@@ -8,10 +8,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  addNumberingView, noticeKind, numberingOutcome, planCounts, numLabel, pendingLine, refusalText,
+  CHECKING_NOW, addNoticeHeading, addNumberingView, noticeKind, numberingOutcome, planCounts, planErrorText, numLabel, pendingLine, refusalText,
   type DetailNumbering, type NumberingSummary, type RenumberPlan,
 } from '../lib/numbering';
-import { prefControl, prefSummary, toggleChoice, needsRenumberConfirm, entryLabel, extensionSettingsHref } from '../lib/sourcePrefs';
+import { prefControl, prefErrorText, prefSummary, toggleChoice, needsRenumberConfirm, entryLabel, extensionSettingsHref } from '../lib/sourcePrefs';
 import { copyTitlesDiffer, postsShareNumber, normCopyTitle } from '../lib/versions';
 
 const ROOT = join(__dirname, '..');
@@ -40,6 +40,24 @@ test('the add dialog shows and sends the numbering its switch chose', () => {
   // Nothing to say, or an older server: no switch, and nothing sent but `auto`.
   assert.equal(addNumberingView({ count: 5, first: 1, last: 5, numbering: { ...STRONG, verdict: 'none', applied: 'source', alt: null } }, true).offer, null);
   assert.deepEqual(addNumberingView({ count: 5, first: 1, last: 5 }, true), { count: 5, first: 1, last: 5, posting: false, send: 'auto', offer: null });
+});
+
+test('the add dialog\'s notice heading names the reading the add will use, not the one switched off', () => {
+  // The e2e walk's shot: with "Keep the source's numbers" switched on, the notice still read "Numbered by posting
+  // order" right above the switch. Reintroduce by heading every strong verdict with posting order: the second
+  // assertion names it.
+  const d = { count: 226, first: 1, last: 226, numbering: STRONG };
+  assert.equal(addNoticeHeading(addNumberingView(d, false)), 'Numbered by posting order');
+  assert.equal(addNoticeHeading(addNumberingView(d, true)), 'Keeping the source’s own numbers', 'switched to the source\'s numbers, the heading still says posting order');
+  const hint = { count: 20, first: 1, last: 20, numbering: { ...STRONG, verdict: 'hint' as const, applied: 'source' as const, alt: { count: 34, first: 1, last: 34 } } };
+  assert.equal(addNoticeHeading(addNumberingView(hint, false)), 'Some posts share a chapter number');
+  assert.equal(addNoticeHeading(addNumberingView(hint, true)), 'Numbered by posting order', 'switched to posting order, the hint\'s heading does not say so');
+  // The dialog draws the heading from the view its counts come from, and counts in words, one to a count.
+  const src = code(read('components/AddSeriesDialog.tsx'));
+  assert.match(src, /data-add-numbering-heading>\{addNoticeHeading\(view\)\}<\/p>/, 'the heading is not the view\'s');
+  assert.doesNotMatch(src, /strong \? tr\('Numbered by posting order'\)/, 'the heading is decided by the verdict alone again');
+  assert.match(src, /posts === 1\s*\? tr\('1 chapter by posting order · \{m\} by the source’s own numbers', \{ m: numbers \}\)/, 'the counts line has no singular');
+  assert.doesNotMatch(src, /Posting order: \{n\}/, 'the counts line is a bare number again');
 });
 
 test('the add dialog wires the switch into the request, the counts and the other-sources block', () => {
@@ -129,6 +147,22 @@ test('the plan sheet: the plan that waits, a Confirm a Health row can take, on <
   assert.ok(all > sheet.indexOf('{shown.map(line)}') && all < sheet.indexOf("tr('Not matched')"), '"Show all" is drawn after "Not matched"');
 });
 
+test('a reopened plan is listed afresh, and Confirm waits while a plan on screen is read again', () => {
+  // The web2 review: with the default five-minute cache, a plan reopened drew the last answer at once with Confirm
+  // live while the fresh listing ran, and a Confirm then applied the server's CURRENT plan, not the one on screen.
+  // Reintroduce by dropping `gcTime: 0`: the first assertion fails; `|| isFetching`: the second.
+  const sheet = code(read('components/NumberingSheet.tsx'));
+  const q = sheet.slice(sheet.indexOf("queryKey: ['numbering-plan'"), sheet.indexOf('});', sheet.indexOf("queryKey: ['numbering-plan'")));
+  assert.match(q, /\bgcTime: 0,/, 'a reopened plan shows the cached answer while the fresh one is listed');
+  assert.match(sheet, /disabled=\{applying \|\| isFetching\} className="btn-key btn-key-primary flex-1" data-plan-confirm/, 'Confirm is live while the plan is read again');
+  assert.match(sheet, /\{isFetching && !applying && <p[^>]*data-plan-refreshing>\{tr\('Reading the source’s chapter list…'\)\}<\/p>\}/, 'nothing says why Confirm waits');
+  // "Listing" was the code's jargon for it (i18n pass 2); the plan's count says what WILL be renamed, before anything is.
+  assert.doesNotMatch(sheet, /Listing the source/, 'the jargon is back');
+  assert.match(sheet, /counts\.renamed === 1 \? tr\('1 chapter will be renamed'\) : tr\('\{n\} chapters will be renamed', \{ n: counts\.renamed \}\)/,
+    'the plan reads as already done');
+  assert.match(sheet, /data-plan-renamed=\{counts\.renamed\}/, 'the count is not on the line as data');
+});
+
 test('a held or refused rename is said as what held it, and a Health row reads what it came to', () => {
   // Reintroduce the one sentence for every cause: a stray file at a target name reads "the source may not have answered".
   const plan = (reasons: RenumberPlan['reasons']): RenumberPlan => ({ mode: 'posting_order', moves: [], parked: [], collisions: [], clean: false, reasons, newFloor: null });
@@ -146,6 +180,42 @@ test('a held or refused rename is said as what held it, and a Health row reads w
   assert.deepEqual(numberingOutcome({ state: 'pending', running: true, numbering: null }), { text: 'Still renaming. The series page shows the new numbers when it is done.', partial: true },
     'a rename still running reads as failed');
   assert.deepEqual(numberingOutcome({ state: 'pending', error: 'Chapter 21.cbz is already on disk', numbering: null }), { text: 'Chapter 21.cbz is already on disk', ok: false });
+});
+
+test('the numbering route\'s two busy answers and its missing plan are each said as what they are', () => {
+  // Both 409s are `busy`: a download writing into the folder, and a check inside the series (bff CHECKING_NOW). Both
+  // read "Chapters are being fetched", which sent an admin looking for a download that was not there. Reintroduce
+  // `busyLine()` for every busy: "a check inside the series reads as a download" fails.
+  const busy = (message: string) => ({ body: JSON.stringify({ error: 'busy', message }) });
+  assert.equal(refusalText(busy(CHECKING_NOW), 'x'), 'This series is being checked right now. Try again when that ends.', 'a check inside the series reads as a download');
+  assert.equal(refusalText(busy('Chapters are being fetched for this series. Try again when that ends.'), 'x'),
+    'Chapters are being fetched for this series. Try again when that ends.');
+  // The confirmed POST carries the same sentence as `error` when the check that would apply it met another run.
+  assert.equal(pendingLine({ error: CHECKING_NOW }), 'This series is being checked right now. Try again when that ends.');
+  // The web's copy of the server's sentence is the server's own, word for word, or no message ever matches it.
+  const bff = readFileSync(join(ROOT, '..', 'bff', 'src', 'lib', 'numbering.ts'), 'utf8');
+  assert.ok(bff.includes(`export const CHECKING_NOW = '${CHECKING_NOW}';`), 'bff lib/numbering.ts CHECKING_NOW no longer reads as the web\'s copy');
+  const route = readFileSync(join(ROOT, '..', 'bff', 'src', 'routes', 'numbering.ts'), 'utf8');
+  assert.match(route, /reply\.code\(409\)\.send\(\{ error: 'busy', message: CHECKING_NOW \}\)/, 'the route no longer sends the check\'s busy with CHECKING_NOW');
+  // The plan's 502: the source did not answer the fresh listing.
+  assert.equal(planErrorText({ body: JSON.stringify({ error: 'unreachable', message: 'The source did not answer, so there is no plan to show. Try again in a moment.' }) }, 'x'),
+    'The source did not answer, so there is no plan to show. Try again in a moment.');
+  assert.equal(planErrorText({ body: JSON.stringify({ error: 'not_found' }) }, 'fallback'), 'fallback');
+  assert.match(code(read('components/NumberingSheet.tsx')), /\{isError && <p[^>]*>\{planErrorText\(loadError, tr\('Could not do that'\)\)\}<\/p>\}/,
+    'the plan\'s failure is shown in the server\'s English');
+  // Extension settings: the engine not answering is the engine's name for it, in the reader's words (i18n pass 2:
+  // "extension server" is not what the app calls it anywhere else); the extension's own exception is as sent.
+  assert.equal(prefErrorText({ body: JSON.stringify({ error: 'unreachable', message: 'The extension server did not answer. Try again in a moment.' }) }, 'x'),
+    'The extension engine did not answer. Try again in a moment.', 'the engine not answering is said as the server\'s English');
+  assert.equal(prefErrorText({ body: JSON.stringify({ error: 'extension_error', message: 'The extension failed: 403' }) }, 'x'), 'The extension failed: 403');
+  assert.equal(prefErrorText(new Error('boom'), 'fallback'), 'fallback');
+  const settings = code(read('components/ExtensionSettings.tsx'));
+  assert.match(settings, /\{prefErrorText\(error, tr\('The extension engine did not answer\. Try again in a moment\.'\)\)\}/, 'the settings sheet shows the server\'s English');
+  assert.match(settings, /toast\(prefErrorText\(e, tr\('Could not change that setting'\)\), 'error'\)/);
+  // The renumber warning names no {source}: a name the engine did not send read "from  that uses", and "its numbers"
+  // read as posting order's too (i18n pass 2). Reintroduce the {source} sentence: the second assertion names it.
+  assert.match(settings, /tr\('Changing this renumbers every series that uses this source’s own numbers \(\{count\}\)\.', \{\s*count:/);
+  assert.doesNotMatch(settings, /\{source\}/, 'a warning names a source the engine may not have sent');
 });
 
 test('the versions sheet shows each copy\'s own title, and says when copies are really different posts', () => {

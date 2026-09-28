@@ -18,6 +18,7 @@ import { sweepToast } from '../lib/sourceEvidence';
 import { stillLine } from '../lib/engineSetup';
 import { deviceName, shownDeviceName } from '../lib/device';
 import { scanState } from '../components/HealthActions';
+import { healthLine } from '../lib/chapterPicker';
 import type { HealthOutcome } from '../lib/types';
 
 const ROOT = join(__dirname, '..');
@@ -59,6 +60,12 @@ test('a count of one takes its singular key, never a plural key filled with 1', 
     refreshed: true, autoUpdate: false, updated: ['A'], failed: [{ name: 'B' }], updatesAvailable: ['C'], obsolete: ['D'], reinstalled: ['E'],
   }));
   assert.deepEqual(onesFilled(extensions), [], `the extension line said a count of one with a plural key: ${extensions}`);
+  // The read-chapter cleanup and the chapter sweep (web2s review): "1 could not be deleted" and "+1 chapters" were
+  // the plural key filled with one.
+  const cleanup = marked(() => taskResult({ deleted: 1, bytes: 1024, failed: 1 }));
+  assert.deepEqual(onesFilled(cleanup), [], `the cleanup line said a count of one with a plural key: ${cleanup}`);
+  const sweep = marked(() => taskResult({ added: 1, healthy: false, failed: 1, chapterFailures: 1 }));
+  assert.deepEqual(onesFilled(sweep), [], `the sweep line said a count of one with a plural key: ${sweep}`);
   for (const [series, books] of [[1, 1], [1, 7], [4, 1]]) {
     const s = marked(() => scanState({ scanned: true, series, books }, Date.now()));
     const said = s.kind === 'done' ? s.outcome ?? '' : '';
@@ -81,12 +88,25 @@ test('a source\'s streak is inside ONE sentence per status, never glued on in En
   // in no locale file any more, so localeCoverage names it too).
   const src = read('components/FindMissingDialog.tsx');
   assert.doesNotMatch(src, /tr\('\{n\} times in a row'\)/, 'the streak is glued after a separately translated verb');
-  const fn = src.slice(src.indexOf('function healthLine('), src.indexOf('function whyText('));
+  const lib = read('lib/chapterPicker.ts');
+  const fn = lib.slice(lib.indexOf('export function healthLine('));
   for (const k of ['rate-limited us', 'refused us', 'did not answer']) {
     assert.ok(fn.includes(`tr('${k} {n} times in a row', { n })`), `"${k}" has no whole sentence with its streak inside`);
     assert.ok(fn.includes(`tr('${k}')`), `"${k}" is not said on its own for a single failure`);
   }
   assert.match(src, /\{tr\('Recently unreliable'\)\} · \{healthLine\(c\.health\)\}/, 'the health line does not use the whole sentences');
+});
+
+test('one failure is the bare status, and the streak is said from two on', () => {
+  // The streak sentences need no "1 time" key only because a single failure never reaches them (localeCoverage's
+  // NOT_PAIRED says so). Reintroduce `n >= 1` on any line of healthLine: its "1" assertion here names the status,
+  // reading "refused us 1 times in a row" (web2s review: nothing caught it).
+  for (const [status, bare] of [['rate_limited', 'rate-limited us'], ['blocked', 'refused us'], ['down', 'did not answer']] as const) {
+    assert.equal(healthLine({ status, consecutive: 1 }), bare, `${status}: one failure is said as a streak of 1`);
+    assert.equal(healthLine({ status, consecutive: 0 }), bare, `${status}: no failure in a row is said as a streak`);
+    assert.equal(healthLine({ status }), bare, `${status}: a count the server did not send is said as a streak`);
+    assert.equal(healthLine({ status, consecutive: 3 }), `${bare} 3 times in a row`, `${status}: a streak of 3 is not said`);
+  }
 });
 
 test('Admin → Providers says Reload sources, its busy word and its toasts in the reader\'s language', () => {
@@ -133,4 +153,10 @@ test('a device the browser does not name is "another device" in the reader\'s wo
   assert.equal(shownDeviceName('Android'), 'Android');
   assert.match(read('components/ProfileAccount.tsx'), /\{shownDeviceName\(s\.device_name\) \|\| tr\('Device'\)\}/,
     'the session list shows a stored English fallback');
+  // Admin → Sessions is the other session list (web2s review): it printed the stored name raw, with a bare-English
+  // "Device". Reintroduce `{s.device_name || 'Device'}` there: this names it.
+  const admin = read('app/admin/page.tsx');
+  const sessions = admin.slice(admin.indexOf('function Sessions('), admin.indexOf('\n}\n', admin.indexOf('function Sessions(')));
+  assert.match(sessions, /\{shownDeviceName\(s\.device_name\) \|\| tr\('Device'\)\}/, 'Admin → Sessions shows a stored English fallback, or "Device" in English');
+  assert.doesNotMatch(sessions, /device_name \|\| 'Device'/, 'Admin → Sessions still has the bare-English "Device"');
 });

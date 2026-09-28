@@ -20,7 +20,7 @@ import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { followable } from '@/lib/scanlators';
-import { offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
+import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
@@ -58,17 +58,6 @@ interface Job extends JobCardNotes { folder: string; title: string; total: numbe
 /** The error code in an API refusal (`{error: 'plan_stale'}`), or null. */
 function codeOf(e: unknown): string | null {
   try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
-}
-
-/**
- * What a source did lately, as ONE sentence per status with its streak inside: "refused us 3 times in a row". The
- * streak used to be glued after the verb in English order, which a verb-final language (de, ja) cannot say.
- */
-function healthLine(h: NonNullable<Candidate['health']>): string {
-  const n = h.consecutive;
-  if (h.status === 'rate_limited') return n > 1 ? tr('rate-limited us {n} times in a row', { n }) : tr('rate-limited us');
-  if (h.status === 'blocked') return n > 1 ? tr('refused us {n} times in a row', { n }) : tr('refused us');
-  return n > 1 ? tr('did not answer {n} times in a row', { n }) : tr('did not answer');
 }
 
 /** Why a source was not offered, in words rather than a code. */

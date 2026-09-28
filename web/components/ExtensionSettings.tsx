@@ -28,9 +28,8 @@ import { t as tr } from '@/lib/i18n';
 import { Sheet } from '@/components/ui';
 import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
 import {
-  needsRenumberConfirm, prefControl, prefSummary, toggleChoice,
+  needsRenumberConfirm, prefControl, prefErrorText, prefSummary, toggleChoice,
   type PrefValue, type PrefWriteAnswer, type SourcePref, type SourcePrefsAnswer,
 } from '@/lib/sourcePrefs';
 
@@ -106,7 +105,7 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
       else if (r.changed) toast(tr('Saved'), 'success');
       if (pref.type === 'text') setTexts((t) => { const { [pref.key]: _gone, ...rest } = t; return rest; });
     } catch (e) {
-      toast(msgOf(e, tr('Could not change that setting')), 'error');
+      toast(prefErrorText(e, tr('Could not change that setting')), 'error');
     }
     setSaving(null);
   };
@@ -117,7 +116,6 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
   };
 
   const name = data?.source.extensionName || target.name || data?.source.name || tr('Extension');
-  const sourceName = data?.source.name ?? target.name ?? '';
   const prefs = (data?.preferences ?? []).filter((p) => prefControl(p) !== 'hidden');
   const siblings = data?.siblings ?? [];
 
@@ -143,7 +141,7 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
           ("This extension provides no source", below), which read "Loading…" beside it for good. */}
       {(isLoading || (!sourceId && !pkgFailed && !pkgSources)) && <p className="py-4 text-sm text-fog-500">{tr('Loading…')}</p>}
       {(isError || pkgFailed) && (
-        <p role="alert" className="py-4 text-sm text-amber-300">{msgOf(error, tr('The extension server did not answer. Try again in a moment.'))}</p>
+        <p role="alert" className="py-4 text-sm text-amber-300">{prefErrorText(error, tr('The extension engine did not answer. Try again in a moment.'))}</p>
       )}
       {pkgSources && !pkgSources.content.length && (
         <p className="py-4 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
@@ -214,14 +212,15 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
                 <div className="mt-2 border-s-2 border-amber-400/70 bg-amber-500/10 py-1.5 pe-2 ps-2.5 text-[11px] leading-relaxed text-amber-100" data-renumber-warning>
                   {data!.renumbers > 0 ? (
                     <>
-                      {tr('Changing this renumbers every series from {source} that uses its numbers ({count}).', {
-                        source: sourceName,
+                      {/* "This source", not {source}: the sheet is about one, and a name the engine did not send
+                          read "from  that uses". "Its numbers" read as posting order's too (i18n pass 2). */}
+                      {tr('Changing this renumbers every series that uses this source’s own numbers ({count}).', {
                         count: data!.renumbers === 1 ? tr('1 series in your library') : tr('{n} series in your library', { n: data!.renumbers }),
                       })}{' '}
                       {tr('Each waits on its series page until you review its renumbering: files are renamed, reading progress stays.')}{' '}
                     </>
                   ) : (
-                    <>{tr('Changing this changes the chapter numbers {source} gives. No series in your library use them yet.', { source: sourceName })}{' '}</>
+                    <>{tr('Changing this changes the chapter numbers this source gives. No series in your library uses them yet.')}{' '}</>
                   )}
                   <span className="text-amber-200/70">{tr('Series numbered by posting order are not affected.')}</span>
                 </div>

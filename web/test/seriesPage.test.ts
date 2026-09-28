@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
+import { bookCountText } from '../lib/format';
+
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
@@ -247,4 +249,17 @@ test('a failed download on a series being archived keeps its way into Library ->
   const failed = band.slice(band.indexOf('data-band-state="failed"'));
   assert.match(failed, /\{!tileLine && <Link href=\{href\}/, 'the failed row has no See all beside an archive row');
   assert.match(band, /const href = downloadsHref\(tile\?\.folder \|\| failed\?\.job\.folder \|\| folder\);/, 'an empty folder wins over the failed download\'s');
+});
+
+test('the header counts chapters or volumes in the reader\'s words, one key to a count', () => {
+  // `{series.booksCount} {mostlyVolumes ? 'volumes' : 'chapters'}` was English in every language, and "1 chapters"
+  // (the e2e walk, Walk Gap's member band). Reintroduce it: the page assertion names it.
+  assert.equal(bookCountText(1), '1 chapter');
+  assert.equal(bookCountText(12), '12 chapters');
+  assert.equal(bookCountText(0), '0 chapters');
+  assert.equal(bookCountText(1, true), '1 volume');
+  assert.equal(bookCountText(7, true), '7 volumes');
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /series \? <>\{bookCountText\(series\.booksCount, mostlyVolumes\)\}<\/> : null,/, 'the header count is bare English again');
+  assert.doesNotMatch(page, /mostlyVolumes \? 'volumes' : 'chapters'/, 'the header count is bare English again');
 });

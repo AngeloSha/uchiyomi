@@ -120,6 +120,17 @@ export function addNumberingView(
   return { count: alt.count, first: alt.first, last: alt.last, posting, send: posting ? 'posting_order' : 'source', offer };
 }
 
+/**
+ * The add dialog's notice heading: the reading the add WILL use, from the same view as its counts. It said
+ * "Numbered by posting order" above a switched-on "Keep the source's numbers" (the e2e walk's shot), a heading that
+ * contradicted the choice right under it. Under a hint the untouched notice names what it found; switched on, the
+ * reading it chose.
+ */
+export function addNoticeHeading(view: { posting: boolean; offer: 'keep' | 'number' | null }): string {
+  if (view.posting) return tr('Numbered by posting order');
+  return view.offer === 'keep' ? tr('Keeping the source’s own numbers') : tr('Some posts share a chapter number');
+}
+
 // ---- the series page ----------------------------------------------------------------------------------------
 
 /**
@@ -159,6 +170,16 @@ export const numLabel = (n: number): string => String(Math.round(n * 1000) / 100
 const busyLine = (): string => tr('Chapters are being fetched for this series. Try again when that ends.');
 
 /**
+ * The server's own words when a renumber waits for another run inside the series -- the sweep or a check reading
+ * its listing (bff lib/numbering.ts CHECKING_NOW; numbering.test.ts holds the two equal). The route's 409 is `busy`
+ * for this AND for a download writing into the folder, so only the message tells them apart; both were said as
+ * "chapters are being fetched", which sent an admin looking for a download that was not there. A confirmed POST
+ * carries the same sentence as `error` when the check that would apply it met another run.
+ */
+export const CHECKING_NOW = 'This series is being checked right now. Try again when that ends.';
+const checkingLine = (): string => tr('This series is being checked right now. Try again when that ends.');
+
+/**
  * Why a confirmed renumbering is not applied yet (POST answered `pending`), in words. It used to be one sentence
  * for every cause -- "the source may not have answered" -- so an admin with a stray file at a target name was
  * told to retry, and retried, for a reason that was never the source: the rename still running past the request,
@@ -166,16 +187,35 @@ const busyLine = (): string => tr('Chapters are being fetched for this series. T
  */
 export function pendingLine(r: Pick<NumberingAnswer, 'running' | 'error' | 'plan'>): string {
   if (r.running) return tr('Still renaming. The series page shows the new numbers when it is done.');
-  if (r.error) return r.error;
+  // A refusal names a file ("Chapter 21.cbz is already on disk"), which stays as sent; the check is a sentence.
+  if (r.error) return r.error === CHECKING_NOW ? checkingLine() : r.error;
   if (r.plan?.reasons.includes('busy')) return busyLine();
   return tr('It could not be applied yet. The source may not have answered; try again in a moment.');
 }
 
-/** A refused numbering request, in words: its `busy` is said here in the reader's language, the rest as sent. */
+/** The body of a refused API call, or nothing when it is not JSON. */
+function bodyOf(e: unknown): { error?: string; message?: string } {
+  try { return JSON.parse((e as { body?: string } | null)?.body || '{}'); } catch { return {}; }
+}
+
+/**
+ * A refused numbering request, in words: its two `busy`s are said here in the reader's language -- a download in
+ * the folder, or a check inside the series -- and the rest as sent.
+ */
 export function refusalText(e: unknown, fallback: string): string {
-  let j: { error?: string; message?: string } = {};
-  try { j = JSON.parse((e as { body?: string } | null)?.body || '{}'); } catch { /* not JSON: the fallback */ }
-  return j.error === 'busy' ? busyLine() : j.message || fallback;
+  const j = bodyOf(e);
+  if (j.error === 'busy') return j.message === CHECKING_NOW ? checkingLine() : busyLine();
+  return j.message || fallback;
+}
+
+/**
+ * A plan that could not be shown, in words: the route's 502 `unreachable` -- the source did not answer the fresh
+ * listing -- in the reader's language, anything else as sent.
+ */
+export function planErrorText(e: unknown, fallback: string): string {
+  const j = bodyOf(e);
+  if (j.error === 'unreachable') return tr('The source did not answer, so there is no plan to show. Try again in a moment.');
+  return j.message || fallback;
 }
 
 /**

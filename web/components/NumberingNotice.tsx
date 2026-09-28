@@ -80,7 +80,9 @@ export function NumberingNotice({ seriesId, numbering, isAdmin, onReview }: {
   } else if (kind === 'remap') {
     tone = 'amber';
     heading = tr('The source’s numbers changed');
-    body = tr('An extension setting changed how {source} numbers its chapters. The files here still carry the old numbers, and new chapters wait until the renumbering is reviewed.', { source });
+    // {source} leads the sentence, where the fallback "This source" is capitalised right: mid-sentence it read "changed
+    // how This source numbers" in every language (i18n pass 2).
+    body = tr('{source} numbers its chapters differently after a change to an extension setting. The files here still carry the old numbers, and new chapters wait until the renumbering is reviewed.', { source });
     keys = [{ label: tr('Review renumbering'), run: () => onReview('remap'), primary: true }];
   } else if (kind === 'applied') {
     tone = 'accent';

@@ -30,7 +30,7 @@ export function DownloadsSection({ data, save }: { data: any; save: Save }) {
       {/* On is "not paused": the column is archive_paused, and the switch says what an admin wants to know. */}
       <SwitchRow label={tr('Slow archive')}
         help={desktop
-          ? `${tr('Off pauses every archive; nothing queued is lost.')} ${tr('Runs only while Uchiyomi is open, including from the tray. A PC that sleeps at night will rarely be inside a night-time window.')}`
+          ? `${tr('Off pauses every archive; nothing queued is lost.')} ${tr('Runs only while Uchiyomi is running, even when it is only in the tray. If the PC sleeps at night, a night-time window will rarely get anything done.')}`
           : tr('Off pauses every archive; nothing queued is lost.')}
         on={data.archive_paused !== true} onChange={(next) => save({ archivePaused: !next })} />
       <NumberRow label={tr('Chapters an hour, per source')} min={ARCHIVE_PACE.perHourRange[0]} max={ARCHIVE_PACE.perHourRange[1]} value={perHour}
@@ -62,8 +62,8 @@ export function DownloadsSection({ data, save }: { data: any; save: Save }) {
             <li>{tr('One chapter at a time per source, with a random pause between pages and a random break between chapters, now and then a long one. Several sites are archived side by side.')}</li>
             <li>{tr('It stands aside for the scheduled check, the library repair, the source check and anyone else downloading from the same site.')}</li>
             <li>{tr('A site that refuses is left alone for an hour, then three, then twelve, then a day at a time. The series stays queued.')}</li>
-            <li>{tr('A restart keeps its place and its breaks. It only fetches from the sources a series already follows; it never searches other sites.')}</li>
-            <li>{tr('Chapters it brings in do not count as new chapters under Updates, and send no notifications.')}</li>
+            <li>{tr('After a restart it carries on where it left off, and no break is cut short. It only fetches from the sources a series already follows; it never searches other sites.')}</li>
+            <li>{tr('Chapters it brings in do not count as new chapters under Updates, and trigger no notifications.')}</li>
           </ul>
         </Disclosure>
       </div>

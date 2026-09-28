@@ -64,8 +64,9 @@ export function taskResult(r: any): string {
     const ran = (step: string) => !only || only.includes(step);
     const bits: string[] = [];
     if (r.stopped === 'shutdown') bits.push(tr('stopped for a restart'));
-    // The downloader's MIN_FREE_GB, in the words of its setting ("Stop when free space is below"): "at its
-    // floor" was our jargon, and the translators had to guess which floor.
+    // The downloader stops when free space on the download disk is under MIN_FREE_GB (bff lib/downloader.ts), an
+    // environment variable with no setting on any page -- "Stop when free space is below" is the slow archive's own
+    // setting, not this. Said as what happened: "at its floor" was our jargon, and translators guessed which floor.
     if (r.stopped === 'disk') bits.push(tr('stopped: free space on the download disk is below the minimum'));
     // Cancel on the download pill (#82): the counts after it are as far as it got.
     if (r.stopped === 'cancelled') bits.push(tr('cancelled'));
@@ -192,7 +193,7 @@ export function taskResult(r: any): string {
     if (r.skipped === 'shutdown') return ` \u00b7 ${tr('stopped for a restart')}`;
     if (r.skipped) return ` \u00b7 ${tr('switched off')}`;
     const bits = [(r.deleted === 1 ? tr('1 chapter deleted') : tr('{n} chapters deleted', { n: r.deleted })), tr('{size} freed', { size: bytes(r.bytes || 0) })];
-    if (r.failed) bits.push(tr('{n} could not be deleted', { n: r.failed }));
+    if (r.failed) bits.push(r.failed === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: r.failed }));
     // A run that stopped because EVERY due chapter's folder was missing along with its file is the download
     // volume not being mounted; the chapters it left are the ones still due. Without this line the result
     // reads as a quiet "0 chapters deleted" when the only fix is to mount the share, after which the next
@@ -201,8 +202,10 @@ export function taskResult(r: any): string {
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {
-    // A sweep an admin cancelled from the download pill (#82) is not a quiet night either.
-    const base = ` \u00b7 ${tr('+{count} chapters', { count: r.added })}${r.stopped === 'cancelled' ? ` \u00b7 ${tr('cancelled')}` : ''}`;
+    // A sweep an admin cancelled from the download pill (#82) is not a quiet night either. One key per count: the
+    // `{count}` key read "+1 chapters", and its placeholder hid it from the pairing check.
+    const added = r.added === 1 ? tr('+1 chapter') : tr('+{n} chapters', { n: r.added });
+    const base = ` \u00b7 ${added}${r.stopped === 'cancelled' ? ` \u00b7 ${tr('cancelled')}` : ''}`;
     if (r.healthy === false) {
       const bits: string[] = [];
       if (r.failed) bits.push(r.failed === 1 ? tr('1 series did not answer') : tr('{n} series did not answer', { n: r.failed }));
