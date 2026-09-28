@@ -98,6 +98,11 @@ test('the band above the chapters shows this series\' server downloads, and re-r
   // (serverDownloads.test.ts).
   assert.match(band, /const step = bandReload\(seen\.current, seriesId, landed\);\s*seen\.current = step\.seen;\s*if \(!step\.reload\) return;/,
     'the band decides on its own when to re-read, or carries one series\' count to the next');
+  // What it saw is kept per series, and that is only right if the effect runs again when the series changes: the band
+  // stays mounted from series A to B, and with equal counts (usually 0) it would keep A's, so B's first landing
+  // reads as a first answer and stays grey. Reintroduce by dropping `seriesId` from the deps: this fails.
+  assert.match(band, /const step = bandReload\(seen\.current, seriesId, landed\);[\s\S]*?\}, \[landed, seriesId, qc\]\);/,
+    'a move to another series with the same count keeps the old series\' seen');
   assert.match(band, /for \(const k of \[\['series-books', seriesId\], \['series-listing', seriesId\], \['series', seriesId\]\]\) qc\.invalidateQueries/, 'the band does not re-read the chapter list');
   assert.match(band, /const RELOAD_EVERY_MS = 4000;/, 'a sweep landing a chapter a second re-reads the page every second');
   assert.match(band, /const \{ data \} = useServerDownloads\(\);/, 'the band polls on its own');
@@ -230,5 +235,16 @@ test('the series page only starts a slow archive; watching it is the band\'s', (
     "the supply line counts the archive's chapters as behind");
   const band = code(read('components/SeriesServerDownloads.tsx'));
   assert.match(band, /\{archive && <ArchiveBand item=\{archive\} view=\{data\?\.archive\} \/>\}/, 'the band has no archive line');
-  assert.match(band, /\{tile && !\(tile\.archive && archive\) && \(/, "the archive's chapter in flight is a second line beside its own");
+  assert.match(band, /const tileLine = !!tile && !\(tile\.archive && archive\);/, "the archive's chapter in flight is a second line beside its own");
+  assert.match(band, /\{tile && tileLine && \(/, "the archive's chapter in flight is a second line beside its own");
+});
+
+test('a failed download on a series being archived keeps its way into Library -> Downloads', () => {
+  // The failed row's "See all" showed only with no tile at all; an archive row's tile hides its own line, so a failed
+  // Fetch on a series being archived had no link. And `??` kept the archive tile's empty folder, losing the failed
+  // job's. Reintroduce `{!tile && <Link`: the first assertion fails; `??`: the second.
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  const failed = band.slice(band.indexOf('data-band-state="failed"'));
+  assert.match(failed, /\{!tileLine && <Link href=\{href\}/, 'the failed row has no See all beside an archive row');
+  assert.match(band, /const href = downloadsHref\(tile\?\.folder \|\| failed\?\.job\.folder \|\| folder\);/, 'an empty folder wins over the failed download\'s');
 });

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ACTION_COPY, CHECK_TITLES, caveatLine, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
+  ACTION_COPY, CHECK_TITLES, caveatLine, caveatTone, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
   runStatusWord, skipLine, solverDownLine, timeLine,
 } from '../lib/healthCopy';
 import type { RepairLiveRun, RepairRunRecord } from '../lib/repairRun';
@@ -143,6 +143,37 @@ test('outcomes, caveats and skips read as sentences, from the stored data', () =
   assert.match(caveatLine({ action: 'retry', code: 'source_off' }), /does not ask it/);
   assert.match(skipLine({ step: 'short', why: 'not_eligible', detail: 'partial' }), /placeholder pages/);
   assert.match(skipLine({ step: 'gaps', why: 'no_searches_left' }), /used all its searches/);
+});
+
+test('#117: gaps below an active slow archive are on their way, not a problem, and Fill now still fetches them', () => {
+  // The critic's ruling: health.ts marks them with the outcome why 'archiving' and Fill now's caveat 'archiving', and
+  // the page words them. Reintroduce by dropping GAP_WHY_BY.archiving: the outcome line loses its reason; drop the
+  // caveat's case: it reads nothing; tone it 'warn': it reads as a problem, in amber.
+  const gaps = { kind: 'gaps' as const, at: null, why: 'archiving', followed: null, coverage: null, fetched: 0, landed: 0, sweep: 0, capped: 0, unfillable: [], scanned: 4 };
+  assert.equal(outcomeLine(gaps), 'Being archived slowly', 'the gap does not say it is being archived');
+  const caveat = { action: 'fill' as const, code: 'archiving' as const };
+  assert.equal(caveatLine(caveat), 'The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.',
+    'the archiving caveat reads nothing');
+  assert.equal(caveatTone(caveat), 'calm', 'a gap on its way reads as a warning');
+  assert.equal(caveatTone({ action: 'fill', code: 'updates_paused' }), 'warn');
+  // #116: a series numbered by posting order is never filled from another source.
+  assert.equal(outcomeLine({ ...gaps, why: 'posting_order' }), 'Numbered by posting order: no other source’s numbers line up with it',
+    'a posting-order gap has no reason');
+});
+
+test('#116: the numbering check has a title, and its two keys say what they rename and when', () => {
+  // Reintroduce a Review that renames at the press: its copy would have to change, and this holds the words to the
+  // arm (healthActions.test.ts), which opens the plan first.
+  assert.equal(CHECK_TITLES.numbering, 'Chapter numbering', 'the numbering check shows the server\'s English title');
+  assert.equal(ACTION_COPY.renumber.label({}), 'Review renumbering');
+  assert.match(ACTION_COPY.renumber.what({}), /renames the files only once you confirm the plan/);
+  assert.match(ACTION_COPY.renumber.what({}), /Reading progress, bookmarks and notes stay with their chapters/);
+  assert.match(ACTION_COPY.renumber.how!({}), /While a renumbering waits for review, the series fetches nothing new/);
+  // The plan's listing (20 s) and the apply's answer (a minute), rounded up as every estimate on the page is.
+  assert.equal(ACTION_COPY.renumber.eta({}), 'Up to 2 minutes');
+  assert.equal(ACTION_COPY.keep_numbers.label({}), 'Keep the source’s numbers');
+  assert.match(ACTION_COPY.keep_numbers.what({}), /already renumbered shows the plan back to the source’s numbers first/);
+  assert.equal(ACTION_COPY.keep_numbers.eta({}), 'Takes a moment');
 });
 
 test('the history names runs the way a person would, and says when one stopped', () => {

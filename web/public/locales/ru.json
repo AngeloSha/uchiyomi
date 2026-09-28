@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1940
+    "strings": 1952
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1473,7 +1473,6 @@
   "That task is switched off": "Эта задача отключена",
   "{n} waiting": "{n} в очереди",
   "1 folder skipped, see Health": "1 папка пропущена, см. «Состояние»",
-  "1 step": "1 шаг",
   "A few minutes at most": "Не больше нескольких минут",
   "A scan is already running": "Сканирование уже идёт",
   "A scan ran less than a minute ago": "Сканирование было меньше минуты назад",
@@ -1492,7 +1491,6 @@
   "What you can do here": "Что здесь можно сделать",
   "{done} of {of}": "{done} из {of}",
   "{n} folders skipped, see Health": "Пропущено папок: {n}, см. «Состояние»",
-  "{n} steps": "Шагов: {n}",
   "1 run kept": "Сохранён 1 запуск",
   "Latest one-off fix: {what}": "Последнее разовое исправление: {what}",
   "No repair has run yet": "Восстановление ещё не запускалось",
@@ -1814,7 +1812,6 @@
   "{n} chapters so far": "Пока глав: {n}",
   "The server is shutting down": "Сервер завершает работу",
   "Paused for everyone by an admin": "Приостановлено для всех администратором",
-  "Only runs between {from} and {to}": "Работает только с {from} до {to}",
   "Outside the hours it may run": "Вне разрешённых часов",
   "Waiting for the scheduled check to finish": "Ждёт окончания плановой проверки",
   "Waiting for the library repair to finish": "Ждёт окончания восстановления библиотеки",
@@ -1832,7 +1829,6 @@
   "Its source is switched off": "Его источник отключён",
   "Its source is not available on this server": "Его источник недоступен на этом сервере",
   "Waiting for another download of this series": "Ждёт другой загрузки этой серии",
-  "Reading its chapter list again": "Заново читает список глав",
   "Waiting for its chapters to be renumbered": "Ждёт перенумерации глав",
   "1 failed too many times": "1 — слишком много неудачных попыток",
   "{n} failed too many times": "{n} — слишком много неудачных попыток",
@@ -1943,5 +1939,21 @@
   "Saved. 1 series is waiting for you to review the renumbering.": "Сохранено. 1 серия ждёт, когда вы проверите перенумерацию.",
   "Saved. {n} series are waiting for you to review the renumbering.": "Сохранено. Серий, ждущих проверки перенумерации: {n}.",
   "1 unchanged": "1 без изменений",
-  "{n} unchanged": "Без изменений: {n}"
+  "{n} unchanged": "Без изменений: {n}",
+  "Chapter numbering": "Нумерация глав",
+  "Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.": "Показывает, какой файл станет какой главой, и переименовывает файлы только после того, как вы подтвердите план. Прогресс чтения, закладки и заметки остаются при своих главах.",
+  "Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.": "Uchiyomi заново читает источник и сопоставляет каждую главу на диске с её публикацией: по публикации, с которой она была загружена, если это записано, иначе по названию или по дате. Глава, которой не соответствует ни одна публикация, сохраняет свой файл под свободным номером сразу после предыдущей главы. Пока перенумерация ждёт проверки, серия не загружает ничего нового.",
+  "Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.": "Оставляет номера глав, которые даёт источник, и Uchiyomi больше не предлагает перенумеровать эту серию. Для уже перенумерованной серии сначала показывается план возврата к номерам источника.",
+  "Being archived slowly": "Архивируются медленно",
+  "Numbered by posting order: no other source’s numbers line up with it": "Пронумеровано по порядку публикации: номера других источников с ним не совпадают",
+  "The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.": "Их загружает медленный архив: «Заполнить сейчас» загрузит их в обычном темпе, не дожидаясь его.",
+  "Chapters are being fetched for this series. Try again when that ends.": "Сейчас загружаются главы этой серии. Попробуйте снова, когда загрузка закончится.",
+  "Outside the hours it may run; it starts again {when}": "Вне разрешённых часов; продолжит {when}",
+  "Only runs between {from} and {to}, server time": "Работает только с {from} до {to} по времени сервера",
+  "Its chapter list could not be read; trying again {when}": "Не удалось прочитать список глав; новая попытка {when}",
+  "Its chapter list could not be read; trying again soon": "Не удалось прочитать список глав; скоро новая попытка",
+  "Nothing has come in for {d}": "Ничего не поступало уже {d}",
+  "Nothing has come in for days": "Уже несколько дней ничего не поступало",
+  "Numbers these posts its own way: this series is numbered by posting order": "Нумерует эти публикации по-своему: эта серия пронумерована по порядку публикации",
+  "this series is numbered by posting order": "эта серия пронумерована по порядку публикации"
 }

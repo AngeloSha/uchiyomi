@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1940
+    "strings": 1952
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1473,7 +1473,6 @@
   "That task is switched off": "このタスクはオフになっています",
   "{n} waiting": "待機中 {n}",
   "1 folder skipped, see Health": "1 フォルダーをスキップ（「状態」を参照）",
-  "1 step": "1 ステップ",
   "A few minutes at most": "長くても数分",
   "A scan is already running": "すでにスキャン中です",
   "A scan ran less than a minute ago": "前回のスキャンから 1 分たっていません",
@@ -1492,7 +1491,6 @@
   "What you can do here": "ここでできること",
   "{done} of {of}": "{done}/{of}",
   "{n} folders skipped, see Health": "{n} フォルダーをスキップ（「状態」を参照）",
-  "{n} steps": "{n} ステップ",
   "1 run kept": "1 件の記録",
   "Latest one-off fix: {what}": "直近の個別修正：{what}",
   "No repair has run yet": "修復はまだ実行されていません",
@@ -1814,7 +1812,6 @@
   "{n} chapters so far": "これまでに {n} 話",
   "The server is shutting down": "サーバーが終了しています",
   "Paused for everyone by an admin": "管理者が全員分を一時停止しています",
-  "Only runs between {from} and {to}": "{from} から {to} の間だけ動きます",
   "Outside the hours it may run": "動作できる時間帯の外です",
   "Waiting for the scheduled check to finish": "定期チェックの完了待ち",
   "Waiting for the library repair to finish": "ライブラリの修復の完了待ち",
@@ -1832,7 +1829,6 @@
   "Its source is switched off": "ソースがオフになっています",
   "Its source is not available on this server": "ソースがこのサーバーで使えません",
   "Waiting for another download of this series": "このシリーズの別のダウンロード待ち",
-  "Reading its chapter list again": "話の一覧を読み直しています",
   "Waiting for its chapters to be renumbered": "話の番号の振り直し待ち",
   "1 failed too many times": "1 話は失敗が多すぎました",
   "{n} failed too many times": "{n} 話は失敗が多すぎました",
@@ -1943,5 +1939,21 @@
   "Saved. 1 series is waiting for you to review the renumbering.": "保存しました。1 シリーズが番号の振り直しの確認を待っています。",
   "Saved. {n} series are waiting for you to review the renumbering.": "保存しました。{n} シリーズが番号の振り直しの確認を待っています。",
   "1 unchanged": "1 話は変更なし",
-  "{n} unchanged": "{n} 話は変更なし"
+  "{n} unchanged": "{n} 話は変更なし",
+  "Chapter numbering": "話の番号付け",
+  "Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.": "どのファイルがどの話になるかを示し、計画を確定したときだけファイル名を変更します。読書の進捗、ブックマーク、メモはそれぞれの話に残ります。",
+  "Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.": "Uchiyomi はソースを読み直し、ディスク上の各話をその投稿に結び付けます。取得元の投稿が記録されていればそれで、なければ名前か日付で結び付けます。どの投稿とも一致しない話はファイルをそのまま残し、直前の話のすぐ後の空いている番号に入ります。番号の振り直しが確認待ちの間、このシリーズは新しい話を取得しません。",
+  "Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.": "ソースが付けた話数をそのまま使い、このシリーズで番号の振り直しを提案しなくなります。すでに振り直したシリーズでは、まずソースの番号に戻す計画が表示されます。",
+  "Being archived slowly": "ゆっくりアーカイブ中",
+  "Numbered by posting order: no other source’s numbers line up with it": "投稿順で番号付け: 他のソースの番号とは対応しません",
+  "The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.": "これらはゆっくりアーカイブが取得中です。「今すぐ埋める」なら、待たずに通常の速さで取得します。",
+  "Chapters are being fetched for this series. Try again when that ends.": "このシリーズの話を取得中です。終わってからもう一度お試しください。",
+  "Outside the hours it may run; it starts again {when}": "動作できる時間帯の外です。{when}に再開します",
+  "Only runs between {from} and {to}, server time": "{from} から {to} の間だけ動きます（サーバーの時刻）",
+  "Its chapter list could not be read; trying again {when}": "話の一覧を読めませんでした。{when}に再試行します",
+  "Its chapter list could not be read; trying again soon": "話の一覧を読めませんでした。まもなく再試行します",
+  "Nothing has come in for {d}": "この {d}、何も届いていません",
+  "Nothing has come in for days": "何日も何も届いていません",
+  "Numbers these posts its own way: this series is numbered by posting order": "これらの投稿に独自の番号を付けています。このシリーズは投稿順で番号付けされています",
+  "this series is numbered by posting order": "このシリーズは投稿順で番号付けされています"
 }

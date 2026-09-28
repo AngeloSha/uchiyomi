@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1940
+    "strings": 1952
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1473,7 +1473,6 @@
   "That task is switched off": "هذه المهمة متوقفة",
   "{n} waiting": "{n} في الانتظار",
   "1 folder skipped, see Health": "تم تخطي مجلد واحد، راجع «الحالة»",
-  "1 step": "خطوة واحدة",
   "A few minutes at most": "بضع دقائق على الأكثر",
   "A scan is already running": "هناك فحص قيد التشغيل بالفعل",
   "A scan ran less than a minute ago": "جرى فحص قبل أقل من دقيقة",
@@ -1492,7 +1491,6 @@
   "What you can do here": "ما يمكنك فعله هنا",
   "{done} of {of}": "{done} من {of}",
   "{n} folders skipped, see Health": "تم تخطي {n} مجلدًا، راجع «الحالة»",
-  "{n} steps": "{n} خطوات",
   "1 run kept": "تشغيل واحد محفوظ",
   "Latest one-off fix: {what}": "آخر إصلاح منفرد: {what}",
   "No repair has run yet": "لم يُشغَّل أي إصلاح بعد",
@@ -1814,7 +1812,6 @@
   "{n} chapters so far": "{n} فصول حتى الآن",
   "The server is shutting down": "الخادم يتوقف عن العمل",
   "Paused for everyone by an admin": "أوقفها مسؤول مؤقتًا للجميع",
-  "Only runs between {from} and {to}": "تعمل فقط بين {from} و{to}",
   "Outside the hours it may run": "خارج الساعات المسموح بها",
   "Waiting for the scheduled check to finish": "بانتظار انتهاء الفحص المجدول",
   "Waiting for the library repair to finish": "بانتظار انتهاء إصلاح المكتبة",
@@ -1832,7 +1829,6 @@
   "Its source is switched off": "مصدرها متوقف",
   "Its source is not available on this server": "مصدرها غير متاح على هذا الخادم",
   "Waiting for another download of this series": "بانتظار تنزيل آخر لهذه السلسلة",
-  "Reading its chapter list again": "تعيد قراءة قائمة فصولها",
   "Waiting for its chapters to be renumbered": "بانتظار إعادة ترقيم فصولها",
   "1 failed too many times": "واحد فشل مرات كثيرة جدًا",
   "{n} failed too many times": "{n} فشلت مرات كثيرة جدًا",
@@ -1943,5 +1939,21 @@
   "Saved. 1 series is waiting for you to review the renumbering.": "تم الحفظ. سلسلة واحدة تنتظر أن تراجع إعادة الترقيم.",
   "Saved. {n} series are waiting for you to review the renumbering.": "تم الحفظ. سلاسل تنتظر أن تراجع إعادة الترقيم: {n}.",
   "1 unchanged": "واحد دون تغيير",
-  "{n} unchanged": "دون تغيير: {n}"
+  "{n} unchanged": "دون تغيير: {n}",
+  "Chapter numbering": "ترقيم الفصول",
+  "Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.": "تعرض أي ملف يصبح أي فصل، ولا تعيد تسمية الملفات إلا بعد أن تؤكد الخطة. يبقى تقدّم القراءة والإشارات المرجعية والملاحظات مع فصولها.",
+  "Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.": "يعيد Uchiyomi قراءة المصدر ويطابق كل فصل على القرص مع منشوره: بالمنشور الذي جُلب منه حيث سُجّل ذلك، وإلا باسمه أو بتاريخه. الفصل الذي لا يطابقه أي منشور يحتفظ بملفه، برقم شاغر بعد الفصل الذي قبله مباشرة. وما دامت إعادة الترقيم بانتظار المراجعة، لا تجلب السلسلة أي جديد.",
+  "Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.": "يُبقي على أرقام الفصول التي يعطيها المصدر، ويتوقف Uchiyomi عن اقتراح إعادة ترقيم هذه السلسلة. أما السلسلة التي أُعيد ترقيمها بالفعل فتُعرض لها أولًا خطة العودة إلى أرقام المصدر.",
+  "Being archived slowly": "قيد الأرشفة البطيئة",
+  "Numbered by posting order: no other source’s numbers line up with it": "مرقّمة حسب ترتيب النشر: لا تتطابق أرقام أي مصدر آخر معها",
+  "The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.": "الأرشفة البطيئة تجلب هذه الفصول: «املأ الآن» تجلبها بالسرعة العادية بدل انتظارها.",
+  "Chapters are being fetched for this series. Try again when that ends.": "يجري جلب فصول لهذه السلسلة. أعد المحاولة عند انتهاء ذلك.",
+  "Outside the hours it may run; it starts again {when}": "خارج الساعات المسموح بها؛ تُستأنف {when}",
+  "Only runs between {from} and {to}, server time": "تعمل فقط بين {from} و{to} بتوقيت الخادم",
+  "Its chapter list could not be read; trying again {when}": "تعذّرت قراءة قائمة فصولها؛ إعادة المحاولة {when}",
+  "Its chapter list could not be read; trying again soon": "تعذّرت قراءة قائمة فصولها؛ ستُعاد المحاولة قريبًا",
+  "Nothing has come in for {d}": "لم يصل شيء منذ {d}",
+  "Nothing has come in for days": "لم يصل شيء منذ أيام",
+  "Numbers these posts its own way: this series is numbered by posting order": "يرقّم هذه المنشورات بطريقته: هذه السلسلة مرقّمة حسب ترتيب النشر",
+  "this series is numbered by posting order": "هذه السلسلة مرقّمة حسب ترتيب النشر"
 }

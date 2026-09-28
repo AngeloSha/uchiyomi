@@ -601,7 +601,7 @@ test('the add dialog offers the other sources only when it already holds a list,
   assert.match(src, /enabled: !!done && \(!done\.nothing \|\| sentFollow > 0\)/, 'a nothing-yet add with candidates does not poll for its results');
   assert.match(src, /return j\?\.autoFollow\?\.done \? false : 2000;/, 'the nothing-yet poll never stops');
   // Every reason the server can give is a sentence; an unknown one stays visible as its code.
-  for (const why of ['numbering_differs', 'title_differs', 'unreachable', 'too_few_listed', 'not_tried', 'cap', 'unavailable']) {
+  for (const why of ['numbering_differs', 'title_differs', 'unreachable', 'too_few_listed', 'not_tried', 'cap', 'unavailable', 'posting_order']) {
     assert.match(src, new RegExp(`case '${why}': return tr\\('[^']+'\\);`), `${why} has no sentence`);
   }
   assert.match(src, /function autoFollowWhy[\s\S]{0,900}default: return why;/, 'an unknown reason is swallowed');

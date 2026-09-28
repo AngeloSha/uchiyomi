@@ -30,7 +30,7 @@ import type { RepairCurrent, RepairEstimate, RepairLiveRun, RepairPhase, RepairR
 const CHECK_TITLE_KEYS = keys(
   'Chapter gaps', 'Suspiciously short chapters', 'Chapters that would not download', 'Series that can no longer update',
   'Source health', 'Duplicate series', 'Impossible chapter numbers', 'Cloudflare solver', 'Version',
-  'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine',
+  'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine', 'Chapter numbering',
 );
 export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[number]>> = {
   'chapter-gaps': CHECK_TITLE_KEYS[0],
@@ -47,6 +47,8 @@ export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[num
   'downloads-missing': CHECK_TITLE_KEYS[11],
   // #72 (bff lib/engineHealth.ts): the one row about the extension engine itself.
   'extension-engine': CHECK_TITLE_KEYS[12],
+  // #116: series whose chapter numbers wait for an admin, or were numbered by posting order by themselves.
+  numbering: CHECK_TITLE_KEYS[13],
 };
 
 export function checkTitle(c: Pick<HealthCheck, 'id' | 'title'>): string {
@@ -107,6 +109,13 @@ const lim = (c: CopyCtx, k: string, fallback: number): number => {
 };
 const moment = () => tr('Takes a moment');
 const repairEta = (c: CopyCtx) => timeLine(c.est) || tr('A few minutes at most');
+
+/**
+ * A renumbering's two bounds, both the server's: the plan lists the source afresh, at most 20 s (bff
+ * lib/numbering.ts PLAN_LIST_TIMEOUT), and a confirmed apply answers within a minute (bff routes/numbering.ts
+ * APPLY_BUDGET_MS) -- past that the renames carry on and the row says so. Nothing else in it waits on anything.
+ */
+const RENUMBER_MAX_MS = 20_000 + 60_000;
 
 /**
  * The words of every action on the page, keyed by the HealthAction it answers, plus the card-level and
@@ -181,6 +190,19 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     label: () => tr('Connect'),
     what: () => tr('Points the extension engine’s own Cloudflare helper at the one Uchiyomi uses and switches it on, so extensions on Cloudflare-protected sites can get through.'),
     how: () => tr('Uchiyomi changes one setting on the engine: its Cloudflare helper, switched on, at the address in {name}. Nothing restarts and nothing is installed. It stays that way unless the engine’s own container names another helper.', { name: 'FLARESOLVERR_URL' }),
+    eta: moment,
+  },
+  // #116, the chapter numbering check. Review opens the plan -- which file becomes which chapter -- and its Confirm
+  // is this row's press; nothing is renamed before it. The same routes as the series page's notice and sheet.
+  renumber: {
+    label: () => tr('Review renumbering'),
+    what: () => tr('Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.'),
+    how: () => tr('Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.'),
+    eta: () => etaLine({ maxMs: RENUMBER_MAX_MS }),
+  },
+  keep_numbers: {
+    label: () => tr('Keep the source’s numbers'),
+    what: () => tr('Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.'),
     eta: moment,
   },
   ignore: {
@@ -420,9 +442,14 @@ const GAP_WHY = keys(
   'Followed a source that has them', 'No other source lists them', 'The search limit was reached; the next repair searches again',
   'Searching other sources is switched off', 'Searched recently; the next repair searches again',
   'A followed source lists them; the next chapter sweep fetches them',
+  'Being archived slowly', 'Numbered by posting order: no other source’s numbers line up with it',
 );
 const GAP_WHY_BY: Record<string, (typeof GAP_WHY)[number]> = {
   followed: GAP_WHY[0], no_candidate: GAP_WHY[1], cap: GAP_WHY[2], off: GAP_WHY[3], cooldown: GAP_WHY[4], listed: GAP_WHY[5],
+  // #117: below an active slow archive's boundary, which fetches them at its own pace -- not a problem.
+  archiving: GAP_WHY[6],
+  // #116: a series numbered by posting order is never filled from another source (bff lib/repair.ts GapsResult).
+  posting_order: GAP_WHY[7],
 };
 
 /**
@@ -469,8 +496,17 @@ export function caveatLine(c: HealthCaveat): string {
         : tr('This source is cooling down: Retry now resets the count but cannot ask it yet.');
     }
     case 'source_off': return tr('This source is switched off: Retry now resets the count but does not ask it.');
+    case 'archiving': return tr('The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.');
   }
   return '';
+}
+
+/**
+ * How a caveat reads: most say what a key will NOT be able to do, in amber; the slow archive's says nothing is
+ * wrong -- the gaps are on their way -- and reads as a plain line, not a warning.
+ */
+export function caveatTone(c: HealthCaveat): 'warn' | 'calm' {
+  return c.code === 'archiving' ? 'calm' : 'warn';
 }
 
 // ---- a row's live state ---------------------------------------------------------------------------------

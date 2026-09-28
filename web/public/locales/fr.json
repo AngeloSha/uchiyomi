@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1940
+    "strings": 1952
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1473,7 +1473,6 @@
   "That task is switched off": "Cette tâche est désactivée",
   "{n} waiting": "{n} en attente",
   "1 folder skipped, see Health": "1 dossier ignoré, voir État",
-  "1 step": "1 étape",
   "A few minutes at most": "Quelques minutes au plus",
   "A scan is already running": "Une analyse est déjà en cours",
   "A scan ran less than a minute ago": "Une analyse a eu lieu il y a moins d’une minute",
@@ -1492,7 +1491,6 @@
   "What you can do here": "Ce que vous pouvez faire ici",
   "{done} of {of}": "{done} sur {of}",
   "{n} folders skipped, see Health": "{n} dossiers ignorés, voir État",
-  "{n} steps": "{n} étapes",
   "1 run kept": "1 passage conservé",
   "Latest one-off fix: {what}": "Dernière correction ponctuelle : {what}",
   "No repair has run yet": "Aucune réparation n’a encore eu lieu",
@@ -1814,7 +1812,6 @@
   "{n} chapters so far": "{n} chapitres jusqu’ici",
   "The server is shutting down": "Le serveur s’arrête",
   "Paused for everyone by an admin": "Mis en pause pour tous par un administrateur",
-  "Only runs between {from} and {to}": "Ne tourne qu’entre {from} et {to}",
   "Outside the hours it may run": "En dehors des heures autorisées",
   "Waiting for the scheduled check to finish": "Attend la fin de la vérification planifiée",
   "Waiting for the library repair to finish": "Attend la fin de la réparation de la bibliothèque",
@@ -1832,7 +1829,6 @@
   "Its source is switched off": "Sa source est désactivée",
   "Its source is not available on this server": "Sa source n’est pas disponible sur ce serveur",
   "Waiting for another download of this series": "Attend un autre téléchargement de cette série",
-  "Reading its chapter list again": "Relit sa liste de chapitres",
   "Waiting for its chapters to be renumbered": "Attend la renumérotation de ses chapitres",
   "1 failed too many times": "1 a échoué trop de fois",
   "{n} failed too many times": "{n} ont échoué trop de fois",
@@ -1943,5 +1939,21 @@
   "Saved. 1 series is waiting for you to review the renumbering.": "Enregistré. 1 série attend que vous vérifiiez la renumérotation.",
   "Saved. {n} series are waiting for you to review the renumbering.": "Enregistré. {n} séries attendent que vous vérifiiez la renumérotation.",
   "1 unchanged": "1 inchangé",
-  "{n} unchanged": "{n} inchangés"
+  "{n} unchanged": "{n} inchangés",
+  "Chapter numbering": "Numérotation des chapitres",
+  "Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.": "Montre quel fichier devient quel chapitre, et ne renomme les fichiers qu’une fois le plan confirmé. La progression de lecture, les signets et les notes restent avec leurs chapitres.",
+  "Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.": "Uchiyomi relit la liste de la source et associe chaque chapitre sur le disque à sa publication : par la publication d’où il a été récupéré quand c’est enregistré, sinon par son nom ou sa date. Un chapitre auquel aucune publication ne correspond garde son fichier, sous un numéro libre juste après le chapitre précédent. Tant qu’une renumérotation attend d’être vérifiée, la série ne récupère rien de nouveau.",
+  "Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.": "Garde les numéros de chapitre donnés par la source, et Uchiyomi cesse de proposer une renumérotation pour cette série. Pour une série déjà renumérotée, le plan de retour aux numéros de la source s’affiche d’abord.",
+  "Being archived slowly": "En cours d’archivage lent",
+  "Numbered by posting order: no other source’s numbers line up with it": "Numérotée dans l’ordre de publication : les numéros d’aucune autre source ne correspondent",
+  "The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.": "L’archivage lent est en train de les récupérer : « Combler maintenant » les récupère au rythme normal au lieu de l’attendre.",
+  "Chapters are being fetched for this series. Try again when that ends.": "Des chapitres de cette série sont en cours de récupération. Réessayez quand ce sera terminé.",
+  "Outside the hours it may run; it starts again {when}": "En dehors des heures autorisées ; reprise {when}",
+  "Only runs between {from} and {to}, server time": "Ne tourne qu’entre {from} et {to} (heure du serveur)",
+  "Its chapter list could not be read; trying again {when}": "Sa liste de chapitres n’a pas pu être lue ; nouvel essai {when}",
+  "Its chapter list could not be read; trying again soon": "Sa liste de chapitres n’a pas pu être lue ; nouvel essai bientôt",
+  "Nothing has come in for {d}": "Rien n’est arrivé depuis {d}",
+  "Nothing has come in for days": "Rien n’est arrivé depuis des jours",
+  "Numbers these posts its own way: this series is numbered by posting order": "Numérote ces publications à sa façon : cette série est numérotée dans l’ordre de publication",
+  "this series is numbered by posting order": "cette série est numérotée dans l’ordre de publication"
 }

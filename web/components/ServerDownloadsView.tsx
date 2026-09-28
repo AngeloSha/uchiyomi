@@ -15,10 +15,11 @@ import { ART } from '@/lib/art';
 import { t as tr } from '@/lib/i18n';
 import { durationText, relativeTime } from '@/lib/format';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
-import { fetchingToast, mayCancel, repairStepLabel, runProgress, runTitle, type RunCard } from '@/lib/jobs';
+import { fetchingToast, mayCancel, repairStepLabel, runProgress, type RunCard } from '@/lib/jobs';
+import { seriesHref } from '@/lib/healthLinks';
 import { ringFraction, ringValueText } from '@/lib/ring';
 import {
-  chapterSpan, downloadSections, originLabel, tileStatus, viewState, type ActivityGroup, type Attention, type Origin, type SourceJobs,
+  chapterSpan, downloadSections, originLabel, runName, tileStatus, viewState, type ActivityGroup, type Attention, type Origin, type SourceJobs,
   type Tile,
 } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
@@ -288,7 +289,7 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
       <li data-attention="run" className="card flex items-start gap-3 px-4 py-3">
         <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-300"><IcAlert width={18} height={18} /></span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-fog-100">{runTitle(r.kind)}</p>
+          <p className="truncate text-sm font-medium text-fog-100">{runName(r)}</p>
           <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{r.reason || tr('Stopped.')}</p>
           {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
           {a.dismiss && (
@@ -347,12 +348,16 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   const running = r.status === 'running';
   const mine = admin || !!r.mine;
   const step = r.kind === 'repair' && running ? repairStepLabel(r.step) : '';
+  const name = runName(r);
+  // A Health press is about one series -- the way to it (the server drops it for a viewer who may not list that
+  // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
+  const history = admin && r.kind === 'repair';
   return (
     <li data-task={r.kind} data-state={r.status} className="card flex items-start gap-3 px-4 py-3">
       <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
-        tone={r.status === 'cancelled' ? 'muted' : 'accent'} label={runTitle(r.kind)} valueText={runProgress(r)} className="mt-0.5" />
+        tone={r.status === 'cancelled' ? 'muted' : 'accent'} label={name} valueText={runProgress(r)} className="mt-0.5" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-fog-100">{runTitle(r.kind)}</p>
+        <p className="truncate text-sm font-medium text-fog-100" data-task-name>{name}</p>
         {step && <p className="mt-0.5 truncate text-[12px] text-fog-300">{step}</p>}
         {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
         {running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{tr('Now: {title}', { title: r.current.title })}</p>}
@@ -364,6 +369,12 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{tr('Stopping after this chapter…')}</p>}
         {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{tr('Cancelled; what landed is kept.')}</p>}
         {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{r.reason}</p>}
+        {(r.seriesId || history) && (
+          <p className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
+            {r.seriesId && <Link href={seriesHref(r.seriesId, r.number)} className="text-accent hover:underline">{tr('Open')} ›</Link>}
+            {history && <Link href="/admin/?tab=Health#repairs" className="text-accent hover:underline">{tr('Recent repairs')} ›</Link>}
+          </p>
+        )}
       </div>
       {mine && running && !r.cancelRequested && (
         <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{tr('Cancel')}</button>

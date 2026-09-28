@@ -13,7 +13,7 @@
  * each with its own test). The owner's call.
  */
 import { t as tr } from './i18n';
-import { etaText, untilText } from './format';
+import { durationText, etaText, untilText } from './format';
 import { ringFraction, type RingValue } from './ring';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -231,6 +231,11 @@ const msUntil = (iso: string | undefined, now: number): number | null => {
  * Why the whole archive, or this one series, is waiting, as a sentence -- every reason the server can send has
  * one here (archive.test.ts walks them all). `view` gives the hours of a window; `now` makes "trying again in 2
  * hours" testable.
+ *
+ * ⚠️ A window's hours are the SERVER's local time (bff lib/archivePace.ts inWindow), and Docker is often UTC: "only
+ * runs between 01:00 and 07:00" read the wrong hours to anyone elsewhere. So the wait says when it opens, relative
+ * and the same everywhere -- the server sends `until` with it -- and names the hours only as a fallback, as server
+ * time.
  */
 export function waitingText(
   w: { why: GlobalWaitWhy | SeriesWaitWhy; until?: string } | null | undefined,
@@ -243,8 +248,8 @@ export function waitingText(
   switch (w.why) {
     case 'stopping': return tr('The server is shutting down');
     case 'paused': return tr('Paused for everyone by an admin');
-    case 'window': return view?.window
-      ? tr('Only runs between {from} and {to}', { from: hh(view.window.from), to: hh(view.window.to) })
+    case 'window': return when ? tr('Outside the hours it may run; it starts again {when}', { when })
+      : view?.window ? tr('Only runs between {from} and {to}, server time', { from: hh(view.window.from), to: hh(view.window.to) })
       : tr('Outside the hours it may run');
     case 'sweep': return tr('Waiting for the scheduled check to finish');
     case 'repair': return tr('Waiting for the library repair to finish');
@@ -259,7 +264,9 @@ export function waitingText(
     case 'disabled': return tr('Its source is switched off');
     case 'source_missing': return tr('Its source is not available on this server');
     case 'series_busy': return tr('Waiting for another download of this series');
-    case 'listing': return tr('Reading its chapter list again');
+    // The last read of its chapter list gave nothing; the next is on a ladder -- an hour, 3, 12, then a day
+    // (bff lib/archivePlan.ts listingRetryAt).
+    case 'listing': return when ? tr('Its chapter list could not be read; trying again {when}', { when }) : tr('Its chapter list could not be read; trying again soon');
     case 'renumbering': return tr('Waiting for its chapters to be renumbered');
     default: return '';
   }
@@ -304,7 +311,16 @@ export function attentionText(e: ArchiveEntry, now: number = Date.now()): string
     }
     case 'source_missing': return tr('Its source is not available on this server');
     case 'disabled': return tr('Its source is switched off');
-    case 'stalled': return tr('Paused for over a week');
+    // Two cases share the reason (bff lib/archivePlan.ts attentionOf): a row paused for a week, and a queued one that
+    // has had its turns and brought nothing in for three days -- a site that lists nothing for it any more. `since`
+    // is when it last brought something in.
+    case 'stalled': {
+      if (e.state === 'paused') return tr('Paused for over a week');
+      const since = Date.parse(e.attention?.since ?? '');
+      return Number.isFinite(since) && now > since
+        ? tr('Nothing has come in for {d}', { d: durationText(now - since) })
+        : tr('Nothing has come in for days');
+    }
     case 'disk': return tr('Waiting for free disk space');
     default: return '';
   }
@@ -316,7 +332,9 @@ export function attentionText(e: ArchiveEntry, now: number = Date.now()): string
  */
 export function archiveStateText(item: ArchiveItem, view: Pick<ArchiveView, 'paused' | 'waiting' | 'window'> | null | undefined, now: number = Date.now()): string {
   const e = item.entry;
-  if (item.section === 'attention') return attentionText(e, now);
+  // Under Needs attention it can still be taking a chapter -- the retry after a backoff: said first, or the one
+  // chapter coming in was nowhere but the sheet.
+  if (item.section === 'attention') return [e.current ? tr('Fetching Ch. {n}', { n: e.current.number }) : '', attentionText(e, now)].filter(Boolean).join(' · ');
   if (e.state === 'done') return '';
   if (e.state === 'paused') return tr('Paused');
   if (view?.paused) return tr('Paused for everyone');

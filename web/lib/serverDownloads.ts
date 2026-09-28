@@ -18,7 +18,8 @@
  */
 import { t as tr } from './i18n';
 import { chaptersLeft } from './chapterRows';
-import { downloadsLabel, finished, type JobCard, type RunCard } from './jobs';
+import { downloadsLabel, finished, runTitle, type JobCard, type RunCard } from './jobs';
+import { kindLabel } from './healthCopy';
 import { ringFraction, type RingValue } from './ring';
 import { archiveItems, type ArchiveItem, type ArchiveView } from './archive';
 import type { AutoFollow } from './types';
@@ -325,6 +326,19 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
   cameIn.sort((a, b) => b.at - a.at);
   const stopped = finished(jobs).filter((j) => j.cancelled);
   return { running, queued, attention, tasks, cameIn, stopped };
+}
+
+/**
+ * A run's name on its Server tasks card. The scheduled check, a bulk Fetch newest and a full repair go by their
+ * kind; a repair a Health key started says what was pressed and what it is about -- "Fill now · Walk Gap", "Find
+ * a longer copy · Walk Tale · Ch. 3" -- in Health's own words (healthCopy.ts kindLabel), so this card and Recent
+ * repairs never name one run two ways. Every Health key starts a repair run, and a card reading "Library repair"
+ * for each could not be told from the nightly. With no series the viewer may list (the server drops the label
+ * for the 18+ hide) it is the press alone, "Fill now"; a server older than v0.49.0 sends no kind at all.
+ */
+export function runName(r: Pick<RunCard, 'kind' | 'repairKind' | 'label' | 'number'>): string {
+  if (r.kind !== 'repair' || !r.repairKind || r.repairKind === 'full') return runTitle(r.kind);
+  return kindLabel(r.repairKind, { label: r.label, number: r.number });
 }
 
 /**

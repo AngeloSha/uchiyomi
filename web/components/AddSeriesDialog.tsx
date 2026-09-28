@@ -98,6 +98,8 @@ export function autoFollowWhy(why: FollowWhy | string): string {
     case 'not_tried': return tr('not checked — it took too long');
     case 'cap': return tr('already following two');
     case 'unavailable': return tr('not available');
+    // #116: nothing is judged -- no other source's numbers line up with posts numbered 1..K.
+    case 'posting_order': return tr('this series is numbered by posting order');
     default: return why;
   }
 }

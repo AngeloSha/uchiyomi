@@ -86,7 +86,16 @@ test('every reason the server can send has a sentence of its own', () => {
   }
   // Two reasons may share words only where they mean the same thing to the reader.
   assert.ok(seen.size >= globals.length + series.length - 1, 'reasons share a sentence');
-  assert.equal(waitingText({ why: 'window' }, view([], { window: { from: 1, to: 7 } }), now), 'Only runs between 01:00 and 07:00');
+  // A window's hours are the server's local time: the wait says when it opens, the same in every timezone, and names
+  // the hours only when the server sent no time, as server time. Reintroduce the bare hours: the first line fails.
+  assert.equal(waitingText({ why: 'window', until: '2026-09-27T15:00:00Z' }, view([], { window: { from: 1, to: 7 } }), now),
+    'Outside the hours it may run; it starts again in 3 hours', 'the window says hours a viewer elsewhere reads as theirs');
+  assert.equal(waitingText({ why: 'window' }, view([], { window: { from: 1, to: 7 } }), now), 'Only runs between 01:00 and 07:00, server time');
+  // `listing` is a read that gave nothing, retried on a ladder (1 h, 3 h, 12 h, a day). Reintroduce "Reading its
+  // chapter list again": a series waiting a day for its next read says it is reading now.
+  assert.equal(waitingText({ why: 'listing', until: '2026-09-27T15:00:00Z' }, null, now), 'Its chapter list could not be read; trying again in 3 hours',
+    'a failed listing reads as a read in progress');
+  assert.equal(waitingText({ why: 'listing' }, null, now), 'Its chapter list could not be read; trying again soon');
   assert.equal(waitingText({ why: 'break', until: '2026-09-27T12:20:00Z' }, null, now), 'Next chapter in 20 minutes');
   assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T15:00:00Z' }, null, now), 'The site asked us to slow down; trying again in 3 hours');
   assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T11:00:00Z' }, null, now), 'The site asked us to slow down', 'a time already past is promised');
@@ -97,6 +106,24 @@ test('every reason the server can send has a sentence of its own', () => {
   assert.equal(attentionText(gaps, now), 'Finished · 3 chapters could not be fetched');
   assert.equal(attentionText({ ...gaps, note: { capped: 1, held: 0, blocked: 0 } }, now), 'Finished · 1 chapter could not be fetched', '"1 chapters"');
   assert.deepEqual(leftBehindLines({ capped: 2, held: 1, blocked: 0 }), ['2 failed too many times', '1 is waiting for a preferred group']);
+  // `stalled` is two things (bff lib/archivePlan.ts attentionOf): paused for a week, or queued with its turns had and
+  // nothing brought in for three days. Reintroduce the one sentence for both: a queued series reads as paused.
+  assert.equal(attentionText(entry({ state: 'paused', attention: { why: 'stalled', since: '2026-09-19T12:00:00Z' } }), now), 'Paused for over a week');
+  assert.equal(attentionText(entry({ attention: { why: 'stalled', since: '2026-09-24T08:00:00Z' } }), now), 'Nothing has come in for 3 days 4 hr',
+    'a queued series that stalled reads as paused');
+  assert.equal(attentionText(entry({ attention: { why: 'stalled', since: '' } }), now), 'Nothing has come in for days');
+});
+
+test('an archive under Needs attention still says the chapter it is taking', () => {
+  // The retry after a backoff: the row said only "The site keeps refusing", and the chapter coming in was nowhere but
+  // the sheet. Reintroduce `if (item.section === 'attention') return attentionText(e, now);`: this fails.
+  const now = Date.parse('2026-09-27T12:00:00Z');
+  const vv = view([entry({ current: { number: 4, startedAt: '' }, attention: { why: 'backoff', since: '' } })]);
+  const [item] = archiveItems(vv, { admin: true });
+  assert.equal(item.section, 'attention');
+  assert.equal(archiveStateText(item, vv, now), 'Fetching Ch. 4 · The site keeps refusing', 'the chapter in flight is shown nowhere');
+  const idle = view([entry({ attention: { why: 'backoff', since: '' } })]);
+  assert.equal(archiveStateText(archiveItems(idle, { admin: true })[0], idle, now), 'The site keeps refusing');
 });
 
 test('the line under a cover: how far, then paused, the chapter coming in, the whole archive\'s wait, else how long', () => {

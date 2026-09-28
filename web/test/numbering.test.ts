@@ -7,7 +7,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { addNumberingView, noticeKind, planCounts, numLabel, type DetailNumbering, type NumberingSummary, type RenumberPlan } from '../lib/numbering';
+import {
+  addNumberingView, noticeKind, numberingOutcome, planCounts, numLabel, pendingLine, refusalText,
+  type DetailNumbering, type NumberingSummary, type RenumberPlan,
+} from '../lib/numbering';
 import { prefControl, prefSummary, toggleChoice, needsRenumberConfirm, entryLabel, extensionSettingsHref } from '../lib/sourcePrefs';
 import { copyTitlesDiffer, postsShareNumber, normCopyTitle } from '../lib/versions';
 
@@ -84,6 +87,10 @@ test('the series page\'s notice says what was done or what waits, and to whom', 
   assert.match(page, /\{numberingSheet && isAdmin && <NumberingSheet /, 'the plan sheet is not admin-only');
   // The versions sheet closes before the plan opens: two sheets stacked both answer Escape.
   assert.match(page, /onNumbering=\{isAdmin && [^}]*\? \(\) => \{ setChapterSheet\(null\); setNumberingSheet\('posting_order'\); \} : undefined\}/);
+  // Not while another change waits (a remap, an undo): confirming posting order there overwrote the queued remap with a
+  // plan built on the source's new numbers. Reintroduce by dropping the `pending` clause: this fails.
+  assert.match(page, /onNumbering=\{isAdmin && listing\?\.numbering\?\.mode !== 'posting_order' && !listing\?\.numbering\?\.pending\s/,
+    'the versions sheet offers posting order while another change waits');
   const notice = code(read('components/NumberingNotice.tsx'));
   assert.match(notice, /\{isAdmin \? \(/, 'the keys are not the admin\'s alone');
 });
@@ -99,9 +106,46 @@ test('the plan sheet counts what moves before it lists it', () => {
   assert.equal(numLabel(7.0200005), '7.02');
   const sheet = code(read('components/NumberingSheet.tsx'));
   // Reintroduce by confirming without `confirm: true`: the route answers the plan again and nothing moves.
-  assert.match(sheet, /\{ json: \{ mode, confirm: true \} \}/, 'Confirm does not confirm');
+  assert.match(sheet, /\{ json: \{ mode: m, confirm: true \} \}/, 'Confirm does not confirm');
   assert.match(sheet, /tr\('Reading progress, bookmarks and notes stay with their chapters\.'\)/);
   assert.match(sheet, /<Sheet\b[^>]*\boverBottomNav\b/s, 'the plan sheet opens under the phone nav');
+});
+
+test('the plan sheet: the plan that waits, a Confirm a Health row can take, on <body>, and "Show all" by its list', () => {
+  const sheet = code(read('components/NumberingSheet.tsx'));
+  // `next` asks the route for no mode -- it picks what waits -- and the change confirmed is the one the plan is about.
+  assert.match(sheet, /numbering\$\{mode === 'next' \? '' : `\?mode=\$\{mode\}`\}/, 'the plan that waits is not asked for');
+  assert.match(sheet, /const m: RenumberMode \| undefined = mode === 'next' \? data\?\.mode : mode;/, 'the confirmed change is not the plan\'s');
+  // Health's row takes the Confirm, so its own status line carries the rename. Reintroduce by posting here regardless.
+  assert.match(sheet, /if \(onConfirm\) \{ onConfirm\(m\); onClose\(\); return; \}/, 'the Confirm cannot be handed to a Health row');
+  // On <body>: Health opens it inside a `.card`, whose backdrop blur would make the card its containing block.
+  // Reintroduce `return (<Sheet`: this fails, and so does healthActions.test.ts's dialog scan.
+  assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet\b/, 'the plan sheet is not on <body>');
+  // A held rename says what held it (the review found a stray file told "the source may not have answered").
+  assert.match(sheet, /setError\(pendingLine\(r\)\);/, 'a held rename is said as the source not answering');
+  assert.match(sheet, /setError\(refusalText\(e, tr\('Could not do that'\)\)\);/, 'a refusal is not said as what it is');
+  // "Show all" right under the moves it unfolds, before "Not matched". Reintroduce it after the parked list: fails.
+  const all = sheet.indexOf('data-plan-all');
+  assert.ok(all > sheet.indexOf('{shown.map(line)}') && all < sheet.indexOf("tr('Not matched')"), '"Show all" is drawn after "Not matched"');
+});
+
+test('a held or refused rename is said as what held it, and a Health row reads what it came to', () => {
+  // Reintroduce the one sentence for every cause: a stray file at a target name reads "the source may not have answered".
+  const plan = (reasons: RenumberPlan['reasons']): RenumberPlan => ({ mode: 'posting_order', moves: [], parked: [], collisions: [], clean: false, reasons, newFloor: null });
+  assert.equal(pendingLine({ running: true }), 'Still renaming. The series page shows the new numbers when it is done.');
+  assert.equal(pendingLine({ error: 'Chapter 21.cbz is already on disk' }), 'Chapter 21.cbz is already on disk', 'the server\'s refusal is dropped');
+  assert.equal(pendingLine({ plan: plan(['busy']) }), 'Chapters are being fetched for this series. Try again when that ends.', 'a busy folder reads as the source');
+  assert.equal(pendingLine({ plan: plan(['unmatched']) }), 'It could not be applied yet. The source may not have answered; try again in a moment.');
+  // The route's 409 while a download writes into the folder, in the reader's language; any other refusal as sent.
+  assert.equal(refusalText({ body: JSON.stringify({ error: 'busy', message: 'Beschäftigt' }) }, 'x'),
+    'Chapters are being fetched for this series. Try again when that ends.', 'a busy folder is said as the server wrote it, not in the reader\'s language');
+  assert.equal(refusalText({ body: JSON.stringify({ error: 'not_found', message: 'gone' }) }, 'x'), 'gone');
+  assert.equal(refusalText(new Error('boom'), 'fallback'), 'fallback');
+  // What a Health row's status line says: done, still renaming (it carries on: partial, never failed), not applied.
+  assert.deepEqual(numberingOutcome({ state: 'applied', numbering: null }), { text: 'Renumbered' });
+  assert.deepEqual(numberingOutcome({ state: 'pending', running: true, numbering: null }), { text: 'Still renaming. The series page shows the new numbers when it is done.', partial: true },
+    'a rename still running reads as failed');
+  assert.deepEqual(numberingOutcome({ state: 'pending', error: 'Chapter 21.cbz is already on disk', numbering: null }), { text: 'Chapter 21.cbz is already on disk', ok: false });
 });
 
 test('the versions sheet shows each copy\'s own title, and says when copies are really different posts', () => {
@@ -125,6 +169,17 @@ test('the versions sheet shows each copy\'s own title, and says when copies are 
   assert.match(sheet, /\{titled && <span dir="auto" className="block truncate text-sm text-fog-100" data-copy-title>\{c\.title\?\.trim\(\) \|\| '—'\}<\/span>\}/,
     'the copy\'s title is not its first line');
   assert.match(sheet, /\{sharing && \(/);
+});
+
+test('a source refused because the series is numbered by posting order says so, in Find missing and the add', () => {
+  // The fill scan names each follower of a posting-order series with why 'posting_order', and auto-follow refuses
+  // with it (bff routes/sources.ts, lib/autoFollow.ts). Without a case the rows read "Not usable" and the raw code.
+  // Reintroduce by deleting the case from whyText: the first assertion fails.
+  assert.match(code(read('components/FindMissingDialog.tsx')), /case 'posting_order': return tr\('Numbers these posts its own way: this series is numbered by posting order'\);/,
+    'Find missing reads "Not usable" for a posting-order refusal');
+  assert.match(code(read('components/AddSeriesDialog.tsx')), /case 'posting_order': return tr\('this series is numbered by posting order'\);/,
+    'the add prints the raw code for a posting-order refusal');
+  assert.match(code(read('lib/types.ts')), /export type FollowWhy = [^;]*\| 'posting_order';/, 'FollowWhy does not know posting order');
 });
 
 test('the settings sheet draws every kind of setting with the right control', () => {
@@ -159,6 +214,9 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   assert.match(src, /if \(needsRenumberConfirm\(pref, data\?\.renumbers \?\? 0\)\) setPending\(\{ pref, value \}\);/);
   assert.match(src, /\{p\.numbering && \(\s*<div className="[^"]*" data-renumber-warning>/, 'the renumber warning is not in the setting\'s row');
   assert.match(src, /<Sheet\b[^>]*\boverBottomNav\b/s, 'the settings sheet opens under the phone nav');
+  // An extension whose package lists no source says so, and stops saying "Loading…" beside it. Reintroduce the guard
+  // without `!pkgSources`: this fails.
+  assert.match(src, /\{\(isLoading \|\| \(!sourceId && !pkgFailed && !pkgSources\)\) && <p[^>]*>\{tr\('Loading…'\)\}<\/p>\}/, 'an empty package reads "Loading…" for good');
   // Reintroduce by returning the Sheet itself: inside the Extensions `.card` (backdrop-filter) it covers the card
   // only, and the admin header shows through above it.
   assert.match(src, /return createPortal\(\s*<Sheet\b/, 'the settings sheet is not portalled out of the card');

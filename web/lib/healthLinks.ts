@@ -5,12 +5,22 @@
 // about ONE chapter: the short one, or where the gap is. So Open takes the admin to that chapter: a short
 // chapter opens in the reader, and a gap or an impossible number opens the series with the list turned to that
 // chapter's page and the row lit up (`?ch=`, read by app/series/page.tsx).
+import { t as tr } from './i18n';
+import { extensionSettingsHref, extSourceIdOf } from './sourcePrefs';
 import type { HealthItem } from './types';
 
 /** A series page, optionally turned to one chapter. `ch` is a chapter NUMBER, never an id. */
 export function seriesHref(id: string, ch?: number | null): string {
   const base = `/series/?id=${encodeURIComponent(id)}`;
   return ch != null && Number.isFinite(ch) ? `${base}&ch=${ch}` : base;
+}
+
+/**
+ * A series page with its renumbering plan open (#116): the page reads `?numbering=review` once, for an admin, and
+ * opens the plan of whatever waits for review (app/series/page.tsx).
+ */
+export function numberingHref(id: string): string {
+  return `${seriesHref(id)}&numbering=review`;
 }
 
 /** The reader, on one chapter. */
@@ -46,6 +56,15 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     // #72: the engine's row is about no series; its setup steps, Check again and Connect are on the Extensions tab.
     case 'extension-engine':
       return [{ href: '/admin/?tab=Extensions' }];
+    // #116: the finding is about a plan, so Open is the plan -- which file becomes which chapter -- on the series
+    // page. An extension source adds its own settings, where a numbering switch of its own may be the better fix
+    // (Webtoons' "sequential chapter numbering", the one #116's reporter needed).
+    case 'numbering':
+      if (it.seriesId) {
+        const ext = extSourceIdOf(it.sourceId);
+        return [{ href: numberingHref(it.seriesId) }, ...(ext ? [{ href: extensionSettingsHref(ext), label: tr('Source settings') }] : [])];
+      }
+      break;
   }
   return it.seriesId ? [{ href: seriesHref(it.seriesId) }] : [];
 }

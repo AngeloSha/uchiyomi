@@ -7,6 +7,10 @@
 // owner asked that it never turn a ring: every ring below is `static` and amber, with an hourglass for a glyph.
 // The one poll it rides on is AppShell's ['source-jobs']; an action here asks it again (kickDownloads) rather
 // than starting a timer of its own.
+//
+// ⚠️ The sheet and the Stop confirmation are on <body> (ui.tsx OnBody): the band and the Needs attention rows are
+// `.card`s, whose backdrop blur made each the dialog's containing block -- only the card dimmed, the panel over
+// the row or off the top of the screen, the next card over its buttons. Only the Queued cover, not a card, worked.
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -20,7 +24,7 @@ import {
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
-import { Img, Sheet } from '@/components/ui';
+import { Img, OnBody, Sheet } from '@/components/ui';
 import { CoverProgress, ProgressRing } from '@/components/ProgressRing';
 import { IcHourglass } from '@/components/icons';
 
@@ -102,13 +106,15 @@ export function useArchiveEnqueue() {
 function StopConfirm({ item, onClose, onStopped }: { item: ArchiveItem; onClose: () => void; onStopped?: () => void }) {
   const a = useArchiveActions();
   return (
-    <ConfirmDialog
-      title={tr('Stop archiving {title}?', { title: item.title })}
-      body={<p>{tr('Chapters already fetched stay; the rest are left for you to fetch later.')}</p>}
-      confirmLabel={tr('Stop archiving')}
-      danger busy={a.busy}
-      onConfirm={async () => { await a.stop(item.seriesId); onClose(); onStopped?.(); }}
-      onClose={onClose} />
+    <OnBody>
+      <ConfirmDialog
+        title={tr('Stop archiving {title}?', { title: item.title })}
+        body={<p>{tr('Chapters already fetched stay; the rest are left for you to fetch later.')}</p>}
+        confirmLabel={tr('Stop archiving')}
+        danger busy={a.busy}
+        onConfirm={async () => { await a.stop(item.seriesId); onClose(); onStopped?.(); }}
+        onClose={onClose} />
+    </OnBody>
   );
 }
 
@@ -175,33 +181,35 @@ export function ArchiveSheet({ item, view, onClose }: { item: ArchiveItem; view?
     e.startedAt ? tr('Started {ago}', { ago: relativeTime(e.startedAt) }) : tr('Queued {ago}', { ago: relativeTime(e.queuedAt) }),
   ].filter(Boolean);
   return (
-    <Sheet title={item.title} onClose={onClose} overBottomNav>
-      <div data-archive-sheet className="space-y-4 pb-2">
-        <div className="flex items-center gap-3">
-          <ArchiveMark item={item} size={44} />
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-300/90">{tr('Slow archive')}</p>
-            <p className="text-sm font-medium tabular-nums text-fog-100">
-              {e.state === 'done' ? archiveProgressText(e)
-                : total == null ? archiveProgressText(e)
-                : total === 1 ? tr('{done} of 1 chapter', { done: e.done }) : tr('{done} of {n} chapters', { done: e.done, n: total })}
-            </p>
+    <OnBody>
+      <Sheet title={item.title} onClose={onClose} overBottomNav>
+        <div data-archive-sheet className="space-y-4 pb-2">
+          <div className="flex items-center gap-3">
+            <ArchiveMark item={item} size={44} />
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-300/90">{tr('Slow archive')}</p>
+              <p className="text-sm font-medium tabular-nums text-fog-100">
+                {e.state === 'done' ? archiveProgressText(e)
+                  : total == null ? archiveProgressText(e)
+                  : total === 1 ? tr('{done} of 1 chapter', { done: e.done }) : tr('{done} of {n} chapters', { done: e.done, n: total })}
+              </p>
+            </div>
+          </div>
+          {status && (
+            <p dir="auto" className={`text-[13px] leading-relaxed ${item.section === 'attention' ? 'text-amber-300' : 'text-fog-200'}`}>{status}</p>
+          )}
+          {lines.length > 0 && (
+            <ul className="space-y-1 text-[12px] leading-relaxed text-fog-400">
+              {lines.map((l) => <li key={l}>{l}</li>)}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <ArchiveKeys item={item} onStop={() => setStopping(true)} />
+            <Link href={`/series/?id=${enc(item.seriesId)}`} onClick={onClose} className="btn-key">{tr('Open series')}</Link>
           </div>
         </div>
-        {status && (
-          <p dir="auto" className={`text-[13px] leading-relaxed ${item.section === 'attention' ? 'text-amber-300' : 'text-fog-200'}`}>{status}</p>
-        )}
-        {lines.length > 0 && (
-          <ul className="space-y-1 text-[12px] leading-relaxed text-fog-400">
-            {lines.map((l) => <li key={l}>{l}</li>)}
-          </ul>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <ArchiveKeys item={item} onStop={() => setStopping(true)} />
-          <Link href={`/series/?id=${enc(item.seriesId)}`} onClick={onClose} className="btn-key">{tr('Open series')}</Link>
-        </div>
-      </div>
-    </Sheet>
+      </Sheet>
+    </OnBody>
   );
 }
 
@@ -247,6 +255,8 @@ export function ArchiveAttentionRow({ item, view, admin }: { item: ArchiveItem; 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-fog-100">{item.title}</p>
         <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{attentionText(item.entry)}</p>
+        {/* Still taking a chapter (the retry after a backoff): said here, not only inside the sheet. */}
+        {item.entry.current && <p className="mt-0.5 text-[12px] text-fog-200" data-archive-current>{tr('Fetching Ch. {n} now', { n: item.entry.current.number })}</p>}
         <p className="mt-0.5 text-[11px] text-fog-500">{tr('Slow archive')} · {archiveProgressText(item.entry)}</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <ArchiveKeys item={item} />

@@ -64,7 +64,9 @@ export interface TrackerStatus {
  * are the server's reasons, each of which the dialog turns into a sentence (`autoFollowWhy` in
  * AddSeriesDialog.tsx) -- a code this list does not know is printed as-is so it is at least visible.
  */
-export type FollowWhy = 'followed' | 'numbering_differs' | 'title_differs' | 'unreachable' | 'too_few_listed' | 'not_tried' | 'cap' | 'unavailable';
+export type FollowWhy = 'followed' | 'numbering_differs' | 'title_differs' | 'unreachable' | 'too_few_listed' | 'not_tried' | 'cap' | 'unavailable'
+  // #116: the series is numbered by posting order, and no other source's numbers line up with it (bff lib/autoFollow.ts).
+  | 'posting_order';
 
 export interface AutoFollowResult {
   source: string;
@@ -372,7 +374,10 @@ export type HealthAction =
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
   | 'ignore' | 'unignore'
   // #72: point the extension engine's own Cloudflare helper at Uchiyomi's (POST /api/admin/extensions/solver).
-  | 'engine_solver';
+  | 'engine_solver'
+  // #116, the chapter numbering check: review the plan of a renumbering and confirm it, or keep the numbers the
+  // source gives (GET/POST /api/admin/series/:id/numbering).
+  | 'renumber' | 'keep_numbers';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
@@ -439,7 +444,11 @@ export type HealthOutcome =
 
 export interface HealthCaveat {
   action: HealthAction;
-  code: 'updates_paused' | 'source_cooling_down' | 'source_off';
+  /**
+   * `archiving` (#117): the gaps lie below an active slow archive's boundary, which fetches them at its own pace --
+   * not a problem, and Fill now still fetches them now, at the normal pace.
+   */
+  code: 'updates_paused' | 'source_cooling_down' | 'source_off' | 'archiving';
   until?: string;
 }
 

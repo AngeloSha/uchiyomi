@@ -8,7 +8,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { chParam, healthLinks, landingNumber, readerHref, seriesHref } from '../lib/healthLinks';
+import { chParam, healthLinks, landingNumber, numberingHref, readerHref, seriesHref } from '../lib/healthLinks';
+import { extSourceIdOf } from '../lib/sourcePrefs';
 
 test('links are the query shape, encoded, with ?ch= only for a real number', () => {
   assert.equal(seriesHref('s 1'), '/series/?id=s%201');
@@ -31,6 +32,21 @@ test('each finding opens the chapter it is about', () => {
   assert.deepEqual(healthLinks('chapter-failures', { title: 'MangaDex', detail: 'd', sourceId: 'mangadex' }), [], 'a source is not a series');
   // A gap with no numbers falls back to the series rather than to nothing.
   assert.deepEqual(healthLinks('chapter-gaps', { title: 't', detail: 'd', seriesId: 's1' }), [{ href: '/series/?id=s1' }]);
+});
+
+test('#116: a numbering finding opens its plan, and an extension source its own settings', () => {
+  // The finding is about a plan, so Open is the plan on the series page (it reads ?numbering=review once). The
+  // Webtoons extension's own "sequential chapter numbering" switch -- the fix #116's reporter needed -- is one
+  // link further. Reintroduce the plain series link: "Open does not open the plan" fails.
+  assert.equal(numberingHref('s 1'), '/series/?id=s%201&numbering=review');
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744' }),
+    [{ href: '/series/?id=s1&numbering=review' }, { href: '/admin/?tab=Extensions&settings=2522335540328470744', label: 'Source settings' }],
+    'Open does not open the plan');
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'mangadex' }), [{ href: '/series/?id=s1&numbering=review' }],
+    'a built-in source is sent to extension settings');
+  assert.equal(extSourceIdOf('sw:-12345'), '-12345');
+  assert.equal(extSourceIdOf('sw:abc'), null, 'an adapter id that is not an extension source id');
+  assert.equal(extSourceIdOf(undefined), null);
 });
 
 test('?ch= lands on that chapter, or on the one just before a gap', () => {
@@ -60,4 +76,16 @@ test('the series page reads ?ch= and lights the row it lands on', () => {
   assert.match(page, /lit=\{litCh === b\.number\}/);
   // Taken off the URL with the router's history state kept: dropping it makes Next reload the page on Back.
   assert.match(page, /replaceState\(window\.history\.state,/);
+});
+
+test('the series page opens the plan Health links to, once, for an admin', () => {
+  // Reintroduce by dropping the effect: Health's Open lands on the series with no plan in sight.
+  const page = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
+  assert.match(page, /const wantPlan = useSearchParams\(\)\.get\('numbering'\) === 'review';/, 'the page does not read ?numbering=');
+  const fx = page.slice(page.indexOf('const openedPlan = useRef'), page.indexOf('}, [wantPlan, isAdmin, id]);'));
+  assert.match(fx, /if \(!wantPlan \|\| !isAdmin \|\| openedPlan\.current === id\) return;/, 'the plan opens for a member, or on every render');
+  assert.match(fx, /u\.searchParams\.delete\('numbering'\);/, 'a reload opens the plan again');
+  assert.match(fx, /setNumberingSheet\('next'\);/, 'the plan opened is not the one waiting');
+  // After the reset on a new series, which would otherwise close it straight away.
+  assert.ok(page.indexOf('useEffect(() => { setNumberingSheet(null); }, [id]);') < page.indexOf('const openedPlan = useRef'), 'the reset closes the plan it opened');
 });
