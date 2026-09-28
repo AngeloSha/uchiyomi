@@ -344,7 +344,15 @@ const WORDS: Record<string, (p: P) => string | null> = {
     // Mid-sentence, as the server's English says them: "(also chapter list, page list)".
     return also.length ? joinPart(lead, tr('also {stages}', { stages: also.map((x) => midSentence(stageName(x))).join(listSep()) }), 'paren') : lead;
   },
-  'sources.reason': (p) => (REASON_WORDS[str(p, 'diagnosis')] ? diagnosisReason({ code: str(p, 'diagnosis') }) : null),
+  // The reason ends its sentence as the server's does (bff lib/said.ts 'sources.reason' adds the full stop a reason
+  // lacks): site_offline's is the one without its own, and aqua's row read "…(its own page) 195 series use it".
+  // Reintroduce the reason as it is: "sources.reason for 'site_offline' reads otherwise" in said.test.ts.
+  'sources.reason': (p) => {
+    const code = str(p, 'diagnosis');
+    if (!REASON_WORDS[code]) return null;
+    const r = diagnosisReason({ code });
+    return !r || /[.!?。！？؟]$/.test(r) ? r : `${r}${cjk() ? '。' : '.'}`;
+  },
   'sources.inconclusive': (p) => byStage(p, {
     search: () => tr('the last test ran out of time while searching — not proof it is broken'),
     chapters: () => tr('the last test ran out of time while listing chapters — not proof it is broken'),

@@ -217,6 +217,24 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     }
   }
   for (const code of fixCodes) assert.ok(seen.has(code), `'${code}' is reached by none of these cases -- add the evidence that reaches it`);
+  // Inside a Health row a reason ends its sentence as the server's English ends it: the server adds the full stop a
+  // reason lacks (site_offline's), and the web read "…(its own page) 195 series use it". Every code but the one whose
+  // words differ on purpose (DIFFERS: "the extension engine"), and in Japanese its own full stop.
+  const saidServer = (await import(join(BFF, 'said.ts'))) as { SAID_ENGLISH: Record<string, (p: never) => string> };
+  const inRow = saidServer.SAID_ENGLISH['sources.reason'] as (p: { diagnosis: string }) => string;
+  for (const code of diagnosisCodes) {
+    if (code === 'ok' || code === 'upstream_down') continue;
+    assert.equal(saidText({ code: 'sources.reason', params: { diagnosis: code } }, '\0'), inRow({ diagnosis: code }),
+      `sources.reason for '${code}' reads otherwise than the server`);
+  }
+  try {
+    setActiveLocale('ja');
+    setActiveDict(JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', 'ja.json'), 'utf8')));
+    assert.match(saidText({ code: 'sources.reason', params: { diagnosis: 'site_offline' } }, '\0'), /）。$/, 'in Japanese the reason does not end its sentence');
+  } finally {
+    setActiveLocale('en');
+    setActiveDict({});
+  }
   // A fix without a code (a sentence written without one) is shown as it came.
   assert.equal(diagnosisFix({ fix: 'as sent' }), 'as sent');
 });
