@@ -50,7 +50,7 @@ import { logAudit } from './audit';
 import { containedPath } from './fsGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
-import { activeArchiveBoundaries, allBelow } from './archiveBoundaries';
+import { archiveHoles, type ArchiveHoles } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
 import { restampBook } from './partial';
 import { chapterFileRel, downloadChapter, type DownloadInput } from './downloader';
@@ -1357,13 +1357,18 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
         ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
   );
-  // A series whose every missing number lies below its active slow archive's boundary (#117) is the archive's
-  // work in progress: it is fetching exactly those, a few an hour, and Health says "being archived" of them. The
-  // nightly leaves it alone -- no search of other sites, no fetch at full speed, and no gaps_checked_at stamp, so
-  // it comes back the night the archive is done -- unless a person named it (Fill now), which fetches them now.
-  // Reintroduce by dropping the skip: "the nightly leaves an archived gap to the archive" in repair.int.test.ts
-  // finds the series stamped.
-  const archiving = opts.seriesId ? new Map<string, number>() : await activeArchiveBoundaries(candidates.map((s) => s.id));
+  // A series whose every missing number its slow archive (#117) is going to fetch -- listed below its boundary,
+  // available, under the retry cap (lib/archiveBoundaries.ts archiveHoles) -- is the archive's work in progress: it
+  // is fetching exactly those, a few an hour, and Health says "being archived" of them. The nightly leaves it alone --
+  // no search of other sites, no fetch at full speed, and no gaps_checked_at stamp, so it comes back the night the
+  // archive is done -- unless a person named it (Fill now), which fetches them now. A paused archive's too: they are
+  // listed already, so a search has nothing to find, and the sweep floors at a paused boundary as well, so the
+  // 'listed' this step would conclude ("the next chapter sweep will fetch them") is a sweep that never comes; Health
+  // lists them as the gaps they are. A number the source does not list is not the archive's (it never fetches one),
+  // and is searched for as any gap is. Reintroduce by dropping the skip: "the nightly leaves an archived gap to the
+  // archive" in repair.int.test.ts finds the series stamped; by counting every number below the boundary: "a number
+  // below the boundary the source does not list" there finds nothing searched.
+  const archiving = opts.seriesId ? new Map<string, ArchiveHoles>() : await archiveHoles(candidates.map((s) => s.id), CHAPTER_RETRY_CAP);
   // One small indexed read per candidate. It is the only way to apply the override and tombstone rules
   // (lib/libraryNumbers.ts) per series, and a few hundred of them once a night is not a load worth
   // flattening into a query nobody can read.
@@ -1374,7 +1379,8 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     if (!gaps.length) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
-    if (allBelow(gapNums, archiving.get(s.id))) continue;
+    const archive = archiving.get(s.id);
+    if (archive && gapNums.every((n) => archive.numbers.has(n))) continue;
     ranked.push({ ...s, have, missing: gapNums.length, gapNums });
   }
   ranked.sort((a, b) => b.missing - a.missing);

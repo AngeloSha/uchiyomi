@@ -798,6 +798,58 @@ test("the nightly leaves an archived gap to the archive, and Fill now fetches be
   }
 });
 
+test("the nightly searches for a hole below the boundary the source does not list, and leaves a paused archive's listed one alone", { skip }, async () => {
+  // The archive fetches only what the listing holds below its boundary (lib/archiveBoundaries.ts archiveHoles). A hole
+  // the source does not list is not its work: counted as the archive's, it was never searched for until the archive
+  // finished, weeks on (integration-2 review). Reintroduce by counting every number below the boundary: nothing is
+  // searched.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, LISTED]);
+  await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 20.001)`, [LISTED]);
+  await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 11', [LISTED]);
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.series, 1, 'a number below the boundary the source does not list is searched for as any gap');
+    assert.ok(searches.length > 0, 'and other sites are asked for it');
+    assert.equal((await series(LISTED)).gaps_result?.why, 'no_candidate');
+
+    // Listed, under a PAUSED archive: a search has nothing to find, and the sweep floors at a paused boundary too, so
+    // the 'listed' this step would store ("the next chapter sweep will fetch them") is a sweep that never comes. Left
+    // alone and unstamped, it is the finding it is on Health. Reintroduce by leaving paused rows out of the skip: the
+    // nightly looks at it.
+    await seedListing(LISTED, A, T.listed, [11]);
+    await q(`UPDATE archive_queue SET state = 'paused' WHERE series_id = $1`, [LISTED]);
+    await q('UPDATE lib_series SET gaps_checked_at = NULL, gaps_result = NULL WHERE id = $1', [LISTED]);
+    searches = [];
+    const paused = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(paused.gaps.series, 0, "the nightly leaves a paused archive's listed hole alone too");
+    assert.equal((await series(LISTED)).gaps_checked_at, null);
+  } finally {
+    await q('DELETE FROM archive_queue WHERE series_id = $1', [LISTED]);
+  }
+});
+
+test('the nightly keeps the boundary: of a gap reaching above it, only the part above is fetched', { skip }, async () => {
+  // Repair Gap's hole (11-13) straddles an active archive's boundary at 12.5. The nightly searches for it -- nobody
+  // lists it -- and follows the source that brackets it; its fetch floors at the boundary like the sweep, so 13 comes
+  // now and 11 and 12, listed from then on, are the archive's (integration-2 review: nothing tested it). Reintroduce by
+  // passing `ignoreArchiveBoundary: true` for the nightly too (stepGaps): 11 and 12 are fetched at full speed.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, GAP]);
+  // A scan titles a series after its first file's ComicInfo, which this file's fixtures write as 'Repair': the hunt
+  // searches by title, so it is named as the sources list it again.
+  await q('UPDATE lib_series SET title = $2 WHERE id = $1', [GAP, T.gap]);
+  await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 12.5)`, [GAP]);
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.followed, 1, 'PREMISE: the source that brackets the hole is followed');
+    const got = (await q('SELECT number::float8 AS number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[])', [GAP, [11, 12, 13]]))
+      .map((x: any) => Number(x.number)).sort((a: number, b: number) => a - b);
+    assert.deepEqual(got, [13], 'the nightly keeps the boundary: of a gap reaching above it, only the part above is fetched');
+    assert.equal(r.gaps.fetched, 1);
+  } finally {
+    await q('DELETE FROM archive_queue WHERE series_id = $1', [GAP]);
+  }
+});
+
 test('the nightly still leaves a paused series alone', { skip }, async () => {
   // Fill now looks at a paused series because a person named it; an untargeted run must not. Reintroduce by
   // dropping `s.auto_update AND` for every run (not only a named one): the paused series is looked at and stamped.

@@ -104,6 +104,11 @@ export interface PartialHold {
   expected: number; // pages the file will contain, placeholders included
   pages: number; // real pages held
   write(): Promise<{ file: string; pages: number; missing: number[] }>;
+  /**
+   * The caller will not write it: its entry in the downloads view ends now, as not kept (lib/downloadActivity.ts
+   * holdPartial sets this). A no-op once written.
+   */
+  drop?(): void;
 }
 
 /** What `downloadChapter` throws when pages are missing. `blockStatus` only when the SOURCE is at fault. */

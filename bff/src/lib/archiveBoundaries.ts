@@ -1,7 +1,6 @@
-// Where each active slow archive (#117) draws its line, for the two readers outside the archive that must know it:
-// Health's chapter-gaps check and the nightly repair's gap step. A gap wholly below an active boundary is the
-// archive's work in progress -- it is fetching exactly those numbers, a few an hour -- not a finding, and not a
-// hole for the repair to search other sites about or fetch at full speed.
+// What each active slow archive (#117) is going to fetch, for the two readers outside the archive that must know it:
+// Health's chapter-gaps check and the nightly repair's gap step. A hole the archive is fetching, a few an hour, is its
+// work in progress -- not a finding, and not a hole for the repair to search other sites about or fetch at full speed.
 //
 // ⚠️ A module of its own, importing nothing but the database. lib/archive.ts imports the source watchdog, which
 // registers itself with lib/healthSummary.ts at load, and healthSummary imports lib/health.ts: were health.ts to
@@ -9,24 +8,51 @@
 // defined what it registers with.
 import { q } from './db';
 
-/**
- * The boundary of every active archive, by series id: queued and paused ones (a paused archive still owns the
- * numbers below its line -- the sweep floors at it, lib/updater.ts), never a finished one, which has lifted its.
- * A row whose boundary is not placed yet (no listing read, or a renumber pending) owns nothing yet. Empty on a
- * read that fails: a gap then reads as a gap, which is what it was before the archive existed.
- */
-export async function activeArchiveBoundaries(seriesIds?: readonly string[]): Promise<Map<string, number>> {
-  // `boundary` as the real it is stored as, the way the sweep's floor reads it (lib/updater.ts ARCHIVE_BOUNDARY): a
-  // float8 cast turns 10.001 into 10.00100040435791, and the two readers must agree on which numbers are below it.
-  const rows = await q<{ series_id: string; boundary: number }>(
-    `SELECT series_id, boundary FROM archive_queue
-      WHERE state IN ('queued', 'paused') AND boundary IS NOT NULL
-        AND ($1::text[] IS NULL OR series_id = ANY($1::text[]))`,
-    [seriesIds ? [...seriesIds] : null],
-  ).catch(() => []);
-  return new Map(rows.map((r) => [r.series_id, Number(r.boundary)]));
+/** One active archive, as the two readers see it. */
+export interface ArchiveHoles {
+  /**
+   * Nothing is fetching these right now: the row is paused, or the admin paused every archive. The sweep still
+   * floors at the boundary meanwhile (lib/updater.ts), so the holes wait for a resume or for Fill now.
+   */
+  paused: boolean;
+  /** The whole numbers it will fetch (see archiveHoles). */
+  numbers: ReadonlySet<number>;
 }
 
-/** Every one of these (gap) numbers lies below the archive's boundary: the whole hole is the archive's to fill. */
-export const allBelow = (numbers: readonly number[], boundary: number | undefined): boolean =>
-  boundary !== undefined && numbers.length > 0 && numbers.every((n) => n < boundary);
+/**
+ * What each active archive will fetch of what is missing, by series id: the numbers LISTED below its boundary that it
+ * may take -- available (not held for a group, not blocked) and under the sweep's retry cap, the archive's own rule
+ * (lib/archive.ts eligibleSql) and the series page's (lib/seriesListing.ts whyOf) -- floored to the whole numbers a gap
+ * is counted in (lib/fill.ts gapsOf). A missing number the source does not list, or one the archive gave up on, is
+ * not its work whatever the boundary: it never fetches those, and read as its work they were never searched for
+ * until the archive finished, weeks on (integration-2 review). Queued and paused rows, never a finished one, which
+ * has lifted its boundary; a row whose boundary is not placed yet (no listing read, or a renumber pending) owns
+ * nothing yet.
+ * Empty on a read that fails: a gap then reads as a gap, which is what it was before the archive existed.
+ * `retryCap` is the sweep's CHAPTER_RETRY_CAP, passed in because lib/updater.ts is not a module this one may import.
+ */
+export async function archiveHoles(seriesIds: readonly string[] | undefined, retryCap: number): Promise<Map<string, ArchiveHoles>> {
+  // `l.number < a.boundary` in the listing's own type, as the archive compares them: both are real, and a float8 cast
+  // turns 10.001 into 10.00100040435791.
+  const rows = await q<{ series_id: string; paused: boolean; numbers: number[] | null }>(
+    `SELECT a.series_id,
+            (a.state = 'paused' OR COALESCE((SELECT st.archive_paused FROM server_settings st WHERE st.id = 1), false)) AS paused,
+            array_agg(DISTINCT floor(l.number)::float8) FILTER (WHERE l.number IS NOT NULL) AS numbers
+       FROM archive_queue a
+       LEFT JOIN series_listing l ON l.series_id = a.series_id AND l.status = 'available' AND l.number < a.boundary
+            AND COALESCE((SELECT f.attempts FROM chapter_failures f WHERE f.series_id = l.series_id AND f.number = l.number), 0) < $2
+      WHERE a.state IN ('queued', 'paused') AND a.boundary IS NOT NULL
+        AND ($1::text[] IS NULL OR a.series_id = ANY($1::text[]))
+      GROUP BY a.series_id, a.state`,
+    [seriesIds ? [...seriesIds] : null, retryCap],
+  ).catch(() => []);
+  return new Map(rows.map((r) => [r.series_id, { paused: r.paused === true, numbers: new Set((r.numbers ?? []).map(Number)) }]));
+}
+
+/** How many of the whole numbers lo..hi the archive will fetch: all of them is `hi - lo + 1`. */
+export function archiveTakes(a: ArchiveHoles | undefined, lo: number, hi: number): number {
+  if (!a) return 0;
+  let n = 0;
+  for (const x of a.numbers) if (x >= lo && x <= hi) n++;
+  return n;
+}

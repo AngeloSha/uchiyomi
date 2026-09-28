@@ -828,6 +828,28 @@ test('a renumber moves the archive: its direction is settled again from the renu
   await arch.archiveIdle();
 });
 
+test('a renumber moves a paused archive too: its direction is settled at the first look after the resume', { skip }, async () => {
+  // A paused row is not looked at, so the `renumbered` mark a commit writes on it waits for the resume -- and the
+  // resume replaced the note, mark and all, as a pause did to a mark no look had settled yet: the archive went on
+  // filling in the direction of the old numbers (integration-2 review). Reintroduce by building the resume's note
+  // without it (archiveAct): chapter 1 starts, below the held block, where 'up' begins.
+  const mark = JSON.stringify({ renumbered: new Date(now).toISOString() });
+  // Renumbered while paused, as the commit leaves the row (its note merged, the pause kept).
+  const s = await series('redirp', A, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { held: [6, 7, 8, 9, 10] });
+  await q(`INSERT INTO archive_queue (series_id, state, boundary, direction, note) VALUES ($1, 'paused', 6, 'up', $2::jsonb || $3::jsonb)`,
+    [s.id, JSON.stringify({ pausedAt: new Date(now).toISOString() }), mark]);
+  // Renumbered while queued, and paused before any look settled it.
+  const s2 = await series('redirq', B, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { held: [6, 7, 8, 9, 10] });
+  await q(`INSERT INTO archive_queue (series_id, state, boundary, direction, note) VALUES ($1, 'queued', 6, 'up', $2::jsonb)`, [s2.id, mark]);
+  assert.equal(await arch.archiveAct('pause', s2.id, { userId: adminId, admin: true, ctx: adminCtx }), 'ok');
+  for (const id of [s.id, s2.id]) assert.equal(await arch.archiveAct('resume', id, { userId: adminId, admin: true, ctx: adminCtx }), 'ok');
+  const t = await tick();
+  assert.equal((await row(s.id)).direction, 'down', 'a renumber moves a paused archive too');
+  assert.equal((await row(s2.id)).direction, 'down', 'and one paused before a look settled it');
+  assert.deepEqual(t.started.map((x) => x.number), [5, 5], "down from the held block's own edge");
+  await arch.archiveIdle();
+});
+
 test('a look between a renumber and its listing reads the listing, and never finishes the archive', { skip }, async () => {
   // A renumber deletes the series' listing, and the check that applied it writes the new one a moment later. A look in
   // between found no candidate and FINISHED the archive -- boundary lifted, floor cleared, the back catalogue left to
@@ -862,10 +884,34 @@ test('a refresh that leaves no listing is a read that gave nothing', { skip }, a
   assert.equal((await row(s.id)).state, 'queued');
 });
 
+/**
+ * `run`, with every library scan held until it has answered: what it answers, or 'waited' when it did not answer
+ * within a few seconds -- it waited for a scan. The scan is a walk of the whole library, and a request that waits on
+ * one can outlive the proxy on a large library (integration-2 review); a scan it started runs once the hold is let go.
+ */
+async function answersWithoutAScan<T>(run: () => Promise<T>): Promise<T | 'waited'> {
+  const { withScansHeld } = await import('../src/lib/library');
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  // Taken at once (no other hold is in place between these tests): a scan asked for from here on waits for `gate`.
+  const held = withScansHeld(() => gate);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([run(), new Promise<'waited'>((r) => { timer = setTimeout(() => r('waited'), 5000); })]);
+  } finally {
+    clearTimeout(timer);
+    open();
+    await held;
+  }
+}
+
 test('a chapter the archive landed and has not scanned yet is in the plan a renumber builds', { skip }, async () => {
   // The archive scans what it lands in batches; a plan is built from lib_books. A file with no row yet kept its old
-  // name through the renames and was scanned in afterwards under a number that is another post's by then.
-  // Reintroduce by dropping the onBeforeRenumberPlan registration in lib/archive.ts: the plan has no book.
+  // name through the renames and was scanned in afterwards under a number that is another post's by then. The plan
+  // starts that scan and says `busy` until it is done, without waiting for it.
+  // Reintroduce by dropping the onBeforeRenumberPlan registration in lib/archive.ts: the plan is not busy, and no scan
+  // is started (the plan after it has no book). Reintroduce the wait (the hook awaiting flushArchiveScan, and
+  // beforePlan awaited): "a plan does not wait for the library scan".
   const { planFor } = await import('../src/lib/numbering');
   const s = await series('plan', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
@@ -873,17 +919,24 @@ test('a chapter the archive landed and has not scanned yet is in the plan a renu
   await arch.archiveIdle();
   assert.deepEqual(onDiskNums(s.folder), [1]);
   assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'landed, and waiting for its batch scan');
-  const p = await planFor(s.id, 'posting_order');
-  assert.ok(p, 'a plan');
+  const first = await answersWithoutAScan(() => planFor(s.id, 'posting_order'));
+  assert.notEqual(first, 'waited', 'a plan does not wait for the library scan');
+  assert.ok(first !== 'waited' && first?.plan.reasons.includes('busy'), 'while what the archive landed is scanned in, the plan is busy');
+  // The scan the plan started.
+  await arch.archiveIdle();
   const books = await q<{ id: string; source_chapter_id: string | null }>('SELECT id, source_chapter_id FROM lib_books WHERE series_id = $1', [s.id]);
   assert.equal(books.length, 1, 'scanned in before the plan read the books');
   assert.equal(books[0].source_chapter_id, `${s.ref}/c1`, 'stamped with the chapter it came from, through setBookMeta');
+  const p = await planFor(s.id, 'posting_order');
+  assert.ok(p, 'a plan');
   assert.deepEqual(p!.plan.moves.map((m) => [m.bookId, m.how]), [[books[0].id, 'id']], 'and matched by that stamp');
+  assert.equal(p!.plan.reasons.includes('busy'), false, 'nothing coming in any more');
 });
 
 test('a confirmed renumber scans in what the archive landed before its apply reads the books', { skip }, async () => {
   // The same rule at the apply itself (settleNumbering), which a confirmation reaches without anyone having read
-  // the plan first. Reintroduce by dropping settleNumbering's beforePlan: the apply builds its plan with no book.
+  // the plan first: held (`busy`, as for a download into the folder) until the scan it started is done.
+  // Reintroduce by dropping settleNumbering's beforePlan: the confirmation applies at once, with no book.
   const { requestNumbering } = await import('../src/lib/numbering');
   const s = await series('settle', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
@@ -891,11 +944,30 @@ test('a confirmed renumber scans in what the archive landed before its apply rea
   await arch.archiveIdle();
   assert.deepEqual(onDiskNums(s.folder), [1]);
   assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'landed, and waiting for its batch scan');
+  const held = await requestNumbering(s.id, 'posting_order', { confirm: true, userId: adminId });
+  assert.ok(held?.state === 'pending' && held.plan?.reasons.includes('busy'), 'held while what the archive landed is scanned in');
+  await arch.archiveIdle();
   const r = await requestNumbering(s.id, 'posting_order', { confirm: true, userId: adminId });
   assert.equal(r?.state, 'applied', JSON.stringify(r));
   const books = await q<{ id: string }>('SELECT id FROM lib_books WHERE series_id = $1', [s.id]);
   assert.equal(books.length, 1, 'scanned in before the apply read the books');
   assert.deepEqual(r?.plan?.moves.map((m: any) => m.bookId), [books[0].id], 'and moved with the rest');
+});
+
+test('a confirmation with chapters still coming in does not wait for the library scan', { skip }, async () => {
+  // It answers `pending` (busy) at once and the scan goes on without it: a confirmation that waited on a scan of the
+  // whole library inside its request spent its minute there on a large library. Reintroduce the wait (the hook
+  // awaiting flushArchiveScan, and beforePlan awaited): 'waited'.
+  const { requestNumbering } = await import('../src/lib/numbering');
+  const s = await series('settlewait', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'PREMISE: landed, and waiting for its batch scan');
+  const held = await answersWithoutAScan(() => requestNumbering(s.id, 'posting_order', { confirm: true, userId: adminId }));
+  assert.notEqual(held, 'waited', 'a confirmation does not wait for the library scan');
+  await arch.archiveIdle();
+  assert.equal((await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id])).length, 1, 'and the scan it started ran');
 });
 
 test('a stop scans in what it landed, and what landed is not counted as left', { skip }, async () => {
@@ -907,8 +979,11 @@ test('a stop scans in what it landed, and what landed is not counted as left', {
   const shown = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
   assert.equal(shown?.left, 2, 'left counts what is still to come');
   assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), []);
+  // Reintroduce by waiting for the scan in archiveAct('stop') (`await flushArchiveScan()`): "a stop does not wait".
+  const stopped = await answersWithoutAScan(() => arch.archiveAct('stop', s.id, { userId: adminId, admin: true, ctx: adminCtx }));
+  assert.equal(stopped, 'ok', 'a stop does not wait for the library scan');
   // Reintroduce by dropping the flush in archiveAct('stop'): the series page reads 0 chapters for twenty minutes.
-  assert.equal(await arch.archiveAct('stop', s.id, { userId: adminId, admin: true, ctx: adminCtx }), 'ok');
+  await arch.archiveIdle();
   assert.equal((await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id])).length, 1, 'a stop scans in what it landed');
 });
 

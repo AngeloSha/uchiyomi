@@ -133,8 +133,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 
 /**
  * One pass over every root that has un-pruned rows. Exported for the tests; the route goes through runVerify.
- * `beforeMark` (tests only) runs between the look and the marking of a root: the moment a renumber can start or
- * commit under the walk.
+ * `beforeMark` (tests only) runs between the look at a root that found files gone and what is decided and marked
+ * from it: the moment a renumber can start or commit under the walk.
  */
 export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void> } = {}): Promise<VerifyResult> {
   const t0 = Date.now();
@@ -186,35 +186,43 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
         else gone.push(l);
       }
     }
+    // Asked again before anything is decided: a renumber that began after a row was read renames its file away from
+    // the name that was looked at, and one that committed since has moved the row to its new name. A row still at the
+    // file it was looked at, with no renumber on its series, is missing; one a renumber moved is not evidence either
+    // way, and is left out of the whole-root rules below as well as the marking -- counted, a large renumber that
+    // started while the walk looked had the download root reported as not mounted ("94 % missing", integration-2
+    // review).
+    // Reintroduce by marking every row the look found gone: "a renumber that starts, or commits, while the walk
+    // looks" in verifyFiles.int.test.ts; by asking only after the whole-root rules: "a large renumber that starts
+    // while the walk looks" there finds the root refused.
+    if (gone.length) await opts.beforeMark?.();
+    const still = gone.length ? new Set((await q<{ id: string }>(
+      `SELECT b.id FROM lib_books b JOIN unnest($1::text[], $2::text[]) AS x(id, file) ON b.id = x.id AND b.file = x.file
+        WHERE NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.id = b.series_id AND s.renumber_plan IS NOT NULL)`,
+      [gone.map((l) => l.row.id), gone.map((l) => l.row.file)])).map((r) => r.id)) : new Set<string>();
+    const moved = gone.length - still.size;
+    const missingHere = gone.filter((l) => still.has(l.row.id));
+    seen -= moved;
     if (!seen) continue;
     // ⚠️ The whole-batch decision (see the header): no file present is a volume that is not there, or a
     // disk with nothing on it, and neither is evidence about any single chapter.
     if (!anyPresent) { unmounted.push(root); continue; }
     // ⚠️ The 90 % rule: one stray present file must not turn "unmounted" into "mark everything else".
-    if (gone.length > seen * REFUSE_ABOVE) {
-      unmounted.push(`${root} (${Math.round((100 * gone.length) / seen)} % of ${seen} chapter files missing)`);
+    if (missingHere.length > seen * REFUSE_ABOVE) {
+      unmounted.push(`${root} (${Math.round((100 * missingHere.length) / seen)} % of ${seen} chapter files missing)`);
       continue;
     }
     roots++;
     checked += seen;
     if (root !== DL_ROOT) {
       // ⚠️ The read library is counted, never marked (the header): a re-fetch could not land on these rows.
-      readLibraryMissing += gone.length;
+      readLibraryMissing += missingHere.length;
       continue;
     }
-    // Asked again just before marking: a renumber that began after a row was read renames its file away from the
-    // name that was looked at, and one that committed since has moved the row to its new name. A row still at the
-    // file it was looked at, with no renumber on its series, is missing. Reintroduce by marking every row the look
-    // found gone: "a renumber that starts, or commits, while the walk looks" in verifyFiles.int.test.ts.
-    await opts.beforeMark?.();
-    const still = gone.length ? new Set((await q<{ id: string }>(
-      `SELECT b.id FROM lib_books b JOIN unnest($1::text[], $2::text[]) AS x(id, file) ON b.id = x.id AND b.file = x.file
-        WHERE NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.id = b.series_id AND s.renumber_plan IS NOT NULL)`,
-      [gone.map((l) => l.row.id), gone.map((l) => l.row.file)])).map((r) => r.id)) : new Set<string>();
-    const ids = gone.map((l) => l.row.id).filter((id) => still.has(id));
+    const ids = missingHere.map((l) => l.row.id);
     for (let i = 0; i < ids.length; i += 500) await tombstoneBooks(ids.slice(i, i + 500), 'missing');
     missing += ids.length;
-    for (const l of gone) if (still.has(l.row.id)) affected.add(l.row.series_id);
+    for (const l of missingHere) affected.add(l.row.series_id);
   }
 
   // The cover follows the lowest LIVE chapter, the way persistScan, mergeSeries and the chapter delete

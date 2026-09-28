@@ -93,9 +93,12 @@ export function onFinished(fn: FinishedListener): () => void {
   return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); };
 }
 
+/** An incomplete chapter nobody wrote: how it ends, whether its caller said so (`drop`) or HOLD_MS ran out. */
+const notKept = (x: ActivityEntry) => endDownload(x.id, { status: 'failed', reason: `${x.reason}; not kept` });
+
 function prune(now = Date.now()) {
   for (const x of [...live.values()]) {
-    if (x.heldAt && now - x.heldAt > HOLD_MS) endDownload(x.id, { status: 'failed', reason: `${x.reason}; not kept` });
+    if (x.heldAt && now - x.heldAt > HOLD_MS) notKept(x);
   }
   for (const k of Object.keys(finished) as CapClass[]) {
     const list = finished[k];
@@ -147,9 +150,12 @@ export function restoreFinished(entries: ReadonlyArray<Omit<ActivityEntry, 'id' 
 /**
  * A chapter that arrived with pages missing. `downloadChapter` never writes it itself: the caller writes it
  * (the hold's `write()`) once no other source did better, or drops it. So the entry stays open until the
- * write, which ends it `partial`; one that is never written ends `failed` after HOLD_MS.
+ * write, which ends it `partial`, or the drop (`drop()`), which ends it `failed` as not kept; one that is
+ * neither ends the same way after HOLD_MS.
  */
-export function holdPartial(id: number, hold: { missing: number[]; write: () => Promise<{ pages: number; missing: number[] }> }): void {
+export function holdPartial(id: number, hold: {
+  missing: number[]; write: () => Promise<{ pages: number; missing: number[] }>; drop?: () => void;
+}): void {
   const x = live.get(id);
   if (!x) return;
   x.heldAt = Date.now();
@@ -160,6 +166,10 @@ export function holdPartial(id: number, hold: { missing: number[]; write: () => 
     endDownload(id, { status: 'partial', pages: w.pages, reason: `saved with ${w.missing.length} page${w.missing.length === 1 ? '' : 's'} missing` });
     return w;
   };
+  // Ended when its caller settles on something else (lib/chapterFallback.ts): left to HOLD_MS, a copy that was not
+  // kept read as a download still running for ten minutes after its chapter had landed whole from another source.
+  // A no-op once the entry has ended (endDownload), so after a write too.
+  hold.drop = () => notKept(x);
 }
 
 /** Downloading or waiting for a slot now, oldest first; then what finished in the last day, newest first. */

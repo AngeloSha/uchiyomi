@@ -101,6 +101,21 @@ const whyOf = (e: any): string =>
 const isRefusal = (e: any): boolean => e?.blockStatus === 'rate_limited' || e?.blockStatus === 'blocked';
 
 export async function downloadWithFallback(f: FallbackInput): Promise<FallbackOutcome> {
+  // Every copy that arrived short, kept or not. The one written ends its entry in the downloads view itself
+  // (partial); every other one is dropped here once the chapter has settled, however it settled -- landed whole
+  // from another source, another hold with fewer holes written, or nothing. Left open, each waited out
+  // downloadActivity's HOLD_MS as a download still running: after a chapter had landed whole from the second source,
+  // the Library ring spun and the Downloads view polled for ten minutes (integration-2 walk). Reintroduce by dropping
+  // the drops: "a copy that was not kept leaves the downloads at once" in chapterFallback.int.test.ts finds it active.
+  const offered: PartialHold[] = [];
+  try {
+    return await tryEachCopy(f, offered);
+  } finally {
+    for (const hold of offered) hold.drop?.();
+  }
+}
+
+async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<FallbackOutcome> {
   const via = f.chapter.source ?? '';
   const n = f.chapter.number;
   const label = `"${f.title}" ch ${n}`;
@@ -127,6 +142,7 @@ export async function downloadWithFallback(f: FallbackInput): Promise<FallbackOu
       // it out of this run: that is the one-strike rule the loops used to apply themselves.
       if (e?.blockStatus) f.refusing.add(src);
       const hold: PartialHold | undefined = e?.partial;
+      if (hold) offered.push(hold);
       if (hold && (!best || hold.missing.length < best.hold.missing.length)) best = { hold, via: src, chapter: ch };
       last = { via: src, err: e };
       if (chosen) first = last;
