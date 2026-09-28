@@ -19,9 +19,9 @@
 //
 //   offline -- fake-a says it is offline. Walk Tale (12 chapters) and Walk Gap (fake-a lists only 2 of its numbers)
 //     are added from fake-a, fake-b is checked NOT to be followed (followed anyway, it is unfollowed through the
-//     Sources sheet), and fake-a goes offline. Providers -> Test fake-a says "The site says it is offline" at the
-//     search step; Health -> Source health's fake-a row says "The site says it is offline (its own page)" with the
-//     fix sentence, and offers "Find other sources (2 series)". The API row carries the same code and count.
+//     Sources sheet), and fake-a goes offline. Providers -> Test fake-a says "The site says it is offline (its own
+//     page)", and "the site says it is offline" at the search step; Health -> Source health's fake-a row says the same
+//     with the fix sentence, and offers "Find other sources (2 series)". The API row carries the same code and count.
 //   run -- that key, pressed. The run starts (two series); Library -> Downloads' Server tasks shows its card with
 //     "1 of 2 series", the series it is on and Stop, then it finishes. Its results: Walk Tale under New sources with
 //     fake-b and its 12 chapters, Walk Gap under Skipped with its reason in words. Walk Tale's Sources sheet then
@@ -34,9 +34,10 @@
 //     runs over that one series and follows fake-b again.
 //   select -- Library: two series selected, More -> Find other sources is a run of 2. Move to library, Remove from
 //     library and Find other sources are rows of More at every width, never keys of the bar.
-//   arabic -- the one pass in Arabic (needs offline before it): the Health row, the running card and the results
-//     view read right to left, the server's English (the row's detail, the series title, the source name) keeps its
-//     own direction, and the numbers are intact. Its words come from web/public/locales/ar.json, never a copy.
+//   arabic -- the one pass in Arabic (needs offline before it): the Health row -- its detail too, worded by its codes
+//     -- the running card and the results view read right to left, what is still the server's or the source's English
+//     (the source's own error line, the series title, the source name) keeps its own direction, and the numbers are
+//     intact. Its words come from web/public/locales/ar.json, never a copy.
 //
 // At every width: no sideways scroll on any page or sheet the walk opens; at 390 the card's series line and the
 // results' long title truncate. Timing is read off the API (GET /api/admin/sources/find, /api/sources/jobs), not
@@ -165,8 +166,9 @@ check('signed in', !!(await waitFor(async () => !(await page.$('input[type=passw
 const go = async (path, wait = 2000) => {
   await page.goto(BASE + path, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
   await sleep(wait);
-  // The Health banner is another step's; on a phone it takes a third of the screen.
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Not now$/.test(b.innerText.trim()))?.click());
+  // The Health banner is another step's; on a phone it takes a third of the screen. Its one button is its Not now, in
+  // the page's language: matched by the English words, the Arabic pass's banner stayed on top of every page.
+  await page.evaluate(() => document.querySelector('[data-health-banner] button')?.click());
   // Never measure a sign-in page: every check after this would pass on it or fail for the wrong reason.
   if (await page.$('input[type=password]')) throw new Error(`${path} opened on the sign-in page`);
 };
@@ -251,6 +253,8 @@ const healthRowOnPage = (sourceId) => page.evaluate((id) => {
   const ps = [...row.querySelectorAll(':scope p[dir="auto"]')];
   const key = row.querySelector('button[data-health-action="find_sources"]');
   const stage = row.querySelector('[data-evidence-stage="search"]');
+  // The search step's error: the source's own words as the server kept them, English in every language.
+  const err = stage?.querySelector('p[dir="auto"]');
   const ev = row.querySelector('[data-source-evidence]');
   const fix = ev ? [...ev.querySelectorAll(':scope > p[dir="auto"]')].pop() : null;
   return {
@@ -258,6 +262,7 @@ const healthRowOnPage = (sourceId) => page.evaluate((id) => {
     detail: ps[1]?.textContent ?? '', detailDir: ps[1] ? getComputedStyle(ps[1]).direction : null, detailAuto: ps[1]?.getAttribute('dir') === 'auto',
     fix: fix?.textContent ?? '', fixDir: fix ? getComputedStyle(fix).direction : null,
     stage: stage?.getAttribute('data-evidence-state') ?? null, stageText: stage?.querySelector('bdi')?.textContent ?? '',
+    error: err?.textContent ?? '', errorDir: err ? getComputedStyle(err).direction : null, errorAuto: err?.getAttribute('dir') === 'auto',
     key: key?.textContent?.trim() ?? null, keyDisabled: key ? key.disabled : null,
     status: [...row.querySelectorAll('[data-action-status]')].map((s) => `${s.getAttribute('data-action-status')}: ${s.textContent}`),
   };
@@ -359,8 +364,10 @@ async function offline() {
     stage: el.querySelector('[data-evidence-stage="search"] bdi')?.textContent ?? '',
     text: el.innerText,
   })).catch(() => null);
-  check(`${tag}: ...and says "The site says it is offline", at the search step`,
-    test?.head === 'The site says it is offline' && test?.stage === 'the site says it is offline', JSON.stringify(test));
+  // The head is the diagnosis's reason as the web words its code (lib/said.ts REASON_WORDS), which Health's row ends
+  // with a full stop: matched inside, not whole.
+  check(`${tag}: ...and says "The site says it is offline (its own page)", and at the search step "the site says it is offline"`,
+    (test?.head ?? '').includes('The site says it is offline (its own page)') && test?.stage === 'the site says it is offline', JSON.stringify(test));
   check(`${tag}: ...never "markup may not match this engine"`, !/markup may not match/.test(test?.text ?? ''), test?.text);
   check(`${tag}: ...with the fix sentence`, /Wait for the site to come back, or find other sources for its series\./.test(test?.text ?? ''), test?.text);
   await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
@@ -649,8 +656,12 @@ async function arabic() {
     check('ar: the page is Arabic, right to left', doc.dir === 'rtl' && doc.lang === 'ar', JSON.stringify(doc));
     const row = await waitFor(async () => { const r = await healthRowOnPage('fake-a'); return r?.key ? r : null; }, 30_000);
     check('ar: the Health row\'s key is Arabic, and its count intact', row?.key === ar('Find other sources ({n} series)', { n: 2 }) && /(^|\D)2(\D|$)/.test(row?.key ?? ''), JSON.stringify(row));
-    check('ar: ...its detail is the server\'s English, in its own direction',
-      !!row?.detailAuto && row?.detailDir === 'ltr' && /The site says it is offline \(its own page\)/.test(row?.detail ?? ''), JSON.stringify(row));
+    // The detail is worded by its codes in the reader's language (lib/said.ts itemDetail), the count among its words.
+    check('ar: ...its detail is Arabic, right to left, its count intact',
+      !!row?.detailAuto && row?.detailDir === 'rtl' && (row?.detail ?? '').includes(ar('The site says it is offline (its own page)'))
+      && (row?.detail ?? '').includes(ar('{n} series use it', { n: 2 })), JSON.stringify(row));
+    check('ar: ...and the source\'s own error, still the server\'s English, keeps its own direction',
+      !!row?.errorAuto && row?.errorDir === 'ltr' && /^site_offline: /.test(row?.error ?? ''), JSON.stringify(row));
     check('ar: ...its fix is worded in Arabic, right to left', row?.fix === ar('Wait for the site to come back, or find other sources for its series.') && row?.fixDir === 'rtl', JSON.stringify(row));
     check('ar: ...and its search step says it too', row?.stageText === ar('the site says it is offline'), JSON.stringify(row));
     check('ar: Health has no sideways scroll', await noSideScroll());
