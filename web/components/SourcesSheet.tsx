@@ -10,6 +10,7 @@
 // a sheet is dismissed by a tap outside or Escape and a draft would go with it.
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import type { GroupStat, Series, SeriesGroups, SeriesSource, StoredPrefs } from '@/lib/types';
 import { t as tr } from '@/lib/i18n';
@@ -263,7 +264,7 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
  * turn "follows the defaults" into a per-series copy of them on the first tap -- a copy that then stops
  * following when the defaults change. Blank patience means the same thing for the same reason.
  */
-export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter }: {
+export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, postingOrder, onShowChapter }: {
   id: string;
   series: Series | undefined;
   groups: GroupStat[];
@@ -282,6 +283,11 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   /** Open Find missing chapters. The page closes this sheet first: a Modal (z-50) opened under a Sheet (z-60) is unreachable. */
   onFindMissing: () => void;
   /**
+   * Numbered by posting order (#116): no other source's numbers line up, so no source is offered to connect
+   * (the server refuses a follow with 409 `posting_order` anyway).
+   */
+  postingOrder?: boolean;
+  /**
    * Put chapter `n`'s row on screen before the jump scrolls to it. The chapter list shows 100 rows a page
    * (lib/chapterPages.ts), so the row a chip names may be on a page that is not rendered at all, and
    * `getElementById` finds nothing.
@@ -294,6 +300,18 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   const [savingPref, setSavingPref] = useState(false);
   const isAdmin = !!admin;
   const sources = series?.sources ?? [];
+  const router = useRouter();
+  // Connect sources for this one series (bff lib/linkBatch.ts): the library's search and review, over one
+  // series. Offered while it may follow another source at all.
+  const [connecting, setConnecting] = useState(false);
+  const mayConnect = !postingOrder && sources.filter((s) => !s.primary).length < 2;
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const r = await api<{ batchId: string }>('/api/admin/link/batches', { json: { seriesIds: [id] } });
+      router.push(`/admin/link/?batch=${r.batchId}`);
+    } catch (e) { toast(msgOf(e, tr('Could not start Connect sources')), 'error'); setConnecting(false); }
+  };
 
   // The stored lists, with a local copy that is written the moment a control is tapped and dropped again
   // when the server's answer arrives -- so two quick taps do not both start from the stale server copy, and
@@ -510,6 +528,11 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               </button>
             )}
             <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
+            {mayConnect && (
+              <button type="button" onClick={connect} disabled={connecting} className="chip text-xs disabled:opacity-50" data-connect-sources>
+                {connecting ? tr('Starting…') : tr('Connect other sources')}
+              </button>
+            )}
           </div>
         )}
         {isAdmin && <AltTitlesEditor seriesId={id} />}
