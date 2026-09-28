@@ -168,7 +168,7 @@ const REASON_WORDS: Record<string, () => string> = {
   solver_down: NEEDS_ADMIN,
   solver_timeout: NEEDS_ADMIN,
   timeout: () => tr('This source did not answer in time.'),
-  too_slow: () => tr('This source answers, but more slowly than it is given.'),
+  too_slow: () => tr('This source answers, but takes longer than the time it is given.'),
   markup_drift: () => tr('This source stopped listing new titles. An admin needs to check it.'),
   unreachable: () => tr('This source is not answering right now.'),
   rate_limited: () => tr('This source asked us to slow down.'),
@@ -237,7 +237,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'numbering.live': (p) => (num(p, 'n') === 1 ? tr('1 series waits for a numbering review') : tr('{n} series wait for a numbering review', { n: num(p, 'n') })),
   'numbering.none': () => tr('No numbering change waits for a review'),
   'numbering.lately': (p) => (num(p, 'n') === 1 ? tr('1 numbered by posting order lately') : tr('{n} numbered by posting order lately', { n: num(p, 'n') })),
-  'numbering.note': () => tr('Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "sequential chapter numbering" setting, under Admin → Extensions, is the other way out.'),
+  'numbering.note': () => tr('Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "Use sequential chapter numbering" setting, under Admin → Extensions, is the other way out.'),
   'numbering.shared': (p) => tr('{name} gives {extras} of {posts} posts a number another post has', { name: sourceName(p), extras: num(p, 'extras'), posts: num(p, 'posts') }),
   'numbering.sharedMost': (p) => tr('{name} gives {extras} of {posts} posts a number another post has ({most} are all {number})', {
     name: sourceName(p), extras: num(p, 'extras'), posts: num(p, 'posts'), most: num(p, 'most'), number: num(p, 'number'),
@@ -373,7 +373,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   // ---- Impossible chapter numbers
   'outliers.live': (p) => (num(p, 'n') === 1 ? tr('1 series has chapters numbered far beyond the rest') : tr('{n} series have chapters numbered far beyond the rest', { n: num(p, 'n') })),
   'outliers.none': () => tr('No out-of-range chapters'),
-  'outliers.note': () => tr('Catches chapters scraped from a site\'s sidebar widget, which belong to a different series. The parser now guards against this, so anything here predates that fix. Deleting is never automatic and the nightly repair never renumbers: "Delete chapter(s)" removes the files (a bookmarked chapter is refused), and a wrong number can be corrected on the series page instead.'),
+  'outliers.note': () => tr('Catches chapters scraped from a site\'s sidebar widget, which belong to a different series. The parser now guards against this, so anything here predates that fix. Deleting is never automatic and the nightly repair never renumbers: "Delete chapters" removes the files (a bookmarked chapter is skipped), and a wrong number can be corrected on the series page instead.'),
   'outliers.detail': (p) => (num(p, 'n') === 1
     ? tr('1 chapter up to {top}, but the series sits around {median}', { top: num(p, 'top'), median: num(p, 'median') })
     : tr('{n} chapters up to {top}, but the series sits around {median}', { n: num(p, 'n'), top: num(p, 'top'), median: num(p, 'median') })),

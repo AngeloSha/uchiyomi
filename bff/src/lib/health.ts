@@ -85,7 +85,7 @@ export interface HealthItem {
   info?: boolean;
   /** The one chapter this item is about (short chapters), so its chip can name it to the repair. */
   bookId?: string;
-  /** Several chapters (impossible numbers), capped: what Delete chapter(s) would act on. */
+  /** Several chapters (impossible numbers), capped: what Delete chapters would act on. */
   bookIds?: string[];
   /** The chapter number this item is about, for the sentence the chip's confirmation shows. */
   number?: number;

@@ -18,6 +18,7 @@ import {
 import { setActiveDict } from '../lib/i18n';
 import { setActiveLocale } from '../lib/format';
 import { headlineText } from '../lib/healthAlert';
+import { ACTION_COPY } from '../lib/healthCopy';
 
 const BFF = join(__dirname, '..', '..', 'bff', 'src', 'lib');
 const haveBff = existsSync(join(BFF, 'said.ts'));
@@ -280,6 +281,23 @@ test("the engine's switched-off state has its own words, never a source card's",
     setActiveDict({});
   }
   assert.equal(saidText({ code: 'engine.switchedOff' }, '\0'), 'Switched off');
+});
+
+test('the notes quote a button and a switch as they are labelled, and say what the action does', () => {
+  // The outliers note quoted "Delete chapter(s)", a button labelled "Delete chapters", and said a bookmarked chapter is
+  // refused where the action skips it; the numbering note quoted the Webtoons switch as "sequential chapter
+  // numbering", which the extension labels "Use sequential chapter numbering" (the v0.49.1 translation review).
+  // Reintroduce either old wording: the assertion that names it fails.
+  const note = saidText({ code: 'outliers.note' }, '\0');
+  const label = (ACTION_COPY.delete.label as (c?: unknown) => string)({});
+  assert.ok(note.includes(`"${label}"`), 'the outliers note quotes a button that does not exist');
+  assert.match((ACTION_COPY.delete.what as (c?: unknown) => string)({}), /a bookmarked chapter is skipped/, 'PREMISE: the action skips a bookmarked chapter');
+  assert.match(note, /\(a bookmarked chapter is skipped\)/, 'the outliers note says otherwise than the action');
+  // The switch as the extension labels it: the fake engine's fixture holds the real extension's preference titles.
+  const fixture = readFileSync(join(__dirname, '..', '..', 'bff', 'test', 'fixtures', 'fakeSuwayomiEngine.mjs'), 'utf8');
+  const title = /title: '(Use sequential chapter numbering)'/.exec(fixture)?.[1];
+  assert.ok(title, 'the fixture names the switch some other way now: read it here');
+  assert.ok(saidText({ code: 'numbering.note' }, '\0').includes(`"${title}"`), 'the numbering note quotes the switch by another name');
 });
 
 test('a line is joined the reader\'s way, and a code this build does not know leaves all of it in English', () => {

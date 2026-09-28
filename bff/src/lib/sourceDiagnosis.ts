@@ -340,7 +340,7 @@ export const REASONS: Readonly<Record<DiagnosisCode, string>> = {
   solver_down: NEEDS_ADMIN,
   solver_timeout: NEEDS_ADMIN,
   timeout: 'This source did not answer in time.',
-  too_slow: 'This source answers, but more slowly than it is given.',
+  too_slow: 'This source answers, but takes longer than the time it is given.',
   markup_drift: MARKUP_DRIFT,
   unreachable: 'This source is not answering right now.',
   rate_limited: 'This source asked us to slow down.',
@@ -481,7 +481,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
     const seconds = f.budgetMs ? Math.round(f.budgetMs / 1000) : null;
     const budget = seconds !== null ? `${seconds}s` : 'the time allowed';
     return D('too_slow',
-      'This source answers, but more slowly than it is given.',
+      'This source answers, but takes longer than the time it is given.',
       fixed('fix.tooSlow', `It keeps taking longer than ${budget} to return its newest page. Raise SOURCE_LATEST_TIMEOUT_MS if the wait is acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.`, { seconds }),
       'admin');
   }

@@ -193,7 +193,8 @@ compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same so
 (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files
 already set both, so an upgrade that recreates the engine is the fix there.* Since v0.37.0 this route and
 the scheduled source check also read the source's slow streak, so `diagnosis.code` can be `too_slow`
-(*This source answers, but more slowly than it is given.*) from both, not only from Discover's health view;
+(*This source answers, but takes longer than the time it is given.*; before v0.49.1 *…but more slowly than it is
+given.*) from both, not only from Discover's health view;
 its `fix` names the configured `SOURCE_LATEST_TIMEOUT_MS` budget in seconds (*longer than 8s*).
 Since v0.49.1 `diagnosis.code` can be `site_offline` (*The site says it is offline (its own page)*; fix *Wait for
 the site to come back, or find other sources for its series.*): a site engine (Madara, Manganato) that finds

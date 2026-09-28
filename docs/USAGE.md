@@ -1460,8 +1460,8 @@ leave the gaps with nothing.
 **What asks you.** The two things that cannot be undone are never automatic. **Duplicate series** offer
 **Merge** per pair, and **Merge all** for the whole check, behind a confirmation that lists every pair and
 marks the copy that is kept (most chapters, then most readers, then the older row); merging is one way.
-**Impossible chapter numbers** offer **Delete chapter(s)**, also behind a confirmation, and a chapter anyone
-has bookmarked is refused. There is deliberately no *Fix all* for either.
+**Impossible chapter numbers** offer **Delete chapters**, also behind a confirmation, and a chapter anyone
+has bookmarked is skipped. There is deliberately no *Fix all* for either.
 
 **What the nightly never does.** It never deletes a chapter, never marks one as gone, never merges two
 series and never renumbers anything. It also never runs beside a chapter sweep: whichever starts second
@@ -2408,7 +2408,7 @@ there.* Since v0.49.0 **Admin → Extensions** says so under the catalogue, and 
 anything. Running the engine yourself? That works too, or set both on that container — see
 [CONFIGURATION.md](CONFIGURATION.md#environment-variables).
 
-**A source says it answers, but more slowly than it is given.** The source is up but keeps taking longer
+**A source says it answers, but takes longer than the time it is given.** The source is up but keeps taking longer
 than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button
 and the daily source check report this too, not only Discover's health view. Raise the budget if the wait is
 acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.

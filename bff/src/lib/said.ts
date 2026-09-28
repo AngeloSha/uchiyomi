@@ -109,7 +109,7 @@ const EN = {
     'Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs ' +
     'to). A new series from such a source is numbered by posting order; one already in your library is renumbered only ' +
     'when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays ' +
-    'with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "sequential chapter numbering" ' +
+    'with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "Use sequential chapter numbering" ' +
     'setting, under Admin → Extensions, is the other way out.',
   'numbering.shared': ({ name, extras, posts }: { name: string | null; extras: number; posts: number }) =>
     `${name ?? 'Its source'} gives ${extras} of ${posts} posts a number another post has`,
@@ -230,7 +230,7 @@ const EN = {
   'outliers.note': () =>
     'Catches chapters scraped from a site\'s sidebar widget, which belong to a different series. The parser ' +
     'now guards against this, so anything here predates that fix. Deleting is never automatic and the nightly ' +
-    'repair never renumbers: "Delete chapter(s)" removes the files (a bookmarked chapter is refused), and a ' +
+    'repair never renumbers: "Delete chapters" removes the files (a bookmarked chapter is skipped), and a ' +
     'wrong number can be corrected on the series page instead.',
   'outliers.detail': ({ n, top, median }: { n: number; top: number; median: number }) =>
     `${n} chapter(s) up to ${top}, but the series sits around ${median}`,
