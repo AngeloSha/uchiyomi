@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.49.1 — (date to be set)
+## v0.49.1 — 2026-09-28
 
 **When a site goes away, its series can find other sources in one press: Find other sources searches the other
 sites for every series of that source, or any you pick, calmly, one series at a time, and follows the ones that
