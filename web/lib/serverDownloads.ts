@@ -21,7 +21,7 @@ import { chaptersLeft } from './chapterRows';
 import { downloadsLabel, finished, runTitle, type JobCard, type RunCard } from './jobs';
 import { kindLabel } from './healthCopy';
 import { ringFraction, type RingValue } from './ring';
-import { archiveItems, type ArchiveItem, type ArchiveView } from './archive';
+import { archiveItems, waitingText, type ArchiveItem, type ArchiveView } from './archive';
 import type { AutoFollow } from './types';
 import type { Said } from './said';
 
@@ -342,6 +342,16 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
 export function runName(r: Pick<RunCard, 'kind' | 'repairKind' | 'label' | 'number'>): string {
   if (r.kind !== 'repair' || !r.repairKind || r.repairKind === 'full') return runTitle(r.kind);
   return kindLabel(r.repairKind, { label: r.label, number: r.number });
+}
+
+/**
+ * What a running Find other sources run waits on, as its Server tasks card says it; '' when it is not waiting. While a
+ * sweep, a repair or the daily source check owns the sources the run waits for it, and its `current` still names the
+ * series it did last -- "Now: Solo Leveling" for as long as the sweep takes. In the words the slow archive and
+ * Health's row use for the same three waits (lib/archive.ts waitingText, lib/findSources.ts findRunState).
+ */
+export function runWaitLine(r: Pick<RunCard, 'status' | 'waiting'>): string {
+  return r.status === 'running' && r.waiting ? waitingText({ why: r.waiting }, null) : '';
 }
 
 /**

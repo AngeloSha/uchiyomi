@@ -20,7 +20,7 @@ import { fetchingToast, mayCancel, repairStepLabel, runProgress, type RunCard } 
 import { seriesHref } from '@/lib/healthLinks';
 import { ringFraction, ringValueText } from '@/lib/ring';
 import {
-  chapterSpan, downloadSections, originLabel, runName, tileStatus, viewState, type ActivityGroup, type Attention, type Origin, type SourceJobs,
+  chapterSpan, downloadSections, originLabel, runName, runWaitLine, tileStatus, viewState, type ActivityGroup, type Attention, type Origin, type SourceJobs,
   type Tile,
 } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
@@ -371,6 +371,7 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   // ONE sentence split around its placeholder, so the series name is its own bidi run (<bdi>): inside the Arabic
   // sentence a title ending in "!" printed the "!" at the wrong end of the name.
   const [nowBefore, nowAfter] = tr('Now: {title}').split('{title}');
+  const wait = runWaitLine(r);
   return (
     <li data-task={r.kind} data-state={r.status} className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
@@ -379,7 +380,10 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         <p className="truncate text-sm font-medium text-fog-100" data-task-name>{name}</p>
         {step && <p className="mt-0.5 truncate text-[12px] text-fog-300">{step}</p>}
         {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
-        {running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{nowBefore}<bdi>{r.current.title}</bdi>{nowAfter}</p>}
+        {/* A find run waiting for a sweep, a repair or the daily check says so, rather than name the series it did last. */}
+        {wait
+          ? <p className="mt-0.5 truncate text-[11px] text-fog-400" data-task-waiting>{wait}</p>
+          : running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{nowBefore}<bdi>{r.current.title}</bdi>{nowAfter}</p>}
         <p className="mt-0.5 text-[11px] text-fog-500">
           {running
             ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })

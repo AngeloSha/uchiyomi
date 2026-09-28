@@ -24,7 +24,7 @@ import { ACTION_COPY, runStatusWord } from '../lib/healthCopy';
 import { answerView, evidenceView, healthRowEvidence, type StageLine } from '../lib/sourceEvidence';
 import { diagnosisFix, diagnosisReason } from '../lib/said';
 import { runProgress, runTitle, type RunCard } from '../lib/jobs';
-import { navRing, runName, type SourceJobs } from '../lib/serverDownloads';
+import { navRing, runName, runWaitLine, type SourceJobs } from '../lib/serverDownloads';
 import { FindResultRow, FindRunRow } from '../components/FindSources';
 
 (globalThis as any).React = React;
@@ -382,6 +382,22 @@ test("Server tasks: the run's card is named as a noun, counts its follows, stops
   assert.match(task, /\{find \? tr\('Stop'\) : tr\('Cancel'\)\}/);
   assert.match(task, /\{find && admin && \(\s*<button type="button" onClick=\{\(\) => setResults\(true\)\}/, 'the card has no way to its results');
   assert.match(task, /\{results && <FindResultsSheet onClose=\{\(\) => setResults\(false\)\} \/>\}/);
+});
+
+test('Server tasks: a find run waiting for a sweep, a repair or the daily check says so on its card', () => {
+  // The jobs route's card carries `waiting` (lane F's review fix), and the card went on saying "Now: <the series it did
+  // last>" for as long as the sweep took. Reintroduce the series line alone in TaskRow: "the card names a series while
+  // the run waits" fails; answer '' in runWaitLine: "the waiting card does not say why".
+  const card: RunCard = { kind: 'find_sources', startedAt: 0, status: 'running', done: 12, total: 189, fetched: 0, failed: 0, followed: 3, current: { id: 's9', title: 'Solo Leveling' } };
+  assert.equal(runWaitLine({ ...card, waiting: 'check' }), 'Waiting for the source check to finish', 'the waiting card does not say why');
+  assert.equal(runWaitLine({ ...card, waiting: 'sweep' }), 'Waiting for the scheduled check to finish');
+  assert.equal(runWaitLine({ ...card, waiting: 'repair' }), 'Waiting for the library repair to finish');
+  assert.equal(runWaitLine(card), '', 'a run that is not waiting says it waits');
+  assert.equal(runWaitLine({ ...card, status: 'done', waiting: 'check' }), '', 'a run that ended still waits');
+  const task = slice(code(read('components/ServerDownloadsView.tsx')), 'function TaskRow(', 'function CameInTile(');
+  assert.match(task, /const wait = runWaitLine\(r\);/);
+  assert.match(task, /\{wait\s*\?\s*<p [^>]*data-task-waiting>\{wait\}<\/p>\s*:\s*running && r\.current\?\.title && <p /,
+    'the card names a series while the run waits');
 });
 
 test('a find run never turns the Library ring: it follows sources, it fetches nothing', () => {

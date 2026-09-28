@@ -61,6 +61,11 @@ export interface RunCard {
   current?: { id: string; title: string };
   /** A `find_sources` run's follows so far: one per (series, source). */
   followed?: number;
+  /**
+   * A `find_sources` run that waits for a sweep, a repair or the daily source check before its next series (its
+   * `current` still names the series it did last). Absent while it is not waiting.
+   */
+  waiting?: 'sweep' | 'repair' | 'check';
   step?: string;
   cancelRequested?: boolean;
   reason?: string;
