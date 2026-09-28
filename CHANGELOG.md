@@ -40,8 +40,8 @@ chapters*.
   or chapter numbers did not match; no other source answered; no other source lists it besides the one it already
   follows), *Skipped* (numbered by posting order, already following as many sources as a series may, fewer than 3
   chapters to compare, no other source that could be asked), and *Not tried*: a stop, the 90-second limit or a
-  restart cut it short, never "not found", with **Search the {n} series not tried**. A restart stops a run the way
-  Stop does, and what it followed stays followed.
+  restart cut it short (or the series was removed meanwhile), never "not found", with **Search the {n} series not
+  tried**. A restart stops a run the way Stop does, and what it followed stays followed.
 
 ### Other names
 
@@ -99,6 +99,8 @@ chapters*.
   still left by a switch to your preferred group's copy, by the completion pass and by the repair's short-chapter
   step.
 - Health's solver row named a newer FlareSolverr *vv3.5.2*. It has one *v* now.
+- **In Arabic**, a series title in Library → Downloads (a server task's *Now:* line, a stopped download, a card under
+  *Needs attention*) is cut at its own end, so its beginning shows; the ellipsis used to take its start.
 
 ### The English that was left, translated
 

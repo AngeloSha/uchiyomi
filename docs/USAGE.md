@@ -487,8 +487,8 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
   other names; one did, but its title or chapter numbers did not match; no other source answered; or no other
   source lists it besides the one it already follows. *Skipped*: numbered by posting order, already following as
   many sources as a series may, fewer than 3 chapters to compare, or no other source that could be asked. *Not
-  tried*: the search was stopped, ran out of time or was interrupted by a restart before it got there — never
-  *not found* — with **Search the {n} series not tried**. *Earlier searches* lists the runs before it; the server
+  tried*: the search was stopped, ran out of time or was interrupted by a restart before it got there (or the series
+  was removed or merged meanwhile) — never *not found* — with **Search the {n} series not tried**. *Earlier searches* lists the runs before it; the server
   keeps the last 20.
 - **A restart** stops a run the way **Stop** does: what it followed stays followed, and the series it never reached
   are listed as not tried.
