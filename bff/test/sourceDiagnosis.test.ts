@@ -17,6 +17,9 @@ const ENGINE_BYPASS_OFF = 'suwayomi: java.io.IOException: Cloudflare bypass curr
 // engine ANSWERED, with the extension's own Java exception about the site.
 const MANGA_BALL = 'suwayomi: Exception while fetching data (/fetchSourceManga) : java.lang.Exception\r\n\r\njava.lang.Exception: java.lang.Exception\n\tat eu.kanade.tachiyomi.extension.en.mangaball.MangaBall.searchMangaParse(MangaBall.kt:120)';
 
+// v0.49.1, verbatim as lib/sources/offline.ts words it for aqua's notice ("Aqua Manga is temporarily offline", HTTP 200).
+const AQUA_OFFLINE = 'site_offline: the site says it is offline ("Aqua Manga is temporarily offline")';
+
 const facts = (p: Partial<HealthFacts> = {}): HealthFacts => ({
   status: 'down', lastError: null, consecutive: 1, lastOkAt: null,
   emptyStreak: 0, blockedUntil: null, disabled: false, ...p,
@@ -129,6 +132,8 @@ test('NO PUBLIC SENTENCE LEAKS INFRASTRUCTURE', () => {
     // #115: the engine's own answer (its message and host must not leak), and chapters with no usable number.
     ['extension_error', [facts({ lastError: null }), { adapterOk: false, failure: { stage: 'search', kind: 'error', error: MANGA_BALL } }]],
     ['unnumbered', [facts({ lastError: null }), { adapterOk: false, failure: { stage: 'chapters', kind: 'unnumbered' } }]],
+    // v0.49.1: the site's own offline notice, whose words are the site's.
+    ['site_offline', [facts({ lastError: AQUA_OFFLINE })]],
     ['unreachable', [facts({ lastError: 'getaddrinfo ENOTFOUND example.invalid' })]],
     ['timeout', [facts({ lastError: 'timeout' })]],
     ['markup_drift', [facts({ lastError: null, emptyStreak: 5 })]],
@@ -393,4 +398,23 @@ test('a stored error is current until a success comes after it', () => {
   assert.equal(currentError({ ...base, last_ok_at: '2026-09-21T00:00:00Z', last_slow_at: '2026-09-22T00:00:00Z' }), 'Just a moment...',
     'a slow answer after the success keeps it current');
   assert.equal(currentError(null), null);
+});
+
+test('an offline notice is not markup drift: the site said what is wrong, and the diagnosis says it too', () => {
+  // aqua, 2026-09-23 on: every page its own "temporarily offline" notice with a 200, a stale empty streak from before
+  // the notice was recognised, and a homepage that answers 200 HTML -- which read as markup drift ("no results --
+  // markup may not match this engine"). Reintroduce by moving the site_offline branch below the homepage rules in
+  // diagnose(): the live case reads markup_drift.
+  const live = diagnose(facts({ lastError: null, emptyStreak: 7 }),
+    { httpStatus: 200, looksHtml: true, adapterOk: false, needsSolver: true, failure: { stage: 'search', kind: 'site_offline', error: AQUA_OFFLINE } });
+  assert.equal(live.code, 'site_offline');
+  assert.equal(live.reason, 'The site says it is offline (its own page)');
+  assert.equal(live.fix, 'Wait for the site to come back, or find other sources for its series.');
+  // Stored alone (the Discover listing's failure, the sweep's traffic note): the same verdict, ahead of the rules a
+  // notice's own words could trip ("maintenance", a Cloudflare page title).
+  // Reintroduce by moving the site_offline rule below the cf_challenge rule: the second case reads cf_challenge.
+  assert.equal(diagnose(facts({ lastError: AQUA_OFFLINE, emptyStreak: 7 })).code, 'site_offline');
+  assert.equal(diagnose(facts({ lastError: 'site_offline: the site says it is offline ("Cloudflare maintenance")' })).code, 'site_offline');
+  // Health's failing row hands the stage's kind in with the error; a kind of its own is enough.
+  assert.equal(diagnose(facts({ lastError: null }), { adapterOk: false, failure: { stage: 'chapters', kind: 'site_offline' } }).code, 'site_offline');
 });

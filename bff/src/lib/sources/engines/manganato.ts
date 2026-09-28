@@ -6,6 +6,14 @@ import { cfGet } from '../flaresolverr';
 import { parseWhen } from '../dates';
 import { plainText } from '../../htmlText';
 import { seriesSlug, isOwnChapterUrl, rebase } from '../slug';
+import { offlineNotice, siteOffline, throwIfOffline } from '../offline';
+
+/**
+ * Anything of the family's own markup (v0.49.1, lib/sources/offline.ts; the Madara engine's MADARA_MARKUP is the
+ * same idea): listing cards, a story page's panels, a chapter list, a reader, a link to a series. A page carrying
+ * any of it is the site working; only a small page with none of it whose title says so is the site offline.
+ */
+export const MANGANATO_MARKUP = /list-comic-item-wrap|story_item|story_name|item-title|genres-item|panel-story-info|story-info|chapter-list|row-content-chapter|container-chapter-reader|\/manga\//i;
 
 const strip = plainText;
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -156,6 +164,8 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
           out.push({ sourceId: url, source: cfg.id, title: strip(m[2]).replace(/\s+class=.*$/i, ''), url, coverUrl: covers.get(url) });
         }
       }
+      // Nothing found is an empty answer -- or the site's own offline notice, which says so and throws.
+      if (!out.length) throwIfOffline(h, MANGANATO_MARKUP);
       return out;
     },
 
@@ -181,11 +191,16 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
         `/manga-list/latest-manga${p > 1 ? `?page=${p}` : ''}`,
         `/genre-all${p > 1 ? `/${p}` : ''}`,
       ];
+      // A path that parses to nothing is a wrong guess, quietly -- unless the page is the site's offline notice,
+      // which is the site answering every path the same way (v0.49.1): then the source is down, and says so.
+      let said: string | null = null;
       for (const path of paths) {
         const h = await cfGet(`${base}${path}`).catch(() => '');
         const out = parseListing(h, cfg.id);
         if (out.length) return out;
+        said ??= offlineNotice(h, MANGANATO_MARKUP);
       }
+      if (said) throw siteOffline(said);
       return [];
     },
 
@@ -204,17 +219,22 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
         `/manga-list/hot-manga${p > 1 ? `?page=${p}` : ''}`,
         `/genre-all${p > 1 ? `/${p}` : ''}?type=topview`,
       ];
+      let said: string | null = null;
       for (const path of paths) {
         const h = await cfGet(`${base}${path}`).catch(() => '');
         const out = parseListing(h, cfg.id);
         if (out.length) return out;
+        said ??= offlineNotice(h, MANGANATO_MARKUP); // as in latest()
       }
+      if (said) throw siteOffline(said);
       return [];
     },
 
     async getSeries(id) {
       const url = mangaUrl(id);
       const h = await cfGet(url);
+      // Before anything is read off it: an offline notice's own <h1> would otherwise become the series' title.
+      throwIfOffline(h, MANGANATO_MARKUP);
       const title = strip((h.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || h.match(/property="og:title" content="([^"]+)"/i) || [])[1] || '');
       const summary = strip(
         (h.match(/(?:id|class)="[^"]*(?:panel-story-info-description|story-info-description)[^"]*"[^>]*>([\s\S]*?)<\/div>/i) ||
@@ -263,6 +283,7 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
         const num = parseFloat(((cu.match(/chapter[-_]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
         if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}`, publishedAt: dates.get(cu) });
       }
+      if (!out.length) throwIfOffline(h, MANGANATO_MARKUP);
       return out.sort((a, b) => a.number - b.number);
     },
 
@@ -285,6 +306,7 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       const urls: string[] = [];
       for (const m of block.matchAll(/<img[^>]+src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"?]*)/gi)) urls.push(norm(m[1]));
       const pages = urls.filter((u) => /^https?:/.test(u) && !/\/thumb(?:s)?\//i.test(u));
+      if (!pages.length) throwIfOffline(h, MANGANATO_MARKUP);
       if (pages.length < 2) return pages;
       const dirOf = (u: string) => u.slice(0, u.lastIndexOf('/'));
       const tally = new Map<string, number>();

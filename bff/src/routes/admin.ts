@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
 import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
 import numberingRoutes from './numbering';
+import findSourcesRoutes from './findSources';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -23,6 +24,7 @@ import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
+import { recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
@@ -436,6 +438,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin);
   // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
   await app.register(numberingRoutes);
+  // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
+  await app.register(findSourcesRoutes);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
@@ -3417,12 +3421,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     // what is newly ready.
     // `tracker`, `external_id`, `backup_title` and `progress` ride along so a tracker row can be linked
     // (and floored) once its series exists, without a second read per row.
-    const rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null }>(
+    const rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; alt_titles: string[] | null }>(
       b.data.candidateIds
-        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress FROM import_candidates
+        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL
              AND id = ANY($2) ORDER BY ord`
-        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress FROM import_candidates
+        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`,
       b.data.candidateIds ? [id, b.data.candidateIds] : [id],
     );
@@ -3474,6 +3478,13 @@ export default async function adminRoutes(app: FastifyInstance) {
             // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
             // fresh add from an existing one would have called EVERY add here "already", including the first.
             if (r.ok && r.nothing) {
+              // The other spellings the list carried (a tracker's romaji and synonyms) become the new series' own
+              // other names (v0.49.1, lib/altTitles.ts): the searches for other sources ask under them. Only for a
+              // series this import added, and before the row reads `added`; best effort, never failing the add.
+              if (row.alt_titles?.length) {
+                const sid = r.seriesId ?? await seriesIdOf(r).catch(() => null);
+                if (sid) await recordAltTitles(sid, row.alt_titles, 'import', { userId }).catch(() => []);
+              }
               await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
               await q(`UPDATE import_batches SET added = added + 1, updated_at = now() WHERE id = $1`, [id]);
             } else if (r.ok || r.error === 'duplicate') {

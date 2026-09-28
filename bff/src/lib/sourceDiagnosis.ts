@@ -39,6 +39,7 @@ export type DiagnosisCode =
   | 'upstream_down'   // the extension server did not answer (unreachable, refused, its own HTTP error)
   | 'extension_error' // the extension server DID answer, with the extension's own error (#115)
   | 'unnumbered'      // chapters are listed, but none with a number Uchiyomi can use (#115)
+  | 'site_offline'    // the site answers with its own offline or maintenance notice (v0.49.1, lib/sources/offline.ts)
   | 'unknown';
 
 /** Who can act on this, which is what decides whether the UI offers a button or asks for patience. */
@@ -92,7 +93,7 @@ export interface Probe {
    * Where the live test just failed, and how (#115). Live evidence of the most specific kind: the stage, and the
    * error as it was thrown a moment ago. `timeout` is our own deadline and proves nothing by itself.
    */
-  failure?: { stage: Stage; kind: 'error' | 'empty' | 'timeout' | 'unnumbered'; error?: string | null };
+  failure?: { stage: Stage; kind: 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline'; error?: string | null };
 }
 
 /** The stage as a phrase for the admin's fix sentence ("while listing pages"); never in a public `reason`. */
@@ -178,6 +179,13 @@ interface RuleCtx { err?: string; stage?: Stage }
 const whileStage = (c: RuleCtx) => (c.stage ? ` while ${STAGE_WORD[c.stage]}` : '');
 
 /**
+ * The site's own offline notice (v0.49.1, lib/sources/offline.ts): the one case where the site says in words what is
+ * wrong. Waiting is the fix for the site; for its series, Health offers Find other sources (the row's action).
+ */
+const SITE_OFFLINE = () => D('site_offline', 'The site says it is offline (its own page)',
+  'Wait for the site to come back, or find other sources for its series.', 'admin');
+
+/**
  * Stored-error rules, most specific first. **The ordering is the whole game.**
  *
  * Both of FlareSolverr's real failure strings contain the word "challenge":
@@ -188,6 +196,10 @@ const whileStage = (c: RuleCtx) => (c.stage ? ` while ${STAGE_WORD[c.stage]}` : 
  * come before `cf_challenge`, and there is a test that reintroduces exactly that mistake.
  */
 const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
+  // First: the message is our own classified error (`site_offline: …`), quoting the site's notice, and a notice's
+  // words ("maintenance", a Cloudflare page title) must not be read by a rule below as something else.
+  [/^site_offline:/i, SITE_OFFLINE],
+
   [/chromedriver.*exited|devtoolsactiveport|session not created/i, () =>
     D('solver_crash', NEEDS_ADMIN,
       fixed('fix.solverCrash', forDesktop(
@@ -335,6 +347,7 @@ export const REASONS: Readonly<Record<DiagnosisCode, string>> = {
   upstream_down: 'The extension server did not answer.',
   extension_error: "This source's extension reported an error.",
   unnumbered: 'This source lists chapters without numbers Uchiyomi can use.',
+  site_offline: 'The site says it is offline (its own page)',
   unknown: NEEDS_ADMIN,
 };
 
@@ -368,6 +381,11 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       return D('unreachable', 'This source is not answering right now.',
         fixed('fix.unreachableAt', `The address could not be reached (${probe.transport}). Check the URL. The site may be gone.`, { transport: probe.transport }), 'admin');
     }
+    // The site said it is offline, in its own words, a moment ago (v0.49.1). Above the homepage rules: that notice
+    // is a 200 HTML page, and an empty streak from before it was recognised would read it as markup drift -- the
+    // misleading "markup may not match this engine" Health gave for aqua. Reintroduce by moving it below them:
+    // "an offline notice is not markup drift" in sourceDiagnosis.test.ts reads markup_drift.
+    if (probe.failure?.kind === 'site_offline') return SITE_OFFLINE();
     // Everything below reads the homepage's status, so it only applies when a homepage was actually asked.
     // For an extension source nothing was (the engine talks to the site, not this server), and a rule that
     // read an absent status as anything at all would be inventing evidence: the live facts such a source

@@ -114,6 +114,7 @@ export const FILL_MAX_CHAPTERS = 300;
 export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
+import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, SEARCH_NAMES } from '../lib/altTitles';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
@@ -707,6 +708,11 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     ]);
     if (chapters.length) void noteStage(src.id, 'chapters', 'ok');
     else if (lookupError !== undefined) void noteStage(src.id, 'chapters', 'fail', { error: lookupError });
+    // v0.49.1: when this pair is some series' MAIN source, its description is that series' own, and the other
+    // names it lists are kept (lib/altTitles.ts) -- the fill scan's read of the series' own source is one of these.
+    // Only names not stored yet: one an admin removed stays removed (its tombstone is the row already there).
+    // Detached and never throwing: a lookup must not wait on, or fail over, a ledger of names.
+    if (series?.summary) void learnFromMainSource(src.id, sourceId, series.summary);
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
     // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
     // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before
@@ -1187,6 +1193,10 @@ export async function addSeriesFromSource(opts: {
     ))[0];
     await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     await replaceListing(id, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    // The other names its source's description lists (v0.49.1, lib/altTitles.ts), from the RAW description --
+    // cleanDescription would flatten the lines the parser reads by -- and before the judgement below, which
+    // matches candidates under them. Never able to fail the add.
+    await learnAltTitles(id, series?.summary);
     // After the numbering and the listing (#116 before #117): the archive's boundary is the floor just written, in
     // the numbers the listing now has, and what it will fetch is read from that listing.
     const archive = opts.archive ? await archiveRest(id, opts.archive) : undefined;
@@ -1301,6 +1311,7 @@ export async function addSeriesFromSource(opts: {
     await setBookDates(folder, selected).catch(() => {});
     if (heldId) {
       await replaceListing(heldId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await learnAltTitles(heldId, series?.summary); // v0.49.1, as on the nothing-yet branch
       if (archiveOpt) heldArchive = await archiveRest(heldId, archiveOpt);
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
@@ -1435,6 +1446,7 @@ export async function addSeriesFromSource(opts: {
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
       await replaceListing(seriesId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await learnAltTitles(seriesId, series?.summary); // v0.49.1, as on the nothing-yet branch
       // Queued once the row, its numbering, its floor and its listing exist; the archive then waits on this add's
       // own card (jobBusy) until the chapters the person picked are in, and only then starts on the rest.
       if (archiveOpt) runArchive = await archiveRest(seriesId, archiveOpt);
@@ -2045,7 +2057,17 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { s, seriesId, have, allowed } = o;
     const plan = st.plan;
     const posting = s.numbering === 'posting_order' && (!s.numbering_source || s.numbering_source === s.source_id);
-    const terms = [...new Set([s.title, o.term].filter(Boolean))] as string[];
+    // The title, up to SEARCH_NAMES of the series' other names (v0.49.1, lib/altTitles.ts) and the typed name, in
+    // that order, one key each. An other name is matched EXACTLY (exactHit), never by pickBest's containment and
+    // word-overlap tiers: those are what a sequel listed among the names would pass. The three-source stop below
+    // is unchanged. Reintroduce by searching the title and the typed name alone: "the fill scan searches under the
+    // other names" in altTitles.int.test.ts finds no candidate on the source that files it under another name.
+    const alts = await altTitlesFor(seriesId, SEARCH_NAMES);
+    const terms: Array<{ term: string; exact: boolean }> = s.title ? [{ term: s.title, exact: false }] : [];
+    for (const a of alts) {
+      if (![s.title, o.term, ...terms.map((t) => t.term)].some((x) => x && norm(x) === norm(a))) terms.push({ term: a, exact: true });
+    }
+    if (o.term && o.term !== s.title) terms.push({ term: o.term, exact: false });
     // The series' own release preferences over the global ones, with patience off: a person is choosing
     // from this list now, and holding a chapter for a group that may never post here would read as "not
     // on this source".
@@ -2154,16 +2176,25 @@ export default async function sourceRoutes(app: FastifyInstance) {
         st.asking.set(src.id, { source: src.id, name: src.name });
         let failed = false;
         try {
-          for (const term of terms) {
+          for (const { term, exact } of terms) {
             try {
-              const hit = pickBest(await withTimeout(src.search(term), budgetFor(src, SCAN_SEARCH_MS)), term);
+              const results = await withTimeout(src.search(term), budgetFor(src, SCAN_SEARCH_MS));
+              const hit = exact ? exactHit(results, term) : pickBest(results, term);
               if (hit?.sourceId) {
                 const f = { source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false };
                 found.push(f);
                 listings.push(assessOne(f));
                 return;
               }
-            } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
+            } catch {
+              // One source failing is not the scan failing -- but it must not be silent. Nor is that source asked
+              // under the next name (v0.49.1): the site, the solver or the extension that failed one search is down
+              // for all of them, and every further name would cost it another whole search budget. sourceHunt.ts
+              // searchByNames stops the same way. Reintroduce by carrying on: "the fill scan asks a source that
+              // failed a search nothing more" in altTitles.int.test.ts finds it asked under the other name too.
+              failed = true;
+              break;
+            }
           }
         } finally {
           // Unless its chapter list has already taken over the entry.
@@ -2605,7 +2636,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
     // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
     // else's: the series a sweep is on may be in a library this viewer cannot open.
-    const runs = listRuns().filter((r) => admin || (r.by !== null && r.by === me));
+    // A Find other sources run (v0.49.1) is an admin's alone, whoever started it.
+    const runs = listRuns().filter((r) => admin || (r.kind !== 'find_sources' && r.by !== null && r.by === me));
     const activity = listActivity();
     // The slow archive's rows (#117), every viewer's from one shared read (lib/archive.ts, ten seconds).
     const archived = await archiveSeriesIds().catch(() => [] as string[]);

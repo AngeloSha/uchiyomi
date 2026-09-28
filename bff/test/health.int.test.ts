@@ -366,7 +366,9 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
     // The chips act on the source by id, never by parsing the title.
     assert.equal(down.sourceId, DOWN, 'every source row names its source');
     // ...and, since v0.48.3, Ignore: a real finding can be silenced (lib/healthIgnore.ts).
-    assert.deepEqual(down.actions, ['test', 'disable', 'ignore'], 'a live failing source offers Test and Turn off');
+    // v0.49.1: and Find other sources, for the one series whose main source it is (lib/findSources.ts).
+    assert.deepEqual(down.actions, ['test', 'disable', 'find_sources', 'ignore'], 'a live failing source offers Test and Turn off');
+    assert.equal(down.findSeries, 1);
     assert.deepEqual(off.actions, ['test'], 'one already turned off is not offered Turn off again (nor Ignore: it is quiet already)');
 
     await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);

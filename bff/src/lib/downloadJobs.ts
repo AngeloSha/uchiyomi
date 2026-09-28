@@ -19,7 +19,8 @@
 
 import { saidOf, type Part, type Said } from './said';
 
-export type RunKind = 'sweep' | 'repair' | 'newest';
+/** `find_sources` (v0.49.1): a Find other sources run (lib/findSources.ts). Admins only; it downloads nothing. */
+export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources';
 
 export interface RunCard {
   kind: RunKind;
@@ -60,6 +61,13 @@ export interface RunCard {
    * Absent: it may download.
    */
   downloads?: false;
+  /** v0.49.1, a Find other sources run: how many sources it has followed so far, across its series. */
+  followed?: number;
+  /**
+   * v0.49.1, a Find other sources run: what it waits on before its next series, while it waits (a sweep, a repair,
+   * the daily source check) -- so Server tasks says why it is paused rather than naming the series it last did.
+   */
+  waiting?: 'sweep' | 'repair' | 'check';
   /** Someone asked it to stop: it does, after the chapter in flight. */
   cancelRequested?: boolean;
   reason?: string;
