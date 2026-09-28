@@ -8,7 +8,8 @@ import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { scheduleText, taskResult } from '@/lib/tasks';
-import { bytes, relativeTime } from '@/lib/format';
+import { joinSentences } from '@/lib/jobs';
+import { bytes, languageName, relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
@@ -2418,7 +2419,7 @@ function Extensions({ span = '' }: { span?: string }) {
                   return (
                     <div key={name} className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-[11px] text-fog-300">
-                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'}>{name}</span>
+                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'} title={name}>{l.lang === null ? name : languageName(name)}</span>
                         <span className="text-fog-500"> · {l.sources} source{l.sources === 1 ? '' : 's'} · {l.enabled} on · {l.used} series</span>
                       </span>
                       {/* Sources that declare no language cannot be selected by one -- the server reaches those rows by id
@@ -2431,7 +2432,7 @@ function Extensions({ span = '' }: { span?: string }) {
                           disabled={working}
                           className={`btn-key ${on ? '' : 'btn-key-primary'}`}>
                           {/* Their own keys: the bare "Hide"/"Show" are the app's collapse toggles ("收起"/"展开"). */}
-                          {working ? '…' : on ? tr('Hide {lang}', { lang: name }) : tr('Show {lang}', { lang: name })}
+                          {working ? '…' : on ? tr('Hide {lang}', { lang: languageName(name) }) : tr('Show {lang}', { lang: languageName(name) })}
                         </button>
                       )}
                     </div>
@@ -2455,13 +2456,13 @@ function Extensions({ span = '' }: { span?: string }) {
           {hiding && (
             <OnBody>
               <ConfirmDialog
-                title={tr('Hide {lang}?', { lang: hiding.lang ?? 'none' })}
-                body={`${hiding.enabled === 1
-                  ? tr('Hiding {lang} turns off 1 source.', { lang: hiding.lang ?? 'none' })
-                  : tr('Hiding {lang} turns off {n} sources.', { lang: hiding.lang ?? 'none', n: hiding.enabled })} ${hiding.used === 1
-                  ? tr('1 series from {lang} will stop updating until you show the language again, but stay readable.', { lang: hiding.lang ?? 'none' })
-                  : tr('{n} series from {lang} will stop updating until you show the language again, but stay readable.', { lang: hiding.lang ?? 'none', n: hiding.used })}`}
-                confirmLabel={tr('Hide {lang}', { lang: hiding.lang ?? 'none' })}
+                title={tr('Hide {lang}?', { lang: languageName(hiding.lang ?? 'none') })}
+                body={joinSentences(hiding.enabled === 1
+                  ? tr('Hiding {lang} turns off 1 source.', { lang: languageName(hiding.lang ?? 'none') })
+                  : tr('Hiding {lang} turns off {n} sources.', { lang: languageName(hiding.lang ?? 'none'), n: hiding.enabled }), hiding.used === 1
+                  ? tr('1 series from {lang} will stop updating until you show the language again, but stay readable.', { lang: languageName(hiding.lang ?? 'none') })
+                  : tr('{n} series from {lang} will stop updating until you show the language again, but stay readable.', { lang: languageName(hiding.lang ?? 'none'), n: hiding.used }))}
+                confirmLabel={tr('Hide {lang}', { lang: languageName(hiding.lang ?? 'none') })}
                 busy={busy === `__lang:${hiding.lang ?? 'none'}`}
                 onConfirm={() => toggleLang(hiding, false)}
                 onClose={() => setHiding(null)}

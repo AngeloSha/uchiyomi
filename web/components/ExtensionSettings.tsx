@@ -32,6 +32,7 @@ import {
   needsRenumberConfirm, prefControl, prefErrorText, prefSummary, toggleChoice,
   type PrefValue, type PrefWriteAnswer, type SourcePref, type SourcePrefsAnswer,
 } from '@/lib/sourcePrefs';
+import { joinSentences, sentenceGap } from '@/lib/jobs';
 
 /** What the sheet opens on: one source (the deep link), or one extension, whose first source it picks. */
 export type SettingsTarget = { sourceId: string; name?: string } | { pkgName: string; name?: string };
@@ -210,18 +211,17 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
                   amber start-edge rule, not a badge. */}
               {p.numbering && (
                 <div className="mt-2 border-s-2 border-amber-400/70 bg-amber-500/10 py-1.5 pe-2 ps-2.5 text-[11px] leading-relaxed text-amber-100" data-renumber-warning>
-                  {data!.renumbers > 0 ? (
-                    <>
-                      {/* "This source", not {source}: the sheet is about one, and a name the engine did not send
-                          read "from  that uses". "Its numbers" read as posting order's too (i18n pass 2). */}
-                      {tr('Changing this renumbers every series that uses this source’s own numbers ({count}).', {
+                  {(() => {
+                    // "This source", not {source}: the sheet is about one, and a name the engine did not send read
+                    // "from  that uses". "Its numbers" read as posting order's too (i18n pass 2). One string with
+                    // sentenceGap between the sentences: a plain space after a CJK full stop is a stray gap.
+                    const warn = data!.renumbers > 0
+                      ? joinSentences(tr('Changing this renumbers every series that uses this source’s own numbers ({count}).', {
                         count: data!.renumbers === 1 ? tr('1 series in your library') : tr('{n} series in your library', { n: data!.renumbers }),
-                      })}{' '}
-                      {tr('Each waits on its series page until you review its renumbering: files are renamed, reading progress stays.')}{' '}
-                    </>
-                  ) : (
-                    <>{tr('Changing this changes the chapter numbers this source gives. No series in your library uses them yet.')}{' '}</>
-                  )}
+                      }), tr('Each waits on its series page until you review its renumbering: files are renamed, reading progress stays.'))
+                      : tr('Changing this changes the chapter numbers this source gives. No series in your library uses them yet.');
+                    return <>{warn}{sentenceGap(warn)}</>;
+                  })()}
                   <span className="text-amber-200/70">{tr('Series numbered by posting order are not affected.')}</span>
                 </div>
               )}

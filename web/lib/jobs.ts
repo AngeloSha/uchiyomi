@@ -131,8 +131,11 @@ export const fetchingLabel = (n: number): string => (n === 1 ? tr('Fetching 1 ch
  */
 export const fetchingToast = (n: number): string => (n === 1 ? tr('Fetching 1 chapter…') : tr('Fetching {n} chapters…', { n }));
 
-/** Two sentences in one line. No space after a CJK full stop, which ends a sentence by itself. */
-export const joinSentences = (a: string, b: string): string => (/[。！？]$/.test(a) ? a + b : `${a} ${b}`);
+/** What goes between a sentence and the next: nothing after a CJK full stop, which ends a sentence by itself. */
+export const sentenceGap = (a: string): string => (/[。！？]$/.test(a) ? '' : ' ');
+
+/** Two sentences in one line (see sentenceGap). */
+export const joinSentences = (a: string, b: string): string => a + sentenceGap(a) + b;
 
 /**
  * What the Library ring says (its title and screen-reader name), in the order a person cares: their downloads,

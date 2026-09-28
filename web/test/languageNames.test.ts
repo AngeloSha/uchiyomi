@@ -1,0 +1,50 @@
+// Admin → Extensions → Languages names a source language by the engine's bare code, and the v0.49.0 Hide/Show keys
+// put that code into a translated sentence. In Spanish and French a bare "en" or "es" is a word of the sentence
+// ("Ocultar en", "Masquer en ?"), so the translators of the final string pass asked for the language's name.
+// Two of the same keys also joined their sentences with a plain space, a stray gap after a CJK full stop.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { languageName, setActiveLocale } from '../lib/format';
+import { joinSentences, sentenceGap } from '../lib/jobs';
+
+const src = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+
+test('a language code reads as the language, in the reader\'s own language', () => {
+  setActiveLocale('en');
+  assert.equal(languageName('en'), 'English', 'the bare code is shown');
+  assert.equal(languageName('zh-Hans'), 'Simplified Chinese');
+  setActiveLocale('de');
+  assert.equal(languageName('en'), 'Englisch', 'the name is not in the app\'s language');
+  setActiveLocale('fr');
+  assert.equal(languageName('es'), 'espagnol');
+  setActiveLocale('en');
+  // The engine's code for a source in every language, and a code Intl does not know.
+  assert.equal(languageName('all'), 'All languages');
+  assert.equal(languageName('not a code!'), 'not a code!', 'an unknown code must stay as it is');
+});
+
+test('the Hide and Show keys, and the question before hiding, name the language', () => {
+  const page = src('app/admin/page.tsx');
+  const block = page.slice(page.indexOf("tr('Hide {lang}', {"), page.indexOf('onConfirm={() => toggleLang(hiding, false)}'));
+  const uses = block.match(/\{ lang: [^,}]+/g) ?? [];
+  assert.ok(uses.length >= 7, `the Hide/Show keys and the dialog pass {lang} (${uses.length} found)`);
+  for (const u of uses) assert.match(u, /\{ lang: languageName\(/, `a bare language code reaches a sentence: ${u}`);
+});
+
+test('two sentences never get a plain space after a CJK full stop', () => {
+  assert.equal(sentenceGap('Done.'), ' ');
+  assert.equal(sentenceGap('完了しました。'), '', 'a space after a CJK full stop');
+  assert.equal(joinSentences('完了しました。', '次へ'), '完了しました。次へ');
+  assert.equal(joinSentences('Done.', 'Next'), 'Done. Next');
+  // The three places the final string pass found joining with a plain space.
+  const page = src('app/admin/page.tsx');
+  assert.match(page, /body=\{joinSentences\(hiding\.enabled === 1/, 'the Hide question joins its sentences with a plain space');
+  const archive = src('components/ArchiveSettings.tsx');
+  assert.doesNotMatch(archive, /nothing queued is lost\.'\)\} \$\{tr\(/, 'the desktop archive help joins its sentences with a plain space');
+  assert.match(archive, /joinSentences\(tr\('Off pauses every archive; nothing queued is lost\.'\)/);
+  const prefs = src('components/ExtensionSettings.tsx');
+  assert.doesNotMatch(prefs, /reading progress stays\.'\)\}\{' '\}/, 'the renumber warning joins its sentences with a plain space');
+  assert.match(prefs, /\{warn\}\{sentenceGap\(warn\)\}/);
+});
