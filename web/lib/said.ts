@@ -16,12 +16,12 @@
  * the server's wherever the two are meant to read alike.
  */
 import { t as tr } from './i18n';
-import { activeLocale, durationText, relativeTime } from './format';
+import { activeLocale, cached, durationText, relativeTime } from './format';
 import { isDesktop } from './desktop';
-import { sourceMark, type ProviderStatus } from './status';
+import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
 /** How a part joins the one before it (bff lib/said.ts Join). */
-export type Join = 'clause' | 'sentence' | 'period' | 'dash' | 'dashCap' | 'paren' | 'colon';
+export type Join = 'clause' | 'sentence' | 'then' | 'period' | 'dash' | 'dashCap' | 'paren' | 'colon';
 
 /** A sentence as the server sends it: its code, what fills it, and how it joins the part before it. */
 export interface Said {
@@ -47,12 +47,20 @@ const cap = (s: string): string => {
   const first = s.charAt(0);
   try { return first.toLocaleUpperCase(activeLocale()) + s.slice(1); } catch { return first.toUpperCase() + s.slice(1); }
 };
+/** A name mid-sentence ("also chapter list"), lower-cased -- except in German, which capitalises every noun. */
+const midSentence = (s: string): string => {
+  if (/^de/.test(activeLocale())) return s;
+  const first = s.charAt(0);
+  try { return first.toLocaleLowerCase(activeLocale()) + s.slice(1); } catch { return first.toLowerCase() + s.slice(1); }
+};
 
 /** Two worded parts, joined the way the reader's language punctuates `how`. */
 export function joinPart(a: string, b: string, how: Join | undefined): string {
   switch (how ?? 'clause') {
     case 'clause': return `${a}${cjk() ? '；' : arabic() ? '؛ ' : '; '}${b}`;
     case 'sentence': return `${a}${cjk() ? '' : ' '}${cap(b)}`;
+    // A sentence that opens on a name, in English ("mangapill fails because of it."): the name's case is its own.
+    case 'then': return `${a}${cjk() ? '' : ' '}${b}`;
     case 'period': return `${a}${cjk() ? '。' : '. '}${cap(b)}`;
     case 'dash': return `${a} — ${b}`;
     case 'dashCap': return `${a} — ${cap(b)}`;
@@ -63,31 +71,39 @@ export function joinPart(a: string, b: string, how: Join | undefined): string {
 }
 
 // ---- dates, times and numbers the reader's way --------------------------------------------------------------
+// Each formatter is built once per language (lib/format.ts `cached`): a Health page says hundreds of these.
+
+const otherYear = (d: Date): boolean => d.getFullYear() !== new Date().getFullYear();
 
 /** "23 Sep" (with the year when it is not this one), in the reader's language. '' for anything not a date. */
 export function dayText(iso: unknown): string {
   const d = new Date(String(iso ?? ''));
   if (!Number.isFinite(d.getTime())) return '';
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) };
-  try { return d.toLocaleDateString(intlTag(), opts); } catch { return d.toLocaleDateString(); }
+  const year = otherYear(d);
+  try {
+    return cached(year ? 'said:dayYear' : 'said:day', () =>
+      new Intl.DateTimeFormat(intlTag(), { day: 'numeric', month: 'short', ...(year ? { year: 'numeric' } : {}) })).format(d);
+  } catch { return d.toLocaleDateString(); }
 }
 
 /**
  * "23 Sep, 16:20", in the reader's language AND time zone. The server's English prints the same moment as
  * "2026-09-23 14:20" in UTC with no zone, which read as local time everywhere but Greenwich (#115's source row).
+ * Reintroduce `timeZone: 'UTC'`: "the moment is not the reader's" in said.test.ts fails.
  */
 export function momentText(iso: unknown): string {
   const d = new Date(String(iso ?? ''));
   if (!Number.isFinite(d.getTime())) return '';
-  const opts: Intl.DateTimeFormatOptions = {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-    ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
-  };
-  try { return d.toLocaleString(intlTag(), opts); } catch { return d.toLocaleString(); }
+  const year = otherYear(d);
+  try {
+    return cached(year ? 'said:momentYear' : 'said:moment', () => new Intl.DateTimeFormat(intlTag(), {
+      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', ...(year ? { year: 'numeric' } : {}),
+    })).format(d);
+  } catch { return d.toLocaleString(); }
 }
 
 const numText = (n: number): string => {
-  try { return new Intl.NumberFormat(intlTag()).format(n); } catch { return String(n); }
+  try { return cached('said:number', () => new Intl.NumberFormat(intlTag())).format(n); } catch { return String(n); }
 };
 
 // ---- shared words ------------------------------------------------------------------------------------------
@@ -97,11 +113,20 @@ type Stage = 'search' | 'chapters' | 'pages' | 'images';
 const stageName = (s: unknown): string =>
   s === 'chapters' ? tr('Chapter list') : s === 'pages' ? tr('Page list') : s === 'images' ? tr('Images') : tr('Search step');
 
-/** A source's status (SourceStatus), as the source card words it. */
-const statusText = (s: unknown): string => sourceMark(String(s ?? '') as ProviderStatus).label;
+/**
+ * A source's status (SourceStatus), as the source card words it. Null for one this build does not know (a newer
+ * server's), which sourceMark would call "Healthy" in a line saying it is failing: the whole line is the English.
+ */
+const statusText = (s: unknown): string | null =>
+  SOURCE_STATUSES.includes(s as ProviderStatus) ? sourceMark(s as ProviderStatus).label : null;
+/** A sentence about a source's status, or null when the status cannot be worded (statusText). */
+const withStatus = (p: P, say: (status: string) => string): string | null => {
+  const status = statusText(p.status);
+  return status === null ? null : say(status);
+};
 
 /** What the chapter-failure ledger records (bff lib/chapterFailures.ts statusOf): its own two, or a source status. */
-const failureStatus = (s: unknown): string =>
+const failureStatus = (s: unknown): string | null =>
   s === 'incomplete' ? tr('pages missing') : s === 'error' ? tr('failed') : statusText(s);
 
 /** "A, B and 3 more": the names a sentence lists, and how many it left out. */
@@ -255,7 +280,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
     const tries = t === 1 ? tr('tried up to 1 time') : tr('tried up to {n} times', { n: t });
     const c = num(p, 'capped');
     const capped = !c ? '' : c === 1 ? tr('1 left alone after {cap}', { cap: num(p, 'cap') }) : tr('{n} left alone after {cap}', { n: c, cap: num(p, 'cap') });
-    const vars = { title: str(p, 'title'), number: num(p, 'number'), status: failureStatus(p.status), reason: str(p, 'reason') };
+    const status = failureStatus(p.status);
+    if (status === null) return null;
+    const vars = { title: str(p, 'title'), number: num(p, 'number'), status, reason: str(p, 'reason') };
     const latest = p.reason ? tr('latest: "{title}" ch {number} ({status}: {reason})', vars) : tr('latest: "{title}" ch {number} ({status})', vars);
     return joinPart([head, tries, capped].filter(Boolean).join(listSep()), latest, 'clause');
   },
@@ -296,8 +323,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'sources.unfinished': (p) => (num(p, 'n') === 1 ? tr('1 could not finish a test') : tr('{n} could not finish a test', { n: num(p, 'n') })),
   'sources.note': () => tr('A source is failing when a Test or the daily check fails at a step (search, chapter list, page list), or when ordinary use fails at the same step three times in a row; downloading images is a step of its own. Only a later success at that same step clears it. Testing never changes a cooldown. A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve; if several fail at once and all of them mention the solver, check the solver rather than the sites. A cooldown on a source no series uses is listed for reference only, and so is a test that ran out of time.'),
   'sources.turnedOff': () => tr('turned off by you'),
-  'sources.expired': (p) => tr('block expired, will retry on next use (was {status})', { status: statusText(p.status) }),
-  'sources.until': (p) => tr('{status} until {when}', { status: statusText(p.status), when: momentText(p.until) }),
+  'sources.expired': (p) => withStatus(p, (status) => tr('block expired, will retry on next use (was {status})', { status })),
+  'sources.until': (p) => withStatus(p, (status) => tr('{status} until {when}', { status, when: momentText(p.until) })),
   'sources.status': (p) => statusText(p.status),
   'sources.uses': (p) => {
     const n = num(p, 'n');
@@ -312,7 +339,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'sources.failing': (p) => {
     const lead = tr('{stage} failing since {when}', { stage: stageName(p.stage), when: momentText(p.since) });
     const also = strs(p, 'also');
-    return also.length ? joinPart(lead, tr('also {stages}', { stages: also.map(stageName).join(listSep()) }), 'paren') : lead;
+    // Mid-sentence, as the server's English says them: "(also chapter list, page list)".
+    return also.length ? joinPart(lead, tr('also {stages}', { stages: also.map((x) => midSentence(stageName(x))).join(listSep()) }), 'paren') : lead;
   },
   'sources.reason': (p) => (REASON_WORDS[str(p, 'diagnosis')] ? diagnosisReason({ code: str(p, 'diagnosis') }) : null),
   'sources.inconclusive': (p) => byStage(p, {
@@ -402,7 +430,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
       w ? (w === 1 ? tr('left out 1 folder or file it could not read') : tr('left out {n} folders or files it could not read', { n: w })) : '',
     ].filter(Boolean);
     let what = parts.join(' ');
-    try { what = new Intl.ListFormat(intlTag(), { type: 'conjunction' }).format(parts); } catch { /* an old WebView: the two side by side */ }
+    try { what = cached('said:and', () => new Intl.ListFormat(intlTag(), { type: 'conjunction' })).format(parts); } catch { /* an old WebView: the two side by side */ }
     return n + w === 1
       ? tr('the last scan {what}; its chapters are on disk but not in the library', { what })
       : tr('the last scan {what}; their chapters are on disk but not in the library', { what });
@@ -680,21 +708,25 @@ function sourceName(p: P): string {
 export const SAID_CODES = Object.keys(WORDS);
 
 /**
- * A line in the reader's language: `said`'s parts worded and joined. `fallback` -- the server's English -- when
- * there is nothing to word (a server older than v0.49.1), or when any part's code is one this build does not
- * know: never a line half in each.
+ * A line in the reader's language: `said`'s parts worded and joined. Null when there is nothing to word (a server
+ * older than v0.49.1), or when any part's code is one this build does not know: never a line half in each.
  */
-export function saidText(said: Said | readonly Said[] | null | undefined, fallback = ''): string {
+export function saidWords(said: Said | readonly Said[] | null | undefined): string | null {
   const parts = Array.isArray(said) ? (said as readonly Said[]) : said ? [said as Said] : [];
-  if (!parts.length) return fallback;
+  if (!parts.length) return null;
   let out = '';
   for (const [i, s] of parts.entries()) {
     const words = s && WORDS[s.code];
     const text = words ? words(s.params ?? {}) : null;
-    if (text === null) return fallback;
+    if (text === null) return null;
     out = i === 0 ? text : joinPart(out, text, s.join);
   }
   return out;
+}
+
+/** The line in the reader's language (saidWords), or `fallback` -- the server's English -- when it cannot be. */
+export function saidText(said: Said | readonly Said[] | null | undefined, fallback = ''): string {
+  return saidWords(said) ?? fallback;
 }
 
 // ---- the fields that carry them ------------------------------------------------------------------------------
@@ -705,9 +737,13 @@ export const checkNote = (c: { note?: string; noteSaid?: Said[] }): string => sa
 export const itemTitle = (i: { title: string; titleSaid?: Said }): string => saidText(i.titleSaid, i.title);
 export const itemDetail = (i: { detail: string; detailSaid?: Said[] }): string => saidText(i.detailSaid, i.detail);
 
-/** A download job's, a chapter's or a server run's reason (bff routes/sources.ts, lib/downloadActivity.ts, lib/downloadJobs.ts). */
+/**
+ * A download job's, a chapter's or a server run's reason (bff routes/sources.ts, lib/downloadActivity.ts,
+ * lib/downloadJobs.ts). The English decides whether there is a reason at all, the codes only its words: an entry
+ * whose `reason` was taken away (a healed chapter's) says nothing, whatever codes were left beside it.
+ */
 export const reasonText = (x: { reason?: string | null; reasonSaid?: Said | Said[] | null } | null | undefined): string =>
-  saidText(x?.reasonSaid, x?.reason ?? '');
+  (x?.reason ? saidText(x.reasonSaid, x.reason) : '');
 
 /** A refusal's message, from a failed API call's body: `messageSaid` worded, else the message as sent, else nothing. */
 export function refusalMessage(body: { message?: string; messageSaid?: Said } | null | undefined): string {

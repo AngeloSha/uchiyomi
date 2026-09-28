@@ -8,6 +8,7 @@
 // whole line in the server's English; and the lines are joined the way the reader's language punctuates.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -49,7 +50,7 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
 const DIFFERS: Record<string, string> = {
   'sources.idle': 'the server\'s "3 no series use" has no verb a translator can agree with: "3 that no series uses"',
   'sources.tested': 'the Test button by its name, as the source\'s evidence lines say it',
-  'sources.failing': 'the stage as a noun ("Search step", never the search button\'s verb) and never lowercased: German keeps its capitals',
+  'sources.failing': 'the stage as a noun: "Search step", never the search button\'s verb',
   'sources.stale': 'how long ago in the reader\'s words, not a count of days',
   'sources.status': 'a source\'s status in words ("Rate-limited"), not its code',
   'sources.until': 'a source\'s status in words',
@@ -130,8 +131,10 @@ test('every sentence the server builds has words here, and they read as the serv
 
 test('every diagnosis the server can reach reads as its English: each reason by its code, each fix by its own', async (t) => {
   if (!haveBff) { t.skip('no bff/ beside web/ in this checkout'); return; }
-  // Reintroduce by deleting REASON_WORDS.edge_403, or WORDS['fix.moved']: "diagnosis 'edge_403' has no reason" or
-  // "'fix.moved' ... reads otherwise" fails. A DiagnosisCode or a FixCode the server gains fails by name below.
+  // Reintroduce by deleting REASON_WORDS.edge_403: "diagnosis 'edge_403' has no reason" fails. Deleting
+  // WORDS['fix.cdnRefuses'] fails "'fix.cdnRefuses' has no words here" -- and only that: a fix without words falls
+  // back to the server's English, which is exactly what the comparison below holds it to. Changing its words fails
+  // "'fix.cdnRefuses' reads otherwise". A DiagnosisCode or a FixCode the server gains fails by name below.
   const { diagnose } = (await import(join(BFF, 'sourceDiagnosis.ts'))) as { diagnose: (f: object, p?: object, base?: string) => { code: string; reason: string; fix: string; fixSaid?: Said } };
   // Comments dropped: one inside DiagnosisCode ("outright; not solvable…") ended the union at its semicolon.
   const src = readFileSync(join(BFF, 'sourceDiagnosis.ts'), 'utf8').replace(/\/\/.*$/gm, '');
@@ -147,6 +150,8 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     assert.ok(REASON_CODES.includes(code), `diagnosis '${code}' has no reason here (lib/said.ts REASON_WORDS)`);
     if (code !== 'ok') assert.ok(worded(diagnosisReason({ code }), code), `diagnosis '${code}' has no words`);
   }
+  // The fixes are not in the server's registry (the first test's walk): each FixCode by name, here.
+  for (const code of fixCodes) assert.ok(SAID_CODES.includes(code), `'${code}' has no words here`);
 
   // Every rule, by the evidence that reaches it (bff test/sourceDiagnosis.test.ts has the verbatim strings).
   const facts = (lastError: string | null, o: object = {}) => ({
@@ -195,6 +200,8 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     const d = diagnose(f, probe, base);
     assert.ok(d.fixSaid, `${what}: the diagnosis (${d.code}) carries no fix code`);
     seen.add(d.fixSaid!.code);
+    // Worded here, not the fallback: diagnosisFix() falls back to `d.fix` itself, which the comparison below passes.
+    assert.notEqual(saidText(d.fixSaid, '\0'), '\0', `${what}: '${d.fixSaid!.code}' has no words here`);
     // "the extension engine", the component's name, where the server says "server" (DIFFERS above).
     if (d.code !== 'upstream_down') assert.equal(diagnosisReason(d), d.reason, `${what}: reason '${d.code}' reads otherwise than the server`);
     const fix = diagnosisFix(d);
@@ -221,6 +228,13 @@ test('a line is joined the reader\'s way, and a code this build does not know le
   assert.equal(saidText([...parts, { code: 'from.a.newer.server' }], 'the English'), 'the English', 'a line with a code this build does not know is not all English');
   // A reason inside a row, for a diagnosis code this build does not know (Fs's site_offline, say), is the same.
   assert.equal(saidText([{ code: 'sources.reason', params: { diagnosis: 'from_a_newer_server' } }], 'the English'), 'the English');
+  // So is a source status it does not know, which the source card's word would call "Healthy" in a failing row.
+  // Reintroduce `sourceMark(…).label` for every status in statusText: "an unknown status is worded" fails.
+  for (const code of ['sources.status', 'sources.until', 'sources.expired', 'failures.detail']) {
+    const params = { status: 'from_a_newer_server', until: ISO, n: 2, series: 1, since: ISO, tries: 3, capped: 0, cap: 5, title: 'Walk Tale', number: 3, reason: null };
+    assert.equal(saidText([{ code, params }], 'the English'), 'the English', `${code}: an unknown status is worded`);
+  }
+  assert.equal(saidText([{ code: 'sources.status', params: { status: 'rate_limited' } }]), 'Rate-limited');
   assert.equal(saidText(undefined, 'from an older server'), 'from an older server');
   // The joins, as the server's English writes them.
   assert.equal(saidText([{ code: 'job.noSpace', params: { error: 'x' } }, { code: 'job.saved', params: { done: 2, total: 5 }, join: 'period' }]),
@@ -233,11 +247,28 @@ test('a line is joined the reader\'s way, and a code this build does not know le
     setActiveLocale('ja');
     assert.equal(joinPart('A', 'B', 'clause'), 'A；B');
     assert.equal(joinPart('A。', 'B', 'sentence'), 'A。B');
+    assert.equal(joinPart('A。', 'b', 'then'), 'A。b', 'in Japanese, a sentence that opens on a name is joined otherwise');
     assert.equal(joinPart('A', 'B', 'paren'), 'A（B）');
     setActiveLocale('ar');
     assert.equal(joinPart('أ', 'ب', 'clause'), 'أ؛ ب');
   } finally {
     setActiveLocale('en');
+  }
+});
+
+test('a sentence that opens on a source\'s name keeps the name as the source spells it, as the server\'s English does', async () => {
+  // The engine row's "…fail until it is. mangapill fails because of it." joins with 'then' (bff lib/engineHealth.ts):
+  // the 'sentence' join raised the first letter and renamed the source. Reintroduce `cap(b)` for 'then' in
+  // joinPart: "a source's name is capitalised" fails.
+  const parts: Said[] = [
+    { code: 'engine.helperIsOff' },
+    { code: 'engine.failing', params: { names: ['mangapill'], more: 0, n: 1 }, join: 'then' },
+  ];
+  const english = 'The engine’s own Cloudflare helper is not in use: it is switched off. Extension sources on Cloudflare-protected sites fail until it is. mangapill fails because of it.';
+  assert.equal(saidText(parts), english, 'a source\'s name is capitalised');
+  if (haveBff) {
+    const server = (await import(join(BFF, 'said.ts'))) as { englishOf: (s: Said[]) => string | null };
+    assert.equal(server.englishOf(parts), english, 'the server\'s English capitalises a source\'s name');
   }
 });
 
@@ -258,6 +289,12 @@ test('Health\'s cards, rows, headline, refusals and reasons read their codes, an
   assert.equal(headlineText({ headline: null, checks: [] }), null);
   assert.equal(reasonText({ reason: 'x', reasonSaid: [{ code: 'job.partial', params: { number: 21, n: 3 } }] }), 'Chapter 21 saved with 3 pages missing');
   assert.equal(reasonText({ reason: 'the site\'s own error' }), 'the site\'s own error');
+  // The English decides whether there is a reason, the codes only its words: an entry whose reason was taken away (a
+  // healed chapter, lib/downloadActivity.ts) and whose codes were left says nothing. Reintroduce
+  // `saidText(x?.reasonSaid, x?.reason ?? '')`: "a reason taken away is still said" fails.
+  for (const reason of [undefined, null, '']) {
+    assert.equal(reasonText({ reason, reasonSaid: [{ code: 'activity.saved', params: { n: 2 } }] }), '', `a reason taken away is still said (${reason})`);
+  }
   assert.equal(refusalMessage({ message: 'x', messageSaid: { code: 'renumber.onDisk', params: { file: 'Chapter 21.cbz' } } }), 'Chapter 21.cbz is already on disk');
 });
 
@@ -265,14 +302,59 @@ test('in German, a Health summary, a row and a date read in German, in the reade
   // The words are real translations (web/test/localeCoverage.test.ts holds every key in all eight files); this
   // holds the wiring: the dictionary is what the codes are worded through, and a date is the reader's.
   const de = JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', 'de.json'), 'utf8'));
+  // Said (and so built) in English first: the formatters are built once per language (lib/format.ts `cached`), and a
+  // change of language must build them again. Drop `formatters.clear()` from setActiveLocale: this fails.
+  const inEnglish = [dayText(ISO), momentText(ISO)];
   try {
     setActiveDict(de);
     setActiveLocale('de');
+    assert.notDeepEqual([dayText(ISO), momentText(ISO)], inEnglish, 'a date keeps the language it was first said in');
     const one = saidText([{ code: 'sources.live', params: { n: 1 } }]);
     assert.equal(one, de['1 source is failing or blocked'], 'a summary is not worded through the German dictionary');
     assert.notEqual(one, '1 source is failing or blocked', 'German reads English');
     const since = saidText({ code: 'numbering.since', params: { at: ISO } });
     assert.ok(since.includes(dayText(ISO)) && !since.includes('2026-09-23'), `the date is not the reader's: ${since}`);
+    // A summary with a newer server's code in it cannot be worded, so the whole headline is the stored English --
+    // never the title in German beside a summary in English. Reintroduce `checkSummary(c)` for the summary in
+    // headlineText: "the headline is half German" fails.
+    const newer = { id: 'sources', title: 'Source health', status: 'warn' as const, summary: 'a newer summary', summarySaid: [{ code: 'from.a.newer.server' }] };
+    assert.equal(headlineText({ headline: 'Source health: a newer summary', checks: [newer] }), 'Source health: a newer summary',
+      'the headline is half German');
+  } finally {
+    setActiveDict({});
+    setActiveLocale('en');
+  }
+});
+
+test('a moment is said in the reader\'s own time zone, never the UTC the server\'s English prints', () => {
+  // 14:20 UTC is 23:20 in Tokyo. In a child process, whose TZ is set before anything is built: a formatter keeps the
+  // time zone it was built in, and this process has built its own already (lib/format.ts `cached`). Reintroduce
+  // `timeZone: 'UTC'` in momentText: "the moment is not the reader's" fails.
+  const script = "import { momentText } from './lib/said.ts'; import { setActiveLocale } from './lib/format.ts';"
+    + ` setActiveLocale('de'); process.stdout.write(momentText('${ISO}'));`;
+  const r = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    cwd: join(__dirname, '..'), env: { ...process.env, TZ: 'Asia/Tokyo' }, encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\b23:20\b/, `the moment is not the reader's: ${r.stdout}`);
+});
+
+test('a stage named mid-sentence is lower-case, as the server\'s English says it; German nouns keep their capital', () => {
+  // A source row's "(also chapter list, page list)". Reintroduce `also.map(stageName)` in 'sources.failing': the
+  // English reads "(also Chapter list, Page list)", and "a stage mid-sentence is capitalised" fails.
+  const row: Said = { code: 'sources.failing', params: { stage: 'search', since: ISO, also: ['chapters', 'pages'] } };
+  assert.match(saidText(row), /^Search step failing since .+ \(also chapter list, page list\)$/, 'a stage mid-sentence is capitalised');
+  const cases: Array<[string, RegExp]> = [
+    ['ru', /^Поиск: .+ \(также список глав, список страниц\)$/],
+    ['pt-BR', /^Busca .+ \(também lista de capítulos, lista de páginas\)$/],
+    ['de', /^Suche: .+ \(auch Kapitelliste, Seitenliste\)$/],
+  ];
+  try {
+    for (const [locale, want] of cases) {
+      setActiveDict(JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', `${locale}.json`), 'utf8')));
+      setActiveLocale(locale);
+      assert.match(saidText(row), want, `${locale}: the stages mid-sentence read otherwise`);
+    }
   } finally {
     setActiveDict({});
     setActiveLocale('en');

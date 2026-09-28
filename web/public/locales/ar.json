@@ -1601,7 +1601,7 @@
   "No duplicates found": "لم يُعثر على تكرارات",
   "Detected by two series matching the same AniList entry, so it catches copies added from different sources under different names. Progress tracking works best with one copy of each. Merging is one-way and never automatic: the nightly repair leaves these alone and you confirm each one.": "يُكتشف ذلك حين تطابق سلسلتان الإدخالَ نفسه في AniList، لذا يلتقط النسخ المضافة من مصادر مختلفة بأسماء مختلفة. تعمل مزامنة التقدّم على أفضل وجه مع نسخة واحدة من كل سلسلة. الدمج في اتجاه واحد ولا يحدث تلقائيًا أبدًا: الإصلاح الليلي لا يمسّ هذه، وأنت من يؤكّد كل واحدة منها.",
   "Same AniList entry": "الإدخال نفسه في AniList",
-  "{n} copies — merge them one pair at a time": "{n} نسخ — ادمجها زوجًا تلو الآخر",
+  "{n} copies — merge them one pair at a time": "النسخ: {n} — ادمجها زوجًا تلو الآخر",
   "1 series has chapters numbered far beyond the rest": "سلسلة واحدة فيها فصول بأرقام تتجاوز البقية بكثير",
   "{n} series have chapters numbered far beyond the rest": "سلاسل فيها فصول بأرقام تتجاوز البقية بكثير: {n}",
   "No out-of-range chapters": "لا فصول بأرقام خارج النطاق",

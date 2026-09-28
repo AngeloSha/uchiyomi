@@ -650,8 +650,8 @@ components:
           description: "What fills the sentence: counts as numbers, moments as ISO 8601 strings (the English prints them in UTC, with no zone), names, file names and a system's own error text as strings, lists as arrays."
         join:
           type: string
-          enum: [clause, sentence, period, dash, dashCap, paren, colon]
-          description: "How this part joins the one before it: \"a; b\" (clause, the default when absent), a new sentence, \"a. B\", \"a — b\" (dashCap raises the next letter), \"a (b)\", \"a: b\"."
+          enum: [clause, sentence, then, period, dash, dashCap, paren, colon]
+          description: "How this part joins the one before it: \"a; b\" (clause, the default when absent), a new sentence (its first letter raised), a new sentence as it is (then: one that opens on a name, whose case is the name's), \"a. B\", \"a — b\" (dashCap raises the next letter), \"a (b)\", \"a: b\"."
 paths:
   /livez:
     get:

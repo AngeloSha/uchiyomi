@@ -90,6 +90,20 @@ test('a helper that is off: a warning with Connect while sources are seen behind
   assert.match(local.items[0].detail, /points at localhost, where no helper runs/);
 });
 
+test('a source is named as it names itself, even where its name opens a sentence', async () => {
+  // v0.49.1's codes joined the names to the sentence before them as a new sentence, whose first letter is raised:
+  // "…fail until it is. Mangapill fails because of it." -- the English changed, and the name was no longer the
+  // source's. Reintroduce `joined('sentence', seen)` in engineHealth.ts: "a lower-case source name is capitalised".
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const off = { supported: true as const, enabled: false, url: OURS };
+  const failing = extensionEngine(base({ solver: off, cloudflare: [{ sourceId: 'sw:1', name: 'mangapill', bypass: true }] }))!;
+  assert.equal(failing.items[0].detail,
+    'The engine’s own Cloudflare helper is not in use: it is switched off. Extension sources on Cloudflare-protected sites fail until it is. mangapill fails because of it.',
+    'a lower-case source name is capitalised');
+  const fronted = extensionEngine(base({ solver: off, cloudflare: [{ sourceId: 'sw:2', name: 'comick.io', bypass: false }] }))!;
+  assert.match(fronted.items[0].detail, /fail until it is\. comick\.io is behind Cloudflare\.$/, 'a lower-case source name is capitalised');
+});
+
 test('no solver of our own to share: no Connect, and the detail says what to set first', async () => {
   const { extensionEngine } = await import('../src/lib/engineHealth');
   const c = extensionEngine(base({ ourSolver: '', solver: { supported: true, enabled: false, url: '' }, cloudflare: [{ sourceId: 'sw:1', name: 'A', bypass: true }] }))!;
@@ -203,6 +217,7 @@ test('every sentence of the row carries its codes, and they say exactly its Engl
     ['other', { solver: { supported: true, enabled: true, url: 'http://elsewhere:8191' } }],
     ['other, desktop', { desktop: true, solver: { supported: true, enabled: true, url: 'http://elsewhere:8191' } }],
     ['off, failing', { solver: { supported: true, enabled: false, url: OURS }, cloudflare: [cf('Ball', true), cf('Dex', true)] }],
+    ['off, failing, a lower-case name', { solver: { supported: true, enabled: false, url: OURS }, cloudflare: [cf('mangapill', true)] }],
     ['localhost, fronted', { solver: { supported: true, enabled: true, url: 'http://localhost:8191' }, cloudflare: [cf('Ball', false)] }],
     ['off, nothing seen, no solver', { solver: { supported: true, enabled: false, url: OURS }, ourSolver: '', version: null }],
   ];

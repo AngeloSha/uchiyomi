@@ -9,7 +9,7 @@
 // (bff lib/healthSummary.ts). Nothing here is for other accounts: the route is admin-only, its text names
 // sources and folders, and there is nothing an ordinary reader could do about any of it.
 import { checkTitle } from './healthCopy';
-import { checkSummary, joinPart, type Said } from './said';
+import { joinPart, saidWords, type Said } from './said';
 
 export type HealthTone = 'warn' | 'problem';
 
@@ -28,13 +28,14 @@ export interface HealthSummary {
 /**
  * The banner's and the marker's sentence in the reader's language: the worst check's title and summary, which the
  * server's `headline` is the English of ("Source health: 1 source is failing or blocked" in every language, until
- * v0.49.1). A summary stored by an older server carries no codes and reads as it was stored.
+ * v0.49.1). A summary this build cannot word -- stored by an older server, with no codes, or with a newer server's
+ * code in it -- leaves the whole line as it was stored: never a translated title beside an English summary.
  */
 export function headlineText(s: Pick<HealthSummary, 'headline' | 'checks'> | null | undefined): string | null {
   if (!s?.headline) return null;
   const c = s.checks?.[0];
-  if (!c?.summarySaid?.length) return s.headline;
-  return joinPart(checkTitle(c), checkSummary(c), 'colon');
+  const summary = c ? saidWords(c.summarySaid) : null;
+  return c && summary !== null ? joinPart(checkTitle(c), summary, 'colon') : s.headline;
 }
 
 /** The marker's colour, or null for no marker at all: a clean report shows nothing. */

@@ -140,7 +140,10 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
     ...titled(say('engine.helper')),
     ...detailOf([
       say(wiring === 'localhost' ? 'engine.localhost' : 'engine.helperIsOff'),
-      seen && joined('sentence', seen),
+      // 'then', never 'sentence': it opens on the sources' names, which are theirs to spell ("mangapill fails
+      // because of it.", "comick.io is behind Cloudflare."). A raised first letter renamed them. Reintroduce
+      // 'sentence': "a source is named as it names itself" in engineHealth.test.ts fails.
+      seen && joined('then', seen),
       // Never on desktop: the shell always gives Uchiyomi its helper.
       !d.ourSolver && noSolver,
     ]),

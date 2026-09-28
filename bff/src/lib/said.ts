@@ -24,6 +24,7 @@ import { REASONS, STAGE_WORD, type DiagnosisCode } from './sourceDiagnosis';
 export type Join =
   | 'clause'    // "a; b" -- the default: a summary's tails, a row's clauses
   | 'sentence'  // "a B": the next sentence, first letter raised
+  | 'then'      // "a b": the next sentence as it is -- one that opens on a name ("mangapill fails because of it.")
   | 'period'    // "a. B": ends the part before it
   | 'dash'      // "a — b"
   | 'dashCap'   // "a — B"
@@ -476,6 +477,7 @@ const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const JOIN: Record<Join, (a: string, b: string) => string> = {
   clause: (a, b) => `${a}; ${b}`,
   sentence: (a, b) => `${a} ${cap(b)}`,
+  then: (a, b) => `${a} ${b}`,
   period: (a, b) => `${a}. ${cap(b)}`,
   dash: (a, b) => `${a} — ${b}`,
   dashCap: (a, b) => `${a} — ${cap(b)}`,

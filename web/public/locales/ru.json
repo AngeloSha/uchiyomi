@@ -1757,7 +1757,7 @@
   "1 chapter could not be saved: {error}": "1 главу не удалось сохранить: {error}",
   "{n} chapters could not be saved: {error}": "Не удалось сохранить главы ({n}): {error}",
   "Cancelled after {done} of 1 chapter.": "Отменено после {done} из 1 главы.",
-  "Cancelled after {done} of {n} chapters.": "Отменено после {done} из {n} гл.",
+  "Cancelled after {done} of {n} chapters.": "Отменено; сохранено глав: {done} из {n}.",
   "1 chapter could not be saved.": "1 главу не удалось сохранить.",
   "{n} chapters could not be saved.": "Не удалось сохранить глав: {n}.",
   "Chapter {numbers} is on disk, but the library scan could not add it": "Глава {numbers} есть на диске, но сканирование библиотеки не смогло её добавить",

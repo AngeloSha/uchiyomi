@@ -488,7 +488,8 @@ numbering and extension-settings routes write in English also comes as codes, be
 params?, join?}` — `code` stable (`gaps.live`, `sources.failing`, `job.partial`, `renumber.onDisk`,
 `pref.noChoice`, a diagnosis's `fix.moved`…), `params` what fills it (counts as numbers, moments as ISO strings,
 names, file names and a system's own error text as strings), and, in a field that is a list, `join` how a part
-joins the one before it (`clause` "a; b" when absent, `sentence`, `period`, `dash`, `dashCap`, `paren`, `colon`).
+joins the one before it (`clause` "a; b" when absent, `sentence`, `then` — a sentence that opens on a name, left as
+it is — `period`, `dash`, `dashCap`, `paren`, `colon`).
 The fields: a check's `summarySaid` and `noteSaid`, an item's `detailSaid` and `titleSaid`, a diagnosis's
 `fixSaid` (its `reason` is its `code`'s sentence), a download card's and an activity entry's `reasonSaid` (a list),
 a run card's `reasonSaid`, a refusal's `messageSaid`, and a numbering answer's `errorSaid`. The English is
