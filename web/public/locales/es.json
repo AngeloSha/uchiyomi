@@ -1776,7 +1776,7 @@
   "Pause all": "Pausar todo",
   "The slow archive fetches whole series a chapter at a time, over nights or days, so a site never sees a burst. Queue a series from the add dialog, its page, or a Library selection.": "El archivado lento obtiene series enteras capítulo a capítulo, a lo largo de noches o días, para que ningún sitio reciba una ráfaga de peticiones. Pon una serie en cola al añadirla, desde su página o con una selección de la biblioteca.",
   "Off pauses every archive; nothing queued is lost.": "Al desactivarlo se pausa todo el archivado; no se pierde nada de lo que está en cola.",
-  "Runs only while Uchiyomi is running, even when it is only in the tray. If the PC sleeps at night, a night-time window will rarely get anything done.": "Solo funciona mientras Uchiyomi esté en marcha, aunque sea solo en la bandeja. Si el PC se suspende por la noche, una franja nocturna rara vez llegará a hacer algo.",
+  "Runs only while Uchiyomi is running, even when it is only in the tray. If the PC sleeps at night, a night-time window will rarely get anything done.": "Solo funciona mientras Uchiyomi esté en marcha, aunque sea solo en la bandeja del sistema. Si el PC se suspende por la noche, un horario nocturno casi nunca servirá de nada.",
   "Chapters an hour, per source": "Capítulos por hora, por fuente",
   "Only during set hours": "Solo en un horario fijo",
   "Hours in the server's local time. 22 until 6 runs overnight.": "Se usa la hora local del servidor. De 22 a 6 funciona de noche.",
