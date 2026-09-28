@@ -4,6 +4,7 @@
 // downloading the rest of the missing chapters -- care to offer as well which one we wanna download". So each
 // source that has chapters the series lacks offers them as a picker, everything selected, and one press
 // downloads the selection now. Pure, so the rules are tested without a browser.
+import { t as tr } from './i18n';
 
 /** A run of consecutive chapter numbers: one chip, "Ch. 12–40". */
 export interface Run { lo: number; hi: number; nums: number[] }
@@ -79,4 +80,20 @@ export function stillAsking(asking: readonly { name: string }[], waiting: number
   if (!asking.length && waiting <= 0) return null;
   const names = asking.slice(0, max).map((a) => a.name);
   return { names, more: asking.length - names.length + Math.max(0, waiting) };
+}
+
+/**
+ * What a source did lately, as ONE sentence per status with its streak inside: "refused us 3 times in a row". The
+ * streak used to be glued after the verb in English order, which a verb-final language (de, ja) cannot say.
+ *
+ * ⚠️ The streak only from two on: a single failure (or a count the server did not send) is the bare status, and that
+ * is the only reason localeCoverage.test.ts may list the three streak sentences as needing no "1 time" key.
+ * Reintroduce `n >= 1` on a line: "blocked: one failure is said as a streak of 1" in sourceStrings.test.ts (or its
+ * status's) fails -- the dialog read "refused us 1 times in a row".
+ */
+export function healthLine(h: { status: string; consecutive?: number | null }): string {
+  const n = h.consecutive ?? 0;
+  if (h.status === 'rate_limited') return n > 1 ? tr('rate-limited us {n} times in a row', { n }) : tr('rate-limited us');
+  if (h.status === 'blocked') return n > 1 ? tr('refused us {n} times in a row', { n }) : tr('refused us');
+  return n > 1 ? tr('did not answer {n} times in a row', { n }) : tr('did not answer');
 }

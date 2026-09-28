@@ -951,8 +951,11 @@ test('POST /api/sources/add forwards the series id, and only to someone who may 
 
     await t.test('a download add puts the series id on its job card once chapter one is scanned', async () => {
       // The only branch that cannot answer with the id: the reply goes out before persistScan has minted
-      // the row. Reintroduce by dropping the `card.seriesId = seriesId` line after the scan in
-      // addSeriesFromSource: the card never carries an id and the dialog is back to guessing by title.
+      // the row. Since v0.49.0 the id reaches the card two ways: the add stamps it after the scan, and GET
+      // /api/sources/jobs fills it from the folder's row for any card that has none. Reintroduce by dropping
+      // both -- the `card.seriesId = seriesId` line in addSeriesFromSource and `j.seriesId ?? seen.row(folder)?.id`
+      // in the route: the card never carries an id and the dialog is back to guessing by title. Either alone
+      // still passes.
       const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
         payload: { source: IDS, sourceId: `${IDS}-3` } });
       assert.equal(r.statusCode, 200, r.body);

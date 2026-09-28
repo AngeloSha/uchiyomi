@@ -10,9 +10,10 @@ repository you trust**, once, and from then on its extensions are listed under *
 
 - [What you need first: the extension engine](#what-you-need-first-the-extension-engine)
 - [Add an extension repository — step by step](#add-an-extension-repository--step-by-step)
-- [Choose your extensions](#choose-your-extensions)
+- [Choose your extensions](#choose-your-extensions) · [An extension's own settings](#an-extensions-own-settings)
 - [Automatic updates](#automatic-updates) · [Why there is a second container](#why-there-is-a-second-container) ·
-  [How it behaves](#how-it-behaves) · [Turning it off](#turning-it-off) · [Settings](#settings)
+  [How it behaves](#how-it-behaves) · [Turning it off](#turning-it-off) · [Your engine's data](#your-engines-data) ·
+  [Settings](#settings)
 - [Komga-compatible API](#komga-compatible-api) (Mihon reading Uchiyomi, the other direction)
 
 ## What you need first: the extension engine
@@ -22,18 +23,34 @@ Where it comes from depends on how you run Uchiyomi:
 
 | You run | The engine |
 |---|---|
-| **Docker** (the standard [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), and the development stack) | Already there: the `uchiyomi-suwayomi` container starts with the rest. Nothing to set up. |
+| **Docker** (the standard [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), and the development stack) | Already there: the `uchiyomi-suwayomi` container starts with the rest. Nothing to set up. `EXTENSION_ENGINE=0` in `.env` turns it off ([Turning it off](#turning-it-off)). |
 | **Uchiyomi Desktop, on this computer** | A download of about 200 MB, once: **Admin → Extensions** → **Download the extension engine (about 200 MB)**. Step by step in [the desktop guide](DESKTOP.md#add-your-first-sources). |
 | **Uchiyomi Desktop, connected to your server** | Your server's. Nothing runs on the computer; the Extensions tab is the server's own. |
-| **CasaOS** | Not part of that listing. **Admin → Extensions** says *No extension engine is set up for this server*; add the `uchiyomi-suwayomi` service from [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL` ([INSTALL.md](INSTALL.md#one-click-installs)). |
-| **Unraid** | Not in the template: set the advanced *SUWAYOMI_URL* to a Suwayomi server you run (and point that one at your FlareSolverr, as the template's help text says). |
-| **Umbrel** | Not part of that package. |
+| **CasaOS** | An add-on beside the listing. Import [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) as a custom app (its tips give the one folder command to run first), then set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567` in Uchiyomi's settings. |
+| **Unraid** | A template of its own: install **uchiyomi-suwayomi** from Apps ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): pinned, memory-capped, chapter downloads off, Cloudflare helper on). Set its *FLARESOLVERR_URL* to the solver Uchiyomi uses, then set Uchiyomi's advanced *SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567`. |
+| **Umbrel** | Not available. An Umbrel app cannot offer an optional second container, and putting the engine in the package would cost every Umbrel install about 800 MB whether it uses extensions or not. MangaDex and sites you add by address work there as everywhere. |
 
-When the engine is there, the top of **Admin → Extensions** shows a green `ready` badge with its version.
-With the engine turned off on Docker (`SUWAYOMI_URL` empty) the tab says so and how to bring it back:
-*The standard Docker install runs one in the `uchiyomi-suwayomi` container. If you turned it off by emptying
-SUWAYOMI_URL, put that line back in .env and run `docker compose up -d`.* A container that is set up but
-stopped shows *Can't reach the extension engine…* instead.
+When the engine is there, the top of **Admin → Extensions** shows *Engine ready · <version>*. When it is not,
+the tab is a **setup screen** instead (since v0.49.0). It says which of three things it is:
+
+- *Extensions are turned off* — `EXTENSION_ENGINE=0` on Docker;
+- *No extension engine is set up for this server.* — no `SUWAYOMI_URL` (CasaOS and Unraid until you add the
+  engine, or emptied by hand);
+- *The extension engine isn't answering* — set up, and not there right now (still starting, stopped, or at the
+  wrong address), with *Tried 3 times since 14:05 · next try in 4 minutes* under it.
+
+Under that come the steps for your platform — **Docker Compose**, **Unraid**, **CasaOS**, **Umbrel** or **Somewhere
+else**, opened on the one Uchiyomi detects (the CasaOS listing, the Unraid template and the Umbrel package say which
+they are; a v0.49.0 compose file gives itself away) — each command in a box with **Copy** where the browser allows
+it. **Check again** asks at once: when the engine answers, the card turns into the extension catalogue by itself,
+and its sources are registered in the same moment; when it does not, *Still no answer: <reason>* stays under the
+button. The card also asks by itself every 15 seconds while you look at it. It ends with where the engine's data is
+and why not to delete it ([Your engine's data](#your-engines-data)).
+
+Uchiyomi keeps trying on its own too: 5 s, 15 s, 30 s, 1 min and 2 min after a failed start, then every
+5 minutes for as long as it takes, quietly (one line in the log says so). Before v0.49.0 it gave up after about
+four minutes, and an engine that came up later — a slow NAS, a template installed after Uchiyomi, a container
+restarted by hand, a **Reload sources** during an outage — stayed missing until someone reloaded by hand.
 
 It costs memory: about **750 MB** once running (731 MiB measured on a server with 22 extensions installed).
 
@@ -69,9 +86,10 @@ https://example.org/repo/index.min.json
 3. Paste the address and press **Add** (or Enter). The button reads **Checking…** and a line says *Checking the
    repository — this can take up to a minute.*: Uchiyomi has the engine read the repository and waits until its
    extensions have arrived.
-4. **Added — {n} extensions from this repository** shows for a moment at the top of the window:
+4. **Added — {n} extensions from this repository** shows for a few seconds as a card at the bottom of the window
+   (bottom-right on a laptop):
 
-   ![The message at the top of the window after the add: Added — 72 extensions from this repository](shots/crop-repo-toast.webp)
+   ![The message after the add: Added — 72 extensions from this repository](shots/crop-repo-toast.webp)
 
    The repository appears in the row, and a line under it says what to do next:
 
@@ -141,6 +159,50 @@ get updates again.
 one of them is searched together. If you have more switched on than that, the panel says so in an amber banner
 and **Content → Health** lists it under *Extension source limit*; hiding languages is the cheap way under it. On
 a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other; the desktop app has no setting for it.
+
+## An extension's own settings
+
+Since v0.49.0. Many extensions have settings of their own — the screen Mihon opens from an extension's entry — and
+**Admin → Extensions** has them too: **Settings**, beside an installed extension, opens that screen.
+
+- **One source at a time.** An extension that provides one source per language keeps settings per language, and the
+  sheet's *Source* choice says which (it opens on the first one switched on). The numbering notice in the add
+  dialog and on the series page links an admin straight to a series' own source (**Source settings**), and so does
+  its row under Health's *Chapter numbering*.
+- **As the extension offers them**: switches and checkboxes, a list to pick one from, a list to tick several, and
+  text. A change is saved as you make it — text when you press **Save** or Enter — and the sheet then shows what the
+  engine holds; *The extension did not take the change.* when it did not. A setting the extension has switched off
+  in its version reads *Not available in this version of the extension*.
+- **They apply to every series from that source**, for every account.
+- **Addressed by name.** The engine stores a change by the setting's position on the screen, and an extension
+  update can move a setting. So Uchiyomi reads the screen again at the moment of saving, finds the setting by its
+  key, checks the value against that setting's own type and choices, and only then sends it. A setting that is not
+  there any more answers *This extension has no such setting any more. Reopen its settings.*
+- **Logged, except what is private.** A change is in the audit log (`source.extension_pref`) with the setting and
+  its old and new value — but a text setting only by its length, since extensions keep logins, keys and private
+  addresses there.
+- Admins only, and only while the engine answers.
+
+### Sequential numbering, and the renumber warning
+
+This is the setting [#116](https://github.com/AngeloSha/uchiyomi/issues/116) was about. The **Webtoons** extension
+numbers a post by the first *ep* or *ch* in its title, so a series posted in parts gives dozens of different posts
+one number (Istrevelia: 226 posts on 13 numbers), and Uchiyomi used to read all but the first on a number as
+versions of it. The extension's own **Use sequential chapter numbering** numbers them 1, 2, 3… instead. Since
+v0.49.0 Uchiyomi does the same by itself, per series, for any extension source that numbers posts this way —
+*posting order* ([USAGE](USAGE.md#chapter-numbering-when-a-source-gives-many-posts-one-number)) — so the switch is
+not needed; either way the chapters come out in the order they were posted.
+
+⚠️ **Changing a numbering setting renumbers your library.** The files of every series from that source carry the
+numbers the source gave them, and a setting that changes those numbers would leave each file under another post's
+number. A setting whose key or title speaks of sequential, chapter or episode numbering is treated as one. Its row
+says so before you touch it, with how many series in your library use that source's numbers, and when there are
+any the sheet asks once more (*Renumber 3 series?*). Each of those series is then held: its page says *The source's
+numbers changed*, nothing new downloads for it, and it updates again once an admin has reviewed the renaming there
+(**Review renumbering**, which matches every file to its post under the new numbers and renames it in place,
+reading progress and bookmarks included). Series numbered by posting order are not affected: their numbers are the
+posts' own. The add dialog's cached chapter lists for that source are dropped at once, so an add shows the new
+numbers.
 
 ## Automatic updates
 
@@ -221,8 +283,25 @@ file.** An install set up before v0.46.0 gets the cap by downloading the current
   FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the
   shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates
   the engine is the fix there.*
+- **The engine's page cache is kept empty.** The engine keeps a copy of every page it serves, with no limit, in
+  its container (not in its volume: on the host's system disk). Uchiyomi already has those pages in the CBZ it
+  wrote, so it asks the engine to delete them after each extension download job, and every half hour while
+  nothing is downloading through it; never while an extension download is running. Covers are left alone.
 - **If the engine is down, Uchiyomi is fine.** It boots normally, the built-in engines keep working, the panel
-  says it is unreachable, and extension-backed series simply do not update until it is back.
+  says it isn't answering and keeps asking, and extension-backed series simply do not update until it is back.
+  **Admin → Health** then says why those series wait (*…can't be reached because the extension engine isn't
+  answering*, or *…is off* — no longer "over the source limit"), and its **Extension engine** row says what
+  the engine itself is doing.
+- **Health checks the engine's own Cloudflare helper.** The **Extension engine** row reads the engine's
+  `flareSolverrEnabled` / `flareSolverrUrl`. When the helper is off, or points at `localhost` (the engine's own
+  container, where no solver runs), the row turns amber while an extension source is seen behind Cloudflare, and
+  is a greyed line otherwise. The row, and under the catalogue on **Admin → Extensions** the *Cloudflare helper*
+  line, offer **Connect**, which sets the engine to the solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it
+  on. Nothing restarts, and the engine keeps it unless its own container names another solver. It is never changed
+  without someone pressing it; with no `FLARESOLVERR_URL` on Uchiyomi both say to set that first. When the engine
+  cannot say what its helper is set to while a source fails with its *Cloudflare bypass currently disabled*, the
+  row reads *It cannot use its Cloudflare helper*, with the same **Connect** wherever there is a setting to change
+  (an engine too old to report the setting has to be set on its own container).
 - **Series stay routed** by the source they came from, so the scheduled updater keeps pulling new chapters.
 
 Two things worth knowing:
@@ -237,17 +316,67 @@ Two things worth knowing:
 
 ## Turning it off
 
-On Docker: set `SUWAYOMI_URL=` (empty) in `.env` and restart the app; the Extensions tab then says no engine is
-set up, and nothing else changes. To reclaim the memory as well, delete the `uchiyomi-suwayomi` service from
-your compose file (`yomi-suwayomi` in the development stack) and run `docker compose up -d --remove-orphans`.
-`docker compose stop` only lasts until the next `docker compose up`, which starts it again. The desktop app has no switch for it: an engine that was never
-downloaded costs nothing, and one that was only runs while Uchiyomi does.
+On Docker: put `EXTENSION_ENGINE=0` in `.env` next to your compose file and run `docker compose up -d`. The
+engine's container goes away, its memory with it, and Uchiyomi (which reads the same line) treats extensions as
+off; nothing else changes. Its data stays in its volume — `<project>_uchiyomi_suwayomi`, Compose putting your
+project's name (the folder's, by default) in front — so deleting the line and running the same command brings it
+back where it left off. Never `docker compose down -v` while you might come back: that deletes the volume, and
+with it the links for every series you added through an extension.
+
+- The switch needs the v0.49.0 compose files or later. An older file ignores the line: download the file for your
+  layout again — [`deploy/docker-compose.yml`](../deploy/docker-compose.yml),
+  [`docker-compose.external-db.yml`](../deploy/docker-compose.external-db.yml) or
+  [`docker-compose.split.yml`](../deploy/docker-compose.split.yml); each has the switch — or add its two lines to
+  yours (`deploy:` / `replicas: ${EXTENSION_ENGINE:-1}` under the engine,
+  `EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}` in the app's environment). An install made before v0.18.0 may run
+  the external-database layout under the name `docker-compose.yml` (it has a `uchiyomi-db` container): replace
+  that with `docker-compose.external-db.yml`, never with the one-container file, which would start on a new, empty
+  database.
+- `docker compose pull` still downloads the engine's image while it is off; `docker image rm` reclaims it.
+- An empty `SUWAYOMI_URL=` in `.env` turns extensions off in the app too (since the v0.49.0 compose files; the
+  older ones put the default back, which is why it never worked), but leaves the container running.
+- An engine you run yourself is not affected by the switch: it only turns off the bundled container.
+
+`docker compose stop` only lasts until the next `docker compose up`, which starts it again. On Unraid and CasaOS,
+stop or remove the engine's container and empty `SUWAYOMI_URL`. The desktop app has no switch for it: an engine
+that was never downloaded costs nothing, and one that was only runs while Uchiyomi does. The same steps, per
+platform, are under **Admin → Extensions** → **Turning it off**, below the catalogue.
+
+## Your engine's data
+
+The engine keeps its installed extensions, its repositories and — the part nothing else has — the id every
+series you added through an extension is routed by. It lives in the engine container's volume on Docker —
+`<project>_uchiyomi_suwayomi` in `docker volume ls`, where `<project>` is your Compose project's name (the folder's,
+by default) — `/mnt/user/appdata/uchiyomi-suwayomi` with the Unraid template, `/DATA/AppData/uchiyomi-suwayomi` with
+the CasaOS add-on, and the `engine` folder of the desktop app's data folder.
+
+**It is not in Uchiyomi's nightly backup**, on purpose: it belongs to another container that Uchiyomi cannot
+reach, a copy of its database taken while it runs may not be consistent, and Suwayomi's own backup restores
+series under new ids, which would not keep the links anyway. So back it up with your other volumes: stop the
+engine, copy, start it.
+
+```bash
+docker compose stop uchiyomi-suwayomi
+docker run --rm --volumes-from uchiyomi-suwayomi -v "$PWD":/b alpine tar czf /b/engine.tgz -C /home/suwayomi/.local/share/Tachidesk .
+docker compose up -d
+```
+
+`--volumes-from` borrows the stopped container's own volume, so the copy is of the data it really uses, whatever
+Compose named the volume. ⚠️ Never write the volume's name as bare `uchiyomi_suwayomi`: Docker makes a new, empty
+volume of that name without a word, and the backup is an empty file. With the engine switched off
+(`EXTENSION_ENGINE=0`) there is no container to borrow from: take the volume's full name from `docker volume ls`
+and mount that, `docker run --rm -v <project>_uchiyomi_suwayomi:/d -v "$PWD":/b alpine tar czf /b/engine.tgz -C /d .`
+
+On Unraid and CasaOS, copy the folder above the same way, with the engine stopped. Admin → Extensions says how
+many series depend on it, and warns you never to delete it: turning the engine off is safe, deleting its data is
+not. Moving it between setups is in [MIGRATING.md](MIGRATING.md#adding-or-removing-the-extension-engine).
 
 ## Settings
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
+| `EXTENSION_ENGINE` | `1` | `0` doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Compose only accepts `0` or `1` here (it is the engine's replica count, and any other value stops `docker compose up` for the whole stack); the app also reads `off`, `false` and `no`, for setups that don't pass the line to Compose. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
+| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off (in the v0.49.0 compose files and later). A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |

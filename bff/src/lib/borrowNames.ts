@@ -8,6 +8,7 @@ import { judgeCandidate, bounded, MIN_TRY_MS, type Judgement } from './autoFollo
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { chapterName } from './library';
+import { HEALED_NAME } from './naming';
 import { HUNT_MAX_SOURCES, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { visibleToAll } from './visibility';
 
@@ -46,7 +47,8 @@ export const NAMES_RETRY_MS = 7 * 24 * 3600_000;
 const NAMES_WALL_MS = 60_000;
 const NAMES_SEARCH_MS = 20_000;
 
-export type BorrowWhy = 'off' | 'nothing_to_do' | 'too_few' | 'waiting' | 'no_donor' | 'no_names';
+/** `posting_order`: the series is numbered by posting order (#116), so no donor's numbers name its chapters. */
+export type BorrowWhy = 'off' | 'nothing_to_do' | 'too_few' | 'waiting' | 'no_donor' | 'no_names' | 'posting_order';
 export interface BorrowResult { named: number; donor?: string; why?: BorrowWhy }
 
 type NameDonor = { source?: string; sourceId?: string; none?: number };
@@ -70,10 +72,13 @@ export async function borrowingOn(own: boolean | null): Promise<boolean> {
 
 export async function borrowNamesFor(seriesId: string, opts: { now?: number; force?: boolean } = {}): Promise<BorrowResult> {
   const now = opts.now ?? Date.now();
-  const s = await one<{ id: string; title: string; source_id: string | null; borrow_names: boolean | null; name_donor: NameDonor | null }>(
-    `SELECT s.id, s.title, s.source_id, s.borrow_names, s.name_donor FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`,
+  const s = await one<{ id: string; title: string; source_id: string | null; borrow_names: boolean | null; name_donor: NameDonor | null; numbering: string | null }>(
+    `SELECT s.id, s.title, s.source_id, s.borrow_names, s.name_donor, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`,
     [seriesId]).catch(() => null);
   if (!s) return { named: 0, why: 'nothing_to_do' };
+  // A donor lends a name by NUMBER, and under posting order no other site's chapter 20 is our chapter 20. The
+  // series' own source names every post anyway: posting order is exactly the case where each has its own title.
+  if (s.numbering === 'posting_order') return { named: 0, why: 'posting_order' };
   if (!(await borrowingOn(s.borrow_names))) return { named: 0, why: 'off' };
 
   // Only LIVE chapters with no name at all. A borrowed name counts as a name: re-deciding it every night would
@@ -173,14 +178,17 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
  * for itself.
  */
 export async function clearBorrowedNames(scope: { seriesId: string } | 'following-server'): Promise<number> {
+  // A name the listing healed (HEALED_NAME, lib/seriesListing.ts) is marked too, and is not a borrowed one: it is
+  // the series' own source's name, and it stays. Reintroduce by clearing every marked name: "switching it off takes
+  // back exactly what was borrowed" in borrowNames.int.test.ts takes the healed "Own Four" back too.
   const rows = scope === 'following-server'
     ? await q<{ id: string }>(
       `UPDATE lib_books b SET chapter_name = NULL, chapter_name_source = NULL, updated_at = now()
          FROM lib_series s
-        WHERE s.id = b.series_id AND s.borrow_names IS NULL AND b.chapter_name_source IS NOT NULL
-        RETURNING b.id`)
+        WHERE s.id = b.series_id AND s.borrow_names IS NULL AND b.chapter_name_source IS NOT NULL AND b.chapter_name_source <> $1
+        RETURNING b.id`, [HEALED_NAME])
     : await q<{ id: string }>(
       `UPDATE lib_books SET chapter_name = NULL, chapter_name_source = NULL, updated_at = now()
-        WHERE series_id = $1 AND chapter_name_source IS NOT NULL RETURNING id`, [scope.seriesId]);
+        WHERE series_id = $1 AND chapter_name_source IS NOT NULL AND chapter_name_source <> $2 RETURNING id`, [scope.seriesId, HEALED_NAME]);
   return rows.length;
 }

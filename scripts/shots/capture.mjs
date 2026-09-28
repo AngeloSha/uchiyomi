@@ -346,17 +346,20 @@ async function main() {
     await xp.close();
   }
 
-  // The success toast the docs name as step 4 ("Added — {n} extensions from this repository"). It lasts 3.2 s
-  // and sits at the top of the window, away from the row, so the crops above never show it (they wait for it
-  // to go): it is photographed on its own, the moment the add answers.
+  // The success notice the docs name as step 4 ("Added — {n} extensions from this repository"). Since v0.49.0 it
+  // is a card at the bottom of the window -- bottom-right on a laptop -- for as long as it takes to read (about
+  // 6 s here, lib/notices.ts noticeDuration), away from the row, so the crops above never show it: it is
+  // photographed on its own, the moment the add answers.
   if (want('crop-repo-toast')) {
     const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [] })]);
     await tabOn(xp, 'Extensions');
     const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
     await clickText(xp, 'button', 'Add');
+    // The card itself (components/Toast.tsx `data-notice`), not the capsule at the top it replaced: a selector
+    // for that timed out, and every capture after it in the run was skipped.
     const toast = await xp.waitForFunction(
-      () => [...document.querySelectorAll('.fixed.inset-x-0.top-0 *')].find((e) => /^Added — \d+ extensions? from this repository/.test((e.textContent || '').trim()) && e.className && String(e.className).includes('rounded-full')),
+      () => [...document.querySelectorAll('[data-notices] [data-notice="success"]')].find((e) => /^Added — \d+ extensions? from this repository/.test((e.textContent || '').trim())),
       { timeout: 15000 },
     );
     await sleep(300);
@@ -393,8 +396,9 @@ async function main() {
     if (want('phone-repo-empty')) { await xp.screenshot({ path: `${OUT}/phone-repo-empty.png`, clip: box }); console.log('  ✓ phone-repo-empty'); }
     await clickText(xp, 'button', 'Add');
     await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
-    // Let the toast go (3.2 s): it is fixed to the top of the viewport and would sit across the crop.
-    await sleep(4200);
+    // Let the notice go: on a phone it sits above the bottom nav, and a crop that reaches down would take it in.
+    await xp.waitForFunction(() => !document.querySelector('[data-notices] [data-notice]'), { timeout: 15000 }).catch(() => {});
+    await sleep(300);
     box = await rowBox(true);
     if (!box) throw new Error('phone-repo-added: no next-step line after the add');
     await sleep(600);

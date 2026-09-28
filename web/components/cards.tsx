@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { img } from '@/lib/api';
 import { Book, Series } from '@/lib/types';
 import { chapterLabel, progressOf, relativeTime } from '@/lib/format';
-import { deviceId } from '@/lib/device';
+import { deviceId, shownDeviceName } from '@/lib/device';
 import { coverTriplet } from '@/lib/theme';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay, IcPlus, IcWifiOff } from './icons';
@@ -132,6 +132,9 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
   // Progress already syncs across devices; this just says where you left off, and only when that was
   // somewhere else — "you were reading this on the device you're holding" is noise.
   const elsewhere = book.lastDevice && book.lastDevice.id !== deviceId() ? book.lastDevice : null;
+  // A platform ("iPhone"), or "another device" in the reader's words -- never the English "Browser" an older sign-in
+  // stored for a platform it did not know.
+  const where = elsewhere ? shownDeviceName(elsewhere.name) || tr('another device') : '';
   return (
     <Link
       href={`/reader/?book=${book.id}`}
@@ -144,7 +147,11 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
         <p className="mb-2 text-xs text-fog-300">
           {chapterLabel(book)}
           {elsewhere && (
-            <span className="text-fog-500"> · on {elsewhere.name || 'another device'}{elsewhere.at ? ` ${relativeTime(elsewhere.at)}` : ''}</span>
+            // One sentence per language: relativeTime is the reader's language now, and "on iPhone vor 3 Tagen"
+            // was English words around a German phrase.
+            <span className="text-fog-500"> · {elsewhere.at
+              ? tr('on {device} {when}', { device: where, when: relativeTime(elsewhere.at) })
+              : tr('on {device}', { device: where })}</span>
           )}
         </p>
         <ProgressBar value={pct || 0.02} />

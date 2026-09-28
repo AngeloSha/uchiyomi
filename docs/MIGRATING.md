@@ -17,6 +17,7 @@ container starts a Postgres of its own. An existing install never drifts into th
 - [One container → external database](#one-container--external-database)
 - [Upgrading the embedded Postgres major](#postgres-upgrade)
 - [From the split layout to one container](#moving-from-the-split-layout-to-one-container)
+- [Adding or removing the extension engine](#adding-or-removing-the-extension-engine)
 
 ## One container, no database container
 
@@ -196,3 +197,63 @@ app as one container next to its own `uchiyomi-db` — the external-database lay
 that installs made before v0.18.0 keep their database exactly where it already is. If you installed an older
 split-layout manifest, remove the app from CasaOS and re-import this one; CasaOS keeps the volumes, so your
 library survives.
+
+# Adding or removing the extension engine
+
+The extension engine (Mihon/Tachiyomi extensions, [extensions.md](extensions.md)) is an optional second container
+beside any of the layouts above. Turning it off and on never touches Uchiyomi's own data, and never needs a
+migration; the one thing to protect is the engine's own data ([extensions.md](extensions.md#your-engines-data)).
+
+**Docker Compose (v0.49.0 files and later).** One line in `.env`, then the usual command:
+
+```bash
+echo "EXTENSION_ENGINE=0" >> .env     # off: the container goes, its volume stays
+docker compose up -d
+```
+
+Delete the line (or set it to `1`) and run `docker compose up -d` again to bring it back where it left off. Compose
+only accepts `0` or `1` here: the value is the engine's replica count, and any other word stops `docker compose up`
+for the whole stack. Uchiyomi reads the same line, so it knows extensions are off instead of reporting an engine
+that isn't answering.
+
+**Compose files from before v0.49.0** have no switch; they keep working as they are. To get it, download the file
+for your layout again — `deploy/docker-compose.yml`, `docker-compose.external-db.yml` or `docker-compose.split.yml`
+(`curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/<that file>`); each has the switch — or
+add its two lines to yours: `deploy:` / `replicas: ${EXTENSION_ENGINE:-1}` under `uchiyomi-suwayomi`, and
+`EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}` in the app's `environment`. An install made before v0.18.0 may run the
+external-database layout under the name `docker-compose.yml` (it has a `uchiyomi-db` container): replace that with
+`docker-compose.external-db.yml`, never with the one-container file, which would start on a new, empty database.
+⚠️ With the new file an empty `SUWAYOMI_URL=` line in `.env` really turns extensions off (the old files put the
+default back, which is why that never worked); delete such a line if you want to keep them.
+
+**Unraid and CasaOS.** Add the engine with the `uchiyomi-suwayomi` template (Unraid, from Apps) or the add-on
+[`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) (CasaOS, imported as a custom
+app), then set `SUWAYOMI_URL` on Uchiyomi; remove it by stopping the engine and emptying `SUWAYOMI_URL`. The
+step-by-step for each, with the folder to create first, is under **Admin → Extensions** while no engine is set up.
+**Umbrel** cannot add an optional second container, so extensions are not available there.
+
+## Moving the engine between setups
+
+Compose ↔ Unraid ↔ CasaOS, or to a machine of its own: copy the engine's data, not just its settings.
+
+1. Stop the engine on the old setup, and copy its data: its appdata folder on Unraid and CasaOS; on Compose its
+   volume, `<project>_uchiyomi_suwayomi` in `docker volume ls`, most simply through the stopped container's own
+   mount (never through a bare `uchiyomi_suwayomi`, which Docker would create empty):
+
+   ```bash
+   docker run --rm --volumes-from uchiyomi-suwayomi -v "$PWD":/b alpine tar czf /b/engine.tgz -C /home/suwayomi/.local/share/Tachidesk .
+   ```
+
+2. Put it where the new setup mounts it (`/mnt/user/appdata/uchiyomi-suwayomi` for the Unraid template,
+   `/DATA/AppData/uchiyomi-suwayomi` for the CasaOS add-on), owned by uid **1000**: the official engine image runs
+   as that user and cannot write to a folder that belongs to root (`chown -R 1000:1000 <folder>`).
+3. Run the **same engine version** on both sides. Every shipped file pins the same one (a test holds them equal);
+   an engine newer than the data migrates it forward, and an older one cannot read what a newer one wrote.
+4. Keep the same address if you can. Covers fetched through the engine are stored with its address, so after a
+   move to a new one they show as placeholders until the series' covers are fetched again.
+5. Point `SUWAYOMI_URL` at the new engine. The extension sources come back by themselves within a few minutes
+   (or at once with **Check again** under Admin → Extensions).
+
+**Removing it for good.** Series added through extensions stay in your library and stay readable; Admin → Health
+lists them as waiting for the extension engine. Delete the engine's data only if you will never come back:
+without it, those series cannot be linked to their sources again except by adding them anew.

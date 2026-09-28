@@ -56,8 +56,10 @@ sites' terms and your local law.
 - **Library management** — several libraries, a filter panel (sort, read state, status, format, genres),
   *Select all* with bulk fetch and removal, editable metadata that survives a rescan, merge, delete, restore
   and forget.
-- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads and duplicates; *Verify
-  chapter files* re-checks that what the database claims is on disk actually is.
+- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads, duplicates and failing sources,
+  and names the step a source fails at. Every fix says what it does and how long it usually takes before you
+  press it, shows its progress live, and keeps what it did; *Verify chapter files* re-checks that what the
+  database claims is on disk actually is.
 - **Import what you already track** — a Mihon backup, a MangaDex list, a pasted list of titles, or your
   AniList / MyAnimeList / Kitsu list. Every match is **reviewed before it lands**, with a confidence score,
   *Change* and *Skip*, and batches you can resume.
@@ -65,7 +67,8 @@ sites' terms and your local law.
 **Fetching**
 
 - **~1,400 Mihon / Tachiyomi extensions** from a repository you add, plus generic engines for common site
-  families (paste a URL) and MangaDex. Nothing is enabled until you choose it.
+  families (paste a URL) and MangaDex. Nothing is enabled until you choose it, and each extension's own settings
+  are one click away, as in Mihon.
 - **Discover** — what your sources just published, grouped by language, and a search that **answers
   progressively**: results appear as each source replies instead of waiting for the slowest, and every
   source says whether it answered, failed or timed out.
@@ -76,6 +79,12 @@ sites' terms and your local law.
   written into the file as ComicInfo `<Translator>`.
 - **Shows you what you do not have** — chapters the sources list but your disk lacks appear as grey rows you
   can select and fetch.
+- **Library → Downloads** — everything the server is fetching, whoever started it, as covers that fill like apps
+  being installed, with what came in today; a ring on the Library tab says when something is coming in.
+- **A slow archive** — a whole back catalogue fetched a chapter at a time over nights or days, with the random
+  pauses of someone reading, so a site never sees a burst; it survives restarts and never counts as new chapters.
+- **Numbers webtoon posts in the order they were posted** — a source that gives many different posts one chapter
+  number (an episode split into parts) no longer reads as a few chapters with dozens of versions.
 - **Survives real-world sources** — it slows down when a site rate-limits instead of hammering it, and a
   chapter missing a handful of pages is kept as a **partial**, with placeholders, and repaired overnight
   rather than thrown away.

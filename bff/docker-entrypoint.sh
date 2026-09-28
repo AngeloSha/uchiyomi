@@ -161,10 +161,15 @@ else
 fi
 
 # The server's own log goes to the container log with the app's, rather than to a file inside the volume
-# that nothing rotates. Started with -w so the app never races a database that is still recovering.
+# that nothing rotates: no -l, so the server keeps the stdout/stderr it inherits, and -s keeps pg_ctl's own
+# "waiting for server to start" chatter out. It was `-l /dev/stdout ... start >/dev/null`, which opened that
+# same /dev/null: every Postgres error, a FATAL or a full disk included, was thrown away (found by the v0.49.0
+# embedded rollback drill; the watcher only ever said the database had stopped). `-l /dev/stderr` is no
+# answer either: as the PUID user the server may not reopen the container's stderr, and the container never
+# starts. Started with -w so the app never races a database that is still recovering.
 echo "[entrypoint] starting embedded Postgres $SERVER_MAJOR (socket $PGSOCK)"
-as_app pg_ctl -D "$PGDATA" -w -t 60 -l /dev/stdout \
-  -o "-c listen_addresses='' -k $PGSOCK -c log_min_messages=warning" start >/dev/null
+as_app pg_ctl -D "$PGDATA" -w -t 60 -s \
+  -o "-c listen_addresses='' -k $PGSOCK -c log_min_messages=warning" start
 if ! as_app psql -h "$PGSOCK" -U yomi -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='yomi'" | grep -q 1; then
   as_app createdb -h "$PGSOCK" -U yomi yomi
 fi

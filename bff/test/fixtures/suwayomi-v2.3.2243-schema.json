@@ -1,0 +1,3522 @@
+{
+  "_provenance": ["Introspected from Suwayomi-Server v2.3.2243 (r2243) by captureSuwayomiSchema.mjs.","Deprecated fields, arguments, input fields and enum values are included; introspection hides them by default.","Type shapes only. Types named __* (introspection) are left out."],
+  "engine": {"name":"Suwayomi-Server","version":"v2.3.2243","revision":"r2243"},
+  "roots": {"query":"Query","mutation":"Mutation","subscription":"Subscription"},
+  "types": {
+   "AboutServerPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "buildTime": "LongString!",
+      "buildType": "String!",
+      "discord": "String!",
+      "github": "String!",
+      "name": "String!",
+      "revision": {"type":"String!","deprecated":"The version includes the revision as the patch number"},
+      "version": "String!"
+    }
+   },
+   "AboutWebUI": {
+    "kind": "OBJECT",
+    "fields": {
+      "channel": "WebUIChannel!",
+      "tag": "String!",
+      "updateTimestamp": "LongString!"
+    }
+   },
+   "AddExtensionStoreInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "indexUrl": "String!"
+    }
+   },
+   "AddExtensionStorePayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extensionStore": "ExtensionStoreType!"
+    }
+   },
+   "AuthMode": {
+    "kind": "ENUM",
+    "values": ["NONE","BASIC_AUTH","SIMPLE_LOGIN","UI_LOGIN"]
+   },
+   "BackupRestoreState": {
+    "kind": "ENUM",
+    "values": ["IDLE","SUCCESS","FAILURE","RESTORING_CATEGORIES","RESTORING_MANGA","RESTORING_META","RESTORING_SETTINGS"]
+   },
+   "BackupRestoreStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "mangaProgress": "Int!",
+      "state": "BackupRestoreState!",
+      "totalManga": "Int!"
+    }
+   },
+   "BindTrackInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "mangaId": "Int!",
+      "private": "Boolean",
+      "remoteId": "LongString!",
+      "trackerId": "Int!"
+    }
+   },
+   "BindTrackPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecord": "TrackRecordType!"
+    }
+   },
+   "BindTrackRecordInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "mangaId": "Int!",
+      "trackRecordId": "Int!"
+    }
+   },
+   "BindTrackRecordPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecord": "TrackRecordType!"
+    }
+   },
+   "Boolean": {
+    "kind": "SCALAR"
+   },
+   "BooleanFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "Boolean",
+      "distinctFromAll": "[Boolean!]",
+      "distinctFromAny": "[Boolean!]",
+      "equalTo": "Boolean",
+      "greaterThan": "Boolean",
+      "greaterThanOrEqualTo": "Boolean",
+      "in": "[Boolean!]",
+      "isNull": "Boolean",
+      "lessThan": "Boolean",
+      "lessThanOrEqualTo": "Boolean",
+      "notDistinctFrom": "Boolean",
+      "notEqualTo": "Boolean",
+      "notEqualToAll": "[Boolean!]",
+      "notEqualToAny": "[Boolean!]",
+      "notIn": "[Boolean!]"
+    }
+   },
+   "CategoryConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "default": "Boolean",
+      "id": "Int",
+      "name": "String",
+      "order": "Int"
+    }
+   },
+   "CategoryEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "CategoryType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "CategoryFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[CategoryFilterInput!]",
+      "default": "BooleanFilterInput",
+      "id": "IntFilterInput",
+      "name": "StringFilterInput",
+      "not": "CategoryFilterInput",
+      "or": "[CategoryFilterInput!]",
+      "order": "IntFilterInput"
+    }
+   },
+   "CategoryJobStatus": {
+    "kind": "ENUM",
+    "values": ["UPDATING","SKIPPED"]
+   },
+   "CategoryMetaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "categoryId": "Int!",
+      "key": "String!",
+      "value": "String!",
+      "category": "CategoryType!"
+    },
+    "interfaces": ["MetaType"]
+   },
+   "CategoryMetaTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categoryId": "Int!",
+      "key": "String!",
+      "value": "String!"
+    }
+   },
+   "CategoryNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[CategoryEdge!]!",
+      "nodes": "[CategoryType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "CategoryOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","NAME","ORDER"]
+   },
+   "CategoryOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "CategoryOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "CategoryType": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "Boolean!",
+      "id": "Int!",
+      "includeInDownload": "IncludeOrExclude!",
+      "includeInUpdate": "IncludeOrExclude!",
+      "name": "String!",
+      "order": "Int!",
+      "mangas": "MangaNodeList!",
+      "meta": "[CategoryMetaType!]!"
+    }
+   },
+   "CategoryUpdateType": {
+    "kind": "OBJECT",
+    "fields": {
+      "category": "CategoryType!",
+      "status": "CategoryJobStatus!"
+    }
+   },
+   "CbzMediaType": {
+    "kind": "ENUM",
+    "values": ["MODERN","LEGACY","COMPATIBLE"]
+   },
+   "ChapterConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterNumber": "Float",
+      "fetchedAt": "LongString",
+      "id": "Int",
+      "isBookmarked": "Boolean",
+      "isDownloaded": "Boolean",
+      "isRead": "Boolean",
+      "lastPageRead": "Int",
+      "lastReadAt": "LongString",
+      "mangaId": "Int",
+      "name": "String",
+      "pageCount": "Int",
+      "realUrl": "String",
+      "scanlator": "String",
+      "sourceOrder": "Int",
+      "uploadDate": "LongString",
+      "url": "String"
+    }
+   },
+   "ChapterEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "ChapterType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "ChapterFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[ChapterFilterInput!]",
+      "chapterNumber": "DoubleFilterInput",
+      "fetchedAt": "LongFilterInput",
+      "id": "IntFilterInput",
+      "inLibrary": "BooleanFilterInput",
+      "isBookmarked": "BooleanFilterInput",
+      "isDownloaded": "BooleanFilterInput",
+      "isRead": "BooleanFilterInput",
+      "lastPageRead": "IntFilterInput",
+      "lastReadAt": "LongFilterInput",
+      "mangaId": "IntFilterInput",
+      "name": "StringFilterInput",
+      "not": "ChapterFilterInput",
+      "or": "[ChapterFilterInput!]",
+      "pageCount": "IntFilterInput",
+      "realUrl": "StringFilterInput",
+      "scanlator": "StringFilterInput",
+      "sourceOrder": "IntFilterInput",
+      "uploadDate": "LongFilterInput",
+      "url": "StringFilterInput"
+    }
+   },
+   "ChapterMetaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapterId": "Int!",
+      "key": "String!",
+      "value": "String!",
+      "chapter": "ChapterType!"
+    },
+    "interfaces": ["MetaType"]
+   },
+   "ChapterMetaTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "key": "String!",
+      "value": "String!"
+    }
+   },
+   "ChapterNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[ChapterEdge!]!",
+      "nodes": "[ChapterType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "ChapterOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","SOURCE_ORDER","NAME","UPLOAD_DATE","CHAPTER_NUMBER","LAST_READ_AT","FETCHED_AT"]
+   },
+   "ChapterOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "ChapterOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "ChapterType": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapterNumber": "Float!",
+      "fetchedAt": "LongString!",
+      "id": "Int!",
+      "isBookmarked": "Boolean!",
+      "isDownloaded": "Boolean!",
+      "isRead": "Boolean!",
+      "lastPageRead": "Int!",
+      "lastReadAt": "LongString!",
+      "mangaId": "Int!",
+      "name": "String!",
+      "pageCount": "Int!",
+      "realUrl": "String",
+      "scanlator": "String",
+      "sourceOrder": "Int!",
+      "uploadDate": "LongString!",
+      "url": "String!",
+      "manga": "MangaType!",
+      "meta": "[ChapterMetaType!]!"
+    }
+   },
+   "CheckBoxFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "Boolean!",
+      "name": "String!"
+    }
+   },
+   "CheckBoxPreference": {
+    "kind": "OBJECT",
+    "fields": {
+      "currentValue": "Boolean",
+      "default": "Boolean!",
+      "enabled": "Boolean!",
+      "key": "String",
+      "summary": "String",
+      "title": "String",
+      "visible": "Boolean!"
+    }
+   },
+   "CheckForServerUpdatesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "channel": "String!",
+      "tag": "String!",
+      "url": "String!"
+    }
+   },
+   "ClearCachedImagesInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "cachedPages": "Boolean",
+      "cachedThumbnails": "Boolean",
+      "clientMutationId": "String",
+      "downloadedThumbnails": "Boolean"
+    }
+   },
+   "ClearCachedImagesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "cachedPages": "Boolean",
+      "cachedThumbnails": "Boolean",
+      "clientMutationId": "String",
+      "downloadedThumbnails": "Boolean"
+    }
+   },
+   "ClearDownloaderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "ClearDownloaderPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "ConnectKoSyncAccountInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "password": "String!",
+      "serverAddress": "String!",
+      "username": "String!"
+    }
+   },
+   "ContentWarning": {
+    "kind": "ENUM",
+    "values": ["SAFE","MIXED","NSFW"]
+   },
+   "ContentWarningFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "ContentWarning",
+      "distinctFromAll": "[ContentWarning!]",
+      "distinctFromAny": "[ContentWarning!]",
+      "equalTo": "ContentWarning",
+      "greaterThan": "ContentWarning",
+      "greaterThanOrEqualTo": "ContentWarning",
+      "in": "[ContentWarning!]",
+      "isNull": "Boolean",
+      "lessThan": "ContentWarning",
+      "lessThanOrEqualTo": "ContentWarning",
+      "notDistinctFrom": "ContentWarning",
+      "notEqualTo": "ContentWarning",
+      "notEqualToAll": "[ContentWarning!]",
+      "notEqualToAny": "[ContentWarning!]",
+      "notIn": "[ContentWarning!]"
+    }
+   },
+   "CreateBackupInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "flags": "PartialBackupFlagsInput",
+      "includeCategories": {"type":"Boolean","deprecated":"Will get removed, replace with flags"},
+      "includeChapters": {"type":"Boolean","deprecated":"Will get removed, replace with flags"},
+      "includeClientData": {"type":"Boolean","deprecated":"Will get removed, replace with flags"},
+      "includeHistory": {"type":"Boolean","deprecated":"Will get removed, replace with flags"},
+      "includeServerSettings": {"type":"Boolean","deprecated":"Will get removed, replace with flags"},
+      "includeTracking": {"type":"Boolean","deprecated":"Will get removed, replace with flags"}
+    }
+   },
+   "CreateBackupPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "url": "String!"
+    }
+   },
+   "CreateCategoryInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "default": "Boolean",
+      "includeInDownload": "IncludeOrExclude",
+      "includeInUpdate": "IncludeOrExclude",
+      "name": "String!",
+      "order": "Int"
+    }
+   },
+   "CreateCategoryPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "category": "CategoryType!",
+      "clientMutationId": "String"
+    }
+   },
+   "Cursor": {
+    "kind": "SCALAR"
+   },
+   "DatabaseType": {
+    "kind": "ENUM",
+    "values": ["H2","POSTGRESQL"]
+   },
+   "DeleteCategoryInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categoryId": "Int!",
+      "clientMutationId": "String"
+    }
+   },
+   "DeleteCategoryMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categoryId": "Int!",
+      "clientMutationId": "String",
+      "key": "String!"
+    }
+   },
+   "DeleteCategoryMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "category": "CategoryType!",
+      "clientMutationId": "String",
+      "meta": "CategoryMetaType"
+    }
+   },
+   "DeleteCategoryMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[DeleteCategoryMetasItemInput!]!"
+    }
+   },
+   "DeleteCategoryMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categoryIds": "[Int!]!",
+      "keys": "[String!]",
+      "prefixes": "[String!]"
+    }
+   },
+   "DeleteCategoryMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "categories": "[CategoryType!]!",
+      "clientMutationId": "String",
+      "metas": "[CategoryMetaType!]!"
+    }
+   },
+   "DeleteCategoryPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "category": "CategoryType",
+      "clientMutationId": "String",
+      "mangas": "[MangaType!]!"
+    }
+   },
+   "DeleteChapterMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "clientMutationId": "String",
+      "key": "String!"
+    }
+   },
+   "DeleteChapterMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapter": "ChapterType!",
+      "clientMutationId": "String",
+      "meta": "ChapterMetaType"
+    }
+   },
+   "DeleteChapterMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[DeleteChapterMetasItemInput!]!"
+    }
+   },
+   "DeleteChapterMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterIds": "[Int!]!",
+      "keys": "[String!]",
+      "prefixes": "[String!]"
+    }
+   },
+   "DeleteChapterMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String",
+      "metas": "[ChapterMetaType!]!"
+    }
+   },
+   "DeleteDownloadedChapterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!"
+    }
+   },
+   "DeleteDownloadedChapterPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "ChapterType!",
+      "clientMutationId": "String"
+    }
+   },
+   "DeleteDownloadedChaptersInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!"
+    }
+   },
+   "DeleteDownloadedChaptersPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "DeleteGlobalMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "key": "String!"
+    }
+   },
+   "DeleteGlobalMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "GlobalMetaType"
+    }
+   },
+   "DeleteGlobalMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "keys": "[String!]",
+      "prefixes": "[String!]"
+    }
+   },
+   "DeleteGlobalMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "metas": "[GlobalMetaType!]!"
+    }
+   },
+   "DeleteMangaMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "key": "String!",
+      "mangaId": "Int!"
+    }
+   },
+   "DeleteMangaMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "manga": "MangaType!",
+      "meta": "MangaMetaType"
+    }
+   },
+   "DeleteMangaMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[DeleteMangaMetasItemInput!]!"
+    }
+   },
+   "DeleteMangaMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "keys": "[String!]",
+      "mangaIds": "[Int!]!",
+      "prefixes": "[String!]"
+    }
+   },
+   "DeleteMangaMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "mangas": "[MangaType!]!",
+      "metas": "[MangaMetaType!]!"
+    }
+   },
+   "DeleteSourceMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "key": "String!",
+      "sourceId": "LongString!"
+    }
+   },
+   "DeleteSourceMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "SourceMetaType",
+      "source": "SourceType"
+    }
+   },
+   "DeleteSourceMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[DeleteSourceMetasItemInput!]!"
+    }
+   },
+   "DeleteSourceMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "keys": "[String!]",
+      "prefixes": "[String!]",
+      "sourceIds": "[LongString!]!"
+    }
+   },
+   "DeleteSourceMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "metas": "[SourceMetaType!]!",
+      "sources": "[SourceType!]!"
+    }
+   },
+   "DequeueChapterDownloadInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!"
+    }
+   },
+   "DequeueChapterDownloadPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "DequeueChapterDownloadsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!"
+    }
+   },
+   "DequeueChapterDownloadsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "DoubleFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "Float",
+      "distinctFromAll": "[Float!]",
+      "distinctFromAny": "[Float!]",
+      "equalTo": "Float",
+      "greaterThan": "Float",
+      "greaterThanOrEqualTo": "Float",
+      "in": "[Float!]",
+      "isNull": "Boolean",
+      "lessThan": "Float",
+      "lessThanOrEqualTo": "Float",
+      "notDistinctFrom": "Float",
+      "notEqualTo": "Float",
+      "notEqualToAll": "[Float!]",
+      "notEqualToAny": "[Float!]",
+      "notIn": "[Float!]"
+    }
+   },
+   "DownloadChangedInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "maxUpdates": "Int"
+    }
+   },
+   "DownloadEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "DownloadType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "DownloaderState": {
+    "kind": "ENUM",
+    "values": ["STARTED","STOPPED"]
+   },
+   "DownloadNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[DownloadEdge!]!",
+      "nodes": "[DownloadType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "DownloadState": {
+    "kind": "ENUM",
+    "values": ["QUEUED","DOWNLOADING","FINISHED","ERROR"]
+   },
+   "DownloadStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "queue": "[DownloadType!]!",
+      "state": "DownloaderState!"
+    }
+   },
+   "DownloadType": {
+    "kind": "OBJECT",
+    "fields": {
+      "position": "Int!",
+      "progress": "Float!",
+      "state": "DownloadState!",
+      "tries": "Int!",
+      "chapter": "ChapterType!",
+      "manga": "MangaType!"
+    }
+   },
+   "DownloadUpdate": {
+    "kind": "OBJECT",
+    "fields": {
+      "download": "DownloadType!",
+      "type": "DownloadUpdateType!"
+    }
+   },
+   "DownloadUpdates": {
+    "kind": "OBJECT",
+    "fields": {
+      "initial": "[DownloadType!]",
+      "omittedUpdates": "Boolean!",
+      "state": "DownloaderState!",
+      "updates": "[DownloadUpdate!]!"
+    }
+   },
+   "DownloadUpdateType": {
+    "kind": "ENUM",
+    "values": ["QUEUED","DEQUEUED","PAUSED","STOPPED","PROGRESS","FINISHED","ERROR","POSITION"]
+   },
+   "Duration": {
+    "kind": "SCALAR"
+   },
+   "Edge": {
+    "kind": "INTERFACE",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "Node!"
+    },
+    "possibleTypes": ["CategoryEdge","ChapterEdge","DownloadEdge","ExtensionEdge","ExtensionStoreEdge","MangaEdge","MetaEdge","SourceEdge","TrackRecordEdge","TrackerEdge"]
+   },
+   "EditTextPreference": {
+    "kind": "OBJECT",
+    "fields": {
+      "currentValue": "String",
+      "default": "String",
+      "dialogMessage": "String",
+      "dialogTitle": "String",
+      "enabled": "Boolean!",
+      "key": "String",
+      "summary": "String",
+      "text": "String",
+      "title": "String",
+      "visible": "Boolean!"
+    }
+   },
+   "EnqueueChapterDownloadInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!"
+    }
+   },
+   "EnqueueChapterDownloadPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "EnqueueChapterDownloadsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!"
+    }
+   },
+   "EnqueueChapterDownloadsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "ExtensionConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "apkName": "String",
+      "apkUrl": "String",
+      "contentWarning": "ContentWarning",
+      "extensionLib": "String",
+      "hasUpdate": "Boolean",
+      "iconUrl": "String",
+      "isInstalled": "Boolean",
+      "isNsfw": {"type":"Boolean","deprecated":", replace with contentWarning"},
+      "isObsolete": "Boolean",
+      "jarUrl": "String",
+      "lang": "String",
+      "name": "String",
+      "pkgName": "String",
+      "repo": {"type":"String","deprecated":", replace with storeIndexUrl"},
+      "storeIndexUrl": "String",
+      "versionCode": "Int",
+      "versionCodeLong": "LongString",
+      "versionName": "String"
+    }
+   },
+   "ExtensionEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "ExtensionType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "ExtensionFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[ExtensionFilterInput!]",
+      "apkName": "StringFilterInput",
+      "apkUrl": "StringFilterInput",
+      "contentWarning": "ContentWarningFilterInput",
+      "extensionLib": "StringFilterInput",
+      "hasUpdate": "BooleanFilterInput",
+      "iconUrl": "StringFilterInput",
+      "isInstalled": "BooleanFilterInput",
+      "isNsfw": {"type":"BooleanFilterInput","deprecated":", replace with contentWarning"},
+      "isObsolete": "BooleanFilterInput",
+      "jarUrl": "StringFilterInput",
+      "lang": "StringFilterInput",
+      "name": "StringFilterInput",
+      "not": "ExtensionFilterInput",
+      "or": "[ExtensionFilterInput!]",
+      "pkgName": "StringFilterInput",
+      "repo": {"type":"StringFilterInput","deprecated":", replace with storeIndexUrl"},
+      "storeIndexUrl": "StringFilterInput",
+      "versionCode": {"type":"IntFilterInput","deprecated":", replace with versionCodeLong"},
+      "versionCodeLong": "LongFilterInput",
+      "versionName": "StringFilterInput"
+    }
+   },
+   "ExtensionNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[ExtensionEdge!]!",
+      "nodes": "[ExtensionType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "ExtensionOrderBy": {
+    "kind": "ENUM",
+    "values": ["PKG_NAME","NAME","APK_NAME"],
+    "deprecatedValues": {"APK_NAME":""}
+   },
+   "ExtensionOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "ExtensionOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "ExtensionStoreConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "id": "Int",
+      "indexUrl": "String",
+      "name": "String"
+    }
+   },
+   "ExtensionStoreEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "ExtensionStoreType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "ExtensionStoreFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[ExtensionStoreFilterInput!]",
+      "indexUrl": "StringFilterInput",
+      "name": "StringFilterInput",
+      "not": "ExtensionStoreFilterInput",
+      "or": "[ExtensionStoreFilterInput!]"
+    }
+   },
+   "ExtensionStoreNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[ExtensionStoreEdge!]!",
+      "nodes": "[ExtensionStoreType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "ExtensionStoreOrderBy": {
+    "kind": "ENUM",
+    "values": ["NAME","INDEX_URL"]
+   },
+   "ExtensionStoreOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "ExtensionStoreOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "ExtensionStoreType": {
+    "kind": "OBJECT",
+    "fields": {
+      "badgeLabel": "String!",
+      "contactDiscord": "String",
+      "contactWebsite": "String!",
+      "extensionListUrl": "String",
+      "indexUrl": "String!",
+      "isLegacy": "Boolean!",
+      "name": "String!",
+      "signingKey": "String!",
+      "extensions": "ExtensionNodeList!"
+    }
+   },
+   "ExtensionType": {
+    "kind": "OBJECT",
+    "fields": {
+      "apkName": "String",
+      "apkUrl": "String",
+      "contentWarning": "ContentWarning!",
+      "extensionLib": "String",
+      "hasUpdate": "Boolean!",
+      "iconUrl": "String!",
+      "isInstalled": "Boolean!",
+      "isNsfw": {"type":"Boolean!","deprecated":"Removed in extension api v1.6, replace with contentWarning"},
+      "isObsolete": "Boolean!",
+      "jarUrl": "String",
+      "lang": "String!",
+      "name": "String!",
+      "pkgName": "String!",
+      "repo": {"type":"String","deprecated":"Removed in extension api v1.6, replace with storeIndexUrl"},
+      "storeIndexUrl": "String",
+      "versionCode": {"type":"Int!","deprecated":"Type was changed to Long, will be switched back to this variable name in the future., replace with versionCodeLong"},
+      "versionCodeLong": "LongString!",
+      "versionName": "String!",
+      "extensionStore": "ExtensionStoreType",
+      "source": "SourceNodeList!"
+    }
+   },
+   "FetchChapterPagesInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "clientMutationId": "String",
+      "format": "String"
+    }
+   },
+   "FetchChapterPagesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapter": "ChapterType!",
+      "clientMutationId": "String",
+      "pages": "[String!]!",
+      "syncConflict": "SyncConflictInfoType"
+    }
+   },
+   "FetchChaptersInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "mangaId": "Int!"
+    }
+   },
+   "FetchChaptersPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "FetchExtensionsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "FetchExtensionsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extensionStores": "[ExtensionStoreType!]!",
+      "extensions": "[ExtensionType!]!"
+    }
+   },
+   "FetchMangaAndChaptersInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "fetchChapters": "Boolean!",
+      "fetchManga": "Boolean!",
+      "id": "Int!"
+    }
+   },
+   "FetchMangaAndChaptersPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String",
+      "manga": "MangaType!"
+    }
+   },
+   "FetchMangaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!"
+    }
+   },
+   "FetchMangaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "manga": "MangaType!"
+    }
+   },
+   "FetchSourceMangaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "filters": "[FilterChangeInput!]",
+      "page": "Int!",
+      "query": "String",
+      "source": "LongString!",
+      "type": "FetchSourceMangaType!"
+    }
+   },
+   "FetchSourceMangaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "hasNextPage": "Boolean!",
+      "mangas": "[MangaType!]!"
+    }
+   },
+   "FetchSourceMangaType": {
+    "kind": "ENUM",
+    "values": ["SEARCH","POPULAR","LATEST"]
+   },
+   "FetchTrackInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "recordId": "Int!"
+    }
+   },
+   "FetchTrackPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecord": "TrackRecordType!"
+    }
+   },
+   "Filter": {
+    "kind": "UNION",
+    "possibleTypes": ["CheckBoxFilter","GroupFilter","HeaderFilter","SelectFilter","SeparatorFilter","SortFilter","TextFilter","TriStateFilter"]
+   },
+   "FilterChangeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "checkBoxState": "Boolean",
+      "groupChange": "FilterChangeInput",
+      "position": "Int!",
+      "selectState": "Int",
+      "sortState": "SortSelectionInput",
+      "textState": "String",
+      "triState": "TriState"
+    }
+   },
+   "Float": {
+    "kind": "SCALAR"
+   },
+   "GlobalMetaNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[MetaEdge!]!",
+      "nodes": "[GlobalMetaType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "GlobalMetaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "key": "String!",
+      "value": "String!"
+    },
+    "interfaces": ["MetaType"]
+   },
+   "GlobalMetaTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "key": "String!",
+      "value": "String!"
+    }
+   },
+   "GroupFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "filters": "[Filter!]!",
+      "name": "String!"
+    }
+   },
+   "HeaderFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "name": "String!"
+    }
+   },
+   "IncludeOrExclude": {
+    "kind": "ENUM",
+    "values": ["EXCLUDE","INCLUDE","UNSET"]
+   },
+   "InstallExternalExtensionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "extensionFile": "Upload!"
+    }
+   },
+   "InstallExternalExtensionPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extension": "ExtensionType!"
+    }
+   },
+   "Int": {
+    "kind": "SCALAR"
+   },
+   "IntFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "Int",
+      "distinctFromAll": "[Int!]",
+      "distinctFromAny": "[Int!]",
+      "equalTo": "Int",
+      "greaterThan": "Int",
+      "greaterThanOrEqualTo": "Int",
+      "in": "[Int!]",
+      "isNull": "Boolean",
+      "lessThan": "Int",
+      "lessThanOrEqualTo": "Int",
+      "notDistinctFrom": "Int",
+      "notEqualTo": "Int",
+      "notEqualToAll": "[Int!]",
+      "notEqualToAny": "[Int!]",
+      "notIn": "[Int!]"
+    }
+   },
+   "KoreaderSyncChecksumMethod": {
+    "kind": "ENUM",
+    "values": ["BINARY","FILENAME"]
+   },
+   "KoreaderSyncConflictStrategy": {
+    "kind": "ENUM",
+    "values": ["PROMPT","KEEP_LOCAL","KEEP_REMOTE","DISABLED"]
+   },
+   "KoreaderSyncLegacyStrategy": {
+    "kind": "ENUM",
+    "values": ["PROMPT","SILENT","SEND","RECEIVE","DISABLED"]
+   },
+   "KoSyncConnectPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "message": "String",
+      "status": "KoSyncStatusPayload!"
+    }
+   },
+   "KoSyncStatusPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "isLoggedIn": "Boolean!",
+      "serverAddress": "String",
+      "username": "String"
+    }
+   },
+   "LastUpdateTimestampPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "timestamp": "LongString!"
+    }
+   },
+   "LibraryUpdateStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "categoryUpdates": "[CategoryUpdateType!]!",
+      "jobsInfo": "UpdaterJobsInfoType!",
+      "mangaUpdates": "[MangaUpdateType!]!"
+    }
+   },
+   "LibraryUpdateStatusChangedInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "maxUpdates": "Int"
+    }
+   },
+   "ListPreference": {
+    "kind": "OBJECT",
+    "fields": {
+      "currentValue": "String",
+      "default": "String",
+      "enabled": "Boolean!",
+      "entries": "[String!]!",
+      "entryValues": "[String!]!",
+      "key": "String",
+      "summary": "String",
+      "title": "String",
+      "visible": "Boolean!"
+    }
+   },
+   "LoginInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "password": "String!",
+      "username": "String!"
+    }
+   },
+   "LoginPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "accessToken": "String!",
+      "clientMutationId": "String",
+      "refreshToken": "String!"
+    }
+   },
+   "LoginTrackerCredentialsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "password": "String!",
+      "trackerId": "Int!",
+      "username": "String!"
+    }
+   },
+   "LoginTrackerCredentialsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "isLoggedIn": "Boolean!",
+      "tracker": "TrackerType!"
+    }
+   },
+   "LoginTrackerOAuthInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "callbackUrl": "String!",
+      "clientMutationId": "String",
+      "trackerId": "Int!"
+    }
+   },
+   "LoginTrackerOAuthPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "isLoggedIn": "Boolean!",
+      "tracker": "TrackerType!"
+    }
+   },
+   "LogoutKoSyncAccountInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "LogoutKoSyncAccountPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "status": "KoSyncStatusPayload!"
+    }
+   },
+   "LogoutTrackerInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "trackerId": "Int!"
+    }
+   },
+   "LogoutTrackerPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "isLoggedIn": "Boolean!",
+      "tracker": "TrackerType!"
+    }
+   },
+   "LongFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "LongString",
+      "distinctFromAll": "[LongString!]",
+      "distinctFromAny": "[LongString!]",
+      "equalTo": "LongString",
+      "greaterThan": "LongString",
+      "greaterThanOrEqualTo": "LongString",
+      "in": "[LongString!]",
+      "isNull": "Boolean",
+      "lessThan": "LongString",
+      "lessThanOrEqualTo": "LongString",
+      "notDistinctFrom": "LongString",
+      "notEqualTo": "LongString",
+      "notEqualToAll": "[LongString!]",
+      "notEqualToAny": "[LongString!]",
+      "notIn": "[LongString!]"
+    }
+   },
+   "LongString": {
+    "kind": "SCALAR"
+   },
+   "MangaConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "artist": "String",
+      "author": "String",
+      "categoryIds": "[Int!]",
+      "chaptersLastFetchedAt": "LongString",
+      "description": "String",
+      "genre": "[String!]",
+      "id": "Int",
+      "inLibrary": "Boolean",
+      "inLibraryAt": "LongString",
+      "initialized": "Boolean",
+      "lastFetchedAt": "LongString",
+      "realUrl": "String",
+      "sourceId": "LongString",
+      "status": "MangaStatus",
+      "thumbnailUrl": "String",
+      "title": "String",
+      "url": "String"
+    }
+   },
+   "MangaEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "MangaType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "MangaFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[MangaFilterInput!]",
+      "artist": "StringFilterInput",
+      "author": "StringFilterInput",
+      "categoryId": "IntFilterInput",
+      "chaptersLastFetchedAt": "LongFilterInput",
+      "description": "StringFilterInput",
+      "genre": "StringFilterInput",
+      "id": "IntFilterInput",
+      "inLibrary": "BooleanFilterInput",
+      "inLibraryAt": "LongFilterInput",
+      "initialized": "BooleanFilterInput",
+      "lastFetchedAt": "LongFilterInput",
+      "not": "MangaFilterInput",
+      "or": "[MangaFilterInput!]",
+      "realUrl": "StringFilterInput",
+      "sourceId": "LongFilterInput",
+      "status": "MangaStatusFilterInput",
+      "thumbnailUrl": "StringFilterInput",
+      "title": "StringFilterInput",
+      "url": "StringFilterInput"
+    }
+   },
+   "MangaJobStatus": {
+    "kind": "ENUM",
+    "values": ["PENDING","RUNNING","COMPLETE","FAILED","SKIPPED"]
+   },
+   "MangaMetaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "key": "String!",
+      "mangaId": "Int!",
+      "value": "String!",
+      "manga": "MangaType!"
+    },
+    "interfaces": ["MetaType"]
+   },
+   "MangaMetaTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "key": "String!",
+      "mangaId": "Int!",
+      "value": "String!"
+    }
+   },
+   "MangaNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[MangaEdge!]!",
+      "nodes": "[MangaType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "MangaOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","TITLE","IN_LIBRARY_AT","LAST_FETCHED_AT"]
+   },
+   "MangaOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "MangaOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "MangaStatus": {
+    "kind": "ENUM",
+    "values": ["UNKNOWN","ONGOING","COMPLETED","LICENSED","PUBLISHING_FINISHED","CANCELLED","ON_HIATUS"]
+   },
+   "MangaStatusFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "MangaStatus",
+      "distinctFromAll": "[MangaStatus!]",
+      "distinctFromAny": "[MangaStatus!]",
+      "equalTo": "MangaStatus",
+      "greaterThan": "MangaStatus",
+      "greaterThanOrEqualTo": "MangaStatus",
+      "in": "[MangaStatus!]",
+      "isNull": "Boolean",
+      "lessThan": "MangaStatus",
+      "lessThanOrEqualTo": "MangaStatus",
+      "notDistinctFrom": "MangaStatus",
+      "notEqualTo": "MangaStatus",
+      "notEqualToAll": "[MangaStatus!]",
+      "notEqualToAny": "[MangaStatus!]",
+      "notIn": "[MangaStatus!]"
+    }
+   },
+   "MangaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "artist": "String",
+      "author": "String",
+      "chaptersLastFetchedAt": "LongString",
+      "description": "String",
+      "genre": "[String!]!",
+      "id": "Int!",
+      "inLibrary": "Boolean!",
+      "inLibraryAt": "LongString!",
+      "initialized": "Boolean!",
+      "lastFetchedAt": "LongString",
+      "realUrl": "String",
+      "sourceId": "LongString!",
+      "status": "MangaStatus!",
+      "thumbnailUrl": "String",
+      "thumbnailUrlLastFetched": "LongString",
+      "title": "String!",
+      "updateStrategy": "UpdateStrategy!",
+      "url": "String!",
+      "age": "LongString",
+      "bookmarkCount": "Int!",
+      "categories": "CategoryNodeList!",
+      "chapters": "ChapterNodeList!",
+      "chaptersAge": "LongString",
+      "downloadCount": "Int!",
+      "firstUnreadChapter": "ChapterType",
+      "hasDuplicateChapters": "Boolean!",
+      "highestNumberedChapter": "ChapterType",
+      "lastReadChapter": "ChapterType",
+      "latestFetchedChapter": "ChapterType",
+      "latestReadChapter": "ChapterType",
+      "latestUploadedChapter": "ChapterType",
+      "meta": "[MangaMetaType!]!",
+      "source": "SourceType",
+      "trackRecords": "TrackRecordNodeList!",
+      "unreadCount": "Int!"
+    }
+   },
+   "MangaUpdateType": {
+    "kind": "OBJECT",
+    "fields": {
+      "status": "MangaJobStatus!",
+      "manga": "MangaType!"
+    }
+   },
+   "MetaConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "key": "String",
+      "value": "String"
+    }
+   },
+   "MetaEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "GlobalMetaType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "MetaFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[MetaFilterInput!]",
+      "key": "StringFilterInput",
+      "not": "MetaFilterInput",
+      "or": "[MetaFilterInput!]",
+      "value": "StringFilterInput"
+    }
+   },
+   "MetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "key": "String!",
+      "value": "String!"
+    }
+   },
+   "MetaOrderBy": {
+    "kind": "ENUM",
+    "values": ["KEY","VALUE"]
+   },
+   "MetaOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "MetaOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "MetaType": {
+    "kind": "INTERFACE",
+    "fields": {
+      "key": "String!",
+      "value": "String!"
+    },
+    "possibleTypes": ["CategoryMetaType","ChapterMetaType","GlobalMetaType","MangaMetaType","SourceMetaType"]
+   },
+   "MultiSelectListPreference": {
+    "kind": "OBJECT",
+    "fields": {
+      "currentValue": "[String!]",
+      "default": "[String!]",
+      "dialogMessage": "String",
+      "dialogTitle": "String",
+      "enabled": "Boolean!",
+      "entries": "[String!]!",
+      "entryValues": "[String!]!",
+      "key": "String",
+      "summary": "String",
+      "title": "String",
+      "visible": "Boolean!"
+    }
+   },
+   "Mutation": {
+    "kind": "OBJECT",
+    "fields": {
+      "createBackup": {"type":"CreateBackupPayload!","args":{"input":"CreateBackupInput"}},
+      "restoreBackup": {"type":"RestoreBackupPayload!","args":{"input":"RestoreBackupInput!"}},
+      "createCategory": {"type":"CreateCategoryPayload","args":{"input":"CreateCategoryInput!"}},
+      "deleteCategory": {"type":"DeleteCategoryPayload","args":{"input":"DeleteCategoryInput!"}},
+      "deleteCategoryMeta": {"type":"DeleteCategoryMetaPayload","args":{"input":"DeleteCategoryMetaInput!"}},
+      "deleteCategoryMetas": {"type":"DeleteCategoryMetasPayload","args":{"input":"DeleteCategoryMetasInput!"}},
+      "setCategoryMeta": {"type":"SetCategoryMetaPayload","args":{"input":"SetCategoryMetaInput!"}},
+      "setCategoryMetas": {"type":"SetCategoryMetasPayload","args":{"input":"SetCategoryMetasInput!"}},
+      "updateCategories": {"type":"UpdateCategoriesPayload","args":{"input":"UpdateCategoriesInput!"}},
+      "updateCategory": {"type":"UpdateCategoryPayload","args":{"input":"UpdateCategoryInput!"}},
+      "updateCategoryOrder": {"type":"UpdateCategoryOrderPayload","args":{"input":"UpdateCategoryOrderInput!"}},
+      "updateMangaCategories": {"type":"UpdateMangaCategoriesPayload","args":{"input":"UpdateMangaCategoriesInput!"}},
+      "updateMangasCategories": {"type":"UpdateMangasCategoriesPayload","args":{"input":"UpdateMangasCategoriesInput!"}},
+      "deleteChapterMeta": {"type":"DeleteChapterMetaPayload","args":{"input":"DeleteChapterMetaInput!"}},
+      "deleteChapterMetas": {"type":"DeleteChapterMetasPayload","args":{"input":"DeleteChapterMetasInput!"}},
+      "fetchChapterPages": {"type":"FetchChapterPagesPayload","args":{"input":"FetchChapterPagesInput!"}},
+      "fetchChapters": {"type":"FetchChaptersPayload","args":{"input":"FetchChaptersInput!"},"deprecated":"Deprecated in Tachiyomix 1.6, replace with fetchMangaAndChapters"},
+      "setChapterMeta": {"type":"SetChapterMetaPayload","args":{"input":"SetChapterMetaInput!"}},
+      "setChapterMetas": {"type":"SetChapterMetasPayload","args":{"input":"SetChapterMetasInput!"}},
+      "updateChapter": {"type":"UpdateChapterPayload","args":{"input":"UpdateChapterInput!"}},
+      "updateChapters": {"type":"UpdateChaptersPayload","args":{"input":"UpdateChaptersInput!"}},
+      "clearDownloader": {"type":"ClearDownloaderPayload","args":{"input":"ClearDownloaderInput!"}},
+      "deleteDownloadedChapter": {"type":"DeleteDownloadedChapterPayload","args":{"input":"DeleteDownloadedChapterInput!"}},
+      "deleteDownloadedChapters": {"type":"DeleteDownloadedChaptersPayload","args":{"input":"DeleteDownloadedChaptersInput!"}},
+      "dequeueChapterDownload": {"type":"DequeueChapterDownloadPayload","args":{"input":"DequeueChapterDownloadInput!"}},
+      "dequeueChapterDownloads": {"type":"DequeueChapterDownloadsPayload","args":{"input":"DequeueChapterDownloadsInput!"}},
+      "enqueueChapterDownload": {"type":"EnqueueChapterDownloadPayload","args":{"input":"EnqueueChapterDownloadInput!"}},
+      "enqueueChapterDownloads": {"type":"EnqueueChapterDownloadsPayload","args":{"input":"EnqueueChapterDownloadsInput!"}},
+      "reorderChapterDownload": {"type":"ReorderChapterDownloadPayload","args":{"input":"ReorderChapterDownloadInput!"}},
+      "startDownloader": {"type":"StartDownloaderPayload","args":{"input":"StartDownloaderInput!"}},
+      "stopDownloader": {"type":"StopDownloaderPayload","args":{"input":"StopDownloaderInput!"}},
+      "fetchExtensions": {"type":"FetchExtensionsPayload","args":{"input":"FetchExtensionsInput!"}},
+      "installExternalExtension": {"type":"InstallExternalExtensionPayload","args":{"input":"InstallExternalExtensionInput!"}},
+      "updateExtension": {"type":"UpdateExtensionPayload","args":{"input":"UpdateExtensionInput!"}},
+      "updateExtensions": {"type":"UpdateExtensionsPayload","args":{"input":"UpdateExtensionsInput!"}},
+      "addExtensionStore": {"type":"AddExtensionStorePayload","args":{"input":"AddExtensionStoreInput!"}},
+      "removeExtensionStore": {"type":"RemoveExtensionStorePayload","args":{"input":"RemoveExtensionStoreInput!"}},
+      "clearCachedImages": {"type":"ClearCachedImagesPayload!","args":{"input":"ClearCachedImagesInput!"}},
+      "resetWebUIUpdateStatus": "WebUIUpdateStatus",
+      "updateWebUI": {"type":"WebUIUpdatePayload","args":{"input":"WebUIUpdateInput!"}},
+      "connectKoSyncAccount": {"type":"KoSyncConnectPayload!","args":{"input":"ConnectKoSyncAccountInput!"}},
+      "logoutKoSyncAccount": {"type":"LogoutKoSyncAccountPayload!","args":{"input":"LogoutKoSyncAccountInput!"}},
+      "pullKoSyncProgress": {"type":"PullKoSyncProgressPayload","args":{"input":"PullKoSyncProgressInput!"}},
+      "pushKoSyncProgress": {"type":"PushKoSyncProgressPayload","args":{"input":"PushKoSyncProgressInput!"}},
+      "deleteMangaMeta": {"type":"DeleteMangaMetaPayload","args":{"input":"DeleteMangaMetaInput!"}},
+      "deleteMangaMetas": {"type":"DeleteMangaMetasPayload","args":{"input":"DeleteMangaMetasInput!"}},
+      "fetchManga": {"type":"FetchMangaPayload","args":{"input":"FetchMangaInput!"},"deprecated":"Deprecated in Tachiyomix 1.6, replace with fetchMangaAndChapters"},
+      "fetchMangaAndChapters": {"type":"FetchMangaAndChaptersPayload","args":{"input":"FetchMangaAndChaptersInput!"}},
+      "setMangaMeta": {"type":"SetMangaMetaPayload","args":{"input":"SetMangaMetaInput!"}},
+      "setMangaMetas": {"type":"SetMangaMetasPayload","args":{"input":"SetMangaMetasInput!"}},
+      "updateManga": {"type":"UpdateMangaPayload","args":{"input":"UpdateMangaInput!"}},
+      "updateMangas": {"type":"UpdateMangasPayload","args":{"input":"UpdateMangasInput!"}},
+      "deleteGlobalMeta": {"type":"DeleteGlobalMetaPayload","args":{"input":"DeleteGlobalMetaInput!"}},
+      "deleteGlobalMetas": {"type":"DeleteGlobalMetasPayload","args":{"input":"DeleteGlobalMetasInput!"}},
+      "setGlobalMeta": {"type":"SetGlobalMetaPayload","args":{"input":"SetGlobalMetaInput!"}},
+      "setGlobalMetas": {"type":"SetGlobalMetasPayload","args":{"input":"SetGlobalMetasInput!"}},
+      "resetSettings": {"type":"ResetSettingsPayload!","args":{"input":"ResetSettingsInput!"}},
+      "setSettings": {"type":"SetSettingsPayload!","args":{"input":"SetSettingsInput!"}},
+      "startSync": {"type":"StartSyncPayload!","args":{"input":"StartSyncInput!"}},
+      "deleteSourceMeta": {"type":"DeleteSourceMetaPayload","args":{"input":"DeleteSourceMetaInput!"}},
+      "deleteSourceMetas": {"type":"DeleteSourceMetasPayload","args":{"input":"DeleteSourceMetasInput!"}},
+      "fetchSourceManga": {"type":"FetchSourceMangaPayload","args":{"input":"FetchSourceMangaInput!"}},
+      "setSourceMeta": {"type":"SetSourceMetaPayload","args":{"input":"SetSourceMetaInput!"}},
+      "setSourceMetas": {"type":"SetSourceMetasPayload","args":{"input":"SetSourceMetasInput!"}},
+      "updateSourcePreference": {"type":"UpdateSourcePreferencePayload","args":{"input":"UpdateSourcePreferenceInput!"}},
+      "bindTrack": {"type":"BindTrackPayload!","args":{"input":"BindTrackInput!"}},
+      "bindTrackRecord": {"type":"BindTrackRecordPayload","args":{"input":"BindTrackRecordInput!"}},
+      "fetchTrack": {"type":"FetchTrackPayload!","args":{"input":"FetchTrackInput!"}},
+      "loginTrackerCredentials": {"type":"LoginTrackerCredentialsPayload!","args":{"input":"LoginTrackerCredentialsInput!"}},
+      "loginTrackerOAuth": {"type":"LoginTrackerOAuthPayload!","args":{"input":"LoginTrackerOAuthInput!"}},
+      "logoutTracker": {"type":"LogoutTrackerPayload!","args":{"input":"LogoutTrackerInput!"}},
+      "trackProgress": {"type":"TrackProgressPayload","args":{"input":"TrackProgressInput!"}},
+      "unbindTrack": {"type":"UnbindTrackPayload!","args":{"input":"UnbindTrackInput!"}},
+      "updateTrack": {"type":"UpdateTrackPayload!","args":{"input":"UpdateTrackInput!"}},
+      "updateCategoryManga": {"type":"UpdateCategoryMangaPayload","args":{"input":"UpdateCategoryMangaInput!"}},
+      "updateLibrary": {"type":"UpdateLibraryPayload","args":{"input":"UpdateLibraryInput!"}},
+      "updateLibraryManga": {"type":"UpdateLibraryMangaPayload","args":{"input":"UpdateLibraryMangaInput!"}},
+      "updateStop": {"type":"UpdateStopPayload!","args":{"input":"UpdateStopInput!"}},
+      "login": {"type":"LoginPayload!","args":{"input":"LoginInput!"}},
+      "refreshToken": {"type":"RefreshTokenPayload!","args":{"input":"RefreshTokenInput!"}}
+    }
+   },
+   "Node": {
+    "kind": "UNION",
+    "possibleTypes": ["CategoryMetaType","CategoryType","ChapterMetaType","ChapterType","DownloadType","DownloadUpdate","ExtensionStoreType","ExtensionType","GlobalMetaType","MangaMetaType","MangaType","PartialSettingsType","SettingsType","SourceMetaType","SourceType","TrackRecordType","TrackerType"]
+   },
+   "NodeList": {
+    "kind": "INTERFACE",
+    "fields": {
+      "edges": "[Edge!]!",
+      "nodes": "[Node!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "possibleTypes": ["CategoryNodeList","ChapterNodeList","DownloadNodeList","ExtensionNodeList","ExtensionStoreNodeList","GlobalMetaNodeList","MangaNodeList","SourceNodeList","TrackRecordNodeList","TrackerNodeList"]
+   },
+   "PageInfo": {
+    "kind": "OBJECT",
+    "fields": {
+      "endCursor": "Cursor",
+      "hasNextPage": "Boolean!",
+      "hasPreviousPage": "Boolean!",
+      "startCursor": "Cursor"
+    }
+   },
+   "PartialBackupFlagsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "includeCategories": "Boolean",
+      "includeChapters": "Boolean",
+      "includeClientData": "Boolean",
+      "includeHistory": "Boolean",
+      "includeManga": "Boolean",
+      "includeServerSettings": "Boolean",
+      "includeTracking": "Boolean"
+    }
+   },
+   "PartialSettingsType": {
+    "kind": "OBJECT",
+    "fields": {
+      "authMode": "AuthMode",
+      "authPassword": "String",
+      "authUsername": "String",
+      "autoBackupIncludeCategories": "Boolean",
+      "autoBackupIncludeChapters": "Boolean",
+      "autoBackupIncludeClientData": "Boolean",
+      "autoBackupIncludeHistory": "Boolean",
+      "autoBackupIncludeManga": "Boolean",
+      "autoBackupIncludeServerSettings": "Boolean",
+      "autoBackupIncludeTracking": "Boolean",
+      "autoDownloadAheadLimit": {"type":"Int","deprecated":"Replaced with autoDownloadNewChaptersLimit, replace with autoDownloadNewChaptersLimit"},
+      "autoDownloadIgnoreReUploads": "Boolean",
+      "autoDownloadNewChapters": "Boolean",
+      "autoDownloadNewChaptersLimit": "Int",
+      "backupInterval": "Int",
+      "backupPath": "String",
+      "backupTTL": "Int",
+      "backupTime": "String",
+      "basicAuthEnabled": {"type":"Boolean","deprecated":"Removed - prefer authMode, replace with authMode"},
+      "basicAuthPassword": {"type":"String","deprecated":"Removed - prefer authPassword, replace with authPassword"},
+      "basicAuthUsername": {"type":"String","deprecated":"Removed - prefer authUsername, replace with authUsername"},
+      "databasePassword": "String",
+      "databaseType": "DatabaseType",
+      "databaseUrl": "String",
+      "databaseUsername": "String",
+      "debugLogsEnabled": "Boolean",
+      "downloadAsCbz": "Boolean",
+      "downloadConversions": "[SettingsDownloadConversionType!]",
+      "downloadsPath": "String",
+      "electronPath": "String",
+      "excludeCompleted": "Boolean",
+      "excludeEntryWithUnreadChapters": "Boolean",
+      "excludeNotStarted": "Boolean",
+      "excludeUnreadChapters": "Boolean",
+      "extensionRepos": {"type":"[String!]","deprecated":"Replaced with addExtensionStore and removeExtensionStore mutations"},
+      "flareSolverrAsResponseFallback": "Boolean",
+      "flareSolverrEnabled": "Boolean",
+      "flareSolverrSessionName": "String",
+      "flareSolverrSessionTtl": "Int",
+      "flareSolverrTimeout": "Int",
+      "flareSolverrUrl": "String",
+      "globalUpdateInterval": "Float",
+      "gqlDebugLogsEnabled": {"type":"Boolean","deprecated":"Removed - does not do anything"},
+      "initialOpenInBrowserEnabled": "Boolean",
+      "ip": "String",
+      "jwtAudience": "String",
+      "jwtRefreshExpiry": "Duration",
+      "jwtTokenExpiry": "Duration",
+      "kcefEnabled": "Boolean",
+      "koreaderSyncChecksumMethod": "KoreaderSyncChecksumMethod",
+      "koreaderSyncDeviceId": {"type":"String","deprecated":"Moved to preference store. Is supposed to be random and gets auto generated, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncPercentageTolerance": "Float",
+      "koreaderSyncServerUrl": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncStrategy": {"type":"KoreaderSyncLegacyStrategy","deprecated":"Replaced with koreaderSyncStrategyForward and koreaderSyncStrategyBackward, replace with koreaderSyncStrategyForward, koreaderSyncStrategyBackward"},
+      "koreaderSyncStrategyBackward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncStrategyForward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncUserkey": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncUsername": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "localSourcePath": "String",
+      "maxLogFileSize": "String",
+      "maxLogFiles": "Int",
+      "maxLogFolderSize": "String",
+      "maxSourcesInParallel": "Int",
+      "opdsCbzMimetype": "CbzMediaType",
+      "opdsChapterSortOrder": "SortOrder",
+      "opdsEnablePageReadProgress": "Boolean",
+      "opdsItemsPerPage": "Int",
+      "opdsMarkAsReadOnDownload": "Boolean",
+      "opdsShowOnlyDownloadedChapters": "Boolean",
+      "opdsShowOnlyUnreadChapters": "Boolean",
+      "opdsSkipChapterMetadataFeed": "Boolean",
+      "opdsUseBinaryFileSizes": "Boolean",
+      "port": "Int",
+      "serveConversions": "[SettingsDownloadConversionType!]",
+      "socksProxyEnabled": "Boolean",
+      "socksProxyHost": "String",
+      "socksProxyPassword": "String",
+      "socksProxyPort": "String",
+      "socksProxyUsername": "String",
+      "socksProxyVersion": "Int",
+      "syncDataCategories": "Boolean",
+      "syncDataChapters": "Boolean",
+      "syncDataHistory": "Boolean",
+      "syncDataManga": "Boolean",
+      "syncDataTracking": "Boolean",
+      "syncInterval": "Duration",
+      "syncYomiApiKey": "String",
+      "syncYomiEnabled": "Boolean",
+      "syncYomiHost": "String",
+      "systemTrayEnabled": "Boolean",
+      "updateMangas": "Boolean",
+      "useHikariConnectionPool": "Boolean",
+      "webUIChannel": "WebUIChannel",
+      "webUIFlavor": "WebUIFlavor",
+      "webUIInterface": "WebUIInterface",
+      "webUIUpdateCheckInterval": "Float"
+    },
+    "interfaces": ["Settings"]
+   },
+   "PartialSettingsTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "authMode": "AuthMode",
+      "authPassword": "String",
+      "authUsername": "String",
+      "autoBackupIncludeCategories": "Boolean",
+      "autoBackupIncludeChapters": "Boolean",
+      "autoBackupIncludeClientData": "Boolean",
+      "autoBackupIncludeHistory": "Boolean",
+      "autoBackupIncludeManga": "Boolean",
+      "autoBackupIncludeServerSettings": "Boolean",
+      "autoBackupIncludeTracking": "Boolean",
+      "autoDownloadAheadLimit": {"type":"Int","deprecated":"Replaced with autoDownloadNewChaptersLimit, replace with autoDownloadNewChaptersLimit"},
+      "autoDownloadIgnoreReUploads": "Boolean",
+      "autoDownloadNewChapters": "Boolean",
+      "autoDownloadNewChaptersLimit": "Int",
+      "backupInterval": "Int",
+      "backupPath": "String",
+      "backupTTL": "Int",
+      "backupTime": "String",
+      "basicAuthEnabled": {"type":"Boolean","deprecated":"Removed - prefer authMode, replace with authMode"},
+      "basicAuthPassword": {"type":"String","deprecated":"Removed - prefer authPassword, replace with authPassword"},
+      "basicAuthUsername": {"type":"String","deprecated":"Removed - prefer authUsername, replace with authUsername"},
+      "databasePassword": "String",
+      "databaseType": "DatabaseType",
+      "databaseUrl": "String",
+      "databaseUsername": "String",
+      "debugLogsEnabled": "Boolean",
+      "downloadAsCbz": "Boolean",
+      "downloadConversions": "[SettingsDownloadConversionTypeInput!]",
+      "downloadsPath": "String",
+      "electronPath": "String",
+      "excludeCompleted": "Boolean",
+      "excludeEntryWithUnreadChapters": "Boolean",
+      "excludeNotStarted": "Boolean",
+      "excludeUnreadChapters": "Boolean",
+      "extensionRepos": {"type":"[String!]","deprecated":"Replaced with addExtensionStore and removeExtensionStore mutations"},
+      "flareSolverrAsResponseFallback": "Boolean",
+      "flareSolverrEnabled": "Boolean",
+      "flareSolverrSessionName": "String",
+      "flareSolverrSessionTtl": "Int",
+      "flareSolverrTimeout": "Int",
+      "flareSolverrUrl": "String",
+      "globalUpdateInterval": "Float",
+      "gqlDebugLogsEnabled": {"type":"Boolean","deprecated":"Removed - does not do anything"},
+      "initialOpenInBrowserEnabled": "Boolean",
+      "ip": "String",
+      "jwtAudience": "String",
+      "jwtRefreshExpiry": "Duration",
+      "jwtTokenExpiry": "Duration",
+      "kcefEnabled": "Boolean",
+      "koreaderSyncChecksumMethod": "KoreaderSyncChecksumMethod",
+      "koreaderSyncDeviceId": {"type":"String","deprecated":"Moved to preference store. Is supposed to be random and gets auto generated, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncPercentageTolerance": "Float",
+      "koreaderSyncServerUrl": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncStrategy": {"type":"KoreaderSyncLegacyStrategy","deprecated":"Replaced with koreaderSyncStrategyForward and koreaderSyncStrategyBackward, replace with koreaderSyncStrategyForward, koreaderSyncStrategyBackward"},
+      "koreaderSyncStrategyBackward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncStrategyForward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncUserkey": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncUsername": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "localSourcePath": "String",
+      "maxLogFileSize": "String",
+      "maxLogFiles": "Int",
+      "maxLogFolderSize": "String",
+      "maxSourcesInParallel": "Int",
+      "opdsCbzMimetype": "CbzMediaType",
+      "opdsChapterSortOrder": "SortOrder",
+      "opdsEnablePageReadProgress": "Boolean",
+      "opdsItemsPerPage": "Int",
+      "opdsMarkAsReadOnDownload": "Boolean",
+      "opdsShowOnlyDownloadedChapters": "Boolean",
+      "opdsShowOnlyUnreadChapters": "Boolean",
+      "opdsSkipChapterMetadataFeed": "Boolean",
+      "opdsUseBinaryFileSizes": "Boolean",
+      "port": "Int",
+      "serveConversions": "[SettingsDownloadConversionTypeInput!]",
+      "socksProxyEnabled": "Boolean",
+      "socksProxyHost": "String",
+      "socksProxyPassword": "String",
+      "socksProxyPort": "String",
+      "socksProxyUsername": "String",
+      "socksProxyVersion": "Int",
+      "syncDataCategories": "Boolean",
+      "syncDataChapters": "Boolean",
+      "syncDataHistory": "Boolean",
+      "syncDataManga": "Boolean",
+      "syncDataTracking": "Boolean",
+      "syncInterval": "Duration",
+      "syncYomiApiKey": "String",
+      "syncYomiEnabled": "Boolean",
+      "syncYomiHost": "String",
+      "systemTrayEnabled": "Boolean",
+      "updateMangas": "Boolean",
+      "useHikariConnectionPool": "Boolean",
+      "webUIChannel": "WebUIChannel",
+      "webUIFlavor": "WebUIFlavor",
+      "webUIInterface": "WebUIInterface",
+      "webUIUpdateCheckInterval": "Float"
+    }
+   },
+   "Preference": {
+    "kind": "UNION",
+    "possibleTypes": ["CheckBoxPreference","EditTextPreference","ListPreference","MultiSelectListPreference","SwitchPreference"]
+   },
+   "PullKoSyncProgressInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "clientMutationId": "String"
+    }
+   },
+   "PullKoSyncProgressPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapter": "ChapterType",
+      "clientMutationId": "String",
+      "syncConflict": "SyncConflictInfoType"
+    }
+   },
+   "PushKoSyncProgressInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "clientMutationId": "String"
+    }
+   },
+   "PushKoSyncProgressPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapter": "ChapterType",
+      "clientMutationId": "String",
+      "success": "Boolean!"
+    }
+   },
+   "Query": {
+    "kind": "OBJECT",
+    "fields": {
+      "restoreStatus": {"type":"BackupRestoreStatus","args":{"id":"String!"}},
+      "validateBackup": {"type":"ValidateBackupResult!","args":{"input":"ValidateBackupInput!"}},
+      "categories": {"type":"CategoryNodeList!","args":{"condition":"CategoryConditionInput","filter":"CategoryFilterInput","orderBy":{"type":"CategoryOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[CategoryOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "category": {"type":"CategoryType!","args":{"id":"Int!"}},
+      "chapter": {"type":"ChapterType!","args":{"id":"Int!"}},
+      "chapters": {"type":"ChapterNodeList!","args":{"condition":"ChapterConditionInput","filter":"ChapterFilterInput","orderBy":{"type":"ChapterOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[ChapterOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "downloadStatus": "DownloadStatus!",
+      "extension": {"type":"ExtensionType!","args":{"pkgName":"String!"}},
+      "extensions": {"type":"ExtensionNodeList!","args":{"condition":"ExtensionConditionInput","filter":"ExtensionFilterInput","orderBy":{"type":"ExtensionOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[ExtensionOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "extensionStore": {"type":"ExtensionStoreType!","args":{"indexUrl":"String!"}},
+      "extensionStores": {"type":"ExtensionStoreNodeList!","args":{"condition":"ExtensionStoreConditionInput","filter":"ExtensionStoreFilterInput","order":"[ExtensionStoreOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "aboutServer": "AboutServerPayload!",
+      "aboutWebUI": "AboutWebUI!",
+      "checkForServerUpdates": "[CheckForServerUpdatesPayload!]!",
+      "checkForWebUIUpdate": "WebUIUpdateCheck!",
+      "getWebUIUpdateStatus": "WebUIUpdateStatus!",
+      "koSyncStatus": "KoSyncStatusPayload!",
+      "manga": {"type":"MangaType!","args":{"id":"Int!"}},
+      "mangas": {"type":"MangaNodeList!","args":{"condition":"MangaConditionInput","filter":"MangaFilterInput","orderBy":{"type":"MangaOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[MangaOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "meta": {"type":"GlobalMetaType!","args":{"key":"String!"}},
+      "metas": {"type":"GlobalMetaNodeList!","args":{"condition":"MetaConditionInput","filter":"MetaFilterInput","orderBy":{"type":"MetaOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[MetaOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "settings": "SettingsType!",
+      "source": {"type":"SourceType!","args":{"id":"LongString!"}},
+      "sources": {"type":"SourceNodeList!","args":{"condition":"SourceConditionInput","filter":"SourceFilterInput","orderBy":{"type":"SourceOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[SourceOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "lastSyncStatus": "SyncStatus",
+      "searchTracker": {"type":"SearchTrackerPayload!","args":{"input":"SearchTrackerInput!"}},
+      "trackRecord": {"type":"TrackRecordType!","args":{"id":"Int!"}},
+      "trackRecords": {"type":"TrackRecordNodeList!","args":{"condition":"TrackRecordConditionInput","filter":"TrackRecordFilterInput","orderBy":{"type":"TrackRecordOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[TrackRecordOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "tracker": {"type":"TrackerType!","args":{"id":"Int!"}},
+      "trackers": {"type":"TrackerNodeList!","args":{"condition":"TrackerConditionInput","orderBy":{"type":"TrackerOrderBy","deprecated":"Replaced with order, replace with order"},"orderByType":{"type":"SortOrder","deprecated":"Replaced with order, replace with order"},"order":"[TrackerOrderInput!]","before":"Cursor","after":"Cursor","first":"Int","last":"Int","offset":"Int"}},
+      "lastUpdateTimestamp": "LastUpdateTimestampPayload!",
+      "libraryUpdateStatus": "LibraryUpdateStatus!",
+      "updateStatus": {"type":"UpdateStatus!","deprecated":"Replaced with libraryUpdateStatus, replace with libraryUpdateStatus"}
+    }
+   },
+   "RefreshTokenInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "refreshToken": "String!"
+    }
+   },
+   "RefreshTokenPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "accessToken": "String!",
+      "clientMutationId": "String"
+    }
+   },
+   "RemoveExtensionStoreInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "indexUrl": "String!"
+    }
+   },
+   "RemoveExtensionStorePayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extensionStore": "ExtensionStoreType"
+    }
+   },
+   "ReorderChapterDownloadInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterId": "Int!",
+      "clientMutationId": "String",
+      "to": "Int!"
+    }
+   },
+   "ReorderChapterDownloadPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "ResetSettingsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "ResetSettingsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "settings": "SettingsType!"
+    }
+   },
+   "RestoreBackupInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "backup": "Upload!",
+      "clientMutationId": "String",
+      "flags": "PartialBackupFlagsInput"
+    }
+   },
+   "RestoreBackupPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "id": "String!",
+      "status": "BackupRestoreStatus"
+    }
+   },
+   "SearchTrackerInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "query": "String!",
+      "trackerId": "Int!"
+    }
+   },
+   "SearchTrackerPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "trackSearches": "[TrackSearchType!]!"
+    }
+   },
+   "SelectFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "Int!",
+      "name": "String!",
+      "values": "[String!]!"
+    }
+   },
+   "SeparatorFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "name": "String!"
+    }
+   },
+   "SetCategoryMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "meta": "CategoryMetaTypeInput!"
+    }
+   },
+   "SetCategoryMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "CategoryMetaType!"
+    }
+   },
+   "SetCategoryMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[SetCategoryMetasItemInput!]!"
+    }
+   },
+   "SetCategoryMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categoryIds": "[Int!]!",
+      "metas": "[MetaInput!]!"
+    }
+   },
+   "SetCategoryMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "categories": "[CategoryType!]!",
+      "clientMutationId": "String",
+      "metas": "[CategoryMetaType!]!"
+    }
+   },
+   "SetChapterMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "meta": "ChapterMetaTypeInput!"
+    }
+   },
+   "SetChapterMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "ChapterMetaType!"
+    }
+   },
+   "SetChapterMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[SetChapterMetasItemInput!]!"
+    }
+   },
+   "SetChapterMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "chapterIds": "[Int!]!",
+      "metas": "[MetaInput!]!"
+    }
+   },
+   "SetChapterMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String",
+      "metas": "[ChapterMetaType!]!"
+    }
+   },
+   "SetGlobalMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "meta": "GlobalMetaTypeInput!"
+    }
+   },
+   "SetGlobalMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "GlobalMetaType!"
+    }
+   },
+   "SetGlobalMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "metas": "[MetaInput!]!"
+    }
+   },
+   "SetGlobalMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "metas": "[GlobalMetaType!]!"
+    }
+   },
+   "SetMangaMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "meta": "MangaMetaTypeInput!"
+    }
+   },
+   "SetMangaMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "MangaMetaType!"
+    }
+   },
+   "SetMangaMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[SetMangaMetasItemInput!]!"
+    }
+   },
+   "SetMangaMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "mangaIds": "[Int!]!",
+      "metas": "[MetaInput!]!"
+    }
+   },
+   "SetMangaMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "mangas": "[MangaType!]!",
+      "metas": "[MangaMetaType!]!"
+    }
+   },
+   "SetSettingsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "settings": "PartialSettingsTypeInput!"
+    }
+   },
+   "SetSettingsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "settings": "SettingsType!"
+    }
+   },
+   "SetSourceMetaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "meta": "SourceMetaTypeInput!"
+    }
+   },
+   "SetSourceMetaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "meta": "SourceMetaType!"
+    }
+   },
+   "SetSourceMetasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "items": "[SetSourceMetasItemInput!]!"
+    }
+   },
+   "SetSourceMetasItemInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "metas": "[MetaInput!]!",
+      "sourceIds": "[LongString!]!"
+    }
+   },
+   "SetSourceMetasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "metas": "[SourceMetaType!]!",
+      "sources": "[SourceType!]!"
+    }
+   },
+   "Settings": {
+    "kind": "INTERFACE",
+    "fields": {
+      "authMode": "AuthMode",
+      "authPassword": "String",
+      "authUsername": "String",
+      "autoBackupIncludeCategories": "Boolean",
+      "autoBackupIncludeChapters": "Boolean",
+      "autoBackupIncludeClientData": "Boolean",
+      "autoBackupIncludeHistory": "Boolean",
+      "autoBackupIncludeManga": "Boolean",
+      "autoBackupIncludeServerSettings": "Boolean",
+      "autoBackupIncludeTracking": "Boolean",
+      "autoDownloadAheadLimit": {"type":"Int","deprecated":"Replaced with autoDownloadNewChaptersLimit, replace with autoDownloadNewChaptersLimit"},
+      "autoDownloadIgnoreReUploads": "Boolean",
+      "autoDownloadNewChapters": "Boolean",
+      "autoDownloadNewChaptersLimit": "Int",
+      "backupInterval": "Int",
+      "backupPath": "String",
+      "backupTTL": "Int",
+      "backupTime": "String",
+      "basicAuthEnabled": {"type":"Boolean","deprecated":"Removed - prefer authMode, replace with authMode"},
+      "basicAuthPassword": {"type":"String","deprecated":"Removed - prefer authPassword, replace with authPassword"},
+      "basicAuthUsername": {"type":"String","deprecated":"Removed - prefer authUsername, replace with authUsername"},
+      "databasePassword": "String",
+      "databaseType": "DatabaseType",
+      "databaseUrl": "String",
+      "databaseUsername": "String",
+      "debugLogsEnabled": "Boolean",
+      "downloadAsCbz": "Boolean",
+      "downloadConversions": "[SettingsDownloadConversion!]",
+      "downloadsPath": "String",
+      "electronPath": "String",
+      "excludeCompleted": "Boolean",
+      "excludeEntryWithUnreadChapters": "Boolean",
+      "excludeNotStarted": "Boolean",
+      "excludeUnreadChapters": "Boolean",
+      "extensionRepos": {"type":"[String!]","deprecated":"Replaced with addExtensionStore and removeExtensionStore mutations"},
+      "flareSolverrAsResponseFallback": "Boolean",
+      "flareSolverrEnabled": "Boolean",
+      "flareSolverrSessionName": "String",
+      "flareSolverrSessionTtl": "Int",
+      "flareSolverrTimeout": "Int",
+      "flareSolverrUrl": "String",
+      "globalUpdateInterval": "Float",
+      "gqlDebugLogsEnabled": {"type":"Boolean","deprecated":"Removed - does not do anything"},
+      "initialOpenInBrowserEnabled": "Boolean",
+      "ip": "String",
+      "jwtAudience": "String",
+      "jwtRefreshExpiry": "Duration",
+      "jwtTokenExpiry": "Duration",
+      "kcefEnabled": "Boolean",
+      "koreaderSyncChecksumMethod": "KoreaderSyncChecksumMethod",
+      "koreaderSyncDeviceId": {"type":"String","deprecated":"Moved to preference store. Is supposed to be random and gets auto generated, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncPercentageTolerance": "Float",
+      "koreaderSyncServerUrl": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncStrategy": {"type":"KoreaderSyncLegacyStrategy","deprecated":"Replaced with koreaderSyncStrategyForward and koreaderSyncStrategyBackward, replace with koreaderSyncStrategyForward, koreaderSyncStrategyBackward"},
+      "koreaderSyncStrategyBackward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncStrategyForward": "KoreaderSyncConflictStrategy",
+      "koreaderSyncUserkey": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncUsername": {"type":"String","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "localSourcePath": "String",
+      "maxLogFileSize": "String",
+      "maxLogFiles": "Int",
+      "maxLogFolderSize": "String",
+      "maxSourcesInParallel": "Int",
+      "opdsCbzMimetype": "CbzMediaType",
+      "opdsChapterSortOrder": "SortOrder",
+      "opdsEnablePageReadProgress": "Boolean",
+      "opdsItemsPerPage": "Int",
+      "opdsMarkAsReadOnDownload": "Boolean",
+      "opdsShowOnlyDownloadedChapters": "Boolean",
+      "opdsShowOnlyUnreadChapters": "Boolean",
+      "opdsSkipChapterMetadataFeed": "Boolean",
+      "opdsUseBinaryFileSizes": "Boolean",
+      "port": "Int",
+      "serveConversions": "[SettingsDownloadConversion!]",
+      "socksProxyEnabled": "Boolean",
+      "socksProxyHost": "String",
+      "socksProxyPassword": "String",
+      "socksProxyPort": "String",
+      "socksProxyUsername": "String",
+      "socksProxyVersion": "Int",
+      "syncDataCategories": "Boolean",
+      "syncDataChapters": "Boolean",
+      "syncDataHistory": "Boolean",
+      "syncDataManga": "Boolean",
+      "syncDataTracking": "Boolean",
+      "syncInterval": "Duration",
+      "syncYomiApiKey": "String",
+      "syncYomiEnabled": "Boolean",
+      "syncYomiHost": "String",
+      "systemTrayEnabled": "Boolean",
+      "updateMangas": "Boolean",
+      "useHikariConnectionPool": "Boolean",
+      "webUIChannel": "WebUIChannel",
+      "webUIFlavor": "WebUIFlavor",
+      "webUIInterface": "WebUIInterface",
+      "webUIUpdateCheckInterval": "Float"
+    },
+    "possibleTypes": ["PartialSettingsType","SettingsType"]
+   },
+   "SettingsDownloadConversion": {
+    "kind": "INTERFACE",
+    "fields": {
+      "callTimeout": "Duration",
+      "compressionLevel": "Float",
+      "connectTimeout": "Duration",
+      "headers": "[SettingsDownloadConversionHeader!]",
+      "mimeType": "String!",
+      "target": "String!"
+    },
+    "possibleTypes": ["SettingsDownloadConversionType"]
+   },
+   "SettingsDownloadConversionHeader": {
+    "kind": "INTERFACE",
+    "fields": {
+      "name": "String!",
+      "value": "String!"
+    },
+    "possibleTypes": ["SettingsDownloadConversionHeaderType"]
+   },
+   "SettingsDownloadConversionHeaderType": {
+    "kind": "OBJECT",
+    "fields": {
+      "name": "String!",
+      "value": "String!"
+    },
+    "interfaces": ["SettingsDownloadConversionHeader"]
+   },
+   "SettingsDownloadConversionHeaderTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "name": "String!",
+      "value": "String!"
+    }
+   },
+   "SettingsDownloadConversionType": {
+    "kind": "OBJECT",
+    "fields": {
+      "callTimeout": "Duration",
+      "compressionLevel": "Float",
+      "connectTimeout": "Duration",
+      "headers": "[SettingsDownloadConversionHeaderType!]",
+      "mimeType": "String!",
+      "target": "String!"
+    },
+    "interfaces": ["SettingsDownloadConversion"]
+   },
+   "SettingsDownloadConversionTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "callTimeout": "Duration",
+      "compressionLevel": "Float",
+      "connectTimeout": "Duration",
+      "headers": "[SettingsDownloadConversionHeaderTypeInput!]",
+      "mimeType": "String!",
+      "target": "String!"
+    }
+   },
+   "SettingsType": {
+    "kind": "OBJECT",
+    "fields": {
+      "authMode": "AuthMode!",
+      "authPassword": "String!",
+      "authUsername": "String!",
+      "autoBackupIncludeCategories": "Boolean!",
+      "autoBackupIncludeChapters": "Boolean!",
+      "autoBackupIncludeClientData": "Boolean!",
+      "autoBackupIncludeHistory": "Boolean!",
+      "autoBackupIncludeManga": "Boolean!",
+      "autoBackupIncludeServerSettings": "Boolean!",
+      "autoBackupIncludeTracking": "Boolean!",
+      "autoDownloadAheadLimit": {"type":"Int!","deprecated":"Replaced with autoDownloadNewChaptersLimit, replace with autoDownloadNewChaptersLimit"},
+      "autoDownloadIgnoreReUploads": "Boolean!",
+      "autoDownloadNewChapters": "Boolean!",
+      "autoDownloadNewChaptersLimit": "Int!",
+      "backupInterval": "Int!",
+      "backupPath": "String!",
+      "backupTTL": "Int!",
+      "backupTime": "String!",
+      "basicAuthEnabled": {"type":"Boolean!","deprecated":"Removed - prefer authMode, replace with authMode"},
+      "basicAuthPassword": {"type":"String!","deprecated":"Removed - prefer authPassword, replace with authPassword"},
+      "basicAuthUsername": {"type":"String!","deprecated":"Removed - prefer authUsername, replace with authUsername"},
+      "databasePassword": "String!",
+      "databaseType": "DatabaseType!",
+      "databaseUrl": "String!",
+      "databaseUsername": "String!",
+      "debugLogsEnabled": "Boolean!",
+      "downloadAsCbz": "Boolean!",
+      "downloadConversions": "[SettingsDownloadConversionType!]!",
+      "downloadsPath": "String!",
+      "electronPath": "String!",
+      "excludeCompleted": "Boolean!",
+      "excludeEntryWithUnreadChapters": "Boolean!",
+      "excludeNotStarted": "Boolean!",
+      "excludeUnreadChapters": "Boolean!",
+      "extensionRepos": {"type":"[String!]!","deprecated":"Replaced with addExtensionStore and removeExtensionStore mutations"},
+      "flareSolverrAsResponseFallback": "Boolean!",
+      "flareSolverrEnabled": "Boolean!",
+      "flareSolverrSessionName": "String!",
+      "flareSolverrSessionTtl": "Int!",
+      "flareSolverrTimeout": "Int!",
+      "flareSolverrUrl": "String!",
+      "globalUpdateInterval": "Float!",
+      "gqlDebugLogsEnabled": {"type":"Boolean!","deprecated":"Removed - does not do anything"},
+      "initialOpenInBrowserEnabled": "Boolean!",
+      "ip": "String!",
+      "jwtAudience": "String!",
+      "jwtRefreshExpiry": "Duration!",
+      "jwtTokenExpiry": "Duration!",
+      "kcefEnabled": "Boolean!",
+      "koreaderSyncChecksumMethod": "KoreaderSyncChecksumMethod!",
+      "koreaderSyncDeviceId": {"type":"String!","deprecated":"Moved to preference store. Is supposed to be random and gets auto generated, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncPercentageTolerance": "Float!",
+      "koreaderSyncServerUrl": {"type":"String!","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncStrategy": {"type":"KoreaderSyncLegacyStrategy!","deprecated":"Replaced with koreaderSyncStrategyForward and koreaderSyncStrategyBackward, replace with koreaderSyncStrategyForward, koreaderSyncStrategyBackward"},
+      "koreaderSyncStrategyBackward": "KoreaderSyncConflictStrategy!",
+      "koreaderSyncStrategyForward": "KoreaderSyncConflictStrategy!",
+      "koreaderSyncUserkey": {"type":"String!","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "koreaderSyncUsername": {"type":"String!","deprecated":"Moved to preference store. User is supposed to use a login/logout mutation, replace with MOVE TO PREFERENCES"},
+      "localSourcePath": "String!",
+      "maxLogFileSize": "String!",
+      "maxLogFiles": "Int!",
+      "maxLogFolderSize": "String!",
+      "maxSourcesInParallel": "Int!",
+      "opdsCbzMimetype": "CbzMediaType!",
+      "opdsChapterSortOrder": "SortOrder!",
+      "opdsEnablePageReadProgress": "Boolean!",
+      "opdsItemsPerPage": "Int!",
+      "opdsMarkAsReadOnDownload": "Boolean!",
+      "opdsShowOnlyDownloadedChapters": "Boolean!",
+      "opdsShowOnlyUnreadChapters": "Boolean!",
+      "opdsSkipChapterMetadataFeed": "Boolean!",
+      "opdsUseBinaryFileSizes": "Boolean!",
+      "port": "Int!",
+      "serveConversions": "[SettingsDownloadConversionType!]!",
+      "socksProxyEnabled": "Boolean!",
+      "socksProxyHost": "String!",
+      "socksProxyPassword": "String!",
+      "socksProxyPort": "String!",
+      "socksProxyUsername": "String!",
+      "socksProxyVersion": "Int!",
+      "syncDataCategories": "Boolean!",
+      "syncDataChapters": "Boolean!",
+      "syncDataHistory": "Boolean!",
+      "syncDataManga": "Boolean!",
+      "syncDataTracking": "Boolean!",
+      "syncInterval": "Duration!",
+      "syncYomiApiKey": "String!",
+      "syncYomiEnabled": "Boolean!",
+      "syncYomiHost": "String!",
+      "systemTrayEnabled": "Boolean!",
+      "updateMangas": "Boolean!",
+      "useHikariConnectionPool": "Boolean!",
+      "webUIChannel": "WebUIChannel!",
+      "webUIFlavor": "WebUIFlavor!",
+      "webUIInterface": "WebUIInterface!",
+      "webUIUpdateCheckInterval": "Float!"
+    },
+    "interfaces": ["Settings"]
+   },
+   "SortFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "SortSelection",
+      "name": "String!",
+      "values": "[String!]!"
+    }
+   },
+   "SortOrder": {
+    "kind": "ENUM",
+    "values": ["ASC","DESC","ASC_NULLS_FIRST","DESC_NULLS_FIRST","ASC_NULLS_LAST","DESC_NULLS_LAST"]
+   },
+   "SortSelection": {
+    "kind": "OBJECT",
+    "fields": {
+      "ascending": "Boolean!",
+      "index": "Int!"
+    }
+   },
+   "SortSelectionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "ascending": "Boolean!",
+      "index": "Int!"
+    }
+   },
+   "SourceConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "contentWarning": "ContentWarning",
+      "id": "LongString",
+      "isNsfw": {"type":"Boolean","deprecated":"replace with contentWarning == ContentRating.MIXED, replace with contentWarning"},
+      "lang": "String",
+      "name": "String"
+    }
+   },
+   "SourceEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "SourceType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "SourceFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[SourceFilterInput!]",
+      "contentWarning": "ContentWarningFilterInput",
+      "id": "LongFilterInput",
+      "isNsfw": {"type":"BooleanFilterInput","deprecated":"replace with contentWarning, replace with contentWarning"},
+      "lang": "StringFilterInput",
+      "name": "StringFilterInput",
+      "not": "SourceFilterInput",
+      "or": "[SourceFilterInput!]"
+    }
+   },
+   "SourceMetaType": {
+    "kind": "OBJECT",
+    "fields": {
+      "key": "String!",
+      "sourceId": "LongString!",
+      "value": "String!",
+      "source": "SourceType!"
+    },
+    "interfaces": ["MetaType"]
+   },
+   "SourceMetaTypeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "key": "String!",
+      "sourceId": "LongString!",
+      "value": "String!"
+    }
+   },
+   "SourceNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[SourceEdge!]!",
+      "nodes": "[SourceType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "SourceOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","NAME","LANG"]
+   },
+   "SourceOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "SourceOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "SourcePreferenceChangeInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "checkBoxState": "Boolean",
+      "editTextState": "String",
+      "listState": "String",
+      "multiSelectState": "[String!]",
+      "position": "Int!",
+      "switchState": "Boolean"
+    }
+   },
+   "SourceType": {
+    "kind": "OBJECT",
+    "fields": {
+      "baseUrl": {"type":"String","deprecated":", replace with homeUrl"},
+      "contentWarning": "ContentWarning!",
+      "displayName": "String!",
+      "homeUrl": "String",
+      "iconUrl": "String!",
+      "id": "LongString!",
+      "isConfigurable": "Boolean!",
+      "isNsfw": {"type":"Boolean!","deprecated":", replace with contentWarning"},
+      "lang": "String!",
+      "name": "String!",
+      "supportsLatest": "Boolean!",
+      "extension": "ExtensionType!",
+      "filters": "[Filter!]!",
+      "manga": "MangaNodeList!",
+      "meta": "[SourceMetaType!]!",
+      "preferences": "[Preference!]!"
+    }
+   },
+   "StartDownloaderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "StartDownloaderPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "StartSyncInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "StartSyncPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "result": "StartSyncResult!"
+    }
+   },
+   "StartSyncResult": {
+    "kind": "ENUM",
+    "values": ["SUCCESS","SYNC_IN_PROGRESS","SYNC_DISABLED"]
+   },
+   "StopDownloaderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "StopDownloaderPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "downloadStatus": "DownloadStatus!"
+    }
+   },
+   "String": {
+    "kind": "SCALAR"
+   },
+   "StringFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "distinctFrom": "String",
+      "distinctFromAll": "[String!]",
+      "distinctFromAny": "[String!]",
+      "distinctFromInsensitive": "String",
+      "distinctFromInsensitiveAll": "[String!]",
+      "distinctFromInsensitiveAny": "[String!]",
+      "endsWith": "String",
+      "endsWithAll": "[String!]",
+      "endsWithAny": "[String!]",
+      "endsWithInsensitive": "String",
+      "endsWithInsensitiveAll": "[String!]",
+      "endsWithInsensitiveAny": "[String!]",
+      "equalTo": "String",
+      "greaterThan": "String",
+      "greaterThanInsensitive": "String",
+      "greaterThanOrEqualTo": "String",
+      "greaterThanOrEqualToInsensitive": "String",
+      "in": "[String!]",
+      "inInsensitive": "[String!]",
+      "includes": "String",
+      "includesAll": "[String!]",
+      "includesAny": "[String!]",
+      "includesInsensitive": "String",
+      "includesInsensitiveAll": "[String!]",
+      "includesInsensitiveAny": "[String!]",
+      "isNull": "Boolean",
+      "lessThan": "String",
+      "lessThanInsensitive": "String",
+      "lessThanOrEqualTo": "String",
+      "lessThanOrEqualToInsensitive": "String",
+      "like": "String",
+      "likeAll": "[String!]",
+      "likeAny": "[String!]",
+      "likeInsensitive": "String",
+      "likeInsensitiveAll": "[String!]",
+      "likeInsensitiveAny": "[String!]",
+      "notDistinctFrom": "String",
+      "notDistinctFromInsensitive": "String",
+      "notEndsWith": "String",
+      "notEndsWithAll": "[String!]",
+      "notEndsWithAny": "[String!]",
+      "notEndsWithInsensitive": "String",
+      "notEndsWithInsensitiveAll": "[String!]",
+      "notEndsWithInsensitiveAny": "[String!]",
+      "notEqualTo": "String",
+      "notEqualToAll": "[String!]",
+      "notEqualToAny": "[String!]",
+      "notIn": "[String!]",
+      "notInInsensitive": "[String!]",
+      "notIncludes": "String",
+      "notIncludesAll": "[String!]",
+      "notIncludesAny": "[String!]",
+      "notIncludesInsensitive": "String",
+      "notIncludesInsensitiveAll": "[String!]",
+      "notIncludesInsensitiveAny": "[String!]",
+      "notLike": "String",
+      "notLikeAll": "[String!]",
+      "notLikeAny": "[String!]",
+      "notLikeInsensitive": "String",
+      "notLikeInsensitiveAll": "[String!]",
+      "notLikeInsensitiveAny": "[String!]",
+      "notStartsWith": "String",
+      "notStartsWithAll": "[String!]",
+      "notStartsWithAny": "[String!]",
+      "notStartsWithInsensitive": "String",
+      "notStartsWithInsensitiveAll": "[String!]",
+      "notStartsWithInsensitiveAny": "[String!]",
+      "startsWith": "String",
+      "startsWithAll": "[String!]",
+      "startsWithAny": "[String!]",
+      "startsWithInsensitive": "String",
+      "startsWithInsensitiveAll": "[String!]",
+      "startsWithInsensitiveAny": "[String!]"
+    }
+   },
+   "Subscription": {
+    "kind": "OBJECT",
+    "fields": {
+      "downloadChanged": {"type":"DownloadStatus!","deprecated":"Replaced with downloadStatusChanged, replace with downloadStatusChanged(input)"},
+      "downloadStatusChanged": {"type":"DownloadUpdates!","args":{"input":"DownloadChangedInput!"}},
+      "webUIUpdateStatusChange": "WebUIUpdateStatus!",
+      "syncStatusChanged": "SyncStatus!",
+      "libraryUpdateStatusChanged": {"type":"UpdaterUpdates!","args":{"input":"LibraryUpdateStatusChangedInput!"}},
+      "updateStatusChanged": {"type":"UpdateStatus!","deprecated":"Replaced with updates, replace with updates(input)"}
+    }
+   },
+   "SwitchPreference": {
+    "kind": "OBJECT",
+    "fields": {
+      "currentValue": "Boolean",
+      "default": "Boolean!",
+      "enabled": "Boolean!",
+      "key": "String",
+      "summary": "String",
+      "title": "String",
+      "visible": "Boolean!"
+    }
+   },
+   "SyncConflictInfoType": {
+    "kind": "OBJECT",
+    "fields": {
+      "deviceName": "String!",
+      "remotePage": "Int!"
+    }
+   },
+   "SyncState": {
+    "kind": "ENUM",
+    "values": ["STARTED","CREATING_BACKUP","DOWNLOADING","MERGING","UPLOADING","RESTORING","SUCCESS","ERROR"]
+   },
+   "SyncStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "backupRestoreId": "String",
+      "endDate": "LongString",
+      "errorMessage": "String",
+      "startDate": "LongString!",
+      "state": "SyncState!"
+    }
+   },
+   "TextFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "String!",
+      "name": "String!"
+    }
+   },
+   "TrackerConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "icon": "String",
+      "id": "Int",
+      "isLoggedIn": "Boolean",
+      "name": "String"
+    }
+   },
+   "TrackerEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "TrackerType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "TrackerNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[TrackerEdge!]!",
+      "nodes": "[TrackerType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "TrackerOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","NAME","IS_LOGGED_IN"]
+   },
+   "TrackerOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "TrackerOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "TrackerType": {
+    "kind": "OBJECT",
+    "fields": {
+      "authUrl": "String",
+      "icon": "String!",
+      "id": "Int!",
+      "isLoggedIn": "Boolean!",
+      "name": "String!",
+      "supportsPrivateTracking": "Boolean!",
+      "supportsReadingDates": "Boolean!",
+      "supportsTrackDeletion": "Boolean!",
+      "isTokenExpired": "Boolean!",
+      "scores": "[String!]!",
+      "statuses": "[TrackStatusType!]!",
+      "trackRecords": "TrackRecordNodeList!"
+    }
+   },
+   "TrackProgressInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "mangaId": "Int!"
+    }
+   },
+   "TrackProgressPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecords": "[TrackRecordType!]!"
+    }
+   },
+   "TrackRecordConditionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "finishDate": "LongString",
+      "id": "Int",
+      "lastChapterRead": "Float",
+      "libraryId": "LongString",
+      "mangaId": "Int",
+      "private": "Boolean",
+      "remoteId": "LongString",
+      "remoteUrl": "String",
+      "score": "Float",
+      "startDate": "LongString",
+      "status": "Int",
+      "title": "String",
+      "totalChapters": "Int",
+      "trackerId": "Int"
+    }
+   },
+   "TrackRecordEdge": {
+    "kind": "OBJECT",
+    "fields": {
+      "cursor": "Cursor!",
+      "node": "TrackRecordType!"
+    },
+    "interfaces": ["Edge"]
+   },
+   "TrackRecordFilterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "and": "[TrackRecordFilterInput!]",
+      "finishDate": "LongFilterInput",
+      "id": "IntFilterInput",
+      "lastChapterRead": "DoubleFilterInput",
+      "libraryId": "LongFilterInput",
+      "mangaId": "IntFilterInput",
+      "not": "TrackRecordFilterInput",
+      "or": "[TrackRecordFilterInput!]",
+      "private": "BooleanFilterInput",
+      "remoteId": "LongFilterInput",
+      "remoteUrl": "StringFilterInput",
+      "score": "DoubleFilterInput",
+      "startDate": "LongFilterInput",
+      "status": "IntFilterInput",
+      "title": "StringFilterInput",
+      "totalChapters": "IntFilterInput",
+      "trackerId": "IntFilterInput"
+    }
+   },
+   "TrackRecordNodeList": {
+    "kind": "OBJECT",
+    "fields": {
+      "edges": "[TrackRecordEdge!]!",
+      "nodes": "[TrackRecordType!]!",
+      "pageInfo": "PageInfo!",
+      "totalCount": "Int!"
+    },
+    "interfaces": ["NodeList"]
+   },
+   "TrackRecordOrderBy": {
+    "kind": "ENUM",
+    "values": ["ID","MANGA_ID","TRACKER_ID","REMOTE_ID","TITLE","LAST_CHAPTER_READ","TOTAL_CHAPTERS","SCORE","START_DATE","FINISH_DATE","PRIVATE"]
+   },
+   "TrackRecordOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "by": "TrackRecordOrderBy!",
+      "byType": "SortOrder"
+    }
+   },
+   "TrackRecordType": {
+    "kind": "OBJECT",
+    "fields": {
+      "finishDate": "LongString!",
+      "id": "Int!",
+      "lastChapterRead": "Float!",
+      "libraryId": "LongString",
+      "mangaId": "Int!",
+      "private": "Boolean!",
+      "remoteId": "LongString!",
+      "remoteUrl": "String!",
+      "score": "Float!",
+      "startDate": "LongString!",
+      "status": "Int!",
+      "title": "String!",
+      "totalChapters": "Int!",
+      "trackerId": "Int!",
+      "displayScore": "String!",
+      "manga": "MangaType!",
+      "tracker": "TrackerType!"
+    }
+   },
+   "TrackSearchType": {
+    "kind": "OBJECT",
+    "fields": {
+      "coverUrl": "String!",
+      "finishedReadingDate": "LongString!",
+      "id": "Int!",
+      "lastChapterRead": "Float!",
+      "libraryId": "LongString",
+      "private": "Boolean!",
+      "publishingStatus": "String!",
+      "publishingType": "String!",
+      "remoteId": "LongString!",
+      "score": "Float!",
+      "startDate": "String!",
+      "startedReadingDate": "LongString!",
+      "status": "Int!",
+      "summary": "String!",
+      "title": "String!",
+      "totalChapters": "Int!",
+      "trackerId": "Int!",
+      "trackingUrl": "String!",
+      "displayScore": "String!",
+      "tracker": "TrackerType!"
+    }
+   },
+   "TrackStatusType": {
+    "kind": "OBJECT",
+    "fields": {
+      "name": "String!",
+      "value": "Int!"
+    }
+   },
+   "TriState": {
+    "kind": "ENUM",
+    "values": ["IGNORE","INCLUDE","EXCLUDE"]
+   },
+   "TriStateFilter": {
+    "kind": "OBJECT",
+    "fields": {
+      "default": "TriState!",
+      "name": "String!"
+    }
+   },
+   "UnbindTrackInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "deleteRemoteTrack": "Boolean",
+      "recordId": "Int!"
+    }
+   },
+   "UnbindTrackPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecord": "TrackRecordType"
+    }
+   },
+   "UpdateCategoriesInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!",
+      "patch": "UpdateCategoryPatchInput!"
+    }
+   },
+   "UpdateCategoriesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "categories": "[CategoryType!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateCategoryInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!",
+      "patch": "UpdateCategoryPatchInput!"
+    }
+   },
+   "UpdateCategoryMangaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categories": "[Int!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateCategoryMangaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "updateStatus": "UpdateStatus!"
+    }
+   },
+   "UpdateCategoryOrderInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!",
+      "position": "Int!"
+    }
+   },
+   "UpdateCategoryOrderPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "categories": "[CategoryType!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateCategoryPatchInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "default": "Boolean",
+      "includeInDownload": "IncludeOrExclude",
+      "includeInUpdate": "IncludeOrExclude",
+      "name": "String"
+    }
+   },
+   "UpdateCategoryPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "category": "CategoryType!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateChapterInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!",
+      "patch": "UpdateChapterPatchInput!"
+    }
+   },
+   "UpdateChapterPatchInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "isBookmarked": "Boolean",
+      "isRead": "Boolean",
+      "lastPageRead": "Int"
+    }
+   },
+   "UpdateChapterPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapter": "ChapterType!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateChaptersInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!",
+      "patch": "UpdateChapterPatchInput!"
+    }
+   },
+   "UpdateChaptersPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "chapters": "[ChapterType!]!",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateExtensionInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "String!",
+      "patch": "UpdateExtensionPatchInput!"
+    }
+   },
+   "UpdateExtensionPatchInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "install": "Boolean",
+      "uninstall": "Boolean",
+      "update": "Boolean"
+    }
+   },
+   "UpdateExtensionPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extension": "ExtensionType"
+    }
+   },
+   "UpdateExtensionsInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[String!]!",
+      "patch": "UpdateExtensionPatchInput!"
+    }
+   },
+   "UpdateExtensionsPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "extensions": "[ExtensionType!]!"
+    }
+   },
+   "UpdateLibraryInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "categories": "[Int!]",
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateLibraryMangaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateLibraryMangaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "updateStatus": "UpdateStatus!"
+    }
+   },
+   "UpdateLibraryPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "updateStatus": "LibraryUpdateStatus!"
+    }
+   },
+   "UpdateMangaCategoriesInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!",
+      "patch": "UpdateMangaCategoriesPatchInput!"
+    }
+   },
+   "UpdateMangaCategoriesPatchInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "addToCategories": "[Int!]",
+      "clearCategories": "Boolean",
+      "removeFromCategories": "[Int!]"
+    }
+   },
+   "UpdateMangaCategoriesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "manga": "MangaType!"
+    }
+   },
+   "UpdateMangaInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "id": "Int!",
+      "patch": "UpdateMangaPatchInput!"
+    }
+   },
+   "UpdateMangaPatchInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "inLibrary": "Boolean"
+    }
+   },
+   "UpdateMangaPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "manga": "MangaType!"
+    }
+   },
+   "UpdateMangasCategoriesInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!",
+      "patch": "UpdateMangaCategoriesPatchInput!"
+    }
+   },
+   "UpdateMangasCategoriesPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "mangas": "[MangaType!]!"
+    }
+   },
+   "UpdateMangasInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "ids": "[Int!]!",
+      "patch": "UpdateMangaPatchInput!"
+    }
+   },
+   "UpdateMangasPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "mangas": "[MangaType!]!"
+    }
+   },
+   "UpdaterJobsInfoType": {
+    "kind": "OBJECT",
+    "fields": {
+      "finishedJobs": "Int!",
+      "isRunning": "Boolean!",
+      "skippedCategoriesCount": "Int!",
+      "skippedMangasCount": "Int!",
+      "totalJobs": "Int!"
+    }
+   },
+   "UpdaterUpdates": {
+    "kind": "OBJECT",
+    "fields": {
+      "categoryUpdates": "[CategoryUpdateType!]!",
+      "initial": "LibraryUpdateStatus",
+      "jobsInfo": "UpdaterJobsInfoType!",
+      "mangaUpdates": "[MangaUpdateType!]!",
+      "omittedUpdates": "Boolean!"
+    }
+   },
+   "UpdateSourcePreferenceInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "change": "SourcePreferenceChangeInput!",
+      "clientMutationId": "String",
+      "source": "LongString!"
+    }
+   },
+   "UpdateSourcePreferencePayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "preferences": "[Preference!]!",
+      "source": "SourceType!"
+    }
+   },
+   "UpdateState": {
+    "kind": "ENUM",
+    "values": ["IDLE","DOWNLOADING","FINISHED","ERROR"]
+   },
+   "UpdateStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "completeJobs": "UpdateStatusType!",
+      "failedJobs": "UpdateStatusType!",
+      "isRunning": "Boolean!",
+      "pendingJobs": "UpdateStatusType!",
+      "runningJobs": "UpdateStatusType!",
+      "skippedCategories": "UpdateStatusCategoryType!",
+      "skippedJobs": "UpdateStatusType!",
+      "updatingCategories": "UpdateStatusCategoryType!"
+    }
+   },
+   "UpdateStatusCategoryType": {
+    "kind": "OBJECT",
+    "fields": {
+      "categories": "CategoryNodeList!"
+    }
+   },
+   "UpdateStatusType": {
+    "kind": "OBJECT",
+    "fields": {
+      "mangas": "MangaNodeList!"
+    }
+   },
+   "UpdateStopInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateStopPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String"
+    }
+   },
+   "UpdateStrategy": {
+    "kind": "ENUM",
+    "values": ["ALWAYS_UPDATE","ONLY_FETCH_ONCE"]
+   },
+   "UpdateTrackInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String",
+      "finishDate": "LongString",
+      "lastChapterRead": "Float",
+      "private": "Boolean",
+      "recordId": "Int!",
+      "scoreString": "String",
+      "startDate": "LongString",
+      "status": "Int",
+      "unbind": {"type":"Boolean","deprecated":"Replaced with \"unbindTrack\" mutation, replace with unbindTrack"}
+    }
+   },
+   "UpdateTrackPayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "trackRecord": "TrackRecordType"
+    }
+   },
+   "Upload": {
+    "kind": "SCALAR"
+   },
+   "ValidateBackupInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "backup": "Upload!"
+    }
+   },
+   "ValidateBackupResult": {
+    "kind": "OBJECT",
+    "fields": {
+      "missingSources": "[ValidateBackupSource!]!",
+      "missingTrackers": "[ValidateBackupTracker!]!"
+    }
+   },
+   "ValidateBackupSource": {
+    "kind": "OBJECT",
+    "fields": {
+      "id": "LongString!",
+      "name": "String!"
+    }
+   },
+   "ValidateBackupTracker": {
+    "kind": "OBJECT",
+    "fields": {
+      "name": "String!"
+    }
+   },
+   "WebUIChannel": {
+    "kind": "ENUM",
+    "values": ["BUNDLED","STABLE","PREVIEW"]
+   },
+   "WebUIFlavor": {
+    "kind": "ENUM",
+    "values": ["WEBUI","VUI","CUSTOM"]
+   },
+   "WebUIInterface": {
+    "kind": "ENUM",
+    "values": ["BROWSER","ELECTRON"]
+   },
+   "WebUIUpdateCheck": {
+    "kind": "OBJECT",
+    "fields": {
+      "channel": "WebUIChannel!",
+      "tag": "String!",
+      "updateAvailable": "Boolean!"
+    }
+   },
+   "WebUIUpdateInfo": {
+    "kind": "OBJECT",
+    "fields": {
+      "channel": "WebUIChannel!",
+      "tag": "String!"
+    }
+   },
+   "WebUIUpdateInput": {
+    "kind": "INPUT_OBJECT",
+    "inputFields": {
+      "clientMutationId": "String"
+    }
+   },
+   "WebUIUpdatePayload": {
+    "kind": "OBJECT",
+    "fields": {
+      "clientMutationId": "String",
+      "updateStatus": "WebUIUpdateStatus!"
+    }
+   },
+   "WebUIUpdateStatus": {
+    "kind": "OBJECT",
+    "fields": {
+      "info": "WebUIUpdateInfo!",
+      "progress": "Int!",
+      "state": "UpdateState!"
+    }
+   }
+  }
+}

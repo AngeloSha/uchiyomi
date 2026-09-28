@@ -121,7 +121,7 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
   state.startedAt = new Date().toISOString();
   state.results = [];
   startedBy = input.userId;
-  // The run's card on the download pill (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
+  // The run's card in Library -> Downloads (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
   // fans this out over hundreds of series, a second and a half apart.
   const card = beginRun('newest', input.userId, input.ids.length);
   void withOrigin('bulk', input.userId ?? null, () => run(input, card)).catch((e) => {
@@ -140,6 +140,7 @@ function explain(r: Awaited<ReturnType<typeof updateSeries>>): { outcome: Newest
     case 'unrouted': return { outcome: 'skipped', reason: 'No source is installed for this series.' };
     case 'blocked': return { outcome: 'skipped', reason: 'Its source is in a cooldown. Try again later.' };
     case 'source_error': return { outcome: 'failed', reason: 'Its source did not answer.' };
+    case 'renumber_pending': return { outcome: 'skipped', reason: 'Its chapters are waiting to be renumbered. Review it on the series page.' };
     default: break;
   }
   const n = r.newest;

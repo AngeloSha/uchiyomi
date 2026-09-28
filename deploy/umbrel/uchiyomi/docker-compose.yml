@@ -30,6 +30,9 @@ services:
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
       BACKUP_KEEP: "14"
+      # Tells Admin → Extensions which setup steps to open on (v0.49.0), and nothing else: here, that an Umbrel app
+      # cannot add the optional extension engine. An older image ignores it.
+      UCHIYOMI_PLATFORM: umbrel
     volumes:
       - ${UMBREL_ROOT}/data/storage/downloads/manga:/library
       - ${APP_DATA_DIR}/data/db:/data

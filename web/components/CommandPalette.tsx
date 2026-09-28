@@ -9,22 +9,31 @@ import { Page, Series } from '@/lib/types';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from './Toast';
 import { Img } from './ui';
-import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments } from './icons';
+import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcCloudDownload, IcGrid, IcMoments } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
+import { useLayer } from '@/lib/layers';
+import { canDownload, useAuth } from '@/lib/auth';
+import { downloadsHref } from '@/lib/libraryView';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
 export function CommandPalette({ open, seed = '', onClose }: { open: boolean; seed?: string; onClose: () => void }) {
   const router = useRouter();
   const toast = useToast();
+  const { user, status } = useAuth();
+  // What the server is fetching is Library -> Downloads, a view the route behind it opens only to a viewer
+  // who may download: nobody else is offered the way in.
+  const mayDownload = status === 'authed' && canDownload(user);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Series[]>([]);
   const [searching, setSearching] = useState(false);
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
+  // On the notices' layer stack while open (lib/layers.ts). It stays mounted while closed, hence `open`.
+  useLayer('dialog', open);
 
   // Reset on open (to the typed-to-open character, if any) and focus the input. A layout effect, focusing
   // in the same commit that mounts the input: with type-to-search the NEXT keystroke is usually already on
@@ -76,24 +85,29 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
 
   const go = useCallback((href: string) => { onClose(); router.push(href); }, [onClose, router]);
 
+  // Labels and hints through tr(): they are what the list shows and what a typed query is matched against, so
+  // an English-only list could neither be read nor found in the reader's language.
   const actions: Action[] = useMemo(() => ([
     {
-      key: 'surprise', label: 'Surprise me', hint: 'random series', icon: <IcSparkle width={16} height={16} />,
+      key: 'surprise', label: tr('Surprise me'), hint: tr('random series'), icon: <IcSparkle width={16} height={16} />,
       run: async () => {
         try { const r = await api<{ seriesId: string | null }>('/api/random'); if (r.seriesId) go(`/series/?id=${r.seriesId}`); }
         catch { toast('No luck — try again', 'error'); }
       },
     },
-    { key: 'updates', label: 'Updates', hint: 'new chapters', icon: <IcBell width={16} height={16} />, run: () => go('/updates') },
-    { key: 'moments', label: 'Moments', hint: 'pages you saved', icon: <IcMoments width={16} height={16} />, run: () => go('/moments') },
-    { key: 'downloads', label: 'Offline downloads', icon: <IcDownload width={16} height={16} />, run: () => go('/downloads') },
+    { key: 'updates', label: tr('Updates'), hint: tr('new chapters'), icon: <IcBell width={16} height={16} />, run: () => go('/updates') },
+    { key: 'moments', label: tr('Moments'), hint: tr('pages you saved'), icon: <IcMoments width={16} height={16} />, run: () => go('/moments') },
+    // What the SERVER is fetching (v0.49.0), beside this device's copies: two different promises, two entries.
+    // Kept on desktop, where it is the only "downloads" there is.
+    ...(mayDownload ? [{ key: 'server-downloads', label: tr('Server downloads'), hint: tr('what the server is fetching'), icon: <IcCloudDownload width={16} height={16} />, run: () => go(downloadsHref()) }] : []),
+    { key: 'downloads', label: tr('Offline downloads'), icon: <IcDownload width={16} height={16} />, run: () => go('/downloads') },
     // Genres are a filter now, not a page. The palette still gets you there in one keystroke.
-    { key: 'genres', label: 'Filter by genre', icon: <IcGrid width={16} height={16} />, run: () => go('/library') },
+    { key: 'genres', label: tr('Filter by genre'), icon: <IcGrid width={16} height={16} />, run: () => go('/library') },
     {
-      key: 'refresh', label: 'Refresh library', hint: 'scan for new chapters', icon: <IcRefresh width={16} height={16} />,
-      run: async () => { onClose(); toast('Refreshing…'); await triggerRefresh(); toast('Refresh started', 'success'); },
+      key: 'refresh', label: tr('Refresh library'), hint: tr('scan for new chapters'), icon: <IcRefresh width={16} height={16} />,
+      run: async () => { onClose(); toast(tr('Refreshing…'), 'info', { busy: true, key: 'refresh' }); await triggerRefresh(); toast(tr('Refresh started'), 'success', { key: 'refresh' }); },
     },
-  ] as Action[]).filter((a) => !hiddenOnDesktop(DESKTOP_HIDDEN.paletteKeys, a.key)), [go, onClose, toast]); // no Offline downloads on desktop (lib/desktop.ts)
+  ] as Action[]).filter((a) => !hiddenOnDesktop(DESKTOP_HIDDEN.paletteKeys, a.key)), [go, onClose, toast, mayDownload]); // no Offline downloads on desktop (lib/desktop.ts)
 
   const query = q.trim().toLowerCase();
   const shownActions = query.length < 2 ? actions : actions.filter((a) => a.label.toLowerCase().includes(query) || a.key.includes(query));

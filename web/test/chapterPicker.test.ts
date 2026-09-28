@@ -73,7 +73,7 @@ test('one chapter reads as one chapter, in the dialog, the toasts and the pill, 
   ];
   for (const k of singulars) assert.ok(src.includes(`tr('${k}'`), `the dialog never says "${k}"`);
   // Every "Fetching n chapters" goes through lib/jobs.ts, which knows about one.
-  for (const f of ['app/series/page.tsx', 'components/FindMissingDialog.tsx', 'components/AddSeriesDialog.tsx', 'components/DownloadsIndicator.tsx']) {
+  for (const f of ['app/series/page.tsx', 'components/FindMissingDialog.tsx', 'components/AddSeriesDialog.tsx', 'components/ServerDownloadsView.tsx', 'components/SeriesServerDownloads.tsx']) {
     assert.doesNotMatch(readFileSync(join(root, f), 'utf8'), /tr\('Fetching \{n\} chapters/, `${f} counts chapters itself`);
   }
   const keys = [...singulars, 'Fetching 1 chapter…', 'Fetching 1 chapter', 'Downloading {n} chapters.', '{m} are not listed yet and come with the next check.', '{m} could not be fetched now.'];

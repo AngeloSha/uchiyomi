@@ -1,8 +1,9 @@
-// The download pill's rules (lib/jobs.ts, #82): what the strip shows now the server keeps a finished job for a
-// day, who is offered a Cancel, and how the server's own runs are worded.
+// The downloads rules (lib/jobs.ts, #82): what the strip shows now the server keeps a finished job for a day,
+// who is offered a Cancel, and how the server's own runs are worded -- on the pill until v0.49.0, on the
+// Library ring and in Library -> Downloads since.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { finished, forStrip, mayCancel, pillLabel, runProgress, runTitle, STRIP_DONE_MS, type JobCard, type RunCard } from '../lib/jobs';
+import { downloadsLabel, finished, forStrip, mayCancel, repairStepLabel, runProgress, runTitle, STRIP_DONE_MS, type JobCard, type RunCard } from '../lib/jobs';
 
 const job = (over: Partial<JobCard>): JobCard => ({ folder: 'f', title: 'T', total: 3, done: 3, status: 'done', ...over });
 const run = (over: Partial<RunCard>): RunCard =>
@@ -41,11 +42,27 @@ test('Cancel is offered for your own running download, or anyone\'s to an admin,
   assert.equal(mayCancel(job({ mine: true }), true), false, 'a finished job was offered a Cancel');
 });
 
-test("the pill says the person's own downloads first, then the server's run, then failures", () => {
-  assert.equal(pillLabel(1, 7, [run({})], 2), 'Fetching 7 chapters');
-  assert.equal(pillLabel(0, 0, [run({ status: 'done' }), run({ kind: 'repair' })], 2), runTitle('repair'));
-  assert.equal(pillLabel(0, 0, [run({ status: 'done' })], 2), '2 failed');
-  assert.equal(pillLabel(0, 0, [run({ status: 'cancelled' })], 0), null, 'a finished run raised the pill by itself');
+test("the ring's words say the person's own downloads first, then the server's run, then failures", () => {
+  // The pill's label, renamed with the pill gone (v0.49.0). Reintroduce by dropping the `serverChapters` branch:
+  // serverDownloads.test.ts finds "Fetching 3 chapters" is null.
+  assert.equal(downloadsLabel(1, 7, [run({})], 2), 'Fetching 7 chapters');
+  assert.equal(downloadsLabel(0, 0, [run({ status: 'done' }), run({ kind: 'repair' })], 2), runTitle('repair'));
+  assert.equal(downloadsLabel(0, 0, [run({ status: 'done' })], 2), '2 failed');
+  assert.equal(downloadsLabel(0, 0, [run({ status: 'cancelled' })], 0), null, 'a finished run raised the ring by itself');
+});
+
+test('a repair names the step it is on, from one list shared with Health', () => {
+  // One list, so the Downloads view's Server tasks card and Health's live strip never name a step two ways.
+  // Reintroduce by keying the list out of order (swap 'count' and 'failures' in REPAIR_STEP_KEYS): the
+  // failures step reads "Counting pages".
+  assert.equal(repairStepLabel('solver'), 'Checking the solver', 'the solver step is named for another step');
+  assert.equal(repairStepLabel('failures'), 'Retrying failed chapters', 'the failures step is named for another step');
+  assert.equal(repairStepLabel('short'), 'Looking for longer copies', 'the short step is named for another step');
+  assert.equal(repairStepLabel('directions'), 'Learning reading directions', 'the directions step is named for another step');
+  assert.equal(repairStepLabel('someday'), '', 'a step this build does not know is named anyway');
+  assert.equal(repairStepLabel(undefined), '');
+  assert.equal(runTitle('sweep'), 'Checking for new chapters');
+  assert.equal(runTitle('newest'), 'Fetch newest');
 });
 
 test('a run says how far it has got in its own unit, and nothing before it has sized itself', () => {

@@ -123,7 +123,9 @@ export type FollowWhy =
   /** It qualified, but the series already follows MAX_FOLLOWERS sources. */
   | 'cap'
   /** The primary itself, a disabled source, one in a cooldown, one not loaded, or one this viewer may not reach. */
-  | 'unavailable';
+  | 'unavailable'
+  /** The series is numbered by posting order (#116): another source's numbers cannot line up, so none is judged. */
+  | 'posting_order';
 
 export interface FollowResult {
   source: string;
@@ -343,9 +345,10 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
   const refuseAll = (why: FollowWhy): FollowResult[] => refusals(list, why);
   if (!list.length) return [];
 
-  const row = await one<{ id: string; title: string; source_id: string | null; deleted_at: string | null; merged_into: string | null }>(
-    'SELECT id, title, source_id, deleted_at, merged_into FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+  const row = await one<{ id: string; title: string; source_id: string | null; deleted_at: string | null; merged_into: string | null; numbering: string | null }>(
+    'SELECT id, title, source_id, deleted_at, merged_into, numbering FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
   if (!row || row.deleted_at || row.merged_into) return refuseAll('unavailable');
+  if (row.numbering === 'posting_order') return refuseAll('posting_order');
   const numbers = (await q<{ number: number }>('SELECT DISTINCT number FROM series_listing WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => Number(r.number)).filter((n) => Number.isFinite(n));
   // Decided once for the whole add rather than per candidate: no source is asked when nothing can be

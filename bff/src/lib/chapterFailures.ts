@@ -51,12 +51,15 @@ export async function noteChapterFailure(f: ChapterFailure): Promise<void> {
   const blame = e?.blockStatus ? `${e.blockStatus} (cooldown)` : `${status} (no cooldown)`;
   console.warn(`[updater] "${f.title}" ch ${f.number} via ${f.sourceId}: ${pages}${blame}: ${reasonOf(e)}`);
   if (e?.diskFull) return; // not the chapter's fault, and not the source's
+  // `at` is the latest attempt; `first_at` (v0.49.0) the first failure, kept on every later one -- the Health
+  // page's "failing since" -- and filled from `at` for a row written before the column (or by a rollback).
   await q(
-    `INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at)
-     VALUES ($1, $2, $3, $4, $5, 1, now())
+    `INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+     VALUES ($1, $2, $3, $4, $5, 1, now(), now())
      ON CONFLICT (series_id, number) DO UPDATE SET
        source_id = EXCLUDED.source_id, status = EXCLUDED.status, reason = EXCLUDED.reason,
-       attempts = chapter_failures.attempts + 1, at = now()`,
+       attempts = chapter_failures.attempts + 1, first_at = COALESCE(chapter_failures.first_at, chapter_failures.at),
+       at = now()`,
     [f.seriesId, f.number, f.sourceId, status, reasonOf(e)],
   ).catch(() => {}); // best effort, like logAudit: a ledger must never be the thing that fails a download
 }

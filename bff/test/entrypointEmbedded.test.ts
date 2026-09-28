@@ -109,6 +109,12 @@ test('THE EMBEDDED PATH: initdb once, socket-only start, the app pointed at it, 
   assert.match(start, /listen_addresses=''/, 'the embedded database must not listen on TCP');
   assert.match(start, new RegExp(`-k ${sb.sock}\\b`), 'the socket directory must be the one the app is told about');
   assert.match(start, /\s-w\b/, 'start must wait for the server, or the app races recovery');
+  // The server keeps the container's stdout/stderr: no -l, and pg_ctl's output is not thrown away. Reintroduce
+  // `-l /dev/stdout ... start >/dev/null`: the server opened that same /dev/null, so no Postgres error ever reached
+  // the container log. (`-l /dev/stderr` is worse: as the PUID user the server may not reopen it and never starts.)
+  assert.doesNotMatch(start, /\s-l\s/, "the embedded database writes its log somewhere other than the container log");
+  assert.doesNotMatch(readFileSync(SCRIPT, 'utf8'), /pg_ctl[^\n]*(?:\\\n[^\n]*)*start\s*>\s*\/dev\/null/,
+    "pg_ctl start's output, and with it the embedded database's log, is thrown away");
   assert.ok(r.calls.some((c) => c.startsWith('createdb')), 'the yomi database was never created');
   assert.equal(r.env.DATABASE_URL, `postgres://yomi@/yomi?host=${sb.sock}`, 'the app was pointed somewhere else');
   assert.equal(r.env.EMBEDDED_DB, '1');

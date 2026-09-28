@@ -56,57 +56,6 @@ export const STATUSES = [
   { key: 'CANCELLED', label: STATUS_LABELS[3] },
 ];
 
-/**
- * A source the viewer's library comes from (GET /api/library/sources): how many series were added from it
- * (`main`) and how many read from it at all, as their main source or a linked one (`any`).
- */
-export interface LibrarySource { id: string; name: string; main: number; any: number; installed: boolean }
-
-/** The sources, one query for the panel and the page's active-filter chips (react-query shares it). */
-export function useLibrarySources() {
-  return useQuery({
-    queryKey: ['library-sources'],
-    queryFn: () => api<{ content: LibrarySource[] }>('/api/library/sources').then((r) => r.content ?? []),
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
-/** How many sources a source section lists before the rest go behind "Show all". */
-const SOURCE_HEAD = 10;
-
-/**
- * One source filter: every source with its count, single choice, a tap on the chosen one clears it. The
- * chosen source is always listed, even past the head, so a reload never leaves it filtering with no control.
- */
-function SourceSection({ title, help, rows, count, value, onPick }: {
-  title: string; help: string; rows: LibrarySource[]; count: (s: LibrarySource) => number; value: string; onPick: (id: string) => void;
-}) {
-  const [all, setAll] = useState(false);
-  const listed = rows.filter((s) => count(s) > 0).sort((a, b) => count(b) - count(a) || a.name.localeCompare(b.name));
-  const head = all ? listed : listed.slice(0, SOURCE_HEAD);
-  const shown = head.some((s) => s.id === value) || !value ? head : [...head, ...listed.filter((s) => s.id === value)];
-  const hidden = listed.length - shown.length;
-  if (!listed.length) return null;
-  return (
-    <section>
-      <Eyebrow>{title}</Eyebrow>
-      <p className="-mt-1 mb-1.5 text-[11px] leading-snug text-fog-600">{help}</p>
-      <Chips>
-        {shown.map((s) => (
-          <button key={s.id} type="button" onClick={() => onPick(value === s.id ? '' : s.id)} aria-pressed={value === s.id}
-            title={s.installed ? undefined : tr('not installed')}
-            className={`chip text-xs ${value === s.id ? 'chip-active' : ''} ${s.installed ? '' : 'text-fog-500'}`}>
-            {s.name}<span className="ms-1 tabular-nums text-fog-600">{count(s)}</span>
-          </button>
-        ))}
-      </Chips>
-      {hidden > 0 && (
-        <button type="button" onClick={() => setAll(true)} className="mt-2 text-xs text-accent">{tr('Show all')} ({hidden})</button>
-      )}
-    </section>
-  );
-}
-
 /** How many genres are listed before the rest go behind "Show all". */
 const GENRE_HEAD = 20;
 /** Below this many, the search box is noise. */
@@ -155,20 +104,15 @@ function GenreRow({ facet, on, onToggle }: { facet: GenreFacet; on: boolean; onT
   );
 }
 
-export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc, anySrc, onSet }: {
+export function LibraryFilters({ sort, read, status, genres, lib, libs, onSet }: {
   sort: string;
   read: string;
   status: string;
   genres: string[];
   lib: string;
   libs: LibraryRow[];
-  /** The `src` URL param: only series ADDED from this source. */
-  mainSrc: string;
-  /** The `anysrc` URL param: series that read from this source at all, main or linked. */
-  anySrc: string;
   onSet: (k: string, v: string) => void;
 }) {
-  const { data: sources } = useLibrarySources();
   const [q, setQ] = useState('');
   const [showAll, setShowAll] = useState(false);
 
@@ -261,17 +205,6 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
           ))}
         </Chips>
       </section>
-
-      {/* Only with more than one source to choose between. Empty on a Komga backend (no sources there), so
-          neither section renders and no condition a Komga server would refuse is ever sent. */}
-      {(sources?.length ?? 0) > 1 && (
-        <>
-          <SourceSection title={tr('Main source')} help={tr('Series added from this source.')}
-            rows={sources!} count={(s) => s.main} value={mainSrc} onPick={(id) => onSet('src', id)} />
-          <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a linked one.')}
-            rows={sources!} count={(s) => s.any} value={anySrc} onPick={(id) => onSet('anysrc', id)} />
-        </>
-      )}
 
       {formats.length > 0 && (
         <section>

@@ -10,6 +10,12 @@
 #   Run the v0.40 walk once per fresh instance; repeat with WIDTH=390 and a fresh E2E_NET/E2E_PORT.
 #   KEEP=1 E2E_ADULT=1 bash web/test/e2e/up.sh   # fake-b declares itself adult: what walk42 needs
 #   E2E_EMBEDDED=1 bash web/test/e2e/up.sh   # no Postgres container: the image runs its own (DATABASE_URL unset)
+#   KEEP=1 E2E_ENGINE=fake E2E_ENGINE_MODE=down bash web/test/e2e/up.sh   # with the fake extension engine (walk49 engine)
+#   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # the stack for all of walk49
+#     -- which then needs E2E_ARCHIVE_FAST=1 on its own command too (walk49.mjs's header): this flag only sets the
+#     app's archive timing, and a walk without it skips the archive checks that need that timing
+#   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
+#   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -25,6 +31,7 @@ APP="$NET"
 DB="$NET-db"
 FAKE_A="$NET-fake-a"
 FAKE_B="$NET-fake-b"
+ENGINE_C="$NET-engine"
 # Docker's default address pools can be exhausted on a busy host, so the subnet is pinned rather than left
 # to chance -- an unexplained "all predefined address pools have been fully subnetted" is a bad first
 # impression of a test suite.
@@ -36,6 +43,14 @@ EMBEDDED=${E2E_EMBEDDED:-0}
 # leg on PORT+1; fixed 18150/18151 made those two otherwise-correct runs fight over a host port.
 FAKE_A_PORT=${E2E_FAKE_A_PORT:-$((20000 + (PORT % 1000) * 2))}
 FAKE_B_PORT=${E2E_FAKE_B_PORT:-$((FAKE_A_PORT + 1))}
+ENGINE_PORT=${E2E_ENGINE_PORT:-$((FAKE_B_PORT + 1))}
+# E2E_ENGINE=fake: the strict fake Suwayomi v2.3.2243 (bff/test/fixtures/fakeSuwayomiEngine.mjs) as the extension
+# engine, in E2E_ENGINE_MODE (up, down, slow, extension_error; /__mode switches it later). Unset: no engine at
+# all, SUWAYOMI_URL empty -- the "No extension engine is set up" state (#72).
+ENGINE=${E2E_ENGINE:-}
+# The image's tag: its own per run when several instances are built at once (parallel lanes), so one run never
+# starts another's build.
+IMAGE=${E2E_IMAGE:-uchiyomi:e2e}
 LIB=$(mktemp -d)
 DATA=$(mktemp -d)
 # The v0.42.0 walk needs one provider that declares itself adult, to prove the "Show 18+" reveal keeps it
@@ -46,17 +61,32 @@ DATA=$(mktemp -d)
 # The same walk needs one series whose title carries characters a keyboard cannot type (#66), and it is
 # served by fake-a alone so that adding it names one provider and no fold has to be resolved.
 if [ "${E2E_ADULT:-0}" = "1" ]; then ADULT_SOURCE="fake-b"; EXTRA_A="v42"; else ADULT_SOURCE=""; EXTRA_A="none"; fi
+# What the app is started with beyond the common set, for both database layouts.
+APP_ENV=()
+# E2E_ARCHIVE_FAST=1: the slow archive's test-only timing (#117; bff lib/archive.ts, lib/archivePace.ts). With the
+# owner's defaults its first look comes ten minutes after a boot, every chapter is followed by a break of at least
+# 45 s and pages are 1.5-4 s apart, so a walk could never watch a chapter land. Here: the first look 5 s after the
+# boot, a 2 s floor under the break, pages 20-60 ms apart, a tick every 2 s. Each has its own name to override
+# (ARCHIVE_FIRST_RUN_MS=… and so on). Off by default: every walk before v0.49 runs against the real pacing.
+if [ "${E2E_ARCHIVE_FAST:-0}" = "1" ]; then
+  APP_ENV+=(-e "ARCHIVE_FIRST_RUN_MS=${ARCHIVE_FIRST_RUN_MS:-5000}" -e "ARCHIVE_MIN_BREAK_MS=${ARCHIVE_MIN_BREAK_MS:-2000}"
+    -e "ARCHIVE_PAGE_GAP_MS=${ARCHIVE_PAGE_GAP_MS:-20,60}" -e "ARCHIVE_TICK_MS=${ARCHIVE_TICK_MS:-2000}")
+fi
+# E2E_MIN_FREE_GB: the downloader's free-space floor (MIN_FREE_GB, 10 GiB when unset), measured where the app
+# downloads to -- in this rig the host's own disk. A test host with less free than that refuses every download, and
+# the walks read it as a broken feature; 0 turns the floor off. Unset: the app's own default.
+if [ -n "${E2E_MIN_FREE_GB:-}" ]; then APP_ENV+=(-e "MIN_FREE_GB=$E2E_MIN_FREE_GB"); fi
 
 cleanup() {
-  [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT (library $LIB, data $DATA)"; return; }
-  docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" >/dev/null 2>&1 || true
+  [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT} (library $LIB, data $DATA)"; return; }
+  docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # /data is written by the container as PUID (our own uid), so a plain rm works.
   rm -rf "$LIB" "$DATA"
 }
 trap cleanup EXIT INT TERM
 
-docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" >/dev/null 2>&1 || true
+docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
@@ -76,11 +106,27 @@ for stub in "http://127.0.0.1:$FAKE_A_PORT/__log" "http://127.0.0.1:$FAKE_B_PORT
   [ "$ready" = "1" ] || { echo "fake source did not start: $stub" >&2; exit 1; }
 done
 
+ENGINE_ENV=()
+if [ "$ENGINE" = "fake" ]; then
+  echo "· starting the fake extension engine (${E2E_ENGINE_MODE:-up})"
+  docker run -d --name "$ENGINE_C" --network "$NET" -p "127.0.0.1:$ENGINE_PORT:$ENGINE_PORT" \
+    -v "$REPO:/repo:ro" -w /repo node:24-alpine \
+    node web/test/e2e/fakeEngine.mjs --port "$ENGINE_PORT" --mode "${E2E_ENGINE_MODE:-up}" >/dev/null
+  ready=0
+  for _ in $(seq 1 50); do
+    if curl -sf -o /dev/null "http://127.0.0.1:$ENGINE_PORT/__mode"; then ready=1; break; fi
+    sleep .1
+  done
+  [ "$ready" = "1" ] || { echo "fake engine did not start" >&2; exit 1; }
+  # A solver address for the app to share with the engine (Connect); nothing needs it to answer.
+  ENGINE_ENV=(-e "SUWAYOMI_URL=http://$ENGINE_C:$ENGINE_PORT" -e "FLARESOLVERR_URL=http://$NET-solver:8191")
+fi
+
 echo "· seeding a library"
 python3 "$REPO/web/test/e2e/seed.py" "$LIB"
 
 echo "· building the all-in-one image"
-docker build -q -f "$REPO/Dockerfile.aio" -t uchiyomi:e2e "$REPO" >/dev/null
+docker build -q -f "$REPO/Dockerfile.aio" -t "$IMAGE" "$REPO" >/dev/null
 
 if [ "$EMBEDDED" = "1" ]; then
   echo "· embedded database: no Postgres container, DATABASE_URL unset, /data mounted"
@@ -90,12 +136,15 @@ if [ "$EMBEDDED" = "1" ]; then
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
     -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
-    -e PUID="$(id -u)" -e PGID="$(id -g)" \
-    -v "$LIB":/library -v "$DATA":/data uchiyomi:e2e >/dev/null
+    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} ${APP_ENV[@]+"${APP_ENV[@]}"} \
+    -v "$LIB":/library -v "$DATA":/data "$IMAGE" >/dev/null
 else
   docker run -d --name "$DB" --network "$NET" \
     -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=yomi postgres:16-alpine >/dev/null
-  for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q 2>/dev/null && break; sleep 1; done
+  # Over TCP, not the socket: the image's first start runs initdb against a temporary server that listens on the
+  # socket only, answers "ready", and is then stopped and started again. An app that connected in that gap died
+  # with "the database system is starting up" and the walk had no instance to drive.
+  for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q -h 127.0.0.1 2>/dev/null && break; sleep 1; done
 
   docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
     -e DATABASE_URL="postgres://postgres:e2e@$DB:5432/yomi" \
@@ -104,8 +153,8 @@ else
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
     -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
-    -e PUID="$(id -u)" -e PGID="$(id -g)" \
-    -v "$LIB":/library uchiyomi:e2e >/dev/null
+    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} ${APP_ENV[@]+"${APP_ENV[@]}"} \
+    -v "$LIB":/library "$IMAGE" >/dev/null
 fi
 
 echo "· waiting for it to come up"
@@ -120,6 +169,8 @@ TOKEN=$(curl -sf -X POST "http://127.0.0.1:$PORT/auth/login" -H 'content-type: a
   -d "{\"username\":\"$USER\",\"password\":\"$PASS\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')
 curl -sf -X POST "http://127.0.0.1:$PORT/api/refresh" -H "authorization: Bearer $TOKEN" >/dev/null
 sleep 4
+
+[ "${E2E_NO_WALK:-0}" = "1" ] && { echo "up: $NET on :$PORT"; exit 0; }
 
 echo "· driving the browser"
 cd "$REPO/web"

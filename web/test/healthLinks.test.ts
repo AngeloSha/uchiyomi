@@ -8,7 +8,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { chParam, healthLinks, landingNumber, readerHref, seriesHref } from '../lib/healthLinks';
+import { chParam, healthLinks, landingNumber, numberingHref, readerHref, seriesHref } from '../lib/healthLinks';
+import { extSourceIdOf } from '../lib/sourcePrefs';
 
 test('links are the query shape, encoded, with ?ch= only for a real number', () => {
   assert.equal(seriesHref('s 1'), '/series/?id=s%201');
@@ -31,6 +32,36 @@ test('each finding opens the chapter it is about', () => {
   assert.deepEqual(healthLinks('chapter-failures', { title: 'MangaDex', detail: 'd', sourceId: 'mangadex' }), [], 'a source is not a series');
   // A gap with no numbers falls back to the series rather than to nothing.
   assert.deepEqual(healthLinks('chapter-gaps', { title: 't', detail: 'd', seriesId: 's1' }), [{ href: '/series/?id=s1' }]);
+});
+
+test('#116: a numbering finding opens its plan, and an extension source its own settings', () => {
+  // The finding is about a plan, so Open is the plan on the series page (it reads ?numbering=review once). The
+  // Webtoons extension's own "sequential chapter numbering" switch -- the fix #116's reporter needed -- is one
+  // link further. Reintroduce the plain series link: "Open does not open the plan" fails.
+  assert.equal(numberingHref('s 1'), '/series/?id=s%201&numbering=review');
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744', actions: ['renumber', 'keep_numbers'] }),
+    [{ href: '/series/?id=s1&numbering=review' }, { href: '/admin/?tab=Extensions&settings=2522335540328470744', label: 'Source settings' }],
+    'Open does not open the plan');
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'mangadex', actions: ['renumber'] }), [{ href: '/series/?id=s1&numbering=review' }],
+    'a built-in source is sent to extension settings');
+  assert.equal(extSourceIdOf('sw:-12345'), '-12345');
+  assert.equal(extSourceIdOf('sw:abc'), null, 'an adapter id that is not an extension source id');
+  assert.equal(extSourceIdOf(undefined), null);
+});
+
+test('#116: a numbering row with nothing to review opens the series, not a plan nobody asked for', () => {
+  // The page opens the route's `next` plan, the other numbering when nothing waits: "numbered by posting order lately"
+  // (info, Keep only) opened "Use the source's numbers" with a Rename key, and an interrupted renumber (no key: the
+  // next check finishes it) a Confirm over its journal (web2 review). Reintroduce the plan for every numbering row:
+  // each assertion below names its row.
+  const ext = { href: '/admin/?tab=Extensions&settings=2522335540328470744', label: 'Source settings' };
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744', actions: ['keep_numbers'], info: true }),
+    [{ href: '/series/?id=s1' }, ext], 'a series numbered by posting order lately opens a rename plan');
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744' }),
+    [{ href: '/series/?id=s1' }, ext], 'an interrupted renumber opens a fresh plan over its journal');
+  // A kept choice is info too, even with Review on it: Open is the series, Review is the key.
+  assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'mangadex', actions: ['renumber'], info: true }),
+    [{ href: '/series/?id=s1' }], 'a kept choice opens the plan');
 });
 
 test('?ch= lands on that chapter, or on the one just before a gap', () => {
@@ -60,4 +91,31 @@ test('the series page reads ?ch= and lights the row it lands on', () => {
   assert.match(page, /lit=\{litCh === b\.number\}/);
   // Taken off the URL with the router's history state kept: dropping it makes Next reload the page on Back.
   assert.match(page, /replaceState\(window\.history\.state,/);
+});
+
+test('the series page opens the plan Health links to, once, for an admin', () => {
+  // Reintroduce by dropping the effect: Health's Open lands on the series with no plan in sight.
+  const page = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
+  assert.match(page, /const wantPlan = useSearchParams\(\)\.get\('numbering'\) === 'review';/, 'the page does not read ?numbering=');
+  const fx = page.slice(page.indexOf('const openedPlan = useRef'), page.indexOf('}, [wantPlan, isAdmin, id]);'));
+  assert.match(fx, /if \(!wantPlan \|\| !isAdmin \|\| openedPlan\.current === id\) return;/, 'the plan opens for a member, or on every render');
+  assert.match(fx, /u\.searchParams\.delete\('numbering'\);/, 'a reload opens the plan again');
+  assert.match(fx, /setNumberingSheet\('next'\);/, 'the plan opened is not the one waiting');
+  // After the reset on a new series, which would otherwise close it straight away.
+  assert.ok(page.indexOf('useEffect(() => { setNumberingSheet(null); }, [id]);') < page.indexOf('const openedPlan = useRef'), 'the reset closes the plan it opened');
+});
+
+test("Health's Open links wrap onto a second line rather than being cut", () => {
+  // 390-de-health-numbering-row.png: "Öffnen · Einstellungen der Q…" -- which settings, the link no longer said.
+  // Reintroduce `max-w-[11rem] truncate` on the link: "a Health link is cut to one line" fails by name.
+  const page = readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8');
+  const links = page.slice(page.indexOf('links={healthLinks(c.id, it).map((l) => ('), page.indexOf('))}>', page.indexOf('links={healthLinks(c.id, it).map((l) => (')));
+  const cls = /<Link key=\{l\.href\} href=\{l\.href\} className="([^"]*)"/.exec(links)?.[1];
+  assert.ok(cls, "Health's links moved -- update this test");
+  assert.doesNotMatch(cls!, /\btruncate\b/, 'a Health link is cut to one line');
+  assert.match(cls!, /\bline-clamp-2\b/, 'a Health link can grow past two lines, or is cut to one');
+  assert.match(cls!, /\bbreak-words\b/);
+  assert.match(cls!, /\bmax-w-\[11rem\]/, 'the links column can take the finding\'s words\' width');
+  // The arrow stays with the last word: a no-break space, so "›" never starts the second line on its own.
+  assert.match(links, /\{'\\u00a0'\}›/, 'the arrow can wrap onto a line of its own');
 });

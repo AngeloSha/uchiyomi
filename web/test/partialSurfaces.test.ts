@@ -138,17 +138,17 @@ test('the job card lines: chapters not pages, the slow-down sentence only for a 
 test('the three job-card readers all draw the lines through jobNoteLines', () => {
   // Each surface used to word its own sentences; one helper is what keeps them saying the same thing and
   // what lets the locale test see each sentence once. Reintroduce by inlining `tr('took chapter…')` in any
-  // one of them: that file no longer calls the helper.
-  for (const f of ['components/DownloadsIndicator.tsx', 'components/FindMissingDialog.tsx', 'components/AddSeriesDialog.tsx']) {
+  // one of them: that file no longer calls the helper. Library -> Downloads took over from the pill (v0.49.0).
+  for (const f of ['components/ServerDownloadsView.tsx', 'components/FindMissingDialog.tsx', 'components/AddSeriesDialog.tsx']) {
     const src = code(read(f));
     assert.match(src, /import \{ jobNoteLines, type JobCardNotes \} from '@\/lib\/jobNotes';/, `${f} does not import the helper`);
     assert.match(src, /interface Job extends JobCardNotes \{/, `${f}'s Job does not carry switched/partial`);
     assert.match(src, /jobNoteLines\(j(?:ob)?, /, `${f} does not render the lines`);
     assert.doesNotMatch(src, /tr\('took chapter|tr\('\{from\} asked us|saved with pages missing'/, `${f} words a job line itself`);
   }
-  // The pill asks for names only once a card has something to name, and only as a viewer who may download.
-  const pill = code(read('components/DownloadsIndicator.tsx'));
-  assert.match(pill, /enabled: mayAdd && jobs\.some\(\(j\) => !!j\.switched\?\.length\)/, 'the pill asks /api/sources with nothing to name, or for a viewer the route refuses');
+  // The view asks for names only once a card has something to name, and only as a viewer who may download.
+  const view = code(read('components/ServerDownloadsView.tsx'));
+  assert.match(view, /enabled: mayAdd && jobs\.some\(\(j\) => !!j\.switched\?\.length\)/, 'the Downloads view asks /api/sources with nothing to name, or for a viewer the route refuses');
 });
 
 // ---- the admin switch ----
@@ -175,7 +175,8 @@ test('Health keeps explanatory notes reachable when a check has no active findin
   // repaired. The aria relationship makes the newly available disclosure understandable to assistive tech.
   const src = code(read('app/admin/page.tsx'));
   const health = between(src, 'function Health()', '\ninterface ExtStatus', 'Health');
-  assert.match(health, /const expandable = !!c\.items\.length \|\| !!c\.note;/, 'a note without findings cannot make its Health card expandable');
+  // v0.49.0: a card with an action of its own (Scan the library now) opens too -- after the note, never instead.
+  assert.match(health, /const expandable = !!c\.items\.length \|\| !!c\.note \|\| hasCardActions\(c\);/, 'a note without findings cannot make its Health card expandable');
   assert.match(health, /type="button"[\s\S]*?aria-expanded=\{expandable \? isOpen : undefined\}[\s\S]*?aria-controls=\{expandable \? `health-\$\{c\.id\}-details` : undefined\}[\s\S]*?disabled=\{!expandable\}/, 'the Health disclosure does not announce or control its note panel');
   assert.match(health, /id=\{`health-\$\{c\.id\}-details`\}[\s\S]*?data-health-note/, 'the Health note panel lost the id named by its disclosure');
 });

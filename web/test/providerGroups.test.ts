@@ -5,6 +5,8 @@
 // twenty-nine cards again, which is exactly the wall this was written to remove.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { groupProviders, worstStatus, type ProviderSrc, type SrcStatus } from '../lib/providerGroups';
 
 const PKG = 'eu.kanade.tachiyomi.extension.all.hentai3';
@@ -88,4 +90,24 @@ test('a group with a package name never merges with a nameless one', () => {
   // space; keep them apart so an upgrade that fills pkg_name cannot silently double a card's row count.
   const g = groupProviders([sw('1', 'en'), sw('2', 'ja', { extension: { pkgName: null, name: '3Hentai' } })]);
   assert.equal(g.length, 2);
+});
+
+test('the panel says each status as a mark in words: the card, the folded header and every variant row', () => {
+  // v0.49.0 ("no more pills"): the three places a status shows went through one capsule that printed the
+  // server's token as sent -- "ok", "rate-limited", "quiet" -- in English in every language, with only the tint
+  // telling a blocked source from a healthy one. Reintroduce by putting the capsule back
+  // (`<span className={`rounded-full px-2 …`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>`):
+  // "the status is not a mark" fails; by passing a variant's own status to the folded header instead of
+  // `g.worst`: "the folded header" fails.
+  const src = readFileSync(join(__dirname, '..', 'app/admin/page.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const a = src.indexOf('function Providers(');
+  const b = src.indexOf('function ExtensionsLink(', a);
+  assert.ok(a >= 0 && b > a, 'function Providers moved');
+  const panel = src.slice(a, b);
+  assert.match(panel, /const statusMark = \(st: ProviderStatus\) => <StatusMark \{\.\.\.sourceMark\(st\)\} \/>;/, 'the status is not a mark');
+  assert.equal([...panel.matchAll(/\{statusMark\(st\)\}/g)].length, 2, 'the source card and each variant row show their own status');
+  assert.equal([...panel.matchAll(/\{statusMark\(g\.worst\)\}/g)].length, 1, 'the folded header does not wear the unhappiest variant\'s status');
+  assert.doesNotMatch(panel, /'rate-limited'/, 'the server\'s token is shown as a word again');
+  assert.doesNotMatch(src, /\bSTATUS_STYLE\b/, 'the capsule tints are back');
 });

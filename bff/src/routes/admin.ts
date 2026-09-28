@@ -1,7 +1,9 @@
 import { hash } from '@node-rs/argon2';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
+import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
+import numberingRoutes from './numbering';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -13,16 +15,20 @@ import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fi
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
+import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
-import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairStep } from '../lib/repair';
-import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
+import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
+import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
+import { worstCase } from '../lib/repairEstimate';
+import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
-import { smokeTest, probeBase, buildProbe } from '../lib/sourceProbe';
-import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
+import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
+import { smokeTest } from '../lib/sourceProbe';
+import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
+import { checkSourceLive, recordLiveResult } from '../lib/sourceCheck';
+import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
-import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, withTimeout } from '../lib/sources';
 import {
@@ -31,6 +37,7 @@ import {
 } from '../lib/sources/suwayomi/extensions';
 import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview } from '../lib/sources/suwayomi/langs';
 import { lastSuwayomiLoad } from '../lib/sources/suwayomi/register';
+import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
@@ -38,7 +45,7 @@ import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
@@ -58,7 +65,7 @@ import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, ty
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
-import { readHealthSummary, storeHealthSummary } from '../lib/healthSummary';
+import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
@@ -398,18 +405,66 @@ async function keepRestricted(qq: typeof q, userId: string): Promise<void> {
   }
 }
 
+/**
+ * Which of these series this admin may see NAMED (v0.49.0): a repair run's target and current series are a
+ * listing, so they follow /api/sources/jobs' rule for a run's "now on ..." -- the count stays, the title of a
+ * series the viewer may not list (the 18+ hide, above all) goes. One query, and none when there is nothing.
+ */
+async function listable(req: FastifyRequest, ids: Array<string | undefined>): Promise<Set<string>> {
+  const list = ids.filter((x): x is string => !!x);
+  if (!list.length) return new Set();
+  return browsableIds(list, await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) }));
+}
+const scrubTarget = (t: RunTarget, ok: Set<string>): RunTarget =>
+  (t.seriesId && !ok.has(t.seriesId) ? { ...t, label: undefined } : t);
+const scrubSkips = (skips: RepairSkip[] | undefined, ok: Set<string>): RepairSkip[] =>
+  (skips ?? []).map((k) => (k.target?.seriesId && !ok.has(k.target.seriesId) ? { ...k, target: { ...k.target, title: undefined } } : k));
+/** The series a stored result's skips name, for `listable`. */
+const skipIds = (r: { skips?: RepairSkip[] } | null | undefined) => (r?.skips ?? []).map((k) => k.target?.seriesId);
+/**
+ * A stored result as this admin may read it: its skips name series too (folder_busy, no_searches_left), on the
+ * Tasks line's result, the latest one-off fix's and the status route's last full run. Reintroduce by sending any
+ * of them as stored: "an admin who hides 18+ reads no adult title in the repair's answers" in
+ * repairRoutes.int.test.ts finds the title.
+ */
+const scrubResult = <R extends { skips?: RepairSkip[] } | null | undefined>(r: R, ok: Set<string>): R =>
+  (r?.skips?.length ? { ...r, skips: scrubSkips(r.skips, ok) } : r);
+
+/** The run kinds the status route always estimates: the Health page's three chips, its cards and the nightly. */
+const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now'];
+
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
+  // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
+  await app.register(numberingRoutes);
   // Connect sources and a series' other names (routes/adminLink.ts), behind the two hooks above.
   await linkRoutes(app);
 
-  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books.
-  app.post('/api/admin/library/scan', async () => persistScan());
+  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
+  // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
+  // header summary to catch up with what the scan found (v0.49.0).
+  app.post('/api/admin/library/scan', async () => {
+    runtime.lastScan = Date.now();
+    const r = await persistScan();
+    scheduleHealthSummaryRefresh();
+    return r;
+  });
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
   app.post('/api/admin/update/:id', async (req) => withOrigin('check', userIdOf(req), () => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10)));
-  app.post('/api/admin/update', async (req) => runUpdateAll({ onlyFavorites: !!(req.body as any)?.favorites, maxNew: Number((req.body as any)?.maxNew) || 10 }));
+  // Through runSweep, as the schedule and Run now are (#117): `runtime.updating` is the flag every other job --
+  // the repair, the slow archive -- stands aside for, and a bare runUpdateAll here ran without it. 409 while a
+  // sweep or a repair runs; the sweep's result, as before, when it ends.
+  // Reintroduce by calling runUpdateAll bare: "POST /api/admin/update is refused while a sweep runs" in
+  // sweepRunner.int.test.ts starts a second sweep on top of the first.
+  app.post('/api/admin/update', async (req, reply) => {
+    const run = runSweep({ onlyFavorites: !!(req.body as any)?.favorites, maxNew: Number((req.body as any)?.maxNew) || 10, by: userIdOf(req) }, app.log);
+    if (!run) return reply.code(409).send({ error: 'busy', message: 'A chapter sweep or a library repair is already running.' });
+    const r = await run;
+    if (!r) return reply.code(500).send({ error: 'failed', message: 'The update run failed. The server log has the details.' });
+    return r;
+  });
 
   app.get('/api/admin/users', async () => ({
     content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
@@ -429,7 +484,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, alt_title_matching';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, alt_title_matching, '
+    + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -444,6 +500,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // thing and then go and see how much it took" is the wrong order to learn it in. Null if it cannot be
       // counted -- an unavailable figure must not stop the settings page loading.
       cleanup_read_due: await dueCountCached(row?.cleanup_read_days ?? 30).catch(() => null),
+      // The slow archive's disk floor is set against this (#117): GiB free under the download root, null unknown.
+      archive_free_gb: await archiveFreeGb().catch(() => null),
     };
   };
   /**
@@ -548,7 +606,9 @@ export default async function adminRoutes(app: FastifyInstance) {
        * containment. Off stops the parsed names being used at once; names an admin typed or confirmed stay.
        */
       altTitleMatching: z.boolean().optional(),
-    }).parse(req.body);
+      // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
+      ...ARCHIVE_SETTINGS_SHAPE,
+    }).superRefine(archiveWindowPair).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
@@ -591,12 +651,23 @@ export default async function adminRoutes(app: FastifyInstance) {
         [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
       invalidateSourcePrefs();
     }
+    await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
 
   // ---- scheduled tasks ----
-  app.get('/api/admin/tasks', async () => {
+  /**
+   * A task's schedule three ways (v0.49.0): `schedule` in English exactly as before, for the API; and the
+   * English sentence as a KEY with its values, which the page translates (web/public/locales, keyed by the
+   * English string like every other tr() key). A new schedule sentence here is a new locale key there.
+   */
+  const sched = (key: string, vars: Record<string, string | number> = {}) => ({
+    schedule: key.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k])),
+    scheduleKey: key,
+    scheduleVars: vars,
+  });
+  app.get('/api/admin/tasks', async (req) => {
     const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
@@ -607,14 +678,31 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
     const backupLast = runtime.lastBackup || (s?.backup_last_run ? new Date(s.backup_last_run).getTime() : null);
+    // The repair's history: the Tasks line's origin and the latest one-off fix beside it (lib/repairRuns.ts).
+    const digest = await runDigest().catch(() => null);
+    // Memory wins once this process has run it (see the row below); both are the last FULL run's.
+    const repairLast = repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null);
+    const seen = await listable(req, [
+      digest?.latestOther?.target.seriesId, ...skipIds(digest?.latestOther?.result), ...skipIds(repairLast),
+    ]);
+    const latestOther = digest?.latestOther
+      ? { ...digest.latestOther, target: scrubTarget(digest.latestOther.target, seen), result: scrubResult(digest.latestOther.result, seen) }
+      : null;
+    // Who started the run on the Tasks line: the history's newest full run, and only while it IS that run (the
+    // result names its run). Between a run writing its result and the history catching up, say nothing rather
+    // than the previous run's origin. Reintroduce by leaving skipped runs out of the digest's lastFull
+    // (repairRuns.ts): "the Tasks line's origin is the run it shows" in repairRoutes.int.test.ts finds no
+    // 'nightly' beside a nightly's result (and without the run check below, the manual run's before it).
+    const lastFull = digest?.lastFull;
+    const lastOrigin = lastFull && (!repairLast?.run || repairLast.run === lastFull.id) ? lastFull.origin : null;
     return { content: [
-      { id: 'scan', name: 'Library scan', schedule: 'on demand', lastRun: runtime.lastScan || null, running: false },
-      { id: 'update', name: 'Check for new chapters', schedule: `every ${s?.updater_hours ?? 6}h`, lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
-      { id: 'backup', name: 'Backup database & config', schedule: `daily at ${String(s?.backup_hour ?? 3).padStart(2, '0')}:00`, lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
+      { id: 'scan', name: 'Library scan', ...sched('on demand'), lastRun: runtime.lastScan || null, running: false },
+      { id: 'update', name: 'Check for new chapters', ...sched('every {h}h', { h: s?.updater_hours ?? 6 }), lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
+      { id: 'backup', name: 'Backup database & config', ...sched('daily at {hh}:00', { hh: String(s?.backup_hour ?? 3).padStart(2, '0') }), lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
       {
         id: 'fingerprint',
         name: 'Fingerprint library files',
-        schedule: 'in the background, rechecked every 6h',
+        ...sched('in the background, rechecked every 6h'),
         lastRun: fpState.finishedAt,
         lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, ms: fpState.ms } : null,
         running: fpState.running,
@@ -623,7 +711,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'pagehash',
         name: 'Find repeated pages',
-        schedule: 'in the background, rechecked every 6h',
+        ...sched('in the background, rechecked every 6h'),
         lastRun: phState.finishedAt,
         lastResult: phState.finishedAt
           ? { chapters: phState.chapters, pages: phState.pages, failed: phState.failed, ms: phState.ms }
@@ -637,7 +725,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'verify',
         name: 'Verify chapter files',
-        schedule: 'on demand \u00b7 after a database-only restore',
+        ...sched('on demand · after a database-only restore'),
         // Persisted like the cleanup's, so a restart keeps the last run. Memory wins once this process has
         // run it -- including a run that threw (finishedAt set, lastResult null): falling through to the
         // stored row there would put an older healthy result back on the panel over a walk that died.
@@ -652,15 +740,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'repair',
         name: 'Repair library',
-        schedule: s?.repair_enabled === false
-          ? 'switched off · on demand'
-          : `every ${REPAIR_HOURS}h · never during a chapter sweep`,
+        ...(s?.repair_enabled === false
+          ? sched('switched off · on demand')
+          : sched('every {h}h · never during a chapter sweep', { h: REPAIR_HOURS })),
         // Memory wins once this process has run it, including a run that threw (finishedAt set, lastResult
         // null): the verify's precedent above says why falling through to the stored row there would put an
         // older healthy result back on the panel over a run that died.
+        // ⚠️ Since v0.49.0 both are the last FULL run's (the nightly, or Run now here): a one-row Health fix
+        // is in the history, and in `latestOther` below, and no longer replaces this line.
         lastRun: repairState.finishedAt || (s?.repair_last_run ? new Date(s.repair_last_run).getTime() : null),
-        lastResult: repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null),
+        lastResult: scrubResult(repairLast, seen),
+        lastOrigin,
         running: repairState.running,
+        startedAt: repairState.running ? repairState.startedAt : null,
+        run: repairState.live?.id ?? null,
+        nextAt: repairState.nextAt,
+        latestOther,
         // What one run takes on at most, so the Health page's "Fix all issues" can say so rather than guess.
         caps: { short: REPAIR_SHORT_MAX, gaps: REPAIR_GAPS_MAX },
       },
@@ -670,9 +765,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       ...(s?.cleanup_read ? [{
         id: 'cleanup',
         name: 'Delete read chapters',
-        schedule: (s.cleanup_read_days === 0
-          ? 'hourly \u00b7 as soon as everyone has finished'
-          : `hourly \u00b7 ${s.cleanup_read_days} day${s.cleanup_read_days === 1 ? '' : 's'} after everyone has finished`),
+        ...(s.cleanup_read_days === 0
+          ? sched('hourly · as soon as everyone has finished')
+          // The singular spells its count, as the page's counted pairs do ("1 day" / "{n} days").
+          : s.cleanup_read_days === 1 ? sched('hourly · 1 day after everyone has finished')
+          : sched('hourly · {n} days after everyone has finished', { n: s.cleanup_read_days })),
         lastRun: runtime.lastCleanup || (s.cleanup_read_last_run ? new Date(s.cleanup_read_last_run).getTime() : null),
         lastResult: runtime.lastCleanupResult ?? s.cleanup_read_last_result ?? null,
         running: runtime.cleaning,
@@ -685,7 +782,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       ...(suwayomiConfigured() ? [{
         id: 'extensions',
         name: 'Extension updates',
-        schedule: `every ${s?.extension_hours ?? 6}h` + (s?.extension_auto_update === false ? ' \u00b7 check only' : ''),
+        ...sched(s?.extension_auto_update === false ? 'every {h}h · check only' : 'every {h}h', { h: s?.extension_hours ?? 6 }),
         lastRun: extState.lastRun || (s?.extension_last_run ? new Date(s.extension_last_run).getTime() : null),
         lastResult: extState.lastResult ?? s?.extension_last_result ?? null,
         running: extState.running,
@@ -725,10 +822,94 @@ export default async function adminRoutes(app: FastifyInstance) {
       message: 'sourceId only applies to the failures step (send only: ["failures"])',
     });
 
+  /**
+   * The library repair, live (v0.49.0): what the running run is on, how far it has got and what it skipped,
+   * plus the limits and estimates the Health page's action rows show BEFORE a press, the last runs, and when
+   * the nightly is next. Polled every two seconds while a run is going, so it reads memory and the history's
+   * memoised digest (lib/repairRuns.ts) -- one settings read aside, no query grows with the library.
+   * `?kinds=a,b` asks for estimates of further run kinds (a "Fix all issues" plan), at most ten.
+   */
+  app.get('/api/admin/tasks/repair/status', async (req) => {
+    const me = userIdOf(req);
+    const extra = String((req.query as { kinds?: string } | undefined)?.kinds ?? '')
+      .split(',').map((k) => k.trim()).filter((k) => /^[a-z_+:]{1,80}$/.test(k)).slice(0, 10);
+    const [digest, settings] = await Promise.all([
+      runDigest(),
+      one<{ on: boolean }>('SELECT repair_enabled AS "on" FROM server_settings WHERE id = 1').catch(() => null),
+    ]);
+    const snap = repairLiveSnapshot();
+    const ok = await listable(req, [
+      snap?.target.seriesId, snap?.current?.seriesId, ...(snap?.skips ?? []).map((k) => k.target?.seriesId),
+      ...digest.recent.map((r) => r.target.seriesId), ...skipIds(digest.lastFull?.result),
+    ]);
+    let run = null;
+    if (snap) {
+      const { by, current, target, skips, ...rest } = snap;
+      run = {
+        ...rest,
+        mine: !!by && by === me,
+        target: scrubTarget(target, ok),
+        current: current?.seriesId && !ok.has(current.seriesId) ? { ...current, title: undefined } : current,
+        skips: scrubSkips(skips, ok),
+      };
+    }
+    // Conservative: any source behind Cloudflare stretches a page list and a listing to the solver's budget.
+    const solver = listSources().some((a) => a.requiresCloudflare);
+    const estimates: Record<string, { typicalMs: number | null; runs: number; worstMs: number | null; downloads: number }> = {};
+    for (const kind of new Set([...ESTIMATED_KINDS, ...Object.keys(digest.typical), ...extra])) {
+      const w = worstCase(kind, REPAIR_LIMITS, { solver });
+      estimates[kind] = { typicalMs: digest.typical[kind]?.typicalMs ?? null, runs: digest.typical[kind]?.runs ?? 0, worstMs: w.boundedMs, downloads: w.downloads };
+    }
+    const r0 = digest.recent[0];
+    return {
+      running: repairState.running,
+      sweepRunning: runtime.updating,
+      enabled: settings?.on !== false,
+      nextAt: repairState.nextAt,
+      run,
+      last: repairState.last ?? (r0 && r0.finishedAt ? { id: r0.id, finishedAt: r0.finishedAt, status: r0.status, kind: r0.kind } : null),
+      recent: digest.recent.map((r) => ({ ...r, target: scrubTarget(r.target, ok) })),
+      lastFull: digest.lastFull ? { ...digest.lastFull, result: scrubResult(digest.lastFull.result, ok) } : null,
+      limits: REPAIR_LIMITS,
+      estimates,
+      stepTypicalMs: digest.stepTypicalMs,
+    };
+  });
+
+  /** Every kept repair run, newest first (lib/repairRuns.ts): Health's "Recent repairs", or one run by id. */
+  app.get('/api/admin/tasks/repair/runs', async (req, reply) => {
+    const p = z.object({
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+      id: z.string().uuid().optional(),
+    }).safeParse(req.query ?? {});
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', message: p.error.issues[0]?.message ?? 'Bad query' });
+    const content = await listRunRecords({ ...p.data, me: userIdOf(req) });
+    const ok = await listable(req, content.flatMap((r) => [r.target.seriesId, ...(r.result?.skips ?? []).map((k) => k.target?.seriesId)]));
+    // `notes` names series by title alone ("<title> ch 5 (3 -> 20)", "<title> -> source"), with no id to hold each
+    // one to the listing rule, so an admin who hides 18+ gets none of them rather than an adult title among them
+    // (integration-1 review). The page never reads them; a script that wants them asks with "Show 18+" on.
+    // Reintroduce by sending them as stored: "an admin who hides 18+ reads no adult title" in
+    // repairRoutes.int.test.ts finds the title in the history.
+    const noNotes = hideAdult(req);
+    return {
+      content: content.map((r) => ({
+        ...r,
+        target: scrubTarget(r.target, ok),
+        result: scrubResult(r.result, ok),
+        ...(noNotes ? { notes: null } : {}),
+      })),
+    };
+  });
+
   app.post('/api/admin/tasks/:id/run', async (req, reply) => {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
-    if (id === 'scan') return { ok: true, ...(await persistScan()) };
+    if (id === 'scan') {
+      runtime.lastScan = Date.now();
+      const r = await persistScan();
+      scheduleHealthSummaryRefresh();
+      return { ok: true, ...r };
+    }
     if (id === 'repair') {
       const b = repairBody.safeParse(req.body ?? {});
       if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
@@ -745,7 +926,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       const run = runRepair(app.log, { ...b.data, userId: userIdOf(req) ?? null });
       if (!run) return { ok: false, error: 'busy' };
       run.catch(() => {}); // runRepair logs it and clears the result; this only stops an unhandled rejection
-      return { ok: true, started: true };
+      // The run's id (v0.49.0), set synchronously by runRepair: the page watches GET
+      // /api/admin/tasks/repair/status for THIS id to leave `running` and land in `last`/`recent`, which is
+      // how it knows its own run ended -- a one-row fix no longer moves the Tasks line it used to watch.
+      // Reintroduce by dropping it: "the run answer names the run" in repairRoutes.int.test.ts fails.
+      return { ok: true, started: true, run: repairState.live?.id };
     }
     if (id === 'verify') {
       // ⚠️ Never awaited, like the sweep and the cleanup. One stat per row over a network share is minutes
@@ -1093,6 +1278,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { planId, source, sourceSeriesId } = b.data;
+    // Numbered by posting order (#116): a follower would never be merged (lib/updater.ts), so following one is
+    // refused with the reason rather than accepted and silently ignored.
+    if (await postingOrderSeries(id)) return reply.code(409).send({ error: 'posting_order', message: POSTING_ORDER_REFUSAL });
     const plan = getPlan(planId);
     if (!plan) return reply.code(409).send({ error: 'plan_stale', message: 'That list has moved on. Scan again.' });
     if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });
@@ -1132,6 +1320,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
     );
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
+    // The answer is the list as the follow left it, read BEFORE the refresh below starts: a follow is not a check.
+    // Read after it, the answer raced the refresh's own stamp on the new source (updater.ts writes
+    // series_sources.checked_at as soon as the source answers) and said "never checked" or "checked just now" by
+    // a millisecond, whichever of the two drew the warmer pooled connection -- #115's evidence writes left the
+    // answer one that had never read these tables, and on an idle machine it lost every time. The refresh's check
+    // shows on the next read.
+    // Reintroduce by reading this after the refresh has started: "never checked yet" in seriesSources.int.test.ts.
+    const list = await seriesSourcesFor(id);
     // A person just confirmed this source carries the series, so the name it uses is one of the series' own
     // names now (lib/altTitles.ts) -- the next search for another source may find it under that name.
     if (cand.title) await recordAltTitles(id, [cand.title], 'confirmed', { sourceId: source, userId: userIdOf(req) }).catch(() => 0);
@@ -1141,7 +1337,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // a minute to list, and the Find missing dialog's "Follow and download" asks the fetch route, which
     // refreshes the listing itself before it picks a copy.
     void updateSeries(id, 0).catch(() => {});
-    return { ok: true, sources: await seriesSourcesFor(id) };
+    return { ok: true, sources: list };
   });
 
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
@@ -1446,7 +1642,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       [id],
     );
     if (!book) return reply.code(404).send({ error: 'not_found' });
-    await q('UPDATE lib_books SET short_confirmed_at = CASE WHEN $2 THEN now() ELSE NULL END WHERE id = $1', [id, confirmed]);
+    // short_result (v0.49.0) says who decided and when, so the greyed row reads "marked fine by an admin"
+    // rather than "confirmed short at the source" -- the repair's proof is a different claim. Withdrawn with
+    // the stamp: the chapter is an open finding again, and the repair's next look writes its own.
+    await q(`UPDATE lib_books SET short_confirmed_at = CASE WHEN $2 THEN now() ELSE NULL END,
+                    short_result = CASE WHEN $2 THEN jsonb_build_object('at', now(), 'why', 'confirmed_by_admin',
+                                   'by', (SELECT u.username FROM users u WHERE u.id::text = $3)) ELSE NULL END
+              WHERE id = $1`, [id, confirmed, userIdOf(req) ?? '']);
     await logAudit('book.short_confirmed', {
       userId: userIdOf(req),
       detail: { id, seriesId: book.series_id, title: book.title, number: Number(book.number), pages: book.pages, confirmed },
@@ -2344,29 +2546,10 @@ export default async function adminRoutes(app: FastifyInstance) {
   // extension's sources become Uchiyomi sources. Nothing here downloads an APK into this process. (This
   // comment used to claim the opposite -- that installing was a link out to Suwayomi's UI -- which stopped
   // being true the day the catalogue block below was written.)
-  app.get('/api/admin/extensions/status', async () => {
-    if (!suwayomiConfigured()) return { configured: false, reachable: false };
-    let version: string | null = null;
-    let reachable = false;
-    let error: string | undefined;
-    try {
-      version = (await suwayomiAbout()).version;
-      reachable = true;
-    } catch (e) {
-      error = (e as Error)?.message || 'unreachable';
-    }
-    const counts = await one<{ enabled: number; known: number }>(
-      `SELECT count(*) FILTER (WHERE enabled)::int AS enabled, count(*)::int AS known FROM suwayomi_sources`,
-    );
-    // `enabled` is what the operator asked for; `registered` is what search actually reaches. They differ
-    // by `skipped` whenever the cap bites, and until the panel showed all three that gap was invisible.
-    const load = lastSuwayomiLoad();
-    return {
-      configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
-      registered: load?.registered ?? 0, skipped: load?.skipped ?? 0, cap: env.SUWAYOMI_MAX_SOURCES,
-      hiddenLangs: await getHiddenLangs().catch(() => [] as string[]),
-    };
-  });
+  // What the engine is doing and why, for the Extensions tab and its setup screen (#72): lib/extensionEngine.ts.
+  // ⚠️ It registers the engine's sources when it answers again after a registration that missed it, so the
+  // setup screen's "Check again" -- a refetch of this -- brings the extensions back at once.
+  app.get('/api/admin/extensions/status', async () => engineStatusReport());
 
   // Every extension route from here down answers 400 rather than a confusing 502 when there is no engine.
   const needExt = (reply: FastifyReply) =>
@@ -2376,8 +2559,9 @@ export default async function adminRoutes(app: FastifyInstance) {
   // extension server is briefly unreachable, so the page still renders something useful.
   app.get('/api/admin/extensions/sources', async (req) => {
     if (!suwayomiConfigured()) return { content: [], reachable: false };
-    const { q: term, lang } = req.query as { q?: string; lang?: string };
-    let remote: Array<{ id: string; name: string; displayName?: string | null; lang?: string | null; isNsfw?: boolean | null; supportsLatest?: boolean | null }> = [];
+    // `pkg` (#116): one extension's sources, for its settings sheet's language select.
+    const { q: term, lang, pkg } = req.query as { q?: string; lang?: string; pkg?: string };
+    let remote: Array<{ id: string; name: string; displayName?: string | null; lang?: string | null; isNsfw?: boolean | null; supportsLatest?: boolean | null; extension?: { pkgName?: string | null } | null }> = [];
     let reachable = true;
     try {
       remote = await listRemoteSources();
@@ -2402,8 +2586,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         nsfw: !!s.isNsfw,
         supportsLatest: !!s.supportsLatest,
         enabled: on.has(String(s.id)),
+        pkgName: s.extension?.pkgName ?? null,
       }))
-      .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang))
+      .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang) && (!pkg || s.pkgName === pkg))
       .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
     // The per-language overview rides along unfiltered: `q` and `lang` narrow the source list, and a
     // Languages panel that only knew about the language you had just filtered to would be no panel.
@@ -2540,6 +2725,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     } catch (e) {
       return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not refresh.' });
     }
+  });
+
+  /**
+   * Point the engine's own Cloudflare helper at the one Uchiyomi uses, and switch it on (#72, #54): Health's
+   * "Connect the Cloudflare helper" and the Extensions tab's Connect. Only ever on a press -- it changes a setting
+   * on someone's engine (lib/sources/suwayomi/engineSolver.ts). The audit names the solver's host, never its
+   * address: on desktop that carries the in-app helper's token.
+   */
+  app.post('/api/admin/extensions/solver', async (req, reply) => {
+    if (needExt(reply)) return;
+    const r = await connectEngineSolver();
+    if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message });
+    await logAudit('extension.solver', { userId: userIdOf(req), detail: r.audit, req });
+    return { ok: true, enabled: r.enabled, wiring: r.wiring };
   });
 
   app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {
@@ -3357,7 +3556,28 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- provider/source health control ----
-  app.get('/api/admin/sources', async () => ({ content: await healthAll() }));
+  /**
+   * Every source's stored health, plus what the admin surfaces need and readers never get (#115): the last live
+   * verdict (`live`) and the failures that are open and confirmed now (`failing`, lib/sourceEvidence.ts). The
+   * Providers card overlays these on the public status, which stays exactly what GET /api/sources says: that one
+   * is a single cache key for every account and feeds Discover's ordering. `evidence` is the same per-stage lines
+   * Health's rows carry, so the card and the row are drawn from one reading of `stages`; `testMs` is how long one
+   * Test may take, for the Test button's clock (the same number Health's sources check sends).
+   */
+  app.get('/api/admin/sources', async () => {
+    const now = Date.now();
+    return {
+      content: (await healthAllWithEvidence()).map((h) => ({
+        ...h,
+        failing: currentFailures(h.stages, now).map(({ confirmed: _c, stale: _s, ...f }) => f),
+        live: h.live_at
+          ? { at: h.live_at, by: h.live_by, state: h.live_state, stage: h.live_stage, code: h.live_code, checks: h.live_checks }
+          : null,
+        evidence: stageLines(h.stages),
+      })),
+      testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,
+    };
+  });
   /**
    * Go and look at this source right now, and say what is wrong with it.
    *
@@ -3370,9 +3590,12 @@ export default async function adminRoutes(app: FastifyInstance) {
    * - **It does not consult the cooldown.** `blockedNow` is read in exactly two places and neither is on
    *   this path, so nothing had to be added to bypass it. Do not "fix" that for consistency: running while
    *   the source is blocked is the entire point of the button.
-   * - **It writes no health.** Adding `reportFail` here is the obvious-looking mistake: three impatient
-   *   clicks would take `consecutive` from 3 to 6 and the cooldown from 90 minutes to its ceiling. A
-   *   diagnostic must never change the diagnosis.
+   * - **It records what it found as evidence, and never changes the cooldown** (v0.49.0, #115). The verdict
+   *   goes to live_* and the per-stage evidence Health reads (lib/sourceCheck.ts). No `reportFail`: three
+   *   impatient clicks would take `consecutive` from 3 to 6 and the cooldown from 90 minutes to its ceiling. No
+   *   status, and no checked_at either: the desktop app schedules the daily check from max(checked_at)
+   *   (server.ts), so a Test that stamped it would postpone the check. Before v0.49.0 it wrote nothing at all,
+   *   which is how a source could fail its Test while Health said "All good".
    * - **Passing does not clear the block.** It reports `canClear` and leaves the decision to the admin. The
    *   smoke test stops at listing page URLs and never fetches an image byte, while the downloader's own
    *   failures are about bytes: hotlink protection, HTML served where a JPEG was promised. Green here is not
@@ -3383,24 +3606,26 @@ export default async function adminRoutes(app: FastifyInstance) {
    * Run the source watchdog now, rather than waiting for its daily sweep.
    *
    * Same code path as the schedule, including the auto-fixes, so what an admin sees here is exactly what
-   * happens unattended. It can take a while: every source is probed and smoke-tested one at a time, on
-   * purpose, because they share one Cloudflare solver.
+   * happens unattended. It can take a while -- every source is probed and smoke-tested one at a time, on
+   * purpose, because they share one Cloudflare solver -- so since v0.49.0 it runs in the background: this
+   * answers 202 with the progress at once, and GET on the same path reads it until `running` is false and
+   * `result` holds the sweep's answer. One request held open for the whole sweep was cut by reverse proxies.
    */
   app.post('/api/admin/sources/check', async (req, reply) => {
-    if (checkRunning()) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.' });
-    try {
-      const r = await runSourceCheck();
-      await logAudit('source.check', {
-        userId: userIdOf(req),
-        detail: { checked: r.sources.length, attention: r.needsAttention.length },
-        req,
-      });
-      return reply.send(r);
-    } catch (e: any) {
-      if (e?.busy) return reply.code(409).send({ error: 'busy' });
-      throw e;
-    }
+    const userId = userIdOf(req);
+    // The audit line is written when the sweep ends, long after this answer, and req.ip reads the socket, which
+    // may be gone by then: the two things logAudit reads of a request, its IP and user agent, are taken now.
+    const h = req.headers;
+    const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
+    const started = !checkRunning() && startSourceCheck({ by: 'admin' }, (r) => logAudit('source.check', {
+      userId,
+      detail: { checked: r.sources.length, attention: r.needsAttention.length, inconclusive: r.inconclusive.length },
+      req: from,
+    }));
+    if (!started) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.', progress: checkProgress() });
+    return reply.code(202).send(checkProgress());
   });
+  app.get('/api/admin/sources/check', async () => checkProgress());
 
   const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
@@ -3410,47 +3635,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
     testing.add(id);
     try {
-      // ⚠️ `slow_streak` must stay in this list: diagnose() reads it before any stored-error rule, and
-      // without the column the streak reads as 0 and `too_slow` can never come out of this button (it did
-      // not for two releases; only Discover, via healthAll(), could say it). The sweep's SELECT matches.
-      const h = await one<SourceHealth>(
-        `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
-                empty_streak, last_empty_at, slow_streak, updated_at FROM source_health WHERE source_id = $1`,
-        [id],
-      ).catch(() => null);
-      // The site first, and without the solver: when the solver is the broken part, asking it tells us
-      // nothing. This one request separates "moved", "refused" and "solver down" from each other. Not every
-      // adapter has a `base` to probe this way -- Suwayomi/extension sources never do, since the engine, not
-      // this server, talks to the site -- so `bare` stays undefined for those and the homepage-status rules
-      // simply do not apply; `buildProbe` is what still carries `adapterOk`, without which an extension
-      // source that just passed every live check falls through to whatever stale error `last_error` holds.
-      const bare = src.base ? await probeBase(src.base) : undefined;
-      const smoke = await smokeTest(src);
-      // The same helper the scheduled sweep uses, so the button and the schedule cannot disagree.
-      const probe = buildProbe(bare, smoke, src);
-      const facts = {
-        status: h?.status ?? 'ok',
-        lastError: h?.last_error ?? null,
-        consecutive: h?.consecutive ?? 0,
-        lastOkAt: h?.last_ok_at ?? null,
-        emptyStreak: h?.empty_streak ?? 0,
-        blockedUntil: h?.blocked_until ?? null,
-        slowStreak: h?.slow_streak ?? 0,
-        // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number.
-        budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
-        disabled: !!h?.disabled,
-      };
-      // A search that returns nothing without throwing IS the markup-drift signature, so let the live result
-      // speak even when the stored record is clean. This is the one fault no stored evidence ever captures.
-      const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
-      const d = diagnose(
-        { ...facts, emptyStreak: parsedNothing ? Math.max(facts.emptyStreak, 3) : facts.emptyStreak },
-        probe,
-        src.base,
-      );
-      const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now());
-      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: smoke.ok, code: d.code }, req });
-      return reply.send({ ok: smoke.ok, timedOut: smoke.timedOut, checks: smoke.checks, probe, diagnosis: d, canClear: smoke.ok && blocked });
+      // The same function the scheduled sweep runs, so the button and the schedule cannot disagree.
+      const r = await checkSourceLive(src, { by: 'test' });
+      await recordLiveResult(id, r, 'test');
+      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: r.smoke.ok, code: r.diagnosis.code, state: r.state, stage: r.stage }, req });
+      return reply.send({
+        ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
+        canClear: r.smoke.ok && r.blocked,
+        state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
+      });
     } finally {
       testing.delete(id);
     }

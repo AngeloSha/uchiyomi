@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
@@ -14,19 +15,22 @@ import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
-import { LibraryFilters, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
+import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
+import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { t as tr } from '@/lib/i18n';
 import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
+import { useLayer } from '@/lib/layers';
+import { useReduceEffects } from '@/lib/effects';
+import { readView, type LibraryView } from '@/lib/libraryView';
+import { kickDownloads, useDownloadsRing } from '@/lib/useServerDownloads';
+import { ProgressRing } from '@/components/ProgressRing';
+import { ServerDownloadsView } from '@/components/ServerDownloadsView';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
-function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
+function conditionFrom(read: string, status: string, genres: string[], lib: string) {
   const all: any[] = [];
   if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
-  // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
-  // it reads from -- added from it, or linked to it as a fallback.
-  if (src) all.push({ mainSource: { operator: 'is', value: src } });
-  if (anysrc) all.push({ anySource: { operator: 'is', value: anysrc } });
   if (read) all.push({ readStatus: { operator: 'is', value: read } });
   if (status) all.push({ status: { operator: 'is', value: status } });
   for (const g of genres) all.push({ genre: { operator: 'is', value: g } });
@@ -47,10 +51,6 @@ function LibraryInner() {
   // Which library, or '' for all of them. This lists only what the viewer may open -- the endpoint filters
   // by their grants -- so the tab row doubles as an honest answer to "what do I actually have access to".
   const lib = params.get('lib') || '';
-  const src = params.get('src') || '';
-  const anysrc = params.get('anysrc') || '';
-  const { data: libSources } = useLibrarySources();
-  const sourceName = (id: string) => libSources?.find((x) => x.id === id)?.name || id;
   const { data: allLibs } = useLibraries();
   // The 18+ filter can hide series by genre on an install with no 18+ library; the reveal must still render.
   const adultFilter = useAdultFilterConfigured();
@@ -69,24 +69,36 @@ function LibraryInner() {
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // The phone's overflow for the admin actions (see the bar below).
+  // The phone's overflow for the two admin actions (see the bar below).
   const [more, setMore] = useState(false);
   // The Fetch newest job as last polled, while it runs: what the bar's label counts up with.
   const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
   // Set while a Fetch newest run is being followed: calling it stops the polling (the bar's Cancel chip).
   const stopFollowing = useRef<(() => void) | null>(null);
-  const { isAdmin, user } = useAuth();
-  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib, src, anysrc]);
+  // The select bar on the notices' layer stack (lib/layers.ts), measured: its chips wrap to two rows on a
+  // phone, and a notice has to rise above whichever height it has.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', selecting && picked.size > 0, { ref: toolbarRef });
+  const { isAdmin, user, status: authStatus } = useAuth();
+  // Series | Downloads (v0.49.0): which of the page's two views, from the URL on every render -- a link to
+  // `?view=downloads` while already on /library (the desktop's header button, the palette) does not remount
+  // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
+  const mayDownload = authStatus === 'authed' && canDownload(user);
+  const view: LibraryView = readView(params.get('view'), mayDownload);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib, view]);
   const togglePick = (id: string) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // ⚠️ `lib` counts. It used to be left out because it lived in its own tab rail rather than in the sheet,
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
-  const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0) + (src ? 1 : 0) + (anysrc ? 1 : 0);
+  const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0);
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params.toString());
     if (v) next.set(k, v); else next.delete(k);
+    // `folder` points one arrival at a tile in Downloads ("Open in library" on an add still downloading its
+    // first chapter). Any change made on the page has moved on from it.
+    next.delete('folder');
     router.replace(`/library?${next.toString()}`);
   };
 
@@ -98,10 +110,12 @@ function LibraryInner() {
     router.replace(`/library?${n.toString()}`);
   };
 
-  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
+  const condition = useMemo(() => conditionFrom(read, status, genres, lib), [read, status, genres.join(','), lib]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    queryKey: ['library', active.key, read, status, genres.join(','), lib, src, anysrc],
+    queryKey: ['library', active.key, read, status, genres.join(','), lib],
+    // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
+    enabled: view === 'series',
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition } }),
@@ -231,9 +245,22 @@ function LibraryInner() {
   };
 
   /**
-   * Connect sources (bff lib/linkBatch.ts): search every other source for the selection, under every name
-   * each series goes by, and open the review. Nothing is followed here -- the review page is where every
-   * match is confirmed. Admin-only, like the follow it leads to.
+   * Queue the selection for the slow archive (#117): each series' rest fetched a chapter at a time over days,
+   * never in a burst. The server works out what is missing and says it per series; the notice sums it up
+   * ("12 series queued for the slow archive · 3 series had nothing older to fetch"). Library -> Downloads shows them.
+   */
+  const archiveEnqueue = useArchiveEnqueue();
+  const archiveSelected = async () => {
+    setActing(true);
+    const r = await archiveEnqueue([...picked]);
+    if (r) settle();
+    setActing(false);
+  };
+
+  /**
+   * Connect sources (bff lib/linkBatch.ts): look for the selection on other sources, under every name each
+   * series goes by, and open the review. The server works through it as a paced background job; nothing is
+   * followed here -- the review page is where every match is confirmed. Admin-only, like the follow it leads to.
    */
   const connectSources = async () => {
     // The server takes 500 at a time; "Select all" over a long scroll can hold more.
@@ -260,24 +287,27 @@ function LibraryInner() {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    // `view`: the sentinel is only in the DOM in the series view, so coming back to it must observe it again.
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, view]);
 
   const items = data?.pages.flatMap((p) => p.content) ?? [];
   const total = data?.pages[0]?.totalElements;
 
+  const series = view === 'series';
   return (
-    <PullToRefresh onRefresh={onRefresh}>
+    <PullToRefresh onRefresh={series ? onRefresh : () => kickDownloads(qc)}>
     <div className={`min-h-screen-d ${selecting && picked.size > 0 ? 'pb-40 lg:pb-0' : ''}`}>
       {/* Sidebar beside the grid from lg: up. `min-w-0` on the grid column is load-bearing -- a flex child
           defaults to `min-width:auto`, so without it the grid refuses to shrink and pushes the page
-          sideways instead, which is the horizontal-overflow failure layout.mjs exists to catch. */}
+          sideways instead, which is the horizontal-overflow failure layout.mjs exists to catch. The
+          Downloads view has no filters to show, so it takes the whole width. */}
       <div className="lg:flex lg:gap-8 xl:gap-10">
-        <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64" aria-label={tr('Filters')}>
+        {series && <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64" aria-label={tr('Filters')}>
           {/* Its own scroller: this holds five sections and up to a hundred genres, which is taller than the
               window. `data-lenis-prevent` because Lenis drives the page and would otherwise eat the wheel. */}
           <div className="sticky top-6 max-h-[calc(100dvh-3rem)] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
             <LibraryFilters
-              sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
+              sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs}
               onSet={setParam}
             />
             {activeCount > 0 && (
@@ -286,7 +316,7 @@ function LibraryInner() {
               </button>
             )}
           </div>
-        </aside>
+        </aside>}
 
         <div className="min-w-0 flex-1">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
@@ -309,7 +339,9 @@ function LibraryInner() {
             )}
           </div>
         </div>
-        <p className="mt-0.5 text-xs text-fog-500">
+        {mayDownload && <ViewSwitch view={view} onView={(v) => setParam('view', v === 'series' ? '' : v)} />}
+        {series && <>
+        <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500`}>
           {total != null && <>{total} series<span className="text-fog-600"> · </span></>}
           {/* Sorting moved into the panel, so the header has to keep saying what it is -- otherwise the
               order of two thousand covers is decided by something with no representation on screen. */}
@@ -346,16 +378,6 @@ function LibraryInner() {
                 {libs.find((l) => l.id === lib)?.name || lib} ×
               </button>
             )}
-            {src && (
-              <button onClick={() => setParam('src', '')} className="chip text-xs">
-                {tr('Main: {name}', { name: sourceName(src) })} ×
-              </button>
-            )}
-            {anysrc && (
-              <button onClick={() => setParam('anysrc', '')} className="chip text-xs">
-                {tr('Any: {name}', { name: sourceName(anysrc) })} ×
-              </button>
-            )}
             {read && (
               <button onClick={() => setParam('read', '')} className="chip text-xs">
                 {tr(READ_STATES.find((r) => r.key === read)?.label || read)} ×
@@ -374,11 +396,15 @@ function LibraryInner() {
             <button onClick={clearAll} className="chip text-xs text-fog-500">{tr('Clear all')}</button>
           </div>
         )}
+        </>}
       </header>
+
+      {!series && <ServerDownloadsView focusFolder={params.get('folder')} />}
 
       {/* `data-library-grid` is a test hook, not a style. layout.mjs measures fill as the span between the
           leftmost and rightmost painted things, so a sidebar cannot lower it -- and a grid squeezed to a
           third of the window would still score 95%. This attribute is what lets that be measured. */}
+      {series && <>
       <div data-library-grid className="grid grid-cols-3 gap-x-3 gap-y-5 px-4 pt-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-5 lg:gap-x-4 lg:px-0 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10">
         {isLoading
           ? Array.from({ length: 14 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)
@@ -395,6 +421,7 @@ function LibraryInner() {
           {activeCount ? tr('Nothing matches those filters.') : tr('Your library is empty.')}
         </p>
       )}
+      </>}
         </div>
       </div>
       {/* ⚠️ Above the phone nav, not under it. This div renders inside AppShell's `<main class="relative
@@ -404,15 +431,16 @@ function LibraryInner() {
           is the nav's height (92 px measured at 390 px); from lg up the nav is hidden and the bar
           returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
           the nav. */}
-      {selecting && picked.size > 0 && (
-        <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-8 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {series && selecting && picked.size > 0 && (
+        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
-              count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet);
-              from lg up there is room and they are chips like the rest. The series page reserves `pe-36`
-              for the downloads pill (fixed bottom-20 end-3, floating over this bar's lower band while a
-              fetch runs); here that end padding costs two whole rows at 390 px, so the bar pads its BOTTOM
-              instead (`pb-8`, the pill's top is ~35 px above the nav) and the last row stays clear of it. */}
-          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+              count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
+              from lg up there is room and they are chips like the rest. (The bar's bottom padding was `pb-8`
+              until v0.49.0, clearance for the floating downloads pill, which is gone.) "Archive slowly" (#117)
+              is the same: a key from lg up, a row of More on a phone -- which is why More is there for anyone
+              who may download, not only admins. From lg up the row is wider than the phone's, so its eight
+              actions stay one row in English at 1024 px. */}
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-5xl">
             <span className="me-auto text-sm font-medium text-fog-100">
               {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : tr('{n} selected', { n: picked.size })}
             </span>
@@ -425,7 +453,8 @@ function LibraryInner() {
             {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Move to library')}</button>}
             {isAdmin && <button disabled={acting} onClick={connectSources} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Connect sources')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setRemoving(true)} className="chip hidden text-xs text-rose-300 disabled:opacity-50 lg:inline-flex">{tr('Remove from library')}</button>}
-            {isAdmin && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
+            {canDownload(user) && <button disabled={acting} onClick={archiveSelected} className="btn-key hidden lg:inline-flex">{tr('Archive slowly')}</button>}
+            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
             {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
                 downloads, and a bar frozen for all of it left navigating away as the only way out. Cancel stops
                 the polling and leaves select mode; the run completes server-side. Reintroduce with a plain
@@ -441,18 +470,28 @@ function LibraryInner() {
           {/* `pb-2`: the sheet's nav clearance is 4 px short of the nav's measured height (see the series
               page), and the last row here would otherwise end 3 px under it. */}
           <div className="space-y-1 pb-2">
-            <button onClick={() => { setMore(false); setMoving(true); }}
-              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
-              {tr('Move to library')}
-            </button>
-            <button onClick={() => { setMore(false); void connectSources(); }}
-              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
-              {tr('Connect sources')}
-            </button>
-            <button onClick={() => { setMore(false); setRemoving(true); }}
-              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
-              {tr('Remove from library')}
-            </button>
+            {canDownload(user) && (
+              <button onClick={() => { setMore(false); void archiveSelected(); }}
+                className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                {tr('Archive slowly')}
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                <button onClick={() => { setMore(false); setMoving(true); }}
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Move to library')}
+                </button>
+                <button onClick={() => { setMore(false); void connectSources(); }}
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Connect sources')}
+                </button>
+                <button onClick={() => { setMore(false); setRemoving(true); }}
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
+                  {tr('Remove from library')}
+                </button>
+              </>
+            )}
           </div>
         </Sheet>
       )}
@@ -490,7 +529,7 @@ function LibraryInner() {
       {sheet && (
         <Sheet title={tr('Filters')} onClose={() => setSheet(false)} overBottomNav>
           <LibraryFilters
-            sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
+            sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs}
             onSet={setParam}
           />
           <div className="mt-5 flex gap-2">
@@ -505,6 +544,47 @@ function LibraryInner() {
       )}
     </div>
     </PullToRefresh>
+  );
+}
+
+/**
+ * Series | Downloads (v0.49.0): two text tabs under the Library title, an accent underline sliding between
+ * them. Its own row rather than the title itself: "Téléchargements" in the display font beside three 40 px
+ * buttons does not fit a 390 px phone, and the same place in both views means nothing jumps on a switch. No
+ * capsule: the owner's "no more pills" -- the settings' Segmented control is one. Downloads wears the Library
+ * ring's state in small: a 16 px ring and the count of series coming in.
+ *
+ * A switch, not a navigation: it replaces the URL (the page's one `setParam`), so Back leaves the Library
+ * rather than walking back through the tabs. The underline slides only when motion is welcome.
+ */
+function ViewSwitch({ view, onView }: { view: LibraryView; onView: (v: LibraryView) => void }) {
+  const ring = useDownloadsRing();
+  const plain = useReduceEffects();
+  const still = useReducedMotion();
+  const tabs: [LibraryView, string][] = [['series', tr('Series')], ['downloads', tr('Downloads')]];
+  return (
+    <div role="tablist" aria-label={tr('Library')} className="mt-2 flex items-end gap-6 border-b border-ink-800/80">
+      {tabs.map(([v, label]) => {
+        const on = v === view;
+        return (
+          <button key={v} type="button" role="tab" aria-selected={on} data-view-tab={v} onClick={() => { if (!on) onView(v); }}
+            className={`relative -mb-px flex items-center gap-1.5 pb-2 pt-1 text-sm font-semibold transition-colors ${on ? 'text-fog-50' : 'text-fog-500 hover:text-fog-200'}`}>
+            {label}
+            {v === 'downloads' && ring.show && ring.progress !== 'idle' && (
+              <ProgressRing progress={ring.progress} size={16} tone={ring.slow ? 'amber' : 'accent'} static={ring.slow} />
+            )}
+            {v === 'downloads' && ring.count > 0 && (
+              <span className="rounded-[4px] bg-ink-800 px-[3px] text-[10px] font-bold leading-[14px] tabular-nums text-accent">{ring.count}</span>
+            )}
+            {v === 'downloads' && ring.attention && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+            {on && (
+              <motion.span layoutId="libview" aria-hidden className="absolute inset-x-0 -bottom-px h-0.5 rounded-sm bg-accent"
+                transition={plain || still ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 40 }} />
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

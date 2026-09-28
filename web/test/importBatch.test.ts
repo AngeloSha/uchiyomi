@@ -525,7 +525,11 @@ test('the Discover strip tells the truth about a carrier card: a nothing-yet add
   // as finished" fails.
   const src = code(read('app/discover/page.tsx'));
   assert.match(src, /\) : j\.total === 0 && j\.autoFollow \? \(\s*<p className="mt-1 text-\[11px\] text-fog-500">\{j\.autoFollow\.done \? tr\('Checked other sources'\) : tr\('Checking other sources…'\)\}<\/p>\s*\) : \(\s*<p className="mt-1 text-\[11px\] text-emerald-400">\{tr\('Fetched'\)\}<\/p>/, 'a carrier card reads Fetched, or the running check reads as finished');
-  assert.match(src, /autoFollow\?: AutoFollow;/, "the strip's Job does not know the judgement");
+  // The strip reads the shared jobs answer (v0.49.0), whose card type is lib/serverDownloads.ts DownloadJob.
+  assert.match(src, /const \{ data: jobsData \} = useServerDownloads\(\);/, "the strip's jobs are not the shared answer");
+  const lib = code(read('lib/serverDownloads.ts'));
+  const card = lib.slice(lib.indexOf('export interface DownloadJob extends JobCard {'), lib.indexOf('\n}\n', lib.indexOf('export interface DownloadJob')));
+  assert.match(card, /autoFollow\?: AutoFollow;/, "the strip's Job does not know the judgement");
   for (const f of localeFiles()) assert.deepEqual(missingIn(f, ['Checking other sources…', 'Checked other sources']), [], `${f} lacks a strip key`);
 });
 
@@ -539,8 +543,9 @@ test('the switch is for admins: a member sees no "also check" switch, sends no a
   // told who can follow" fails; by passing `true` from Discover: "Discover does not pass isAdmin" fails.
   const src = code(read('components/AddSeriesDialog.tsx'));
   assert.match(src, /mayFollow: boolean;/, 'the dialog has no mayFollow prop');
-  assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length \?/, "a member's add still carries alsoFollow");
-  assert.match(src, /\{mayFollow && others\.length > 0 && \(\s*<div className="mt-3" data-also-follow>/, 'the switch renders for a member');
+  // v0.49.0 (#116): and never under posting order, whose numbers no other source shares.
+  assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length && !view\?\.posting \?/, "a member's add still carries alsoFollow");
+  assert.match(src, /\{mayFollow && others\.length > 0 && !view\?\.posting && \(\s*<div className="mt-3" data-also-follow>/, 'the switch renders for a member');
   const block = src.slice(src.indexOf('const followBlock = (() => {'), src.indexOf('if (others.length === 0) return'));
   assert.match(block, /if \(!mayFollow\) return <p[^>]*>\{tr\('Other sources: an admin can follow them from Sources & translations\.'\)\}<\/p>;/, 'a member is not told who can follow');
   assert.match(code(read('app/discover/page.tsx')), /<AddSeriesDialog\s+seed=\{seed\}\s+sources=\{budgetIds\}\s+mayFollow=\{isAdmin\}/, 'Discover does not pass isAdmin');
@@ -581,10 +586,12 @@ test('the add dialog offers the other sources only when it already holds a list,
   assert.match(memo, /return out\.slice\(0, ALSO_FOLLOW_MAX\);/, 'more than six can ride');
   assert.doesNotMatch(memo, /api</, 'others is fetched rather than taken from the list the dialog already has');
   assert.match(src, /useState<Provider\[\] \| null>\(seed\.kind === 'group' \? seed\.providers : null\)/, 'providers is no longer null for a result seed');
-  assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length \? others\.map\(\(\{ source, sourceId \}\) => \(\{ source, sourceId \}\)\) : undefined;/, 'alsoFollow rides with the switch off, or carries more than the identity');
-  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody \}/, 'the add body does not carry alsoFollow');
+  assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length && !view\?\.posting \? others\.map\(\(\{ source, sourceId \}\) => \(\{ source, sourceId \}\)\) : undefined;/, 'alsoFollow rides with the switch off, or carries more than the identity');
+  // (#116's `numbering` and #117's "Archive the rest slowly" ride after it, pinned in numbering.test.ts and
+  // addSeriesDialog.test.ts.)
+  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering(?:, \.\.\.\(archiving \? \{ archive: true \} : \{\}\))? \}/, 'the add body does not carry alsoFollow');
   // The switch is on the options step only with candidates, remembered per device under one key.
-  assert.match(src, /\{mayFollow && others\.length > 0 && \(\s*<div className="mt-3" data-also-follow>/, 'the switch shows without candidates');
+  assert.match(src, /\{mayFollow && others\.length > 0 && !view\?\.posting && \(\s*<div className="mt-3" data-also-follow>/, 'the switch shows without candidates');
   assert.match(src, /const ALSO_FOLLOW_KEY = 'uchiyomi\.alsoFollow';/, 'the per-device key changed');
   assert.match(src, /localStorage\.setItem\(ALSO_FOLLOW_KEY, v \? '1' : '0'\)/, 'the switch is not remembered');
   // The done step: results from the job card the dialog already polls; a result seed points at Find missing.
@@ -594,7 +601,7 @@ test('the add dialog offers the other sources only when it already holds a list,
   assert.match(src, /enabled: !!done && \(!done\.nothing \|\| sentFollow > 0\)/, 'a nothing-yet add with candidates does not poll for its results');
   assert.match(src, /return j\?\.autoFollow\?\.done \? false : 2000;/, 'the nothing-yet poll never stops');
   // Every reason the server can give is a sentence; an unknown one stays visible as its code.
-  for (const why of ['numbering_differs', 'title_differs', 'unreachable', 'too_few_listed', 'not_tried', 'cap', 'unavailable']) {
+  for (const why of ['numbering_differs', 'title_differs', 'unreachable', 'too_few_listed', 'not_tried', 'cap', 'unavailable', 'posting_order']) {
     assert.match(src, new RegExp(`case '${why}': return tr\\('[^']+'\\);`), `${why} has no sentence`);
   }
   assert.match(src, /function autoFollowWhy[\s\S]{0,900}default: return why;/, 'an unknown reason is swallowed');

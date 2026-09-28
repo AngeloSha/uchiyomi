@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.48.4
+  version: 0.49.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -387,12 +387,95 @@ components:
         sourceName: { type: string }
         why:
           type: string
-          enum: [missing, held, blocked, failed, floor]
+          enum: [missing, held, blocked, failed, floor, archive]
+          description: >-
+            `archive` (since v0.49.0, #117): an active slow archive will fetch it -- available, under the retry
+            cap, below the archive's boundary. It comes before `floor`; a capped, held or blocked number keeps
+            its own reason, since the archive does not fetch those either.
         attempts: { type: integer, description: Only when the chapter has failed at least once. }
         reason: { type: string, description: The downloader's last error text. Admins only. }
         waitingFor: { type: string, description: "Only when why is held, and only when a priority group survives the blocklist: the effective first-choice group (the series' own priority over the global one) the chapter is being held for, spelt as the preference names it." }
         waitDaysLeft: { type: integer, minimum: 0, description: "Only with waitingFor: whole days until the patience window closes, counted as the sweep counts it -- from the oldest hosted copy that is not from a blocked group, under today's preferences (so 0 when the window has closed since the last check)." }
         read: { type: boolean, enum: [true], description: "Only when the caller marked this number read although the server does not hold it (POST /api/series/{id}/listing-progress). Absent, never false, for everyone else." }
+    ArchiveSeries:
+      type: object
+      description: >-
+        One series queued for the slow archive (#117), as a viewer may see it. `left` is what the archive may
+        still fetch below its boundary (null until its first listing is read). `waiting` is why it is not
+        fetching right now: `turn` (another series on its source has the slot, or the archive has as many
+        sources in flight as it may), `break` (its source is between chapters; `until`), `backoff` (its source
+        refused a chapter and is left alone: 1 h, 3 h, 12 h, then a day), `source_busy` (somebody else's
+        download is on its source), `pace` (its source answered 429 recently), `cooldown` (the source's own
+        back-off), `disabled`, `source_missing`, `series_busy` (a download for the series itself is running),
+        `listing` (its listing must be read before its next chapter, and the last read gave none: read again at
+        `until`, 1 h, 3 h, 12 h, then a day apart), `renumbering` (a renumber is pending for it). `attention` puts
+        it under Needs attention: `backoff` (refused twice in a row), `source_missing` or `disabled` (for over a
+        day), `disk`, `stalled` (paused a week, or queued three days without a chapter coming in over at least two
+        finished turns that brought nothing -- a turn in flight or one refusal is not a stall), `finished_with_gaps`
+        (done, with `note` saying what was left behind). Chapters landed but not scanned in yet are already out of
+        `left`.
+      required: [seriesId, title, state, direction, done, left, failed, bytes, mine, queuedAt, startedAt]
+      properties:
+        seriesId: { type: string }
+        title: { type: string }
+        state: { type: string, enum: [queued, paused, done] }
+        direction: { type: string, enum: [up, down], description: "Which way the missing numbers are fetched: up from the lowest, or down from the edge of the chapters already held (a Latest-N add)." }
+        done: { type: integer, description: Chapters the archive has landed. }
+        left: { type: [integer, "null"] }
+        failed: { type: integer, description: Chapters that failed (each also on the Health page's failures). }
+        bytes: { type: integer, description: Bytes the archive has written. }
+        mine: { type: boolean, description: This account queued it, and so may pause, resume or stop it (as may an admin). }
+        current: { type: object, properties: { number: { type: number }, startedAt: { type: string, format: date-time } } }
+        nextAt: { type: string, format: date-time, description: "When it may next go: its source's break or backoff, or its own listing retry when that is what it waits for. Absent while a chapter of it is in flight." }
+        etaMs: { type: integer, description: "About how long until the rest is in: left x the series sharing its source x the running average time per chapter, in calendar time -- with a time window set, stretched by the share of the day the window is open." }
+        waiting:
+          type: object
+          properties:
+            why: { type: string, enum: [turn, break, backoff, source_busy, pace, cooldown, disabled, source_missing, series_busy, listing, renumbering] }
+            until: { type: string, format: date-time }
+            source: { type: string, description: The source's name. }
+        attention:
+          type: object
+          properties:
+            why: { type: string, enum: [backoff, source_missing, disabled, stalled, disk, finished_with_gaps] }
+            since: { type: string, format: date-time }
+        queuedAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: string, format: date-time }
+        note:
+          type: object
+          description: "Only when done: numbers below the boundary it left behind -- capped (failed three times), held (waiting for a preferred group), blocked (only blocked groups released them)."
+          properties:
+            capped: { type: integer }
+            held: { type: integer }
+            blocked: { type: integer }
+    ArchiveView:
+      type: object
+      description: >-
+        The slow archive (#117) as one viewer may see it: the pacing an admin set, why nothing is being archived
+        right now when that is the case, and the series this viewer may browse (the same rule as the Downloads
+        view's cards; a finished one is listed for a day, or until dismissed when something was left behind).
+        `waiting.why` is `stopping`, `paused`, `window` (outside the hours it may run; `until` it opens),
+        `sweep`, `repair`, `check` (the daily source check is walking every source) or `disk` (free space is
+        under archive_min_free_gb).
+      required: [paused, perHour, window, series]
+      properties:
+        paused: { type: boolean }
+        perHour: { type: integer, minimum: 1, maximum: 30, description: Chapters an hour, per source. }
+        window:
+          type: [object, "null"]
+          properties:
+            from: { type: integer, minimum: 0, maximum: 23 }
+            to: { type: integer, minimum: 0, maximum: 23 }
+        waiting:
+          type: object
+          properties:
+            why: { type: string, enum: [stopping, paused, window, sweep, repair, check, disk] }
+            until: { type: string, format: date-time }
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchiveSeries"
     ListingNumbers:
       type: object
       description: The chapter numbers a listing-progress call names, as the listing spells them.
@@ -518,7 +601,8 @@ components:
         publishedAt: { type: [string, "null"], format: date-time }
         chosen: { type: boolean, description: The copy the release rules chose at the last check. }
         blocked: { type: boolean, description: Every group on the copy is blocked by the effective preferences. A copy with no groups is never blocked. }
-        onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy)." }
+        onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy). Since v0.49.0 a chapter that landed with the post it came from stamped (lib_books.source_chapter_id) matches that copy alone." }
+        title: { type: [string, "null"], description: "Since v0.49.0 (#116): the copy's own title as the source lists it. Copies from one source and one group under different titles are different posts that share a number, not versions." }
     NotifyTarget:
       type: object
       description: >-
@@ -978,32 +1062,6 @@ paths:
           description: OK
         "401":
           description: Not authenticated
-  /api/library/sources:
-    get:
-      tags:
-        - library
-      summary: The sources the viewer's library comes from, with series counts -- the library's source filters.
-      operationId: getApiLibrarySources
-      description: >-
-        `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
-        the source, `any` the series that read from it at all (added from it, or following it as a fallback).
-        Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
-        the ones the filtered grid shows. `installed` is false for a source whose extension is gone; its series
-        still filter. Empty on a Komga backend. Use the ids as `mainSource` / `anySource` in POST
-        /api/series/search.
-      parameters:
-        - name: adult
-          in: query
-          required: false
-          schema:
-            type: string
-      security:
-        - bearer: []
-      responses:
-        "200":
-          description: OK
-        "401":
-          description: Not authenticated
   /api/trending:
     get:
       tags:
@@ -1093,6 +1151,13 @@ paths:
         - library
       summary: Ask the server to refresh its cached home data.
       operationId: postApiRefresh
+      description: >-
+        Rescans the library, at most once a minute server-wide: within a minute of the last scan it answers
+        {scanned: false, reason: 'rate_limited'}. Otherwise {scanned: true, libraries}, and since v0.49.0 in
+        owned mode, to an admin, also the scan's counts {series, books, ms, skipped} (skipped: folders it could
+        not index, which Health lists), so Scan library now can say what it found. A member is never told the
+        counts: they are the whole library's, libraries that member cannot open included. It also refreshes the stored Health
+        summary the header reads (coalesced, at most once every 30 s).
       security:
         - bearer: []
       responses:
@@ -1126,11 +1191,7 @@ paths:
       summary: "Search and page the library: the grid, the search page, browse-by-genre and the command palette all
         use this."
       description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
-        read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
-        (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
-        `genre`, `author`, and -- owned library only, since v0.49.0 -- `mainSource` (the source a series was
-        added from, by id) and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
-        `unsupported_filter`."
+        read-scoped API token may call it (the one non-GET a read token can use)."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -1346,10 +1407,14 @@ paths:
         ghosts: a chapter the read-chapter cleanup deleted keeps its row (`pruned` on the Book) and is not
         listed here. `why` is one of `missing` (not fetched yet), `held` (waiting for a preferred group),
         `failed` (the sweep gave up after the retry cap; `attempts` says how many), `blocked` (only blocked
-        groups released it; unblock the group to fetch it), `floor` (below the series' Latest-N floor). `reason`,
+        groups released it; unblock the group to fetch it), `floor` (below the series' Latest-N floor), `archive`
+        (an active slow archive will fetch it; since v0.49.0). `reason`,
         the downloader's last error text, is present for admins only. `read: true` marks a number the caller
         ticked read without it being here (POST /api/series/{id}/listing-progress). A chapter matches its
         listing number by its override-aware number, so a chapter an admin renumbered is not also a ghost.
+        `numbering` (v0.49.0, #116) says how the series is numbered and why: { mode (null = automatic, source,
+        posting_order), by (auto, manual), pending (posting_order, source, remap: a change waiting for an
+        admin), note (the detector's last verdict), changedAt, sourceName, extSourceId? }.
       parameters:
         - name: id
           in: path
@@ -1374,6 +1439,18 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Ghost"
+                  archive:
+                    type: [object, "null"]
+                    description: >-
+                      Since v0.49.0 (#117): the series' slow archive, or null -- `{state, done, left, failed, mine,
+                      etaMs?, nextAt?, waiting?, attention?}`, as in ArchiveSeries.
+                  numbering:
+                    type: [object, "null"]
+                    description: >-
+                      Since v0.49.0 (#116), to every viewer of the series: `{mode, by, pending, note, changedAt,
+                      sourceName, extSourceId?}` as described above. While `pending` is set the series downloads
+                      nothing until an admin confirms or declines the change (POST
+                      /api/admin/series/{id}/numbering).
         "401":
           description: Not authenticated
         "404":
@@ -1528,7 +1605,8 @@ paths:
       operationId: getApiSeriesIdVersions
       description: >-
         One entry per chapter number the sources listed at the last check, each with every copy they list
-        (group, language, page count, date, source) flagged `chosen`, `blocked` and `onDisk`. A `source` and
+        (group, language, page count, date, source, and since v0.49.0 its own `title`) flagged `chosen`,
+        `blocked` and `onDisk`. A `source` and
         `sourceId` from here make a Pick for POST /api/sources/fetch or the admin refetch. A number listed
         before v0.33.0 has an empty `copies` until its next check. Any account that can open the series may
         read it.
@@ -1900,7 +1978,10 @@ paths:
         too_few_chapters early answer as well.
         This route deliberately does NOT honour the 18+ reveal (v0.42.0): it is an explicit act on a series
         already in the library, and a series whose own source is adult has to stay fillable whatever the
-        chip says. The age cap still applies — a source above it is never a candidate.
+        chip says. The age cap still applies — a source above it is never a candidate. Since v0.49.0 (#116) a
+        series numbered by posting order is scanned on its own source alone, in the numbers the series keeps;
+        every other source it follows is listed with `why: posting_order` and never asked, and no other source
+        is searched.
       requestBody:
         required: false
         content:
@@ -1995,6 +2076,11 @@ paths:
         - sources
       summary: Fetch specific missing chapter numbers from a source quoted in a plan.
       operationId: postApiSourcesFill
+      description: >-
+        The plan (POST /api/sources/fill/scan) is the authorisation: only numbers it quoted for that source can be
+        asked for, at most 300 at once. Since v0.49.0 (#116) a series waiting for its renumbering answers 409
+        `renumber_pending`, and one numbered by posting order refuses a fill from any source but its own with 409
+        `posting_order` -- another site's chapter numbers do not line up with its posts.
       requestBody:
         required: false
         content:
@@ -2026,7 +2112,9 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: "`plan_stale` (scan again), `disabled` (the source is switched off), `busy` (a download for the series is running), or since v0.49.0 `renumber_pending` / `posting_order` (above)"
+        "429":
+          description: "`blocked`: the source is in a cooldown"
   /api/sources/fetch:
     post:
       tags:
@@ -2107,7 +2195,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it)"
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why), `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it, and since v0.49.0 a slow-archive chapter in flight, which the message names) or, since v0.49.0 (#116), `renumber_pending` (the series waits for an admin to review its renumbering and nothing downloads until then; asked again after the listing refresh, which is where the detector first marks one)"
   /api/sources/search-all:
     get:
       tags:
@@ -2281,12 +2369,22 @@ paths:
       summary: Downloads in progress and failed ones (a failed job is never swept; it carries a reason).
       operationId: getApiSourcesJobs
       description: >-
-        One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?,
-        seriesId?, switched?: [{number, from, to, why?}], partial?}`. `seriesId` is the library id of the
-        series this job is filling, and appears once its first chapter has been scanned in: an add that
-        starts a download is answered before that row exists, so this is where "Open in library" gets the
-        id from (it is absent until then, and for good on a job whose first chapter never landed).
-        `switched` records a chapter completed from a
+        One card per series folder: `{folder, title, total, done, status, origin, reason?, finishedAt?,
+        seriesId?, switched?: [{number, from, to, why?}], partial?, left?, cover?}`. `seriesId` is the library
+        id of the series this job is filling: the card's own, or since v0.49.0 the id of the series row that
+        holds the folder, so a Fetch, fill or refetch card names its series too. An add that starts a download
+        is answered before that row exists, so this is where "Open in library" gets the id from (it is absent
+        until the first chapter has been scanned in, and for good on an add whose first chapter never landed).
+        Since v0.49.0 every viewer gets the cards of the series they can browse (library access, age cap and
+        the 18+ hide; before, cards were filtered only while the 18+ hide was on); a card whose folder is not
+        a series yet goes to the account that started it and to admins, and the account that started a job
+        keeps its card wherever the series lands -- without `seriesId` and `cover` when it is a series that
+        account may not browse; a failed card (`status: error`) goes only to the account that started it and
+        to admins; `origin` says what kind of job it is (`add`, `fetch`, `fill` or `refetch`); `left` on a
+        failed `fetch` or `add` card lists the chapters it did not land (ascending, at most 300), which is what
+        a Try again sends to POST /api/sources/fetch -- a fill's or a refetch's chapters are not ones that route
+        can take again, so those cards carry none; and an add's card carries `cover: {source, url}`, its
+        source's cover, for drawing before the series has a thumbnail of its own. `switched` records a chapter completed from a
         different followed source after its first copy failed; `why` is `rate_limited` when a 429 caused
         the switch and may be absent for an ordinary failure. `partial` counts chapters this job saved with
         repair placeholders. Both additions are absent when empty. An add
@@ -2309,12 +2407,22 @@ paths:
         `cancelRequested` until the chapter in flight is done and then ends `done` with `cancelled: true`
         and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
         the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
-        account that started it as well.
+        account that started it as well. Since v0.49.0 a repair's card also carries `repairKind` (full for a run of
+        every step -- the nightly, Tasks -> Run now, Health's Fix all issues -- else fix_short, fill, retry or
+        steps:...), `label` (the series title or source name a one-row Health press is about),
+        `number` (the chapter's, for a one-chapter run) and `seriesId` (the series `label` names); `label`,
+        `number` and `seriesId` are left out for a viewer who may not list that series (the 18+ hide), as
+        `current` is.
         Since v0.48.1 the response also carries `activity: {active, recent}` -- every chapter the server is
         downloading or finished in the last day, whatever started it: `{id, seriesId, folder, title, number, source,
-        origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server, status: queued|downloading|done|partial|failed,
+        origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server|archive, status: queued|downloading|done|partial|failed,
         startedAt, finishedAt?, pages?, reason?, mine}`, limited to the series this viewer can browse (a folder that
-        is not a series yet: its starter and admins).
+        is not a series yet: its starter and admins). Since v0.49.0 `recent` survives a restart: every finished
+        chapter is also written down, kept a week, and the last day of it (at most 500 entries) is read back when
+        the server starts, with fresh `id`s. Also since v0.49.0 (#117) the response carries `archive`
+        (ArchiveView): the slow archive's queue, its rows limited to the series this viewer can browse and
+        filtered per request (never one viewer's answer replayed to another); its chapters are in `activity`
+        with origin `archive`.
       security:
         - bearer: []
       responses:
@@ -2326,6 +2434,8 @@ paths:
                 type: object
                 required: [content]
                 properties:
+                  archive:
+                    $ref: "#/components/schemas/ArchiveView"
                   content:
                     type: array
                     items:
@@ -2340,12 +2450,19 @@ paths:
                         status: { type: string }
                         reason: { type: string }
                         finishedAt: { type: integer }
+                        origin:
+                          type: string
+                          enum: [add, fetch, fill, refetch]
+                          description: >-
+                            Since v0.49.0: what kind of job this is -- an add (and a nothing-yet add's carrier
+                            card), a Fetch, a fill from "Find missing chapters", or an admin's Fetch again.
                         seriesId:
                           type: string
                           description: >-
-                            The series this job is filling, once its first chapter has been scanned in.
-                            Absent before that (a download add is answered before the row exists) and on a
-                            job whose first chapter never landed.
+                            The series this job is filling: the card's own, else the series row holding the
+                            folder (since v0.49.0). Absent while an add's first chapter has not been scanned
+                            in (it is answered before the row exists), and for good when it never lands; also
+                            absent on a card shown to its starter in a series they may not browse.
                         switched:
                           type: array
                           items:
@@ -2364,6 +2481,24 @@ paths:
                         cancelled:
                           type: boolean
                           description: The job stopped because of a Cancel. It ends `done`, with `reason` saying how far it got.
+                        left:
+                          type: array
+                          maxItems: 300
+                          items: { type: number }
+                          description: >-
+                            Since v0.49.0, on a failed `fetch` or `add` job: the chapters it did not land,
+                            ascending -- what a Try again sends to POST /api/sources/fetch as `numbers`. Empty when
+                            every chapter landed and the library scan is what failed; absent on a fill or a
+                            refetch, whose chapters that route cannot take again.
+                        cover:
+                          type: object
+                          required: [source, url]
+                          properties:
+                            source: { type: string }
+                            url: { type: string }
+                          description: >-
+                            Since v0.49.0, on an add's card: the cover its source gave, for GET
+                            /img/sources/cover, until the series has a thumbnail of its own.
                   runs:
                     type: array
                     description: >-
@@ -2371,7 +2506,8 @@ paths:
                       `repair` (the library repair; `done`/`total` count its steps and `step` names the one it
                       is on) and `newest` (a bulk "Fetch newest"). An admin sees every run, the account that
                       started a bulk run sees that one; nobody else sees any. A finished run stays listed for a
-                      day. `current` is the series it is inside, left out when this request hides that series.
+                      day. `current` is the series it is inside, left out when this viewer may not list that
+                      series (since v0.49.0 for every viewer, not only under the 18+ hide).
                     items:
                       type: object
                       additionalProperties: false
@@ -2394,6 +2530,11 @@ paths:
                         cancelRequested: { type: boolean }
                         reason: { type: string }
                         mine: { type: boolean }
+                        repairKind: { type: string, description: "Since v0.49.0, a repair: which run it is -- full (every step: the nightly, Tasks -> Run now, Health's Fix all issues), fix_short, fill, retry, or steps:<a+b...>[:now]." }
+                        label: { type: string, description: "Since v0.49.0, a repair: the series title or source name a one-row Health fix is about. Left out, with number and seriesId, for a viewer who may not list that series, and whenever current is." }
+                        number: { type: number, description: Since v0.49.0, a repair about one chapter -- its number. }
+                        seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
+                        downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
         "403":
@@ -2489,7 +2630,9 @@ paths:
       summary: Stop a running download after the chapter in flight.
       operationId: postApiSourcesJobsFolderCancel
       description: >-
-        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403.
+        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403 --
+        since v0.49.0 only for a job GET /api/sources/jobs hands them, and 404 for one it does not, exactly as
+        for no job at all, so the answer never says that a download is running for a title they cannot see.
         The job checks between chapters, so a file is never left half-written: what already landed stays,
         and the card ends `done` with `cancelled: true` and a `reason` saying how far it got. A re-fetch
         that set old copies aside puts back every one it did not reach. Audited as `download.cancel`.
@@ -2509,7 +2652,7 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: No such job
+          description: No such job, or one this account is not shown
         "409":
           description: "Conflict: `not_running` -- the job has already stopped"
   /api/sources/runs/{kind}/cancel:
@@ -2573,10 +2716,12 @@ paths:
       summary: Dismiss a stopped job; 409 while it is still running, or while its auto-follow judgement runs.
       operationId: deleteApiSourcesJobsFolder
       description: >-
-        Only a job that has stopped: 409 `running` while `status` is `downloading`, and likewise while the
-        card's `autoFollow.done` is false -- a nothing-yet carrier card is `done` from birth, and dropping it
-        mid-judgement would let the follows land with the report they belong to gone, while the dialog polled
-        for a card that no longer existed.
+        Since v0.49.0 only the account that started the job, or an admin, may dismiss it; anyone else gets
+        403, answered before the 409 -- and 404 for a job GET /api/sources/jobs does not hand them, exactly as
+        for no job at all. Only a job that has stopped: 409 `running` while `status` is
+        `downloading`, and likewise while the card's `autoFollow.done` is false -- a nothing-yet carrier card
+        is `done` from birth, and dropping it mid-judgement would let the follows land with the report they
+        belong to gone, while the dialog polled for a card that no longer existed.
       parameters:
         - name: folder
           in: path
@@ -2591,9 +2736,9 @@ paths:
         "401":
           description: Not authenticated
         "403":
-          description: "Forbidden: token scope, account permission or age limit"
+          description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: Not found, or not visible to this account
+          description: No such job, or one this account is not shown
         "409":
           description: "Conflict: `running` -- the download is still going, or the auto-follow judgement has not finished"
   /api/discover/trending:
@@ -2656,7 +2801,11 @@ paths:
         `count`, `first` and `last` describe one copy per chapter number under the server-wide release
         preferences (what the add would land). `groups` is the who-scanlates-this panel built from the same
         chapter list (no second source call), with `onDisk` 0 since nothing is on disk yet; `versions` is how
-        many numbers the source lists in more than one copy.
+        many numbers the source lists in more than one copy. `numbering` (v0.49.0, #116) is the detector's word
+        on the listing: { verdict (strong, hint, none), applied (posting_order when the add will number the
+        posts 1..K in posting order, else source), ordered, posts, numbers, biggest { number, posts }, examples,
+        alt { count, first, last } (the other reading, for the dialog's switch), extSourceId? }; `count`,
+        `first` and `last` follow `applied`.
         This route deliberately does NOT honour the 18+ reveal (v0.42.0), and neither does POST
         /api/sources/add: both are explicit acts on a source and a series the caller just named, and the
         reveal governs what appears unasked. The age cap does apply and answers 403 by id.
@@ -2703,6 +2852,165 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/sources/archive:
+    get:
+      tags:
+        - sources
+      summary: The slow archive's queue (#117), as this account may see it.
+      operationId: getApiSourcesArchive
+      description: >-
+        Since v0.49.0. The same object GET /api/sources/jobs carries as `archive`, for a surface that wants the
+        archive alone: rows limited to the series this account can browse. Requires canDownload.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchiveView"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - sources
+      summary: Queue series to be fetched slowly -- a chapter at a time, paced per source, over nights or days (#117).
+      operationId: postApiSourcesArchive
+      description: >-
+        Since v0.49.0. Admins, and members with canDownload, for series they may see, and only when every source
+        the series follows is inside their age limit. Each id answers for itself: `queued`; `already` (queued or
+        paused already); `nothing` (the listing leaves nothing to fetch below the boundary: everything listed is
+        here, capped, held or blocked); `unrouted` (no source is installed for it); `denied` (a source it follows
+        is outside this account's age limit); `not_found` (no such series, or one this account may not see --
+        with no title). The archive owns the listed numbers below a boundary -- the series' floor, else a hair
+        above the newest listed number; a series with no listing yet is queued, and its first turn reads one --
+        and the nightly sweep keeps the new releases above it; chapter_floor itself is never changed while it runs.
+        Nothing is followed or searched for. A finished archive queued again starts over. Audited as
+        `download.archive`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesIds]
+              properties:
+                seriesIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, minLength: 1, maxLength: 200 }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: One outcome per distinct id, in the order given.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, outcome]
+                      properties:
+                        id: { type: string }
+                        title: { type: string, description: Absent for not_found. }
+                        outcome: { type: string, enum: [queued, already, nothing, unrouted, denied, not_found] }
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/archive/{seriesId}/pause:
+    post:
+      tags:
+        - sources
+      summary: Pause one series' slow archive; a chapter in flight finishes. Its boundary stays.
+      operationId: postApiSourcesArchiveSeriesIdPause
+      description: >-
+        Since v0.49.0. The account that queued it, or an admin; anyone else who can see the series gets 403, and
+        one who cannot gets 404, as for no archive at all. 409 `done` on a finished archive.
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or an archive this account did not queue"
+        "404":
+          description: No archive for that series, or one this account may not see
+        "409":
+          description: "Conflict: `done` -- the archive has finished"
+  /api/sources/archive/{seriesId}/resume:
+    post:
+      tags:
+        - sources
+      summary: Resume a paused slow archive.
+      operationId: postApiSourcesArchiveSeriesIdResume
+      description: Since v0.49.0. Same rules and answers as pause.
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or an archive this account did not queue"
+        "404":
+          description: No archive for that series, or one this account may not see
+        "409":
+          description: "Conflict: `done` -- the archive has finished"
+  /api/sources/archive/{seriesId}:
+    delete:
+      tags:
+        - sources
+      summary: Stop a slow archive, or dismiss a finished one. What landed stays.
+      operationId: deleteApiSourcesArchiveSeriesId
+      description: >-
+        Since v0.49.0. The account that queued it, or an admin (403 otherwise; 404 to one who cannot see the
+        series). A chapter in flight finishes. The rest goes back to where it was before the archive: under a
+        Latest-N or Nothing-yet floor it waits for someone to fetch it, otherwise the nightly sweep fetches it at its
+        own pace. Audited as `download.archive_stop`.
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or an archive this account did not queue"
+        "404":
+          description: No archive for that series, or one this account may not see
   /api/sources/add:
     post:
       tags:
@@ -2754,6 +3062,16 @@ paths:
                   type: boolean
                 force:
                   type: boolean
+                numbering:
+                  type: string
+                  enum: [auto, source, posting_order]
+                  description: >-
+                    How to number the series (v0.49.0, #116). `auto` (the default) numbers by posting order when
+                    the source gives many different posts one number; `source` keeps the source's numbers;
+                    `posting_order` numbers the posts 1..K whatever the detector says. `alsoFollow` is ignored
+                    under posting order. A folder that already holds chapters is never renumbered by an add: it
+                    is added in the source's numbers with a renumbering pending, for an admin to review (unless
+                    the series kept an assignment for this source, when it was removed and is added back).
                 alsoFollow:
                   type: array
                   maxItems: 6
@@ -2787,6 +3105,12 @@ paths:
                     sources). Results are NOT in this answer: they are on the series' job card (GET
                     /api/sources/jobs, `autoFollow`), which a `none` add gets minted for the purpose.
                     Ignored for a title already in the library.
+                archive:
+                  type: boolean
+                  description: >-
+                    Since v0.49.0 (#117): "Archive the rest slowly" -- what the selection leaves is queued for the
+                    slow archive (the rules of POST /api/sources/archive), once the add has settled. Ignored when
+                    the selection is the whole listing.
       security:
         - bearer: []
       responses:
@@ -2819,6 +3143,16 @@ paths:
                     description: >-
                       Every chapter selected was already in the library, so none was fetched (`chapters` is
                       0 and `started` false). Absent on a partial re-add, where `chapters` is the remainder.
+                  archive:
+                    type: string
+                    enum: [queued, later, nothing, already, unrouted, denied, not_found]
+                    description: >-
+                      Only when the request asked for `archive`: what became of the rest -- an outcome of POST
+                      /api/sources/archive, or `later` on a download, which queues it once the first chapter is in
+                      and the listing is written (it then shows on GET /api/sources/jobs `archive`). `later` too when
+                      the add left the series' numbering for an admin's review (#116: a folder that already held
+                      books): it is queued, and its boundary is placed once the renumber has settled, in the numbers
+                      the series keeps. `nothing` when the selection was the whole listing.
         "400":
           description: Malformed body or parameter
         "401":
@@ -4897,7 +5231,11 @@ paths:
         - admin
       summary: Check every auto-updating series for new chapters now.
       operationId: postApiAdminUpdate
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Runs the
+        same sweep as the schedule and Tasks' Run now, and answers with its result when it ends. Since v0.49.0 it
+        is marked running like them -- the flag the repair and the slow archive stand aside for -- so it answers
+        409 `busy` while a sweep or a library repair runs, rather than starting a second sweep beside it.
       security:
         - bearer: []
       responses:
@@ -4908,7 +5246,9 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: "Conflict: `busy` -- a sweep or a library repair is running"
+        "500":
+          description: The sweep itself failed; the server log has the details
   /api/admin/users:
     get:
       tags:
@@ -5051,6 +5391,14 @@ paths:
                   borrow_names:
                     type: boolean
                     description: Whether the nightly repair borrows chapter names from another source. See borrowNames on PATCH.
+                  archive_paused: { type: boolean, description: "The slow archive (#117) is paused server-wide. See archivePaused on PATCH." }
+                  archive_per_hour: { type: integer, minimum: 1, maximum: 30 }
+                  archive_window_from: { type: [integer, "null"], minimum: 0, maximum: 23 }
+                  archive_window_to: { type: [integer, "null"], minimum: 0, maximum: 23 }
+                  archive_min_free_gb: { type: integer, minimum: 1, maximum: 2000 }
+                  archive_free_gb:
+                    type: [number, "null"]
+                    description: GiB free under the download root now, one decimal, what archive_min_free_gb is set against; null when it cannot be measured.
         "401":
           description: Not authenticated
         "403":
@@ -5208,6 +5556,36 @@ paths:
                     this off clears exactly the names it wrote for every series that follows this setting
                     (a series switched on for itself keeps its own).
                   type: boolean
+                archivePaused:
+                  type: boolean
+                  description: >-
+                    Pause the slow archive (#117) for every series. A chapter in flight finishes. Queued series keep
+                    their place and their boundary, so the sweep still leaves their back catalogue to it.
+                archivePerHour:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  description: >-
+                    Chapters an hour the slow archive takes from each source. Default 4: breaks are jittered and
+                    now and then long, pages one at a time with a random 1.5-4 s between them
+                    (ARCHIVE_PAGE_GAP_MS), at most three sources at once (ARCHIVE_MAX_SOURCES).
+                archiveWindowFrom:
+                  type: [integer, "null"]
+                  minimum: 0
+                  maximum: 23
+                  description: >-
+                    The local hour the slow archive may start at, with archiveWindowTo the hour it stops; a window
+                    may cross midnight (22 to 6). Both are sent together, set or both null (any time, the
+                    default); one alone is refused.
+                archiveWindowTo:
+                  type: [integer, "null"]
+                  minimum: 0
+                  maximum: 23
+                archiveMinFreeGb:
+                  type: integer
+                  minimum: 1
+                  maximum: 2000
+                  description: The slow archive waits while less than this many GB are free under the download root. Default 20.
       security:
         - bearer: []
       responses:
@@ -5243,12 +5621,109 @@ paths:
         server_settings.repair_last_run / repair_last_result, memory winning once this process has run it).
         Its result is {ok, ms, only?, counted, uncounted, short: {looked, replaced, confirmed, left},
         gaps: {series, followed, fetched, unfillable, sweep}, failures: {reset, retried?}, solver: {reset,
-        unblocked, expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk'}.
+        unblocked, expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk', stepMs?, skips?, run?}.
+        Since v0.49.0 `lastRun`/`lastResult` are the last FULL run (no `only`: the nightly, or Run now here) --
+        a one-row Health fix no longer replaces them or moves the nightly's schedule -- and the repair entry
+        adds `lastOrigin` ('nightly' | 'manual' | null), `startedAt` and `run` (the running run's id, or null),
+        `nextAt` (when the nightly is armed for) and `latestOther` {id, kind, target, finishedAt, status,
+        result} (the newest scoped run, from GET /api/admin/tasks/repair/runs). Every entry also carries
+        `scheduleKey` (the schedule sentence with {placeholders}, a locale key on the web) and `scheduleVars`
+        (their values); `schedule` stays the English sentence.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/repair/status:
+    get:
+      tags:
+        - admin
+      summary: The library repair, live -- what it is on, its limits and estimates, the last runs and the next nightly.
+      operationId: getApiAdminTasksRepairStatus
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.49.0. Polled by the Health page every 2 s while a run is going; it reads memory and a memoised digest
+        of repair_runs, so it costs no query that grows with the library. Answers {running, sweepRunning,
+        enabled (repair_enabled), nextAt (epoch ms of the armed nightly, or null outside owned mode), run, last,
+        recent, lastFull, limits, estimates, stepTypicalMs}. `run` is null or the running run: {id, startedAt,
+        origin: 'nightly' | 'manual', mine, kind ('full' | 'fix_short' | 'fill' | 'retry' |
+        'steps:<a+b...>[:now]'), only, target {seriesId?, bookId?, sourceId?, now?, number?, label?}, steps,
+        step, stepIndex, stepStartedAt, stepMs, planned {step: n}, current {kind: series | chapter | source |
+        solver | files, seriesId?, bookId?, title?, number?, sourceId?, phase, done?, of?} | null, counts (the
+        live result so far), budget {left, of} (searches the run has left), shortReserve {left, of} | null,
+        skips[], cancelRequested}. Who started it is never sent, only `mine`; a series title (current.title,
+        target.label, a skip's target.title) is dropped when this viewer may not list that series (the 18+
+        hide), as on GET /api/sources/jobs. `last` {id, finishedAt, status, kind} is the newest finished run of
+        any kind -- how a page that pressed a one-row fix learns that ITS run (the id the run route answered)
+        ended, even one that took 5 ms; `recent` the five newest finished runs {id, finishedAt, status, kind,
+        target}; `lastFull` {id, at, ms, origin, result} the newest full run. `limits` is every bound the
+        running process uses (env overrides applied): shortMax, gapsMax, groupsMax, namesMax, countMax,
+        directionsMax, huntBudget, shortHuntMax, gapChapters, retrySeries, shortCopies, failuresMax, retryCap,
+        paceMs, pageListMs, listingRefreshMs, listTimeoutMs, huntWallMs, huntMaxSources, solverBudgetMs,
+        expiredBlockHours, repairHours. `estimates` maps a run kind to {typicalMs (median of its last five
+        finished runs, or null), runs, worstMs (the sum of the waits the code bounds -- page lists, listings,
+        searches -- or null when a planned step has no such bound), downloads (the most chapters it can
+        download, stated as a count, never folded into the time)}, for the Health chips' kinds, every kind in
+        the history, and up to ten more named in `kinds`. Statuses: running | done | stopped | failed |
+        skipped | interrupted (a run whose process died; closed when the next run starts).
+      parameters:
+        - name: kinds
+          in: query
+          required: false
+          description: Comma-separated run kinds to estimate as well, e.g. steps:failures+gaps+short+solver:now (at most ten).
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/repair/runs:
+    get:
+      tags:
+        - admin
+      summary: Every kept library repair run, newest first, or one by id.
+      operationId: getApiAdminTasksRepairRuns
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.49.0. Every run is kept in repair_runs -- the nightly and every Health press -- pruned to at least
+        the newest 50 rows and everything from the last 90 days. Answers {content: [{id, startedAt, finishedAt,
+        origin: 'nightly' | 'manual', username (who pressed it; null for the nightly or a deleted account),
+        mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
+        {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
+        dropped when this viewer may not list that series. `notes` names series by title alone, with no id to
+        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many, 1 to 50 (default 20).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+        - name: id
+          in: query
+          required: false
+          description: One run, by the id POST /api/admin/tasks/repair/run answered with.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
         "401":
           description: Not authenticated
         "403":
@@ -5282,7 +5757,7 @@ paths:
         schedule. Audit: `task.run` {task: 'verify'} at the press and `library.verify` {checked, missing,
         readLibraryMissing, unmounted, ms} when the walk ends.
         `repair` (since v0.41.0) is the only task that takes a body, and it is also detached. With no body it
-        runs all five steps over the whole library; `only` narrows it to named steps, and the three targets
+        runs all eight steps over the whole library; `only` narrows it to named steps, and the three targets
         each belong to exactly one step -- `seriesId` to `gaps` ("Fill now" on one series), `bookId` to
         `short` ("Fix" on one chapter), `sourceId` to `failures` ("Retry now" on one source) -- so a target
         sent without `only: ["<its step>"]` is refused with 400 rather than quietly widened into a full run.
@@ -5292,6 +5767,15 @@ paths:
         {ok:false,error:'busy'}; the other direction is named too -- pressing `update` (Check for new
         chapters) while a repair runs answers {ok:false,error:'repair_running'} rather than a shared `busy`,
         which would say the sweep is still running when it is not. Counts land on GET /api/admin/tasks as the `repair` entry's `lastResult`.
+        Since v0.49.0 the answer is {ok: true, started: true, run} with the run's id (uuid): every run is kept
+        in repair_runs, only a full run (no `only`) is the Tasks entry's `lastResult`, and a scoped run's
+        progress and end are read from GET /api/admin/tasks/repair/status (`run`, then `last`/`recent`) and
+        its record from GET /api/admin/tasks/repair/runs?id=. `seriesId` with `only: ["gaps"]` (Fill now) looks
+        at the series even while its automatic updates are off, and fetches gap chapters a followed source
+        already lists (at most 20), not only after following a new one. The result may carry `skips`
+        [{step, target?, why: folder_busy | not_eligible | no_gaps | source_cooling_down | source_off |
+        solver_down | no_searches_left, until?, detail?}] saying what was passed over and why. `scan` (awaited)
+        stamps the Tasks entry's lastRun like POST /api/refresh does.
         Audit: `task.run` {task:'repair'} at the press, `library.repair` {only?, seriesId?, bookId?,
         sourceId?, summary, stopped?, replaced[], confirmed[], followed[]} when the run ends (userId null for
         the nightly), plus `book.short_fixed` per replaced chapter and `series.follow_source` per followed
@@ -5343,6 +5827,14 @@ paths:
                   description: >-
                     One source whose failed chapters to reset and re-check regardless of their age. Only
                     with only: ["failures"].
+                now:
+                  type: boolean
+                  description: >-
+                    Since v0.48.3: the whole library, now. Only with no target, and only where the `failures` step
+                    runs (400 otherwise). That step then resets EVERY source's failed chapters whatever their age
+                    and re-checks up to 10 series from the sources that can be asked now (never one cooling down or
+                    switched off, and never with a search). Health's Fix all issues sends it, and since v0.49.0 so
+                    does the Fix all on its "Chapters that would not download" card.
       security:
         - bearer: []
       responses:
@@ -5823,7 +6315,8 @@ paths:
         "409":
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
-            own source); source_unavailable (the adapter is not loaded or is disabled).
+            own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
+            posting_order (the series is numbered by posting order, so a follower would never be merged).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -5935,6 +6428,93 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/{id}/numbering:
+    get:
+      tags:
+        - admin
+      summary: "The plan a numbering change would carry out on one series, changing nothing (#116)."
+      operationId: getApiAdminSeriesIdNumbering
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. From a fresh,
+        bounded listing of the series' numbering source. `mode` defaults to the change waiting for review, else
+        the other numbering. The plan lists every file's move { bookId, from, to, fromFile, file, via (rename,
+        row, override, none), how (id, pick, stored, name, date, listing), title }, the books no post matched
+        (`parked`), the numbers two books would share (`collisions`), whether it could be applied unattended
+        (`clean`, with `reasons`), and the floor it moves to; `tracker` says a tracker is linked.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [posting_order, source, remap]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { mode, plan, tracker, numbering }"
+        "400":
+          description: Unknown mode
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "502":
+          description: The source did not answer, so there is no plan (unreachable)
+    post:
+      tags:
+        - admin
+      summary: "Choose how one series is numbered: by posting order, by the source, or automatically (#116)."
+      operationId: postApiAdminSeriesIdNumbering
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `auto` hands the
+        series back to the detector. `posting_order` and `source` without `confirm` answer `needs_confirm` with
+        the plan and change nothing; with it they rename the files in place (book ids, reading progress,
+        bookmarks and notes are kept) and answer `applied`. Choosing the numbering the series already has
+        (Keep the source's numbers on a series waiting for review) renames nothing and answers `unchanged`.
+        `remap` confirms the remap an extension setting queued. `pending` means the change could not be applied
+        yet, and the series stays held: the source did not answer; the apply was refused (`error` says why -- a
+        file already at a target name, or another check inside the series -- and `plan.reasons` carries `busy`
+        when a download started meanwhile); or it took longer than a minute and carries on (`running: true`).
+        A manual choice is never undone by the detector.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [auto, source, posting_order, remap] }
+                confirm: { type: boolean }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { state (applied, pending, needs_confirm, unchanged), plan?, tracker?, error?, running?, numbering }"
+        "400":
+          description: Malformed body
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "busy (with `confirm`): chapters are being fetched for this series, or a check is inside it -- the sweep, Check now, a listing refresh, Fill -- and would fetch into the old numbers after the renames; try again when that ends. `message` says which."
   /api/admin/series/{id}/restore:
     post:
       tags:
@@ -6836,9 +7416,17 @@ paths:
     get:
       tags:
         - admin
-      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages."
+      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages, why it is off, the retry, the platform, linked series and its Cloudflare helper."
       operationId: getApiAdminExtensionsStatus
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Not configured: `{configured: false, reachable: false, off: 'switch' | 'unset', platform, linkedSeries}`
+        (`switch` is EXTENSION_ENGINE=0 with the bundled address). Configured: the fields above plus `engine`
+        (host:port), `platform` (desktop, compose, unraid, casaos, umbrel or unknown), `retry` ({attempts, since,
+        nextAt} while the registration retry runs, else null), `lastTry`, `linkedSeries` (series added through an
+        extension) and, when the engine answers, `solver` ({supported, enabled, wiring: ok | off | localhost |
+        other | unsupported, connectable, url}; `url` is never sent on desktop). When the engine answers but the
+        last registration missed it, this call registers its sources before replying."
+
       security:
         - bearer: []
       responses:
@@ -6854,7 +7442,10 @@ paths:
         - admin
       summary: "Sources the installed extensions provide, with which are enabled; plus a per-language overview (langs) and the hidden languages, unfiltered."
       operationId: getApiAdminExtensionsSources
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row
+        carries the `pkgName` of the extension it comes from (v0.49.0), and `pkg` narrows the list to one
+        extension's sources -- one per language -- as the extension settings sheet's language select reads it.
       parameters:
         - name: q
           in: query
@@ -6864,6 +7455,12 @@ paths:
         - name: lang
           in: query
           required: false
+          schema:
+            type: string
+        - name: pkg
+          in: query
+          required: false
+          description: One extension's package name, e.g. eu.kanade.tachiyomi.extension.all.webtoons.
           schema:
             type: string
       security:
@@ -6949,6 +7546,98 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/extensions/sources/{id}/preferences:
+    get:
+      tags:
+        - admin
+      summary: "One extension source's own settings, the preference screen Mihon shows for it (#116)."
+      operationId: getApiAdminExtensionsSourcesIdPreferences
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Read through
+        the extension engine. `preferences` lists every setting in screen order as { key, type (switch,
+        checkbox, list, multiselect or text), title, summary, visible, enabled, value, default, entries?,
+        entryValues?, dialogTitle?, dialogMessage?, numbering }; `numbering` marks a setting that changes the
+        chapter numbers the source gives (Webtoons' "Use sequential chapter numbering"). No position is ever
+        answered: a write names the key. `siblings` are the extension's other sources (one per language);
+        `usedBy` counts the library's series from this source and `renumbers` those a numbering change would
+        renumber (the ones not numbered by posting order).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The engine's source id (a 64-bit integer, as a string).
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { source { id, name, lang, pkgName, extensionName }, siblings, preferences, usedBy, renumbers }"
+        "400":
+          description: Malformed id, or no extension server configured
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The extension server has no such source (unknown_source)
+        "502":
+          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`"
+    post:
+      tags:
+        - admin
+      summary: "Change one of an extension source's own settings, addressed by key (#116)."
+      operationId: postApiAdminExtensionsSourcesIdPreferences
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The server
+        reads the preference screen again, finds the key's current position, checks the value against the
+        setting's type and choices, and only then writes it: the engine addresses a write by position, which an
+        extension update can move. A value that really changed drops the source's cached chapter lists (what the
+        add dialog shows). A change to a numbering setting that the engine took (`applied`) marks every series
+        from this source that uses the source's numbers for a remap (`numbering_pending = 'remap'`): each waits
+        for an admin to confirm its renaming (POST /api/admin/series/{id}/numbering, mode remap) before it updates
+        again, unless its next check finds that every chapter keeps its number, which settles the remap by itself;
+        series numbered by posting order are unaffected. Audited as `source.extension_pref`, a text setting's value
+        by its length only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key: { type: string, maxLength: 256 }
+                value:
+                  description: A boolean (switch, checkbox), a string (list, text) or a list of strings (multiselect).
+                  oneOf:
+                    - type: boolean
+                    - type: string
+                      maxLength: 4096
+                    - type: array
+                      maxItems: 200
+                      items: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { ok, changed, applied (the engine holds the value), remap (series marked), preferences, usedBy, renumbers }"
+        "400":
+          description: "bad_request, unknown_pref, ambiguous_pref, disabled, bad_value (not one of the setting's choices), or not_configured"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The extension server has no such source (unknown_source)
+        "502":
+          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`"
   /api/admin/extensions/catalog:
     get:
       tags:
@@ -7017,6 +7706,32 @@ paths:
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "502":
+          description: The extension engine did not answer
+  /api/admin/extensions/solver:
+    post:
+      tags:
+        - admin
+      summary: Point the extension engine's own Cloudflare helper at the solver Uchiyomi uses (FLARESOLVERR_URL),
+        and switch it on.
+      operationId: postApiAdminExtensionsSolver
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Sets the engine's flareSolverrEnabled and flareSolverrUrl; nothing restarts. Only on request, never by
+        itself. Answers `{ok, enabled, wiring}`. Audited as `extension.solver` with the solver's host, never its
+        address."
+
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "`not_configured` (no extension engine), `no_solver` (Uchiyomi has no FLARESOLVERR_URL to
+            share) or `unsupported` (the engine has no such setting)"
         "401":
           description: Not authenticated
         "403":
@@ -7153,7 +7868,7 @@ paths:
       tags:
         - admin
       summary: "Library health checks: chapter gaps, short chapters, duplicates, failing sources, frozen series, the
-        solver, the library scan, downloads missing from the library."
+        solver, the library scan, downloads missing from the library, the extension engine."
       operationId: getApiAdminHealth
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
@@ -7172,6 +7887,40 @@ paths:
         withdraws it, which is what a row carrying `fixed` offers); delete is POST
         /api/admin/series/{id}/chapters/delete; merge is POST /api/admin/series/{id}/merge; test, unblock and
         disable are the existing POST /api/admin/sources/{id}/... routes.
+        Since v0.49.0 an item may carry `outcome`, what the last attempt at it found, from stored rows:
+        {kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable[], scanned} (the
+        gap `detail` is now '<n> missing — <ranges>' alone; the conclusion it used to end with is here), {kind:
+        'short', at, why: replaced | confirmed | no_longer_copy | source_silent | hunt_cooldown | no_searches |
+        hunt_off | download_failed | partial | confirmed_by_admin, asked?, answered?, best?, hunt?, missing?,
+        by?} or {kind: 'failures', firstAt (the first failure, which a Retry now no longer resets), lastAt,
+        attempts, resetPending}; and `caveats` [{action, code: updates_paused | source_cooling_down |
+        source_off | archiving, until?}], what an action will not be able to do, said before it is pressed. A short
+        chapter saved with placeholder pages is offered confirm_short only.
+        Since v0.49.0 (#115) the `sources` check reads per-stage evidence: each item adds `evidence` [{stage:
+        search | chapters | pages | images, state: ok | fail | unknown, at, by: test | sweep | traffic, kind:
+        error | empty | unnumbered, error}], `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
+        stage} (the last live check), `diagnosis` {code, reason, fix} and `series` (how many series use the
+        source), and is titled by the source's name. A confirmed failure (a failed Test or daily check, or three
+        traffic failures in a row at one stage) is a finding even for a source no series uses; a test that ran
+        out of time and a failure unchecked for seven days are `info`. The check carries `testMs`, how long one
+        Test may take. A new check, `extension-engine` (#72), reports the extension engine: off on purpose (ok,
+        one info item), not answering (warn, exactly one item), or whether its own Cloudflare helper is in use,
+        with the new action `engine_solver` (POST /api/admin/extensions/solver) when the helper is off or points
+        at localhost -- a finding only while an extension source is seen behind Cloudflare. It is absent when no
+        engine is set up and no series depends on one.
+        Since v0.49.0 (#117) a gap below an active slow archive's boundary is the archive's to fetch: a gaps item
+        whose every gap is below it is `info`, with outcome `why: 'archiving'` and no `fixed`, and any gaps item
+        with a gap below it carries the caveat {action: fill, code: archiving} -- the nightly repair leaves those
+        numbers to the archive, and Fill now fetches them at once, at normal pace. The gaps outcome's `why` also
+        reads `posting_order`: the series is numbered by posting order, so no other source is searched or
+        followed for it. A new check, `numbering` (#116, "Chapter numbering"), lists each series with a
+        numbering change waiting for review (the detector's proposal, an admin's choice not applied yet, or a
+        remap an extension setting queued), a renumber a restart interrupted, and a series whose source the
+        detector only suspects of giving different posts one number; as `info`, a series the detector numbered
+        by posting order on its own in the last 14 days, and one an admin kept in its source's numbers against
+        a strong verdict. Its actions are `renumber` (GET, then POST with `confirm`,
+        /api/admin/series/{id}/numbering) and `keep_numbers` (POST with mode `source`); items carry `seriesId`
+        and `sourceId`. The check is absent when no series has anything to say about its numbering.
       security:
         - bearer: []
       responses:
@@ -8128,7 +8877,8 @@ paths:
     get:
       tags:
         - admin
-      summary: Every source with its stored health, cooldown and diagnosis.
+      summary: Every source with its stored health, cooldown, the last live verdict (`live`), its open, confirmed
+        failures per stage (`failing`) and one line per stage (`evidence`); `testMs` is how long one Test may take.
       operationId: getApiAdminSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:
@@ -8141,18 +8891,39 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/check:
-    post:
+    get:
       tags:
         - admin
-      summary: "Run the source watchdog now: probe and smoke-test every source, follow verified moves. 409 while
-        running."
-      operationId: postApiAdminSourcesCheck
+      summary: "Where the current or last source check is: {running, by, startedAt, finishedAt, total, done, current,
+        result, error}."
+      operationId: getApiAdminSourcesCheck
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        `result` is the finished sweep's answer (verdicts, needsAttention, inconclusive, notified), kept in memory
+        until the next run starts.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: "Start the source watchdog now, in the background: probe and smoke-test every source, follow verified
+        moves. Answers 202 with the progress; 409 while running."
+      operationId: postApiAdminSourcesCheck
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Read the progress and the result with GET on the same path. Each verdict carries state (pass, fail,
+        inconclusive), stage and kind; needsAttention is every confirmed live failure except a rate limit, plus
+        moved sites, and admins are pushed once per new or changed failure.
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Started
         "401":
           description: Not authenticated
         "403":
@@ -8163,7 +8934,8 @@ paths:
     post:
       tags:
         - admin
-      summary: Probe one source right now, ignoring its cooldown, and diagnose it; writes no health.
+      summary: Probe one source right now, ignoring its cooldown, and diagnose it; records the verdict as evidence and
+        never changes the cooldown.
       operationId: postApiAdminSourcesIdTest
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -8177,7 +8949,11 @@ paths:
         the shipped compose names (uchiyomi-suwayomi, http://uchiyomi-flaresolverr:8191), never the
         development stack's; and since v0.37.0 this route reads the source's slow streak, so `code` can be
         `too_slow` ("This source answers, but more slowly than it is given.") here as well as from Discover's
-        health view, with a `fix` naming the configured SOURCE_LATEST_TIMEOUT_MS budget in seconds.
+        health view, with a `fix` naming the configured SOURCE_LATEST_TIMEOUT_MS budget in seconds. Since
+        v0.49.0 the answer adds {state, stage, ms, recorded}; the verdict is recorded in source_health.live_* and
+        the per-stage evidence Health reads (never status, consecutive, blocked_until or checked_at); `code` is
+        never `ok` when `ok` is false, and can be `extension_error` (the engine answered with the extension's own
+        error) or `unnumbered`.
       parameters:
         - name: id
           in: path

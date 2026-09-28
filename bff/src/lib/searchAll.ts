@@ -20,7 +20,7 @@ import type { SourceAdapter, SourceSeries } from './sources/types';
 import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
-import { classify, reportFail, reportSlow, type SourceHealth } from './sourceHealth';
+import { classify, noteStage, reportFail, reportSlow, type SourceHealth } from './sourceHealth';
 
 /** An env knob: a finite number at or above `min`, else the default. An empty string is unset. */
 const knob = (name: string, def: number, min = 0): number => {
@@ -182,6 +182,8 @@ async function askOne(entry: Entry, src: SourceAdapter, term: string): Promise<v
     // Empty is a normal answer -- the title is not on this source -- and is reported nowhere: the newest
     // listing's empty-streak evidence is about page 1 of a listing, not about a search for one title.
     Object.assign(cell, { state: items.length ? 'ok' : 'empty', items, ms: Date.now() - t0, settledAt: Date.now() });
+    // #115: a search that found something is evidence the search stage works (non-escalating, throttled).
+    if (items.length) void noteStage(src.id, 'search', 'ok');
   } catch (e) {
     // Two different facts, recorded two different ways, exactly as the newest listing records them (see
     // routes/sources.ts latestPage): outrunning OUR budget is counted and at worst earns a short fixed
@@ -190,7 +192,14 @@ async function askOne(entry: Entry, src: SourceAdapter, term: string): Promise<v
       void reportSlow(src.id, (e as { ms?: number }).ms ?? budget);
       Object.assign(cell, { state: 'timeout', ms: Date.now() - t0, settledAt: Date.now() });
     } else {
-      void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'search failed');
+      const error = (e as Error)?.message || 'search failed';
+      // And evidence for Health, at the stage it happened (#115) -- after the count, never beside it. The note
+      // creates the row when the source has none, and side by side that bare row could land first: to anything
+      // reading in between (the next search's cooldown check, Health, a test) a source with no failure on record.
+      // Chained, the evidence can neither get ahead of the count nor hold it up. Not our own timeout: that is
+      // reportSlow's. Reintroduce by firing the two side by side: "a refusal must count against the source" in
+      // searchAll.int.test.ts reads the bare row.
+      void reportFail(src.id, classify(e) ?? 'down', error).then(() => noteStage(src.id, 'search', 'fail', { error }));
       Object.assign(cell, { state: 'failed', ms: Date.now() - t0, settledAt: Date.now() });
     }
   } finally {

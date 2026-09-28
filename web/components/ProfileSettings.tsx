@@ -343,7 +343,8 @@ function DownloadsSection() {
   };
 
   return (
-    <Section id="downloads" title={tr('Downloads')} icon={<IcDownload width={18} height={18} />}>
+    // "Offline downloads": this device's copies. Since v0.49.0 a bare "Downloads" names the server's view.
+    <Section id="downloads" title={tr('Offline downloads')} icon={<IcDownload width={18} height={18} />}>
       <SwitchRow label={tr('Keep favorites offline')} help={tr('Auto-download the latest unread chapters of your favorites.')}
         on={!!so.enabled} onChange={(enabled) => set({ enabled })} />
       {so.enabled && (

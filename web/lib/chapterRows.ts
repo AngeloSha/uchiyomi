@@ -12,10 +12,11 @@ export type Row =
   | { kind: 'book'; book: Book }
   | { kind: 'ghost'; ghost: Ghost }
   /**
-   * A stretch of consecutive `floor` ghosts, shown as one line; `open` when the reader expanded it, in which
-   * case its ghosts follow it as rows. Keyed by `from`, its lowest number, which is what `expandedRuns` holds.
+   * A stretch of consecutive `floor` ghosts, or of `archive` ones (#117: chapters an active slow archive will
+   * fetch), shown as one line; `open` when the reader expanded it, in which case its ghosts follow it as rows.
+   * Keyed by `from`, its lowest number, which is what `expandedRuns` holds.
    */
-  | { kind: 'run'; why: 'floor'; from: number; to: number; count: number; open: boolean }
+  | { kind: 'run'; why: RunWhy; from: number; to: number; count: number; open: boolean }
   /** The ghosts hidden behind "Show all {n}". Always the last row. */
   | { kind: 'more'; hidden: number };
 
@@ -25,6 +26,10 @@ export type Row =
  * that is 90% grey rows buries the chapters somebody can actually read.
  */
 export const GHOST_CAP = 50;
+
+/** The ghosts that collapse into run rows: below a Latest-N floor, and on their way through the slow archive. */
+export type RunWhy = 'floor' | 'archive';
+const collapses = (g: Pick<Ghost, 'why'>): g is Ghost & { why: RunWhy } => g.why === 'floor' || g.why === 'archive';
 
 /**
  * The rows of the chapter list, in the list's direction.
@@ -37,6 +42,9 @@ export const GHOST_CAP = 50;
  *     are. One line naming the range is what that situation needs -- and a run whose key (its lowest
  *     number) is in `expandedRuns` keeps that line, marked `open`, with its ghosts following it as ordinary
  *     ghost rows (asked for on #40: the sentence used to point at a dialog, now it unfolds);
+ *   * `archive` ghosts (#117) collapse the same way into runs of their own, and a run is only ever one kind:
+ *     a floor number between two archive numbers (a capped one, say) ends the archive run and starts a floor
+ *     run, so each line's sentence stays true of every number under it;
  *   * when `!showAll` and there are more than `GHOST_CAP` other ghosts -- an expanded run's ghosts count
  *     as "other" the moment it is opened -- the `GHOST_CAP` nearest the highest on-disk number are kept
  *     (those are the ones the reader is about to reach; for an opened run that is the newest of the older
@@ -49,19 +57,22 @@ export const GHOST_CAP = 50;
 export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll: boolean, expandedRuns: ReadonlySet<number> = new Set()): Row[] {
   const have = new Set(books.map((b) => b.number));
   const missing = ghosts.filter((g) => Number.isFinite(g.number) && !have.has(g.number));
-  const floor = missing.filter((g) => g.why === 'floor').sort((a, b) => a.number - b.number);
-  let rest = missing.filter((g) => g.why !== 'floor');
+  const floor = missing.filter(collapses).sort((a, b) => a.number - b.number);
+  let rest = missing.filter((g) => !collapses(g));
 
-  // The runs, from every floor ghost, before any cap: a run's sentence names the whole stretch however much
-  // of it is shown. A book between two floor ghosts splits them (books are sorted ascending already).
-  type Run = { from: number; to: number; count: number; open: boolean; ghosts: Ghost[] };
+  // The runs, from every floor and archive ghost, before any cap: a run's sentence names the whole stretch
+  // however much of it is shown. A book between two such ghosts splits them (books are sorted ascending
+  // already), and so does a change of kind: a floor run and an archive run are never one line.
+  // Reintroduce by dropping `last.why === g.why`: "an archive run and a floor run are two lines" in
+  // chapterRows.test.ts reads one run saying "not here yet" over chapters the archive is fetching.
+  type Run = { why: RunWhy; from: number; to: number; count: number; open: boolean; ghosts: Ghost[] };
   const runs: Run[] = [];
   const bookNumbers = books.map((b) => b.number).sort((a, b) => a - b);
   for (const g of floor) {
     const last = runs[runs.length - 1];
     const bookBetween = last && bookNumbers.some((n) => n > last.to && n < g.number);
-    if (last && !bookBetween) { last.to = g.number; last.count += 1; last.ghosts.push(g); continue; }
-    runs.push({ from: g.number, to: g.number, count: 1, open: false, ghosts: [g] });
+    if (last && !bookBetween && last.why === g.why) { last.to = g.number; last.count += 1; last.ghosts.push(g); continue; }
+    runs.push({ why: g.why, from: g.number, to: g.number, count: 1, open: false, ghosts: [g] });
   }
   for (const r of runs) if (expandedRuns.has(r.from)) { r.open = true; rest = rest.concat(r.ghosts); }
 
@@ -82,11 +93,11 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
   type Block = { n: number; rows: Row[] };
   const blocks: Block[] = [
     ...books.map((book): Block => ({ n: book.number, rows: [{ kind: 'book', book }] })),
-    ...rest.filter((g) => g.why !== 'floor').map((ghost): Block => ({ n: ghost.number, rows: [{ kind: 'ghost', ghost }] })),
+    ...rest.filter((g) => !collapses(g)).map((ghost): Block => ({ n: ghost.number, rows: [{ kind: 'ghost', ghost }] })),
     ...runs.map((r): Block => ({
       n: r.from,
       rows: [
-        { kind: 'run', why: 'floor', from: r.from, to: r.to, count: r.count, open: r.open },
+        { kind: 'run', why: r.why, from: r.from, to: r.to, count: r.count, open: r.open },
         ...(r.open ? r.ghosts.filter((g) => kept.has(g)).map((ghost): Row => ({ kind: 'ghost', ghost })) : []),
       ],
     })),
@@ -109,8 +120,8 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
 const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it');
 
 /**
- * The ghost row's caption: the string key and its arguments, for `tr(key, args)`. Null for `floor`: a floor
- * ghost is only ever shown under a run row, and the run row's sentence already says why.
+ * The ghost row's caption: the string key and its arguments, for `tr(key, args)`. Null for `floor` and
+ * `archive`: those ghosts are only ever shown under a run row, and the run row's sentence already says why.
  *
  * `held` names the group the chapter waits for and the days left when the server sent them
  * (`waitingFor`/`waitDaysLeft`, v0.34.0); an older server, or a series whose every preferred group is
@@ -131,6 +142,7 @@ export function whyLabel(g: Pick<Ghost, 'why'> & Partial<Pick<Ghost, 'attempts' 
 
 // Declared through `keys()` for the same reason as WHY_LABELS: they reach `tr()` through runLabel's return.
 const RUN_LABELS = keys('Ch. {a}–{b} · {n} older chapters not here yet', 'Ch. {n} · 1 older chapter not here yet');
+const ARCHIVE_RUN_LABELS = keys('Ch. {a}–{b} · {n} chapters being archived slowly', 'Ch. {n} · 1 chapter being archived slowly');
 
 /**
  * The run row's sentence: the string key and its arguments, for `tr(key, args)`.
@@ -141,9 +153,10 @@ const RUN_LABELS = keys('Ch. {a}–{b} · {n} older chapters not here yet', 'Ch.
  * eight languages the plural is not a suffix.
  */
 export function runLabel(r: Extract<Row, { kind: 'run' }>): { key: string; args: Record<string, string | number> } {
+  const labels = r.why === 'archive' ? ARCHIVE_RUN_LABELS : RUN_LABELS;
   return r.count === 1
-    ? { key: RUN_LABELS[1], args: { n: r.from } }
-    : { key: RUN_LABELS[0], args: { a: r.from, b: r.to, n: r.count } };
+    ? { key: labels[1], args: { n: r.from } }
+    : { key: labels[0], args: { a: r.from, b: r.to, n: r.count } };
 }
 
 /**

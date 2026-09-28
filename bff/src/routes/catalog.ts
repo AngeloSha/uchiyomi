@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { komgaImage } from '../lib/komga';
-import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
-import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
+import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
+import { UnsupportedFilter } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
 import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
 
@@ -12,6 +12,7 @@ import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsabl
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
+import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
@@ -19,6 +20,9 @@ import { enrichSeries, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
+import { archiveSummaryFor } from '../lib/archive';
+import { chapterName } from '../lib/naming';
+import { numberingSummary } from '../lib/numbering';
 import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { ghostsEnabled } from '../lib/komgaGhosts';
@@ -145,16 +149,6 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { content: await komga.genreOverview(vc(req), n) };
   });
 
-  // The sources the viewer's library comes from, with how many series each is the main source of and how
-  // many read from it at all: the library's "Main source" and "Any source" filters. Empty on a Komga
-  // backend, which has no notion of a source -- the filters then do not render, and never send a condition
-  // Komga would refuse.
-  app.get('/api/library/sources', async (req) => {
-    if (!OWNED) return { content: [] };
-    const rows = await owned.librarySources(vc(req));
-    return { content: rows.map((r) => ({ id: r.id, name: getSource(r.id)?.name ?? r.label ?? r.id, main: r.main, any: r.any, installed: !!getSource(r.id) })) };
-  });
-
   // What everyone in the household is reading (cross-user, last 14 days).
   app.get('/api/trending', async (req) => {
     // Over-fetch, then filter, then take twelve. The LIMIT used to run BEFORE the per-id visibility check,
@@ -217,7 +211,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { content: await enrichSeries(req, picks) };
   });
 
-  app.post('/api/refresh', async () => {
+  app.post('/api/refresh', async (req) => {
     const now = Date.now();
     if (now - runtime.lastScan < 60_000) return { scanned: false, reason: 'rate_limited' };
     runtime.lastScan = now;
@@ -226,8 +220,23 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // ⚠️ The owned library has ONE scan, of every root, whatever library id it is handed (lib/ownedCatalog.ts):
     // one call per library started that whole scan once per library, all at the same time. Komga scans each.
     const targets = NATIVE_PROGRESS ? libs : [libs[0] ?? { id: 'lib' }];
-    await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => {})));
-    return { scanned: true, libraries: libs.length };
+    const answers = await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => null)));
+    // v0.49.0: the owned scan's counts, so "Scan library now" can say "212 series, 4,310 chapters, 1 folder
+    // skipped" rather than nothing (Komga answers no body: no counts, as before). And the header's summary
+    // catches up with what the scan found -- "folders the scan cannot index" is one of its checks.
+    // Reintroduce by answering without them: "Scan library now answers what it found" in
+    // repairRoutes.int.test.ts finds no `series`.
+    // ⚠️ Admins only. Members press this too (home, library, the top bar, the command palette), and the counts
+    // are the WHOLE library's, restricted and 18+ libraries included: a member limited to one library would
+    // learn how big the ones they cannot open are. Reintroduce by dropping the role check: the member half of
+    // that test finds a `series` key.
+    const counts = roleOf(req) !== 'admin' ? undefined : answers.find((a: any) => a && typeof a.series === 'number') as
+      { series: number; books: number; ms: number; skipped: number } | undefined;
+    scheduleHealthSummaryRefresh();
+    return {
+      scanned: true, libraries: libs.length,
+      ...(counts ? { series: counts.series, books: counts.books, ms: counts.ms, skipped: counts.skipped } : {}),
+    };
   });
 
   app.get('/api/home', async (req) => {
@@ -535,9 +544,21 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/listing', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
+    // The slow archive's boundary rides along (#117): a number it will fetch reads 'archive', and `archive` is
+    // its line on the page, or null.
+    const f = await one<{ chapter_floor: number | null; archive_boundary: number | null }>(
+      `SELECT chapter_floor, (SELECT a.boundary FROM archive_queue a WHERE a.series_id = s.id AND a.state IN ('queued', 'paused')) AS archive_boundary
+         FROM lib_series s WHERE id = $1`, [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
-    return listingFor(id, { floor, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
+    const archiveBoundary = f?.archive_boundary == null ? null : Number(f.archive_boundary);
+    // How the series is numbered and why (#116): the series page's notice. Every viewer who can open the series
+    // reads it -- it explains the numbers they see; the controls beside it are the admin's.
+    const [listing, numbering, archive] = await Promise.all([
+      listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) }),
+      numberingSummary(id),
+      archiveSummaryFor(id, userIdOf(req)).catch(() => null),
+    ]);
+    return { ...listing, numbering, archive };
   });
 
   /**
@@ -638,10 +659,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const rows = await q<{ number: number; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
-      'SELECT number, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
-    const books = await q<{ number: number; source_id: string | null; scanlator: string | null }>(
-      'SELECT number, source_id, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
+    const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
+      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+    const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
+      'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
     const booksOf = new Map<number, typeof books>();
     for (const b of books) {
       const n = Number(b.number);
@@ -662,6 +683,18 @@ export default async function catalogRoutes(app: FastifyInstance) {
       content: rows.map((r) => {
         const number = Number(r.number);
         const here = booksOf.get(number) ?? [];
+        // Copies from one source and one group under different titles are different posts that share a number
+        // (#116), and the group stamp cannot tell them apart: the chapter name the file was saved under can.
+        const titleOf = (c: ListingCopy) => (c.title ?? r.title ?? '').trim();
+        const namesDiffer = (c: ListingCopy) => (r.copies ?? []).some((o) => o !== c && o.source === c.source
+          && keysOf(o.groups ?? []) === keysOf(c.groups ?? []) && titleOf(o) !== titleOf(c));
+        // A chapter-id stamp decides only when it names one of this number's copies. One that names none -- the
+        // engine re-created its chapter ids (a reinstall), or the stamp outlived a replacement from another copy
+        // -- says nothing about which copy the file is, and the group and name rule below still can (#116 review).
+        // Reintroduce by trusting any stamp: "a stamp that names no listed copy falls back to the group" in
+        // groupsAndVersions.int.test.ts shows no copy on disk.
+        const stamped = (b: { source_chapter_id: string | null }) =>
+          !!b.source_chapter_id && (r.copies ?? []).some((o) => o.sourceId === b.source_chapter_id);
         return {
           number,
           copies: (r.copies ?? []).map((c) => {
@@ -673,6 +706,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
               key: `${c.source}:${c.sourceId}`,
               source: c.source,
               sourceName: sourceName(c.source),
+              // The copy's own title (v0.49.0); a row stored before copies had titles lends its own.
+              // Reintroduce by dropping it: "every version carries its own title" in groupsAndVersions.int.test.ts
+              // reads undefined.
+              title: c.title ?? r.title ?? null,
               groups: c.groups ?? [],
               scanlator: c.scanlator ?? null,
               lang: c.lang ?? null,
@@ -686,8 +723,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
               // NULL there, and requiring the source first left every one of them "not on disk".
               // Reintroduce by requiring `b.source_id === c.source` ahead of the stamp check: chapter 7 in
               // groupsAndVersions.int.test.ts reads [false].
-              onDisk: here.some((b) => b.scanlator
+              // A file stamped with the post it came from (v0.49.0, lib_books.source_chapter_id) is that post and no
+              // other; the stamps below are for files older than that.
+              onDisk: here.some((b) => stamped(b)
+                ? b.source_chapter_id === c.sourceId && (b.source_id == null || b.source_id === c.source)
+                : b.scanlator
                 ? b.source_id === c.source && keysOf(groupsOf({ scanlator: b.scanlator })) === keys
+                  && (!namesDiffer(c) || !b.chapter_name || b.chapter_name === chapterName(titleOf(c), number))
                 : (b.source_id == null || b.source_id === c.source) && chosen),
             };
           }),

@@ -5,7 +5,6 @@ import { useAuth } from '@/lib/auth';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
-import { DownloadsIndicator } from './DownloadsIndicator';
 import { HealthBanner } from './HealthAlert';
 import { LoginScreen } from './LoginScreen';
 import { DesktopReconnect } from './DesktopReconnect';
@@ -16,6 +15,7 @@ import { Mark } from './Brand';
 import { IcWifiOff } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { desktopShell, isDesktop } from '@/lib/desktop';
+import { useServerDownloads } from '@/lib/useServerDownloads';
 
 function Splash() {
   return (
@@ -77,6 +77,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (path.startsWith('/downloads') || path.startsWith('/reader')) return;
     router.replace('/downloads/');
   }, [status, path, router]);
+  // THE poller for what the server is fetching (lib/useServerDownloads.ts): the Library ring, Library ->
+  // Downloads, the series band and Discover all read what this one asks, at the pace its answer sets. Here,
+  // above every early return, because a hook must run on every render; off in the reader, which shows none of
+  // it. It needs a signed-in viewer who may download, so offline it asks nothing.
+  useServerDownloads({ poll: true, enabled: !path.startsWith('/reader') });
   // Ctrl/Cmd+K, "/", or just typing, anywhere in the app (reader keeps its own keys; palette skipped there)
   usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'), setPaletteSeed);
 
@@ -120,8 +125,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <PageTransition>{children}</PageTransition>
       </main>
       <BottomNav />
-      {/* Renders nothing unless something is downloading or has failed. */}
-      {status === 'authed' && <DownloadsIndicator />}
       {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
     </>
   );

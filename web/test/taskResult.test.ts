@@ -8,7 +8,9 @@
 // fix -- a stale or unreadable catalogue looking identical to an up-to-date one.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { taskResult } from '../lib/tasks';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SCHEDULE_KEYS, TASK_NAMES, scheduleText, taskResult } from '../lib/tasks';
 
 test('no result at all renders nothing, rather than a stray separator', () => {
   assert.equal(taskResult(null), '');
@@ -75,11 +77,12 @@ test('a verify run that found read-library files gone says so, without claiming 
   // The read library is not Uchiyomi's to re-fetch (a re-fetch lands under the download folder, on a new
   // row), so the task counts those and leaves them alone -- and must say so, or "12 checked, none missing"
   // over a read library with three files gone reads as "the read library is fine". Reintroduce by dropping
-  // the `readLibraryMissing` line.
+  // the `readLibraryMissing` line. It is "a library you built by hand" on screen, the app's words for it:
+  // "the read library" was translated as "the library of read chapters" in three languages.
   const r = taskResult({ checked: 12, missing: 0, readLibraryMissing: 3, unmounted: [] });
   assert.match(r, /none missing/);
-  assert.match(r, /3 missing in the read library, not marked/);
-  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, readLibraryMissing: 0, unmounted: [] }), /read library/, 'nothing missing there says nothing about it');
+  assert.match(r, /3 missing in a library you built by hand, not marked/);
+  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, readLibraryMissing: 0, unmounted: [] }), /built by hand/, 'nothing missing there says nothing about it');
 });
 
 test('a backup that measured nothing says so instead of showing a contented size', () => {
@@ -111,7 +114,7 @@ test('an extension check reports what it did, including what it deliberately did
   assert.match(messy, /1 failed/);
   assert.match(messy, /1 obsolete/);
   assert.match(messy, /1 reinstalled/);
-  assert.match(messy, /waiting for the library sweep/);
+  assert.match(messy, /waiting for the chapter sweep to end/, 'the deferral names the chapter sweep, the job every other line names');
 });
 
 test('a quiet extension check does not claim things are waiting when auto-update is on', () => {
@@ -133,8 +136,8 @@ test('a repair reports all five sections, with the backlog it has not reached ye
     failures: { reset: 41 },
     solver: { reset: true, unblocked: 4, expired: 0 },
   });
-  assert.equal(r, ' · 2000 page counts stamped, 28625 still to count · short: 3 replaced, 5 confirmed, 12 left'
-    + ' · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4 unblocked');
+  assert.equal(r, ' · 2000 page counts stamped, 28625 still to count · short: 3 replaced, 5 confirmed, 12 left unchanged'
+    + ' · gaps: 5 series, 2 followed a new source, 9 chapters fetched · 41 failures reset · solver reset, 4 sources unblocked');
 });
 
 test('a repair counts in singulars when the count is one', () => {
@@ -146,7 +149,7 @@ test('a repair counts in singulars when the count is one', () => {
     failures: { reset: 1 },
     solver: { reset: false, unblocked: 0, expired: 1 },
   });
-  assert.equal(r, ' · 1 page count stamped · short: 0 replaced, 0 confirmed · gaps: 1 series, 0 followed, 1 chapter fetched'
+  assert.equal(r, ' · 1 page count stamped · short: 0 replaced, 0 confirmed · gaps: 1 series, 0 followed a new source, 1 chapter fetched'
     + ' · 1 failure reset · solver: nothing to reset, 1 old block cleared');
 });
 
@@ -208,7 +211,7 @@ test('a repair that stopped early says so before its counts', () => {
   const disk = taskResult({
     counted: 0, uncounted: 900, stopped: 'disk', only: ['count'],
   });
-  assert.equal(disk, ' · stopped: the download disk is at its floor · 0 page counts stamped, 900 still to count');
+  assert.equal(disk, ' · stopped: free space on the download disk is below the minimum · 0 page counts stamped, 900 still to count');
 });
 
 test('a repair that is switched off says so, instead of five empty sections', () => {
@@ -235,11 +238,12 @@ test('group upgrades say what they did when switched on, and nothing when off (#
     failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
   };
   // Off is the default, and "groups: off" on every night's line would be noise about a feature nobody chose.
-  assert.doesNotMatch(taskResult({ ...base, groups: { off: true, looked: 0, replaced: 0, left: 0 } }), /groups/);
+  assert.doesNotMatch(taskResult({ ...base, groups: { off: true, looked: 0, replaced: 0, left: 0 } }), /group/);
   // A result from before v0.47.0 has no `groups` at all.
-  assert.doesNotMatch(taskResult(base), /groups/);
-  assert.match(taskResult({ ...base, groups: { looked: 3, replaced: 2, left: 1 } }), / · groups: 2 replaced, 1 left/);
-  assert.equal(taskResult({ counted: 0, uncounted: 0, only: ['groups'], groups: { looked: 1, replaced: 1, left: 0 } }), ' · groups: 1 replaced');
+  assert.doesNotMatch(taskResult(base), /group/);
+  // Named after its setting ("Upgrade chapters to a preferred group"): a bare "groups" read as any grouping.
+  assert.match(taskResult({ ...base, groups: { looked: 3, replaced: 2, left: 1 } }), / · group upgrades: 2 replaced, 1 left unchanged/);
+  assert.equal(taskResult({ counted: 0, uncounted: 0, only: ['groups'], groups: { looked: 1, replaced: 1, left: 0 } }), ' · group upgrades: 1 replaced');
   // A cancelled run (the download pill, #82) leads with it, like the other stops.
   assert.match(taskResult({ ...base, stopped: 'cancelled' }), /^ · cancelled · /);
 });
@@ -252,4 +256,45 @@ test('the repair says when it learned reading directions, and a directions-only 
   assert.doesNotMatch(taskResult({ ...base, directions: { asked: 40, learned: 0 } }), /reading direction/);
   assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 2, learned: 0 } }), ' · 0 reading directions learned');
   assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 1, learned: 1 } }), ' · 1 reading direction learned');
+});
+
+// ---- v0.49.0: how long, and the Tasks tab in every language ----
+
+test('a repair says how long it took, last, and the English line is otherwise unchanged', () => {
+  // Nobody could tell a nightly that takes two minutes from one that takes two hours. Reintroduce by dropping
+  // the `ms` clause: the line below ends at "reset".
+  assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 125_000 }), ' · 7 failures reset · took 2 min');
+  assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 0 }), ' · 7 failures reset', 'a zero time is said');
+});
+
+test('every schedule the tasks route sends is a key the page translates, with its values', () => {
+  // bff routes/admin.ts sends `scheduleKey` + `scheduleVars` beside the English `schedule`. A sentence there
+  // that is not in SCHEDULE_KEYS (and so in no locale file) shows in English in every language. Reintroduce by
+  // adding a `sched('every {h}h, quietly')` to the route: it is named below.
+  const route = readFileSync(join(__dirname, '../../bff/src/routes/admin.ts'), 'utf8');
+  const sent = [...route.matchAll(/\bsched\(\s*(?:[^'()]*\?\s*)?'([^']+)'(?:\s*:\s*'([^']+)')?/g)].flatMap((m) => [m[1], m[2]]).filter(Boolean);
+  assert.ok(sent.length >= 10, `only ${sent.length} schedule sentences found in the route -- the scan is broken`);
+  for (const k of sent) assert.ok((SCHEDULE_KEYS as readonly string[]).includes(k), `the route sends schedule "${k}", which SCHEDULE_KEYS does not carry`);
+  assert.equal(scheduleText({ scheduleKey: 'every {h}h', scheduleVars: { h: 6 }, schedule: 'every 6h' }), 'every 6h');
+  assert.equal(scheduleText({ schedule: 'every 6h' }), 'every 6h', 'an older server\'s English schedule is dropped');
+  // The task names the route sends are keys too.
+  const at = route.indexOf("app.get('/api/admin/tasks', async");
+  const list = route.slice(at, route.indexOf("app.get('/api/admin/tasks/repair/status'", at));
+  const names = [...list.matchAll(/\bname: '([^']+)',/g)].map((m) => m[1]);
+  assert.ok(at > 0 && names.length >= 8, `only ${names.length} task names found in the tasks route -- the slice is broken`);
+  for (const n of names) assert.ok((TASK_NAMES as readonly string[]).includes(n), `task name "${n}" is not in TASK_NAMES`);
+});
+
+test('the Tasks tab says nothing in bare English', () => {
+  // Reintroduce `'Already running'` without tr(): the literal scan names it.
+  const page = readFileSync(join(__dirname, '../app/admin/page.tsx'), 'utf8');
+  const tasks = page.slice(page.indexOf('function Tasks()'), page.indexOf('function DesktopBackups()'));
+  const code = tasks.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  for (const lit of ['Run now', 'Running…', 'Already running', 'That task is switched off', 'Failed', 'Started', 'not run yet']) {
+    const bare = new RegExp(`(?<!tr\\()['\`]${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`);
+    assert.doesNotMatch(code, bare, `Tasks() renders "${lit}" untranslated`);
+  }
+  assert.doesNotMatch(code, /`last run \$\{/, 'Tasks() renders "last run" untranslated');
+  assert.match(code, /\{tr\(t\.name\)\}/, 'task names are not translated');
+  assert.match(code, /\{scheduleText\(t\)\}/, 'schedules are not translated');
 });

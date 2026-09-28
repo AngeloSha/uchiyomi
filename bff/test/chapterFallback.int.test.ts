@@ -196,3 +196,25 @@ test('a persistent refusal may hunt, and still never writes a partial', { skip }
   assert.equal(none.kind, 'failed');
   assert.equal(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 8.cbz')), false, 'no placeholder archive was written on a refusal, persistent or not');
 });
+
+test('a copy that was not kept leaves the downloads at once', { skip }, async () => {
+  // A copy that arrives short is held open in the downloads view until the fallback decides (holdPartial). When the
+  // chapter landed whole from another source -- or a hold with fewer holes was written instead -- the one not kept
+  // waited out HOLD_MS there as a download still running: the Library ring spun and the Downloads view polled for
+  // ten minutes (integration-2 walk). Reintroduce by not dropping them (downloadWithFallback's finally): it is active.
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  const open = (n: number) => listActivity().active.filter((e) => e.folder === 'Fallback Tale' && e.number === n);
+  failures.set(`${PRI}/drop-five/4`, 404);
+  const out = await run(chapter(PRI, 'drop-five', 11), [chapter(FOL, 'fol-five', 11)]).result;
+  assert.deepEqual([out.kind, out.via], ['landed', FOL], 'PREMISE: landed whole from the second source');
+  assert.deepEqual(open(11), [], 'a copy that was not kept leaves the downloads at once');
+  const ended = listActivity().recent.find((e) => e.folder === 'Fallback Tale' && e.number === 11 && e.source === PRI);
+  assert.deepEqual([ended?.status, ended?.reason], ['failed', 'arrived with 1 page missing; not kept'], 'ended as not kept, as the wait would have ended it');
+
+  // Two copies short by a page each: the first is written, and the other leaves the downloads too.
+  failures.set(`${PRI}/drop-two/4`, 404);
+  failures.set(`${FOL}/fol-two/3`, 404);
+  const two = await run(chapter(PRI, 'drop-two', 12), [chapter(FOL, 'fol-two', 12)]).result;
+  assert.deepEqual([two.kind, two.via], ['partial', PRI], 'PREMISE: the first hold was written');
+  assert.deepEqual(open(12), [], 'and the hold not written leaves the downloads too');
+});

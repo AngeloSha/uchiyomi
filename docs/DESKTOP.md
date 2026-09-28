@@ -209,11 +209,17 @@ languages as the app).
 
 - **Schedules start sooner.** A computer is switched off and on far more than a server, so the first run of
   each job after a start comes sooner: the new-chapter check and the extension check after 2 minutes, the
-  Cloudflare helper check after 1, the repair, read-chapter clean-up and import clean-up after 5, and the
-  daily source check 24 hours after its last run (at least 5 minutes after start). A server keeps its 10 to
-  30 minutes. After the computer sleeps, those other jobs can run one interval late; only the backup re-aims.
+  Cloudflare helper check after 1, the slow archive's first look after 3, the repair, read-chapter clean-up and
+  import clean-up after 5, and the daily source check 24 hours after its last run (at least 5 minutes after
+  start). A server keeps its 10 to 30 minutes. After the computer sleeps, those other jobs can run one interval
+  late; only the backup re-aims.
+- **The slow archive runs only while Uchiyomi does** — the window or the tray (since v0.49.0; [the user
+  guide](USAGE.md#fetching-a-whole-series-slowly-the-slow-archive)). It never keeps the computer awake, so a PC that
+  sleeps at night is rarely inside a night-time window set under **Admin → Settings → Downloads**; a quit or a sleep
+  costs it nothing but time, since it carries on from where it was.
 - **Room.** Downloads stop when the library's drive has less than **5 GB** free (a server keeps 10), and the
-  image cache is capped at **4 GB** (16 on a server).
+  image cache is capped at **4 GB** (16 on a server). The slow archive keeps its own floor, 20 GB by default,
+  under **Admin → Settings → Downloads**.
 - **Windows-safe folder names** (Windows only): a series folder loses control characters and trailing dots and
   spaces, and the names Windows reserves — `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, also with
   an extension — get a `_` (`CON` becomes `CON_`). A custom site's name is treated the same when it becomes the
@@ -517,11 +523,11 @@ Its server answers *not found* for each of these, so they are gone, not just out
 | Members, the per-library access line, the age caps per member | One person. Libraries themselves, 18+ libraries and age ratings stay. |
 | OPDS, the Komga-compatible API (and its "Show missing chapters in Mihon" setting), API tokens | They exist for other devices, and this server does not listen to other devices at all. |
 | Push notifications, *Install app* | The window has no push service. Notification targets — a webhook, Home Assistant, ntfy, Discord — still work, and are the way to hear about new chapters on a phone. |
-| **Save offline**, *Save all offline*, the Offline tab, the Downloads settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. |
+| **Save offline**, *Save all offline*, the Offline tab, the *Offline downloads* settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. What the app fetched from your sources is under **Library → Downloads**, where a link to the Offline tab also leads. |
 | The anonymous install count | Never sent from the desktop app, whatever a restored database says. |
 
 In the admin that means no Members or Sessions tabs (a link to either opens Overview), no Sessions tile and no
-member count; on the profile, no Account tab; under Settings no Downloads or This device sections; under
+member count; on the profile, no Account tab; under Settings no Offline downloads or This device sections; under
 Connections no OPDS or API tokens (progress tracking with AniList, MyAnimeList and Kitsu stays).
 
 If you want any of these — other people in your household, reading on a phone, OPDS readers — that is what a

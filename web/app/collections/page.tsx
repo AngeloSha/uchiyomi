@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcPlus, IcTrash } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { useLayer } from '@/lib/layers';
 
 export interface CollectionRow { id: string; name: string; accent: string | null; sort_order: number; item_count: number }
 
@@ -19,6 +20,9 @@ export default function CollectionsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [creating, setCreating] = useState(false);
+  // The New collection dialog below, on the notices' layer stack (lib/layers.ts) while it is open: it toasts
+  // "Failed to create" over itself.
+  useLayer('dialog', creating);
   const [name, setName] = useState('');
   const [accent, setAccent] = useState(ACCENTS[0]);
   const { data, isLoading } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections') });
@@ -86,7 +90,7 @@ export default function CollectionsPage() {
 
       {creating && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={() => setCreating(false)}>
-          <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label={tr('New collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 font-display text-lg font-semibold">{tr('New collection')}</h3>
             <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()}
               placeholder={tr('e.g. Plan to read')} autoFocus

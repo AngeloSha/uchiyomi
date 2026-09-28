@@ -26,7 +26,10 @@
 //   the navigate key is normalised to a trailing slash: the export is written with `trailingSlash: true`, so
 //   `/downloads` -> `/downloads/` is a redirect the SERVER performs, and offline there is no server to do it.
 //   Every v9 SHELL entry is keyed without the slash, so this bump is load-bearing too.
-const VERSION = 'v10';
+// v11 (v0.49.0): /api/admin/* is network-only now (the rule below). Every admin answer a v10 worker stored went
+//   into the capped API cache -- Health polls the repair's status every 2 s while a run goes -- and nothing reads
+//   those entries any more, so they would sit there, crowding out a reader's cached re-reads, until a bump.
+const VERSION = 'v11';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
@@ -266,7 +269,12 @@ self.addEventListener('fetch', (e) => {
     // per-account (an age-limited account is served a filtered source list, and an account that may not
     // download is refused outright), so a stored copy is one account's answer waiting to be replayed to the
     // next person on a shared household device. VERSION went to v6 to drop copies stored before this.
-    if (url.pathname.startsWith('/api/sources')) {
+    //
+    // The admin console is never cached here either (v0.49.0). Health polls the repair's status every two
+    // seconds while a run is going, and each answer through `networkFirst` went into the capped API cache,
+    // churning the 300 entries a reader's offline re-reads depend on; and an admin answer replayed from cache
+    // is a stale "running" that never ends.
+    if (url.pathname.startsWith('/api/sources') || url.pathname.startsWith('/api/admin/')) {
       e.respondWith(fetch(req));
       return;
     }

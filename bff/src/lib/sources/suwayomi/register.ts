@@ -61,18 +61,31 @@ export interface LoadResult {
 // record of "skipped 30 over the limit" was one console.warn at boot, which is exactly where nobody looks
 // when search quietly stops covering half their sources; the status route and the health page read it now.
 let last: LoadResult | null = null;
+let lastAt: number | null = null;
 export const lastSuwayomiLoad = (): LoadResult | null => last;
+/** When the most recent load began (epoch ms), whichever way it went: Admin → Extensions' "last tried". */
+export const lastSuwayomiLoadAt = (): number | null => lastAt;
 
 /**
- * Called at boot and from reloadAll(). Returns a summary rather than throwing, so a dead extension server
- * degrades to "no extension sources" instead of taking the server down with it.
+ * Called at boot, from reloadAll() and by the retry below. Returns a summary rather than throwing, so a dead
+ * extension server degrades to "no extension sources" instead of taking the server down with it.
+ *
+ * `quiet` leaves out the "could not list sources" warning: the retry passes it once it has said, in one line,
+ * that it goes on trying every few minutes -- a log that gains a line every five minutes for a week of an engine
+ * someone switched off by hand is a log nobody reads.
  */
-export async function loadSuwayomiSources(list: () => Promise<RemoteSource[]> = listRemoteSources): Promise<LoadResult> {
-  last = await load(list);
+export async function loadSuwayomiSources(
+  list: () => Promise<RemoteSource[]> = listRemoteSources,
+  opts: { quiet?: boolean } = {},
+): Promise<LoadResult> {
+  lastAt = Date.now();
+  last = await load(list, !!opts.quiet);
+  // Registered, however it came about (a retry, a reload, Check again): any retry still waiting is done.
+  if (last.reachable) connected(last);
   return last;
 }
 
-async function load(list: () => Promise<RemoteSource[]>): Promise<LoadResult> {
+async function load(list: () => Promise<RemoteSource[]>, quiet: boolean): Promise<LoadResult> {
   if (!suwayomiConfigured()) return { configured: false, reachable: false, available: 0, registered: 0, skipped: 0 };
 
   let remote: RemoteSource[];
@@ -80,7 +93,7 @@ async function load(list: () => Promise<RemoteSource[]>): Promise<LoadResult> {
     remote = await list();
   } catch (e) {
     const msg = (e as Error)?.message || 'unreachable';
-    console.warn(`[sources] suwayomi: could not list sources (${msg})`);
+    if (!quiet) console.warn(`[sources] suwayomi: could not list sources (${msg})`);
     return { configured: true, reachable: false, available: 0, registered: 0, skipped: 0, error: msg };
   }
 
@@ -106,34 +119,129 @@ async function load(list: () => Promise<RemoteSource[]>): Promise<LoadResult> {
   return { configured: true, reachable: true, available: remote.length, registered, skipped };
 }
 
+// ---- keep trying until the engine answers ---------------------------------------------------------------------
+
+/** The fast phase after a failed load: the engine is a JVM, and on a cold start it is usually just still booting. */
+export const RETRY_FAST_MS: readonly number[] = [5_000, 15_000, 30_000, 60_000, 120_000];
+/** After the fast phase, one quiet try this often, for as long as it takes. */
+export const RETRY_EVERY_MS = 5 * 60_000;
+
+/** One registration attempt, as the retry makes it. Injectable so a test can drive the loop without an engine. */
+export type RetryLoad = (opts: { quiet: boolean }) => Promise<LoadResult>;
+const defaultLoad: RetryLoad = (o) => loadSuwayomiSources(listRemoteSources, o);
+
+interface RetryLoop {
+  /** Asked and not answered in this outage, counting the failed load that started the loop. */
+  attempts: number;
+  /** When the loop started: right after the load that found the engine gone. */
+  since: number;
+  nextAt: number;
+  /** Retries made, which is also where in the fast phase the loop is. */
+  tries: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  fast: readonly number[];
+  everyMs: number;
+  load: RetryLoad;
+}
+
+let loop: RetryLoop | null = null;
+let inFlight: Promise<LoadResult> | null = null;
+const reconnectHooks = new Set<() => void>();
+
 /**
- * Keep trying, quietly, after a failed first load.
+ * Keep trying after a failed load, for as long as it takes (#72).
  *
  * The engine is a JVM and takes longer to accept connections than Uchiyomi does to boot, so on a cold
- * `docker compose up` the first attempt reliably fails. Without this the extension sources stay missing and
- * the panel says "unreachable" until someone thinks to hit reload -- which is exactly the kind of "turn it on
- * yourself" friction this feature is not supposed to have.
+ * `docker compose up` the first attempt reliably fails; the fast phase (5 s, 15 s, 30 s, 1 min, 2 min) is for
+ * that. ⚠️ It used to stop there, about four minutes in, and nothing ever asked again: an engine that came up
+ * later -- a slow NAS, an Unraid template installed after Uchiyomi, a container restarted by hand, a reload
+ * that ran during an outage -- stayed unregistered until someone found the reload button. So after the fast
+ * phase it tries every `everyMs` (5 minutes), quietly, until the engine answers or stops being configured.
  *
- * Backs off and gives up rather than retrying forever: if it is still refusing after a few minutes it is
- * genuinely not there, and the panel says so honestly.
+ * ONE loop per process: a second call while one runs changes nothing, so the boot, every reloadAll during an
+ * outage and anything else may call it without doubling the traffic. Timers never hold the process open.
  */
-export function scheduleSuwayomiRetry(delaysMs: number[] = [5_000, 15_000, 30_000, 60_000, 120_000]): void {
-  if (!suwayomiConfigured()) return;
-  let i = 0;
-  const attempt = async (): Promise<void> => {
-    if (i >= delaysMs.length) return;
-    const wait = delaysMs[i++];
-    setTimeout(() => {
-      void loadSuwayomiSources()
-        .then((r) => {
-          if (r.reachable) {
-            console.log(`[sources] suwayomi: connected on retry (${r.registered} extension source(s))`);
-            return;
-          }
-          void attempt();
-        })
-        .catch(() => attempt());
-    }, wait).unref?.();
-  };
-  void attempt();
+export function scheduleSuwayomiRetry(
+  delaysMs: readonly number[] = RETRY_FAST_MS,
+  everyMs: number = RETRY_EVERY_MS,
+  load: RetryLoad = defaultLoad,
+): void {
+  if (!suwayomiConfigured() || loop) return;
+  const now = Date.now();
+  loop = { attempts: 1, since: now, nextAt: now, tries: 0, timer: null, fast: delaysMs, everyMs, load };
+  arm(loop);
+}
+
+function arm(l: RetryLoop): void {
+  const wait = l.fast[l.tries] ?? l.everyMs;
+  l.nextAt = Date.now() + wait;
+  l.timer = setTimeout(() => { void tick(l); }, wait);
+  l.timer.unref?.();
+}
+
+async function tick(l: RetryLoop): Promise<void> {
+  if (loop !== l) return;
+  l.timer = null;
+  // EXTENSION_ENGINE and SUWAYOMI_URL are read once at boot, so this only ends a loop in a test today; it is
+  // here so the loop can never outlive the thing it is waiting for.
+  if (!suwayomiConfigured()) { loop = null; return; }
+  // The fast phase warns on each failure as it always did; from the first slow try on, one line says so and
+  // the tries themselves stay out of the log.
+  const quiet = l.tries >= l.fast.length;
+  l.tries++;
+  const r = await once(l.load, quiet).catch(() => null);
+  if (loop !== l) return; // answered (here or elsewhere), or stopped
+  if (r?.reachable) { connected(r); return; }
+  l.attempts++;
+  if (l.tries === l.fast.length) {
+    console.warn(`[sources] suwayomi: still not answering; trying again every ${Math.round(l.everyMs / 60_000)} min without logging each attempt`);
+  }
+  arm(l);
+}
+
+/** One attempt at a time, whoever asks: the loop, Check again and the status route's self-heal share it. */
+function once(load: RetryLoad, quiet: boolean): Promise<LoadResult> {
+  if (!inFlight) inFlight = load({ quiet }).finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+/** The engine answered and its sources are registered: the loop is over, and whoever asked to know is told. */
+function connected(r: LoadResult): void {
+  const l = loop;
+  if (!l) return;
+  if (l.timer) clearTimeout(l.timer);
+  loop = null;
+  console.log(`[sources] suwayomi: connected on retry (${r.registered} extension source(s))`);
+  for (const hook of reconnectHooks) {
+    try { hook(); } catch { /* a listener's failure is its own */ }
+  }
+}
+
+/**
+ * Try right now, once: Admin → Extensions' Check again and its self-heal (routes/admin.ts, the status route).
+ * Single-flight with the loop; a success ends it. A failure while the loop runs counts as one more attempt.
+ */
+export async function retrySuwayomiNow(load: RetryLoad = defaultLoad): Promise<LoadResult> {
+  const r = await once(load, !!loop);
+  if (r.reachable) connected(r);
+  else if (loop) loop.attempts++;
+  return r;
+}
+
+/** The loop as Admin → Extensions shows it, or null when none is running. Times are ISO strings. */
+export function suwayomiRetryState(): { attempts: number; since: string; nextAt: string } | null {
+  if (!loop) return null;
+  return { attempts: loop.attempts, since: new Date(loop.since).toISOString(), nextAt: new Date(loop.nextAt).toISOString() };
+}
+
+/** Run `fn` whenever a retry brings the engine back (the Health engine check forgets its cached probe). */
+export function onSuwayomiReconnect(fn: () => void): () => void {
+  reconnectHooks.add(fn);
+  return () => { reconnectHooks.delete(fn); };
+}
+
+/** For tests: end the loop without an answer. */
+export function stopSuwayomiRetry(): void {
+  if (loop?.timer) clearTimeout(loop.timer);
+  loop = null;
 }

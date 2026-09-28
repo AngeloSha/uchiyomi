@@ -1,9 +1,9 @@
 /**
  * The server's own downloading, as cards: the nightly sweep, the library repair and a bulk "Fetch newest".
  *
- * #82 (Wolf92s): "I can't find what's currently being downloaded." The download pill (web
- * components/DownloadsIndicator.tsx) only ever knew the jobs a person started from a button -- routes/sources.ts
- * keeps those, one card per series folder. Everything the server does by itself went through `updateSeries`
+ * #82 (Wolf92s): "I can't find what's currently being downloaded." The download pill (Library -> Downloads since
+ * v0.49.0, web components/ServerDownloadsView.tsx) only ever knew the jobs a person started from a button --
+ * routes/sources.ts keeps those, one card per series folder. Everything the server does by itself went through `updateSeries`
  * and was invisible: a sweep fetching forty chapters at three in the morning looked exactly like a quiet
  * night until the Updates shelf filled up, and there was no way to stop one that was hammering a source.
  *
@@ -36,6 +36,28 @@ export interface RunCard {
   current?: { id: string; title: string };
   /** The repair's current step (lib/repair.ts REPAIR_STEPS). */
   step?: string;
+  /**
+   * v0.49.0, the repair: what a one-row Health press is about -- a series title, or a source's name -- so a
+   * card that says "Library repair" can say which one. The web puts the action's own name in front of it.
+   */
+  label?: string;
+  /**
+   * v0.49.0, the repair: which run it is (lib/repairRuns.ts kindOf: fix_short, fill, retry, steps:…), and the
+   * chapter's number when it is about one chapter -- with `label`, "Find a longer copy · Walk Tale ch 3".
+   */
+  repairKind?: string;
+  number?: number;
+  /**
+   * v0.49.0, the repair: the series `label` names, when it names one. The Downloads view drops the label for a
+   * viewer who may not list that series (the 18+ hide); a source's name has no series and is not dropped.
+   */
+  seriesId?: string;
+  /**
+   * v0.49.0: `false` on a run that cannot download a chapter (a solver reset, a page count, names,
+   * directions; lib/repairRuns.ts canDownload). It stays a Server task but does not turn the Library ring.
+   * Absent: it may download.
+   */
+  downloads?: false;
   /** Someone asked it to stop: it does, after the chapter in flight. */
   cancelRequested?: boolean;
   reason?: string;

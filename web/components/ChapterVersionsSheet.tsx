@@ -3,7 +3,8 @@
 // ⋯ → Versions. It replaces the `{n} versions` pill and the list that unfolded under the row (VersionStrip),
 // which put three bordered lines of source names and state chips inside the chapter list itself.
 //
-// One row per copy, the markers that tell them apart, and one action: Fetch on a copy the server lacks (for
+// One row per copy -- since v0.49.0 under its own title when the titles differ (#116) -- the squared markers that
+// tell them apart, and one action key: Fetch on a copy the server lacks (for
 // anyone who may download -- a blocked copy included, since a pick names the copy and the server takes it
 // as an explicit choice), or Replace… on a copy of a chapter already here (admins, and only a file Uchiyomi
 // downloaded). ⚠️ Replace… CLOSES THIS SHEET before the confirm opens: the confirm is a Modal at z-50 and
@@ -16,6 +17,7 @@ import { SourceIcon } from '@/components/SourcePicker';
 import { IcCloudDownload } from '@/components/icons';
 import { chapterLabel, relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
+import { copyTitlesDiffer, postsShareNumber } from '@/lib/versions';
 
 /**
  * A pre-v0.33 listing row carries no `copies`; the sheet still has the ghost's or the book's own fields to
@@ -31,7 +33,7 @@ function ownCopy(ghost?: Ghost, book?: Book, sourceName?: string): VersionCopy {
            pages: book?.media.pagesCount ?? null, publishedAt: book?.metadata?.releaseDate ?? null, chosen: false, blocked: false, onDisk: true };
 }
 
-export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames, isAdmin, mayFetch, mayReplace, onFetch, onReplace, onClose }: {
+export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames, isAdmin, mayFetch, mayReplace, onFetch, onReplace, onNumbering, onClose }: {
   number: number;
   ghost?: Ghost;
   book?: Book;
@@ -47,6 +49,8 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
   /** `copy` names the pick; undefined is "this number, whatever the rules choose" (the synthesized row). */
   onFetch: (copy?: VersionCopy) => void;
   onReplace: (copy: VersionCopy) => void;
+  /** An admin's way to the numbering plan, when these copies look like different posts (#116). */
+  onNumbering?: () => void;
   onClose: () => void;
 }) {
   const label = chapterLabel(book ?? { number });
@@ -54,9 +58,23 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
   const title = (book ? book.metadata?.title || book.name : ghost?.title)?.trim() || '';
   const showTitle = !!title && !/^(ch(apter)?\.?\s*)?[\d.]+$/i.test(title);
   const rows = copies.length ? copies : [ownCopy(ghost, book, book?.sourceId ? sourceNames[book.sourceId] : undefined)];
+  // Each copy's own title (v0.49.0), as its first line, only when the titles differ: twenty identical "—" rows
+  // under one number were how #116 looked, and three groups' "Chapter 5" would only repeat the heading.
+  const titled = copyTitlesDiffer(rows);
+  const sharing = titled && postsShareNumber(rows);
   return (
     <Sheet title={label} onClose={onClose} overBottomNav>
-      {showTitle && <p className="-mt-2 mb-3 text-sm text-fog-400">{title}</p>}
+      {showTitle && !titled && <p className="-mt-2 mb-3 text-sm text-fog-400">{title}</p>}
+      {/* One group does not release one chapter twice under two names: these are different posts the source
+          numbered the same. A plain note, and for an admin the way to the numbering plan. */}
+      {sharing && (
+        <div data-posts-share-number className="mb-3 border-s-2 border-ink-600 py-1.5 pe-2 ps-2.5 text-[12px] leading-relaxed text-fog-300">
+          {tr('These look like different posts that share a number, not versions of one chapter.')}
+          {onNumbering && (
+            <button type="button" onClick={onNumbering} className="ms-1.5 font-medium text-accent hover:underline">{tr('Number by posting order')}</button>
+          )}
+        </div>
+      )}
       {/* The downloader's last error, for admins: it used to ride on the pill's hover title, which no phone
           can reach. The server sends `reason` to nobody else. */}
       {isAdmin && ghost?.why === 'failed' && ghost.reason && (
@@ -73,12 +91,13 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
             <div key={c.key || `own${i}`} className="flex items-center gap-2.5 py-2.5 text-xs">
               <GroupAvatar name={who || '?'} size={18} />
               <span className="min-w-0 flex-1">
+                {titled && <span dir="auto" className="block truncate text-sm text-fog-100" data-copy-title>{c.title?.trim() || '—'}</span>}
                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  <span className="truncate text-sm text-fog-100">{who || '—'}</span>
+                  <span className={titled ? 'truncate text-[12px] text-fog-400' : 'truncate text-sm text-fog-100'}>{who || (titled ? '' : '—')}</span>
                   {c.lang && <span className="rounded border border-ink-700 px-1 text-[10px] uppercase leading-4 text-fog-500">{c.lang}</span>}
-                  {c.onDisk && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('on server')}</span>}
-                  {c.chosen && <span className="rounded-full border border-accent/40 px-1.5 text-[10px] leading-4 text-accent">{tr("server's pick")}</span>}
-                  {c.blocked && <span className="rounded-full border border-rose-500/40 px-1.5 text-[10px] leading-4 text-rose-300">{tr('blocked group')}</span>}
+                  {c.onDisk && <span className="rounded-[4px] border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('on server')}</span>}
+                  {c.chosen && <span className="rounded-[4px] border border-accent/40 px-1.5 text-[10px] leading-4 text-accent">{tr("server's pick")}</span>}
+                  {c.blocked && <span className="rounded-[4px] border border-rose-500/40 px-1.5 text-[10px] leading-4 text-rose-300">{tr('blocked group')}</span>}
                 </span>
                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-fog-500">
                   {c.pages != null && <span>{tr('{n} pages', { n: c.pages })}</span>}
@@ -92,14 +111,12 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
                 </span>
               </span>
               {mayFetch && !c.onDisk && (
-                <button type="button" onClick={() => onFetch(own ? undefined : c)}
-                  className="chip shrink-0 px-2.5 py-1 text-[11px]">
+                <button type="button" onClick={() => onFetch(own ? undefined : c)} className="btn-key">
                   <IcCloudDownload width={14} height={14} />{tr('Fetch')}
                 </button>
               )}
               {mayReplace && !own && (
-                <button type="button" onClick={() => onReplace(c)} disabled={c.onDisk}
-                  className="chip shrink-0 px-2.5 py-1 text-[11px] disabled:opacity-40">{tr('Replace…')}</button>
+                <button type="button" onClick={() => onReplace(c)} disabled={c.onDisk} className="btn-key">{tr('Replace…')}</button>
               )}
             </div>
           );

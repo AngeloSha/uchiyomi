@@ -37,7 +37,7 @@ export function HealthMarker() {
   const label = `${countLine(data.count)}${data.headline ? ` — ${data.headline}` : ''}`;
   return (
     <Link href={HEALTH_HREF} title={label} aria-label={label}
-      className={`relative grid h-10 w-10 place-items-center rounded-full border border-ink-700 transition hover:border-accent/50 ${tone === 'problem' ? 'text-red-400' : 'text-amber-300'}`}>
+      className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-full border border-ink-700 transition hover:border-accent/50 ${tone === 'problem' ? 'text-red-400' : 'text-amber-300'}`}>
       <IcAlert width={19} height={19} />
       <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ${tone === 'problem' ? 'bg-red-400' : 'bg-amber-300'}`} />
     </Link>

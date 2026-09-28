@@ -114,6 +114,39 @@ test('source browsing is still never cached', async () => {
   assert.ok(!apiCache || store.get(apiCache)!.size === 0, 'per-account source answers must not be stored');
 });
 
+test('the admin console is never cached, so a polled repair status cannot churn the API cache', async () => {
+  // Health polls GET /api/admin/tasks/repair/status every 2 s while a repair runs (v0.49.0). Through
+  // networkFirst each answer was stored, evicting a reader's cached pages from the 300-entry cache, and an
+  // offline replay would show a run "running" forever. Reintroduce by dropping the `/api/admin/` half of the
+  // network-only rule in sw.js: the cache holds the status answers.
+  const { handlers, store } = loadSw();
+  for (let i = 0; i < 5; i++) await doFetch(handlers, 'https://yomi.test/api/admin/tasks/repair/status');
+  await doFetch(handlers, 'https://yomi.test/api/admin/health');
+  await new Promise((r) => setTimeout(r, 20));
+  const apiCache = [...store.keys()].find((k) => k.startsWith('yomi-api-'));
+  const held = apiCache ? [...store.get(apiCache)!.keys()].filter((u) => u.includes('/api/admin/')) : [];
+  assert.deepEqual(held, [], 'admin answers were stored in the API cache');
+  // ...while the reader's own API answers are still cached, or offline re-reads break.
+  await doFetch(handlers, 'https://yomi.test/api/books/b1/pages');
+  await new Promise((r) => setTimeout(r, 20));
+  const after = [...store.keys()].find((k) => k.startsWith('yomi-api-'));
+  assert.ok(after && store.get(after)!.size > 0, 'the API cache stopped caching everything');
+});
+
+test('the new worker drops the admin answers a v10 worker stored', async () => {
+  // Admin answers went through networkFirst until v0.49.0, so a v10 API cache can hold hundreds of repair-status
+  // polls that nothing reads any more; only a VERSION bump evicts them. Reintroduce by leaving VERSION at 'v10':
+  // the old cache survives activation.
+  const { handlers, store } = loadSw();
+  store.set('yomi-api-v10', new Map([['https://yomi.test/api/admin/tasks/repair/status', {}], ['https://yomi.test/api/books/b1/pages', {}]]));
+  store.set('yomi-shell-v10', new Map([['https://yomi.test/', {}]]));
+  const waits: Promise<any>[] = [];
+  await handlers.activate({ waitUntil: (p: any) => waits.push(p) });
+  await Promise.all(waits);
+  assert.ok(!store.has('yomi-api-v10'), 'the v10 API cache, with its stored admin answers, survived the new worker');
+  assert.ok(!store.has('yomi-shell-v10'), 'a v10 cache survived the new worker');
+});
+
 // ---- what v9 and v10 exist for: offline navigation ----------------------------------------------------
 //
 // Neither of the two rules below had a test, which is how they came to be the subject of a bug report three

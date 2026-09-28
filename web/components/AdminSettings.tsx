@@ -30,6 +30,7 @@ import type { KnownGroup, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
+import { DownloadsSection } from '@/components/ArchiveSettings';
 import { isDesktop } from '@/lib/desktop';
 import { adultShown } from '@/lib/adult';
 import { addable, moveIn, orderRows } from '@/lib/sourceOrder';
@@ -64,6 +65,9 @@ export function AdminSettings() {
           Scanlators: Server must stay first (run.mjs), and settingsConsole.test.ts pins the four above in
           their order. Its rows and its one dialog live in their own file; it reads its own endpoint. */}
       <NotificationsSection />
+      {/* v0.49.0 (#117): the slow archive's pause and pace, in its own file. After the pinned sections, the
+          four above and Notifications right behind them (adminNotifications.test.ts). */}
+      <DownloadsSection data={data} save={save} />
       <AdultFilterSection data={data} save={save} />
       <SourceOrderSection data={data} save={save} />
     </div>

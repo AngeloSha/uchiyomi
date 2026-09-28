@@ -100,17 +100,21 @@ export function useCheckNow(id: string, onDone: () => void) {
     setChecking(true);
     try {
       await api(`/api/admin/series/${id}/check`, { method: 'POST' });
-      toast('Checking for new chapters…', 'info');
+      toast(tr('Checking for new chapters…'), 'info', { busy: true, key: `check-${id}` });
       const started = Date.now();
       const tick = async () => {
         const st = await api<{ running: boolean; added?: number; waiting?: number; error?: string }>(`/api/admin/series/${id}/check`).catch(() => null);
         if (st && !st.running) {
           setChecking(false);
-          if (st.error) toast('Check failed', 'error');
+          // The result takes the busy card's place (the same key), so it is translated as the busy one is: a
+          // card that turned from German to English in place read as a glitch.
+          if (st.error) toast(tr('Check failed'), 'error', { key: `check-${id}` });
           else {
             // A number held for a preferred group is not "up to date": say it is being waited for.
-            const held = st.waiting ? ` · ${st.waiting} held for a preferred group` : '';
-            toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}${held}` : st.waiting ? `Nothing new yet${held}` : 'Already up to date', 'success');
+            const held = !st.waiting ? '' : st.waiting === 1 ? tr('1 held for a preferred group') : tr('{n} held for a preferred group', { n: st.waiting });
+            const added = !st.added ? '' : st.added === 1 ? tr('Added 1 new chapter') : tr('Added {n} new chapters', { n: st.added });
+            const said = added || (st.waiting ? tr('Nothing new yet') : tr('Already up to date'));
+            toast([said, held].filter(Boolean).join(' · '), 'success', { key: `check-${id}` });
             onDone();
           }
           return;
@@ -119,7 +123,7 @@ export function useCheckNow(id: string, onDone: () => void) {
         setTimeout(tick, 3000);
       };
       setTimeout(tick, 2000);
-    } catch (e) { setChecking(false); toast(msgOf(e, 'Could not start a check'), 'error'); }
+    } catch (e) { setChecking(false); toast(msgOf(e, tr('Could not start a check')), 'error'); }
   };
   return { checking, checkNow };
 }
@@ -392,7 +396,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     try {
       await api(`/api/admin/series/${encodeURIComponent(id)}`, { method: 'PATCH', json: { borrowNames: on } });
       onSaved();
-      toast(on === null ? tr('Back to the server default') : on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success');
+      toast(on === null ? tr('Back to the server default') : on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success', { busy: on === true });
     } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
     setBorrowing(false);
   };

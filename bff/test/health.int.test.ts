@@ -136,7 +136,8 @@ const S_FROZEN = 's_health_frozen', S_ROUTED = 's_health_routed', S_OFF = 's_hea
 test('a series with no working source is listed, one with a working source is not', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
-  const { runHealthChecks } = await import('../src/lib/health');
+  const { runHealthChecks, frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
   const { registerAdapter } = await import('../src/lib/sources');
   await migrate();
   registerAdapter({ id: 'health-live', name: 'Health Live', search: async () => [], getSeries: async () => null,
@@ -160,12 +161,15 @@ test('a series with no working source is listed, one with a working source is no
     const titles = check.items.map((i: any) => i.title);
     assert.ok(titles.includes('Frozen Fixture'), `the frozen series is named: ${titles.join(', ')}`);
     assert.ok(!titles.includes('Routed Fixture'), 'a series whose adapter is loaded is not');
-    assert.match(check.items.find((i: any) => i.title === 'Frozen Fixture').detail, /sw:999999999 is no longer installed/);
+    assert.ok(titles.includes('Off Fixture'), 'a series on a switched-off source is still frozen');
+    // The reasons, with the extension engine answering: this process has none, and with none every extension
+    // series waits for the engine first (the next test but one).
+    const up = await frozenSeries(noIgnores(), 'up');
+    const detail = (title: string) => up.items.find((i) => i.title === title)!.detail;
+    assert.match(detail('Frozen Fixture'), /sw:999999999 is no longer installed/);
     // Reintroduce by dropping the EXISTS subquery from frozenSeries(): "a switched-off source is said to be
     // switched off" fails, the detail reads "no longer installed" for a source that is right there.
-    assert.ok(titles.includes('Off Fixture'), 'a series on a switched-off source is still frozen');
-    assert.match(check.items.find((i: any) => i.title === 'Off Fixture').detail, /sw:health-off is switched off/,
-      'a switched-off source is said to be switched off');
+    assert.match(detail('Off Fixture'), /sw:health-off is switched off/, 'a switched-off source is said to be switched off');
   } finally {
     for (const id of [S_FROZEN, S_ROUTED, S_OFF]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
     await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-off'`);
@@ -186,7 +190,8 @@ const S_COVERED = 's_health_covered', S_ORPHANED = 's_health_orphaned';
 test('a dead primary with a live follower is reference, not a warning; with a dead follower it is still frozen', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
-  const { runHealthChecks } = await import('../src/lib/health');
+  const { runHealthChecks, frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
   const { registerAdapter } = await import('../src/lib/sources');
   await migrate();
   registerAdapter({ id: 'health-follower', name: 'Health Follower', search: async () => [], getSeries: async () => null,
@@ -209,10 +214,60 @@ test('a dead primary with a live follower is reference, not a warning; with a de
     const orphaned = check.items.find((i: any) => i.title === 'Orphaned Fixture');
     assert.ok(orphaned, 'a dead primary with a dead follower is listed');
     assert.notEqual(orphaned.info, true, 'and it is a real finding');
-    assert.match(orphaned.detail, /sw:777777777 is no longer installed/);
+    const up = await frozenSeries(noIgnores(), 'up');
+    assert.match(up.items.find((i) => i.title === 'Orphaned Fixture')!.detail, /sw:777777777 is no longer installed/);
     assert.equal(check.status, 'warn');
   } finally {
     for (const id of [S_COVERED, S_ORPHANED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});
+
+const S_ENGINE = 's_health_engine', S_GONE = 's_health_gone';
+
+/**
+ * #72: with no extension engine answering, EVERY extension series is unrouted, and an enabled source then read
+ * "over the source limit (SUWAYOMI_MAX_SOURCES)" -- advice to raise a limit that was never reached. The engine is
+ * the reason in each state it can be in; with it answering, the old rules stand.
+ *
+ * Reintroduce by making engineWhy() in frozenSeries return null (the old why() for every state): the 'off' case
+ * reads "over the source limit" again, and "the engine is the reason" fails.
+ */
+test('the engine being off is the reason, not the source limit', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
+  await migrate();
+  for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
+  // Enabled and remembered, but not registered: exactly what every extension source is while the engine is away.
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('health-engine', 'Engine Source', 'en', true)`);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Engine Fixture', $1, 12, 'sw:health-engine', '1')`, [S_ENGINE]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Gone Fixture', $1, 3, 'gone-pack-source', '1')`, [S_GONE]);
+  try {
+    const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'up', title: string) => {
+      const c = await frozenSeries(noIgnores(), engine);
+      return { detail: c.items.find((i) => i.title === title)!.detail, note: c.note ?? '' };
+    };
+    for (const engine of ['off', 'switched_off'] as const) {
+      const r = await detail(engine, 'Engine Fixture');
+      assert.match(r.detail, /^12 chapters; its source sw:health-engine can’t be reached because the extension engine is off$/, `the engine is the reason (${engine})`);
+      assert.doesNotMatch(r.detail, /source limit/);
+      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back\. /);
+    }
+    assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
+    const up = await detail('up', 'Engine Fixture');
+    assert.match(up.detail, /sw:health-engine is over the source limit \(SUWAYOMI_MAX_SOURCES\)/, 'with the engine up, the limit is the reason');
+    assert.doesNotMatch(up.note, /wait for the extension engine/);
+    // A source that is not an extension's is not the engine's to explain.
+    for (const engine of ['off', 'switched_off', 'unreachable', 'up'] as const) {
+      assert.match((await detail(engine, 'Gone Fixture')).detail, /gone-pack-source is no longer installed$/, `a non-extension source (${engine})`);
+    }
+  } finally {
+    for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+    await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
   }
 });
 
@@ -335,11 +390,13 @@ test('a source hidden by language is turned off too, however stale its health ro
   await q(`INSERT INTO source_health (source_id, status, disabled, consecutive) VALUES ($1, 'down', false, 4)`, [`sw:${ID}`]);
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
-    const row = c.items.find((i: any) => i.title === `sw:${ID}`);
+    // By sourceId: since v0.49.0 (#115) the row is titled with the engine's name for it ('Hidden RU'), not the id.
+    const row = c.items.find((i: any) => i.sourceId === `sw:${ID}`);
     assert.ok(row, 'still listed');
+    assert.equal(row.title, 'Hidden RU', 'named, not sw:<id>');
     assert.equal(row.info, true, 'hidden by language is off');
     assert.match(row.detail, /turned off/);
-    assert.ok(!c.items.some((i: any) => !i.info && i.title === `sw:${ID}`), 'never counted as a fault');
+    assert.ok(!c.items.some((i: any) => !i.info && i.sourceId === `sw:${ID}`), 'never counted as a fault');
   } finally {
     await q('DELETE FROM source_health WHERE source_id = $1', [`sw:${ID}`]);
     await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [ID]);
@@ -381,6 +438,34 @@ test('a stored error older than the last success is history, not a fix to go and
     assert.match(fresh.detail, /Cloudflare interstitial/, 'fresh: an error newer than the last success is still diagnosed');
   } finally {
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[STALE, FRESH]]);
+  }
+});
+
+test('a source that keeps outrunning its budget is listed, as Providers already says', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // Providers marks a source with slow_streak >= 3 'quiet'; Health selected rows only by status and empty streak,
+  // so the source that vanished from Discover for a day (reportSlow's story) was on one surface and not the other.
+  // Reintroduce by dropping `OR sh.slow_streak >= 3` from sourceTrouble()'s WHERE: the slow row is missing.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const SLOW = 'hl-slow';
+  const S_SLOW = 's_health_slow';
+  await q('DELETE FROM source_health WHERE source_id = $1', [SLOW]);
+  await q('DELETE FROM lib_series WHERE id = $1', [S_SLOW]);
+  await q(`INSERT INTO source_health (source_id, status, slow_streak, last_slow_at, last_error) VALUES ($1, 'ok', 4, now(), 'timeout after 8000ms')`, [SLOW]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Slow Fixture', $1, 3, $2, 's1')`, [S_SLOW, SLOW]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    const row = c.items.find((i: any) => i.sourceId === SLOW);
+    assert.ok(row, 'listed');
+    assert.notEqual(row.info, true, 'a series depends on it, so it is a finding');
+    assert.equal(row.diagnosis.code, 'too_slow', 'and the diagnosis is the slow one, with the budget');
+    assert.match(row.detail, /longer than 8s/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_SLOW]);
+    await q('DELETE FROM source_health WHERE source_id = $1', [SLOW]);
   }
 });
 
@@ -535,7 +620,15 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
   await book(4, 1, '/library', `${S_SHORT}/Ch 04 [somescan].cbz`);
   await book(5, 2, DL_ROOT, chapterFileRel(S_SHORT, 5));
   await book(6, 1, DL_ROOT, chapterFileRel(S_SHORT, 6));
+  await book(7, 2, DL_ROOT, chapterFileRel(S_SHORT, 7));
+  await book(8, 1, DL_ROOT, chapterFileRel(S_SHORT, 8));
   await q(`UPDATE lib_books SET short_confirmed_at = now() WHERE id = $1`, [`b_${S_SHORT}_5`]);
+  // Saved with a placeholder page: the chapter sweep re-fetches it, and the repair's short step skips it.
+  await q(`UPDATE lib_books SET missing_pages = ARRAY[2] WHERE id = $1`, [`b_${S_SHORT}_7`]);
+  // "It's fine", pressed by an admin (the confirm-short route writes both).
+  await q(`UPDATE lib_books SET short_confirmed_at = now(),
+                  short_result = '{"at":"2026-09-01T00:00:00.000Z","why":"confirmed_by_admin","by":"hs-admin"}'::jsonb
+            WHERE id = $1`, [`b_${S_SHORT}_8`]);
   // A tombstoned chapter: the bytes are gone, so a page count taken before they went says nothing anybody
   // can act on. Reintroduce by dropping `b.pruned_at IS NULL` from shortChapters(): it is reported again.
   await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_SHORT}_6`]);
@@ -557,7 +650,16 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
     assert.ok(Date.parse(confirmed.fixed?.at) > 0, 'and says when that was decided');
     assert.deepEqual(confirmed.actions, ['confirm_short'], 'its one chip is the one that withdraws the confirmation');
     assert.equal(of(6), undefined, 'a deleted chapter is not a short chapter');
-    assert.match(c.summary, /1 confirmed short at the source/);
+    // v0.49.0. Reintroduce by offering fix_short on a row with missing_pages again: the actions below read
+    // ['fix_short', 'confirm_short'], and Fix would do nothing (stepShort filters `missing_pages IS NULL`).
+    const partial = of(7);
+    assert.deepEqual(partial.actions, ['confirm_short'], 'a chapter with placeholder pages is not offered Fix');
+    assert.deepEqual(partial.outcome, { kind: 'short', at: null, why: 'partial', missing: 1 }, 'and says why');
+    const fine = of(8);
+    assert.equal(fine.fixed?.what, 'marked fine by an admin', 'a person\'s judgement is not claimed as the repair\'s proof');
+    assert.equal(fine.outcome?.why, 'confirmed_by_admin');
+    assert.equal(fine.outcome?.by, 'hs-admin');
+    assert.match(c.summary, /2 confirmed short at the source/);
     assert.match(c.note, /Counted nightly by the repair task/, 'the note no longer says only opened chapters count');
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_SHORT]);
@@ -592,26 +694,49 @@ test('a gap the repair has already looked into is greyed until its answer goes s
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
     return c.items.find((i: any) => i.title === 'Gaps Result Fixture');
   };
-  const stamp = async (ago: string, result: Record<string, unknown>) =>
+  // The stamp and the conclusion at the same time, as a finished run leaves them; `concluded` apart from the
+  // stamp is a run that is on this series right now.
+  const AGO: Record<string, number> = { '1 hour': 3600e3, '8 days': 8 * 864e5 };
+  const stamp = async (ago: string, result: Record<string, unknown>, concluded = ago) =>
     q(`UPDATE lib_series SET gaps_checked_at = now() - $2::interval, gaps_result = $3::jsonb WHERE id = $1`,
-      [S_GR, ago, JSON.stringify({ at: new Date().toISOString(), have_count: 5, ...result })]);
+      [S_GR, ago, JSON.stringify({ at: new Date(Date.now() - AGO[concluded]).toISOString(), have_count: 5, ...result })]);
   try {
     const first = await item();
     assert.ok(first, 'never looked at: a plain finding');
     assert.notEqual(first.info, true);
     assert.equal(first.fixed, undefined, 'nothing has been decided about it yet');
 
-    await stamp('1 hour', { why: 'no_candidate', sweep: 0 });
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0, unfillable: ['4-6'], scanned: 3 });
     const asked = await item();
     assert.equal(asked.info, true, 'asked, and the answer was no: greyed');
     assert.equal(asked.fixed?.what, 'no other source lists them');
-    assert.match(asked.detail, /no other source lists them, checked \d{4}-\d{2}-\d{2}$/);
+    // v0.49.0: the conclusion is data the page translates, not an English suffix on the detail.
+    // Reintroduce the suffix and the first assertion fails; drop `outcome` and the rest do.
+    assert.equal(asked.detail, '3 missing — 4-6', 'the detail is the finding alone');
+    assert.equal(asked.outcome?.kind, 'gaps');
+    assert.equal(asked.outcome?.why, 'no_candidate');
+    assert.deepEqual(asked.outcome?.unfillable, ['4-6']);
+    assert.equal(asked.outcome?.scanned, 3);
+    assert.ok(Date.parse(asked.outcome?.at) > Date.now() - 2 * 3600e3, 'and when it was concluded');
 
     await stamp('8 days', { why: 'no_candidate', sweep: 0 });
     assert.notEqual((await item()).info, true, 'an answer older than a week is worth asking again');
 
+    // A run stamps the series BEFORE it searches, so mid-run the stamp is fresh while the stored answer is
+    // still last week's. Reintroduce by judging freshness on gaps_checked_at: this reads as settled.
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0 }, '8 days');
+    assert.notEqual((await item()).info, true, "last week's answer is not made fresh by tonight's stamp");
+
     await stamp('1 hour', { why: 'cooldown', sweep: 0 });
     assert.notEqual((await item()).info, true, 'a cooldown is not an answer: nobody was asked');
+
+    // #116: a series numbered by posting order is never searched for -- no other site's numbers line up -- and
+    // the repair says so. That is an answer too, greyed like "nobody lists them". Reintroduce by leaving
+    // 'posting_order' out of ANSWERED (lib/health.ts): it stays amber every night.
+    await stamp('1 hour', { why: 'posting_order', sweep: 0 });
+    const numbered = await item();
+    assert.equal(numbered.info, true, 'numbered by posting order: an answer, greyed');
+    assert.equal(numbered.fixed?.what, 'this series is numbered by posting order, so no other source is searched', 'and the row says why');
 
     // Something landed since the search ran, so the hole may have moved.
     await stamp('1 hour', { why: 'no_candidate', sweep: 0, have_count: 4 });
@@ -621,7 +746,15 @@ test('a gap the repair has already looked into is greyed until its answer goes s
     await stamp('1 hour', { why: 'listed', sweep: 3 });
     const listed = await item();
     assert.equal(listed.info, true, 'a hole the chapter sweep is about to fill is not a finding');
-    assert.match(listed.detail, /the next chapter sweep will fetch them/);
+    assert.equal(listed.outcome?.why, 'listed');
+    assert.equal(listed.outcome?.sweep, 3);
+    assert.match(listed.fixed?.what, /the next chapter sweep will fetch them/);
+
+    // A paused series: nothing but Fill now will ever fetch its gaps, and the row says so before the press.
+    // Reintroduce by dropping the caveat: the assertion below finds none.
+    assert.equal(listed.caveats, undefined, 'updates on: no caveat');
+    await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [S_GR]);
+    assert.deepEqual((await item()).caveats, [{ action: 'fill', code: 'updates_paused' }]);
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_GR]);
   }
@@ -684,5 +817,251 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
     await q('DELETE FROM read_progress WHERE user_id = $1', [uid]).catch(() => {});
     await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [[D1, D2]]).catch(() => {});
     await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+  }
+});
+
+const S_FAIL = 's_health_fail';
+
+/**
+ * v0.49.0: "failing since" is the FIRST failure (first_at), not the latest attempt, and a source that cannot
+ * be asked right now says so on its Retry now before anyone presses it.
+ *
+ * Reintroduce by reading min(f.at) again: `since` is the latest attempt. Drop the caveat builder: none is found.
+ */
+test('the failures row says since when, how often, and what Retry now cannot do yet', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const SRC = 'health-fail-src';
+  await q('DELETE FROM lib_series WHERE id = $1', [S_FAIL]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Fail Fixture',$1)`, [S_FAIL]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+           VALUES ($1, 1, $2, 'error', 'x', 2, now() - interval '1 hour', '2026-09-01T00:00:00Z'),
+                  ($1, 2, $2, 'error', 'y', 1, now() - interval '2 hours', NULL)`, [S_FAIL, SRC]);
+  const row = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-failures').items.find((i: any) => i.sourceId === SRC);
+  try {
+    const r = await row();
+    assert.equal(r.outcome?.kind, 'failures');
+    assert.equal(r.outcome?.firstAt, '2026-09-01T00:00:00.000Z', 'the first failure, not the latest attempt');
+    assert.match(r.detail, /since 2026-09-01/);
+    assert.equal(r.outcome?.attempts, 2);
+    assert.equal(r.outcome?.resetPending, false);
+    assert.equal(r.caveats, undefined, 'a source that can be asked has no caveat');
+
+    await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at)
+             VALUES ($1, 'rate_limited', 1, now() + interval '30 minutes', now())`, [SRC]);
+    const blocked = await row();
+    assert.equal(blocked.caveats?.length, 1);
+    assert.equal(blocked.caveats[0].action, 'retry');
+    assert.equal(blocked.caveats[0].code, 'source_cooling_down');
+    assert.ok(Date.parse(blocked.caveats[0].until) > Date.now(), 'with when it ends');
+
+    await q(`UPDATE source_health SET blocked_until = NULL, disabled = true WHERE source_id = $1`, [SRC]);
+    assert.deepEqual((await row()).caveats, [{ action: 'retry', code: 'source_off' }]);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_FAIL]);
+    await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
+  }
+});
+
+const S_ARCH = 's_health_arch', S_ARCH_UP = 's_health_arch_up';
+
+/**
+ * #117 x Health (the critic's "health-clarity vs issue-117"): a series' slow archive fetches every number listed below
+ * its boundary a few an hour, so a hole it takes whole is its work in progress -- listed for reference, with the
+ * outcome `archiving` in place of whatever an older search concluded -- and Fill now says what it will do differently
+ * (caveat `archiving`: at once, at normal pace). A hole reaching above the boundary stays a finding; a finished
+ * archive owns nothing. Only what it will really fetch, and only while it fetches (integration-2 review): a number the
+ * source does not list, or one the archive gave up on, is a gap like any other, and so is every hole of a paused
+ * archive, or of any archive while the admin has paused them all.
+ *
+ * Reintroduce by dropping `archived` from chapterGaps: the first assertion finds a live finding. Drop the caveat
+ * builder's archive half: the caveat assertions find none. Count every number below the boundary (archiveHoles
+ * without its listing): "a number the source does not list is not the archive's" reads archiving. Count a paused
+ * archive: "paused, nothing is fetching them" does; leave the admin's pause out of archiveHoles: "nor while every
+ * archive is paused" does.
+ */
+test("a gap below an active archive's boundary is the archive's, and Fill now says it fetches it at once", { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S_ARCH, S_ARCH_UP]]);
+  const book = (sid: string, n: number) => q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+    VALUES ($1,$2,'test',$3,$4,$5,20)`, [`b_${sid}_${n}`, sid, `/test/${sid}/${n}.cbz`, `Chapter ${n}`, n]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Archived Gap Fixture',$1)`, [S_ARCH]);
+  for (const n of [1, 2, 3, 7, 8]) await book(S_ARCH, n);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Half Archived Fixture',$1)`, [S_ARCH_UP]);
+  for (const n of [1, 5, 9, 10]) await book(S_ARCH_UP, n);
+  // An older search's answer on the archived one: the archive is what is happening to the hole now.
+  await q(`UPDATE lib_series SET gaps_checked_at = now(), gaps_result = $2::jsonb WHERE id = $1`,
+    [S_ARCH, JSON.stringify({ at: new Date().toISOString(), have_count: 5, why: 'listed', sweep: 3 })]);
+  await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 8.5), ($2, 'queued', 5.5)
+           ON CONFLICT (series_id) DO UPDATE SET state = EXCLUDED.state, boundary = EXCLUDED.boundary`, [S_ARCH, S_ARCH_UP]);
+  // What the sources list: the archive fetches listed numbers, and only those.
+  const list = (sid: string, n: number) => q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1,$2,'test','{}'::jsonb)
+    ON CONFLICT (series_id, number) DO NOTHING`, [sid, n]);
+  for (const n of [4, 5, 6]) await list(S_ARCH, n);
+  for (const n of [2, 3, 4, 6, 7, 8]) await list(S_ARCH_UP, n);
+  const gaps = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps');
+  const item = (c: any, id: string) => c.items.find((i: any) => i.seriesId === id);
+  try {
+    let c = await gaps();
+    const arch = item(c, S_ARCH);
+    assert.ok(arch, 'still listed: the hole is there until the archive fills it');
+    assert.equal(arch.info, true, 'a hole wholly below the boundary is the archive\'s, not a finding');
+    assert.equal(arch.outcome?.kind, 'gaps');
+    assert.equal(arch.outcome?.why, 'archiving', 'the outcome says it is being archived');
+    assert.equal(arch.outcome?.at, null, 'from no search at all');
+    assert.equal(arch.fixed, undefined, "an older search's answer is not what is happening to it now");
+    assert.deepEqual(arch.caveats, [{ action: 'fill', code: 'archiving' }], 'Fill now fetches them at once instead');
+    assert.match(c.summary, /1 being archived slowly/);
+    // Reaching above the boundary (6-8 over 5.5): the sweep owns that part, so it stays a finding.
+    const up = item(c, S_ARCH_UP);
+    assert.notEqual(up.info, true, 'a hole reaching above the boundary is still a finding');
+    assert.notEqual(up.outcome?.why, 'archiving');
+    assert.deepEqual(up.caveats, [{ action: 'fill', code: 'archiving' }], 'though Fill now still fetches its lower part at once');
+    // Paused, nothing is fetching them: the hole is not being archived, whatever it is waiting for (the sweep still
+    // floors at a paused archive's boundary). The older answer stands; Fill now still fetches them at once.
+    await q(`UPDATE archive_queue SET state = 'paused' WHERE series_id = $1`, [S_ARCH]);
+    c = await gaps();
+    assert.equal(item(c, S_ARCH).outcome?.why, 'listed', 'paused, nothing is fetching them: not being archived');
+    assert.deepEqual(item(c, S_ARCH).caveats, [{ action: 'fill', code: 'archiving' }]);
+    // Finished, it has lifted its boundary: a gap again, with the older answer it had.
+    await q(`UPDATE archive_queue SET state = 'done' WHERE series_id = $1`, [S_ARCH]);
+    c = await gaps();
+    assert.equal(item(c, S_ARCH).outcome?.why, 'listed');
+    assert.equal(item(c, S_ARCH).caveats, undefined);
+    // Never searched at all, and wholly below an active boundary: the archive's still, not only when an older search
+    // had already greyed it. Reintroduce by greying only a searched hole (drop `archived ||` from `info`): a finding.
+    await q(`UPDATE archive_queue SET state = 'queued' WHERE series_id = $1`, [S_ARCH]);
+    await q('UPDATE lib_series SET gaps_checked_at = NULL, gaps_result = NULL WHERE id = $1', [S_ARCH]);
+    assert.equal(item(await gaps(), S_ARCH).info, true, "a hole nobody searched for is the archive's too");
+    // The same hole, never searched, is a finding again whenever nothing is fetching it.
+    await q(`UPDATE archive_queue SET state = 'paused' WHERE series_id = $1`, [S_ARCH]);
+    assert.notEqual(item(await gaps(), S_ARCH).info, true, "a paused archive's hole is a finding: nothing is fetching it");
+    await q(`UPDATE archive_queue SET state = 'queued' WHERE series_id = $1`, [S_ARCH]);
+    await q('UPDATE server_settings SET archive_paused = true WHERE id = 1');
+    try {
+      assert.notEqual(item(await gaps(), S_ARCH).info, true, 'nor while every archive is paused');
+    } finally {
+      await q('UPDATE server_settings SET archive_paused = false WHERE id = 1');
+    }
+    assert.equal(item(await gaps(), S_ARCH).info, true, 'PREMISE: resumed, the archive\'s again');
+    // A number the source does not list is not the archive's: it never fetches it, and read as being archived the
+    // hole was never searched for until the archive finished, weeks on.
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 5', [S_ARCH]);
+    c = await gaps();
+    assert.notEqual(item(c, S_ARCH).info, true, "a number the source does not list is not the archive's");
+    assert.deepEqual(item(c, S_ARCH).caveats, [{ action: 'fill', code: 'archiving' }], 'though Fill now still fetches the rest at once');
+    // Nor is one it gave up on: past the sweep's retry cap, the archive leaves it too.
+    await list(S_ARCH, 5);
+    await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, attempts) VALUES ($1, 5, 'test', 'error', 99)`, [S_ARCH]);
+    assert.notEqual(item(await gaps(), S_ARCH).info, true, 'nor one it gave up on');
+  } finally {
+    await q('UPDATE server_settings SET archive_paused = false WHERE id = 1');
+    await q('DELETE FROM archive_queue WHERE series_id = ANY($1)', [[S_ARCH, S_ARCH_UP]]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S_ARCH, S_ARCH_UP]]);
+  }
+});
+
+const NB = ['s_health_nb_pending', 's_health_nb_remap', 's_health_nb_journal', 's_health_nb_auto', 's_health_nb_kept', 's_health_nb_hint', 's_health_nb_old', 's_health_nb_asked'];
+
+/**
+ * #116's Health check (the critic's "issue-116 vs health-clarity"): a series in a library is never renamed
+ * unattended, so the detector marks it and it downloads nothing until an admin confirms the plan -- which, before
+ * this check, only its own series page said. Each waiting series is a finding by name, with `renumber` and, for a
+ * change nobody asked for, `keep_numbers`; a journal a crash left is a finding with no key; numbered by posting
+ * order on its own lately, a hint, and a strong verdict kept by hand are listed too.
+ *
+ * Reintroduce by leaving numberingCheck() out of runHealthChecks: the check is not there.
+ */
+test('the numbering check names every series waiting for a numbering review, with what can be done about it', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [NB]);
+  const note = (verdict: string) => JSON.stringify({ verdict, ordered: true, posts: 226, numbers: 13, extras: 213, biggest: { number: 7, posts: 73 }, examples: [], source: 'nb-web' });
+  const seed = (id: string, cols: Record<string, unknown>) => {
+    const keys = ['id', 'source', 'title', 'folder', 'source_id', ...Object.keys(cols)];
+    const vals = [id, 'Webtoons (health)', id, id, 'nb-web', ...Object.values(cols)];
+    return q(`INSERT INTO lib_series (${keys.join(',')}) VALUES (${keys.map((k, i) => (k === 'numbering_note' ? `$${i + 1}::jsonb` : `$${i + 1}`)).join(',')})`, vals);
+  };
+  await seed(NB[0], { numbering_pending: 'posting_order', numbering_source: 'nb-web', numbering_note: note('strong') });
+  await seed(NB[1], { numbering_pending: 'remap' });
+  await seed(NB[2], { renumber_plan: JSON.stringify({ v: 1 }) });
+  await seed(NB[3], { numbering: 'posting_order', numbering_by: 'auto', numbering_source: 'nb-web', numbering_changed_at: new Date(), numbering_note: note('strong') });
+  await seed(NB[4], { numbering: 'source', numbering_by: 'manual', numbering_note: note('strong') });
+  await seed(NB[5], { numbering_note: note('hint') });
+  await seed(NB[6], { numbering: 'posting_order', numbering_by: 'auto', numbering_changed_at: new Date(Date.now() - 20 * 86_400_000), numbering_note: note('strong') });
+  await seed(NB[7], { numbering_pending: 'posting_order', numbering_by: 'manual' });
+  const check = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'numbering');
+  const item = (c: any, id: string) => c.items.find((i: any) => i.seriesId === id);
+  try {
+    const c = await check();
+    assert.ok(c, 'the numbering check');
+    assert.equal(c.title, 'Chapter numbering');
+    assert.equal(c.status, 'warn');
+    const pending = item(c, NB[0]);
+    assert.equal(pending.title, NB[0], 'named by its series');
+    assert.equal(pending.sourceId, 'nb-web', 'and its numbering source, for the extension settings link');
+    assert.deepEqual(pending.actions, ['renumber', 'keep_numbers']);
+    assert.notEqual(pending.info, true);
+    assert.match(pending.detail, /gives 213 of 226 posts a number another post has \(73 are all 7\)/);
+    // nb-web is no adapter this process has loaded (an extension the engine is not serving): the source is named as
+    // the series was added. Reintroduce by falling back to the id (`getSource(src)?.name || src` in numberingCheck):
+    // "nb-web gives ...".
+    assert.match(pending.detail, /^Webtoons \(health\) gives/, 'a source that is not loaded is named as the series was added, not by its id');
+    assert.match(pending.detail, /Nothing downloads for this series/);
+    assert.deepEqual(item(c, NB[1]).actions, ['renumber'], 'a remap is confirmed, never declined');
+    assert.match(item(c, NB[1]).detail, /extension setting changed/);
+    const journal = item(c, NB[2]);
+    assert.equal(journal.actions, undefined, 'the check that finishes it is the way out');
+    assert.match(journal.detail, /interrupted/);
+    assert.notEqual(journal.info, true);
+    assert.deepEqual([item(c, NB[3]).info, item(c, NB[3]).actions], [true, ['keep_numbers']], 'numbered on its own lately: for reference');
+    assert.deepEqual([item(c, NB[4]).info, item(c, NB[4]).actions], [true, ['renumber']], 'kept by hand: for reference');
+    assert.deepEqual([item(c, NB[5]).info, item(c, NB[5]).actions], [undefined, ['renumber', 'keep_numbers']], 'a hint is worth a look');
+    assert.equal(item(c, NB[6]), undefined, 'two weeks on, a series numbered on its own is no longer news');
+    assert.deepEqual(item(c, NB[7]).actions, ['renumber'], 'a change an admin asked for is not declined from here');
+    assert.match(c.summary, /series wait for a numbering review/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [NB]);
+  }
+});
+
+const S_HOLE = 's_health_hole';
+
+/**
+ * #116: a series numbered by posting order keeps the number of a post its source DELETED as a hole (lib/numbering.ts),
+ * so nothing after it moves. Nothing can fill it, so it is not a gap (lib/libraryNumbers.ts).
+ *
+ * Reintroduce by dropping the UNION from HAVE_SQL: the hole at 3 is a gap nobody can ever clear.
+ */
+test('a post the source deleted is a hole, not a gap', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_HOLE]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, source_id, numbering, numbering_by, numbering_source)
+           VALUES ($1,'test','Hole Fixture',$1,'hole-src','posting_order','auto','hole-src')`, [S_HOLE]);
+  for (const n of [1, 2, 4, 5]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages) VALUES ($1,$2,'test',$3,$4,$5,20)`,
+      [`b_${S_HOLE}_${n}`, S_HOLE, `/test/${S_HOLE}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  await q(`INSERT INTO series_post_numbers (series_id, source_id, post_id, number, seen_at, gone_at)
+           VALUES ($1, 'hole-src', 'p3', 3, now(), now())`, [S_HOLE]);
+  const gap = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps').items.find((i: any) => i.seriesId === S_HOLE);
+  try {
+    assert.equal(await gap(), undefined, 'the deleted post leaves a hole that is not a gap');
+    // The same number, not deleted at the source: missing, and a gap like any other.
+    await q(`UPDATE series_post_numbers SET gone_at = NULL WHERE series_id = $1`, [S_HOLE]);
+    assert.match((await gap())?.detail ?? '', /^1 missing — 3/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_HOLE]);
   }
 });

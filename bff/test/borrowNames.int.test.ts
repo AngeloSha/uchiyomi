@@ -11,6 +11,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { HEALED_NAME } from '../src/lib/naming';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -175,15 +176,23 @@ test("the chapter's own name is never replaced, and later outranks a borrowed on
   await series('own');
   await borrowNamesFor(S('own'));
   assert.equal((await book('own', 2)).chapter_name, 'Own Two', 'a borrowed name replaced the chapter\'s own');
-  assert.equal((await book('own', 2)).chapter_name_source, null);
+  // The listing healed it, and says so (#116): the copy it chose named it, which need not be the file on disk.
+  // Reintroduce by healing with a NULL source (the v0.48 heal): this reads null.
+  assert.equal((await book('own', 2)).chapter_name_source, HEALED_NAME, 'a healed name is marked as the listing\'s');
   assert.equal((await book('own', 5)).chapter_name, 'Good Name 5');
   // The own source starts naming chapter 5: the next check's listing heal replaces the borrowed name.
   ownNames.set(5, 'Chapter 5: Own Five');
+  const stamp = async () => (await q('SELECT updated_at FROM lib_books WHERE id = $1', [`${S('own')}_b2`]))[0].updated_at.toISOString();
+  const healedAt = await stamp();
   await updateSeries(S('own'), 0);
   const b5 = await book('own', 5);
   // Reintroduce by healing only NULL names (the v0.46.0 rule): the borrowed name stays.
   assert.equal(b5.chapter_name, 'Own Five');
-  assert.equal(b5.chapter_name_source, null, 'the donor mark outlived the name it marked');
+  assert.equal(b5.chapter_name_source, HEALED_NAME, 'the donor mark outlived the name it marked');
+  // A healed name is healed once, as an unmarked one was: marked, it is not a borrowed name for the next check to
+  // replace, and every sweep rewrote it -- and bumped updated_at, which the clients sync by. Reintroduce by healing
+  // every marked name (drop `chapter_name_source <> $2` in replaceListing): chapter 2 is written again.
+  assert.equal(await stamp(), healedAt, 'a healed name is not healed again by every check');
 });
 
 test('switching it off takes back exactly what was borrowed', { skip }, async () => {
@@ -193,7 +202,16 @@ test('switching it off takes back exactly what was borrowed', { skip }, async ()
   await borrowNamesFor(S('clear'));
   assert.equal((await book('clear', 1)).chapter_name, 'Good Name 1');
   const n = await clearBorrowedNames({ seriesId: S('clear') });
-  assert.equal(n, 11);
+  assert.equal(n, 11, 'exactly the borrowed names are taken back');
   assert.equal((await book('clear', 1)).chapter_name, null);
   assert.equal((await book('clear', 4)).chapter_name, 'Own Four', 'an own name was taken back with the borrowed ones');
+
+  // The server switch going off takes back the borrowed names of every series that follows it -- and, the same way,
+  // never the names the listing healed. Reintroduce by clearing every marked name in the 'following-server' branch.
+  await series('clearall');
+  await borrowNamesFor(S('clearall'));
+  assert.equal((await book('clearall', 4)).chapter_name_source, HEALED_NAME);
+  await clearBorrowedNames('following-server');
+  assert.equal((await book('clearall', 1)).chapter_name, null, 'what was borrowed is taken back server-wide');
+  assert.equal((await book('clearall', 4)).chapter_name, 'Own Four', 'an own name was taken back with the borrowed ones, server-wide');
 });

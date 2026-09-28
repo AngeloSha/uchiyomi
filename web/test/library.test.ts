@@ -383,3 +383,23 @@ test('every string the select bar renders is in the locale files, singulars incl
     assert.ok(label in es, `"${label}" renders through tr() but is in no locale file`);
   }
 });
+
+test('Archive slowly: a key from lg up, a row of More on a phone, for anyone who may download', () => {
+  // #117. The phone bar holds two rows at 390 px (above), so the archive is a row of More there, and More is
+  // there for members who may download, not only admins -- whose two rows in it stay theirs. A key, not a
+  // chip: the owner kept chips for filters and sorts. Reintroduce by showing the key at every width (drop
+  // `hidden lg:inline-flex`): "the archive key reaches the phone bar" fails; gate More on `isAdmin` again: "a
+  // member who may download has no way to archive on a phone" fails.
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /\{canDownload\(user\) && <button disabled=\{acting\} onClick=\{archiveSelected\} className="btn-key hidden lg:inline-flex">\{tr\('Archive slowly'\)\}<\/button>\}/,
+    'the archive key reaches the phone bar');
+  assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className="chip text-xs disabled:opacity-50 lg:hidden"/,
+    'a member who may download has no way to archive on a phone');
+  const sheet = src.slice(src.indexOf("<Sheet title={tr('{n} selected'"), src.indexOf('</Sheet>', src.indexOf("<Sheet title={tr('{n} selected'")));
+  assert.match(sheet, /\{canDownload\(user\) && \(\s*<button onClick=\{\(\) => \{ setMore\(false\); void archiveSelected\(\); \}\}/, 'More has no Archive slowly, or keeps the sheet open under the notice');
+  assert.match(sheet, /\{isAdmin && \(\s*<>\s*<button onClick=\{\(\) => \{ setMore\(false\); setMoving\(true\); \}\}/, "a member's More offers the admin's Move to library");
+  // One request per 500 (the route's cap), and one notice for the whole selection: components/ArchiveQueue.tsx.
+  const q = code(read('components/ArchiveQueue.tsx'));
+  assert.match(q, /for \(let i = 0; i < ids\.length; i \+= ARCHIVE_MAX_SERIES\)/, 'a big selection is one request past the route cap');
+  assert.match(q, /ids\.length === 1 \? archiveOutcomeNotice\([^)]*\) : archiveBulkNotice\(results\)/, 'a selection is not summed up in one notice');
+});

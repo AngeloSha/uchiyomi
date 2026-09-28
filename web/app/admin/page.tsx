@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabParam } from '@/lib/useTabParam';
 import { AdminSettings } from '@/components/AdminSettings';
@@ -7,26 +7,44 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
-import { taskResult } from '@/lib/tasks';
-import { bytes, relativeTime } from '@/lib/format';
+import { scheduleText, taskResult } from '@/lib/tasks';
+import { joinSentences } from '@/lib/jobs';
+import { bytes, languageName, relativeTime } from '@/lib/format';
+import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
-import { HealthActions, HealthCheckActions, HealthFixAll } from '@/components/HealthActions';
-import { Backdrop, Img } from '@/components/ui';
+import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
+import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
+import { ActionStatus } from '@/components/ActionList';
+import { RepairRunProvider } from '@/lib/useRepairRun';
+import { checkTitle } from '@/lib/healthCopy';
+import { keysFor } from '@/lib/healthKeys';
+import type { ActionState } from '@/lib/actionState';
+import { Backdrop, Img, OnBody } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
-import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { groupProviders, providerStatus, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
+import { EngineSetup, EngineReadyFoot } from '@/components/EngineSetup';
+import type { EngineReport } from '@/lib/engineSetup';
+import { ExtensionSettings, useExtensionSettingsParam } from '@/components/ExtensionSettings';
+import { StatusEdge, StatusMark } from '@/components/StatusMark';
+import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
+import { useLayer } from '@/lib/layers';
+import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
+import { SourceEvidence } from '@/components/SourceEvidence';
+import { checkAllLabel, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
+import { useTicker } from '@/lib/ticker';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -71,13 +89,6 @@ const _GROUP_LABELS = keys('Server', 'People', 'Content', 'Sources');
 
 const TABS = GROUPS.flatMap((g) => g.tabs);
 type Tab = (typeof TABS)[number];
-const STATUS_STYLE: Record<string, string> = {
-  ok: 'bg-emerald-600/20 text-emerald-300', blocked: 'bg-red-600/20 text-red-300',
-  rate_limited: 'bg-amber-600/20 text-amber-300', down: 'bg-orange-600/20 text-orange-300', disabled: 'bg-ink-700 text-fog-400',
-  // Answers without error, returns nothing. Deliberately not red: it may be a site redesign rather than a
-  // failure, and until it is tested nobody knows which.
-  quiet: 'bg-fog-600/20 text-fog-300',
-};
 
 /**
  * The tab lives in the URL (`?tab=Settings`), read through `useSearchParams`, which a statically exported
@@ -145,7 +156,6 @@ function AdminInner() {
  * counts are still there, just demoted to the line that supports it.
  */
 function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
-  const toast = useToast();
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery({
@@ -166,10 +176,16 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
     : bad ? tr('{n} checks found something', { n: bad })
     : tr('Everything looks healthy');
 
+  // The scan's answer, under the button (v0.49.0): it used to be dropped, so a scan refused because one ran a
+  // minute ago looked exactly like one that found nothing. Then Health is checked again, and its header mark.
+  const [scanned, setScanned] = useState<ActionState | null>(null);
   const scan = async () => {
-    toast(tr('Scanning library…'));
-    await triggerRefresh();
-    setTimeout(() => qc.invalidateQueries({ queryKey: ['admin-stats'] }), 2500);
+    const at = Date.now();
+    setScanned({ kind: 'working', startedAt: at, step: tr('Scanning library…') });
+    const r = await triggerRefresh();
+    setScanned(scanState(r, at));
+    await Promise.all([qc.invalidateQueries({ queryKey: ['admin-stats'] }), qc.invalidateQueries({ queryKey: ['admin-health'] })]);
+    await qc.invalidateQueries({ queryKey: ['health-summary'] });
   };
 
   // Separate singular keys rather than a plural library. Nine languages with one count each does not justify
@@ -225,9 +241,10 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className="mt-5">
-          <button onClick={scan} className="btn-accent px-5 py-2.5 text-sm">
-            <IcRefresh width={16} height={16} />{tr('Scan library now')}
+          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className="btn-accent px-5 py-2.5 text-sm disabled:opacity-60">
+            <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
           </button>
+          {scanned && scanned.kind !== 'working' && <div data-hero-scan-result className="max-w-xl"><ActionStatus state={scanned} /></div>}
         </motion.div>
       </div>
     </div>
@@ -366,12 +383,20 @@ function NeedsAttention({ health, className = '' }: {
         </>
       ) : (
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {failing.map((c) => (
-            <div key={c.id} className={`rounded-2xl border px-3 py-2.5 ${HEALTH_TONE[c.status]}`}>
-              <p className="text-sm font-medium text-fog-100">{c.title}</p>
-              <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
-            </div>
-          ))}
+          {failing.map((c) => {
+            // The tint alone told a problem from a warning only to someone who can tell red from amber:
+            // the glyph's shape says it too, and names it to a screen reader. The edge is StatusEdge's bar,
+            // the one every card that needs a second look wears from v0.49.0. Inset 12 px rather than the
+            // default 16: the tile is short, and 12 still clears its 16 px corners (checked at 390 and 1280).
+            const m = healthMark(c.status);
+            return (
+              <div key={c.id} className={`relative rounded-2xl border px-3 py-2.5 ${TONE_SURFACE[m.tone]}`}>
+                <StatusEdge tone={m.tone} inset="inset-y-3" />
+                <p className="flex items-center gap-1.5 text-sm font-medium text-fog-100"><StatusMark tone={m.tone} title={m.label} />{c.title}</p>
+                <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -510,14 +535,30 @@ function Members() {
   );
 }
 
+/** One row of GET /api/admin/sources: the stored health plus #115's evidence (bff routes/admin.ts). */
+interface AdminSourceRow {
+  source_id: string;
+  last_error?: string | null;
+  consecutive?: number;
+  /** The open, confirmed, current failures per stage. */
+  failing?: Array<{ stage: string; since: string; error: string | null; kind: string; by: string; streak: number }>;
+  /** The last deliberate live check, or null when there has been none. */
+  live?: (LiveVerdict & { code: string | null }) | null;
+  /** One line per stage, what was last seen there. */
+  evidence?: StageLine[];
+}
+
 function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
   const { data: srcs } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
-  const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: any[] }>('/api/admin/sources'), refetchInterval: 10000 });
+  const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: AdminSourceRow[]; testMs?: number }>('/api/admin/sources'), refetchInterval: 10000 });
   const hmap = new Map((health?.content || []).map((h) => [h.source_id, h]));
-  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); } catch { toast('Failed', 'error'); } };
+  // Health reads the same evidence, and the header's mark reads Health's summary: a Test, a block cleared or a
+  // source switched off here must not leave either of them saying what they said before (#115).
+  const invalHealth = () => { qc.invalidateQueries({ queryKey: ['admin-health'] }); qc.invalidateQueries({ queryKey: ['health-summary'] }); };
+  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast('Failed', 'error'); } };
   const { data: custom } = useQuery({ queryKey: ['admin-custom'], queryFn: () => api<{ content: any[] }>('/api/admin/sources/custom') });
   const customIds = new Set((custom?.content || []).map((c: any) => c.id));
   const [reloading, setReloading] = useState(false);
@@ -525,13 +566,13 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     setReloading(true);
     try {
       const r = await api<{ available: number }>('/api/admin/sources/reload', { method: 'POST' });
-      toast(`Reloaded — ${r.available} source${r.available === 1 ? '' : 's'} available`, 'success');
+      toast(r.available === 1 ? tr('Reloaded — 1 source available') : tr('Reloaded — {n} sources available', { n: r.available }), 'success');
       qc.invalidateQueries({ queryKey: ['sources'] });
       qc.invalidateQueries({ queryKey: ['admin-sources'] });
-    } catch { toast('Reload failed', 'error'); }
+    } catch { toast(tr('Reload failed'), 'error'); }
     setReloading(false);
   };
-  const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); };
+  const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); invalHealth(); };
   const [eng, setEng] = useState<'auto' | 'madara' | 'manganato' | 'mangathemesia'>('auto');
   // The (i) beside "Add a site": what a source, an extension and a site by URL are, in the explainer the
   // reader-facing sheets share. This panel is where the words are first met by whoever runs the server.
@@ -561,30 +602,55 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   // running container, so a test result always wins the display.
   const [sweep, setSweep] = useState<any>(null);
   const [checking, setChecking] = useState(false);
+  // Where the sweep has got to, from its GET: "Checking 7 of 40 · Manga Ball (EN)" on the button.
+  const [progress, setProgress] = useState<SourceCheckProgress | null>(null);
+  const sweepDone = (r: any) => {
+    setSweep(r);
+    const t = sweepToast(r);
+    toast(t.text, t.type);
+    inval();
+  };
+  // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts). A sweep already
+  // running when the tab opens -- the daily one, or one another tab started -- is followed too, so the button shows
+  // where it is instead of offering a second run the server would refuse. ONE owner of its answer per visit, and
+  // none once the tab is left (checkAllSession): a press kept polling after a tab switch, and the next visit's
+  // follower then gave the same notice a second time.
+  const checkRun = useRef<CheckAllSession | null>(null);
+  useEffect(() => {
+    const run = checkAllSession(api, {
+      progress: (p) => { setChecking(true); setProgress(p); },
+      done: sweepDone,
+      failed: (e) => toast(msgOf(e, tr('Could not run the check')), 'error'),
+      idle: () => { setChecking(false); setProgress(null); },
+    });
+    checkRun.current = run;
+    void run.follow();
+    return () => run.leave();
+    // Once per visit to the tab: the session owns the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
-  const checkAll = async () => {
+  const checkAll = () => {
     setChecking(true);
-    try {
-      const r = await api<any>('/api/admin/sources/check', { method: 'POST' });
-      setSweep(r);
-      toast(r.needsAttention.length ? `${r.needsAttention.length} source(s) need attention` : 'All sources healthy',
-        r.needsAttention.length ? 'error' : 'success');
-      inval();
-    } catch (e: any) { toast(msgOf(e, 'Could not run the check'), 'error'); }
-    setChecking(false);
+    void checkRun.current?.press();
   };
 
-  const [tested, setTested] = useState<Map<string, any>>(new Map());
+  const [tested, setTested] = useState<Map<string, TestAnswer & { probe?: { finalUrl?: string } }>>(new Map());
   const [testingId, setTestingId] = useState<string | null>(null);
+  // When the running Test began, for its clock against the server's own limit (`testMs`): a Test can take most
+  // of a minute on a slow or protected site, and a button that only said "Testing…" for that long read as stuck.
+  const [testFrom, setTestFrom] = useState(0);
+  const now = useTicker(!!testingId);
   const testSource = async (id: string) => {
     setTestingId(id);
+    setTestFrom(Date.now());
     try {
-      const r = await api<any>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const r = await api<TestAnswer & { probe?: { finalUrl?: string } }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
       setTested((m) => new Map(m).set(id, r));
-      toast(r.ok ? 'Working' : (r.diagnosis?.reason || 'Still failing'), r.ok ? 'success' : 'error');
+      toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
       inval();
     } catch (e: any) {
-      toast(msgOf(e, 'Could not test that source'), 'error');
+      toast(msgOf(e, tr('Could not test that source')), 'error');
     }
     setTestingId(null);
   };
@@ -604,7 +670,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
 
   const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
 
-  const list = (srcs?.content || []) as ProviderSrc[];
+  // The public status, overlaid with what only the admin rows know: a confirmed failure at a step reads
+  // 'failing' instead of the 'ok' the public status keeps until a cooldown (#115).
+  const list = ((srcs?.content || []) as ProviderSrc[]).map((s) => ({ ...s, status: providerStatus(s.status as any, hmap.get(s.id)) }));
   // One card per extension PACKAGE rather than per source: a multi-language extension is one install that
   // exposes one source per language, and 3Hentai alone put twenty-nine near-identical cards here, enabled
   // or not. A package with a single variant, and every engine, pack and custom site, renders the card it
@@ -615,69 +683,68 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const toggleGroup = (key: string) => setUnfolded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   /**
-   * The diagnosis, then the fix, then the raw error last and small. The raw string was all there used to
-   * be: "timeout", truncated to one line, written by three different faults. Shared by the full card and
+   * What is known about this source, through the one component Health's rows use as well (SourceEvidence): the
+   * Test that just ran here, else what the server kept -- the last Test or daily check and the stage lines -- so a
+   * reload does not wipe the verdict. Then the cooldown's raw error, last and small. Shared by the full card and
    * the compact variant row, so a language variant inside a folded package can be tested and read the same way.
+   *
+   * ⚠️ "Working normally." comes only from a Test that passed (lib/sourceEvidence.ts answerView). It used to be
+   * the fallback for any diagnosis without a reason, which put it under a failed Search (#115).
    */
-  function diagnosisOf(s: ProviderSrc, st: string) {
-    const h = hmap.get(s.id) as any;
+  function evidenceOf(s: ProviderSrc, st: ProviderStatus) {
+    const h = hmap.get(s.id);
     const t = tested.get(s.id);
-    const d = t?.diagnosis;
     const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
-    if (!d && !(h?.last_error && unwell)) return null;
-    return (
-      <div className="mt-1.5 space-y-1">
-        {d && <p className="text-[12px] text-fog-200">{d.reason || 'Working normally.'}</p>}
-        {d?.fix && <p className="text-[11px] leading-relaxed text-fog-400">{d.fix}</p>}
-        {h?.last_error && unwell && (
-          <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
-        )}
-      </div>
-    );
-  }
-  function testResultOf(s: ProviderSrc) {
-    const t = tested.get(s.id);
-    if (!t) return null;
-    return (
-      <div className={`mt-2 rounded-xl border p-2 ${t.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
-        {t.checks.map((c: any, i: number) => (
-          <p key={i} className="text-[11px] text-fog-300">{c.ok ? '✓' : '✗'} {c.name}: <span className="text-fog-500">{c.detail}</span></p>
-        ))}
-        {t.timedOut && <p className="text-[11px] text-amber-300">Gave up waiting. The site is slow or heavily protected.</p>}
-      </div>
-    );
+    const cooldown = h?.last_error && unwell
+      ? <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
+      : null;
+    if (t) {
+      return (
+        <>
+          <SourceEvidence answer={t} onMove={customIds.has(s.id) ? () => moveSite(s.id) : undefined} />
+          {cooldown}
+        </>
+      );
+    }
+    const failing = !!h?.failing?.length;
+    if (h && (h.live || failing)) {
+      return (
+        <>
+          {/* A card whose last check passed and that fails nowhere needs one line, not four. */}
+          <SourceEvidence lines={h.evidence} tested={h.live} failing={failing} compact={!failing && h.live?.state === 'pass'} />
+          {cooldown}
+        </>
+      );
+    }
+    return cooldown && <div className="mt-1.5">{cooldown}</div>;
   }
   /** Test / Clear block / Enable-Disable, plus the two custom-site buttons when the source is one. */
   function controlsOf(s: ProviderSrc, st: string) {
     return (
       <>
-        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="chip text-xs disabled:opacity-50">
-          {testingId === s.id ? 'Testing…' : tr('Test')}
+        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} data-source-test={s.id} className="btn-key tabular-nums">
+          {testingId === s.id ? testClock(now - testFrom, health?.testMs) : tr('Test')}
         </button>
-        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
-        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
-        {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
-          <button onClick={() => moveSite(s.id)} className="chip text-xs text-accent">{tr('Update address')}</button>
-        )}
+        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="btn-key">{tr('Clear block')}</button>}
+        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="btn-key">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
         {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
       </>
     );
   }
-  const statusChip = (st: string) => (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
-  );
+  // A glyph and the words, not a capsule around the server's own token: "ok" and "rate-limited" were shown
+  // as sent, in English in every language, and a blocked source and a healthy one differed only in tint.
+  const statusMark = (st: ProviderStatus) => <StatusMark {...sourceMark(st)} />;
 
   /** The card every source has always had: one source, its status, its diagnosis, its controls. */
   function sourceCard(s: ProviderSrc) {
-    const st = (s.status ?? 'ok') as string;
+    const st: ProviderStatus = s.status ?? 'ok';
     return (
-      <div key={s.id} className="card grad-border p-4">
+      <div key={s.id} data-source-card={s.id} className="card grad-border p-4">
         <div className="flex items-center gap-2">
           <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
-          {statusChip(st)}
+          {statusMark(st)}
         </div>
-        {diagnosisOf(s, st)}
-        {testResultOf(s)}
+        {evidenceOf(s, st)}
         <div className="mt-2 flex flex-wrap gap-1.5">{controlsOf(s, st)}</div>
       </div>
     );
@@ -698,23 +765,22 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
             {g.name}
             <span className="ms-2 text-[11px] text-fog-500">{tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}</span>
           </span>
-          {statusChip(g.worst)}
+          {statusMark(g.worst)}
           <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
         </button>
         {isOpen && (
           <ul className="mt-2 divide-y divide-ink-800">
             {g.sources.map((s) => {
-              const st = (s.status ?? 'ok') as string;
+              const st: ProviderStatus = s.status ?? 'ok';
               return (
                 <li key={s.id} className="py-2">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
-                    {statusChip(st)}
+                    {statusMark(st)}
                     <span className="text-[11px] text-fog-500">{tr('{n} series', { n: s.used ?? 0 })}</span>
                     <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
                   </div>
-                  {diagnosisOf(s, st)}
-                  {testResultOf(s)}
+                  {evidenceOf(s, st)}
                 </li>
               );
             })}
@@ -730,25 +796,29 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <p className="text-sm text-fog-400">{tr('{n} sources in {m} providers', { n: list.length, m: groups.length })}</p>
         <div className="flex gap-1.5">
           {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
-          <button onClick={checkAll} disabled={checking} className="chip shrink-0 text-xs disabled:opacity-50">
-            {checking ? 'Checking…' : '🔍 Check all now'}
+          <button onClick={checkAll} disabled={checking} data-source-check-all className="btn-key tabular-nums">
+            {checking ? checkAllLabel(progress) : `🔍 ${tr('Check all now')}`}
           </button>
-          <button onClick={reload} disabled={reloading} className="chip shrink-0 text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+          {/* Translated like its neighbour: it stayed English beside a translated "Check all now". */}
+          <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? tr('Reloading…') : `↻ ${tr('Reload sources')}`}</button>
         </div>
       </div>
       {sweep && (
         <div className="full rounded-xl border border-ink-700 bg-ink-850/60 p-3">
           <p className="text-xs text-fog-300">
-            Checked {sweep.sources.length} source{sweep.sources.length === 1 ? '' : 's'}.
-            {sweep.needsAttention.length
-              ? ` ${sweep.needsAttention.length} need${sweep.needsAttention.length === 1 ? 's' : ''} attention.`
-              : ' Nothing needs attention.'}
+            {sweep.sources.length === 1 ? tr('Checked 1 source.') : tr('Checked {n} sources.', { n: sweep.sources.length })}{' '}
+            {sweepToast(sweep).text}
           </p>
           {sweep.sources.filter((v: any) => v.action).map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: followed its move to a new address</p>
+            // The SOURCE moved; Uchiyomi followed it ("{name}: followed its move" had the source follow itself).
+            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('moved to a new address, which Uchiyomi now uses')}</p>
           ))}
           {sweep.needsAttention.map((v: any) => (
             <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {v.fix || v.reason}</p>
+          ))}
+          {/* Our own deadline, not a verdict on the site: named, never counted as failing. */}
+          {(sweep.inconclusive || []).map((v: any) => (
+            <p key={v.id} className="mt-1 text-[11px] text-fog-500"><span className="text-fog-300">{v.name}</span>: {tr('could not finish in time — not proof it is broken')}</p>
           ))}
         </div>
       )}
@@ -774,7 +844,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
           </select>
           <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className="field min-w-[110px] flex-1" />
           <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className="field min-w-[170px] flex-[2]" />
-          <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
+          <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-key btn-key-primary">{adding ? 'Adding…' : 'Add'}</button>
         </div>
         <p className="mt-1.5 text-[11px] text-fog-500">Just paste a site&apos;s homepage URL — the engine is auto-detected (or pick it). Picked up instantly, no restart. Works for sites on the Madara, MangaThemesia, or Manganato engines.</p>
         {smoke && (
@@ -810,7 +880,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <p className="mb-3 text-[11px] text-fog-500">
           {tr('Bring your library over from another app: import a list → review matches → add. A Mihon / Tachiyomi backup, a public MangaDex list, or pasted titles; every match is shown before anything is added.')}
         </p>
-        <button onClick={() => router.push('/admin/import/')} className="btn-accent w-full py-2 text-sm">
+        <button onClick={() => router.push('/admin/import/')} className="btn-key btn-key-primary w-full">
           {tr('Import and review matches →')}
         </button>
       </div>
@@ -872,7 +942,10 @@ function ExtensionsLink({ onTab }: { onTab: (t: Tab) => void }) {
     : down && engine === 'installing' ? tr('Installing the extension engine…')
     : down && (engine === 'starting' || engine === 'running') ? tr('Starting the extension engine…')
     : down && engine === 'failed' ? tr('The extension engine could not be installed.')
-    : down ? tr('The extension engine isn’t running')
+    // #72: why, on the server build: switched off on purpose, never set up, or set up and not answering.
+    : down && status.off === 'switch' ? tr('Extensions are turned off')
+    : down && status.off === 'unset' ? tr('No extension engine is set up')
+    : down ? tr('The extension engine isn’t answering')
     : status.enabled === 1 ? tr('1 source enabled')
     : tr('{n} sources enabled', { n: status.enabled ?? 0 });
   return (
@@ -912,7 +985,7 @@ function ArtReview() {
   const startBackfill = async () => {
     try {
       const r = await api<{ total: number }>('/api/admin/art/backfill', { method: 'POST' });
-      toast(`Hunting art for ${r.total} series…`, 'success');
+      toast(`Hunting art for ${r.total} series…`, 'success', { busy: true });
       qc.invalidateQueries({ queryKey: ['admin-art-backfill'] });
     } catch (e: any) { toast(msgOf(e, 'Backfill already running?'), 'error'); }
   };
@@ -967,6 +1040,8 @@ function ArtReview() {
 }
 
 function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => void; onApplied: () => void }) {
+  // A dialog on the notices' layer stack (lib/layers.ts): it toasts while open ("Failed to apply").
+  useLayer('dialog');
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const { data, isLoading } = useQuery({
@@ -993,7 +1068,9 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      {/* max-w-xl, the widest a centred panel may be: from lg up the notices' column beside it is sized to clear
+          36 rem (lib/notices.ts WIDE_BESIDE_DIALOG), and at 42 rem this one's corner sat under it. */}
+      <div role="dialog" aria-modal="true" aria-label={row.title} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -1050,16 +1127,17 @@ function Tasks() {
       if (r?.ok === false) {
         toast(r.error === 'sweep_running' ? tr('A chapter sweep is running — try again in a few minutes')
           : r.error === 'repair_running' ? tr('The library repair is running — try again in a few minutes')
-          : r.error === 'busy' ? 'Already running'
-          : r.error === 'not_enabled' ? 'That task is switched off'
-          : 'Failed', 'error');
+          : r.error === 'busy' ? tr('Already running')
+          : r.error === 'not_enabled' ? tr('That task is switched off')
+          : tr('Failed'), 'error');
       }
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
       // series and the reporter's summary was "the run now buttons don't work" -- because from the outside,
       // "Started" followed by nothing changing is indistinguishable from a button that does nothing.
       else if (typeof r?.series === 'number') {
-        toast(r.series ? `Scan done: ${r.series} series, ${r.books ?? 0} chapters` : 'Scan done: nothing found — check the folder layout', r.series ? 'success' : 'error');
+        const s = scanState({ scanned: true, series: r.series, books: r.books }, Date.now());
+        toast(s.kind === 'done' ? s.outcome : '', r.series ? 'success' : 'error');
       }
       // The verify task is detached (one stat per chapter over a share is minutes, and a request that long
       // dies at the proxy while the walk goes on), so its counts cannot be in this answer. The one place
@@ -1070,9 +1148,9 @@ function Tasks() {
       // rather than a bare "Started": a nightly run counts two thousand files and can replace a chapter,
       // and none of that is in this answer.
       else if (id === 'repair' && r?.started) toast(tr('Started — the Tasks line shows what it did'), 'success');
-      else toast('Started', 'success');
+      else toast(tr('Started'), 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
-    } catch { toast('Failed', 'error'); }
+    } catch { toast(tr('Failed'), 'error'); }
   };
   // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
@@ -1082,7 +1160,7 @@ function Tasks() {
       <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
         {(data?.content || []).map((t: any) => (
           <div key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
-            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{t.name}</p>
+            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{tr(t.name)}</p>
             {/* Phone stacks the schedule under the name; from lg it takes a track of its own. */}
             {/* ⚠️ `remaining` is shown because the backlog is the one number that tells you whether a task is
                 keeping up. The server has always sent it and nothing displayed it, so a job that had quietly
@@ -1091,13 +1169,21 @@ function Tasks() {
                 verify line ("one folder looked unmounted…: /library-dl, 4000 checked, 312 missing…") is
                 900 px wide -- truncated, it read as a clean run on every width. */}
             <p className="col-start-1 row-start-2 min-w-0 break-words text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-              {t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}
+              {scheduleText(t)} · {t.lastRun ? tr('last run {when}', { when: relativeTime(new Date(t.lastRun).toISOString()) }) : tr('not run yet')}
+              {/* The repair's line is the last FULL run's since v0.49.0 (the nightly, or Run now here): say which. */}
+              {t.lastRun && t.lastOrigin === 'nightly' ? ` ${tr('(nightly)')}` : t.lastRun && t.lastOrigin === 'manual' ? ` ${tr('(run by hand)')}` : ''}
+              {taskResult(t.lastResult)}
               {typeof t.remaining === 'number' && t.remaining > 0 && (
-                <span className="text-amber-300"> · {t.remaining.toLocaleString()} waiting</span>
+                <span className="text-amber-300"> · {tr('{n} waiting', { n: t.remaining.toLocaleString() })}</span>
               )}
             </p>
+            {t.id === 'repair' && (
+              <div className="col-start-1 row-start-3 min-w-0 lg:col-start-2 lg:row-start-2">
+                <RepairTaskLines nextAt={t.nextAt} latestOther={t.latestOther} running={!!t.running} />
+              </div>
+            )}
             <button onClick={() => run(t.id)} disabled={t.running}
-              className="chip col-start-2 row-span-2 row-start-1 shrink-0 justify-self-end text-xs disabled:opacity-50 lg:col-start-3 lg:row-span-1">{t.running ? 'Running…' : 'Run now'}</button>
+              className="btn-key col-start-2 row-span-2 row-start-1 justify-self-end lg:col-start-3 lg:row-span-1">{t.running ? tr('Running…') : tr('Run now')}</button>
           </div>
         ))}
       </div>
@@ -1192,12 +1278,14 @@ function Sessions() {
             <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{s.display_name || s.username}</p>
             {/* Phone folds device and ip under the name; from lg each takes its own track. */}
             <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-              {s.device_name || 'Device'}
-              <span className="lg:hidden"> · {s.ip || 'unknown'} · active {relativeTime(s.last_seen)}</span>
+              {/* The stored name through the same mapping as Profile → Sessions: an older sign-in's English "Browser"
+                  is not shown, and no name is "Device" in the reader's words. */}
+              {shownDeviceName(s.device_name) || tr('Device')}
+              <span className="lg:hidden"> · {s.ip || tr('unknown ip')} · {tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
             </p>
-            <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || 'unknown'}</p>
+            <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || tr('unknown ip')}</p>
             <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 items-center gap-2 justify-self-end lg:col-start-4 lg:row-span-1">
-              <span className="hidden text-[11px] text-fog-500 lg:inline">active {relativeTime(s.last_seen)}</span>
+              <span className="hidden text-[11px] text-fog-500 lg:inline">{tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
               {/* `current` marks the caller's own session. The admin route does not send it yet, so this is
                   inert rather than wrong: without it, revoking the row you are sitting on logs you out. */}
               {s.current ? (
@@ -1220,13 +1308,6 @@ function Sessions() {
 // and this page mounts them, so declaring the shapes here would have meant that component importing from a
 // Next route file which imports the component straight back. `info` items -- a source you switched off, a
 // short chapter you already confirmed -- are rendered dimmed so the eye lands on the real findings.
-
-const HEALTH_TONE: Record<HealthCheck['status'], string> = {
-  problem: 'border-red-500/40 bg-red-500/10 text-red-300',
-  warn: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-  ok: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-};
-const HEALTH_LABEL: Record<HealthCheck['status'], string> = { problem: 'Needs attention', warn: 'Worth a look', ok: 'All good' };
 
 /** Read-only audit of the library: gaps, truncated downloads, duplicates, and failing sources. */
 interface DeletedRow {
@@ -1886,98 +1967,112 @@ function Health() {
   });
   const checks = data?.checks || [];
   const bad = checks.filter((c) => c.status !== 'ok').length;
-  // After anything on this page changes a finding -- a fix, an ignore -- the page is checked again, and the
-  // header's mark with it: the refetch stores a new summary, and the header reads that summary.
+  // After anything on this page changes a finding -- a repair that ENDED, an ignore -- the page is checked
+  // again, and the header's mark with it: the refetch stores a new summary, and the header reads that summary.
   const qc = useQueryClient();
   const recheck = () => refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] }));
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
-  // overview uses, so the shape of the panel is the verdict.
+  // overview uses, so the shape of the panel is the verdict. The repair provider holds the live run and its
+  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx).
   return (
-    <div className="board">
-      {/* Wraps: at phone width the sentence and two chips do not fit on one line (v0.48.3). */}
-      <div className="full flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-fog-500">
-          {!data ? 'Checking your library…'
-            : bad ? `${bad} of ${checks.length} checks found something`
-            : 'Everything looks healthy'}
-          {data && <> · checked {relativeTime(data.generatedAt)}</>}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <HealthFixAll checks={checks} onDone={recheck} />
-          <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
-            {isFetching ? 'Checking…' : 'Re-check'}
+    <RepairRunProvider onEnded={recheck}>
+      <div className="board">
+        {/* Wraps: at phone width the sentence and the key do not fit on one line (v0.48.3). */}
+        <div className="full flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-fog-500">
+            {!data ? tr('Checking your library…')
+              : bad ? tr('Checks that found something: {n} of {m}', { n: bad, m: checks.length })
+              : tr('Everything looks healthy')}
+            {data && <> · {tr('checked {when}', { when: relativeTime(data.generatedAt) })}</>}
+          </p>
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className="btn-key">
+            <IcRefresh aria-hidden width={14} height={14} />{isFetching ? tr('Checking…') : tr('Re-check')}
           </button>
         </div>
-      </div>
 
-      {checks.map((c) => {
-        const isOpen = open === c.id;
-        // Notes explain important states that are deliberately not findings. A readable partial chapter,
-        // for example, is absent from the active failure ledger but this note is the only place Health says
-        // where it appears and when it is repaired. Keep those cards expandable even when `items` is empty.
-        const expandable = !!c.items.length || !!c.note;
-        return (
-          <div key={c.id} data-health-check={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
-            {/* ⚠️ The check-level chips are a SIBLING of the disclosure, never a child of it: a button
-                inside a button is invalid HTML and the browser hoists the inner one out of the header
-                altogether. They also come after it, because the end-to-end walk opens a card by clicking
-                the first button inside `[data-health-check="…"]`. */}
-            <div className="flex items-center">
+        <RepairLiveStrip />
+        <FixAllIssues checks={checks} />
+
+        {checks.map((c) => {
+          const isOpen = open === c.id;
+          // Notes explain important states that are deliberately not findings. A readable partial chapter, for
+          // example, is absent from the active failure ledger but this note is the only place Health says where
+          // it appears and when it is repaired. Keep those cards expandable even when `items` is empty -- and
+          // a card with an action of its own (Scan the library now) too.
+          const expandable = !!c.items.length || !!c.note || hasCardActions(c);
+          const mark = healthMark(c.status);
+          const rowKeys = keysFor(c.id, c.items);
+          return (
+            <div key={c.id} data-health-check={c.id} className={`card grad-border relative overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
+              <StatusEdge tone={mark.tone} />
+              {/* ⚠️ The disclosure is the FIRST button in the card: the end-to-end walks open a card by
+                  clicking the first button inside `[data-health-check="…"]`. Every action lives in the body. */}
               <button
                 type="button"
                 onClick={() => setOpen(isOpen ? null : c.id)}
                 aria-expanded={expandable ? isOpen : undefined}
                 aria-controls={expandable ? `health-${c.id}-details` : undefined}
                 disabled={!expandable}
-                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
+                className="flex w-full min-w-0 items-center gap-x-3 px-4 py-3.5 text-start disabled:cursor-default"
               >
-                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
-                  {HEALTH_LABEL[c.status]}
-                </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-fog-100">{c.title}</p>
-                  <p className="text-[11px] text-fog-500">{c.summary}</p>
+                  <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="text-sm text-fog-100">{checkTitle(c)}</span>
+                    <StatusMark {...mark} size="xs" />
+                    <CardProgress checkId={c.id} />
+                  </p>
+                  <p dir="auto" className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
                 </div>
                 {expandable && (
-                  <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
+                  <>
+                    <span className="sr-only">{isOpen ? tr('Hide details') : tr('Show details')}</span>
+                    <span aria-hidden className="inline-grid shrink-0 text-fog-500 rtl:-scale-x-100">
+                      <IcChevronRight width={16} height={16} className={`transition ${isOpen ? 'rotate-90' : ''}`} />
+                    </span>
+                  </>
                 )}
               </button>
-              <HealthCheckActions check={c} onDone={recheck} />
-            </div>
-            {c.id === 'update' && <DesktopUpdateNote />}
+              {c.id === 'update' && <DesktopUpdateNote />}
 
-            {isOpen && (
-              <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
-                {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
-                <div className="divide-y divide-ink-800/70">
-                  {/* Wraps rather than truncating the row: a source item carries Test, Clear block and
-                      Turn off, which at 390 px is more than fits beside a title, and the Test chip's fix
-                      is a sentence that takes a line of its own inside this same wrap container. */}
-                  {c.items.map((it, i) => (
-                    <div key={`${c.id}-${i}`} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-fog-100">{it.title}</p>
-                        <p className="text-[11px] text-fog-500">{it.detail}</p>
-                      </div>
-                      <HealthActions check={c.id} item={it} onDone={recheck} />
-                      {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
-                      {/* A duplicate pair gets one per copy, each naming its copy: two bare "Open"s cannot be told
-                          apart on a phone, where there is no tooltip. */}
-                      {healthLinks(c.id, it).map((l) => (
-                        <Link key={l.href} href={l.href} className="chip max-w-[11rem] shrink-0 truncate text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
-                          {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}
-                        </Link>
-                      ))}
-                    </div>
-                  ))}
+              {isOpen && (
+                <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
+                  <HealthCardActions check={c} />
+                  {c.note && <p data-health-note dir="auto" className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+                  <div className="divide-y divide-ink-800/70">
+                    {c.items.map((it, i) => (
+                      <HealthRow key={rowKeys[i]} rowKey={rowKeys[i]} check={c} item={it}
+                        // To the chapter the finding is about, not just its series (lib/healthLinks.ts). A duplicate
+                        // pair gets one per copy, each naming its copy: two bare "Open"s cannot be told apart on a
+                        // phone, where there is no tooltip. Text links, not chips: they go somewhere, they do nothing.
+                        // Two lines, never cut: "Öffnen · Einstellungen der Q…" hid which settings it opens (the
+                        // arrow is held to the last word by a no-break space).
+                        links={healthLinks(c.id, it).map((l) => (
+                          <Link key={l.href} href={l.href} className="line-clamp-2 max-w-[11rem] break-words text-end text-xs text-accent hover:underline"
+                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                            {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
+                          </Link>
+                        ))}>
+                        {/* The server's own words, in English (a title in any script): `dir="auto"`, or in an Arabic
+                            page a sentence's full stop and closing bracket land at its start. */}
+                        <p dir="auto" className="break-words text-sm text-fog-100">{it.title}</p>
+                        <p dir="auto" className="text-[11px] text-fog-500">{it.detail}</p>
+                        {/* #115: the stage lines and the fix, through the component Providers uses too, and only
+                            where they say something (healthRowEvidence). Among the row's words, above its keys: the
+                            source rows have no Open link beside them, so the lines take the row's full width. */}
+                        {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} />}
+                      </HealthRow>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              )}
+            </div>
+          );
+        })}
+
+        <RepairHistory />
+      </div>
+    </RepairRunProvider>
   );
 }
 
@@ -2013,8 +2108,9 @@ function DesktopUpdateNote() {
   );
 }
 
-interface ExtStatus {
-  configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number;
+/** The engine's own fields (why it is off, the retry, the platform, its Cloudflare helper) are EngineReport's. */
+interface ExtStatus extends EngineReport {
+  enabled?: number; known?: number;
   /** what search actually reaches; differs from `enabled` by `skipped` when SUWAYOMI_MAX_SOURCES bites */
   registered?: number; skipped?: number; cap?: number; hiddenLangs?: string[];
 }
@@ -2074,6 +2170,8 @@ function Extensions({ span = '' }: { span?: string }) {
   const [repoError, setRepoError] = useState<string | null>(null);
   const [showLangs, setShowLangs] = useState(false);
   const [hiding, setHiding] = useState<ExtLang | null>(null);
+  // An extension's own settings (#116), from a row's Settings or the `?settings=` deep link.
+  const [settingsFor, setSettingsFor] = useExtensionSettingsParam();
 
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
   // Fetched only while the block is open: it is the full source list joined with usage counts, and most
@@ -2103,25 +2201,8 @@ function Extensions({ span = '' }: { span?: string }) {
   if (isDesktop() && !(status.configured && status.reachable)) return <EngineInstall span={span} />;
 
   if (!status.configured) {
-    return (
-      <div className={`card grad-border p-4 ${span}`}>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
-        {/* Reached only when SUWAYOMI_URL is empty (turned off, or an install with no engine such as CasaOS):
-            a stopped container with the URL still set is the "Can't reach" line further down. It used to name
-            `yomi-suwayomi`, the development stack's container; the shipped compose files call it
-            `uchiyomi-suwayomi`. */}
-        <p className="text-[11px] leading-relaxed text-fog-500">
-          {tr('No extension engine is set up for this server.')}{' '}
-          {/* Split on the placeholders, keeping them, so a translation may put them in either order. */}
-          {tr('The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.')
-            .split(/(\{name\}|\{command\})/).map((part, i) => (
-              part === '{name}' ? <code key={i} className="text-fog-300">uchiyomi-suwayomi</code>
-                : part === '{command}' ? <code key={i} className="text-fog-300">docker compose up -d</code>
-                  : part
-            ))}
-        </p>
-      </div>
-    );
+    // Off (EXTENSION_ENGINE=0), or no engine set up at all: how to add it on this platform (#72).
+    return <EngineSetup status={status} span={span} />;
   }
 
   const refreshAll = () => {
@@ -2240,11 +2321,9 @@ function Extensions({ span = '' }: { span?: string }) {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
-            {status.reachable ? `ready${status.version ? ` · ${status.version}` : ''}` : 'engine unreachable'}
-          </span>
+          <StatusMark {...engineMark(status.reachable, status.version)} />
           {status.reachable && (
-            <button onClick={refreshRepos} disabled={busy === '__refresh'} className="chip text-[11px] disabled:opacity-50">
+            <button onClick={refreshRepos} disabled={busy === '__refresh'} className="btn-key">
               {busy === '__refresh' ? tr('Refreshing…') : `↻ ${tr('Refresh')}`}
             </button>
           )}
@@ -2252,10 +2331,8 @@ function Extensions({ span = '' }: { span?: string }) {
       </div>
 
       {!status.reachable ? (
-        <p className="text-[11px] text-fog-500">
-          Can&apos;t reach the extension engine{status.error ? ` (${status.error})` : ''}. Uchiyomi keeps working; extensions
-          are just unavailable until it&apos;s back.
-        </p>
+        // Set up, and not answering: what to check on this platform, the retry and Check again (#72).
+        <EngineSetup status={status} bare />
       ) : (
         <>
           <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
@@ -2293,7 +2370,7 @@ function Extensions({ span = '' }: { span?: string }) {
                     onKeyDown={(e) => { if (e.key === 'Enter' && !addingRepo) void addRepo(); }}
                     aria-label={tr('Repository address')} autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url"
                     className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-hidden focus:border-accent" />
-                  <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-accent shrink-0 px-3 py-1.5 text-xs disabled:opacity-50">
+                  <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-key btn-key-primary">
                     {addingRepo ? tr('Checking…') : tr('Add')}
                   </button>
                 </div>
@@ -2324,7 +2401,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 {tr('Next: choose extensions from the list below and press Add on each one you want.')}{' '}
                 <span className="text-fog-400">{tr('Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.', { n: status.cap ?? 25 })}</span>
               </p>
-              <button onClick={() => setShowLangs(true)} className="chip shrink-0 text-[11px]">{tr('Choose languages')}</button>
+              <button onClick={() => setShowLangs(true)} className="btn-key">{tr('Choose languages')}</button>
             </div>
           )}
 
@@ -2335,7 +2412,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 <span>Languages</span>
                 <span className="text-fog-500"> · {status.hiddenLangs?.length ?? 0} hidden</span>
               </span>
-              <span className="text-[11px] text-fog-500">{showLangs ? 'Hide' : 'Manage'}</span>
+              <span className="text-[11px] text-fog-500">{showLangs ? tr('Hide') : tr('Manage')}</span>
             </button>
             {showLangs && (
               <div className="mt-2 space-y-1.5">
@@ -2346,7 +2423,7 @@ function Extensions({ span = '' }: { span?: string }) {
                   return (
                     <div key={name} className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-[11px] text-fog-300">
-                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'}>{name}</span>
+                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'} title={name}>{l.lang === null ? name : languageName(name)}</span>
                         <span className="text-fog-500"> · {l.sources} source{l.sources === 1 ? '' : 's'} · {l.enabled} on · {l.used} series</span>
                       </span>
                       {/* Sources that declare no language cannot be selected by one -- the server reaches those rows by id
@@ -2357,8 +2434,9 @@ function Extensions({ span = '' }: { span?: string }) {
                         <button
                           onClick={() => (on ? (l.used > 0 ? setHiding(l) : toggleLang(l, false)) : toggleLang(l, true))}
                           disabled={working}
-                          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${on ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
-                          {working ? '…' : on ? 'Hide' : 'Show'}
+                          className={`btn-key ${on ? '' : 'btn-key-primary'}`}>
+                          {/* Their own keys: the bare "Hide"/"Show" are the app's collapse toggles ("收起"/"展开"). */}
+                          {working ? '…' : on ? tr('Hide {lang}', { lang: languageName(name) }) : tr('Show {lang}', { lang: languageName(name) })}
                         </button>
                       )}
                     </div>
@@ -2376,15 +2454,24 @@ function Extensions({ span = '' }: { span?: string }) {
             )}
           </div>
 
+          {/* ⚠️ On <body>: this panel is a `.card`, whose backdrop blur makes it the containing block of a `fixed`
+              dialog -- only the panel dimmed, and on a tall one the dialog landed off-screen (the web2 review's scan
+              found it the last dialog left inside a card). One sentence per count, in the reader's words. */}
           {hiding && (
-            <ConfirmDialog
-              title={`Hide ${hiding.lang ?? 'none'}?`}
-              body={`Hiding ${hiding.lang ?? 'none'} turns off ${hiding.enabled} source${hiding.enabled === 1 ? '' : 's'}. ${hiding.used} series came from them and will stop updating until you show it again; they stay readable.`}
-              confirmLabel="Hide"
-              busy={busy === `__lang:${hiding.lang ?? 'none'}`}
-              onConfirm={() => toggleLang(hiding, false)}
-              onClose={() => setHiding(null)}
-            />
+            <OnBody>
+              <ConfirmDialog
+                title={tr('Hide {lang}?', { lang: languageName(hiding.lang ?? 'none') })}
+                body={joinSentences(hiding.enabled === 1
+                  ? tr('Hiding {lang} turns off 1 source.', { lang: languageName(hiding.lang ?? 'none') })
+                  : tr('Hiding {lang} turns off {n} sources.', { lang: languageName(hiding.lang ?? 'none'), n: hiding.enabled }), hiding.used === 1
+                  ? tr('1 series from {lang} will stop updating until you show the language again, but stay readable.', { lang: languageName(hiding.lang ?? 'none') })
+                  : tr('{n} series from {lang} will stop updating until you show the language again, but stay readable.', { lang: languageName(hiding.lang ?? 'none'), n: hiding.used }))}
+                confirmLabel={tr('Hide {lang}', { lang: languageName(hiding.lang ?? 'none') })}
+                busy={busy === `__lang:${hiding.lang ?? 'none'}`}
+                onConfirm={() => toggleLang(hiding, false)}
+                onClose={() => setHiding(null)}
+              />
+            </OnBody>
           )}
 
           {/* The cap overflow used to be one line in the boot log: the panel counted the sources that were on,
@@ -2410,7 +2497,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 <span className="text-amber-200/60"> · a newer version is available from its repository</span>
               </p>
               <button onClick={updateAll} disabled={!!busy}
-                className="shrink-0 rounded-full bg-amber-500/25 px-3 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/40 disabled:opacity-50">
+                className="btn-key border-amber-500/40 bg-amber-500/20 text-amber-100 hover:border-amber-400/70 hover:text-amber-50">
                 {busy === '__updateall' ? 'Updating…' : 'Update all'}
               </button>
             </div>
@@ -2455,12 +2542,15 @@ function Extensions({ span = '' }: { span?: string }) {
                 </div>
                 {e.hasUpdate && (
                   <button onClick={() => act(e, 'update')} disabled={busy === e.pkgName}
-                    className="shrink-0 rounded-full bg-amber-500/20 px-2.5 py-1 text-[11px] text-amber-200 disabled:opacity-50">
+                    className="btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100">
                     {busy === e.pkgName ? '…' : 'Update'}
                   </button>
                 )}
+                {e.installed && (
+                  <button onClick={() => setSettingsFor({ pkgName: e.pkgName, name: e.name })} className="btn-key">{tr('Settings')}</button>
+                )}
                 <button onClick={() => act(e, e.installed ? 'uninstall' : 'install')} disabled={busy === e.pkgName}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${e.installed ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
+                  className={`btn-key ${e.installed ? 'btn-key-danger' : 'btn-key-primary'}`}>
                   {busy === e.pkgName ? '…' : e.installed ? 'Remove' : 'Add'}
                 </button>
               </div>
@@ -2472,8 +2562,10 @@ function Extensions({ span = '' }: { span?: string }) {
             )}
             {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">{tr('Loading…')}</p>}
           </div>
+          <EngineReadyFoot status={status} desktop={isDesktop()} />
         </>
       )}
+      {settingsFor && status.reachable && <ExtensionSettings target={settingsFor} onClose={() => setSettingsFor(null)} />}
     </div>
   );
 }

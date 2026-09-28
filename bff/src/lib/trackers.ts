@@ -183,7 +183,12 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
   const prog = await one<{ chapters: number; total: number; done: number }>(
     // COALESCE the override: if an admin corrected "Vol 2 Ch 5" from chapter 2 to chapter 5, the tracker
     // has to be told 5, or it disagrees with the number the reader is showing the user.
-    `SELECT COALESCE(MAX(COALESCE(ov.number, b.number)) FILTER (WHERE rp.completed), 0)::int AS chapters,
+    // FLOORED, as the contiguous run below is: `::int` on a real ROUNDS, so a completed 12.6 -- every N.5x
+    // chapter anywhere, and every part of an episode a source numbers N.01..N.73 (#116) -- told the tracker
+    // N+1, a chapter nobody had read, and a push is effectively irreversible.
+    // Reintroduce by casting without floor(): "a completed 12.6 tells the tracker 12" in trackers.int.test.ts
+    // reads 13.
+    `SELECT floor(COALESCE(MAX(COALESCE(ov.number, b.number)) FILTER (WHERE rp.completed), 0))::int AS chapters,
             count(*)::int AS total,
             count(*) FILTER (WHERE rp.completed)::int AS done
        FROM lib_books b

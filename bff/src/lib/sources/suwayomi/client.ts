@@ -54,31 +54,111 @@ export function suwayomiImageHeaders(): Record<string, string> {
     : {};
 }
 
+/**
+ * The engine's service name in the shipped compose files: `uchiyomi-suwayomi` in deploy/, `yomi-suwayomi` in the
+ * development stack. EXTENSION_ENGINE only removes THAT container, so only an address naming it goes with it.
+ */
+export const BUNDLED_ENGINE_HOSTS: ReadonlySet<string> = new Set(['uchiyomi-suwayomi', 'yomi-suwayomi']);
+
+/**
+ * EXTENSION_ENGINE=0 while SUWAYOMI_URL still names the bundled container (#72).
+ *
+ * One variable has to turn off both the container and the feature: compose scales the engine to zero replicas,
+ * and without this the app would go on calling a host that no longer exists and report an engine it was told
+ * to drop as "unreachable". But the switch only speaks for the bundled container. Someone who dropped it and
+ * points SUWAYOMI_URL at a Suwayomi of their own, with the line still in .env, keeps extensions -- hence the
+ * host check rather than the flag alone.
+ *
+ * Both inputs are parameters, like suwayomiBase's: env is parsed once at load, and a test could not vary it.
+ */
+export function engineSwitchedOff(raw: string | undefined = env.SUWAYOMI_URL, on: boolean = env.EXTENSION_ENGINE): boolean {
+  if (on) return false;
+  const base = suwayomiBase(raw);
+  if (!base) return false;
+  try {
+    return BUNDLED_ENGINE_HOSTS.has(new URL(base).hostname.toLowerCase());
+  } catch {
+    return false; // not a URL at all: nothing that could be the bundled container
+  }
+}
+
+/**
+ * Is there an extension engine to talk to: an address, and not one switched off with EXTENSION_ENGINE. Every
+ * caller -- registration, the routes, Health, the scheduled checks, `gql` itself -- reads the switch through here.
+ */
 export function suwayomiConfigured(): boolean {
-  return !!env.SUWAYOMI_URL;
+  return !!env.SUWAYOMI_URL && !engineSwitchedOff();
+}
+
+let answered = false;
+
+/**
+ * Has the engine answered this process at least once: any GraphQL request that came back 200. Background
+ * housekeeping that talks to the engine unasked (cache.ts) waits for it, so a JVM that is still starting --
+ * or a desktop whose engine was never downloaded, where SUWAYOMI_URL is always set -- gets no request and
+ * puts no warning in the log. Never reset: an engine that answered once and then went away is worth saying so.
+ */
+export const engineAnswered = (): boolean => answered;
+
+/**
+ * Who failed, in words `diagnose` can tell apart (#115). A transport failure used to surface as undici's bare
+ * "fetch failed" and an abort as "The operation was aborted due to timeout": neither said it was the ENGINE that
+ * did not answer, and the one rule that did mention the engine matched every `suwayomi: ` message -- which is the
+ * opposite case, the engine answering with the extension's own exception. So "Manga Ball (EN)", whose extension
+ * threw on the site, was reported as "The extension server did not answer. Check that container."
+ *
+ * The four shapes, and only these:
+ *   `suwayomi unreachable: fetch failed (<code>)`  no answer at all (refused, reset, DNS)
+ *   `suwayomi timeout after <n>ms`                 no answer in time
+ *   `suwayomi <status>`                            the engine's HTTP layer refused (auth, 5xx)
+ *   `suwayomi: <message>`                          the engine ran the query and the extension failed
+ * classify() still reads the first two as 'down' ("fetch failed", "timeout"), so cooldowns do not change.
+ * `cause` is kept, so a caller that reads `e.cause.code` (the fake engine's own test does) still can.
+ */
+function transportError(e: any, timeoutMs: number): Error {
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+    return new Error(`suwayomi timeout after ${timeoutMs}ms`, { cause: e });
+  }
+  const code = e?.cause?.code || e?.code || e?.cause?.name || e?.name || 'error';
+  return new Error(`suwayomi unreachable: fetch failed (${code})`, { cause: e?.cause ?? e });
 }
 
 /**
  * Run one GraphQL operation. Errors carry the HTTP status in their message on purpose: lib/sourceHealth.ts
  * `classify()` reads the message to decide blocked vs rate-limited vs down, so a failing extension server
- * lands in the existing source-health machinery with no special casing.
+ * lands in the existing source-health machinery with no special casing. Every error starts with "suwayomi"
+ * (see transportError for the four shapes).
  */
 export async function gql<T = unknown>(query: string, variables: Record<string, unknown> = {}, timeoutMs = 30000): Promise<T> {
   if (!suwayomiConfigured()) throw new Error('suwayomi is not configured');
-  const r = await fetch(suwayomiUrl('/api/graphql'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json', ...suwayomiImageHeaders() },
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let r: Response;
+  try {
+    r = await fetch(suwayomiUrl('/api/graphql'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json', ...suwayomiImageHeaders() },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    throw transportError(e, timeoutMs);
+  }
   if (!r.ok) {
     const e: GqlError = new Error(`suwayomi ${r.status}`);
     e.status = r.status;
     throw e;
   }
-  const j = (await r.json()) as { data?: T; errors?: Array<{ message?: string }> };
-  if (j.errors?.length) throw new Error(`suwayomi: ${j.errors[0]?.message || 'graphql error'}`);
-  if (j.data === undefined || j.data === null) throw new Error('suwayomi returned no data');
+  answered = true;
+  let j: { data?: T; errors?: Array<{ message?: string }> };
+  try {
+    j = (await r.json()) as typeof j;
+  } catch (e: any) {
+    // The body is read under the same signal, so a slow or dropped body is still the engine not answering; a
+    // body that is not JSON at all (a proxy's HTML page) is an answer with nothing in it.
+    if (e?.name === 'SyntaxError') throw new Error('suwayomi returned no data', { cause: e });
+    throw transportError(e, timeoutMs);
+  }
+  if (j?.errors?.length) throw new Error(`suwayomi: ${j.errors[0]?.message || 'graphql error'}`);
+  if (j?.data === undefined || j?.data === null) throw new Error('suwayomi returned no data');
   return j.data;
 }
 

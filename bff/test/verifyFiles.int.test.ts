@@ -41,7 +41,7 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 let q: <T = any>(sql: string, params?: any[]) => Promise<T[]>;
-let verifyChapterFiles: () => Promise<any>;
+let verifyChapterFiles: (opts?: { beforeMark?: () => Promise<void> }) => Promise<any>;
 let runVerify: (log?: any) => Promise<any> | false;
 let tombstoneBooks: (ids: string[], reason?: any) => Promise<void>;
 let updateSeries: (id: string, maxNew?: number, opts?: any) => Promise<any>;
@@ -189,6 +189,74 @@ test('a missing row is tombstoned with reason missing, never deleted', { skip },
   assert.equal((await q('SELECT page_dims FROM lib_books WHERE id = $1', [B.three]))[0].page_dims, null);
   // The cover was the missing chapter; every thumbnail falls back to the cover's first page, so it moves.
   assert.equal((await q('SELECT cover_book_id FROM lib_series WHERE id = $1', [S]))[0].cover_book_id, B.one, 'the cover still points at a chapter with no pages');
+});
+
+test('a renumber in flight is not a missing file', { skip }, async () => {
+  // #116 review: between a renumber's first rename and its commit -- and until the next check finishes a journal a
+  // crash left -- the series' rows name files that sit at temporary or new names. Looked at then, each read as
+  // missing, and the sweep then fetched them again. Reintroduce by dropping the renumber_plan test from the walk's
+  // query: chapter 3 of Present is tombstoned.
+  await seed();
+  await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"final"}'::jsonb WHERE id = $1`, [S]);
+  await verifyChapterFiles();
+  assert.equal((await pruned(B.three)).pruned_at, null, 'a renumber in flight is not a missing file');
+  // Its journal done, the same row is missing like any other.
+  await q('UPDATE lib_series SET renumber_plan = NULL WHERE id = $1', [S]);
+  await verifyChapterFiles();
+  assert.equal((await pruned(B.three)).pruned_reason, 'missing');
+});
+
+test("a large renumber in flight is not looked at: it neither counts toward a root's missing share nor gets it refused", { skip }, async () => {
+  // Between a renumber's first rename and its commit its files sit at temporary names. Looked at, thirty of them read
+  // as thirty missing files -- 94 % of the download root -- and the whole root was refused: the file of Present that
+  // really went was left unmarked, and the volume reported as not there. A series with a renumber in flight is not
+  // looked at at all. Reintroduce by dropping the NOT EXISTS from the walk's page query: the root is refused.
+  await seed();
+  const R = 's_vf_renum';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, renumber_plan)
+           VALUES ($1,$2,'Renumbering','vf/Renumbering',30,$3,'{"v":1,"phase":"temp"}'::jsonb)`, [R, SRC, LIB]);
+  for (let n = 1; n <= 30; n++) await book(`b_vf_r${n}`, R, n, `vf/Renumbering/Chapter ${n}.cbz`, DL);
+  const r = await verifyChapterFiles();
+  assert.deepEqual(r.unmounted, [], "a large renumber in flight neither counts toward a root's missing share nor gets it refused");
+  assert.equal((await pruned(B.three)).pruned_reason, 'missing', 'and the file that really went is marked');
+  assert.equal((await pruned('b_vf_r1')).pruned_at, null);
+});
+
+test('a renumber that starts, or commits, while the walk looks is not a missing file', { skip }, async () => {
+  // The walk reads a series' rows, looks for every file, and marks only afterwards: a renumber in between moves the
+  // files it looked for. So each row is asked again just before marking. Reintroduce by marking every row the look
+  // found gone (drop `still` in verifyChapterFiles): chapter 3 of Present is tombstoned.
+  await seed();
+  await verifyChapterFiles({
+    beforeMark: async () => { await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"temp"}'::jsonb WHERE id = $1`, [S]); },
+  });
+  assert.equal((await pruned(B.three)).pruned_at, null, 'a renumber that started while the walk looked');
+  await q('UPDATE lib_series SET renumber_plan = NULL WHERE id = $1', [S]);
+  // One that committed meanwhile has moved the row to its new name: the next walk looks for that one.
+  await verifyChapterFiles({
+    beforeMark: async () => { await q(`UPDATE lib_books SET file = replace(file, 'Chapter 3', 'Chapter 30') WHERE id = $1`, [B.three]); },
+  });
+  assert.equal((await pruned(B.three)).pruned_at, null, 'a renumber that committed while the walk looked');
+});
+
+test("a large renumber that starts while the walk looks does not get the root refused", { skip }, async () => {
+  // The walk read Later's thirty rows with no renumber on the series, and looked for their files after the renumber
+  // had renamed them away: thirty "missing" files of thirty-five, 94 %, and the whole-root rule refused the download
+  // root before the rows were asked again -- the file of Present that really went left unmarked, and the volume
+  // reported as not there (integration-2 review). Asked again before anything is decided, the moved rows count for
+  // nothing.
+  // Reintroduce by asking only after the whole-root rules (verifyChapterFiles): the root is refused.
+  await seed();
+  const L = 's_vf_later';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id) VALUES ($1,$2,'Renumbered later','vf/Later',30,$3)`, [L, SRC, LIB]);
+  for (let n = 1; n <= 30; n++) await book(`b_vf_l${n}`, L, n, `vf/Later/Chapter ${n}.cbz`, DL);
+  const r = await verifyChapterFiles({
+    beforeMark: async () => { await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"temp"}'::jsonb WHERE id = $1`, [L]); },
+  });
+  assert.deepEqual(r.unmounted, [], 'a large renumber that starts while the walk looks does not get the root refused');
+  assert.equal((await pruned(B.three)).pruned_reason, 'missing', 'and the file that really went is marked');
+  assert.equal((await pruned('b_vf_l1')).pruned_at, null, 'the renumbered rows are not');
+  assert.equal(r.checked, 6, 'nor counted as looked at');
 });
 
 test('a removed folder among present ones is marked, not mistaken for a missing volume', { skip }, async () => {

@@ -124,16 +124,136 @@ test('a body that would widen a one-row chip into a whole nightly run is refused
   assert.equal(repairState.running, false, 'and nothing was started');
 });
 
-test('a valid body starts the run and the panel shows it', { skip }, async () => {
+const status = async (tok = adminTok, qs = '') =>
+  app.inject({ method: 'GET', url: `/api/admin/tasks/repair/status${qs}`, headers: { authorization: tok } });
+const runs = async (qs = '', tok = adminTok) =>
+  app.inject({ method: 'GET', url: `/api/admin/tasks/repair/runs${qs}`, headers: { authorization: tok } });
+
+test("a pressed Fix no longer replaces the nightly's result, and lands in the history", { skip }, async () => {
+  // v0.49.0. Reintroduce by restoring the unconditional repair_last_run/repair_last_result UPDATE in
+  // runRepair: the Tasks row below shows the one-step run (counted 0, only ['gaps']) instead of the nightly's.
+  await q(`UPDATE server_settings SET repair_last_run = '2026-01-02T03:04:05Z', repair_last_result = '{"ok":true,"counted":7}'::jsonb WHERE id = 1`);
   const res = await run({ only: ['gaps'], seriesId: 'rr-no-such-series' });
   assert.equal(res.statusCode, 200, res.body);
-  assert.deepEqual(res.json(), { ok: true, started: true });
+  const id = res.json().run;
   await settle();
   const row = await repairRow();
-  assert.equal(row.lastResult?.ok, true, 'the result is on the panel');
-  assert.deepEqual(row.lastResult?.only, ['gaps'], 'and says which step was asked for');
+  assert.equal(row.lastResult?.counted, 7, "the Tasks line is still the nightly's");
+  assert.equal(new Date(row.lastRun).toISOString(), '2026-01-02T03:04:05.000Z', 'and so is its time, which the nightly is armed from');
+  const stored = (await q<{ at: string }>('SELECT repair_last_run AS at FROM server_settings WHERE id = 1'))[0].at;
+  assert.equal(new Date(stored).toISOString(), '2026-01-02T03:04:05.000Z', 'persisted as well as shown');
+  const hist = (await runs(`?id=${id}`)).json().content;
+  assert.equal(hist.length, 1);
+  assert.equal(hist[0].kind, 'fill');
+  assert.equal(hist[0].status, 'done');
+  assert.equal(hist[0].origin, 'manual');
+  assert.equal(hist[0].username, ADMIN, 'who pressed it, by name');
+  assert.equal(hist[0].mine, true);
+  assert.deepEqual(hist[0].result?.only, ['gaps'], 'and what it was asked to do');
+  assert.deepEqual(hist[0].result?.skips?.map((k: any) => k.why), ['not_eligible'], 'including why it did nothing');
+  assert.equal(row.latestOther?.id, id, "the Tasks row's latest one-off fix is this press");
   const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'library.repair' ORDER BY at DESC LIMIT 1`);
   assert.equal(audit[0]?.detail?.seriesId, 'rr-no-such-series', 'the run is audited with what it was asked to do');
+});
+
+test('the run answer names the run, and the status route shows it finished', { skip }, async () => {
+  // Reintroduce by dropping `run` from the route's answer: the uuid assertion fails, and a page that pressed
+  // a 5 ms fix could never tell its own run had ended.
+  const res = await run({ only: ['solver'] });
+  assert.equal(res.json().ok, true);
+  assert.equal(res.json().started, true);
+  const id = res.json().run;
+  assert.match(String(id), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  await settle();
+  const st = (await status()).json();
+  assert.equal(st.running, false);
+  assert.equal(st.run, null, 'nothing is running');
+  assert.equal(st.last?.id, id, 'the run that just ended is `last`');
+  assert.equal(st.recent[0]?.id, id, 'and the newest of `recent`');
+  assert.equal(st.recent[0]?.kind, 'steps:solver');
+  assert.equal(typeof st.enabled, 'boolean');
+  assert.equal(st.sweepRunning, false);
+  // What the page's action rows say BEFORE a press: the limits the code runs with, and estimates per kind.
+  assert.equal(st.limits.shortMax, 20);
+  assert.equal(st.limits.huntBudget, 5);
+  assert.equal(st.estimates.fill.downloads, st.limits.gapChapters, 'Fill now downloads at most the gap-chapter cap');
+  assert.equal(typeof st.estimates.fix_short.worstMs, 'number');
+  assert.equal(st.estimates.full.worstMs, null, 'the nightly counts pages and borrows names: no honest bound');
+  assert.equal(st.estimates['steps:solver'].runs >= 1, true, 'the solver run just made is history for "usually"');
+  assert.equal(typeof st.estimates['steps:solver'].typicalMs, 'number');
+  const plan = (await status(adminTok, '?kinds=steps:failures%2Bgaps%2Bshort%2Bsolver:now')).json();
+  assert.equal(typeof plan.estimates['steps:failures+gaps+short+solver:now']?.downloads, 'number', 'a Fix all issues plan is estimated on request');
+});
+
+test('while a run is going the status route says what it is on, and only admins may ask', { skip }, async () => {
+  repairState.running = true;
+  repairState.live = {
+    id: '00000000-0000-4000-8000-000000000001', startedAt: Date.now() - 5000, origin: 'manual', by: 'someone-else',
+    kind: 'fill', only: ['gaps'], target: { seriesId: S, label: 'Repair Routes Fixture' }, steps: ['gaps'],
+    step: 'gaps', stepIndex: 0, stepStartedAt: Date.now() - 4000, stepMs: {}, planned: { gaps: 1 },
+    current: { kind: 'series', seriesId: S, title: 'Repair Routes Fixture', phase: 'searching', done: 0, of: 1 },
+    budget: { left: 4 }, shortReserve: null, result: null,
+  };
+  try {
+    const st = (await status()).json();
+    assert.equal(st.running, true);
+    assert.equal(st.run.id, '00000000-0000-4000-8000-000000000001');
+    assert.equal(st.run.mine, false, 'someone else started it');
+    assert.equal('by' in st.run, false, 'and who is never sent');
+    assert.equal(st.run.current.phase, 'searching');
+    assert.equal(st.run.current.title, 'Repair Routes Fixture');
+    assert.deepEqual(st.run.budget, { left: 4, of: 5 });
+    assert.equal((await status(memberTok)).statusCode, 403, 'a member may not see what the repair is doing');
+    assert.equal((await runs('', memberTok)).statusCode, 403, 'nor its history');
+  } finally {
+    repairState.running = false;
+    repairState.live = null;
+  }
+  assert.equal((await runs('?id=nope')).statusCode, 400, 'an id is a uuid');
+  assert.equal((await runs('?limit=500')).statusCode, 400, 'and fifty is the most one page asks for');
+});
+
+test('every task says its schedule as a sentence the page can translate', { skip }, async () => {
+  const rows = await tasks();
+  for (const t of rows) {
+    assert.equal(typeof t.scheduleKey, 'string', `${t.id} has a key`);
+    const rendered = t.scheduleKey.replace(/\{(\w+)\}/g, (_: string, k: string) => String(t.scheduleVars[k]));
+    assert.equal(rendered, t.schedule, `${t.id}: the key and its values are the English sentence`);
+  }
+  const repair = rows.find((t: any) => t.id === 'repair');
+  assert.equal(repair.scheduleKey, 'every {h}h · never during a chapter sweep');
+  assert.equal('nextAt' in repair && 'latestOther' in repair && 'lastOrigin' in repair, true);
+});
+
+test('Scan library now answers what it found, and a second press within a minute says why it did not scan', { skip }, async () => {
+  // Reintroduce by answering without the counts (catalog.ts): `series` is undefined. Or by dropping the role
+  // check on them: 'a member is told no library counts'.
+  const catalog = (await import('../src/routes/catalog')).default;
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const c = Fastify();
+  await c.register(jwt, { secret: process.env.JWT_SECRET! });
+  await c.register(catalog);
+  await c.ready();
+  try {
+    runtime.lastScan = 0;
+    const scan = () => c.inject({ method: 'POST', url: '/api/refresh', headers: { authorization: adminTok } });
+    const a = (await scan()).json();
+    assert.equal(a.scanned, true);
+    assert.equal(typeof a.series, 'number', 'how many series the scan holds');
+    assert.equal(typeof a.books, 'number');
+    assert.equal(typeof a.skipped, 'number', 'and how many folders it could not index');
+    assert.deepEqual((await scan()).json(), { scanned: false, reason: 'rate_limited' });
+    // A member presses the same button (home, library, the top bar) and learns that it scanned -- not how big
+    // the whole library is, restricted and 18+ libraries included.
+    runtime.lastScan = 0;
+    const m = (await c.inject({ method: 'POST', url: '/api/refresh', headers: { authorization: memberTok } })).json();
+    assert.equal(m.scanned, true);
+    assert.deepEqual(Object.keys(m).sort(), ['libraries', 'scanned'], 'a member is told no library counts');
+  } finally {
+    runtime.lastScan = 0;
+    await c.close();
+  }
 });
 
 test('a chapter sweep in the way is not the same answer as a repair already running', { skip }, async () => {
@@ -181,11 +301,12 @@ test('the nightly switch does not gate a run somebody asked for', { skip }, asyn
   await q('UPDATE server_settings SET repair_enabled = false WHERE id = 1');
   try {
     const res = await run({ only: ['gaps'], seriesId: 'rr-no-such-series' });
-    assert.deepEqual(res.json(), { ok: true, started: true });
+    assert.equal(res.json().started, true);
     await settle();
     const row = await repairRow();
     assert.equal(row.schedule, 'switched off · on demand', 'but the schedule says it will not run by itself');
-    assert.notEqual(row.lastResult?.skipped, 'disabled', 'and the run that was asked for was not skipped');
+    const rec = (await runs(`?id=${res.json().run}`)).json().content[0];
+    assert.equal(rec?.status, 'done', 'and the run that was asked for was not skipped');
   } finally {
     await q('UPDATE server_settings SET repair_enabled = true WHERE id = 1');
   }
@@ -207,6 +328,11 @@ test('confirm-short records the judgement, and withdrawing it clears the stamp',
   const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'book.short_confirmed' ORDER BY at DESC LIMIT 1`);
   assert.equal(audit[0]?.detail?.confirmed, true);
   assert.equal(audit[0]?.detail?.number, 3, 'the audit row names the chapter, not just its id');
+  // v0.49.0: who decided, so Health says "marked fine by an admin" rather than claiming the repair proved it.
+  // Reintroduce by writing only the stamp: short_result stays null.
+  const why = async () => (await q<{ r: any }>('SELECT short_result AS r FROM lib_books WHERE id = $1', [BOOK]))[0].r;
+  assert.equal((await why())?.why, 'confirmed_by_admin');
+  assert.equal((await why())?.by, ADMIN);
 
   // Withdrawing it is what the greyed row's chip does: the chapter becomes an open finding again and the
   // nightly will look at it on its next run (the repair skips a confirmed chapter entirely).
@@ -214,6 +340,7 @@ test('confirm-short records the judgement, and withdrawing it clears the stamp',
   // never be re-checked.
   assert.deepEqual((await confirmShort(BOOK, { confirmed: false })).json(), { ok: true });
   assert.equal(await stamp(), null, 'and it is gone again');
+  assert.equal(await why(), null, 'with who decided it');
 
   assert.equal((await confirmShort('b_rr_nope')).statusCode, 404, 'a chapter that is not there is not a judgement');
   assert.equal((await confirmShort(BOOK, { confirmed: 'yes' })).statusCode, 400, 'and the body is still a body');
@@ -224,4 +351,114 @@ test('a member can neither run the repair nor confirm a chapter', { skip }, asyn
   assert.equal((await confirmShort(BOOK, {}, memberTok)).statusCode, 403);
   assert.equal(repairState.running, false, 'and nothing started');
   assert.equal((await q<{ at: string | null }>('SELECT short_confirmed_at AS at FROM lib_books WHERE id = $1', [BOOK]))[0].at, null);
+});
+
+test('an admin who hides 18+ reads no adult title in the repair\'s answers', { skip }, async () => {
+  // Every place a repair names a series follows the listing rule (admin.ts `listable`): the target, the series
+  // it is on, and the skips of the running run, of the Tasks line's result, of the latest one-off fix and of the
+  // last full run. Reintroduce by sending any one of them as it is stored: its assertion below names the field.
+  const { clearRunDigest } = await import('../src/lib/repairRuns');
+  const LIB = 'rr-adult-lib', AS = 's_rr_adult', TITLE = 'Rr Hidden Adult Title';
+  await q(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,$1,$1,18) ON CONFLICT (id) DO UPDATE SET age_rating = 18`, [LIB]);
+  await q('DELETE FROM lib_series WHERE id = $1', [AS]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, library_id) VALUES ($1,'test',$2,$1,$3)`, [AS, TITLE, LIB]);
+  const skips = [{ step: 'short', target: { seriesId: AS, bookId: 'b_rr_adult', title: TITLE, number: 3 }, why: 'folder_busy' }];
+  // `notes` name series by title alone: planted too, or the history's assertion below could not fail (the
+  // integration-1 review's probe). Reintroduce by sending notes as stored in the runs route: 'the history' fails.
+  const notes = { replaced: [`${TITLE} ch 3 (2 -> 20)`], confirmed: [], followed: [`${TITLE} -> rp-b`], upgraded: [] };
+  const planted = await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result, notes) VALUES
+       (gen_random_uuid(), now(), now(), 'nightly', 'full', '{}'::jsonb, 'done', 5, $1::jsonb, $3::jsonb),
+       (gen_random_uuid(), now(), now(), 'manual', 'fill', $2::jsonb, 'done', 5, $1::jsonb, $3::jsonb) RETURNING id`,
+    [JSON.stringify({ skips }), JSON.stringify({ seriesId: AS, label: TITLE }), JSON.stringify(notes)]);
+  clearRunDigest();
+  const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
+  repairState.finishedAt = Date.now();
+  repairState.lastResult = { skips };
+  repairState.running = true;
+  repairState.live = {
+    id: '00000000-0000-4000-8000-000000000002', startedAt: Date.now(), origin: 'manual', by: null,
+    kind: 'fill', only: ['gaps'], target: { seriesId: AS, label: TITLE }, steps: ['gaps'],
+    step: 'gaps', stepIndex: 0, stepStartedAt: Date.now(), stepMs: {}, planned: {},
+    current: { kind: 'series', seriesId: AS, title: TITLE, phase: 'searching', done: 0, of: 1 },
+    budget: null, shortReserve: null, result: { skips },
+  };
+  try {
+    const st = (await status()).json();
+    assert.equal(st.run.target.label, undefined, 'status: the running run\'s target');
+    assert.equal(st.run.current.title, undefined, 'status: the series it is on');
+    assert.equal(st.run.skips[0].target.title, undefined, 'status: the running run\'s skips');
+    assert.equal(st.lastFull.result.skips[0].target.title, undefined, 'status: the last full run\'s skips');
+    assert.ok(!JSON.stringify(st).includes(TITLE), 'status: nowhere else either');
+    const row = (await (await app.inject({ method: 'GET', url: '/api/admin/tasks', headers: { authorization: adminTok } })).json())
+      .content.find((t: any) => t.id === 'repair');
+    assert.equal(row.lastResult.skips[0].target.title, undefined, 'Tasks: the Tasks line\'s result');
+    assert.equal(row.latestOther.target.label, undefined, 'Tasks: the latest one-off fix\'s target');
+    assert.equal(row.latestOther.result.skips[0].target.title, undefined, 'Tasks: the latest one-off fix\'s skips');
+    assert.ok(!JSON.stringify(row).includes(TITLE), 'Tasks: nowhere else either');
+    assert.ok(!(await runs()).body.includes(TITLE), 'the history');
+    // The same admin with "Show 18+" on reads every one of them.
+    const shown = (await status(adminTok, '?adult=1')).json();
+    assert.equal(shown.run.current.title, TITLE);
+    assert.equal(shown.lastFull.result.skips[0].target.title, TITLE);
+    // On the parsed field: the run's target label carries the title too, so a match anywhere in the body would pass
+    // with the notes dropped for everyone (integration-2 review).
+    const revealed = (await runs('?adult=1')).json().content.find((r: any) => r.id === planted[1].id);
+    assert.ok(String(revealed?.notes?.replaced?.[0] ?? '').includes(TITLE), 'the notes too, with the reveal on');
+  } finally {
+    repairState.running = false;
+    repairState.live = null;
+    Object.assign(repairState, was);
+    await q('DELETE FROM repair_runs WHERE id = ANY($1)', [planted.map((r) => r.id)]);
+    await q('DELETE FROM lib_series WHERE id = $1', [AS]);
+    await q('DELETE FROM libraries WHERE id = $1', [LIB]);
+    clearRunDigest();
+  }
+});
+
+test("the Tasks line's origin is null while the history has not caught up with the run it shows", { skip }, async () => {
+  // The integration-1 review: the run check had no test of its own -- removed, the test above still passed. A result
+  // naming a run the history's newest full run is not (the history lags a run that has just written the Tasks line)
+  // has no origin to show: another run's would be a lie. Reintroduce `lastFull?.origin ?? null` in the Tasks route:
+  // this reads 'manual'.
+  const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
+  const { clearRunDigest } = await import('../src/lib/repairRuns');
+  const earlier = (await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms)
+     VALUES (gen_random_uuid(), now(), now(), 'manual', 'full', '{}'::jsonb, 'done', 5) RETURNING id`))[0].id;
+  clearRunDigest();
+  repairState.finishedAt = Date.now();
+  repairState.lastResult = { ok: true, counted: 1, run: '00000000-0000-4000-8000-00000000abcd' };
+  try {
+    const row = await repairRow();
+    assert.equal(row.lastResult?.run, '00000000-0000-4000-8000-00000000abcd');
+    assert.equal(row.lastOrigin, null, "the Tasks line's origin is null while the history has not caught up with the run it shows");
+  } finally {
+    Object.assign(repairState, was);
+    await q('DELETE FROM repair_runs WHERE id = $1', [earlier]);
+    clearRunDigest();
+  }
+});
+
+test("the Tasks line's origin is the run it shows, a nightly the switch turned away included", { skip }, async () => {
+  // A nightly the switch turned away still writes the Tasks line (repair.int.test.ts, 'a full run is the Tasks
+  // line'), so the origin beside it must be that run's. Reintroduce by leaving skipped runs out of the history's
+  // lastFull (repairRuns.ts runDigest): the origin is not the nightly's.
+  const { runRepair } = await import('../src/lib/repair');
+  const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
+  const earlier = (await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms)
+     VALUES (gen_random_uuid(), now() - interval '1 hour', now() - interval '1 hour', 'manual', 'full', '{}'::jsonb, 'done', 5) RETURNING id`))[0].id;
+  await q('UPDATE server_settings SET repair_enabled = false WHERE id = 1');
+  try {
+    const r = await (runRepair(undefined) as Promise<any>);
+    assert.equal(r.skipped, 'disabled');
+    const row = await repairRow();
+    assert.equal(row.lastResult?.skipped, 'disabled', 'the Tasks line is the nightly the switch turned away');
+    assert.equal(row.lastOrigin, 'nightly', 'and so is the origin beside it, not the manual run before it');
+  } finally {
+    await q('UPDATE server_settings SET repair_enabled = true WHERE id = 1');
+    await q('DELETE FROM repair_runs WHERE id = $1', [earlier]);
+    Object.assign(repairState, was);
+  }
 });

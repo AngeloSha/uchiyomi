@@ -1,7 +1,9 @@
 'use client';
 import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
+import { useLayer } from '@/lib/layers';
 import { t as tr } from '@/lib/i18n';
 
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
@@ -65,6 +67,20 @@ export function useRtl(): boolean {
 }
 
 /**
+ * A dialog opened from inside a `.card`, moved out to <body> (v0.49.0).
+ *
+ * ⚠️ `.card` blurs its backdrop, and a `backdrop-filter` makes an element the containing block of its `fixed`
+ * descendants: a Sheet or a ConfirmDialog rendered inside a card was laid out in the CARD's box -- only the card
+ * dimmed, the panel over the row or off the top of the screen, the next card painting over its buttons -- and
+ * the Health cards' `overflow-hidden` cut it off as well. Reduce effects hid it, by removing every blur. A
+ * portal keeps the React tree (context, events) and takes the DOM out of the card. PreviewReader and
+ * ExtensionSettings portal themselves for the same reason.
+ */
+export function OnBody({ children }: { children: ReactNode }) {
+  return typeof document === 'undefined' ? null : createPortal(children, document.body);
+}
+
+/**
  * A bottom sheet, for the reader.
  *
  * `Modal` in ConfirmDialog.tsx is centred and sized for a form. The reader is the one immersive surface in
@@ -74,7 +90,7 @@ export function useRtl(): boolean {
  * `data-lenis-prevent` on the scroller is not optional: Lenis drives smooth scrolling for the whole app, and
  * without it a flick inside the sheet scrolls the chapter behind it instead.
  */
-export function Sheet({ title, onClose, overBottomNav, action, footer, children }: {
+export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle, children }: {
   title: string;
   onClose: () => void;
   /** Something small beside the close button: the (i) that opens the explainer, for instance. */
@@ -95,9 +111,20 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
    * nothing on screen to suggest anything was missing. 5.5rem is the bar plus its own safe-area inset.
    */
   overBottomNav?: boolean;
+  /**
+   * A title that is a phrase, not a name: it wraps onto a second line rather than being cut. The renumbering
+   * plan's German "Nach Erscheinungsreihenfolge nummerieren" read "…numme…" at 390 px, its verb gone. Off by
+   * default, so a long series title stays one line.
+   */
+  wrapTitle?: boolean;
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // A dialog on the notices' layer stack (lib/layers.ts). Only an `overBottomNav` sheet leaves the nav band
+  // free; the reader's sheets run to the bottom edge, so they hand over their panel to be measured and the
+  // notices rise above it instead of sitting on its last rows.
+  useLayer('dialog', true, { navBandFree: !!overBottomNav, ref: overBottomNav ? undefined : panelRef });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -118,6 +145,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
           scroller's share, and at 390×667 the admin sources sheet's footer plus the nav padding left the
           scroller 179 px -- its second section began below the fold. */}
       <div
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         className={`glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
                    sm:mb-6 sm:max-w-xl sm:rounded-3xl ${footer ? 'max-h-[85vh]' : 'max-h-[75vh]'} ${
@@ -127,7 +155,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
                    }`}
       >
         <div className="mb-3 flex items-center justify-between gap-3 px-4">
-          <h2 className="min-w-0 truncate font-display text-base font-semibold text-fog-50">{title}</h2>
+          <h2 className={`min-w-0 ${wrapTitle ? 'line-clamp-2 break-words' : 'truncate'} font-display text-base font-semibold text-fog-50`}>{title}</h2>
           <span className="flex shrink-0 items-center gap-2">
             {action}
             <button onClick={onClose} aria-label={tr('Close')}

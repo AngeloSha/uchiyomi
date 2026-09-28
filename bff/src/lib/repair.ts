@@ -35,17 +35,22 @@
  *   step with no searches left stops rather than stamp a series it cannot search.
  *
  * It is DETACHED from its route, like the sweep, the cleanup and the verify: the work is minutes, and a
- * request that long dies at the reverse proxy while the job keeps going. The route answers `started`, the
- * Tasks panel polls `running`, and the result lives in `repairState` for this process and in
- * server_settings.repair_last_run / repair_last_result for the next one.
+ * request that long dies at the reverse proxy while the job keeps going. The route answers `started` with
+ * the run's id, the Health page polls GET /api/admin/tasks/repair/status (fed by `repairState.live`, the one
+ * object every step reports into), and every run -- nightly or pressed -- is kept in repair_runs
+ * (lib/repairRuns.ts). ⚠️ Only a FULL run (no `only`) writes `repairState.lastResult` and
+ * server_settings.repair_last_run / repair_last_result: those are the Tasks line and the nightly's schedule,
+ * and a one-row Fix pressed at 23:00 used to replace the first and move the second (v0.49.0).
  */
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { q, one } from './db';
 import { runtime } from './runtime';
 import { logAudit } from './audit';
 import { containedPath } from './fsGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
+import { archiveHoles, type ArchiveHoles } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
 import { restampBook } from './partial';
 import { chapterFileRel, downloadChapter, type DownloadInput } from './downloader';
@@ -59,8 +64,11 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
-import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
-import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
+import { updateSeries, CHAPTER_RETRY_CAP, LIST_TIMEOUT, type Landed } from './updater';
+import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor, HUNT_WALL_MS, HUNT_MAX_SOURCES } from './sourceHunt';
+import { SOLVER_BUDGET_MS } from './sources/budget';
+import { canDownload, finishRunRecord, isFullRun, kindOf, startRunRecord, targetOf, type RunOrigin, type RunStatus, type RunTarget } from './repairRuns';
+import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { assess, gapsOf } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
@@ -168,6 +176,38 @@ const LISTING_REFRESH_MS = 10_000;
 /** How long after a cooldown has lapsed the escalation memory is wiped as well. See the solver step. */
 const EXPIRED_BLOCK_HOURS = 24;
 
+/**
+ * Every bound above, as the running process has it (env overrides applied), for the Health page: its action
+ * rows say "up to 20 chapters, sharing at most 5 searches" and "at most about 12 min" from THESE, so a knob
+ * an operator turned is what the page says -- lib/repairEstimate.ts builds the worst case from them.
+ */
+export const REPAIR_LIMITS = Object.freeze({
+  shortMax: REPAIR_SHORT_MAX,
+  gapsMax: REPAIR_GAPS_MAX,
+  groupsMax: REPAIR_GROUPS_MAX,
+  namesMax: REPAIR_NAMES_MAX,
+  countMax: REPAIR_COUNT_MAX,
+  directionsMax: REPAIR_DIRECTIONS_MAX,
+  huntBudget: REPAIR_HUNT_BUDGET,
+  shortHuntMax: REPAIR_SHORT_HUNT_MAX,
+  gapChapters: REPAIR_GAP_CHAPTERS,
+  retrySeries: REPAIR_RETRY_SERIES,
+  shortCopies: REPAIR_SHORT_COPIES,
+  failuresMax: REPAIR_FAILURES_MAX,
+  retryCap: CHAPTER_RETRY_CAP,
+  paceMs: REPAIR_PACE_MS,
+  pageListMs: SHORT_PAGES_MS,
+  listingRefreshMs: LISTING_REFRESH_MS,
+  listTimeoutMs: LIST_TIMEOUT,
+  huntWallMs: HUNT_WALL_MS,
+  huntMaxSources: HUNT_MAX_SOURCES,
+  solverBudgetMs: SOLVER_BUDGET_MS,
+  expiredBlockHours: EXPIRED_BLOCK_HOURS,
+  repairHours: REPAIR_HOURS,
+});
+/** Skip reasons one run keeps: enough to say why a press did nothing, bounded like the audit's lists. */
+const MAX_SKIPS = 20;
+
 export interface RepairOpts {
   /** Run only these steps. Absent (or empty) means all five, in REPAIR_STEPS order. */
   only?: RepairStep[];
@@ -260,21 +300,139 @@ export interface RepairResult {
   skipped?: 'disabled';
   /** The run ended early: the server is going down, the download disk is at its floor, or an admin pressed Cancel. */
   stopped?: 'shutdown' | 'disk' | 'cancelled';
+  /** v0.49.0: how long each step took, in the order they ran. */
+  stepMs?: Partial<Record<RepairStep, number>>;
+  /**
+   * v0.49.0: what a step passed over and why, capped at MAX_SKIPS -- so a press that did nothing says so
+   * ("the folder is busy with another download", "the source is cooling down until 14:20") instead of
+   * reading as a run that found nothing to do.
+   */
+  skips?: RepairSkip[];
+  /** v0.49.0: this run's id in repair_runs, the same one the run route answered with. */
+  run?: string;
+}
+
+/** Why a step passed a target over. */
+export type RepairSkipWhy =
+  | 'folder_busy' | 'not_eligible' | 'no_gaps' | 'source_cooling_down' | 'source_off' | 'solver_down' | 'no_searches_left';
+
+export interface RepairSkip {
+  step: RepairStep;
+  target?: { seriesId?: string; bookId?: string; sourceId?: string; title?: string; number?: number };
+  why: RepairSkipWhy;
+  /** When a cooldown ends, for source_cooling_down. */
+  until?: string;
+  /** not_eligible: gone | confirmed | partial | not_owned | not_short; solver_down: the ping's error. */
+  detail?: string;
+}
+
+/** What the step is doing with its current target, in the words the Health page translates. */
+export type RepairPhase =
+  | 'pinging' | 'clearing' | 'counting' | 'rechecking' | 'listing' | 'asking' | 'searching' | 'downloading'
+  | 'following' | 'fetching';
+
+/** The one thing the running step is on right now. */
+export interface RepairCurrent {
+  kind: 'series' | 'chapter' | 'source' | 'solver' | 'files';
+  seriesId?: string;
+  bookId?: string;
+  title?: string;
+  number?: number;
+  sourceId?: string;
+  phase: RepairPhase;
+  /** Of the step's planned targets, how many are behind it (files counted, series re-checked). */
+  done?: number;
+  of?: number;
 }
 
 /**
- * This process's view of the job, for the Tasks panel between polls. The persisted row is the source of
- * truth across a restart; this is what makes "running" answerable at all.
+ * The running repair, live (v0.49.0). ONE object, written only through here() / enterStep() / skip() below,
+ * and read by both GET /api/admin/tasks/repair/status and the run's card on Library -> Downloads (which gets
+ * its step and current series from the same assignments), so the two can never disagree about what the run
+ * is doing. `budget`, `shortReserve` and `result` are the very objects repairLibrary works with, not copies:
+ * the status route snapshots them.
+ */
+export interface RepairLive {
+  id: string;
+  startedAt: number;
+  origin: RunOrigin;
+  /** Who pressed it; null for the nightly. Never sent -- the route answers `mine`. */
+  by: string | null;
+  kind: string;
+  only: RepairStep[] | null;
+  target: RunTarget;
+  /** The steps this run takes, in order. */
+  steps: RepairStep[];
+  step: RepairStep | null;
+  stepIndex: number;
+  stepStartedAt: number | null;
+  stepMs: Partial<Record<RepairStep, number>>;
+  /** Per step, how many targets it took on once it had sized itself (chapters, series, files). */
+  planned: Partial<Record<RepairStep, number>>;
+  current: RepairCurrent | null;
+  budget: { left: number } | null;
+  /** The short step's view of the budget while it runs (see repairLibrary), and what it started with. */
+  shortReserve: { left: number; of: number } | null;
+  result: RepairResult | null;
+  /** What it touched, by name, for the history row (the audit row carries the same lists). */
+  notes?: Notes;
+}
+
+/**
+ * This process's view of the job, for the Tasks panel and the Health page between polls. The persisted row
+ * is the source of truth across a restart; this is what makes "running" answerable at all.
+ *
+ * `finishedAt` / `lastResult` are the last FULL run's (the Tasks line); `last` is the last run of any kind,
+ * which is how a client that pressed a one-row Fix learns that ITS run ended; `nextAt` is when server.ts
+ * has the nightly armed for (null outside owned mode).
  */
 export const repairState: {
   running: boolean;
   startedAt: number | null;
   finishedAt: number | null;
   lastResult: RepairResult | null;
-} = { running: false, startedAt: null, finishedAt: null, lastResult: null };
+  live: RepairLive | null;
+  last: { id: string; finishedAt: number; status: RunStatus; kind: string } | null;
+  nextAt: number | null;
+} = { running: false, startedAt: null, finishedAt: null, lastResult: null, live: null, last: null, nextAt: null };
 
 /**
- * The running repair's card on the download pill (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
+ * A copy of the running repair for GET /api/admin/tasks/repair/status, or null. Copies, so the route can
+ * drop a title without touching the run: the counts (the live result, less its timing), the searches the
+ * whole run has left -- the pot, less what the short step has spent of its reserve and not yet been charged
+ * for (see repairLibrary) -- and whether someone has asked it to stop.
+ */
+export function repairLiveSnapshot() {
+  const live = repairState.live;
+  if (!live) return null;
+  const { result, budget, shortReserve, notes: _notes, current, target, stepMs, planned: plan, ...rest } = live;
+  const spent = shortReserve ? shortReserve.of - shortReserve.left : 0;
+  let counts: Omit<RepairResult, 'ms' | 'stepMs' | 'skips' | 'run'> | null = null;
+  if (result) {
+    const { ms: _ms, stepMs: _s, skips: _k, run: _r, ...c } = result;
+    counts = JSON.parse(JSON.stringify(c));
+  }
+  return {
+    ...rest,
+    target: { ...target },
+    stepMs: { ...stepMs },
+    planned: { ...plan },
+    current: current ? { ...current } : null,
+    counts,
+    budget: budget ? { left: Math.max(0, budget.left - spent), of: REPAIR_HUNT_BUDGET } : null,
+    shortReserve: shortReserve ? { left: shortReserve.left, of: shortReserve.of } : null,
+    skips: (result?.skips ?? []).map((k) => ({ ...k, ...(k.target ? { target: { ...k.target } } : {}) })),
+    cancelRequested: stopRequested(activeCard),
+  };
+}
+
+/** server.ts, whenever it arms the nightly: the Health page and the Tasks row say "next run in 21 h". */
+export function setRepairNext(at: number | null): void {
+  repairState.nextAt = at;
+}
+
+/**
+ * The running repair's card in Library -> Downloads (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
  * obeyed everywhere a shutdown is: between series, between chapters, between steps -- never mid-write.
  */
 let activeCard: RunCard | null = null;
@@ -283,6 +441,42 @@ const halted = (): 'shutdown' | 'cancelled' | null =>
   runtime.stopping ? 'shutdown' : stopRequested(activeCard) ? 'cancelled' : null;
 /** For updateSeries: the chapter loop's own between-chapters check. */
 const cancelled = () => stopRequested(activeCard);
+
+/**
+ * THE writer of "what the run is on now": the live object, and the run's card beside it (its `current` is a
+ * series, so a chapter or a series target sets it and anything else clears it). Answers the object it set,
+ * so a step can move `done` along without a second call.
+ */
+function here(cur: RepairCurrent | null): RepairCurrent | null {
+  const live = repairState.live;
+  if (live) live.current = cur;
+  if (activeCard) activeCard.current = cur?.seriesId && cur.title ? { id: cur.seriesId, title: cur.title } : undefined;
+  return cur;
+}
+
+/** A step begins: the live object and the card are told together, and the previous step's target goes. */
+function enterStep(step: RepairStep, index: number): void {
+  const live = repairState.live;
+  if (live) {
+    live.step = step;
+    live.stepIndex = index;
+    live.stepStartedAt = Date.now();
+  }
+  if (activeCard) activeCard.step = step;
+  here(null);
+}
+
+/** How many targets a step took on, once it knows. */
+function planned(step: RepairStep, n: number): void {
+  const live = repairState.live;
+  if (live) live.planned[step] = n;
+}
+
+/** Why a target was passed over, into the run's own result (the live object reads the same array). */
+function skip(r: RepairResult, s: RepairSkip): void {
+  const list = (r.skips ??= []);
+  if (list.length < MAX_SKIPS) list.push(s);
+}
 
 type Log = { info: (m: string) => void; warn: (m: string) => void; error: (m: unknown) => void };
 
@@ -333,9 +527,12 @@ function rangeText(nums: number[]): string[] {
  * nightly would hand it a clean slate a few hours before it earns the same block again.
  */
 async function stepSolver(r: RepairResult, log?: Log): Promise<void> {
+  here({ kind: 'solver', phase: 'pinging' });
   const ping = await solverPing();
   const blaming = await solverBlaming();
+  planned('solver', blaming.length);
   if (ping.ok && blaming.length) {
+    here({ kind: 'solver', phase: 'clearing', done: 0, of: blaming.length });
     const cleared = resetSolverSessions();
     r.solver.reset = true;
     for (const id of blaming) {
@@ -347,6 +544,9 @@ async function stepSolver(r: RepairResult, log?: Log): Promise<void> {
   } else if (!ping.ok && blaming.length) {
     // Nothing is cleared while the solver is down: the cookies would be re-earned by a solve that cannot
     // happen, and clearing the cooldowns would send every source straight back at a site it cannot reach.
+    // Said in the result as well as the log: "Reset the solver" pressed while it is down did nothing, and
+    // the page must be able to say why rather than report a run that found nothing to do.
+    skip(r, { step: 'solver', why: 'solver_down', detail: String(ping.error || 'unreachable').slice(0, 200) });
     log?.warn(`repair: the solver is not answering (${ping.error || 'unreachable'}); `
       + `${blaming.length} source(s) blame it and nothing was reset -- this one is for the operator`);
   }
@@ -379,18 +579,21 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
       WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL
       ORDER BY mtime DESC LIMIT $1`, [REPAIR_COUNT_MAX],
   );
+  planned('count', rows.length);
+  const cur = here({ kind: 'files', phase: 'counting', done: 0, of: rows.length })!;
   await mapLimit(rows, COUNT_CONCURRENCY, async (b) => {
     if (halted()) return;
     // A path that escapes its root is not a chapter to count; it is something for the health page. Left
     // unstamped as well as uncounted, exactly as the verify task leaves it out of `checked`.
     const abs = containedPath(b.root, b.file);
-    if (!abs) return;
+    if (!abs) { cur.done!++; return; }
     const pages = await countPages(abs);
     const done = await q(
       'UPDATE lib_books SET pages = $1, pages_checked_at = now() WHERE id = $2 AND pages = 0 RETURNING id',
       [pages, b.id],
     ).catch(() => []);
     if (done.length) r.counted++;
+    cur.done!++;
   });
   const left = await one<{ n: number }>(
     `SELECT count(*)::int AS n FROM lib_books WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL`,
@@ -416,16 +619,23 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
 async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: number }, pending: Dated[], log?: Log): Promise<RepairResult['stopped']> {
   // "Fix all issues": every source's rows, as each source's Retry now would (see RepairOpts.now).
   const wide = !!opts.now && !opts.sourceId;
+  // ⚠️ `first_at = COALESCE(first_at, at)` in all three (v0.49.0). `at` is the LAST attempt -- the ledger
+  // bumps it on every failure (lib/chapterFailures.ts) -- and this reset moves it to now, so the Health
+  // page's "failing since" used to become "today" the moment anyone pressed Retry now. first_at keeps the
+  // first failure; a row from before the column existed takes its `at` as the best answer there is.
+  // Reintroduce by dropping it from the UPDATE: "Retry now keeps when the chapter first failed" in
+  // repair.int.test.ts finds first_at null and "since" today.
   const reset = opts.sourceId
     ? await q<{ series_id: string; source_id: string }>(
-        `UPDATE chapter_failures SET attempts = 0, at = now() WHERE source_id = $1 RETURNING series_id, source_id`, [opts.sourceId])
+        `UPDATE chapter_failures SET attempts = 0, first_at = COALESCE(first_at, at), at = now()
+          WHERE source_id = $1 RETURNING series_id, source_id`, [opts.sourceId])
     : wide
     ? await q<{ series_id: string; source_id: string }>(
-        `UPDATE chapter_failures f SET attempts = 0, at = now()
+        `UPDATE chapter_failures f SET attempts = 0, first_at = COALESCE(f.first_at, f.at), at = now()
           WHERE (f.series_id, f.number) IN (SELECT series_id, number FROM chapter_failures ORDER BY at ASC)
           RETURNING f.series_id, f.source_id`)
     : await q<{ series_id: string; source_id: string }>(
-        `UPDATE chapter_failures f SET attempts = 0, at = now()
+        `UPDATE chapter_failures f SET attempts = 0, first_at = COALESCE(f.first_at, f.at), at = now()
           WHERE (f.series_id, f.number) IN (
             SELECT series_id, number FROM chapter_failures
              WHERE attempts >= $1 AND at < now() - interval '7 days'
@@ -435,13 +645,30 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
   if (r.failures.reset) log?.info(`repair: ${r.failures.reset} capped chapter failure(s) given another chance`);
   if (!reset.length || (!opts.sourceId && !wide)) return undefined;
 
-  if (opts.sourceId && await blockedNow(opts.sourceId).catch(() => null)) {
-    log?.info(`repair: ${opts.sourceId} is in a cooldown; its ledger was reset but nothing was re-checked yet`);
-    return undefined;
-  }
-  if (opts.sourceId && await isDisabled(opts.sourceId).catch(() => false)) {
-    log?.info(`repair: ${opts.sourceId} is switched off; its ledger was reset but nothing was re-checked`);
-    return undefined;
+  // Why a source cannot be asked now, if it cannot: in a cooldown (and until when), or switched off. The
+  // answer goes into the run's skips, so "Retry now" on a source that is cooling down says so rather than
+  // reading as a retry that found nothing.
+  const refusal = async (src: string): Promise<RepairSkip | null> => {
+    const blocked = await blockedNow(src).catch(() => null);
+    if (blocked) {
+      return {
+        step: 'failures', target: { sourceId: src }, why: 'source_cooling_down',
+        ...(blocked.blocked_until ? { until: new Date(blocked.blocked_until).toISOString() } : {}),
+      };
+    }
+    if (await isDisabled(src).catch(() => false)) return { step: 'failures', target: { sourceId: src }, why: 'source_off' };
+    return null;
+  };
+
+  if (opts.sourceId) {
+    const no = await refusal(opts.sourceId);
+    if (no) {
+      skip(r, no);
+      log?.info(no.why === 'source_off'
+        ? `repair: ${opts.sourceId} is switched off; its ledger was reset but nothing was re-checked`
+        : `repair: ${opts.sourceId} is in a cooldown; its ledger was reset but nothing was re-checked yet`);
+      return undefined;
+    }
   }
 
   // The same two refusals, per source, when the run is for every source: a series is re-checked only for a
@@ -451,7 +678,10 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
   const askable = new Map<string, boolean>();
   const canAsk = async (src: string): Promise<boolean> => {
     if (!askable.has(src)) {
-      askable.set(src, !(await blockedNow(src).catch(() => null)) && !(await isDisabled(src).catch(() => false)));
+      const no = await refusal(src);
+      // One skip per source that could not be asked, not one per row it would have re-checked.
+      if (no) skip(r, no);
+      askable.set(src, !no);
     }
     return askable.get(src)!;
   };
@@ -461,15 +691,23 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     if (wanted.includes(row.series_id)) continue;
     if (!wide || await canAsk(row.source_id)) wanted.push(row.series_id);
   }
-  const folders = new Map((await q<{ id: string; folder: string }>(
-    `SELECT s.id, s.folder FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')}`, [wanted],
-  ).catch(() => [])).map((s) => [s.id, s.folder]));
+  const rows = await q<{ id: string; folder: string; title: string }>(
+    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')}`, [wanted],
+  ).catch(() => []);
+  const folders = new Map(rows.map((s) => [s.id, s.folder]));
+  const titles = new Map(rows.map((s) => [s.id, s.title]));
+  planned('failures', wanted.length);
   let series = 0, added = 0, failed = 0;
   let stopped: RepairResult['stopped'];
-  for (const id of wanted) {
+  for (const [i, id] of wanted.entries()) {
     { const h = halted(); if (h) { stopped = h; break; } }
     const folder = folders.get(id);
-    if (!folder || busyFolders.has(folder)) continue;
+    if (!folder) continue;
+    if (busyFolders.has(folder)) {
+      skip(r, { step: 'failures', target: { seriesId: id, title: titles.get(id) }, why: 'folder_busy' });
+      continue;
+    }
+    here({ kind: 'series', seriesId: id, title: titles.get(id), phase: 'rechecking', done: i, of: wanted.length });
     series++;
     busyFolders.add(folder);
     try {
@@ -500,6 +738,37 @@ type ShortBook = {
 
 /** The hunt verdicts that PROVE nothing else has this chapter. `cooldown` is silence, not an answer. */
 const PROOF_WHY = new Set(['no_candidate', 'no_copy', 'off', 'cap']);
+
+/**
+ * Why a short chapter was left as it is, or what was done, and when -- `lib_books.short_result` (v0.49.0).
+ * The Health row says "tried today 03:12: 3 sources asked, 2 answered -- no longer copy" from it, which is
+ * the question every greyed-or-not row used to leave open. An UPDATE of one column, never a delete.
+ */
+type ShortWhy =
+  | 'replaced' | 'confirmed' | 'no_longer_copy' | 'source_silent' | 'hunt_cooldown' | 'no_searches' | 'hunt_off' | 'download_failed';
+const noteShort = (bookId: string, res: { why: ShortWhy; asked: number; answered: number; best: number; hunt: string }) =>
+  q('UPDATE lib_books SET short_result = $2::jsonb WHERE id = $1',
+    [bookId, JSON.stringify({ at: new Date().toISOString(), ...res })]).catch(() => {});
+
+/**
+ * Why the chapter a person pressed Fix on is not one the step will look at: one read, answered in the skip's
+ * `detail` so the row can say it. The candidate query's own rules, in the order a person would check them.
+ */
+async function whyNotShort(bookId: string): Promise<string> {
+  const b = await one<{ file: string; root: string | null; number: number; pages: number; gone: boolean; confirmed: boolean; partial: boolean; folder: string }>(
+    `SELECT b.file, b.root, b.number::float8 AS number, b.pages, b.pruned_at IS NOT NULL AS gone,
+            b.short_confirmed_at IS NOT NULL AS confirmed, b.missing_pages IS NOT NULL AS partial, s.folder
+       FROM lib_books b JOIN lib_series s ON s.id = b.series_id AND ${visibleToAll('s')}
+      WHERE b.id = $1`, [bookId],
+  ).catch(() => null);
+  if (!b || b.gone) return 'gone';
+  if (b.confirmed) return 'confirmed';
+  // The chapter sweep re-fetches placeholder pages (up to 10 a night); a replacement here would race it.
+  if (b.partial) return 'partial';
+  const n = Number(b.number);
+  if (b.pages < 1 || b.pages > 2 || n !== Math.floor(n)) return 'not_short';
+  return 'not_owned';
+}
 
 /**
  * (b) Suspiciously short chapters: a whole-numbered chapter that turned out to be one or two images.
@@ -547,7 +816,13 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
   // downloader's layout, a locale that formats a number differently -- this one wins, and it fails in the
   // safe direction: a chapter skipped, never somebody's read-library file replaced.
   const books = rows0.filter((b) => b.file === chapterFileRel(b.folder, Number(b.number)));
-  if (!books.length) return undefined;
+  planned('short', books.length);
+  if (!books.length) {
+    // A person pressed Fix on this one chapter and the step will not touch it: say why, or the press reads
+    // as a run that found nothing wrong.
+    if (opts.bookId) skip(r, { step: 'short', target: { bookId: opts.bookId }, why: 'not_eligible', detail: await whyNotShort(opts.bookId) });
+    return undefined;
+  }
 
   // Grouped by series, because the listing refresh and the busy hold are per series, not per chapter.
   const bySeries = new Map<string, ShortBook[]>();
@@ -562,7 +837,15 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
     const folder = rows[0].folder;
     // Somebody else is already downloading into this folder (a series-page fetch, a Fetch newest run).
     // Two writers on one path is a lost file and a rate-limit strike each; this one simply waits a night.
-    if (busyFolders.has(folder)) continue;
+    // Reintroduce the silent `continue`: "a Fix on a chapter whose folder is busy says so" finds no skip.
+    if (busyFolders.has(folder)) {
+      skip(r, {
+        step: 'short', why: 'folder_busy',
+        target: { seriesId, title: rows[0].title, ...(opts.bookId ? { bookId: opts.bookId, number: Number(rows[0].number) } : {}) },
+      });
+      continue;
+    }
+    here({ kind: 'series', seriesId, title: rows[0].title, phase: 'listing' });
     const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
     // The sources this series is actually followed on -- the primary pair plus series_sources, exactly as
     // listingAlternates builds it (lib/updater.ts). A listing row's source is trusted only while the
@@ -583,6 +866,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       for (const book of rows) {
         { const h = halted(); if (h) { stopped = h; break series; } }
         r.short.looked++;
+        const at = (phase: RepairPhase, sourceId?: string) => here({
+          kind: 'chapter', seriesId, bookId: book.id, title: book.title, number: Number(book.number), phase,
+          ...(sourceId ? { sourceId } : {}), done: r.short.looked - 1, of: books.length,
+        });
         const abs = join(book.root, book.file);
         const listing = await one<{ title: string | null; copies: ListingCopy[] }>(
           'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, book.number],
@@ -605,12 +892,21 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         // chapter being left for tomorrow is the harmless end of that.
         const unasked = bySource.size - copies.length;
 
+        let answered = 0;
+        /**
+         * Page lists really requested, for short_result's "3 sources asked, 2 answered". Counted past the guards:
+         * a source switched off or in a cooldown was not asked, and read as asked-and-silent it sends an admin
+         * to the wrong site. Reintroduce by counting before ask(): "a source in a cooldown is silence, not an
+         * answer" in repair.int.test.ts finds two asked.
+         */
+        let asked = 0;
         /** A page count, or null when the source was not asked or did not answer -- which ends any proof. */
         const ask = async (sourceId: string, chapterSourceId: string): Promise<number | null> => {
           const src = getSource(sourceId);
           if (!src || !allowed(sourceId)) return null;
           if (await isDisabled(sourceId).catch(() => false)) return null;
           if (await blockedNow(sourceId).catch(() => null)) return null;
+          asked++;
           try {
             // Nothing is reported to source_health from here. A page list asked on our own initiative must
             // never be what puts a source into a cooldown: the sweep's own failures are that signal.
@@ -628,10 +924,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
 
         let best = book.pages;
         let bestChapter: SourceChapter | null = null;
-        let answered = 0;
         let silent = unasked > 0;
         for (const c of copies) {
           const chapter = copyToChapter(c, { number: book.number, title: listing?.title ?? null });
+          at('asking', c.source);
           const n = await ask(c.source, c.sourceId);
           if (n === null) { silent = true; continue; }
           answered++;
@@ -641,21 +937,30 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         // Nothing the series already follows has more than we do: ask whether any other site does. With
         // `bookId` the hunt is forced past its once-a-day stamp -- a person pressed Fix on this chapter.
         let huntWhy: string = 'skipped';
+        // Whether the hunt below had a search to spend: a spent budget and a once-a-day stamp both come
+        // back from it as `cooldown`, and the row should say which ("no searches left tonight" is not
+        // "searched too recently").
+        const couldSearch = budget.left > 0;
         if (!bestChapter) {
+          at('searching');
           const h = await huntSource(seriesId, book.number, {
             allowed, budget, reason: 'short_chapter', force: !!opts.bookId,
           });
           huntWhy = h.why;
           if (h.followed) notes.followed.push(`${book.title} -> ${h.followed.source}`);
           if (h.chapter?.source) {
+            at('asking', h.chapter.source);
             const n = await ask(h.chapter.source, h.chapter.sourceId);
             if (n === null) silent = true;
             else { answered++; if (n > best) { best = n; bestChapter = h.chapter; } }
           }
         }
+        const result = (why: ShortWhy) => noteShort(book.id, { why, asked, answered, best, hunt: huntWhy });
 
         if (bestChapter) {
+          at('downloading', bestChapter.source);
           const done = await replaceShort(book, bestChapter, abs, opts, notes, log);
+          await result(done === true ? 'replaced' : 'download_failed');
           if (done === 'disk') { stopped = 'disk'; break series; }
           if (done) { r.short.replaced++; continue; }
           r.short.left++;
@@ -666,10 +971,17 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         // it did not look, which is exactly the thing a proof cannot be built on.
         if (!silent && answered > 0 && PROOF_WHY.has(huntWhy)) {
           await q('UPDATE lib_books SET short_confirmed_at = now() WHERE id = $1', [book.id]).catch(() => {});
+          await result('confirmed');
           r.short.confirmed++;
           notes.confirmed.push(`${book.title} ch ${book.number}`);
           log?.info(`repair: "${book.title}" ch ${book.number} really is ${book.pages} page(s) -- every copy agrees`);
         } else {
+          // Left for tomorrow, and the row says which of the four reasons it was. Reintroduce by dropping
+          // this write: "a short chapter left unfixed records when and why" finds the column null.
+          await result(silent || !answered ? 'source_silent'
+            : huntWhy === 'off' ? 'hunt_off'
+            : huntWhy === 'cooldown' ? (couldSearch ? 'hunt_cooldown' : 'no_searches')
+            : 'no_longer_copy');
           r.short.left++;
         }
       }
@@ -714,7 +1026,7 @@ async function replaceShort(
   // came from the source's page list, and the count that gets stored has to come from the bytes that
   // landed. (The count step writes `pages` too, but only into a blank row -- `AND pages = 0` -- from a
   // file nobody had measured; the two never write the same row for the same reason.)
-  await restampBook(book.id, abs, missing, { source: via, scanlator: chapter.scanlator });
+  await restampBook(book.id, abs, missing, { source: via, scanlator: chapter.scanlator, chapterId: chapter.sourceId });
   const now = await one<{ pages: number }>('SELECT pages FROM lib_books WHERE id = $1', [book.id]);
   const readers = await one<{ n: number }>('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [book.id]).catch(() => null);
   await logAudit('book.short_fixed', {
@@ -915,7 +1227,7 @@ async function replaceWithGroup(
   // A restamp that throws must not take the rest of the night's repair with it: the new file is whole on
   // disk, and the count step re-measures a row whose numbers are stale.
   try {
-    await restampBook(book.id, abs, [], { source: via, scanlator: group });
+    await restampBook(book.id, abs, [], { source: via, scanlator: group, chapterId: copy.sourceId });
   } catch (e) {
     log?.warn(`repair: "${book.title}" ch ${book.number} was replaced but could not be restamped: ${(e as Error)?.message || e}`);
   }
@@ -1008,8 +1320,9 @@ interface GapsResult {
    * ⚠️ `cooldown` here can only ever mean THIS series was hunted within the last day (by the short step,
    * or by a sweep) -- never "the run ran out of searches", which stops the step before anything is
    * stamped (see below). The Health page's "searched too recently to search again" is true of it.
+   * `posting_order`: the series is numbered by posting order (#116), and no other source is searched for it.
    */
-  why: 'followed' | 'no_candidate' | 'cooldown' | 'cap' | 'off' | 'listed';
+  why: 'followed' | 'no_candidate' | 'cooldown' | 'cap' | 'off' | 'listed' | 'posting_order';
 }
 
 /**
@@ -1033,13 +1346,29 @@ interface GapsResult {
  */
 async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: number }, pending: Dated[], notes: Notes, log?: Log): Promise<RepairResult['stopped']> {
   // Series with something to look at. `gaps_checked_at` bounds the rescan; `seriesId` (a person pressing
-  // "Fill now") ignores it, because they are asking about this series now.
+  // "Fill now") ignores it, because they are asking about this series now -- and ignores `auto_update` as
+  // well (v0.49.0): a series whose automatic updates are paused is exactly one whose holes nothing else
+  // will ever fill, and the button said "Fill now" and did nothing. The nightly keeps both filters.
+  // Reintroduce by putting `s.auto_update AND` back for a named series: "Fill now fetches a gap a followed
+  // source already lists, even with updates paused" in repair.int.test.ts looks at no series at all.
   const candidates = await q<{ id: string; title: string; folder: string }>(
     `SELECT s.id, s.title, s.folder FROM lib_series s
-      WHERE s.auto_update AND ${visibleToAll('s')}
+      WHERE ${opts.seriesId ? '' : 's.auto_update AND '}${visibleToAll('s')}
         ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
   );
+  // A series whose every missing number its slow archive (#117) is going to fetch -- listed below its boundary,
+  // available, under the retry cap (lib/archiveBoundaries.ts archiveHoles) -- is the archive's work in progress: it
+  // is fetching exactly those, a few an hour, and Health says "being archived" of them. The nightly leaves it alone --
+  // no search of other sites, no fetch at full speed, and no gaps_checked_at stamp, so it comes back the night the
+  // archive is done -- unless a person named it (Fill now), which fetches them now. A paused archive's too: they are
+  // listed already, so a search has nothing to find, and the sweep floors at a paused boundary as well, so the
+  // 'listed' this step would conclude ("the next chapter sweep will fetch them") is a sweep that never comes; Health
+  // lists them as the gaps they are. A number the source does not list is not the archive's (it never fetches one),
+  // and is searched for as any gap is. Reintroduce by dropping the skip: "the nightly leaves an archived gap to the
+  // archive" in repair.int.test.ts finds the series stamped; by counting every number below the boundary: "a number
+  // below the boundary the source does not list" there finds nothing searched.
+  const archiving = opts.seriesId ? new Map<string, ArchiveHoles>() : await archiveHoles(candidates.map((s) => s.id), CHAPTER_RETRY_CAP);
   // One small indexed read per candidate. It is the only way to apply the override and tombstone rules
   // (lib/libraryNumbers.ts) per series, and a few hundred of them once a night is not a load worth
   // flattening into a query nobody can read.
@@ -1050,14 +1379,29 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     if (!gaps.length) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
+    const archive = archiving.get(s.id);
+    if (archive && gapNums.every((n) => archive.numbers.has(n))) continue;
     ranked.push({ ...s, have, missing: gapNums.length, gapNums });
   }
   ranked.sort((a, b) => b.missing - a.missing);
+  const take = ranked.slice(0, REPAIR_GAPS_MAX);
+  planned('gaps', take.length);
+  if (opts.seriesId && !take.length) {
+    // Fill now on a series with nothing to fill (the hole closed since the page loaded), or one that is no
+    // longer there to look at: said, not silently nothing.
+    skip(r, candidates.length
+      ? { step: 'gaps', target: { seriesId: opts.seriesId, title: candidates[0].title }, why: 'no_gaps' }
+      : { step: 'gaps', target: { seriesId: opts.seriesId }, why: 'not_eligible', detail: 'gone' });
+  }
 
   let stopped: RepairResult['stopped'];
-  for (const s of ranked.slice(0, REPAIR_GAPS_MAX)) {
+  for (const [i, s] of take.entries()) {
     { const h = halted(); if (h) { stopped = h; break; } }
-    if (busyFolders.has(s.folder)) continue;
+    if (busyFolders.has(s.folder)) {
+      skip(r, { step: 'gaps', target: { seriesId: s.id, title: s.title }, why: 'folder_busy' });
+      continue;
+    }
+    const at = (phase: RepairPhase) => here({ kind: 'series', seriesId: s.id, title: s.title, phase, done: i, of: take.length });
 
     const gapSet = new Set(s.gapNums);
     const listed = await q<{ number: number; status: string }>(
@@ -1080,11 +1424,11 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     // nothing ever searched. Stopping here instead costs the run nothing: every series left is one this
     // run had no search for, and they are still the emptiest ones tomorrow.
     if (unlisted.size && budget.left <= 0) {
+      skip(r, { step: 'gaps', target: { seriesId: s.id, title: s.title }, why: 'no_searches_left' });
       log?.info(`repair: no searches left this run -- "${s.title}" and any series behind it keep their place in the queue`);
       break;
     }
     r.gaps.series++;
-    r.gaps.sweep += sweepable.length;
     await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = $1', [s.id]).catch(() => {});
 
     // Until a candidate is found, every unlisted gap number is one nobody has. The follow narrows it.
@@ -1096,6 +1440,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     };
 
     if (unlisted.size) {
+      at('searching');
       const allowed = await sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
       const found = await huntCandidates(s.id, {
         allowed, budget, reason: 'gap', force: !!opts.seriesId,
@@ -1109,6 +1454,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       // what was actually asked.
       out.why = found.why === 'no_copy' ? 'no_candidate' : found.why;
       if (found.chosen) {
+        at('following');
         const fillable = assess(s.have, (found.chosen.chapters ?? []).map((c) => c.number)).fillable.filter((n) => unlisted.has(n));
         try {
           const f = await followHunted(s.id, found.title, found.chosen, 'gap', { numbers: fillable });
@@ -1124,33 +1470,52 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
           log?.warn(`repair: "${s.title}": could not follow the source that brackets its gaps (${out.why})`);
         }
       }
-      if (out.followed) {
-        busyFolders.add(s.folder);
-        try {
-          const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled });
-          const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
-          out.fetched = fetched.length;
-          // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
-          // freshly followed source, oldest missing chapter first up to REPAIR_GAP_CHAPTERS -- so
-          // following a source with a longer catalogue can land twenty chapters of which three were the
-          // gap. `fetched` answers "was the hole filled"; `landed` answers "what did the night cost",
-          // and a line that reported only the first would understate the download by an order.
-          out.landed = up.landed.length;
-          r.gaps.fetched += fetched.length;
-          if (up.landed.length) {
-            log?.info(`repair: "${s.title}": ${up.landed.length} chapter(s) landed from ${out.followed}, `
-              + `${fetched.length} of them inside the gap`);
-          }
-          if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
-          if (up.diskFull) stopped = 'disk';
-        } catch (e: any) {
-          if (e?.diskFull) stopped = 'disk';
-          else log?.warn(`repair: fetching "${s.title}"'s gaps threw: ${(e as Error)?.message || e}`);
-        } finally {
-          busyFolders.delete(s.folder);
+    }
+    // Fetched now: after a follow, the new source's copies; and when a person pressed Fill now on this
+    // series, the gap chapters a followed source ALREADY lists (v0.49.0). The nightly leaves those to the
+    // sweep, which is right for the nightly -- but "Fill now" that ends "listed" with nothing fetched is a
+    // button that did nothing, and on a series whose updates are paused the promised sweep never comes.
+    // Bounded by REPAIR_GAP_CHAPTERS either way.
+    // Reintroduce by dropping `opts.seriesId && sweepable.length`: "Fill now fetches a gap a followed source
+    // already lists" in repair.int.test.ts finds nothing fetched.
+    let sweepLeft = sweepable.length;
+    if (out.followed || (opts.seriesId && sweepable.length)) {
+      at('fetching');
+      busyFolders.add(s.folder);
+      try {
+        // Fill now fetches below an active slow archive's boundary too (#117): the person asked for these
+        // chapters now, at normal pace, rather than at the archive's turn -- and without it the sweep's floor
+        // rises to the boundary and this fetches nothing while the row reads "listed". The nightly keeps the
+        // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
+        // below an active archive's boundary" in repair.int.test.ts fetches nothing.
+        const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId });
+        const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
+        out.fetched = fetched.length;
+        // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
+        // series, oldest missing chapter first up to REPAIR_GAP_CHAPTERS -- so following a source with a
+        // longer catalogue can land twenty chapters of which three were the gap. `fetched` answers "was
+        // the hole filled"; `landed` answers "what did the night cost", and a line that reported only the
+        // first would understate the download by an order.
+        out.landed = up.landed.length;
+        r.gaps.fetched += fetched.length;
+        const got = new Set(fetched.map((l) => Math.floor(l.number)));
+        sweepLeft = sweepable.filter((n) => !got.has(n)).length;
+        if (up.landed.length) {
+          log?.info(`repair: "${s.title}": ${up.landed.length} chapter(s) landed from ${out.followed ?? 'the sources it follows'}, `
+            + `${fetched.length} of them inside the gap`);
         }
+        if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
+        if (up.diskFull) stopped = 'disk';
+      } catch (e: any) {
+        if (e?.diskFull) stopped = 'disk';
+        else log?.warn(`repair: fetching "${s.title}"'s gaps threw: ${(e as Error)?.message || e}`);
+      } finally {
+        busyFolders.delete(s.folder);
       }
     }
+    // What the sweep still has to fetch: the listed gap chapters, less any this run just fetched.
+    out.sweep = sweepLeft;
+    r.gaps.sweep += sweepLeft;
     // Counted in CHAPTERS, not series: "nobody lists these eleven chapters" is the finding an admin can
     // do something about (an alternative title, a manual add), and a count of series would hide whether
     // that is one stubborn hole or a series nothing else carries at all.
@@ -1204,6 +1569,10 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   const pending: Dated[] = [];
   const notes: Notes = { replaced: [], confirmed: [], followed: [], upgraded: [] };
   let stopped: RepairResult['stopped'];
+  r.stepMs = {};
+  // The live object reads the very objects this run works with (see RepairLive): counts, searches left.
+  const live = repairState.live;
+  if (live) { live.result = r; live.budget = budget; }
 
   const steps = REPAIR_STEPS.filter(want);
   if (activeCard) activeCard.total = steps.length;
@@ -1211,7 +1580,8 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     { const h = halted(); if (h) { stopped = h; break; } }
     if (stopped) break;
     if (!want(step)) continue;
-    if (activeCard) activeCard.step = step;
+    enterStep(step, steps.indexOf(step));
+    const t = Date.now();
     if (step === 'solver') await stepSolver(r, log);
     else if (step === 'count') await stepCount(r, log);
     else if (step === 'failures') stopped = await stepFailures(r, opts, budget, pending, log);
@@ -1222,12 +1592,16 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       // in a night is bounded, so the gap step below always has some left to spend.
       const reserve = { left: Math.min(budget.left, REPAIR_SHORT_HUNT_MAX) };
       const had = reserve.left;
+      if (live) live.shortReserve = Object.assign(reserve, { of: had });
       stopped = await stepShort(r, opts, reserve, notes, log);
       budget.left -= had - reserve.left;
+      if (live) live.shortReserve = null;
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
     else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
     else if (step === 'names') stopped = await stepNames(r, log);
     else if (step === 'directions') await stepDirections(r, log);
+    r.stepMs[step] = Date.now() - t;
+    if (live) live.stepMs[step] = r.stepMs[step];
     if (activeCard) {
       activeCard.done++;
       activeCard.fetched = r.short.replaced + r.gaps.fetched + r.groups.replaced + (r.failures.retried?.added ?? 0);
@@ -1246,7 +1620,9 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     }
   }
 
+  here(null);
   const out: RepairResult = { ...r, ms: Date.now() - t0, ...(stopped ? { stopped } : {}) };
+  if (live) live.notes = notes;
   await logAudit('library.repair', {
     userId: opts.userId ?? null,
     detail: {
@@ -1277,45 +1653,88 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
  * folders and both write lib_books for what landed, so a chapter this job is replacing could be the very
  * file the sweep is scanning, and two persistScans racing over one folder mint rows twice. `runSweep`
  * refuses in the same way while `runtime.repairing` is set, and server.ts's ticks defer around each other.
+ *
+ * v0.49.0: the run's id exists synchronously (`repairState.live.id`, which the route answers with), so a
+ * client can tell when ITS run ended -- even a 5 ms one it never saw running -- from the status route's
+ * `last` and `recent`. Every run is recorded in repair_runs; only a full one moves the Tasks line.
  */
 export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResult> | false {
   if (repairState.running || runtime.updating) return false;
   repairState.running = true;
   runtime.repairing = true;
-  repairState.startedAt = Date.now();
-  repairState.finishedAt = null;
+  const full = isFullRun(opts);
+  const startedAt = Date.now();
+  repairState.startedAt = startedAt;
+  if (full) repairState.finishedAt = null;
   const card = activeCard = beginRun('repair', opts.userId ?? null);
+  if (!canDownload(opts)) card.downloads = false;
+  const only = opts.only?.length ? REPAIR_STEPS.filter((s) => opts.only!.includes(s)) : null;
+  const live: RepairLive = repairState.live = {
+    id: randomUUID(), startedAt, origin: opts.userId === undefined ? 'nightly' : 'manual', by: opts.userId ?? null,
+    kind: kindOf(opts), only, target: targetOf(opts), steps: only ?? [...REPAIR_STEPS],
+    step: null, stepIndex: -1, stepStartedAt: null, stepMs: {}, planned: {}, current: null,
+    budget: null, shortReserve: null, result: null,
+  };
   return withOrigin('repair', opts.userId ?? null, async () => {
+    let status: RunStatus = 'failed';
+    let result: RepairResult | null = null;
     try {
+      // Best effort: startRunRecord never throws, and a run with no history row still runs.
+      live.target = await startRunRecord(live);
+      card.repairKind = live.kind;
+      if (live.target.label) card.label = live.target.label;
+      if (live.target.number !== undefined) card.number = live.target.number;
+      if (live.target.seriesId) card.seriesId = live.target.seriesId;
       const r = await repairLibrary(log, opts);
+      r.run = live.id;
+      result = r;
+      status = r.skipped ? 'skipped' : r.stopped ? 'stopped' : 'done';
       // A nightly run the switch turned away did nothing, and a card saying "Library repair: done" would
       // claim otherwise; it goes, rather than ending.
       if (r.skipped) dismissRun('repair');
       else endRun(card, r.stopped === 'disk' ? 'error' : 'done', r.stopped === 'disk' ? 'The library disk is full.' : undefined);
-      repairState.finishedAt = Date.now();
-      repairState.lastResult = r;
-      // Persisted like the cleanup's and the verify's: the Tasks panel promises to keep the last run, and a
-      // restart must not turn it back into "not run yet". Reintroduce by dropping this UPDATE: "the last
-      // result survives a restart" in repair.int.test.ts finds the row empty.
-      await q(
-        'UPDATE server_settings SET repair_last_run = now(), repair_last_result = $1::jsonb WHERE id = 1',
-        [JSON.stringify(r)],
-      ).catch(() => {});
+      // ⚠️ Only a FULL run is the Tasks line, in memory and in the row a restart reads (and the row server.ts
+      // arms the first nightly from). A one-row Fix is in repair_runs and nowhere else. Persisted like the
+      // cleanup's and the verify's: the Tasks panel promises to keep the last run, and a restart must not
+      // turn it back into "not run yet". Reintroduce by dropping this UPDATE: "the last full result
+      // survives a restart" in repair.int.test.ts finds the row empty; by dropping `full`: "a pressed Fix
+      // no longer replaces the nightly's result" in repairRoutes.int.test.ts finds it replaced.
+      if (full) {
+        repairState.finishedAt = Date.now();
+        repairState.lastResult = r;
+        await q(
+          'UPDATE server_settings SET repair_last_run = now(), repair_last_result = $1::jsonb WHERE id = 1',
+          [JSON.stringify(r)],
+        ).catch(() => {});
+      }
       log?.info(`repair: ${summaryOf(r)}${r.skipped ? ' (switched off)' : ''}${r.stopped ? ` (stopped: ${r.stopped})` : ''} in ${r.ms} ms`);
       return r;
     } catch (e) {
-      // Never leave an older healthy result standing after a run that threw, in memory or in the row a
+      // Never leave an older healthy result standing after a full run that threw, in memory or in the row a
       // restart reads: "20 chapters replaced" about a run that died halfway is worse than no line at all.
-      repairState.finishedAt = Date.now();
-      repairState.lastResult = null;
-      await q('UPDATE server_settings SET repair_last_run = now(), repair_last_result = NULL WHERE id = 1').catch(() => {});
+      if (full) {
+        repairState.finishedAt = Date.now();
+        repairState.lastResult = null;
+        await q('UPDATE server_settings SET repair_last_run = now(), repair_last_result = NULL WHERE id = 1').catch(() => {});
+      }
       endRun(card, 'error', 'The repair failed. The server log has the details.');
       log?.error(e);
       throw e;
     } finally {
+      await finishRunRecord(live.id, {
+        status, ms: result?.ms ?? Date.now() - startedAt, stepMs: result?.stepMs ?? live.stepMs, result, notes: live.notes ?? null,
+      });
+      // `last` before `running` goes false: a poll that sees the run gone must also see how it ended.
+      repairState.last = { id: live.id, finishedAt: Date.now(), status, kind: live.kind };
+      repairState.live = null;
       repairState.running = false;
       runtime.repairing = false;
       activeCard = null;
+      // The header's warning follows what the run fixed, without waiting six hours or for someone to open
+      // Health. Detached and coalesced (lib/healthSummary.ts), after the flag is down. A run the switch
+      // turned away changed nothing. Reintroduce by deleting this: "a repair that ends refreshes the header
+      // summary" in healthSummary.int.test.ts finds the stale summary still stored.
+      if (status !== 'skipped') scheduleHealthSummaryRefresh();
     }
   });
 }

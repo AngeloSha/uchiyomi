@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { relativeTime } from '@/lib/format';
+import { shownDeviceName } from '@/lib/device';
 import { readShownOnce, writeShownOnce } from '@/lib/shownOnce';
 import { Avatar } from '@/components/Avatar';
 import { useToast } from '@/components/Toast';
@@ -229,7 +230,7 @@ function SessionsSection() {
       {rows.map((s) => (
         <Row key={s.id}
           label={<>
-            {s.device_name || tr('Device')}
+            {shownDeviceName(s.device_name) || tr('Device')}
             {s.current && <span className="ms-2 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">{tr('This device')}</span>}
           </>}
           help={`${s.ip || tr('unknown ip')} · ${tr('active {when}', { when: relativeTime(s.last_seen) })}`}>

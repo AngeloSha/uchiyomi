@@ -80,15 +80,22 @@ import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
 import { busyFolders } from '../lib/bulkNewest';
+import { enqueueArchive, archiveBusy, archiveSeriesIds, archiveView, type EnqueueOutcome } from '../lib/archive';
+import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
 import { haveNumbers } from '../lib/libraryNumbers';
+import {
+  addNumbering, numberingFor, numberedChapters, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
+  type NumberingChoice,
+} from '../lib/numbering';
+import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import {
   gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
@@ -120,7 +127,7 @@ interface Job {
   title: string; total: number; done: number;
   status: 'downloading' | 'done' | 'error';
   reason?: string;
-  /** When it started, for the pill's "Finished today" list (#82). */
+  /** When it started, for Library -> Downloads (#82). */
   startedAt?: number;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
   finishedAt?: number;
@@ -162,14 +169,51 @@ interface Job {
   switched?: Array<{ number: number; from: string; to: string; why: string }>;
   /** How many chapters this job saved with placeholder pages (lib/partial.ts). */
   partial?: number;
+  /**
+   * On a job that ended in error: the chapters it did not land, ascending, at most FILL_MAX_CHAPTERS -- the
+   * numbers the Downloads view's Try again sends back through POST /api/sources/fetch, which takes exactly
+   * that many (`leftOf`). What landed or was already on disk is not in it. Empty when nothing is left to
+   * ask for: every chapter landed and the library scan is what failed.
+   */
+  left?: number[];
+  /**
+   * An add's cover, as its source gave it, for the Downloads view to draw before chapter one is scanned in
+   * and the series has a thumbnail of its own. The source rides along because the cover proxy
+   * (/img/sources/cover) fetches by it.
+   */
+  cover?: { source: string; url: string };
+  /**
+   * What kind of job this is (v0.49.0): `add` for an add from Discover (and its nothing-yet carrier card),
+   * otherwise the origin startDownloadJob was given -- `fetch`, `fill` or `refetch`. Sent, so the Downloads view
+   * can say which kind of job failed; `left` is set only where POST /api/sources/fetch can redo the job
+   * (`REDOABLE`).
+   */
+  origin: Origin;
 }
 const jobs = new Map<string, Job>();
+
+/**
+ * The jobs a Try again can redo through POST /api/sources/fetch, and so the only ones a `left` is set on. That
+ * route fetches only numbers a FOLLOWED source lists and the library does not hold. A fill took its chapters
+ * from a plan's source the series need not follow, so its numbers would come back `not_listed`; a refetch's
+ * numbers are already here (a failed one puts the old copy back), so they would come back `already_here`. A
+ * Try again that can only answer "nothing to fetch" is a dead button, so those cards carry no `left`, and the
+ * view offers no Try again on them. Reintroduce by setting `left` whatever the origin: "a failed fill or
+ * refetch card names nothing to try again" in downloadsView.int.test.ts reads [2, 3, 4].
+ */
+const REDOABLE: ReadonlySet<Origin> = new Set<Origin>(['fetch', 'add']);
+
+/** A failed job's chapters that did not land, for its Try again (`Job.left`). */
+function leftOf(asked: ReadonlyArray<{ number: number }>, landed: ReadonlyArray<{ number: number }>, onDisk: readonly number[]): number[] {
+  const have = new Set([...landed.map((l) => l.number), ...onDisk]);
+  return [...new Set(asked.map((c) => c.number))].filter((n) => !have.has(n)).sort((a, b) => a - b).slice(0, FILL_MAX_CHAPTERS);
+}
 
 /** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
  *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
  *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough.
- *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question the pill's
- *  Finished list answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
+ *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question Library -> Downloads
+ *  answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
 const DONE_TTL = 24 * 3600_000;
 function sweepJobs(now = Date.now()): void {
   for (const [folder, j] of jobs) {
@@ -188,6 +232,29 @@ function sweepJobs(now = Date.now()): void {
 export function jobBusy(folder: string): boolean {
   return jobs.get(folder)?.status === 'downloading' || busyFolders.has(folder);
 }
+// A renumber (lib/numbering.ts) never renames under a job that is writing into the folder, and a failed card's
+// Try again list names the chapters it lacked by number: after a renumber those are other posts, so the list
+// moves with the files -- and a number the renumber has no place for is dropped rather than fetched as the wrong
+// post.
+registerBusyProbe((folder) => jobs.get(folder)?.status === 'downloading');
+
+/**
+ * Why a manual fetch or a fill must wait, when it must (#116): a renumber is pending review or half-applied, and
+ * every chapter fetched now would land under a number the plan is about to move -- the plan would only grow. A
+ * fill from another source into a posting-order series is refused for good: that source's numbers are not ours.
+ */
+function renumberRefusal(s: { numbering?: string | null; numbering_pending?: string | null; renumber_plan?: unknown; source_id?: string | null }, source?: string) {
+  if (s.numbering_pending || s.renumber_plan) {
+    return { error: 'renumber_pending', message: 'This series is waiting to be renumbered. Review it on the series page first.' };
+  }
+  if (s.numbering === 'posting_order' && source && source !== s.source_id) return { error: 'posting_order', message: POSTING_ORDER_REFUSAL };
+  return null;
+}
+onRenumbered((folder, map) => {
+  const j = jobs.get(folder);
+  if (!j?.left?.length) return;
+  j.left = [...new Set(j.left.map((n) => map.get(numKey(n))).filter((n): n is number => n !== undefined))].sort((a, b) => a - b);
+});
 
 export interface DownloadJobInput {
   folder: string;
@@ -246,38 +313,120 @@ const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} cha
 const logScanError = (e: unknown) => console.warn(`[scan] library scan threw: ${(e as Error)?.message || e}`);
 
 /**
- * The download activity (lib/downloadActivity.ts) as one viewer may see it: every chapter coming in, whatever
- * started it, for the series this viewer can browse -- the same rule as the series themselves, since a title
- * is a listing. A download for a folder that is not a series yet (an add's first chapter) is its starter's and
- * an admin's. Who started a download is not sent, only whether it was this viewer.
+ * Who may see what the Downloads view lists (v0.49.0): one rule, in one place, for job cards, the activity
+ * feed, a run's current series and -- keyed by series id rather than folder -- the slow archive's rows (#117).
+ *
+ * A folder's series row decides, through browsable(): library grants, the age cap and the 18+ hide, the same
+ * rule as the series themselves, since a title is a listing. A folder with no row yet (an add whose first
+ * chapter has not been scanned in) is its starter's and an admin's: it cannot be in anyone's library yet. One
+ * query per poll, whatever the lists hold.
+ *
+ * Its starter keeps their own download whatever the row says (the owner's call): an add can land in a library
+ * the member has no grant to, or be rated above their cap once scanned, and the card -- progress, Cancel, the
+ * reason it failed -- used to vanish mid-download, from the add dialog polling it too. They typed that title
+ * themselves, so its title is no leak; what the row would add is. So an item names the series' id or carries
+ * its cover only when the viewer may browse the row (`openId` here, `cardFor` for the cards).
+ *
+ * Before v0.49.0 job cards were filtered only while the 18+ hide was on, so a member walled off from a library
+ * by grant or age cap still received every card's title. And a failed lookup showed everything; now it reads
+ * as "no row", so each item goes to its starter and admins only -- closed, not open.
  */
-async function activityFor(ctx: ViewCtx, me: string | null, admin: boolean) {
-  const { active, recent } = listActivity();
-  const folders = [...new Set([...active, ...recent].map((e) => e.folder))];
+async function downloadsAudience(ctx: ViewCtx, me: string | null, admin: boolean, keys: { folders: Iterable<string>; seriesIds?: Iterable<string> }) {
+  const folders = [...new Set(keys.folders)];
+  const ids = [...new Set(keys.seriesIds ?? [])].filter(Boolean);
   const p = new Params();
-  const rows = folders.length
+  const rows = folders.length || ids.length
     ? await q<{ id: string; folder: string; ok: boolean }>(
-      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s WHERE s.folder = ANY(${p.add(folders)})`,
+      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s
+        WHERE s.folder = ANY(${p.add(folders)}) OR s.id = ANY(${p.add(ids)})`,
       p.values as any[],
     ).catch(() => [])
     : [];
-  // A folder can have a deleted twin beside its live row (lib/library.ts persistScan): the row this viewer can
-  // browse is the one that speaks for it. `browsable` already refuses a deleted or merged row.
-  const bySeries = new Map<string, { id: string; folder: string; ok: boolean }>();
-  for (const r of rows) if (!bySeries.has(r.folder) || (r.ok && !bySeries.get(r.folder)!.ok)) bySeries.set(r.folder, r);
-  const shown = (e: ActivityEntry) => {
-    const s = bySeries.get(e.folder);
-    return s ? s.ok : admin || (!!e.by && e.by === me);
+  const { byFolder, okIds } = speakingRows(rows, folders);
+  const mine = (by: string | null | undefined) => !!by && by === me;
+  return {
+    /** The row that speaks for a folder, when it has one: its id, and whether this viewer may browse it. */
+    row: (folder: string) => byFolder.get(folder),
+    /**
+     * The folder's series id, for an item to name -- only when this viewer may browse that row: a starter
+     * shown their own download in a library they cannot open gets the title they typed, not a way in.
+     */
+    openId: (folder: string) => { const s = byFolder.get(folder); return s?.ok ? s.id : undefined; },
+    /**
+     * May this viewer see a download into `folder` that `by` started. Reintroduce by answering `s.ok` alone for
+     * a folder with a row: "a starter keeps their own card when it lands where they cannot browse" in
+     * downloadsView.int.test.ts finds no card.
+     */
+    folder: (folder: string, by: string | null | undefined) => {
+      const s = byFolder.get(folder);
+      return s ? s.ok || mine(by) : admin || mine(by);
+    },
+    /** May this viewer see series `id`: a run's current series now, the archive's rows with #117. */
+    series: (id: string) => okIds.has(id),
   };
+}
+type DownloadsAudience = Awaited<ReturnType<typeof downloadsAudience>>;
+
+/**
+ * `downloadsAudience`'s rows, sorted out: the row that speaks for each asked-for folder, and the ids this viewer
+ * may browse. A folder can have a deleted twin beside its live row (lib/library.ts persistScan): the row this
+ * viewer can browse is the one that speaks for it, whichever the query returned first -- `browsable` already
+ * refuses a deleted or merged row. Apart from the query so a test can hand it both orders: the heap's order is
+ * the database's to choose. Reintroduce by keeping the first row a folder meets (`if (!had)` alone): "the
+ * browsable twin speaks for the folder, whichever comes first" in downloadsView.int.test.ts reads the deleted one.
+ */
+export function speakingRows(rows: ReadonlyArray<{ id: string; folder: string; ok: boolean }>, folders: Iterable<string>) {
+  const wanted = new Set(folders);
+  const byFolder = new Map<string, { id: string; ok: boolean }>();
+  const okIds = new Set<string>();
+  for (const r of rows) {
+    if (r.ok) okIds.add(r.id);
+    if (!wanted.has(r.folder)) continue;
+    const had = byFolder.get(r.folder);
+    if (!had || (r.ok && !had.ok)) byFolder.set(r.folder, { id: r.id, ok: r.ok });
+  }
+  return { byFolder, okIds };
+}
+
+/**
+ * The download activity (lib/downloadActivity.ts) as one viewer may see it: every chapter coming in, whatever
+ * started it, by the Downloads view's one rule (`downloadsAudience`). Who started a download is not sent, only
+ * whether it was this viewer.
+ */
+function activityFor(seen: DownloadsAudience, me: string | null, { active, recent }: ReturnType<typeof listActivity>) {
+  const shown = (e: ActivityEntry) => seen.folder(e.folder, e.by);
   const out = ({ by, heldAt: _h, source, ...e }: ActivityEntry) => ({
-    ...e, seriesId: bySeries.get(e.folder)?.id ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
+    ...e, seriesId: seen.openId(e.folder) ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
   });
   return { active: active.filter(shown).map(out), recent: recent.filter(shown).map(out) };
 }
 
+/**
+ * Does GET /api/sources/jobs hand this viewer this card: the folder's rule (`downloadsAudience`), and a FAILED
+ * card only to its starter and admins on top of that -- it is never swept (sweepJobs), so a member would
+ * otherwise carry everyone's failures for good. One function, because Cancel and Dismiss answer by it too.
+ */
+function receives(seen: DownloadsAudience, admin: boolean, me: string | null, folder: string, j: Job): boolean {
+  return seen.folder(folder, j.by) && (admin || j.status !== 'error' || (!!j.by && j.by === me));
+}
+
+/**
+ * A card as this viewer receives it. Who started a job stays on the server; `mine` says whether it is this
+ * viewer's, which is what decides Cancel and Dismiss. `seriesId` from the folder's row when the job does not
+ * name one: a Fetch, a fill or a refetch card never did, and the view needs it for a cover and a link. A card
+ * shown only because this viewer started it, in a series they may not browse, keeps its title and loses the
+ * id and the cover (`downloadsAudience`). Reintroduce by keeping them: "a starter keeps their own card when it
+ * lands where they cannot browse" in downloadsView.int.test.ts reads the series id.
+ */
+function cardFor(seen: DownloadsAudience, me: string | null, folder: string, { by, seriesId, cover, ...j }: Job) {
+  const row = seen.row(folder);
+  const open = !row || row.ok;
+  return { folder, ...j, ...(open ? { seriesId: seriesId ?? row?.id, ...(cover ? { cover } : {}) } : {}), mine: !!by && by === me };
+}
+
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
-  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(input.by ? { by: input.by } : {}) });
+  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), origin: input.origin ?? 'fetch', ...(input.by ? { by: input.by } : {}) });
   const settle = async (ch: SourceChapter, landed: boolean) => {
     if (!input.onSettled) return;
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
@@ -288,7 +437,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   void withOrigin(input.origin ?? 'fetch', input.by ?? null, async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
     const settled = new Set<SourceChapter>();
     // Numbers that landed from a copy the person picked by name: stamped `picked_at` at the end, so the
     // nightly group upgrade (lib/repair.ts stepGroups) never swaps a chosen version for another group's.
@@ -313,6 +462,12 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
     ]);
     const exhausted = () => [...sources, ...followed].every((sid) => refusing.has(sid));
+    // Whichever way it failed -- a full disk, every source refusing, chapters that would not save, a scan that
+    // missed them -- a failed card says what is still to fetch (`Job.left`). Twice: the moment the loop stops,
+    // because the library scan after it can take minutes and the card already reads failed; and at the very
+    // end, where the last reasons to fail are known. Reintroduce by making this a no-op: "a job that ends in
+    // error names the chapters it did not land" in downloadsView.int.test.ts finds no `left`.
+    const noteLeft = () => { const j = jobs.get(folder); if (j?.status === 'error' && REDOABLE.has(j.origin)) j.left = leftOf(chapters, landed, onDisk); };
     /** The listing's other copies of a number, from followed sources; the helper drops the copy's own source. */
     const alternatesOf = async (n: number): Promise<SourceChapter[]> => {
       const row = await one<{ title: string | null; copies: ListingCopy[] }>(
@@ -353,7 +508,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       const j = jobs.get(folder);
       if (out.kind === 'landed' || out.kind === 'partial') {
         landed.push({
-          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (ch.pinned && !out.switched) pickedLanded.push(ch.number);
@@ -399,6 +554,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         break;
       }
     }
+    noteLeft();
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
     await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
@@ -427,6 +583,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
       j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
     } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
+    noteLeft();
   });
 
   return { total: chapters.length };
@@ -518,10 +675,21 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     // both `getSeries` and `listChapters` answer a timeout or a throw with null/[], which is exactly what a
     // title with genuinely nothing on it looks like.
     let failed = false;
+    // #115: what the lookup learned about the chapter stage is evidence for Health (non-escalating). Our own
+    // timeout is not: a slow answer is not a failing source. ONE note per lookup, whichever call threw first:
+    // both ask the same site about the same title, and on a broken extension both throw, so a note per call
+    // made one lookup two failures in a row and two lookups "three in a row" (TRAFFIC_CONFIRM).
+    let lookupError: string | undefined;
+    const caught = (e: any) => {
+      failed = true;
+      if (!e?.selfTimeout) lookupError ??= String(e?.message || 'lookup failed');
+    };
     const [series, chapters] = await Promise.all([
-      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return null; }),
-      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return [] as SourceChapter[]; }),
+      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { caught(e); return null; }),
+      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { caught(e); return [] as SourceChapter[]; }),
     ]);
+    if (chapters.length) void noteStage(src.id, 'chapters', 'ok');
+    else if (lookupError !== undefined) void noteStage(src.id, 'chapters', 'fail', { error: lookupError });
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
     // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
     // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before
@@ -547,6 +715,16 @@ export function clearDetailCache(): void {
   detailCache.clear();
   detailInflight.clear();
   previewPages.clear();
+}
+
+/**
+ * Forget what one source listed: an extension preference that changes how it numbers (#116) makes every cached
+ * chapter list of that source wrong at once, and the add dialog would otherwise count by the old numbers for ten
+ * minutes.
+ */
+export function clearDetailCacheFor(adapterId: string): void {
+  for (const k of [...detailCache.keys()]) if (k.startsWith(`${adapterId}:`)) detailCache.delete(k);
+  for (const k of [...previewPages.keys()]) if (k.startsWith(`${adapterId}\u0000`)) previewPages.delete(k);
 }
 
 /**
@@ -583,7 +761,10 @@ export async function previewChapters(ctx: ViewCtx, source: string | undefined, 
   if (!sourceAllowedFor(src, ctx.maxAgeRating)) return refused(403, 'source_denied', 'That source is not available on this account.');
   if (await isDisabled(src.id).catch(() => false)) return refused(403, 'disabled', `${src.name} is switched off.`);
   if (await blockedNow(src.id).catch(() => null)) return refused(429, 'cooldown', `${src.name} asked us to slow down. Try again later.`);
-  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
+  // Numbered as the add would number them (#116, lib/numbering.ts), so the chapter a preview calls 20 is the
+  // chapter 20 the add lands.
+  const chapters = numberingFor(raw, 'auto').chapters;
   // One copy per number, as an add would take it; an external link (pages === 0) cannot be read here either.
   const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases.filter((c) => c.sourceId && c.pages !== 0);
   if (!chosen.length) return refused(502, 'unreadable', 'That source did not list any chapters it can serve.');
@@ -601,7 +782,12 @@ export async function previewPageList(ctx: ViewCtx, source: string | undefined, 
   const key = `${r.src.id}\u0000${chapter.sourceId}`;
   const hit = previewPages.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_PAGES_TTL) return { src: r.src, chapter, urls: hit.urls };
-  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch(() => null);
+  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch((e) => {
+    // #115: page-stage evidence for Health, never a cooldown; our own timeout is not evidence.
+    if (!e?.selfTimeout) void noteStage(r.src.id, 'pages', 'fail', { error: String(e?.message || 'getPageUrls failed') });
+    return null;
+  });
+  if (urls?.length) void noteStage(r.src.id, 'pages', 'ok');
   if (!urls?.length) return refused(502, 'unreadable', 'That chapter would not load from the source.');
   if (previewPages.size >= PREVIEW_PAGES_MAX) previewPages.delete(previewPages.keys().next().value!);
   previewPages.set(key, { at: Date.now(), urls });
@@ -726,6 +912,11 @@ export interface AddResult {
    * a partial re-add, where `chapters` is what is still to come and the rest needs no wording.
    */
   alreadyHere?: number;
+  /**
+   * What became of `archive: true` (#117): the rest queued for the slow archive (or why not), or `later` on a
+   * detached download, which queues it once chapter one has landed and the listing is written.
+   */
+  archive?: EnqueueOutcome | 'later';
 }
 
 /**
@@ -767,6 +958,26 @@ function judgeAlsoFollow(folder: string, seriesId: string, opts: {
     });
 }
 
+/**
+ * An add's "archive the rest slowly": queued like the Library's action, and never the reason an add fails.
+ *
+ * `later` when the add left the series' numbering for an admin's review (#116: a folder that already holds books
+ * is never renumbered blind): the row is queued, but its boundary is placed only once the renumber has settled,
+ * in the numbers the series keeps (lib/archive.ts enqueueArchive) -- the critic's "never enqueue while
+ * numbering_pending is set: the answer is `later`". Reintroduce by answering the enqueue's own `queued`: "a revived
+ * folder waits for its review" in numbering.int.test.ts reads queued.
+ */
+async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCtx }): Promise<EnqueueOutcome | 'later'> {
+  const out = await enqueueArchive(seriesId, a.by, a.ctx).catch((e) => {
+    console.warn(`[add] could not queue ${seriesId} for the slow archive: ${(e as Error)?.message || e}`);
+    return 'nothing' as const;
+  });
+  if (out !== 'queued') return out;
+  const held = await one<{ held: boolean }>(
+    'SELECT (numbering_pending IS NOT NULL OR renumber_plan IS NOT NULL) AS held FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+  return held?.held ? 'later' : out;
+}
+
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
@@ -792,6 +1003,18 @@ export async function addSeriesFromSource(opts: {
   req?: FastifyRequest;
   /** Which sources THIS viewer may reach; a candidate outside it is reported `unavailable` and never asked. */
   sourceAllowed?: (source: string) => boolean;
+  /**
+   * Queue the rest of the series for the slow archive once the add has settled (#117), as `by`, seen through
+   * `ctx` (lib/archive.ts enqueueArchive: the same rules as the queue route). Ignored when the selection is the
+   * whole listing: there is no rest.
+   */
+  archive?: { by: string | null; ctx: ViewCtx };
+  /**
+   * How to number the series (#116, lib/numbering.ts): `auto` (the default) numbers by posting order when the
+   * detector finds a source giving many different posts one number; `posting_order` and `source` are a person's
+   * choice from the add dialog's switch.
+   */
+  numbering?: NumberingChoice;
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
@@ -802,7 +1025,7 @@ export async function addSeriesFromSource(opts: {
   // duplicate, has it any chapters -- so it cannot move behind the reply. Shared with `/api/sources/detail`,
   // which the add dialog calls seconds earlier for the very same two things: without that, opening the
   // dialog and pressing Add paid for four challenge solves to learn two facts.
-  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  const { series, chapters: listed } = await seriesAndChapters(src, sourceId);
   // No title, no add. This used to fall back to the literal string 'Series', which becomes the folder --
   // so a `getSeries` that timed out while `listChapters` succeeded filed the title under `<Source>/Series`,
   // and the NEXT one to do that was told "already in library" and quietly merged into the same shelf.
@@ -841,6 +1064,22 @@ export async function addSeriesFromSource(opts: {
   if (existing && !existing.deleted_at) {
     return { ok: true, status: 200, title, folder, chapters: 0, seriesId: existing.id, message: 'already in library' };
   }
+  // Numbered here, before the chooser (#116): the selection, the floor, the have-set, the listing and the files
+  // the downloader names all take these numbers, so a Webtoons series whose 226 posts share 13 numbers arrives
+  // as 226 chapters rather than 13 chapters with versions. A folder already holding books is not renamed here --
+  // addNumbering adds it for review instead. Reintroduce by numbering nothing (`listed` straight through):
+  // "a Webtoons-shaped add is numbered by posting order" in numbering.int.test.ts floors the series above the
+  // source's last number (8) rather than the last post's (226).
+  const numbered = await addNumbering(listed, opts.numbering ?? 'auto', { folder, sourceId: source!, existingId: existing?.id ?? null });
+  // Tagged with their source ONCE, before the chooser: listingRows tells the chosen copy from the rest by
+  // identity (chooseReleases hands back the very objects it was given), and it used to be handed a second,
+  // freshly tagged copy of the list -- so every row an add wrote listed its chosen copy twice, and the versions
+  // sheet showed each version twice until the first sweep rewrote the listing.
+  // Reintroduce by tagging a fresh copy for listingRows again: "a Webtoons-shaped add is numbered by posting
+  // order" in numbering.int.test.ts finds two copies on a row.
+  const chapters = numbered.chapters.map((c) => ({ ...c, source: source! }));
+  // Other sources' numbers do not line up with posting numbers, so there is nothing to judge a follower by.
+  if (numbered.applied === 'posting_order' && opts.alsoFollow?.length) opts = { ...opts, alsoFollow: undefined };
   if (!force) {
     // ⚠️ `visibleToAll` stays: this asks "would adding this be a duplicate on THIS SERVER", which is a
     // property of the server, not of the person asking (the same reasoning as `inLibrary` above), so it
@@ -929,7 +1168,11 @@ export async function addSeriesFromSource(opts: {
       [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
        folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
     ))[0];
-    await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
+    await replaceListing(id, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    // After the numbering and the listing (#116 before #117): the archive's boundary is the floor just written, in
+    // the numbers the listing now has, and what it will fetch is read from that listing.
+    const archive = opts.archive ? await archiveRest(id, opts.archive) : undefined;
     // The other names the source's own description lists (lib/altTitles.ts), from the RAW description --
     // cleanDescription folds the lines the parser reads by. Only while the admin switch is on; never waited
     // on the add's behalf, and never able to fail it.
@@ -939,7 +1182,11 @@ export async function addSeriesFromSource(opts: {
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
     // judge, as "nothing was fetched, queued or created" is what a plain nothing-yet add promises.
     if (opts.alsoFollow?.length) {
-      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now() });
+      // Its starter's, as every card an add makes: the Downloads view hands a card to whoever started it wherever
+      // it lands (an 18+ library an admin hides, a library a member cannot browse), and the dialog polls this one
+      // for the follow results. Reintroduce by dropping `by`: "a carrier card is its starter's" in
+      // downloadsView.int.test.ts finds no card.
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
       judgeAlsoFollow(folder, id, opts);
     }
     if (series?.coverUrl) {
@@ -954,11 +1201,13 @@ export async function addSeriesFromSource(opts: {
         await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
       })
       .catch(() => {});
-    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id };
+    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}) };
   }
 
   if (!chosen.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
   const selected = selectChapters(chosen, chapterCount, chapterFrom);
+  // "Archive the rest slowly" has a rest only when the person picked part of the listing.
+  const archiveOpt = opts.archive && selected.length < chosen.length ? opts.archive : undefined;
 
   /**
    * What the library ALREADY holds under this folder, so an add never downloads a chapter that is here (#65).
@@ -986,9 +1235,15 @@ export async function addSeriesFromSource(opts: {
    * ⚠️ A failure here reads as "we hold nothing" and the add fetches everything, which is what it did
    * before this existed. Fetching twice is the old bug; skipping a chapter nobody holds would be a new one.
    */
+  // Under posting order (a series removed and added back), override-aware as the sweep's is: a book in a root the
+  // renumber could not rename holds its posting number in book_overrides (lib/numbering.ts).
   const have = new Set((await q<{ number: number }>(
-    `SELECT DISTINCT b.number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
-      WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`,
+    numbered.applied === 'posting_order'
+      ? `SELECT DISTINCT COALESCE(ov.number, b.number) AS number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+           LEFT JOIN book_overrides ov ON ov.book_id = b.id
+          WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`
+      : `SELECT DISTINCT b.number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+          WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`,
     [folder],
   ).catch(() => [])).map((r) => Number(r.number)));
   const toFetch = selected.filter((c) => !have.has(c.number));
@@ -1022,6 +1277,9 @@ export async function addSeriesFromSource(opts: {
     // By folder, as the run reads it after its own scan: the row exists by construction here, because a
     // non-empty have-set is rows joined to a series with this folder.
     const heldId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
+    let heldArchive: AddResult['archive'];
+    // The numbering before the routing, so no check can reach the row routed and not yet numbered.
+    await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
@@ -1029,12 +1287,13 @@ export async function addSeriesFromSource(opts: {
     // source's own, and the chapters they belong to are here -- they were simply fetched by somebody else.
     await setBookDates(folder, selected).catch(() => {});
     if (heldId) {
-      await replaceListing(heldId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await replaceListing(heldId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      if (archiveOpt) heldArchive = await archiveRest(heldId, archiveOpt);
       void learnAltTitles(heldId, series?.summary, source!).catch(() => {});
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
-        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now() });
+        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
         judgeAlsoFollow(folder, heldId, opts);
       }
     }
@@ -1051,10 +1310,16 @@ export async function addSeriesFromSource(opts: {
         await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
       })
       .catch(() => {});
-    return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
+    return {
+      ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId,
+      ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}),
+    };
   }
 
-  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(opts.userId ? { by: opts.userId } : {}) });
+  // The cover is for the Downloads view, which draws this card before chapter one is scanned in and the series
+  // has a thumbnail of its own.
+  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}),
+    ...(series?.coverUrl ? { cover: { source: source!, url: series.coverUrl } } : {}) });
 
   /**
    * Everything from here is the WORK, as opposed to the decision.
@@ -1067,7 +1332,7 @@ export async function addSeriesFromSource(opts: {
   const run = async (): Promise<AddResult> => {
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
     // The add has one source by definition, but it still goes through the same policy as every other
     // download path: pacing, refusal accounting and an explicit partial hold all live in the helper. There
     // are deliberately no alternates and no hunt here -- no followed series exists until chapter one has
@@ -1090,7 +1355,7 @@ export async function addSeriesFromSource(opts: {
       if (out.kind === 'landed' || out.kind === 'partial') {
         firstPages = out.pages;
         landed.push({
-          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (out.kind === 'partial') {
@@ -1119,7 +1384,7 @@ export async function addSeriesFromSource(opts: {
       if (opts.wait === false) {
         // Detached: the caller has already been told the download started, so this card IS the failure
         // report. It is deliberately not swept -- see sweepJobs -- and is dismissed by hand.
-        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); }
+        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []); }
       } else {
         // Awaited: the caller gets a real HTTP answer and has its own reporting, so leaving a card behind
         // would just be noise -- the bulk importer would strand one per failed title.
@@ -1132,9 +1397,12 @@ export async function addSeriesFromSource(opts: {
       return { ok: false, status: 422, error: 'undownloadable', message: `${why} Try a different source.` };
     }
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
+    let runArchive: AddResult['archive'];
     await persistScan().catch(logScanError);
     await setBookDates(folder, selected).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
+    // The numbering before the routing below, as on the branch above: routed means numbered.
+    await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     // The floor the person's selection earns, computed above the "nothing left to fetch" branch so both
     // writers use the one expression -- and from `selected`, which is what was asked for.
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
@@ -1153,7 +1421,10 @@ export async function addSeriesFromSource(opts: {
       // dialog on the card it is already polling, rather than through a title search that can find the
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
-      await replaceListing(seriesId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await replaceListing(seriesId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      // Queued once the row, its numbering, its floor and its listing exist; the archive then waits on this add's
+      // own card (jobBusy) until the chapters the person picked are in, and only then starts on the rest.
+      if (archiveOpt) runArchive = await archiveRest(seriesId, archiveOpt);
       void learnAltTitles(seriesId, series?.summary, source!).catch(() => {});
       // Only once the listing is written, and only from here: the row did not exist when the dialog was
       // answered (persistScan minted it from chapter 1 above), and the judgement measures against this
@@ -1177,6 +1448,8 @@ export async function addSeriesFromSource(opts: {
       .catch(() => {});
     void (async () => {
       let failures = 0;
+      // As in startDownloadJob: a failed add says what is still to fetch, when the loop stops and at the end.
+      const noteLeft = () => { const j = jobs.get(folder); if (j?.status === 'error') j.left = leftOf(toFetch, landed, onDisk); };
       for (const ch of toFetch.slice(1)) {
         if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): between chapters, never mid-write
         let out: Awaited<ReturnType<typeof downloadWithFallback>>;
@@ -1200,7 +1473,7 @@ export async function addSeriesFromSource(opts: {
         const j = jobs.get(folder);
         if (out.kind === 'landed' || out.kind === 'partial') {
           landed.push({
-            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
             ...(out.kind === 'partial' ? { missing: out.missing.map((i: number) => i + 1) } : {}),
           });
           if (j) {
@@ -1244,6 +1517,7 @@ export async function addSeriesFromSource(opts: {
         // the bar. The next chapter may still be healthy, so keep going as the old loop did.
         if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
       }
+      noteLeft();
       await persistScan().catch(logScanError);
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
@@ -1257,9 +1531,7 @@ export async function addSeriesFromSource(opts: {
       if (j && unindexed.length) {
         j.status = 'error'; j.finishedAt = Date.now();
         j.reason = notInLibraryReason(folder, unindexed);
-        return;
-      }
-      if (j && j.status !== 'error' && j.cancelRequested) {
+      } else if (j && j.status !== 'error' && j.cancelRequested) {
         j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
         j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
       } else if (j && j.status !== 'error') {
@@ -1269,12 +1541,16 @@ export async function addSeriesFromSource(opts: {
         j.status = failures ? 'error' : 'done';
         j.finishedAt = Date.now();
       }
+      noteLeft();
     })();
     // `chapters` is what this add will FETCH, which is why it counts `toFetch`: a re-add that finds half
     // the run on disk is downloading half a run, and telling the dialog otherwise would put a progress
     // bar over a count the job can never reach. An awaited caller is answered after the scan above, so
     // the id is known here whatever the branch -- `existing?.id` is only the revive case (#67).
-    return { ok: true, status: 200, title, folder, chapters: toFetch.length, seriesId: seriesId ?? existing?.id };
+    return {
+      ok: true, status: 200, title, folder, chapters: toFetch.length, seriesId: seriesId ?? existing?.id,
+      ...(opts.archive ? { archive: runArchive ?? 'nothing' } : {}),
+    };
   };
 
   if (opts.wait !== false) return run();
@@ -1285,7 +1561,10 @@ export async function addSeriesFromSource(opts: {
   // anything, so on a first add persistScan has not minted the row yet. A revive already has its id;
   // everything else reads it off the job card once chapter one is scanned (`Job.seriesId`).
   void withOrigin('add', opts.userId ?? null, run).catch(() => {});
-  return { ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id };
+  return {
+    ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id,
+    ...(opts.archive ? { archive: archiveOpt ? 'later' as const : 'nothing' as const } : {}),
+  };
 }
 
 /**
@@ -1443,6 +1722,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
+  // The slow archive's routes (#117), behind the canDownload hook above like everything else here.
+  registerArchiveRoutes(app, vc);
   /** Same shape for every by-id rejection, and it does not say what is being withheld. */
   const denySource = (reply: FastifyReply) =>
     reply.code(403).send({ error: 'forbidden', message: 'That source is not available on this account.' });
@@ -1647,7 +1928,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
-              s.chapter_floor, s.scanlator_prefs
+              s.chapter_floor, s.scanlator_prefs, s.numbering, s.numbering_source
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -1746,9 +2027,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return st;
   }
 
-  async function runFillScan(st: FillScan, o: { s: any; seriesId: string; have: number[]; term: string; allowed: Set<string> }): Promise<void> {
+  async function runFillScan(st: FillScan, o: { s: any; seriesId: string; have: number[]; term: string; allowed: Set<string>; following?: string[] }): Promise<void> {
     const { s, seriesId, have, allowed } = o;
     const plan = st.plan;
+    const posting = s.numbering === 'posting_order' && (!s.numbering_source || s.numbering_source === s.source_id);
     const terms = [...new Set([s.title, o.term].filter(Boolean))] as string[];
     // The series' own release preferences over the global ones, with patience off: a person is choosing
     // from this list now, and holding a chapter for a group that may never post here would read as "not
@@ -1775,6 +2057,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
         else {
           try { raw = (await seriesAndChapters(src, f.sourceId)).chapters; }
           catch { why = 'no_chapters'; }
+          // The series' own source, in the numbers the series keeps (#116): a posting-order series holds chapter
+          // 20, and the source's own list calls that post 2. Read-only -- the check is what persists new posts.
+          if (posting && f.pinned && raw.length) raw = await numberedChapters({ seriesId, sourceId: f.source }, raw);
         }
         // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
         // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
@@ -1815,6 +2100,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
         found.push(f);
         listings.push(assessOne(f));
       }
+    }
+    // Numbered by posting order: no other source's numbers line up with the series', so none is searched. The
+    // sources it follows are named with the reason, so the dialog says why they offer nothing.
+    // Reintroduce by searching anyway: "followers are not merged under posting order" in numbering.int.test.ts
+    // finds no line for the follower ("the follower is named, with the reason").
+    if (posting) {
+      for (const id of o.following ?? []) {
+        if (id !== s.source_id) also(id, getSource(id)?.name ?? id, 'posting_order');
+      }
+      await Promise.all(listings);
+      st.refusal = st.head.gaps.length || plan.candidates.some((c) => c.newer.length || c.older.length) ? null
+        : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' };
+      return;
     }
     // Sources that were asked and did not answer (`unreachable`), and sources never asked because enough
     // already had the title (`not_tried`). Both are shown; neither is "does not have it", and the old scan
@@ -1887,10 +2185,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source).catch(() => false)) return reply.code(429).send({ error: 'blocked' });
 
     const s = await one<any>(
-      `SELECT id, title, folder, summary, author, genres, web, status FROM lib_series WHERE id = $1`, [plan.seriesId]);
+      `SELECT id, title, folder, summary, author, genres, web, status, source_id, numbering, numbering_pending, renumber_plan
+         FROM lib_series WHERE id = $1`, [plan.seriesId]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
 
     if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy' });
+    const renumbering = renumberRefusal(s, source);
+    if (renumbering) return reply.code(409).send(renumbering);
 
     const picked = auth.chapters;
     await logAudit('series.fill', {
@@ -1990,13 +2291,20 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // browsable(), for the fill scan's reason: a fetch on a series someone opened is not a listing.
     const p = new Params();
     const rows = await q<any>(
-      `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id
+      `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id,
+              s.numbering, s.numbering_pending, s.renumber_plan
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+    if (jobBusy(s.folder)) {
+      return reply.code(409).send({ error: 'busy', message: archiveBusy(s.folder)
+        ? 'The slow archive is fetching a chapter of this series right now. Try again in a minute.'
+        : 'A download for that series is already running.' });
+    }
+    const renumbering = renumberRefusal(s);
+    if (renumbering) return reply.code(409).send(renumbering);
 
     // The listing is refreshed first, so what is fetched is the copy the release rules choose NOW rather
     // than the one the last sweep chose: a preferences save never touches series_listing, and a person who
@@ -2012,6 +2320,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // proxy's timeout first while the job starts anyway. Ten seconds covers every direct source; past that
     // the stale listing serves and the refresh finishes in the background for the next click.
     await withTimeout(updateSeries(seriesId, 0), REFRESH_BUDGET_MS).catch(() => {});
+    // Asked again after the refresh: it is where the detector first marks a series whose source gives many posts one
+    // number (#116), and the first Fetch after an upgrade -- before any sweep -- went on from the raw listing into a
+    // series that was held from that moment. Reintroduce by checking only before the refresh: "the refresh that
+    // holds a series holds its fetch" in numbering.int.test.ts starts a job.
+    const settled = await one<{ numbering: string | null; numbering_pending: string | null; renumber_plan: unknown; source_id: string | null }>(
+      'SELECT numbering, numbering_pending, renumber_plan, source_id FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+    const heldNow = settled ? renumberRefusal(settled) : null;
+    if (heldNow) return reply.code(409).send(heldNow);
     if (b.data.floored && plain.length) {
       // Whole numbers become every listed chapter they cover. A whole number nothing lists stays in the list,
       // so it is reported `not_listed` like any other; the cap holds over what it expanded to.
@@ -2047,8 +2363,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     ]);
     // A live row, not a tombstone: a chapter the cleanup let go is fetchable again, and "already here"
     // would send the person to a row with no pages behind it.
+    // Override-aware under posting order, as the sweep's have-set is (lib/updater.ts): a book the renumber could
+    // not rename holds its posting number in book_overrides, and its raw number is some other post's now.
     const here = new Set((await q<{ number: number }>(
-      'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+      s.numbering === 'posting_order'
+        ? `SELECT COALESCE(ov.number, b.number) AS number FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+            WHERE b.series_id = $1 AND COALESCE(ov.number, b.number) = ANY($2::real[]) AND b.pruned_at IS NULL`
+        : 'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
       [seriesId, numbers],
     )).map((r) => Number(r.number)));
 
@@ -2245,42 +2566,69 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
+  /**
+   * Is this job one GET /api/sources/jobs hands the caller (`receives`). Cancel and Dismiss answer 404 for one
+   * that is not, exactly as for no job at all (the owner's call): a 403 would tell a member that a download is
+   * running, or failed, for a title in a library they cannot open -- folders are `<Source>/<Title>`, easy to
+   * guess. Reintroduce by answering 404 only for a missing job: "a member is not told of a card they do not
+   * receive" in downloadsView.int.test.ts reads 403.
+   */
+  const receivedBy = async (req: FastifyRequest, folder: string, j: Job) => {
+    const me = userIdOf(req);
+    const admin = roleOf(req) === 'admin';
+    return receives(await downloadsAudience(vc(req), me, admin, { folders: [folder] }), admin, me, folder, j);
+  };
+
+  /**
+   * What the Downloads view shows (v0.49.0): the job cards, the server's own runs and every chapter coming in.
+   * ONE contract for the view, the nav ring and the series band, all reading this one response; the slow
+   * archive (#117) joins it as `archive`, its rows held to the same `downloadsAudience` by series id.
+   */
   app.get('/api/sources/jobs', async (req) => {
     sweepJobs();
     const me = userIdOf(req);
     const admin = roleOf(req) === 'admin';
-    // Who started a job stays on the server; the list says whether it is this viewer's own, which is what
-    // decides whether the pill offers its Cancel (an admin's pill offers every one).
-    const all = [...jobs.entries()].map(([folder, { by, ...j }]) => ({ folder, ...j, mine: !!by && by === me }));
     // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
     // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
     // else's: the series a sweep is on may be in a library this viewer cannot open.
-    const runs = listRuns()
-      .filter((r) => admin || (r.by !== null && r.by === me))
-      .map(({ by, ...r }) => ({ ...r, mine: !!by && by === me }));
-    const activity = await activityFor(vc(req), me, admin);
-    if (!vc(req).hideAdultLibraries) return { content: all, runs, activity };
-    // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
-    // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
-    // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
-    const p = new Params();
-    const arr = p.add(all.map((j) => j.folder));
-    const hidden = new Set((await q<{ folder: string }>(
-      `SELECT s.folder FROM lib_series s WHERE s.folder = ANY(${arr}) AND NOT (${browsable('s', vc(req), p)})`,
-      p.values as any[],
-    ).catch(() => [])).map((r) => r.folder));
-    // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
-    // of a series this viewer is hiding goes.
-    const p2 = new Params();
-    const ids = p2.add(runs.map((r) => r.current?.id).filter(Boolean) as string[]);
-    const hiddenIds = new Set((await q<{ id: string }>(
-      `SELECT s.id FROM lib_series s WHERE s.id = ANY(${ids}) AND NOT (${browsable('s', vc(req), p2)})`,
-      p2.values as any[],
-    ).catch(() => [])).map((r) => r.id));
+    const runs = listRuns().filter((r) => admin || (r.by !== null && r.by === me));
+    const activity = listActivity();
+    // The slow archive's rows (#117), every viewer's from one shared read (lib/archive.ts, ten seconds).
+    const archived = await archiveSeriesIds().catch(() => [] as string[]);
+    const seen = await downloadsAudience(vc(req), me, admin, {
+      folders: [...jobs.keys(), ...activity.active.map((e) => e.folder), ...activity.recent.map((e) => e.folder)],
+      // By id: a run's current series, the series a repair's card names, and the slow archive's rows (#117),
+      // which answer as `archive` filtered by `seen.series`.
+      seriesIds: [...runs.flatMap((r) => [r.current?.id ?? '', r.seriesId ?? '']), ...archived],
+    });
+    // A card carries the series title, so it is a listing like any other: shown by the folder's series row
+    // (`receives`, `cardFor`). Reintroduce by dropping `seen.folder(...)` there: "a member receives no card for
+    // a series they cannot open" in downloadsView.int.test.ts sees the other library's card.
+    const content = [...jobs.entries()]
+      .filter(([folder, j]) => receives(seen, admin, me, folder, j))
+      .map(([folder, j]) => cardFor(seen, me, folder, j));
     return {
-      content: all.filter((j) => !hidden.has(j.folder)),
-      runs: runs.map((r) => (r.current && hiddenIds.has(r.current.id) ? { ...r, current: undefined } : r)),
-      activity,
+      content,
+      // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
+      // of a series this viewer may not list goes. Always, not only under the 18+ hide as before v0.49.0. A
+      // repair's `label` is a title too (a one-row Fix on an adult series): it goes with its series, and with a
+      // `current` that went. Reintroduce by passing it through: "a repair's card does not name a series the
+      // viewer hides" in downloadsView.int.test.ts reads the title.
+      runs: runs.map(({ by, ...r }) => {
+        const hideCurrent = !!r.current && !seen.series(r.current.id);
+        const hideLabel = hideCurrent || (!!r.seriesId && !seen.series(r.seriesId));
+        return {
+          ...r, mine: !!by && by === me,
+          ...(hideCurrent ? { current: undefined } : {}),
+          ...(hideLabel ? { label: undefined, number: undefined, seriesId: undefined } : {}),
+        };
+      }),
+      activity: activityFor(seen, me, activity),
+      // Filtered HERE, per viewer, by series id, after the shared cache -- never one viewer's answer replayed to
+      // the next. Reintroduce by answering every row: "the queue follows the viewer" in archiveRoutes.int.test.ts
+      // shows a member another library's series.
+      // A database blip there costs the view its archive line, never the downloads it is polling for.
+      archive: await archiveView(seen.series, me).catch(() => undefined),
     };
   });
 
@@ -2292,7 +2640,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.post('/api/sources/jobs/:folder/cancel', async (req, reply) => {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
-    if (!j) return reply.code(404).send({ error: 'not_found' });
+    if (!j || !(await receivedBy(req, folder, j))) return reply.code(404).send({ error: 'not_found' });
     if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     if (j.status !== 'downloading') return reply.code(409).send({ error: 'not_running' });
     j.cancelRequested = true;
@@ -2332,7 +2680,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.delete('/api/sources/jobs/:folder', async (req, reply) => {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
-    if (!j) return reply.code(404).send({ error: 'not_found' });
+    // A card this viewer is not handed reads as no card at all, as for Cancel (`receivedBy`).
+    if (!j || !(await receivedBy(req, folder, j))) return reply.code(404).send({ error: 'not_found' });
+    // Its starter's to dismiss, or an admin's, as Cancel is (v0.49.0). Any member who could download used to
+    // be able to clear anyone's failed card -- the only record that someone's download did not work.
+    // Reintroduce by dropping this: "another member may not dismiss a card they did not start" in
+    // downloadsView.int.test.ts reads 200.
+    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     // Only something that has stopped. Dropping a running job would orphan a download that is still going
     // and leave no way to see it again. A judgement still running counts the same way: a nothing-yet
     // carrier card is `done` from birth, and dropping it mid-judgement would let the follows land (the
@@ -2440,11 +2794,27 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // unasked. Same for the add below, which is the button this dialog leads to (#64).
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
-    const { series, chapters } = await seriesAndChapters(src, sourceId);
+    const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
+    // Numbered as the add will number them (#116, lib/numbering.ts): a source that gives many different posts one
+    // number is counted in posting order, 1..K, and `numbering` says so -- with the other reading's count under
+    // `alt`, for the dialog's "Keep the source's numbers" switch. The cache keeps the raw list: it is shared.
+    // Reintroduce by counting `raw`: "a Webtoons-shaped add is numbered by posting order" in
+    // numbering.int.test.ts reads 13.
+    const n = numberingFor(raw, 'auto');
+    const chapters = n.chapters;
+    const prefs = await effectivePrefsFor(null, 0);
     // Counted the way the add will take them -- one copy per number, the global blacklist applied -- so
     // the dialog's "120 chapters" is the 120 the add lands and not the 200 rows the source listed.
-    const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases;
+    const chosen = chooseReleases(chapters, prefs).releases;
     const nums = chosen.map((c) => c.number);
+    const other = n.applied === 'posting_order' ? raw : numberingFor(raw, 'posting_order').chapters;
+    const altNums = n.detect.verdict === 'none' ? [] : chooseReleases(other, prefs).releases.map((c) => c.number);
+    const numbering = {
+      verdict: n.detect.verdict, ...(n.detect.reason ? { reason: n.detect.reason } : {}), applied: n.applied, ordered: n.detect.ordered,
+      posts: n.detect.posts, numbers: n.detect.numbers, biggest: n.detect.biggest, examples: n.detect.examples,
+      alt: altNums.length ? { count: altNums.length, first: Math.min(...altNums), last: Math.max(...altNums) } : null,
+      ...(isSwAdapterId(src.id) ? { extSourceId: src.id.slice(SW_PREFIX.length) } : {}),
+    };
     // Who scanlates it and how many numbers come in more than one version, from the list already in hand
     // -- no second source call. The dialog shows the top groups with their rhythm so a person can see,
     // before adding, whether the title is still being worked on and by whom; `onDisk` is 0 by construction
@@ -2461,6 +2831,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
       groups: groupStats(chapters.map((c) => ({ number: c.number, groups: groupsOf(c), scanlator: c.scanlator, publishedAt: c.publishedAt, lang: c.lang, source })), []),
       versions,
+      numbering,
     };
   });
 
@@ -2476,6 +2847,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
       chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest', 'none']).optional(),
       autoUpdate: z.boolean().optional(),
       alsoFollow: z.array(z.object({ source: z.string().min(1).max(200), sourceId: z.string().min(1).max(200) })).max(MAX_AUTO_CANDIDATES).optional(),
+      // "Archive the rest slowly" (#117): what the selection leaves is queued for the slow archive.
+      archive: z.boolean().optional(),
+      // #116: the add dialog's numbering switch. Absent is `auto`, what every caller before v0.49.0 meant.
+      numbering: z.enum(['auto', 'source', 'posting_order']).optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
@@ -2501,6 +2876,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const r = await addSeriesFromSource({
       source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false,
       alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
+      numbering: b.data.numbering,
+      ...(b.data.archive ? { archive: { by: userIdOf(req), ctx: vc(req) } } : {}),
     });
     if (!r.ok) {
       // ⚠️ The duplicate answer names a series the caller may not be allowed to open: the check behind it
@@ -2527,6 +2904,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started, nothing: !!r.nothing,
       ...(seriesId ? { seriesId } : {}), ...(r.alreadyHere === undefined ? {} : { alreadyHere: r.alreadyHere }),
+      ...(r.archive ? { archive: r.archive } : {}),
     };
   });
 }

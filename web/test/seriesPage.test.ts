@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
+import { bookCountText } from '../lib/format';
+
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
@@ -79,7 +81,33 @@ test('Fetch all posts its chunks one after the other, each after the previous jo
   assert.doesNotMatch(body, /await startJob\(/, 'one toast for the run, not one per chunk');
   const wait = fn(page, 'awaitJob');
   assert.match(wait, /status !== 'downloading'/, 'the wait ends when the job is no longer downloading');
-  assert.match(wait, /\['source-jobs'\]/, 'through the shared jobs key, so the pill reads the same answer');
+  assert.match(wait, /\['source-jobs'\]/, 'through the shared jobs key, so the Library ring and the band read the same answer');
+});
+
+test('the band above the chapters shows this series\' server downloads, and re-reads the list as chapters land', () => {
+  // v0.49.0. The page used to refresh its chapters only when a job IT started ended, so a chapter the scheduled
+  // check or someone else's Fetch landed stayed grey until a reload. Reintroduce by dropping the landedFor
+  // effect from the band: "the band does not re-read the chapter list" fails. Reintroduce `pe-36` on the
+  // select bar: "the bar still makes room for the pill" fails.
+  const page = code(read('app/series/page.tsx'));
+  const chapters = page.slice(page.indexOf('const Chapters = ('));
+  assert.ok(chapters.indexOf('<SeriesServerDownloads seriesId={id} folder={series?.folder} />') >= 0
+    && chapters.indexOf('<SeriesServerDownloads') < chapters.indexOf("{tr('Chapters')}"), 'the band is not above the chapter list');
+  assert.doesNotMatch(page, /\bpe-36\b/, 'the bar still makes room for the pill');
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  assert.match(band, /const landed = data \? landedFor\(data, seriesId, folder\) : null;/, 'the band does not re-read the chapter list');
+  // When it re-reads is lib/serverDownloads.ts bandReload's (shouldReload, per series), tested there
+  // (serverDownloads.test.ts).
+  assert.match(band, /const step = bandReload\(seen\.current, seriesId, landed\);\s*seen\.current = step\.seen;\s*if \(!step\.reload\) return;/,
+    'the band decides on its own when to re-read, or carries one series\' count to the next');
+  // What it saw is kept per series, and that is only right if the effect runs again when the series changes: the band
+  // stays mounted from series A to B, and with equal counts (usually 0) it would keep A's, so B's first landing
+  // reads as a first answer and stays grey. Reintroduce by dropping `seriesId` from the deps: this fails.
+  assert.match(band, /const step = bandReload\(seen\.current, seriesId, landed\);[\s\S]*?\}, \[landed, seriesId, qc\]\);/,
+    'a move to another series with the same count keeps the old series\' seen');
+  assert.match(band, /for \(const k of \[\['series-books', seriesId\], \['series-listing', seriesId\], \['series', seriesId\]\]\) qc\.invalidateQueries/, 'the band does not re-read the chapter list');
+  assert.match(band, /const RELOAD_EVERY_MS = 4000;/, 'a sweep landing a chapter a second re-reads the page every second');
+  assert.match(band, /const \{ data \} = useServerDownloads\(\);/, 'the band polls on its own');
 });
 
 test('a series with no chapters keeps its run open across Newest and Oldest', () => {
@@ -131,13 +159,16 @@ test('a row caption carries its text as a title, and the desktop grid shows the 
   // what the ellipsis hid, and "3d" gives the caption the word back. Reintroduce by dropping `title=` from
   // RowCaption's <p>: "the caption has a title" fails; or by rendering one span with relativeTime in both
   // forms: "the grid gets the short form" fails.
+  // v0.49.0: the short form is lib/format.ts relativeTimeShort (format.test.ts holds its words). Cutting
+  // " ago" off the sentence matched nothing once every other language spoke through Intl, and the grid said
+  // "vor 3 Tagen". Reintroduce that cut: "the grid cuts the sentence" fails.
   const page = code(read('app/series/page.tsx'));
   const cap = page.slice(page.indexOf('function RowCaption('), page.indexOf('function RowDate('));
   assert.match(cap, /<p className=\{`mt-0\.5 truncate[^>]*title=\{title\}/, 'the caption has a title');
   const date = page.slice(page.indexOf('function RowDate('), page.indexOf('function ChapterRow('));
-  assert.match(date, /replace\(\/ ago\$\/, ''\)/, 'the short form drops the word');
-  assert.match(date, /className="hidden lg:inline">\{short\}/, 'the grid gets the short form');
-  assert.match(date, /className="lg:hidden">\{long\}/, 'the phone keeps the long one');
+  assert.doesNotMatch(date, /replace\(\/ ago/, 'the grid cuts the sentence');
+  assert.match(date, /className="hidden lg:inline">\{relativeTimeShort\(iso\)\}/, 'the grid gets the short form');
+  assert.match(date, /className="lg:hidden">\{relativeTime\(iso\)\}/, 'the phone keeps the long one');
 });
 
 // ---- #69: read marks on the grey rows (chapters the server does not hold) -------------------------------
@@ -188,4 +219,47 @@ test('Mark all read never touches the grey rows', () => {
   const all = fn(page, 'markAllRead');
   assert.match(all, /books\?\.content/, 'it reads the chapters on the server');
   assert.doesNotMatch(all, /ghost|Ghost|listing/, 'and nothing about the grey rows');
+});
+
+test('the series page only starts a slow archive; watching it is the band\'s', () => {
+  // #117, the critic's ruling: one live status surface, the band above the chapter list. The Actions column
+  // and the older-chapters row offer "Archive slowly" while there is something to archive and no archive on
+  // it; a run the archive is fetching offers Show and nothing else. Reintroduce by offering Fetch all on the
+  // archive's run (drop `!archiving &&`): "the archive's run offers Fetch all" fails.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /const mayArchive = canDownload\(user\) && !!listing && !listing\.archive\s*&& ghosts\.some\(\(g\) => \(g\.why === 'floor' \|\| g\.why === 'missing'\) && !haveNumbers\.has\(g\.number\)\);/,
+    'Archive slowly is offered on a series already being archived, or with nothing to archive');
+  assert.match(page, /\{!archiving && canDownload\(user\) && numbers\.length > 0 && \(/, "the archive's run offers Fetch all");
+  assert.match(page, /\{!archiving && mayArchive && numbers\.length > 0 && \(/, "the archive's own run offers to start it again");
+  assert.match(page, /const numbers = filteredGhosts\.filter\(\(g\) => g\.why === r\.why &&/, 'a run hands Hide the other kind\'s numbers');
+  // The supply line's "not here yet" is what the sweep would take: the archive's numbers are not.
+  assert.match(page, /notHere: ghosts\.filter\(\(g\) => g\.why !== 'floor' && g\.why !== 'archive' && !haveNumbers\.has\(g\.number\)\)\.length,/,
+    "the supply line counts the archive's chapters as behind");
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  assert.match(band, /\{archive && <ArchiveBand item=\{archive\} view=\{data\?\.archive\} \/>\}/, 'the band has no archive line');
+  assert.match(band, /const tileLine = !!tile && !\(tile\.archive && archive\);/, "the archive's chapter in flight is a second line beside its own");
+  assert.match(band, /\{tile && tileLine && \(/, "the archive's chapter in flight is a second line beside its own");
+});
+
+test('a failed download on a series being archived keeps its way into Library -> Downloads', () => {
+  // The failed row's "See all" showed only with no tile at all; an archive row's tile hides its own line, so a failed
+  // Fetch on a series being archived had no link. And `??` kept the archive tile's empty folder, losing the failed
+  // job's. Reintroduce `{!tile && <Link`: the first assertion fails; `??`: the second.
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  const failed = band.slice(band.indexOf('data-band-state="failed"'));
+  assert.match(failed, /\{!tileLine && <Link href=\{href\}/, 'the failed row has no See all beside an archive row');
+  assert.match(band, /const href = downloadsHref\(tile\?\.folder \|\| failed\?\.job\.folder \|\| folder\);/, 'an empty folder wins over the failed download\'s');
+});
+
+test('the header counts chapters or volumes in the reader\'s words, one key to a count', () => {
+  // `{series.booksCount} {mostlyVolumes ? 'volumes' : 'chapters'}` was English in every language, and "1 chapters"
+  // (the e2e walk, Walk Gap's member band). Reintroduce it: the page assertion names it.
+  assert.equal(bookCountText(1), '1 chapter');
+  assert.equal(bookCountText(12), '12 chapters');
+  assert.equal(bookCountText(0), '0 chapters');
+  assert.equal(bookCountText(1, true), '1 volume');
+  assert.equal(bookCountText(7, true), '7 volumes');
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /series \? <>\{bookCountText\(series\.booksCount, mostlyVolumes\)\}<\/> : null,/, 'the header count is bare English again');
+  assert.doesNotMatch(page, /mostlyVolumes \? 'volumes' : 'chapters'/, 'the header count is bare English again');
 });

@@ -14,6 +14,7 @@
 // The fixes that send an admin to a container, a compose file or an env var go through `forDesktop`: the
 // desktop app has none of those, and its answer is Uchiyomi's own built-in helper and a restart.
 import type { SourceStatus } from './sourceHealth';
+import type { Stage } from './sourceEvidence';
 import { forDesktop } from './desktop';
 
 export type DiagnosisCode =
@@ -30,7 +31,9 @@ export type DiagnosisCode =
   | 'markup_drift'    // answers fine, parses to nothing
   | 'unreachable'     // DNS failure, refused connection, gone
   | 'rate_limited'
-  | 'upstream_down'   // the extension server, not the site
+  | 'upstream_down'   // the extension server did not answer (unreachable, refused, its own HTTP error)
+  | 'extension_error' // the extension server DID answer, with the extension's own error (#115)
+  | 'unnumbered'      // chapters are listed, but none with a number Uchiyomi can use (#115)
   | 'unknown';
 
 /** Who can act on this, which is what decides whether the UI offers a button or asks for patience. */
@@ -80,6 +83,34 @@ export interface Probe {
    * as blocked.
    */
   needsSolver?: boolean;
+  /**
+   * Where the live test just failed, and how (#115). Live evidence of the most specific kind: the stage, and the
+   * error as it was thrown a moment ago. `timeout` is our own deadline and proves nothing by itself.
+   */
+  failure?: { stage: Stage; kind: 'error' | 'empty' | 'timeout' | 'unnumbered'; error?: string | null };
+}
+
+/** The stage as a phrase for the admin's fix sentence ("while listing pages"); never in a public `reason`. */
+export const STAGE_WORD: Record<Stage, string> = {
+  search: 'searching',
+  chapters: 'listing chapters',
+  pages: 'listing pages',
+  images: 'downloading images',
+};
+
+/**
+ * The stored `last_error`, or null when it is history: a success newer than the last failure (and the last
+ * slow answer) means the words describe an afternoon that is over. `reportOk` never clears the string, so every
+ * reader of it needs this, and three had their own copy or none (#115: the Test button diagnosed a new failure
+ * from a months-old #54 string).
+ */
+export function currentError(row: {
+  last_error?: string | null; last_ok_at?: string | Date | null; last_fail_at?: string | Date | null; last_slow_at?: string | Date | null;
+} | null | undefined): string | null {
+  if (!row?.last_error) return null;
+  const at = (t: string | Date | null | undefined) => (t ? new Date(t).getTime() : 0);
+  const history = at(row.last_ok_at) > Math.max(at(row.last_fail_at), at(row.last_slow_at));
+  return history ? null : row.last_error;
 }
 
 export interface Diagnosis {
@@ -109,6 +140,10 @@ const D = (
 
 const NEEDS_ADMIN = 'This source needs a check from an admin.';
 
+/** What a rule may know besides the error: the stage it was thrown at, when a live test says. */
+interface RuleCtx { err?: string; stage?: Stage }
+const whileStage = (c: RuleCtx) => (c.stage ? ` while ${STAGE_WORD[c.stage]}` : '');
+
 /**
  * Stored-error rules, most specific first. **The ordering is the whole game.**
  *
@@ -119,7 +154,7 @@ const NEEDS_ADMIN = 'This source needs a check from an admin.';
  * site is blocking you, when the site is fine and the fix is to restart a container. The solver rules MUST
  * come before `cf_challenge`, and there is a test that reintroduces exactly that mistake.
  */
-const RULES: Array<[RegExp, () => Diagnosis]> = [
+const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   [/chromedriver.*exited|devtoolsactiveport|session not created/i, () =>
     D('solver_crash', NEEDS_ADMIN,
       forDesktop(
@@ -160,6 +195,29 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
       ),
       'admin')],
 
+  // The engine itself did not answer, or its own HTTP layer refused us. ABOVE every site rule: "suwayomi 403" is
+  // the engine refusing Uchiyomi's Basic auth, and below the edge_403 rule it read as the site's CDN blocking
+  // this server. The four transport shapes are made in suwayomi/client.ts (transportError).
+  [/^suwayomi (?:unreachable|is not configured|returned no data)\b|^suwayomi \d{3}\b/i, (c) => {
+    const auth = /^suwayomi 40[13]\b/.test(c.err ?? '');
+    return D('upstream_down', 'The extension server did not answer.',
+      auth
+        ? forDesktop(
+          "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.",
+          "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.",
+        )
+        : forDesktop(
+          'This is the Suwayomi extension server, not the site. Check that container.',
+          "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.",
+        ), 'admin');
+  }],
+
+  // The engine did not answer in time: our wait, on the engine, says nothing about the site behind it.
+  [/^suwayomi timeout after \d+ms/i, (c) =>
+    D('timeout', 'This source did not answer in time.',
+      `The extension engine did not answer in time${whileStage(c)}. It may be busy with a slow site or a long chapter list; re-test, and if it keeps happening, check the engine's own log.`,
+      'admin', { needsProbe: true })],
+
   [/just a moment|cf-chl|cf_clearance|cloudflare|challenge/i, () =>
     D('cf_challenge', 'This source is protected by a check we could not get past.',
       'A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.',
@@ -180,16 +238,23 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
       'The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.',
       'wait')],
 
-  [/^suwayomi\b|suwayomi \d{3}|suwayomi returned no data/i, () =>
-    D('upstream_down', 'The extension server did not answer.',
-      forDesktop(
-        'This is the Suwayomi extension server, not the site. Check that container.',
-        "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.",
-      ), 'admin')],
-
-  [/enotfound|eai_again|econnrefused/i, () =>
+  [/enotfound|eai_again|econnrefused|unknownhostexception|connectexception/i, () =>
     D('unreachable', 'This source is not answering right now.',
       'The address could not be reached at all. Check the URL. The site may be gone.', 'admin')],
+
+  // From here on the engine DID answer (`suwayomi: ` is a GraphQL error, suwayomi/client.ts): what failed is the
+  // extension, talking to its site. BELOW the Cloudflare, 403, rate-limit and unreachable rules, which read the
+  // same engine-relayed message for what the site said. Until v0.49.0 a catch-all /^suwayomi\b/ sat here and
+  // blamed the engine container for the extension's own exception (#115).
+  [/^suwayomi: .*(?:sockettimeoutexception|\btimed? ?out\b)/i, (c) =>
+    D('timeout', 'This source did not answer in time.',
+      `The extension engine answered, but the site behind the extension did not answer it in time${whileStage(c)}. Often transient: re-test. If it persists, the site may be down or slow for the engine.`,
+      'admin', { needsProbe: true })],
+
+  [/^suwayomi: /i, (c) =>
+    D('extension_error', "This source's extension reported an error.",
+      `The extension engine answered, but the extension itself failed${whileStage(c)}. Usually the site changed or refused the extension: update the extension (Admin → Extensions), check its settings, or open the site in a browser. The engine's own message is shown with the test.`,
+      'admin')],
 
   // Deliberately last, and deliberately NOT confident. `withTimeout` throws this after discarding whatever
   // the adapter knew, so on a real install it covers a moved domain, a 403 and a dead solver at the same
@@ -256,7 +321,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       // The inference that matters most: the site answered us fine from this very container, so whatever
       // the stored error blames, the broken component is the solver and not the site.
       if (probe.httpStatus === 200 && /flaresolverr/i.test(err)) {
-        const hit = RULES.find(([re]) => re.test(err))?.[1]();
+        const hit = RULES.find(([re]) => re.test(err))?.[1]({ err });
         if (hit && hit.code.startsWith('solver_')) return hit;
         return D('solver_down', NEEDS_ADMIN,
           forDesktop(
@@ -269,6 +334,58 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         return D('markup_drift', MARKUP_DRIFT,
           'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.',
           'admin', { silent: true });
+      }
+    }
+
+    // Where the live test failed, and with what (#115). Below the homepage rules, which still name a moved or
+    // refusing site more precisely; above everything stored, because this was thrown a moment ago.
+    const fl = probe.failure;
+    if (fl) {
+      const word = STAGE_WORD[fl.stage];
+      if (fl.kind === 'error') {
+        const e = fl.error || '';
+        for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
+        return D('unknown', NEEDS_ADMIN,
+          `The live test failed while ${word}, and the error matches nothing known. It is shown with the test.`, 'admin');
+      }
+      if (fl.kind === 'unnumbered') {
+        return D('unnumbered', 'This source lists chapters without numbers Uchiyomi can use.',
+          "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Extensions), or Ignore it here.",
+          'admin');
+      }
+      if (fl.kind === 'empty') {
+        // "The titles it tried", not "three of them": up to three are tried, and a one-chapter series or a site with
+        // one search hit gives fewer. The check's own detail carries the count.
+        //
+        // A current stored Cloudflare or solver error explains an empty answer better than "the markup changed":
+        // a challenge page parses to nothing too. Only a current one (the caller passes nothing stale).
+        const why = err ? RULES.find(([re]) => re.test(err))?.[1]({ err }) : undefined;
+        if (why && (why.code === 'cf_challenge' || why.code.startsWith('solver_'))) return why;
+        return D('markup_drift', MARKUP_DRIFT,
+          fl.stage === 'search'
+            ? 'It answers without an error but returns nothing, which usually means the site changed its markup or is serving a challenge page. Re-test it to find out which.'
+            : fl.stage === 'chapters'
+              ? 'It finds titles, but lists no chapters for the titles it tried, which usually means the chapter list moved or changed its markup. Re-add it with auto-detect, or update the extension.'
+              : 'It lists chapters, but no pages for the chapters it tried, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.',
+          'admin', { silent: true, needsProbe: fl.stage === 'search' });
+      }
+      // Our own deadline. With a current stored error, the stored rules below speak -- they name a cause (a
+      // Cloudflare challenge, the engine's own bypass switched off), and running out of time does not contradict
+      // it. With nothing stored to go on, the engine client's own deadline first, which the smoke test carries in
+      // its words (sourceProbe.ts outOfTime): its rule names the engine, where the sentence below would send an
+      // admin to SOURCE_TEST_TIMEOUT_MS -- a wall the engine's fixed 30 s never reaches. Reintroduce by skipping it:
+      // "an engine timeout names the engine" in sourceDiagnosis.test.ts reads the SOURCE_TEST_TIMEOUT_MS advice.
+      // ⚠️ Inside `!err`: run before it, an engine timeout overrode a current stored cause, and a Test that ran
+      // out of the engine's 30 s behind a Cloudflare wall read "the engine did not answer" (integration-1 review).
+      // Reintroduce it above this test: the same test's stored-cause line reads timeout, not cf_challenge.
+      if (!err) {
+        if (fl.error) {
+          const e = fl.error;
+          for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
+        }
+        return D('timeout', 'This source did not answer in time.',
+          `The live test ran out of time while ${word}. That alone is not proof it is broken: re-test, and if it keeps happening, raise SOURCE_TEST_TIMEOUT_MS or look at the site itself.`,
+          'admin', { needsProbe: true });
       }
     }
   }
@@ -284,7 +401,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       'admin');
   }
 
-  for (const [re, make] of RULES) if (re.test(err)) return make();
+  for (const [re, make] of RULES) if (re.test(err)) return make({ err });
 
   if (suspect) {
     return D('markup_drift', MARKUP_DRIFT,
@@ -295,6 +412,13 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
   if (err) {
     return D('unknown', NEEDS_ADMIN,
       'The recorded error does not match anything known. Re-test it for a live verdict.', 'admin', { needsProbe: true });
+  }
+
+  // A live test that just FAILED is never "working normally", whatever the stored record says (#115: the Test
+  // result printed "Working normally." under a ✗).
+  if (probe && probe.adapterOk === false) {
+    return D('unknown', NEEDS_ADMIN,
+      'The live test failed, and nothing recorded explains it. Re-test it and read the failing step.', 'admin', { needsProbe: true });
   }
 
   return D('ok', '', '', 'none');

@@ -1,4 +1,5 @@
 // Loose shapes for the Komga DTOs we consume (only the fields Uchiyomi uses).
+import type { LiveVerdict, StageLine } from './sourceEvidence';
 
 export interface UchiyomiFlags {
   favorite: boolean;
@@ -65,7 +66,9 @@ export interface TrackerStatus {
  * are the server's reasons, each of which the dialog turns into a sentence (`autoFollowWhy` in
  * AddSeriesDialog.tsx) -- a code this list does not know is printed as-is so it is at least visible.
  */
-export type FollowWhy = 'followed' | 'numbering_differs' | 'title_differs' | 'unreachable' | 'too_few_listed' | 'not_tried' | 'cap' | 'unavailable';
+export type FollowWhy = 'followed' | 'numbering_differs' | 'title_differs' | 'unreachable' | 'too_few_listed' | 'not_tried' | 'cap' | 'unavailable'
+  // #116: the series is numbered by posting order, and no other source's numbers line up with it (bff lib/autoFollow.ts).
+  | 'posting_order';
 
 export interface AutoFollowResult {
   source: string;
@@ -214,8 +217,9 @@ export interface Book {
  *   blocked  every copy on offer is from a blocked group -- unblock first, it cannot be fetched
  *   failed   the downloader gave up on it (`attempts` says how many times)
  *   floor    below the series' Latest-N floor; Find missing chapters is the way to reach it
+ *   archive  an active slow archive will fetch it (#117): available, under the retry cap, below its boundary
  */
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
 
 /** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
 export interface Ghost {
@@ -250,6 +254,10 @@ export interface Listing {
   /** When the updater last wrote this list, or null when it never has. Stale beats empty, so the age is shown. */
   checkedAt: string | null;
   content: Ghost[];
+  /** This series' slow archive (#117), or null; absent from a server older than v0.49.0. */
+  archive?: import('./archive').ListingArchive | null;
+  /** How the series is numbered and what waits for an admin (v0.49.0, #116; lib/numbering.ts). Absent from an older server. */
+  numbering?: import('./numbering').NumberingSummary | null;
 }
 
 /** How often a group ships, read off the median gap of its last dated releases. `unknown` with fewer than two dates. */
@@ -312,6 +320,8 @@ export interface VersionCopy {
   blocked: boolean;
   /** The file on this server for the number came from this copy. */
   onDisk: boolean;
+  /** The copy's own title (v0.49.0): posts that share a number are told apart by it (lib/versions.ts). */
+  title?: string | null;
 }
 
 export interface Versions {
@@ -364,7 +374,12 @@ export interface Page<T> {
 export type HealthAction =
   | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry'
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
-  | 'ignore' | 'unignore';
+  | 'ignore' | 'unignore'
+  // #72: point the extension engine's own Cloudflare helper at Uchiyomi's (POST /api/admin/extensions/solver).
+  | 'engine_solver'
+  // #116, the chapter numbering check: review the plan of a renumbering and confirm it, or keep the numbers the
+  // source gives (GET/POST /api/admin/series/:id/numbering).
+  | 'renumber' | 'keep_numbers';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
@@ -397,6 +412,46 @@ export interface HealthItem {
   key?: string;
   /** An admin chose to stop being told about this, and when. The item is then `info`. */
   ignored?: { at: string; by: string | null };
+  /**
+   * v0.49.0: what the last attempt at this finding found, from rows the repair stored, so it survives a
+   * reload -- rendered in the reader's language by lib/healthCopy.ts `outcomeLine`.
+   */
+  outcome?: HealthOutcome;
+  /** v0.49.0: what an action on this row will not be able to do, said before it is pressed (`caveatLine`). */
+  caveats?: HealthCaveat[];
+
+  // ---- #115 (v0.49.0), Source health rows only, as bff lib/health.ts sends them. Kept together and apart from
+  // the fields other workstreams add; components/SourceEvidence.tsx reads them.
+  /** What each stage was last seen doing (search, chapters, pages, images). */
+  evidence?: StageLine[];
+  /** The last deliberate live check: the Test button ('test') or the daily check ('sweep'). */
+  tested?: LiveVerdict;
+  /** The verdict behind the row, admin half included. */
+  diagnosis?: { code: string; reason: string; fix: string };
+  /** How many series use the source (primaries and followers). */
+  series?: number;
+}
+
+/** The last attempt at a finding, per check (bff lib/health.ts `HealthOutcome`). */
+export type HealthOutcome =
+  | {
+    kind: 'gaps'; at: string | null; why: string | null; followed: string | null; coverage: number | null;
+    fetched: number; landed: number; sweep: number; capped: number; unfillable: string[]; scanned: number;
+  }
+  | {
+    kind: 'short'; at: string | null; why: string; asked?: number; answered?: number; best?: number; hunt?: string;
+    missing?: number; by?: string | null;
+  }
+  | { kind: 'failures'; firstAt: string; lastAt: string; attempts: number; resetPending: boolean };
+
+export interface HealthCaveat {
+  action: HealthAction;
+  /**
+   * `archiving` (#117): the gaps lie below an active slow archive's boundary, which fetches them at its own pace --
+   * not a problem, and Fill now still fetches them now, at the normal pace.
+   */
+  code: 'updates_paused' | 'source_cooling_down' | 'source_off' | 'archiving';
+  until?: string;
 }
 
 export interface HealthCheck {
@@ -408,6 +463,8 @@ export interface HealthCheck {
   /** what this check cannot see -- shown so nobody reads more into a green result than it deserves */
   note?: string;
   items: HealthItem[];
+  /** #115, 'sources' only: how long one Test may take, for the Test key's running clock. */
+  testMs?: number;
 }
 
 export interface HomePayload {

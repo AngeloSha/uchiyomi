@@ -1056,8 +1056,10 @@ function ReaderInner() {
         {/* labelled "Back to series", so go to the series -- `back` is history-first and from the home
             Continue rail would land on home instead */}
         <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">{tr('Back to series')}</button>
+        {/* 'Offline', the name of the tab it opens: since v0.49.0 "Downloads" names only the server's view
+            (Library -> Downloads), and this is the chapters kept on this device. */}
         {offlineEnd
-          ? <button onClick={() => router.push('/downloads/')} className="btn-accent text-sm">{tr('Downloads')}</button>
+          ? <button onClick={() => router.push('/downloads/')} className="btn-accent text-sm">{tr('Offline')}</button>
           : <button onClick={() => router.push('/')} className="btn-accent text-sm">{tr('Home')}</button>}
       </div>
       {!offlineEnd && !!upNext?.content?.length && (

@@ -11,6 +11,8 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -128,4 +130,112 @@ test('migrate: is still idempotent, and the shipped data migrations are applied'
   await migrate();
   const noop = await q(`SELECT id FROM schema_migrations WHERE id = '0001-noop'`);
   assert.equal(noop.length, 1, 'the shipped no-op migration did not record exactly one row');
+});
+
+// v0.49.0's promise is that a rollback to v0.48.4 still works: the old image boots on the new schema and keeps
+// writing its rows. The new tables are invisible to it, but the columns added to tables it already INSERTs into
+// are not -- one of them declared NOT NULL without a default and every old INSERT into that table fails, which
+// a fresh test database never shows, because ADD COLUMN on an empty table succeeds either way.
+const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'archive_queue', 'archive_pace'];
+const V049_COLUMNS: Record<string, string[]> = {
+  lib_books: ['short_result', 'source_chapter_id'],
+  chapter_failures: ['first_at'],
+  source_health: ['live_at', 'live_by', 'live_state', 'live_code', 'live_stage', 'live_detail', 'live_checks', 'stages'],
+  lib_series: [
+    'numbering', 'numbering_by', 'numbering_source', 'numbering_pending', 'numbering_note', 'numbering_changed_at',
+    'renumber_plan',
+  ],
+  server_settings: [
+    'archive_paused', 'archive_per_hour', 'archive_window_from', 'archive_window_to', 'archive_min_free_gb',
+  ],
+};
+/** v0.48.4's own schema, captured from its migrate() (see the file's _provenance). */
+const V0484 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.48.4-required-columns.json'), 'utf8')) as {
+  tables: string[];
+  columns: Record<string, string[]>;
+};
+
+test('migrate: v0.49.0 only adds, and every added column lets v0.48.4 keep writing its rows', { skip }, async () => {
+  const tables = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V049_TABLES],
+  );
+  assert.deepEqual(tables.map((t) => t.table_name).sort(), [...V049_TABLES].sort(), 'a v0.49.0 table is missing');
+
+  for (const [table, cols] of Object.entries(V049_COLUMNS)) {
+    const rows = await q<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+      [table, cols],
+    );
+    assert.deepEqual(rows.map((r) => r.column_name).sort(), [...cols].sort(), `a v0.49.0 column of ${table} is missing`);
+  }
+
+  // The rule itself, over the WHOLE schema rather than the list above, so an amendment to the block that adds
+  // a column and forgets the list is caught too: on every table v0.48.4 has, the only required columns are the
+  // ones v0.48.4 already wrote. Reintroduce by adding `ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS
+  // numbering_extra text NOT NULL;` to the block, or by dropping the default from source_health.stages: the
+  // assertion names the column.
+  const current = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0484.tables],
+  );
+  assert.deepEqual(current.map((t) => t.table_name).sort(), [...V0484.tables].sort(), 'a v0.48.4 table is gone: v0.49.0 only adds');
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0484.tables],
+  );
+  for (const r of required) {
+    assert.ok(
+      (V0484.columns[r.table_name] ?? []).includes(r.column_name),
+      `${r.table_name}.${r.column_name} is NOT NULL with no default: after a rollback, v0.48.4's INSERTs into ${r.table_name} fail`,
+    );
+  }
+
+  // The one server_settings row existed before the columns did; ADD COLUMN … DEFAULT fills it. What is
+  // checked is the DECLARED default, not the live row: in a serial run on one database a test that changes
+  // the archive pacing and forgets to put it back must not fail this one. Reintroduce `DEFAULT 5` on
+  // archive_per_hour: "server_settings.archive_per_hour" fails.
+  const defaults = await q<{ column_name: string; column_default: string | null; is_nullable: string }>(
+    `SELECT column_name, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'server_settings' AND column_name = ANY($1)`,
+    [V049_COLUMNS.server_settings],
+  );
+  const declared = Object.fromEntries(defaults.map((d) => [d.column_name, [d.column_default, d.is_nullable]]));
+  assert.deepEqual(declared, {
+    archive_paused: ['false', 'NO'], archive_per_hour: ['4', 'NO'], archive_min_free_gb: ['20', 'NO'],
+    archive_window_from: [null, 'YES'], archive_window_to: [null, 'YES'],
+  }, 'server_settings.archive_per_hour (or another archive column) is not declared as the design set it');
+});
+
+test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {
+  // #117 picks `series_listing.number < boundary`. With boundary numeric, Postgres compares the real as float8,
+  // and 45.3::real reads as 45.29999923706055 -- below a numeric 45.3 -- so the boundary chapter counted as
+  // strictly below itself and both the archive and the sweep claimed it. Reintroduce `boundary numeric` in the
+  // block: "archive_queue.boundary is not the listing's type" fails.
+  const types = await q<{ table_name: string; column_name: string; data_type: string }>(
+    `SELECT table_name, column_name, data_type FROM information_schema.columns
+      WHERE table_schema = 'public' AND (table_name, column_name) IN
+        (('series_listing', 'number'), ('archive_queue', 'boundary'), ('archive_queue', 'floor_at_start'), ('archive_queue', 'current_number'))`,
+  );
+  const t = Object.fromEntries(types.map((r) => [`${r.table_name}.${r.column_name}`, r.data_type]));
+  const listing = t['series_listing.number'];
+  assert.equal(listing, 'real');
+  for (const col of ['boundary', 'floor_at_start', 'current_number']) {
+    assert.equal(t[`archive_queue.${col}`], listing, `archive_queue.${col} is not the listing's type`);
+  }
+  // And what that buys, on this server: an admin's floor of 45.3 stored as the boundary does not hold a listed
+  // 45.3 below it. In a transaction that is rolled back, so the shared test database keeps no series.
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-archive-bound', 'test', 'T', '/t')`);
+      await c.query(`INSERT INTO archive_queue (series_id, boundary) VALUES ('t-archive-bound', 45.3)`);
+      const { rows } = await c.query(`SELECT 45.3::real < boundary AS below FROM archive_queue WHERE series_id = 't-archive-bound'`);
+      assert.equal(rows[0].below, false, 'a listed 45.3 counts as below a boundary of 45.3');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
 });

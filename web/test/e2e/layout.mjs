@@ -19,7 +19,7 @@ const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
 // 700-1500 px -- the "768 px ribbon" the owner reported on the old admin console -- and must not overflow
 // at 390. The tab row's first panel is what a bare `/profile` or `/admin` measures, so the other tabs
 // were never measured at all before this.
-const PAGES = (process.env.PAGES || '/,/library,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Settings,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings').split(',');
+const PAGES = (process.env.PAGES || '/,/library,/library/?view=downloads,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Settings,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings').split(',');
 
 // How much of a wide viewport the content must actually occupy. Not 100%: a settings form SHOULD have
 // margins, and prose that runs 1900px wide is unreadable. But a page using less than this is a column
@@ -123,7 +123,53 @@ try {
     };
   });
 
-  for (const w of [2560, 1920, 1280, 390]) {
+  // The desktop header (components/TopNav.tsx), which is outside <main> and so outside everything below: at
+  // the two narrowest desktop widths, in the languages with the longest nav labels, nothing may run past the
+  // window and no round button may be squeezed. v0.49.0's downloads button pushed Russian 213 px over at 1024,
+  // and every round button became a 21 px oval. The language is this browser's own (localStorage), put back
+  // after.
+  const HEADER_LANGS = (process.env.HEADER_LANGS || 'en,de,ru').split(',');
+  for (const w of [1024, 1280]) {
+    await page.setViewport({ width: w, height: 800 });
+    for (const lang of HEADER_LANGS) {
+      await page.evaluate((c) => localStorage.setItem('uchiyomi.lang', c), lang);
+      await page.goto(BASE + '/library', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      await sleep(1800);
+      const h = await page.evaluate(() => {
+        const row = document.querySelector('header .shell');
+        if (!row) return null;
+        const vw = document.documentElement.clientWidth;
+        const squeezed = [...row.querySelectorAll('.h-10.w-10')].map((el) => el.getBoundingClientRect())
+          .filter((r) => r.width > 0 && (r.width < 39.5 || r.height < 39.5)).map((r) => `${Math.round(r.width)}x${Math.round(r.height)}`);
+        const past = [...row.querySelectorAll('*')].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.right > vw + 0.5).length;
+        // The search gives way down to its icon, never to a sliver of its word: a label that shows is at least 2em
+        // wide, and nothing that shows inside the button is cut by its edge (ru at 1024 and 1280 px, v0.49.0).
+        const label = row.querySelector('[data-search-label]');
+        const search = label?.closest('button');
+        const shows = (el) => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0;
+        let sliver = '';
+        if (search && shows(label)) {
+          const w = label.getBoundingClientRect().width;
+          if (w < 2 * parseFloat(getComputedStyle(label).fontSize)) sliver = `label ${Math.round(w)}px`;
+        }
+        if (search && !sliver) {
+          const box = search.getBoundingClientRect();
+          const cut = [...search.children].filter(shows).map((el) => el.getBoundingClientRect()).find((r) => r.left < box.left - 0.5 || r.right > box.right + 0.5);
+          if (cut) sliver = `a part cut at ${Math.round(cut.left)}-${Math.round(cut.right)} of ${Math.round(box.left)}-${Math.round(box.right)}`;
+        }
+        return { over: row.scrollWidth - row.clientWidth, page: document.documentElement.scrollWidth - vw, squeezed, past, sliver, lang: document.documentElement.lang };
+      });
+      if (!h) { bad(`header @${w} ${lang}: no header to measure`); continue; }
+      if (h.lang !== lang) bad(`header @${w} ${lang}: the page is in "${h.lang}" -- the language did not switch`);
+      else if (h.over > 0 || h.page > 0 || h.past) bad(`header @${w} ${lang}: runs ${Math.max(h.over, h.page)}px past the window (${h.past} element(s) beyond it)`);
+      else if (h.squeezed.length) bad(`header @${w} ${lang}: round buttons squeezed to ${h.squeezed.join(', ')}`);
+      else if (h.sliver) bad(`header @${w} ${lang}: the search shows a sliver (${h.sliver})`);
+      else ok(`header @${w} ${lang}: fits, every round button 40 px, the search whole or its icon alone`);
+    }
+  }
+  await page.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
+
+  for (const w of [2560, 1920, 1280, 1024, 390]) {
     const mobile = w < 700;
     console.log(`\n  ${w}px`);
     await page.setViewport({ width: w, height: mobile ? 844 : 1000, isMobile: mobile, hasTouch: mobile });

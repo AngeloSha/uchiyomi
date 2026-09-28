@@ -8,6 +8,7 @@ import { Heatmap } from '@/components/charts/Heatmap';
 import { Pace } from '@/components/charts/Pace';
 import { Bars } from '@/components/charts/Bars';
 import { t as tr, keys } from '@/lib/i18n';
+import { bookCountText } from '@/lib/format';
 
 /**
  * The You tab of the profile: what you have earned, what you have read, and your lists.
@@ -151,7 +152,7 @@ export function StudioCard({ span = '' }: { span?: string }) {
         <div className="space-y-5">
           <div>
             <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">
-              {tr('{n} chapters', { n: total })}
+              {bookCountText(total)}
             </p>
             {series.length > 0 && <Heatmap values={counts} start={series[0].day} />}
           </div>

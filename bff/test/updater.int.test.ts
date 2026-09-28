@@ -40,6 +40,9 @@ const LIB = 'lib_upd';
 const SRC_OK = 'upd-ok', SRC_THROW = 'upd-throw', SRC_HANG = 'upd-hang', SRC_EMPTY = 'upd-empty';
 const SRC_BLOCK = 'upd-block';
 const SRC_MANY = 'upd-many', SRC_LAND = 'upd-land', SRC_LEDGER = 'upd-ledger';
+const SRC_EVID = 'upd-evid';
+/** How upd-evid answers: its chapter list throws the engine's words, or lists a chapter whose page list throws. */
+let evidMode: 'list' | 'pages' = 'list';
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
 const png = () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
 /** Counts how many chapters the sweep actually ATTEMPTS against a source that is refusing. */
@@ -120,6 +123,19 @@ before(async () => {
   for (const k of ['block2', 'block3']) await mk(k, SRC_BLOCK);
   await mk('land', SRC_LAND);
   await mk('ledger', SRC_LEDGER);
+  registerAdapter({
+    id: SRC_EVID, name: SRC_EVID,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_EVID, title: sid }; },
+    async listChapters() {
+      if (evidMode === 'list') throw new Error('suwayomi: HTTP error 404');
+      return [{ number: 1, title: 'Chapter 1', sourceId: 'e1' }];
+    },
+    // Classifies as nothing (500 is not one of the 502/503/504 classify() reads): the cooldown never hears of it.
+    async getPageUrls() { throw new Error('suwayomi: HTTP error 500'); },
+    async latest() { return []; },
+  } as any);
+  await mk('evid', SRC_EVID);
 });
 
 after(async () => {
@@ -130,7 +146,7 @@ after(async () => {
   await q(`DELETE FROM lib_series WHERE folder LIKE 's_upd_%'`).catch(() => {});
   await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_MANY, SRC_LAND, SRC_LEDGER, SRC_OK, SRC_THROW]]).catch(() => {});
   await q('DELETE FROM lib_series WHERE library_id = $1', [LIB]).catch(() => {});
-  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_BLOCK]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_BLOCK, SRC_EVID]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
 });
 
@@ -971,8 +987,10 @@ test('only the chapters that landed are stamped; a book from an earlier run keep
   const r = await updateSeries(S('stamp'), 5);
 
   assert.equal(r.added, 1);
-  // `title` rides along since the sweep started recording chapter names (setBookMeta keeps only a real one).
-  assert.deepEqual(r.landed, [{ number: 6, scanlator: 'B', source: SRC_GRP, title: 'Chapter 6' }], 'the run reports what landed, for the stamp after the scan');
+  // `title` rides along since the sweep started recording chapter names (setBookMeta keeps only a real one), and
+  // `chapterId` since v0.49.0: the post the file was written from, so a later renumber knows it exactly (#116).
+  // Reintroduce by dropping `chapterId: out.chapterUsed.sourceId` from the updater's landed.push: it is missing here.
+  assert.deepEqual(r.landed, [{ number: 6, scanlator: 'B', source: SRC_GRP, title: 'Chapter 6', chapterId: 'g6b' }], 'the run reports what landed, for the stamp after the scan');
   assert.equal((await bookRow('stamp', 5)).scanlator, 'A', 'a book that did not land keeps its stamp');
 });
 
@@ -1198,4 +1216,41 @@ test('the sweep stands down while a repair runs', { skip }, async () => {
   const run = runSweep({ maxNew: 1 }, quiet as any);
   assert.ok(run, 'and starts again the moment the repair is done');
   await run;
+});
+
+/**
+ * #115: the nightly sweep asks every followed source for its chapters and used to keep what it learned to itself,
+ * and the downloader recorded an extension's own exception nowhere at all (it classifies as nothing). Both now
+ * leave per-stage evidence for Health, and neither touches the cooldown.
+ *
+ * Reintroduce by removing the noteStage in updater.ts's listChapters catch: no chapters evidence. Or by replacing
+ * the downloader's noteStage with reportFail: consecutive is 1.
+ */
+test('the updater and the downloader leave evidence without a cooldown', { skip }, async () => {
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_EVID]);
+  const health = async () => (await q('SELECT * FROM source_health WHERE source_id = $1', [SRC_EVID]))[0];
+  // The notes are fire-and-forget beside the paths readers wait on; give them a moment to land.
+  const settled = async (ok: (h: any) => boolean) => {
+    for (let i = 0; i < 50; i++) { const h = await health(); if (h && ok(h)) return h; await new Promise((r) => setTimeout(r, 20)); }
+    return health();
+  };
+
+  evidMode = 'list';
+  await updateSeries(S('evid'));
+  let h = await settled((x) => !!x.stages?.chapters);
+  assert.ok(h?.stages?.chapters?.failAt, 'the failed chapter list is evidence');
+  assert.equal(h.stages.chapters.streak, 1);
+  assert.equal(h.stages.chapters.failBy, 'traffic');
+  assert.equal(h.stages.chapters.error, 'suwayomi: HTTP error 404');
+  assert.equal(h.status, 'ok', 'and never a status');
+  assert.equal(h.blocked_until, null, 'or a cooldown');
+
+  evidMode = 'pages';
+  await updateSeries(S('evid'));
+  h = await settled((x) => !!x.stages?.pages && !!x.stages?.chapters?.okAt);
+  assert.ok(h.stages.chapters.okAt > h.stages.chapters.failAt, 'a chapter list that answers closes the chapters failure');
+  assert.ok(h.stages.pages?.failAt, 'the page list the downloader could not get is evidence');
+  assert.equal(h.stages.pages.error, 'suwayomi: HTTP error 500');
+  assert.equal(h.consecutive, 0, 'and no escalation');
+  assert.equal(h.status, 'ok');
 });

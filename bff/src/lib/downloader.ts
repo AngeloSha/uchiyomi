@@ -10,11 +10,12 @@ import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources
 import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT, XML_FORBIDDEN } from './library';
 import { beginDownload, startedDownload, endDownload, holdPartial } from './downloadActivity';
-import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
+import { classify, noteStage, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
-import { paceFor, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
+import { pagePace, paceLevel, noteRateLimited, resumePace } from './pace';
+import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
 /**
@@ -103,6 +104,11 @@ export interface PartialHold {
   expected: number; // pages the file will contain, placeholders included
   pages: number; // real pages held
   write(): Promise<{ file: string; pages: number; missing: number[] }>;
+  /**
+   * The caller will not write it: its entry in the downloads view ends now, as not kept (lib/downloadActivity.ts
+   * holdPartial sets this). A no-op once written.
+   */
+  drop?(): void;
 }
 
 /** What `downloadChapter` throws when pages are missing. `blockStatus` only when the SOURCE is at fault. */
@@ -218,12 +224,22 @@ async function isImage(buf: Buffer): Promise<boolean> {
 const MIN_FREE_GB = process.env.MIN_FREE_GB === undefined ? 10 : Number(process.env.MIN_FREE_GB) || 0;
 async function assertFreeSpace(): Promise<void> {
   if (!(MIN_FREE_GB > 0)) return;
-  const free = await statfs(DL_ROOT).then((f) => Number(f.bavail) * Number(f.bsize)).catch(() => null);
+  const free = await freeBytes();
   if (free === null || free >= MIN_FREE_GB * 2 ** 30) return;
   throw Object.assign(
     new Error(`${(free / 2 ** 30).toFixed(1)} GiB free under ${DL_ROOT}, floor is ${MIN_FREE_GB} GiB`),
     { diskFull: true },
   );
+}
+
+/**
+ * Bytes free for downloads under DL_ROOT, or null when statfs cannot say.
+ *
+ * The guard above and the slow archive's own, higher floor (lib/archive.ts) measure the same disk the same
+ * way, and both fail open on null: a guard that cannot measure must not stop everything.
+ */
+export function freeBytes(): Promise<number | null> {
+  return statfs(DL_ROOT).then((f) => Number(f.bavail) * Number(f.bsize)).catch(() => null);
 }
 
 /**
@@ -295,9 +311,16 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
 export interface PageCtx {
   /** The chapter's id on the source: what the referer is derived from when the adapter declares none. */
   chapterSourceId: string;
-  /** Starting gap and pool width. Default: `paceFor(src)`, which is the adapter's declaration at pace level 0. */
+  /** Starting gap and pool width. Default: `pagePace(src)`, which is the adapter's declaration at pace level 0. */
   gap?: number;
   workers?: number;
+  /**
+   * Draw each page's gap from this range instead of using `gap` for every page (the slow archive, via
+   * withSlowPace in lib/pace.ts). Default: whatever pagePace says, which is none outside withSlowPace.
+   */
+  jitter?: [number, number];
+  /** Tests only: where the jitter draws come from. Default Math.random. */
+  rand?: () => number;
   /**
    * false = ask each index once and report; no resume pass. The completion pass uses it: a partial
    * chapter's missing page is asked for once a night, so the source sees exactly as many requests as there
@@ -402,10 +425,13 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
   // declaration at level 0, and one worker at a doubled gap for a source that answered 429 recently. The
   // clamping of a declared width lives in paceFor: a compiled plugin that declares nonsense gets one worker,
   // not zero -- `Math.max(1, NaN)` is NaN, and an Array.from of NaN workers fetches nothing and reports a
-  // 0-page chapter as the site's fault.
-  const pace = paceFor(src, { gapMs: DL_PAGE_GAP_MS });
+  // 0-page chapter as the site's fault. Under withSlowPace (the slow archive) pagePace also hands back a
+  // range, one worker, and a gap that is never below the one it replaces.
+  const pace = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
   let gap = ctx.gap ?? pace.gap;
   let workers = ctx.workers ?? pace.workers;
+  let jitter = ctx.jitter ?? pace.jitter;
+  const rand = ctx.rand ?? pace.rand ?? Math.random;
   let lastStart = -Infinity;
   let lastDone = -Infinity;
 
@@ -426,13 +452,17 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
    * into a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours. Re-checked after the
    * sleep too, since a slot reserved before the 429 landed is exactly the request the site asked us not to
    * make.
+   *
+   * With a jitter range each page draws its OWN gap, fresh, never below `gap`: one draw per chapter would
+   * still be a metronome inside it, and a metronome is what the slow archive is not meant to sound like.
    */
   const run = async (idx: number[]): Promise<void> => {
     let next = 0;
     const worker = async () => {
       while (!retryAfterMs && next < idx.length) {
         const i = idx[next++];
-        const at = Math.max(Date.now(), lastStart + gap, lastDone + gap);
+        const g = jitter ? drawGap(jitter, gap, rand) : gap;
+        const at = Math.max(Date.now(), lastStart + g, lastDone + g);
         lastStart = at;
         const wait = at - Date.now();
         if (wait > 0) {
@@ -479,9 +509,9 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
       retryAfterMs = 0;
       // Resume slower than the burst that caused this, or the wait only buys one more page. The burst is
       // what was refused, so a widened pool narrows to one here too: an engine that said 429 to four
-      // overlapping requests is not going to like four more. A declared gap of 0 stays 0 inside this
-      // chapter (the engine paces the site); the NEXT chapter gets the server default doubled (paceFor).
-      gap = gap ? Math.min(gap * 2, MAX_PAGE_GAP_MS) : 0;
+      // overlapping requests is not going to like four more. The gap doubles up to the ceiling and never
+      // drops; a slow pace's range backs off at both ends and keeps a spread (pace.ts resumePace says how).
+      ({ gap, jitter } = resumePace({ gap, jitter }));
       workers = 1;
     } else if (round) {
       break; // a stable shortfall with no 429: the pages are not there, and one retry was enough to know
@@ -510,13 +540,19 @@ async function fetchChapter(
   } catch (e) {
     const s = classify(e);
     if (s) await reportFail(input.sourceId, s, (e as Error)?.message || 'getPageUrls failed');
+    // #115: evidence whatever classify() makes of it. An extension's own exception classifies as nothing, so
+    // the cooldown never saw it and neither did Health; the stage note sees everything and escalates nothing.
+    void noteStage(input.sourceId, 'pages', 'fail', { error: (e as Error)?.message || 'getPageUrls failed' });
     throw e;
   }
   if (!urls.length) throw new Error('no page urls');
+  void noteStage(input.sourceId, 'pages', 'ok');
 
-  const pace = paceFor(src, { gapMs: DL_PAGE_GAP_MS });
+  // pagePace, not paceFor: under withSlowPace this is where Suwayomi's gap 0 and its pool give way to the
+  // archive's one worker and random gaps. Everywhere else the two are the same thing.
+  const pace = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
   const { page, ext, worst, failed, refusal } = await fetchPages(src, urls, urls.map((_, i) => i), {
-    chapterSourceId: input.chapter.sourceId, gap: pace.gap, workers: pace.workers,
+    chapterSourceId: input.chapter.sourceId, gap: pace.gap, workers: pace.workers, jitter: pace.jitter, rand: pace.rand,
   });
 
   const zip = new AdmZip();
@@ -530,6 +566,7 @@ async function fetchChapter(
   if (!n) {
     const status = refusal ?? blameFor(worst);
     await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})`);
+    void noteStage(input.sourceId, 'images', 'fail', { error: `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})` });
     throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status, status, pages: 0, expected: urls.length, worst, failedPages });
   }
   // A PARTIAL chapter must not be written as a complete one.
@@ -567,6 +604,7 @@ async function fetchChapter(
     const status = refusal ?? blameFor(worst);
     if (!blip) {
       await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})`);
+      void noteStage(input.sourceId, 'images', 'fail', { error: `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})` });
     }
     // The hold: enough of the chapter to be worth keeping with placeholders, and the site did not say no.
     // Offered, not written -- see PartialHold. ⚠️ `!refusing` is the whole point of the second clause:
@@ -588,6 +626,10 @@ async function fetchChapter(
     );
   }
   await reportOk(input.sourceId); // a successful download clears any prior block
+  // Evidence for the two stages a whole chapter proves, and ONLY those: a download says nothing about search
+  // or the chapter list, and must not close their failures (lib/sourceEvidence.ts). reportOk above resets the
+  // cooldown as it always has, and never touches this.
+  void noteStage(input.sourceId, 'images', 'ok');
 
   zip.addFile('ComicInfo.xml', Buffer.from(comicInfo({
     series: input.meta?.series || input.meta?.title || '',

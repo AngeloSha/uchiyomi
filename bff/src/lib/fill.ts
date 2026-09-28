@@ -123,7 +123,12 @@ export type Refusal =
    * the old scan called every source it did not reach `unreachable`, which on an install with 35 sources
    * and a four-slot solver was most of them, every time.
    */
-  | 'not_tried';
+  | 'not_tried'
+  /**
+   * The series is numbered by posting order (#116, lib/numbering.ts), and this source numbers the same posts its
+   * own way: its chapter 20 is not ours, so nothing it lists can fill anything. Never asked.
+   */
+  | 'posting_order';
 
 export function verdict(a: Assessment, theirsCount: number): Refusal {
   if (!theirsCount) return 'no_chapters';

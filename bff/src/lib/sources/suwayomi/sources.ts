@@ -6,7 +6,7 @@
 // Suwayomi's own integer ids, and fetchChapters/fetchChapterPages take those integer ids rather than any
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
-import type { SourceAdapter, SourceSeries, SourceChapter } from '../types';
+import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, type Gql } from './client';
 import { env } from '../../../env';
 
@@ -57,9 +57,37 @@ const FETCH_SOURCE_MANGA = `mutation($source:LongString!,$type:FetchSourceMangaT
 
 const FETCH_MANGA = `mutation($id:Int!){ fetchManga(input:{id:$id}){ manga { ${MANGA_FIELDS} } } }`;
 
+// `sourceOrder url` (#116) were checked against the pinned engine's schema (test/fixtures, v2.3.2243: both are
+// non-null on ChapterType). sourceOrder is index + 1 over the extension's list reversed, so 1 is the OLDEST post,
+// and fetchChapters answers in sourceOrder ascending.
 const FETCH_CHAPTERS = `mutation($mangaId:Int!){
+  fetchChapters(input:{mangaId:$mangaId}){ chapters { id chapterNumber name scanlator uploadDate pageCount sourceOrder url } }
+}`;
+// The v0.48 query, for an older external engine that refuses the two fields above. Its rows still come back in
+// sourceOrder, so their position stands in for the order they no longer carry.
+const FETCH_CHAPTERS_V048 = `mutation($mangaId:Int!){
   fetchChapters(input:{mangaId:$mangaId}){ chapters { id chapterNumber name scanlator uploadDate pageCount } }
 }`;
+
+/**
+ * Engines (by their `gql`) that refused `sourceOrder url` once. Keyed by the transport rather than one module
+ * flag so a test's fake engine cannot leak its answer into the next test; in the app there is one transport,
+ * and so one flag for the process. It is never cleared: an engine does not lose fields, and an upgraded one is
+ * picked up at the next restart.
+ */
+const legacyChapterEngines = new WeakSet<Gql>();
+
+/**
+ * Is this the engine's schema validation refusing the #116 fields? graphql-java words it "Validation error
+ * (FieldUndefined@[fetchChapters/chapters/sourceOrder]) : Field 'sourceOrder' in type 'ChapterType' is
+ * undefined", and client.ts prefixes it ("suwayomi: ..."). Unanchored on purpose, so a wrapper that keeps the
+ * engine's words still matches; anything else -- a timeout, an extension's exception -- is NOT retried, because
+ * the older query would fail the same way and hide the first error.
+ */
+export const refusedChapterFields = (e: unknown): boolean => {
+  const msg = e instanceof Error ? e.message : String(e ?? '');
+  return /Validation error/i.test(msg) && /\b(?:sourceOrder|url)\b/.test(msg);
+};
 
 const FETCH_PAGES = `mutation($chapterId:Int!){ fetchChapterPages(input:{chapterId:$chapterId}){ pages } }`;
 
@@ -83,6 +111,8 @@ interface RemoteChapter {
   scanlator?: string | null;
   uploadDate?: string | null; // epoch millis as a string (Suwayomi's LongString)
   pageCount?: number | null;
+  sourceOrder?: number | null; // absent from the v0.48 query
+  url?: string | null;
 }
 
 /** Suwayomi's MangaStatus enum is SCREAMING_CASE; the rest of the app shows this verbatim. */
@@ -112,15 +142,18 @@ function toSeries(m: RemoteManga, adapterId: string): SourceSeries | null {
   };
 }
 
-function toChapter(c: RemoteChapter): SourceChapter | null {
+/** `position` is the row's 1-based place in the engine's answer: the order when the row carries none. */
+function toChapter(c: RemoteChapter, position: number): SourceChapter | null {
   if (c?.id == null) return null;
   const num = typeof c.chapterNumber === 'number' ? c.chapterNumber : NaN;
   // A chapter with no usable number can't be ordered, named or diffed against the library — drop it rather
   // than inventing 0, which would collide with a real chapter 0.
   if (!Number.isFinite(num) || num < 0) return null;
   const when = Number(c.uploadDate);
-  return {
+  const out: SourceChapter = {
     sourceId: String(c.id),
+    // The extension's number, raw, even when many posts share it (#116): what to do about that is decided per
+    // series in the listing layer (lib/postingOrder.ts), which can see the series and this adapter cannot.
     number: num,
     title: c.name?.trim() || `Chapter ${num}`,
     pages: typeof c.pageCount === 'number' && c.pageCount > 0 ? c.pageCount : undefined,
@@ -128,7 +161,11 @@ function toChapter(c: RemoteChapter): SourceChapter | null {
     // Mihon's free-text scanlator column, verbatim. Blank means the extension does not know, and the
     // chooser treats an absent group differently from an empty-named one, so it must not become ''.
     scanlator: c.scanlator?.trim() || undefined,
+    order: typeof c.sourceOrder === 'number' && Number.isFinite(c.sourceOrder) && c.sourceOrder > 0 ? c.sourceOrder : position,
   };
+  const url = typeof c.url === 'string' ? c.url.trim() : '';
+  if (url) out.url = url;
+  return out;
 }
 
 /**
@@ -198,16 +235,36 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     },
 
     async listChapters(seriesId) {
-      const d = await run<{ fetchChapters: { chapters: RemoteChapter[] } }>(FETCH_CHAPTERS, { mangaId: Number(seriesId) });
+      type Answer = { fetchChapters: { chapters: RemoteChapter[] } };
+      const vars = { mangaId: Number(seriesId) };
+      let d: Answer;
+      if (legacyChapterEngines.has(run)) d = await run<Answer>(FETCH_CHAPTERS_V048, vars);
+      else {
+        try {
+          d = await run<Answer>(FETCH_CHAPTERS, vars);
+        } catch (e) {
+          // An engine older than the pinned one may not have the fields; ask it once the old way and remember.
+          if (!refusedChapterFields(e)) throw e;
+          legacyChapterEngines.add(run);
+          d = await run<Answer>(FETCH_CHAPTERS_V048, vars);
+        }
+      }
       const list = d?.fetchChapters?.chapters;
       if (!Array.isArray(list)) return [];
       // Every copy of a number is reported, not just the first the engine listed. The choice between
       // groups belongs to lib/releases.ts, which knows the series' preference; this adapter's job is to
-      // say who released what. Sorting stays: callers diff the list in order.
-      return list
-        .map(toChapter)
+      // say who released what. Sorting stays: callers diff the list in order. The position is taken BEFORE
+      // the sort and before junk rows are dropped: the engine answers in sourceOrder, so a row's place in
+      // its answer is its posting order when the row does not say.
+      const out = list
+        .map((c, i) => toChapter(c, i + 1))
         .filter((c): c is SourceChapter => !!c)
         .sort((a, b) => a.number - b.number);
+      // How many rows toChapter dropped for having no usable number (#115): on the FINAL array, after the sort,
+      // so the smoke test can tell "no numbers" from "no chapters". Non-enumerable (types.ts UNNUMBERED).
+      const dropped = list.filter((c) => c?.id != null).length - out.length;
+      if (dropped > 0) Object.defineProperty(out, UNNUMBERED, { value: dropped });
+      return out;
     },
 
     async getPageUrls(chapterId) {

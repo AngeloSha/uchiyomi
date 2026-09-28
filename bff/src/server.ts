@@ -24,10 +24,13 @@ import { refreshHealthSummary } from './lib/healthSummary';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
-import { runRepair, REPAIR_HOURS } from './lib/repair';
+import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
+import { startArchive } from './lib/archive';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
+import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
+import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { KomgaError } from './lib/komga';
@@ -43,7 +46,7 @@ import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
 import personalRoutes from './routes/personal';
 import downloadRoutes from './routes/downloads';
-import sourceRoutes from './routes/sources';
+import sourceRoutes, { jobBusy } from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
@@ -55,6 +58,13 @@ async function main() {
   await migrate();
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
+  // What finished downloading in the last day, back into the Downloads view, and every chapter from here on
+  // written down (lib/activityLog.ts). Before any download can start, so nothing lands ahead of the day it
+  // restores. A database that cannot be read here costs the view its yesterday, never the boot.
+  await startActivityLog().then(
+    (n) => { if (n) console.log(`[activity] ${n} finished download(s) from the last day restored`); },
+    (e) => console.warn(`[activity] could not read the download log: ${(e as Error)?.message || e}`),
+  );
   const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
@@ -392,9 +402,10 @@ async function main() {
    * ⚠️ Never beside a chapter sweep, in either direction: the sweep tick above waits ten minutes for a
    * repair, this one waits ten minutes for a sweep, and both jobs refuse to start on top of the other.
    *
-   * Its own interval (REPAIR_HOURS, default 24) counted from the END of the last completed run, which is
+   * Its own interval (REPAIR_HOURS, default 24) counted from the END of the last completed FULL run, which is
    * persisted -- so a deploy does not push the next repair out by a whole day, the way the sweep's first
-   * run used to be pushed out by six hours. The floor is thirty minutes rather than the sweep's ten: this
+   * run used to be pushed out by six hours. (Only a full run writes repair_last_run since v0.49.0: a one-row
+   * Health fix pressed at 23:00 used to push the next nightly after a restart to 23:00 the day after.) The floor is thirty minutes rather than the sweep's ten: this
    * job opens two thousand archives, and a server that has just booted should be answering readers first.
    * Owned mode only: everything it repairs lives in lib_books and DL_ROOT, which a Komga-backed install
    * does not have. `OWNED`, for the reason given at the sweep above.
@@ -420,6 +431,8 @@ async function main() {
         // Outside the re-arm below, so a run that threw does not end the schedule.
         app.log.error(e as any);
       }
+      // Told to the Health page and the Tasks row ("next run in 21 h") every time the timer is armed.
+      setRepairNext(Date.now() + next);
       setTimeout(tick, next).unref();
     };
     void (async () => {
@@ -431,9 +444,18 @@ async function main() {
       const delay = Math.max(firstRunFloor(30 * 60 * 1000, 'repair'), last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
       app.log.info(`repair: first run in ${Math.round(delay / 60000)} min`
         + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed run on record)'));
+      setRepairNext(Date.now() + delay);
       setTimeout(tick, delay).unref();
     })();
   }
+
+  /**
+   * The slow archive (#117, lib/archive.ts): series queued to be fetched a chapter at a time, paced per source.
+   * It schedules itself -- a first look ten minutes after boot (three on desktop), then whenever a break ends --
+   * and stands aside for every sweep, repair and source check. `jobBusy` is how it sees a download a person
+   * started on the same series. Owned mode only, like the sweep: it writes DL_ROOT and lib_books.
+   */
+  if (OWNED) startArchive({ busy: jobBusy, log: app.log });
 
   // Drop import batches nobody will come back to (`sweepImportBatches` in routes/admin.ts owns the rule:
   // finished ones after a week, unfinished ones after a month). Daily, first run fifteen minutes after
@@ -491,6 +513,11 @@ async function main() {
       app.log.info(`extensions: first check in ${Math.round(delay / 60000)} min`);
       setTimeout(tick, delay).unref();
     })();
+
+    // The engine keeps a copy of every page it serves and never deletes one; left alone it filled a host's
+    // system disk (17 GB, 2026-09-27). Emptied after each extension download job and every half hour while
+    // nothing is downloading through it, never mid-chapter (lib/sources/suwayomi/cache.ts).
+    startEngineCacheKeeper(app.log);
   }
 
   // Nightly backup, aligned to a wall-clock hour and re-read from settings each time the timer is armed.
@@ -640,7 +667,8 @@ async function main() {
     process.once(sig, () => {
       runtime.stopping = true;
       app.log.info(`${sig}: finishing the current chapter, then stopping`);
-      void app.close().finally(() => process.exit(0));
+      // The download log's last lines first: a chapter that finished a moment ago is written down, not lost.
+      void app.close().then(flushActivityLog).finally(() => process.exit(0));
       setTimeout(() => process.exit(0), 20_000).unref(); // never hang a shutdown on a slow site
     });
   }

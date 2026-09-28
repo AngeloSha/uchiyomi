@@ -20,7 +20,7 @@ import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { followable } from '@/lib/scanlators';
-import { offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
+import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
@@ -74,8 +74,11 @@ function whyText(c: Candidate): string {
     case 'no_chapters': return tr('Listed no chapters');
     case 'blocked': return tr('Temporarily unavailable');
     case 'unreachable': return tr('Could not be reached (timed out or refused)');
-    case 'not_tried': return tr('Not asked: enough sources already had it');
+    // "It" is the series (bff fill.ts `not_tried`): enough OTHER sources listed it, so this one was never asked.
+    case 'not_tried': return tr('Not asked: enough other sources already list this series');
     case 'disabled': return tr('Switched off');
+    // #116: the series is numbered by posting order, so another source's chapter 20 is not this series' 20.
+    case 'posting_order': return tr('Numbers these posts its own way: this series is numbered by posting order');
     default: return tr('Not usable');
   }
 }
@@ -195,7 +198,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       });
       setStarted(res.folder);
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
-      toast(fetchingToast(numbers.length), 'info');
+      toast(fetchingToast(numbers.length), 'info', { busy: true });
     } catch (e) {
       toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
@@ -261,7 +264,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId, numbers: numbers.slice(0, max) },
         });
         setStarted(res.folder);
-        toast(fetchingToast(Math.min(numbers.length, max)), 'info');
+        toast(fetchingToast(Math.min(numbers.length, max)), 'info', { busy: true });
       } else {
         if (mode === 'follow') {
           if (!(await follow(c, false))) return;
@@ -279,7 +282,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             ? other === 1 ? tr('1 could not be fetched now.') : tr('{m} could not be fetched now.', { m: other })
             : '';
         const downloading = res.total === 1 ? tr('Downloading 1 chapter.') : tr('Downloading {n} chapters.', { n: res.total });
-        toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info');
+        toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info', { busy: true });
       }
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
       qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
@@ -370,9 +373,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             successful download clears the streak. The person decides, with the record in front of them. */}
         {c.health && (
           <p className="mt-1 text-xs text-amber-300">
-            {tr('Recently unreliable')} · {c.health.status === 'rate_limited' ? tr('rate-limited us')
-              : c.health.status === 'blocked' ? tr('refused us') : tr('did not answer')}
-            {c.health.consecutive > 1 && ` ${tr('{n} times in a row').replace('{n}', String(c.health.consecutive))}`}
+            {tr('Recently unreliable')} · {healthLine(c.health)}
             {!c.health.lastOkAt && ` · ${tr('never completed a download here')}`}
           </p>
         )}

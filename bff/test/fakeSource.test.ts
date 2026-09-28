@@ -89,3 +89,24 @@ test('the gated adapters call the stub contract and keep the downloader defaults
   assert.deepEqual(await a.getPageUrls('walk-tale-1'), ['http://127.0.0.1:18150/img/walk-tale-1/1']);
   assert.equal(asked.length, 4);
 });
+
+test('the e2e adapter carries a posting order only when the stub states one', async () => {
+  // #116's Istrevelia-shaped stub series lists `order` on each post. Reintroduce by passing the stub's value
+  // through untouched (the plain spread): the string '7' stays a string and the junk values survive.
+  process.env.FAKE_SOURCE_URLS = 'fake-a=http://127.0.0.1:18150';
+  await cleanRegistry();
+  const { loadBuiltins } = await import('../src/lib/sources/builtins');
+  const { getSource } = await import('../src/lib/sources/loader');
+  loadBuiltins();
+  globalThis.fetch = (async () => Response.json([
+    { sourceId: 'p1', number: 1, order: 1 },
+    { sourceId: 'p2', number: 1, order: '7' },
+    { sourceId: 'p3', number: 1, order: 'soon' },
+    { sourceId: 'p4', number: 1, order: 0 },
+    { sourceId: 'p5', number: 1, order: null },
+    { sourceId: 'p6', number: 1 },
+  ])) as typeof fetch;
+  const listed = await getSource('fake-a')!.listChapters('walk-istrevelia');
+  assert.deepEqual(listed.map((c) => c.order), [1, 7, undefined, undefined, undefined, undefined]);
+  assert.deepEqual(listed.map((c) => Object.hasOwn(c, 'order')), [true, true, false, false, false, false], 'no order is no key');
+});

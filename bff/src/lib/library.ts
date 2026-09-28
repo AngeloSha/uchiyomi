@@ -8,7 +8,7 @@ import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
-import { numFromName, naturalCmp } from './naming';
+import { numFromName, naturalCmp, chapterName } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { directionFromComicInfo } from './directionSignals';
 import { reconcileListingProgress } from './listingProgress';
@@ -705,7 +705,38 @@ export function persistScan(): Promise<ScanResult> {
   return again;
 }
 
+/** The hold withScansHeld has in place, while it has one: a scan that starts meanwhile waits for it. */
+let hold: Promise<void> | null = null;
+
+/**
+ * Run `fn` with no library scan in flight: wait out the one running, and keep the next from starting until
+ * `fn` settles. A renumber (lib/numbering.ts) renames a series' files and then updates their rows in place;
+ * a scan between the two would read `Chapter 20.cbz` as a new book -- a second row and a new id -- or meet
+ * the (root, file) index on the row still being moved. persistScan's own promise is unchanged: a caller that
+ * asks during the hold is answered by a scan that starts once the hold is over, which is what it asked for.
+ *
+ * ⚠️ The scan running now is taken in the same turn as the hold is set, and a scan waits for the hold it finds
+ * once, not in a loop: two holders queued behind one scan would otherwise each wait for the other.
+ * Reintroduce by not waiting in scanOnce: "a scan asked for during a renumber waits for it" in
+ * numbering.int.test.ts sees the scan start inside the hold.
+ */
+export async function withScansHeld<T>(fn: () => Promise<T>): Promise<T> {
+  while (hold) await hold.catch(() => undefined);
+  const running = scanning;
+  let release!: () => void;
+  hold = new Promise<void>((r) => { release = r; });
+  try {
+    if (running) await running.catch(() => undefined);
+    return await fn();
+  } finally {
+    hold = null;
+    release();
+  }
+}
+
 async function scanOnce(): Promise<ScanResult> {
+  const held = hold;
+  if (held) await held.catch(() => undefined);
   scansStarted++;
   const t0 = Date.now();
   let nBooks = 0;
@@ -756,14 +787,19 @@ async function scanOnce(): Promise<ScanResult> {
         // belong to: unordered, the deleted twin could come back first and the `continue` below skipped the
         // folder for good. Reintroduce by dropping the ORDER BY: "a deleted twin does not hide the live row"
         // in scanResilience.int.test.ts finds its books missing.
-        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string }>(
-          `SELECT id, deleted_at, merged_into, library_id FROM lib_series WHERE folder = $1
+        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string; renumbering: boolean }>(
+          `SELECT id, deleted_at, merged_into, library_id, renumber_plan IS NOT NULL AS renumbering FROM lib_series WHERE folder = $1
             ORDER BY (deleted_at IS NOT NULL), (merged_into IS NOT NULL), created_at LIMIT 1`,
           [folderRel],
         );
         // Deleted: leave it alone entirely. Reviving it would mint a new id and strand everything attached
         // to the old one -- favourites, ratings, notes, reading history.
         if (known?.deleted_at) { removed++; continue; }
+        // Half-way through a renumber that a crash interrupted (lib/numbering.ts): its files carry their new
+        // names while their rows still carry the old ones, and indexing it now would mint a second row -- a
+        // new id, with none of the reading history -- for every file that moved. Its next check finishes the
+        // journal; until then the folder is left exactly as it is.
+        if (known?.renumbering) continue;
         // Merged away: its files belong to the survivor now. Without this the books get pulled back out by
         // `ON CONFLICT (root, file) DO UPDATE SET series_id = EXCLUDED.series_id` and the merge silently undoes.
         const mergeTarget = known?.merged_into || null;
@@ -910,6 +946,18 @@ async function scanOnce(): Promise<ScanResult> {
 }
 
 /**
+ * The number setBookDates and setBookMeta match a landing to, as SQL over `lib_books b` and `lib_series s`: the raw
+ * lib_books.number (see setBookDates for why), except on a series numbered by posting order (#116), where it is
+ * the override-aware one. There a book in a root the renumber could not rename keeps the SOURCE's number as its
+ * raw number (another post's, now) and its own post's in book_overrides (lib/numbering.ts); matched raw, the
+ * landing of post 2 re-stamped the read-only post 21 with post 2's chapter id, name, group and date -- and the
+ * chapter id is the evidence every later remap trusts first (#116 review). Reintroduce the raw match: "a chapter in
+ * a root the server cannot rename in moves by override" in numbering.int.test.ts finds post 21 stamped as post 2.
+ */
+const BOOK_NUMBER = `(CASE WHEN s.numbering = 'posting_order'
+  THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END)`;
+
+/**
  * Stamp source release dates onto a series' books (matched by chapter number). Called after persistScan by the
  * add flow and the updater — the scanner itself never touches published_at, so stamps survive rescans.
  */
@@ -926,42 +974,19 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   // own chapter list and line up with what was parsed out of the filename it gave us. A manual correction
   // is about how a chapter is presented to the reader, not about which remote chapter this file is, so
   // honouring it here would stop release dates matching at all.
+  // ⚠️ Except under posting order (#116, BOOK_NUMBER): there the numbers are posts', and a book the renumber could
+  // not rename keeps its raw number with its post's in the override.
   await q(
     `UPDATE lib_books b SET published_at = v.p
      FROM (VALUES ${values.join(',')}) AS v(n, p), lib_series s
-     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n AND b.published_at IS DISTINCT FROM v.p`,
+     WHERE s.folder = $1 AND b.series_id = s.id AND ${BOOK_NUMBER} = v.n AND b.published_at IS DISTINCT FROM v.p`,
     params,
   );
 }
 
-// A volume marker in front of the chapter: "Vol.3", "Volume 3 -", "Tome 3,".
-const VOLUME = String.raw`(?:(?:vol(?:ume)?|tome|band|том)\.?\s*\d+(?:\.\d+)?\s*[,:.\-–—]?\s*)?`;
-// The word a source puts before the number, in the languages sources are written in.
-const CHAPTER_WORD = String.raw`(?:(?:ch(?:apter|ap)?|episode|ep|capítulo|capitulo|cap|chapitre|kapitel|глава|розділ|chương|bölüm|bab|rozdział)\.?\s*)?`;
-// After the number, the separators between it and a real name.
-const SEPARATOR = String.raw`\s*(?:[:.\-–—|~]+\s*)?`;
-
-/**
- * The chapter's own name, when the source gave one: what is left once the volume, the chapter word and the
- * number are taken off the front. Null when nothing is left -- the title only said the number again.
- *
- * A downloaded file is named from its number alone (lib/downloader.ts explains why), so the scanner's title
- * is the number twice. Sources usually know better, and the downloader writes it into the CBZ's ComicInfo,
- * but nothing read it back. Most sources also just say "Chapter 12", in several languages and often behind a
- * volume ("Vol.3 Chapter 12", "Capítulo 12", "第12話"): each of those is the number again, and "Vol.3 Chapter
- * 12: The Return" is named "The Return".
- */
-export function chapterName(title: string | undefined | null, number: number): string | null {
-  const t = (title ?? '').trim();
-  if (!t) return null;
-  const n = String(number).replace('.', '\\.');
-  // `(?!\.?\d)`: 12 must not match the front of 120 or 12.5.
-  const re = new RegExp(`^${VOLUME}${CHAPTER_WORD}(?:第\\s*)?0*${n}(?!\\.?\\d)(?:\\s*(?:話|话|章|回|화|편))?${SEPARATOR}`, 'iu');
-  const m = re.exec(t);
-  if (!m) return t;
-  const rest = t.slice(m[0].length).trim();
-  return rest || null;
-}
+// chapterName lives in lib/naming.ts, beside numFromName, so the pure numbering logic (lib/postingOrder.ts) can
+// read a chapter's name without importing the database. Re-exported so its importers are unchanged.
+export { chapterName };
 
 /**
  * Stamp which group released the file on disk, and which adapter it came from, onto a series' books.
@@ -970,35 +995,43 @@ export function chapterName(title: string | undefined | null, number: number): s
  * a number can change from one sweep to the next (a preferred group catches up, a block is added), and
  * stamping every listed number would relabel a file already on disk from group A as group B the moment
  * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
- * same reason: these numbers are the source's, not the override's.
+ * same reason: these numbers are the source's, not the override's -- and the same exception for a series numbered
+ * by posting order (BOOK_NUMBER), whose numbers are its posts'.
  *
  * `missing` is the 1-based list of placeholder pages when the chapter was saved partial (lib/partial.ts),
  * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
  * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
  *
- * `title` is what the source called the chapter. Its name (chapterName, above) goes to `chapter_name` -- never
- * to `title`, which is the filename's -- and only when there is one, so a copy whose source says only "Chapter
- * 12" never replaces a name an earlier copy supplied.
+ * `title` is what the source called the chapter. Its name (chapterName, lib/naming.ts) goes to `chapter_name`
+ * -- never to `title`, which is the filename's -- and only when there is one, so a copy whose source says only
+ * "Chapter 12" never replaces a name an earlier copy supplied.
+ *
+ * `chapterId` is the source chapter the file was written from (v0.49.0, #116): `source_chapter_id`, the one
+ * piece of evidence that says exactly which post a file is when a source's numbers change under it (a
+ * renumber by posting order, its undo, an extension setting flipped). Before it, every such remap had to
+ * infer the post from the file's name or date. Absent leaves the stamp as it was.
  */
-export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
+export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
   if (!rows.length) return;
   const values: string[] = [];
   const params: any[] = [folder];
   for (const c of rows) {
-    params.push(c.number, c.scanlator ?? null, c.source ?? null, c.missing?.length ? c.missing : null, chapterName(c.title, c.number));
-    values.push(`($${params.length - 4}::real, $${params.length - 3}::text, $${params.length - 2}::text, $${params.length - 1}::int[], $${params.length}::text)`);
+    params.push(c.number, c.scanlator ?? null, c.source ?? null, c.missing?.length ? c.missing : null, chapterName(c.title, c.number), c.chapterId ?? null);
+    values.push(`($${params.length - 5}::real, $${params.length - 4}::text, $${params.length - 3}::text, $${params.length - 2}::int[], $${params.length - 1}::text, $${params.length}::text)`);
   }
   await q(
     // An own name replaces a borrowed one (lib/borrowNames.ts), and takes its donor mark with it.
     `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
             chapter_name = COALESCE(v.name, b.chapter_name),
-            chapter_name_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.chapter_name_source END
-     FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name), lib_series s
-     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
+            chapter_name_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.chapter_name_source END,
+            source_chapter_id = COALESCE(v.cid, b.source_chapter_id)
+     FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name, cid), lib_series s
+     WHERE s.folder = $1 AND b.series_id = s.id AND ${BOOK_NUMBER} = v.n
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src
             OR b.missing_pages IS DISTINCT FROM v.miss
-            OR (v.name IS NOT NULL AND b.chapter_name IS DISTINCT FROM v.name))`,
+            OR (v.name IS NOT NULL AND b.chapter_name IS DISTINCT FROM v.name)
+            OR (v.cid IS NOT NULL AND b.source_chapter_id IS DISTINCT FROM v.cid))`,
     params,
   );
 }

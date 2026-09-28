@@ -8,6 +8,7 @@ import { IcChevronLeft, IcX } from '@/components/icons';
 import { chapterLabel } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { inOrder, neighbours, previewCountUrl, previewListUrl, previewPageUrl, type PreviewChapter } from '@/lib/preview';
+import { useLayer } from '@/lib/layers';
 
 /**
  * Read a chapter straight from a source, without adding the series to the library (#91).
@@ -47,6 +48,8 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
   canAdd?: boolean;
 }) {
   const [number, setNumber] = useState<number | null>(null);
+  // A full-screen dialog on the notices' layer stack (lib/layers.ts); it covers the nav band too.
+  useLayer('dialog');
   const numberRef = useRef(number);
   numberRef.current = number;
   const closeRef = useRef(onClose);

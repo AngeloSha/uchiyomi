@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
-import { chapterLabel, chapterName, isVolumeName, relativeTime } from '@/lib/format';
+import { bookCountText, chapterLabel, chapterName, isVolumeName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -14,8 +14,9 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments } from '@/components/icons';
+import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
+import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
@@ -35,6 +36,17 @@ import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
 import { useContextMenu } from '@/components/ContextMenu';
+import { useLayer } from '@/lib/layers';
+import { kickDownloads } from '@/lib/useServerDownloads';
+import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
+import { useArchiveEnqueue } from '@/components/ArchiveQueue';
+import { listingArchiveLine } from '@/lib/archive';
+import { NumberingNotice } from '@/components/NumberingNotice';
+import { NumberingSheet } from '@/components/NumberingSheet';
+import type { PlanMode } from '@/lib/numbering';
+
+/** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
+const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -78,6 +90,9 @@ function autoDirectionLabel(d: Series['detectedDirection']): string {
 }
 
 function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series: Series; onClose: () => void; onSaved: () => void }) {
+  // On the notices' layer stack (lib/layers.ts), as Modal is: this hand-rolled dialog toasts while open
+  // ("Could not save"), and a notice placed as if nothing were open would sit on its lower buttons.
+  useLayer('dialog');
   const toast = useToast();
   const [title, setTitle] = useState(series.metadata?.title || series.name || '');
   const [summary, setSummary] = useState(series.metadata?.summary || series.booksMetadata?.summary || '');
@@ -186,7 +201,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const followers = linked.filter((x) => !x.primary).length;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Edit series')} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -330,6 +345,7 @@ interface CollectionRow { id: string; name: string; accent: string | null; item_
 
 /** "Add to collection" sheet: pick an existing list or create one inline. */
 function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
+  useLayer('dialog');
   const toast = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState('');
@@ -353,7 +369,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Add to collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -478,6 +494,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
 }
 
 function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
+  useLayer('dialog');
   const toast = useToast();
   const [number, setNumber] = useState(String(book.number ?? ''));
   const [title, setTitle] = useState(book.metadata?.title || book.name || '');
@@ -502,7 +519,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Edit chapter')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -598,14 +615,16 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
  * word is what the column can spare there, and the number still reads as a date beside the others. Older
  * chapters show the locale date in both forms, as the column always has. `lg` is where the list becomes
  * the grid. Two spans rather than a media query in JS: the first paint of a static export knows no width.
+ *
+ * ⚠️ The short form is lib/format.ts `relativeTimeShort`, not this sentence with " ago" cut off: every
+ * language but English says the sentence through Intl ("vor 3 Tagen"), where the cut matched nothing and
+ * the grid showed the whole of it.
  */
 function RowDate({ iso, className = '' }: { iso: string; className?: string }) {
-  const long = relativeTime(iso);
-  const short = long === 'just now' ? 'now' : long.replace(/ ago$/, '');
   return (
     <span className={`shrink-0 text-[11px] text-fog-500 ${className}`}>
-      <span className="lg:hidden">{long}</span>
-      <span className="hidden lg:inline">{short}</span>
+      <span className="lg:hidden">{relativeTime(iso)}</span>
+      <span className="hidden lg:inline">{relativeTimeShort(iso)}</span>
     </span>
   );
 }
@@ -894,6 +913,8 @@ function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number;
 function SeriesInner() {
   const id = useSearchParams().get('id') || '';
   const wantCh = chParam(useSearchParams().get('ch'));
+  // Health's Open on a numbering finding (#116, lib/healthLinks.ts numberingHref): the plan, open on arrival.
+  const wantPlan = useSearchParams().get('numbering') === 'review';
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -935,6 +956,23 @@ function SeriesInner() {
   const [explaining, setExplaining] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [chapterSheet, setChapterSheet] = useState<{ number: number; book?: Book; ghost?: Ghost } | null>(null);
+  // The renumbering plan (#116), opened from the numbering notice or, for an admin, from the versions sheet.
+  const [numberingSheet, setNumberingSheet] = useState<PlanMode | null>(null);
+  useEffect(() => { setNumberingSheet(null); }, [id]);
+  // ...or from Health, whose link names no mode: the plan of whatever waits, as the route picks it. Once per series,
+  // for an admin (the routes are theirs), and `numbering` then leaves the address, as `ch` does below, so a reload
+  // or Back does not open it again. After the reset above, which runs first.
+  const openedPlan = useRef<string | null>(null);
+  useEffect(() => {
+    if (!wantPlan || !isAdmin || openedPlan.current === id) return;
+    openedPlan.current = id;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('numbering');
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
+    } catch { /* the plan opens regardless */ }
+    setNumberingSheet('next');
+  }, [wantPlan, isAdmin, id]);
   // The older-chapters runs the reader unfolded, by the run's lowest number (chapterRows.ts). Hiding one
   // drops its ghosts from the picks: they leave the screen, and the same rule as `toggleGhosts` applies --
   // a row nobody can see cannot stay picked, or the bar keeps counting and Fetch acts on it.
@@ -1090,7 +1128,7 @@ function SeriesInner() {
   const supplyInput = useMemo(() => ({
     sources: series?.sources ?? [],
     groups: groups.map((g) => g.name),
-    notHere: ghosts.filter((g) => g.why !== 'floor' && !haveNumbers.has(g.number)).length,
+    notHere: ghosts.filter((g) => g.why !== 'floor' && g.why !== 'archive' && !haveNumbers.has(g.number)).length,
     listedTotal: ghosts.length,
     booksCount: series?.booksCount ?? 0,
     checkedAt: supplyChecked,
@@ -1248,13 +1286,14 @@ function SeriesInner() {
   const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
     if (mode === 'previous') {
       const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
-      if (!prev.length) { toast('Nothing before this chapter is unread'); return; }
-      toast(`Marking ${prev.length} chapter${prev.length > 1 ? 's' : ''} read…`);
+      if (!prev.length) { toast(tr('Nothing before this chapter is unread')); return; }
+      // One card, in one language: the result takes the busy card's place (the same key), so both are translated.
+      toast(markingText(prev.length), 'info', { busy: true, key: 'mark-read' });
       await setRead(prev, true);
-      toast(`Marked ${prev.length} read`, 'success');
+      toast(tr('Marked {n} read', { n: prev.length }), 'success', { key: 'mark-read' });
     } else {
       await setRead([b], mode === 'read');
-      toast(mode === 'read' ? 'Marked read' : 'Marked unread', 'success');
+      toast(mode === 'read' ? tr('Marked read') : tr('Marked unread'), 'success');
     }
   };
   // Deliberately the WHOLE list, not the group filter's subset: "Mark all read" is a statement about the
@@ -1267,28 +1306,35 @@ function SeriesInner() {
   // seriesPage.test.ts fails.
   const markAllRead = async () => {
     const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
-    if (!todo.length) { toast('Everything is already read', 'success'); return; }
-    toast(`Marking ${todo.length} chapters read…`);
+    if (!todo.length) { toast(tr('Everything is already read'), 'success'); return; }
+    toast(markingText(todo.length), 'info', { busy: true, key: 'mark-read' });
     await setRead(todo, true);
-    toast(`Marked ${todo.length} chapters read`, 'success');
+    toast(todo.length === 1 ? tr('Marked 1 chapter read') : tr('Marked {n} chapters read', { n: todo.length }), 'success', { key: 'mark-read' });
   };
 
   // The one download loop, for Save all offline and for Save offline in select mode: stops at the first
   // failure, because the usual cause is a full device and every further attempt would fail the same way.
+  // ONE outcome, in the busy card's place (the same key), after the loop: stopped part-way, the error says what
+  // was saved as well. The error used to be pushed inside the loop and the success after it under the same
+  // key, which replaced the error in the same tick -- the reader saw "Saved 3 chapters offline" and never
+  // learned it had stopped. offlineOutcome (lib/notices.ts) is the decision; notices.test.ts holds it and
+  // fails on any flow that keys a success after its error.
   const saveOffline = async (todo: Book[]) => {
-    toast(tr('Saving {n} chapters offline…', { n: todo.length }));
+    toast(todo.length === 1 ? tr('Saving 1 chapter offline…') : tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
     let done = 0;
+    let stopped = false;
     for (const b of todo) {
       try {
         await downloadChapter(b.id);
         setDownloaded((s) => new Set(s).add(b.id));
         done++;
       } catch {
-        toast(tr('Stopped — device storage may be full'), 'error');
+        stopped = true;
         break;
       }
     }
-    if (done) toast(tr('Saved {n} chapters offline', { n: done }), 'success');
+    const out = offlineOutcome(done, todo.length, stopped);
+    if (out) toast(out.msg, out.type, { key: 'save-offline' });
   };
   const downloadAll = async () => {
     if (downloadingAll || !books) return;
@@ -1334,6 +1380,10 @@ function SeriesInner() {
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
   const pickedCount = pickedBookList.length + pickedGhostList.length;
+  // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
+  // and a notice has to rise above whichever height it has.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', selecting && pickedCount > 0, { ref: toolbarRef });
 
   const invalidateChapters = () => {
     for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
@@ -1365,7 +1415,10 @@ function SeriesInner() {
     try {
       const res = await api<{ folder: string; total: number }>(path, { method: 'POST', json: body });
       setStarted({ folder: res.folder, at: Date.now() });
-      toast(fetchingToast(res.total), 'info');
+      // Ask for the jobs now: the answer carries this job, and with it the poll's 2.5 s pace (AppShell's
+      // poller reads its interval off each answer) -- otherwise the band and the ring wait out a 30 s idle poll.
+      void kickDownloads(qc);
+      toast(fetchingToast(res.total), 'info', { busy: true });
       invalidateChapters();
       leaveSelect();
     } catch (e) {
@@ -1382,7 +1435,7 @@ function SeriesInner() {
    * Poll the shared jobs key until the job for `folder` is no longer downloading; the job as last seen, or
    * null when the list no longer has it (over and aged out -- or, past the same five seconds `jobDone`
    * allows, never listed) or the server could not be asked three times running. Through `fetchQuery` so
-   * the pill and the page's own 2 s poll read the same answer and the requests are deduped.
+   * the Library ring, the band and this wait read the same answer and the requests are deduped.
    */
   const awaitJob = async (folder: string): Promise<SourceJob | null> => {
     const at = Date.now();
@@ -1411,8 +1464,9 @@ function SeriesInner() {
       for (const [i, chunk] of chunks.entries()) {
         const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId: id, numbers: chunk } });
         setStarted({ folder: res.folder, at: Date.now() });
+        void kickDownloads(qc);
         if (i === 0) {
-          toast(fetchingToast(numbers.length), 'info');
+          toast(fetchingToast(numbers.length), 'info', { busy: true });
           invalidateChapters();
           leaveSelect();
         }
@@ -1456,7 +1510,7 @@ function SeriesInner() {
       const lines = [
         { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
         { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-        { n: other, text: tr('{n} could not be deleted', { n: other }) },
+        { n: other, text: other === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: other }) },
       ].filter((l) => l.n > 0);
       if (res.applied === 0 && lines.length) {
         // ⚠️ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
@@ -1479,23 +1533,24 @@ function SeriesInner() {
     setConfirming(null);
   };
 
-  // While the job this page started is downloading, poll the shared jobs key every 2 s (the
-  // FindMissingDialog pattern) and refresh the two chapter queries when it stops, so ghosts turn into rows
-  // without a reload. ⚠️ `dataUpdatedAt` is compared against the moment the job started: the key is shared
-  // with the downloads pill, so the first render after the POST sees that pill's CACHED list -- from before
-  // the job existed -- and "the job is not in the list" would otherwise read as "the job has finished".
+  // While the job this page started is downloading, read the shared jobs key and refresh the chapter queries
+  // when it stops, so ghosts turn into rows without a reload. No poll of its own (v0.49.0): AppShell's one
+  // poller asks every 2.5 s while a job downloads, and startJob kicks it the moment the job exists. A second
+  // observer with its own interval would double the requests. ⚠️ `dataUpdatedAt` is compared against the
+  // moment the job started: the key is shared with the Library ring, so the first render after the POST sees
+  // its CACHED list -- from before the job existed -- and "the job is not in the list" would otherwise read as
+  // "the job has finished".
   const jobs = useQuery({
     queryKey: ['source-jobs'],
     queryFn: () => api<{ content: SourceJob[] }>('/api/sources/jobs'),
     enabled: !!started,
-    refetchInterval: 2000,
   });
   const job = started ? jobs.data?.content?.find((j) => j.folder === started.folder) : undefined;
   const jobFresh = !!started && jobs.dataUpdatedAt >= started.at;
   // A fresh list without the job means it is over and has aged out -- or a poll that was already in flight
   // when the POST landed answered without it. Five seconds tells those apart: a job that has not appeared
-  // by then is not going to. (`Date.now()` here is re-evaluated on every 2 s poll, which is what makes it
-  // a clock rather than a constant.)
+  // by then is not going to. (`Date.now()` here is re-evaluated on every poll, which is what makes it a
+  // clock rather than a constant.)
   const jobDone = jobFresh && (job ? job.status !== 'downloading' : Date.now() - started.at > 5000);
   useEffect(() => {
     if (!jobDone) return;
@@ -1550,6 +1605,17 @@ function SeriesInner() {
   // A "Nothing yet" series: added with no chapters, the older run under its floor is the page's only
   // content and the ☁ on those rows the call to action. Nothing to read, nothing to save offline.
   const nothingYet = !!series && series.booksCount === 0;
+  // "Archive slowly" (#117): the rest of the series fetched a chapter at a time, over nights or days. Offered
+  // while the listing has something the archive could take and no archive is on it; this page only starts
+  // one -- its progress, Pause and Stop are the band's, above the chapter list.
+  const archiveEnqueue = useArchiveEnqueue();
+  const mayArchive = canDownload(user) && !!listing && !listing.archive
+    && ghosts.some((g) => (g.why === 'floor' || g.why === 'missing') && !haveNumbers.has(g.number));
+  const archiveSlowly = async () => {
+    setActing(true);
+    await archiveEnqueue([id], title);
+    setActing(false);
+  };
   const Actions = (
     <div className="mt-4 flex flex-col gap-2">
       <button onClick={() => resumeBook && router.push(`/reader/?book=${resumeBook.id}`)} disabled={nothingYet || !resumeBook} className="btn-accent w-full disabled:opacity-50">
@@ -1606,6 +1672,11 @@ function SeriesInner() {
         <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></svg>{tr('Find missing chapters')}</button>
       )}
+      {mayArchive && (
+        <button type="button" onClick={archiveSlowly} disabled={acting} data-archive-slowly
+          className="btn-key mt-1 h-auto w-full py-2.5 text-sm font-normal text-fog-300">
+          <IcHourglass width={16} height={16} />{tr('Archive slowly')}</button>
+      )}
       {isAdmin && (
         <>
           <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
@@ -1624,7 +1695,7 @@ function SeriesInner() {
   const metaBits: ReactNode[] = [
     author ? <span className="text-fog-300">by {author}</span> : null,
     meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
-    series ? <>{series.booksCount} {mostlyVolumes ? 'volumes' : 'chapters'}</> : null,
+    series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
     // yet"), with the source and the groups beside it, and one line saying it is enough.
@@ -1658,6 +1729,10 @@ function SeriesInner() {
   const activeFilters = (group !== ALL_GROUPS ? 1 : 0) + (showGhosts ? 0 : 1);
   const Chapters = (
     <div ref={chaptersTop} className="scroll-mt-20">
+      {/* How the chapters are numbered, when that needs saying (#116): above the band, which it can hold. */}
+      <NumberingNotice seriesId={id} numbering={listing?.numbering} isAdmin={isAdmin} onReview={setNumberingSheet} />
+      {/* What the server is fetching for this series, whoever started it (v0.49.0): above the list it fills. */}
+      <SeriesServerDownloads seriesId={id} folder={series?.folder} />
       {/* The heading on its own line and ONE row of four short, text-only chips under it. Measured at
           390 px: with icons and the two long chips this was five chips on two rows plus two sentences;
           the four fit one row in English, and `flex-wrap` (never nowrap) is the safety valve for German
@@ -1726,19 +1801,27 @@ function SeriesInner() {
             const { key, args } = runLabel(r);
             // The run's own numbers, from the same filtered list the row was built from, so "Fetch all 5"
             // fetches the five the sentence counts and not a sixth the group filter hid.
-            const numbers = filteredGhosts.filter((g) => g.why === 'floor' && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);
+            const numbers = filteredGhosts.filter((g) => g.why === r.why && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);
+            // A run the slow archive is fetching (#117) says how far it has got and offers nothing but Show:
+            // its Pause and Stop are the band's. An older-chapters run may start one instead.
+            const archiving = r.why === 'archive';
             return (
-              <div key={`run${r.from}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
-                <span className="me-auto">{tr(key, args)}</span>
+              <div key={`run${r.from}`} data-run={r.why} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
+                <span className="me-auto">{archiving ? [tr(key, args), listingArchiveLine(listing?.archive)].filter(Boolean).join(' · ') : tr(key, args)}</span>
                 {/* The two chips travel together: when the sentence leaves no room they wrap as one pair to
                     the end of the next line, not one chip after the sentence and one orphaned below. */}
                 <span className="ms-auto flex shrink-0 gap-1.5">
                   <button type="button" onClick={() => toggleRun(r.from, numbers)} aria-expanded={r.open} className={`chip shrink-0 px-2.5 py-1 text-[11px] ${r.open ? 'chip-active' : ''}`}>
                     {r.open ? tr('Hide') : tr('Show')}
                   </button>
-                  {canDownload(user) && numbers.length > 0 && (
+                  {!archiving && canDownload(user) && numbers.length > 0 && (
                     <button type="button" onClick={() => fetchMany(numbers)} disabled={acting} className="chip shrink-0 px-2.5 py-1 text-[11px] disabled:opacity-50">
                       <IcCloudDownload width={14} height={14} />{tr('Fetch all {n}', { n: numbers.length })}
+                    </button>
+                  )}
+                  {!archiving && mayArchive && numbers.length > 0 && (
+                    <button type="button" onClick={archiveSlowly} disabled={acting} data-archive-slowly className="btn-key h-7 shrink-0 px-2.5 text-[11px]">
+                      <IcHourglass width={14} height={14} />{tr('Archive slowly')}
                     </button>
                   )}
                 </span>
@@ -1772,10 +1855,8 @@ function SeriesInner() {
   // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
   // tappable.
   const Toolbar = selecting && pickedCount > 0 && (
-    <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      {/* pe-36 on phones keeps the chips clear of the downloads pill (fixed bottom-20 end-3), which floats
-          over this bar's lower band while a source job is running. */}
-      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 pe-36 lg:pe-0">
+    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
@@ -1879,8 +1960,14 @@ function SeriesInner() {
           onFetch={(copy) => { const n = chapterSheet.number; setChapterSheet(null); void (copy ? pickGhost(n, copy) : fetchOne(n)); }}
           // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
+          // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
+          // Not while a change waits for review (a remap, an undo): the notice above the list offers that plan, and
+          // confirming posting order here would overwrite it with a plan built on the wrong numbers.
+          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' && !listing?.numbering?.pending
+            ? () => { setChapterSheet(null); setNumberingSheet('posting_order'); } : undefined}
           onClose={() => setChapterSheet(null)} />
       )}
+      {numberingSheet && isAdmin && <NumberingSheet seriesId={id} mode={numberingSheet} onClose={() => setNumberingSheet(null)} />}
 
       {deleting && series && (
         <ConfirmDialog

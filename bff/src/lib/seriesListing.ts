@@ -20,6 +20,7 @@ import { getSource, type SourceChapter } from './sources';
 import { groupsOf, normGroup } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { chapterName } from './library';
+import { HEALED_NAME } from './naming';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
 export type ListingStatus = 'available' | 'held' | 'blocked';
@@ -37,6 +38,15 @@ export interface ListingCopy {
   lang: string | null;
   pages: number | null;
   publishedAt: string | null;
+  /**
+   * The copy's OWN title (v0.49.0, #116). Copies of one number used to share the row's title, which is right for
+   * three groups' "Chapter 5" and wrong for the case #116 is about: posts that share a number and are different
+   * chapters, whose versions sheet read twenty identical lines. Absent on rows written before v0.49.0, where the
+   * row's title stands in, as it always did.
+   */
+  title?: string | null;
+  /** The number the source gave the copy, when Uchiyomi renumbered it (posting order). */
+  sourceNumber?: number;
 }
 
 export interface ListingRow {
@@ -105,6 +115,7 @@ export function listingRows(
     // group (a re-upload) must not have both entries read as chosen.
     const others = copies.filter((c) => c !== shown);
     if (order) others.sort(order);
+    // Reintroduce by dropping `title`: "every copy keeps its own title" in seriesListing.test.ts reads undefined.
     const toCopy = (c: SourceChapter): ListingCopy => ({
       sourceId: c.sourceId,
       source: c.source ?? fallbackSource,
@@ -113,6 +124,8 @@ export function listingRows(
       lang: c.lang ?? null,
       pages: typeof c.pages === 'number' && Number.isFinite(c.pages) ? c.pages : null,
       publishedAt: c.publishedAt && Number.isFinite(Date.parse(c.publishedAt)) ? c.publishedAt : null,
+      title: c.title ?? null,
+      ...(typeof c.sourceNumber === 'number' && Number.isFinite(c.sourceNumber) ? { sourceNumber: c.sourceNumber } : {}),
     });
     out.push({
       number,
@@ -168,6 +181,23 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
      * for the number again), in JavaScript, and written to `chapter_name` only -- never to `title`, the
      * filename's. A name already there is kept: the copy on disk named it -- unless it was BORROWED from
      * another source (lib/borrowNames.ts, `chapter_name_source`), which the chapter's own source outranks.
+     *
+     * ⚠️ And a healed name is MARKED as one (v0.49.0, `chapter_name_source` = HEALED_NAME): it is the name of the
+     * copy the listing chose for the number, which need not be the copy on disk -- for a book downloaded before
+     * names were stamped, it is the listing's guess, like the release date every sweep stamps (#116). Unmarked,
+     * a renumber took it for the file's own name and a plan built on it read clean. A name a landing stamps later
+     * (library.ts setBookMeta) is the file's own and clears the mark; the borrowed-name cleanup leaves it alone.
+     * Reintroduce by writing NULL: "the chapter's own name is never replaced" in borrowNames.int.test.ts finds no
+     * mark on the healed name.
+     * The number is the override-aware one under posting order, as setBookMeta's (lib/library.ts BOOK_NUMBER):
+     * the listing's numbers are posts' there, and a book the renumber could not rename keeps another post's
+     * number as its raw one.
+     * ⚠️ Nothing is healed while the series' numbering is in question (a change pending, or a renumber's journal):
+     * the listing is then in numbers its files may not be in -- an add from another source writes the source's raw
+     * numbers over files in posting numbers, a changed extension setting moves every number under the files -- so
+     * a name healed now is another post's, and the renumber's plan would take it as evidence. Reintroduce by
+     * healing regardless: "the raw listing vouches for no book" in numbering.int.test.ts finds a book moved to the
+     * post whose name the heal gave it.
      */
     const named = new Map<number, string>();
     for (const r of rows) {
@@ -176,15 +206,19 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
     }
     const all = [...named];
     for (let i = 0; i < all.length; i += 1000) {        // well inside Postgres's 65 535 parameters
-      const params: unknown[] = [seriesId];
+      const params: unknown[] = [seriesId, HEALED_NAME];
       const values = all.slice(i, i + 1000).map(([n, name]) => {
         params.push(n, name);
         return `($${params.length - 1}::real, $${params.length}::text)`;
       });
       await qq(
-        `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = NULL, updated_at = now()
-           FROM (VALUES ${values.join(',')}) AS v(n, name)
-          WHERE b.series_id = $1 AND b.number = v.n AND (b.chapter_name IS NULL OR b.chapter_name_source IS NOT NULL)`,
+        `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = $2, updated_at = now()
+           FROM (VALUES ${values.join(',')}) AS v(n, name), lib_series s
+          WHERE b.series_id = $1 AND s.id = b.series_id
+            AND (CASE WHEN s.numbering = 'posting_order'
+                      THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END) = v.n
+            AND (b.chapter_name IS NULL OR (b.chapter_name_source IS NOT NULL AND b.chapter_name_source <> $2))
+            AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL`,
         params,
       );
     }
@@ -194,14 +228,17 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
 /**
  * A stored copy as the downloader takes it. `groups` is the already-split list, which groupsOf reads back
  * identically (an array is authoritative), so the file's Translator tag and the lib_books.scanlator stamp
- * come out as they would have from the live listing. The title is the row's: a copy stores none of its
- * own, and the number's title is the same whichever group released it.
+ * come out as they would have from the live listing. The title is the copy's own when it has one (v0.49.0):
+ * a pick or a Replace… of one post must stamp THAT post's name, not the chosen copy's -- the row's title
+ * stands in for copies stored before copies had titles.
+ * Reintroduce by returning `row.title`: "a pick is stamped with the picked copy's title" in
+ * seriesListing.test.ts reads the row's.
  */
 export function copyToChapter(copy: ListingCopy, row: { number: number; title: string | null }): SourceChapter {
   return {
     sourceId: copy.sourceId,
     number: row.number,
-    title: row.title ?? undefined,
+    title: copy.title ?? row.title ?? undefined,
     pages: copy.pages ?? undefined,
     publishedAt: copy.publishedAt ?? undefined,
     scanlator: copy.scanlator ?? undefined,
@@ -211,7 +248,7 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
   };
 }
 
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
 
 export interface Ghost {
   number: number;
@@ -250,8 +287,16 @@ export interface Ghost {
  * anything. Failed before held: a number the sweep has given up on is not "waiting" for anyone -- and a
  * failure count is the one reason with a number attached that the page shows in amber. Held, then plain
  * missing, which is the sweep simply not having got to it yet.
+ *
+ * Archive before all of them (#117): a number an active slow archive will fetch -- available, under the retry
+ * cap, below its boundary -- is on its way, which is neither "older than where it was added" (a floor-less
+ * series has no such place) nor missing. Only those: a capped, held or blocked number below the boundary keeps
+ * its own reason, since the archive will not fetch it either. `archiveBoundary` is null with no active archive.
+ * Reintroduce by testing the boundary after the cap: "the series page's reason for a number an active archive
+ * will fetch" in archivePlan.test.ts reads archive for a capped number.
  */
-export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number): GhostWhy {
+export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null): GhostWhy {
+  if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < CHAPTER_RETRY_CAP) return 'archive';
   if (floor != null && number < floor) return 'floor';
   if (status === 'blocked') return 'blocked';
   if (attempts >= CHAPTER_RETRY_CAP) return 'failed';
@@ -303,7 +348,7 @@ export function waitDaysLeftOf(copies: ListingCopy[], patienceMs: number, now = 
  *
  * `userId` names whose marks set `read`; without it no row is marked.
  */
-export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean; userId?: string }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
+export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean; userId?: string; archiveBoundary?: number | null }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
   const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [seriesId]);
   const rows = await q<GhostRow>(
     `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason,
@@ -342,7 +387,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         groups: r.groups ?? [],
         sourceId: r.source_id,
         sourceName: getSource(r.source_id)?.name ?? r.source_id,
-        why: whyOf(r.status, Number(r.number), opts.floor, attempts),
+        why: whyOf(r.status, Number(r.number), opts.floor, attempts, opts.archiveBoundary ?? null),
       };
       if (attempts > 0) g.attempts = attempts;
       if (opts.admin && r.reason) g.reason = r.reason;

@@ -107,20 +107,39 @@ test('no English is left bare in the repository flow', () => {
   assert.deepEqual(bare, [], `bare English in the repository flow: ${bare.join(' | ')}`);
 });
 
-test('the Docker card names the shipped container, and the Providers card does not call a missing download a fault', () => {
-  // Reintroduce by putting `docker compose up -d yomi-suwayomi` back (the development stack's name): the
-  // first assertion fails. By dropping the `engine === 'absent'` arm of ExtensionsLink: "not installed yet"
-  // fails, and desktop's first visit reads "The extension engine isn't running" again.
+test('with no engine the tab is the setup screen, and the Providers card says why without calling a missing download a fault', () => {
+  // v0.49.0 (#72): the not-configured card was one sentence for every platform ("If you turned it off by emptying
+  // SUWAYOMI_URL, put that line back"), wrong for a Compose admin who set EXTENSION_ENGINE=0 and for Unraid and
+  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx now, and its steps are pinned by
+  // engineSetup.test.ts (shipped names only, never `yomi-suwayomi`). Reintroduce the old card: "the setup screen"
+  // fails. Drop the `engine === 'absent'` arm of ExtensionsLink: "not installed yet" fails, and desktop's first
+  // visit reads as a fault again. Collapse the three server arms back into one: its assertion names the arm.
   const card = slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>');
-  assert.match(card, /<code key=\{i\} className="text-fog-300">uchiyomi-suwayomi<\/code>/, 'the card does not name the shipped container');
-  assert.doesNotMatch(card, /[>\s]yomi-suwayomi[<\s]/, 'the card names the development stack\'s container');
-  assert.match(card, /\.split\(\/\(\\\{name\\\}\|\\\{command\\\}\)\/\)/, 'the placeholders are split in a fixed order a translation cannot move');
+  assert.match(card, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the setup screen');
+  assert.doesNotMatch(card, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
+  // Set up and not answering: the same screen inside the panel, under its header and status mark.
+  assert.match(ext, /\{!status\.reachable \? \(\s*<EngineSetup status=\{status\} bare \/>\s*\) : \(/, 'the unreachable panel is not the setup screen');
+  assert.doesNotMatch(ext, /Can&apos;t reach the extension engine/, 'the untranslated unreachable line is back');
   const link = slice(admin, 'function ExtensionsLink(', 'function ArtReview(');
   assert.match(link, /: down && engine === 'absent' \? tr\('Not installed yet — download it under Extensions'\)/, 'not installed yet');
-  assert.match(link, /: down \? tr\('The extension engine isn’t running'\)/, 'the server build lost its own line');
+  assert.match(link, /: down && status\.off === 'switch' \? tr\('Extensions are turned off'\)/, 'switched off on purpose');
+  assert.match(link, /: down && status\.off === 'unset' \? tr\('No extension engine is set up'\)/, 'never set up');
+  assert.match(link, /: down \? tr\('The extension engine isn’t answering'\)/, 'set up and not answering');
   const hook = slice(admin, 'function useDesktopEngineState(', 'function ExtensionsLink(');
   assert.match(hook, /useState<EngineStatus\['state'\] \| null>\(null\)/, 'the hook answers something before the shell does');
   assert.match(hook, /const b = bridge\(\);\s*if \(!b\?\.engine\) return;/, 'the hook asks for an engine where there is no bridge');
+});
+
+test('the engine\'s state is a mark in the viewer\'s words, not an English capsule', () => {
+  // v0.49.0 ("no more pills"): the header's `rounded-full border px-2` badge read "ready · v2.3.2243" or
+  // "engine unreachable" in every language. Reintroduce the badge
+  // (`<span className={`rounded-full border px-2 py-0.5 text-[10px] …`}>{status.reachable ? `ready…` : 'engine unreachable'}</span>`):
+  // "the engine's state is not a mark" fails (and noPills names the capsule).
+  // From the header's own code: the first "{tr('Extensions')}</p>" is the not-configured card's.
+  const header = slice(ext, 'const list = cat?.content || [];', '{status.reachable && (');
+  assert.doesNotMatch(header, /No extension engine is set up/, 'the header slice starts at the not-configured card');
+  assert.match(header, /<StatusMark \{\.\.\.engineMark\(status\.reachable, status\.version\)\} \/>/, 'the engine\'s state is not a mark');
+  assert.doesNotMatch(header, /engine unreachable|`ready/, 'the English badge text is back');
 });
 
 test('one extension available is said in the singular', () => {
@@ -129,6 +148,24 @@ test('one extension available is said in the singular', () => {
   // Reintroduce by dropping either `cat?.total === 1` arm from the row's summary: its assertion fails.
   assert.match(row, /cat\?\.total === 1\s*\?\s*tr\('1 extension repository · 1 extension available'\)/, 'one repository, one extension');
   assert.match(row, /cat\?\.total === 1\s*\?\s*tr\('\{n\} extension repositories · 1 extension available', \{ n: repos\.content\.length \}\)/, 'several repositories, one extension');
+});
+
+test('hiding a language asks on <body>, out of the Extensions card, in the reader\'s words', () => {
+  // The Extensions panel is a `.card`: its backdrop blur made it the containing block of the `fixed` dialog, which
+  // dimmed only the panel and could land off-screen (the web2 review's scan: the last dialog left inside a card),
+  // and its title, body and key were English templates. Reintroduce the bare `<ConfirmDialog` (no OnBody): the
+  // first assertion names it; put back `title={`Hide ${…}?`}`: "the title is English".
+  const at = ext.indexOf('{hiding && (');
+  assert.ok(at > 0, 'the hide confirmation is not where this test looks');
+  const dialog = ext.slice(at, ext.indexOf('/>', ext.indexOf('<ConfirmDialog', at)));
+  assert.match(dialog, /^\{hiding && \(\s*<OnBody>\s*<ConfirmDialog\b/, 'the hide confirmation is rendered inside the Extensions card');
+  assert.match(dialog, /title=\{tr\('Hide \{lang\}\?', \{ lang: /, 'the title is English');
+  // Its own key, not the bare "Hide", which is the app's collapse toggle ("收起" in Chinese).
+  assert.match(dialog, /confirmLabel=\{tr\('Hide \{lang\}', \{ lang: /, 'the key is English, or the collapse toggle\'s word');
+  assert.doesNotMatch(dialog, /`Hid(?:e|ing) \$\{/, 'the title or body is an English template');
+  // One sentence per count: "turns off 1 sources", and "1 series … they stay readable".
+  assert.match(dialog, /hiding\.enabled === 1\s*\? tr\('Hiding \{lang\} turns off 1 source\.'/, 'one source is said with the plural');
+  assert.match(dialog, /hiding\.used === 1\s*\? tr\('1 series from \{lang\} will stop updating/, 'one series is said with the plural');
 });
 
 test('the repository flow is translated in all eight languages', () => {
@@ -142,6 +179,8 @@ test('the repository flow is translated in all eight languages', () => {
     ...trKeys(slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>')),
     ...trKeys(slice(admin, 'function ExtensionsLink(', 'function ArtReview(')),
     ...trKeys(read('components/EngineInstall.tsx')),
+    ...trKeys(read('components/EngineSetup.tsx')),
+    ...trKeys(read('lib/engineSetup.ts')),
   ]);
   assert.ok(keys.size >= 40, `only ${keys.size} strings found -- the scan is broken`);
   const dir = join(ROOT, 'public/locales');

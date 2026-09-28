@@ -16,6 +16,7 @@ import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
 import { IcCheck, IcSearch, IcX } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { bookCountText } from '@/lib/format';
 import type { ImportCandidate } from '@/lib/importBatch';
 import type { Src } from '@/lib/sourceGroups';
 
@@ -54,7 +55,7 @@ function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loadin
         <p className="text-[10px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
         <p className="truncate text-sm text-fog-100">{title}</p>
         <p className="truncate text-[11px] text-fog-400">
-          {sourceLabel}{loading ? ` · ${tr('checking…')}` : count != null ? ` · ${tr('{n} chapters', { n: count })}` : ''}
+          {sourceLabel}{loading ? ` · ${tr('checking…')}` : count != null ? ` · ${bookCountText(count)}` : ''}
         </p>
       </div>
     </div>

@@ -98,6 +98,15 @@ export const IcInfo = (p: P) => (
 export const IcAlert = (p: P) => (
   <svg {...base(p)}><path d="M12 3.5 2.5 20h19L12 3.5Z" /><path d="M12 10v4.5" /><path d="M12 17.5h.01" /></svg>
 );
+// Waiting its turn: a queued cover in the Downloads view, a refused action that will run later.
+export const IcClock = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+);
+// The slow archive (#117): fetched over days, a chapter at a time. An hourglass rather than the clock, which
+// already means "queued, next in line" -- the archive is not waiting for a turn, it is taking its time.
+export const IcHourglass = (p: P) => (
+  <svg {...base(p)}><path d="M6.5 3h11" /><path d="M6.5 21h11" /><path d="M7.5 3c0 4.5 4.5 6 4.5 9s-4.5 4.5-4.5 9" /><path d="M16.5 3c0 4.5-4.5 6-4.5 9s4.5 4.5 4.5 9" /></svg>
+);
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );
