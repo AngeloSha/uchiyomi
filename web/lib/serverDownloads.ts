@@ -376,12 +376,14 @@ export interface NavRing {
 /**
  * The Library ring. Fills with the running jobs' chapters (done / total over all of them); with no job, with
  * the running run's progress once it has sized itself; otherwise it turns. Nothing to draw when nothing runs
- * and nothing failed. A run that cannot download (`downloads: false`) and the slow archive never turn it.
+ * and nothing failed. A run that cannot download (`downloads: false`), a "Find other sources" run (it follows,
+ * it fetches nothing) and the slow archive never turn it.
  */
 export function navRing(d: Partial<SourceJobs> | undefined): NavRing {
   const s = downloadSections(d, { admin: false });
   const jobs = s.running.filter((t) => t.job).map((t) => t.job!);
-  const runs = (d?.runs ?? []).filter((r) => r.status === 'running' && r.downloads !== false);
+  // Reintroduce by dropping the kind: the admin's Library ring turns for hours while a find run follows sources.
+  const runs = (d?.runs ?? []).filter((r) => r.status === 'running' && r.downloads !== false && r.kind !== 'find_sources');
   const serverChapters = [...s.running, ...s.queued].filter((t) => !t.job && !t.archive).reduce((n, t) => n + t.entries.length, 0);
   // Reintroduce by counting the archive's chapters here: a week-long archive turns the ring for a week.
   const active = jobs.length > 0 || serverChapters > 0 || runs.length > 0;

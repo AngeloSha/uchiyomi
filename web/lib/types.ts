@@ -378,7 +378,9 @@ export type HealthAction =
   | 'engine_solver'
   // #116, the chapter numbering check: review the plan of a renumbering and confirm it, or keep the numbers the
   // source gives (GET/POST /api/admin/series/:id/numbering).
-  | 'renumber' | 'keep_numbers';
+  | 'renumber' | 'keep_numbers'
+  // v0.49.1: look for other sources for every series whose main source is `sourceId` (POST /api/admin/sources/find).
+  | 'find_sources';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
@@ -435,6 +437,11 @@ export interface HealthItem {
   diagnosis?: { code: string; reason: string; fix: string; fixSaid?: Said };
   /** How many series use the source (primaries and followers). */
   series?: number;
+  /**
+   * v0.49.1, on a row offering 'find_sources': how many series a run would search for -- the visible series whose MAIN
+   * source is `sourceId`. The key's words say the number when it is here.
+   */
+  findSeries?: number;
 }
 
 /** The last attempt at a finding, per check (bff lib/health.ts `HealthOutcome`). */

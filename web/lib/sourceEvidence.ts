@@ -27,7 +27,8 @@ export interface StageLine {
   state: 'ok' | 'fail' | 'unknown';
   at: string | null;
   by: EvidenceBy | null;
-  kind: 'error' | 'empty' | 'unnumbered' | null;
+  /** `site_offline` (v0.49.1): the site answered with its own "temporarily offline" page. */
+  kind: 'error' | 'empty' | 'unnumbered' | 'site_offline' | null;
   error: string | null;
 }
 
@@ -45,7 +46,7 @@ export interface TestCheck {
   ok: boolean;
   detail: string;
   stage?: Stage;
-  kind?: 'error' | 'empty' | 'timeout' | 'unnumbered';
+  kind?: 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline';
   error?: string;
 }
 
@@ -104,6 +105,15 @@ export interface EvidenceView {
 }
 
 /**
+ * A site that answers with its own "temporarily offline" or maintenance page (v0.49.1, bff kind and diagnosis
+ * `site_offline`): aqua served one for days while Health blamed its markup. Its reason and fix are worded where every
+ * diagnosis is, by code (lib/said.ts REASON_WORDS.site_offline and 'fix.siteOffline'); a stage line says it here.
+ */
+export const SITE_OFFLINE = 'site_offline';
+/** A stage line's detail for it, beside "answered with nothing". */
+const offlineDetail = () => tr('the site says it is offline');
+
+/**
  * The check names the smoke test uses, as words a translator has seen; anything newer is shown as sent. Its
  * 'Search' check is the search STAGE, so it reads as the stage does, never as the search button's verb.
  */
@@ -131,8 +141,9 @@ export function answerView(t: TestAnswer): EvidenceView {
     if (bad) {
       rows.push({
         key: stage, glyph: 'fail', label: stageLabel(stage),
-        // The failing check's own name when the stage has two (Series page / Chapters), then its words.
-        detail: cs.length > 1 ? checkName(bad.name) : null,
+        // The failing check's own name when the stage has two (Series page / Chapters), then its words; a site that
+        // served its own offline page says so, whichever check met it.
+        detail: bad.kind === SITE_OFFLINE ? offlineDetail() : cs.length > 1 ? checkName(bad.name) : null,
         error: bad.error || bad.detail || null, when: null,
       });
     } else if (late) {
@@ -205,7 +216,8 @@ export function evidenceView(
     if (l.state === 'fail') {
       rows.push({
         key: l.stage, glyph: 'fail', label: stageLabel(l.stage),
-        detail: l.kind === 'empty' ? tr('answered with nothing') : l.kind === 'unnumbered' ? tr('chapters without numbers') : null,
+        detail: l.kind === 'empty' ? tr('answered with nothing') : l.kind === 'unnumbered' ? tr('chapters without numbers')
+          : l.kind === SITE_OFFLINE ? offlineDetail() : null,
         error: l.error, when: whenBy(l.at, l.by),
       });
     } else if (l.state === 'ok') {
@@ -223,7 +235,7 @@ export interface SourceHealthRow {
   detail?: string;
   detailSaid?: Said[];
   evidence?: StageLine[] | null;
-  diagnosis?: { fix?: string; fixSaid?: Said } | null;
+  diagnosis?: { code?: string; fix?: string; fixSaid?: Said } | null;
 }
 
 /**

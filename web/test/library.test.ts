@@ -347,24 +347,33 @@ test('a remove that hid nothing says so, in error tone, and keeps the selection'
   assert.match(branch![1], /settle\(\)/, 'a remove that hid something no longer settles');
 });
 
-test('the select bar fits two rows on a phone: admin actions fold behind More', () => {
+test('the select bar fits two rows on a phone and one at 1024 px: the admin actions are behind More at every width', () => {
   // ⚠️ Seven chips plus the count wrap to three rows at 390 px (series/page.tsx warns about exactly this),
-  // and a third row covers a third of the grid. The two admin chips are `hidden lg:inline-flex` and a `More`
-  // chip (`lg:hidden`) opens them in a Sheet instead. Reintroduce by showing the admin chips at every width:
-  // measure36-style puppeteer at 390 px shows three rows of chips.
+  // and a third row covers a third of the grid, so a `More` chip opens the admin actions in a Sheet instead.
+  // Reintroduce by showing the admin chips at every width: measure36-style puppeteer at 390 px shows three rows.
+  // v0.49.1: Find other sources joined Move to library and Remove from library. As a ninth key from lg up it needed
+  // 1081 px (measured with the app's CSS and fonts, 240 selected): two rows in English at 1024 AND 1280 px, where eight
+  // took 940 of 992. So the three are rows of More at every width, and More stays for admins from lg up (735 px in
+  // English, 822 in German, which took two rows before). Reintroduce any of them as a key in the bar: "an admin action
+  // is a key in the bar" fails; drop the admin's More from lg up: "the admin actions cannot be reached from lg up".
   const src = read('app/library/page.tsx');
   const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\][\s\S]*?<\/div>\s*<\/div>\s*\)\}/.exec(src)?.[0] ?? '';
   assert.ok(bar.length > 200, 'could not find the select bar');
   const chips = [...bar.matchAll(/className=\{?[`"]chip[^`"]*[`"]\}?/g)].map((m) => m[0]);
   const phoneOnly = chips.filter((c) => /\blg:hidden\b/.test(c));
-  const wideOnly = chips.filter((c) => /\bhidden\b.*\blg:inline-flex\b/.test(c));
   assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More chip');
-  assert.equal(wideOnly.length, 2, 'expected the two admin chips to be wide-screen only');
-  const phoneChips = chips.length - wideOnly.length;
-  assert.ok(phoneChips <= 6, `${phoneChips} chips reach the phone bar; more than six wraps to a third row at 390 px`);
+  assert.ok(chips.length <= 6, `${chips.length} chips reach the phone bar; more than six wraps to a third row at 390 px`);
+  assert.doesNotMatch(code(bar), /setMoving\(true\)|setRemoving\(true\)|findSelected/, 'an admin action is a key in the bar');
+  assert.match(bar, /onClick=\{\(\) => setMore\(true\)\} className=\{`chip text-xs disabled:opacity-50 \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
+    'the admin actions cannot be reached from lg up');
+  // From lg up, every chip and key an admin sees there: at most the seven that measured one row at 1024 px.
+  const keys = [...bar.matchAll(/className=\{?[`"]((?:chip|btn-key)\b[^`"]*)[`"]\}?/g)].map((m) => m[1]);
+  const wide = keys.filter((c) => !/\blg:hidden\b/.test(c) || /isAdmin/.test(c));
+  assert.ok(wide.length <= 7, `${wide.length} keys in the bar from lg up; nine wrapped to two rows at 1024 and 1280 px`);
   // And the sheet closes before either dialog opens: a Sheet (z-60) paints over a Modal (z-50).
   assert.match(code(src), /setMore\(false\); setMoving\(true\)/, 'Move to library opens its modal under the sheet');
   assert.match(code(src), /setMore\(false\); setRemoving\(true\)/, 'Remove opens its dialog under the sheet');
+  assert.match(code(src), /setMore\(false\); void findSelected\(\);/, 'Find other sources is not a row of More, or keeps the sheet open under the notice');
 });
 
 test('every string the select bar renders is in the locale files, singulars included', () => {
@@ -391,7 +400,8 @@ test('Archive slowly: a key from lg up, a row of More on a phone, for anyone who
   const src = code(read('app/library/page.tsx'));
   assert.match(src, /\{canDownload\(user\) && <button disabled=\{acting\} onClick=\{archiveSelected\} className="btn-key hidden lg:inline-flex">\{tr\('Archive slowly'\)\}<\/button>\}/,
     'the archive key reaches the phone bar');
-  assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className="chip text-xs disabled:opacity-50 lg:hidden"/,
+  // More is a member's on a phone only (from lg up Archive slowly is a key), and an admin's at every width (v0.49.1).
+  assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className=\{`chip text-xs disabled:opacity-50 \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
     'a member who may download has no way to archive on a phone');
   const sheet = src.slice(src.indexOf("<Sheet title={tr('{n} selected'"), src.indexOf('</Sheet>', src.indexOf("<Sheet title={tr('{n} selected'")));
   assert.match(sheet, /\{canDownload\(user\) && \(\s*<button onClick=\{\(\) => \{ setMore\(false\); void archiveSelected\(\); \}\}/, 'More has no Archive slowly, or keeps the sheet open under the notice');
