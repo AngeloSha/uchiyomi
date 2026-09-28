@@ -2,8 +2,10 @@
 // HTTP contract as web/test/e2e/fakeSource.mjs. No database is needed for this guard.
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -109,4 +111,94 @@ test('the e2e adapter carries a posting order only when the stub states one', as
   const listed = await getSource('fake-a')!.listChapters('walk-istrevelia');
   assert.deepEqual(listed.map((c) => c.order), [1, 7, undefined, undefined, undefined, undefined]);
   assert.deepEqual(listed.map((c) => Object.hasOwn(c, 'order')), [true, true, false, false, false, false], 'no order is no key');
+});
+
+/** A small HTML page the way a site's notice is shaped: its title, a card with the same words and a Discord link. */
+const htmlPage = (title: string, extra = '') => new Response(
+  `<!doctype html><html lang="en"><head><title>${title}</title></head><body><div class="card"><h1>${title}</h1>`
+    + `<p><a href="https://discord.gg/fake-a">Join us on Discord</a></p>${extra}</div></body></html>`,
+  { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } },
+);
+
+test('an offline notice from the stub is the site saying it is offline, on every route, by the product\'s own rule', async () => {
+  // v0.49.1: the walk (walk491.mjs) scripts `offline` on the stub, which then answers every route with aqua's kind of
+  // page -- HTTP 200, HTML. The adapter hands it to lib/sources/offline.ts offlineNotice, as an engine does, so
+  // Health's "The site says it is offline" is the product's own path. Reintroduce by dropping the text/html branch in
+  // fake.ts json(): r.json() throws a SyntaxError, no classified error, and "…is read as the site saying it is
+  // offline" fails for search first.
+  process.env.FAKE_SOURCE_URLS = 'fake-a=http://127.0.0.1:18150';
+  await cleanRegistry();
+  const { loadBuiltins } = await import('../src/lib/sources/builtins');
+  const { getSource } = await import('../src/lib/sources/loader');
+  const { isSiteOffline, SITE_OFFLINE } = await import('../src/lib/sources/offline');
+  loadBuiltins();
+  const a = getSource('fake-a')!;
+  let answer = () => htmlPage('Fake A is temporarily offline');
+  globalThis.fetch = (async () => answer()) as typeof fetch;
+  const failure = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e as Error & { kind?: string; said?: string });
+
+  const routes: Array<[string, () => Promise<unknown>]> = [
+    ['search', () => a.search('Walk Tale')],
+    ['series', () => a.getSeries('walk-tale')],
+    ['chapters', () => a.listChapters('walk-tale')],
+    ['pages', () => a.getPageUrls('walk-tale-1')],
+  ];
+  for (const [route, call] of routes) {
+    const e = await failure(call());
+    assert.ok(isSiteOffline(e), `${route}: the notice is read as the site saying it is offline (${e})`);
+    assert.equal(e?.kind, SITE_OFFLINE, route);
+    assert.equal(e?.said, 'Fake A is temporarily offline', route);
+  }
+
+  // The same page shapes that are NOT a notice stay plain failures: an HTML page whose title says nothing of the kind,
+  // and one carrying the stub's own JSON (FAKE_MARKUP), which is the site working whatever its title says.
+  answer = () => htmlPage('Fake A');
+  let e = await failure(a.search('Walk Tale'));
+  assert.ok(e && !isSiteOffline(e), `a page that is no notice read as one (${e})`);
+  assert.match(String(e?.message), /answered HTML, not JSON/);
+  answer = () => htmlPage('Fake A is temporarily offline', '<pre>{"sourceId": "walk-tale", "title": "Walk Tale"}</pre>');
+  e = await failure(a.search('Walk Tale'));
+  assert.ok(e && !isSiteOffline(e), `a page with the stub's own markup read as a notice (${e})`);
+});
+
+test('the stub\'s own `offline` page is one the adapter reads as the site saying it is offline', async () => {
+  // The two halves of the rig must agree: web/test/e2e/fakeSource.mjs writes the page, the adapter above reads it. A
+  // page grown past offlineNotice's 8 KB, or a title reworded, would leave the walk's Health row saying something
+  // else, and the walk would fail far from the cause; this fails here first. Reintroduce by retitling the stub's page
+  // "Fake A": the search comes back a plain failure.
+  const script = join(__dirname, '..', '..', 'web', 'test', 'e2e', 'fakeSource.mjs');
+  const port = await new Promise<number>((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port: p } = srv.address() as AddressInfo; srv.close(() => resolve(p)); });
+  });
+  const child = spawn(process.execPath, [script, '--name', 'fake-a', '--port', String(port)], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error(`the stub did not start: ${out}`)), 10_000);
+      child.stdout!.on('data', (c) => { out += c; if (/listening on/.test(out)) { clearTimeout(timer); resolve(); } });
+      child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`the stub exited (${code}): ${out}`)); });
+    });
+    const base = `http://127.0.0.1:${port}`;
+    const set = (behaviour: string) => realFetch(`${base}/__script`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chapter: 'site', page: 0, behaviour }),
+    });
+    process.env.FAKE_SOURCE_URLS = `fake-a=${base}`;
+    await cleanRegistry();
+    const { loadBuiltins } = await import('../src/lib/sources/builtins');
+    const { getSource } = await import('../src/lib/sources/loader');
+    const { isSiteOffline } = await import('../src/lib/sources/offline');
+    loadBuiltins();
+    const a = getSource('fake-a')!;
+    assert.equal((await a.search('Walk Tale'))[0]?.title, 'Walk Tale', 'the stub answers normally before it is scripted');
+    assert.equal((await set('offline')).status, 200);
+    const e = await a.listChapters('walk-tale').then(() => null, (err: Error & { said?: string }) => err);
+    assert.ok(isSiteOffline(e), `the stub's offline page was not read as the site saying it is offline (${e})`);
+    assert.equal(e?.said, 'Fake A is temporarily offline');
+    assert.equal((await set('ok')).status, 200);
+    assert.equal((await a.listChapters('walk-tale')).length, 12, '`ok` on "site" brings the site back');
+  } finally {
+    child.kill('SIGTERM');
+  }
 });

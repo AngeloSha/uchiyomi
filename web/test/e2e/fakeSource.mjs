@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Dependency-free HTTP source used only by the v0.40 and v0.41 browser walks.
+// Dependency-free HTTP source used only by the browser walks (v0.40 onwards).
 //
 //   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49]
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
-// (shorthand for walk-tale-N), a SERIES id (for `omit:`), or "search" with page 0. GET /__log returns every
-// source request with start and finish timestamps. POST /__reset clears scripts, counters and the log.
+// (shorthand for walk-tale-N), a SERIES id (for `omit:`), "search" with page 0, or "site" with page 0 (for
+// `offline`). GET /__log returns every source request with start and finish timestamps. POST /__reset clears
+// scripts, counters and the log.
 //
 // The behaviours, and which route reads each one:
 //   ok, tiny-webp, 404, slow:<ms>, 429:after=<n>,retryAfter=<s>   /img (and slow: also /search)
@@ -14,6 +15,16 @@
 //   omit:<a>-<b>                                                  /chapters (those numbers are not listed)
 //   error                                                         /search only ("search", page 0): HTTP 500, so
 //                                                                 the adapter throws -- #115's failing Search stage
+//   offline                                                       EVERY source route ("site", page 0): HTTP 200
+//                                                                 text/html, the site's own small "Fake A is
+//                                                                 temporarily offline" page, shaped like the one
+//                                                                 aqua has served since 2026-09-23 (v0.49.1's
+//                                                                 walk491). `ok` on "site" brings the site back.
+//
+// ⚠️ `offline` answers 200 on purpose, and in HTML: that is what made aqua hard to see. The adapter (bff
+// lib/sources/fake.ts) hands such a page to the product's own offlineNotice, which accepts it only while it is
+// small (under 8 KB), says so in its <title> or first <h1>, and carries none of the stub's JSON. The control
+// routes (/__script, /__log, /__reset) keep answering, and the log records each request as route `offline`.
 //
 // ⚠️ `short:` has to change BOTH routes. The downloader takes `expected = max(urls.length, chapter.pages)`
 // (lib/downloader.ts), so a listing that still declares twelve pages while /pages hands back two makes an
@@ -116,6 +127,27 @@ function png(seed) {
 }
 const pages = Array.from({ length: 12 }, (_, i) => png(i + (NAME === 'fake-b' ? 100 : 1)));
 
+// The `offline` page: a notice and a card with a Discord link, no theme and no data -- a few hundred bytes, as aqua's
+// is. "Fake A" is the stub's own name ("fake-a") the way a site names itself.
+const SITE_NAME = NAME.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+const OFFLINE_PAGE = Buffer.from(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${SITE_NAME} is temporarily offline</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111317;color:#e8e8e8;font:16px/1.5 system-ui,sans-serif}.card{max-width:26rem;margin:1rem;padding:2rem;border-radius:14px;background:#1b1e25;text-align:center}.card a{color:#8ab4ff}</style>
+</head>
+<body>
+<div class="card">
+<h1>${SITE_NAME} is temporarily offline</h1>
+<p>We are working on the site. News and updates are on our Discord.</p>
+<p><a href="https://discord.gg/${NAME}" rel="nofollow noopener">Join us on Discord</a></p>
+</div>
+</body>
+</html>
+`);
+
 const scripts = new Map();
 const requestCounts = new Map();
 const log = [];
@@ -178,13 +210,21 @@ const server = http.createServer(async (req, res) => {
       const page = Number(body.page ?? 0);
       const behaviour = String(body.behaviour ?? body.behavior ?? '');
       if (!chapter || !Number.isInteger(page) || page < 0 || page > 12 ||
-          !/^(?:ok|error|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
+          !/^(?:ok|error|offline|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
         return sendJson(res, 400, { error: 'bad_script' });
       }
       scripts.set(keyOf(chapter, page), behaviour);
       requestCounts.delete(chapter);
       scripts.delete(`${keyOf(chapter, page)}:fired`);
       return sendJson(res, 200, { ok: true, chapter, page, behaviour });
+    }
+
+    // The whole site down behind its own notice (see the header): every source route, before any of them reads a
+    // script of its own.
+    if (behaviourFor('site', 0) === 'offline') {
+      const row = begin(req, url, { route: 'offline' });
+      finish(row, 200);
+      return sendBytes(res, 200, 'text/html; charset=utf-8', OFFLINE_PAGE);
     }
 
     if (req.method === 'GET' && url.pathname === '/search') {

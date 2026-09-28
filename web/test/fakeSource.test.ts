@@ -78,3 +78,33 @@ test('without the flag the stub is what the earlier walks know: no new series, n
     assert.deepEqual(tale[0], { sourceId: 'walk-tale-1', number: 1, title: 'Chapter 1', pages: 12, lang: 'en' });
   });
 });
+
+test('`offline` on "site" answers every source route with the site\'s own small notice, and `ok` brings it back', async () => {
+  // v0.49.1's walk (walk491.mjs): fake-a says it is offline the way aqua has since 2026-09-23 -- HTTP 200, a small
+  // HTML page, a card with a Discord link. Reintroduce by answering only /search with it: /series/walk-tale still
+  // answers its JSON and the loop below fails there.
+  await withStub('none', async (base) => {
+    const script = (behaviour: string) => fetch(`${base}/__script`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chapter: 'site', page: 0, behaviour }),
+    });
+    assert.equal((await script('offline')).status, 200);
+    for (const path of ['/search?q=walk', '/series/walk-tale', '/chapters/walk-tale', '/pages/walk-tale-1', '/img/walk-tale-1/1']) {
+      const r = await fetch(base + path);
+      assert.equal(r.status, 200, path);
+      assert.match(r.headers.get('content-type') || '', /^text\/html/, path);
+      const html = await r.text();
+      // offlineNotice (bff lib/sources/offline.ts) accepts a notice only under 8 KB; aqua's is a few hundred bytes.
+      assert.ok(Buffer.byteLength(html) < 8 * 1024, `${path}: ${Buffer.byteLength(html)} B is no small notice`);
+      assert.match(html, /<title>Fake A is temporarily offline<\/title>/, path);
+      assert.match(html, /<h1>Fake A is temporarily offline<\/h1>/, path);
+      assert.match(html, /<a href="https:\/\/discord\.gg\/fake-a"/, path);
+      assert.doesNotMatch(html, /"sourceId"/, `${path}: the notice carries the stub's own data`);
+    }
+    // The control routes keep answering, and the log says what the offline site was asked.
+    const log = (await get(`${base}/__log`)).body.content as Array<{ route: string; path: string }>;
+    assert.deepEqual(log.filter((r) => r.route === 'offline').map((r) => r.path),
+      ['/search', '/series/walk-tale', '/chapters/walk-tale', '/pages/walk-tale-1', '/img/walk-tale-1/1']);
+    assert.equal((await script('ok')).status, 200);
+    assert.equal((await get(`${base}/chapters/walk-tale`)).body.length, 12, '`ok` on "site" brings the site back');
+  });
+});
