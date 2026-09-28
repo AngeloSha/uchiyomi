@@ -318,11 +318,12 @@ sees any, because `current` names a series that may be in a library they cannot 
 the request hides that series anyway). `POST /api/sources/runs/<kind>/cancel` stops one the same way as a
 shutdown does — between series and between chapters, never mid-write — and `DELETE /api/sources/runs/<kind>`
 dismisses a finished one. Both cancels are audited as `download.cancel`. Since v0.49.0 a repair's card also
-carries `repairKind` (`fix_short`, `fill`, `retry`, `steps:<a+b…>[:now]`), `label` (the series title or source
-name a one-row Health fix is about), `number` (the chapter's, for a one-chapter fix) and `seriesId` (the series
-`label` names); `label`, `number` and `seriesId` are left out for a viewer who may not list that series, and
-whenever `current` is. A run that cannot download a chapter (a solver reset, a page count, names, directions)
-carries `downloads: false`.
+carries `repairKind` — `full` for a run of every step (the nightly, Tasks → Run now, Health's *Fix all issues*),
+else `fix_short`, `fill`, `retry` or `steps:<a+b…>[:now]` — `label` (the series title or source name a one-row
+Health fix is about), `number` (the chapter's, for a one-chapter fix) and `seriesId` (the series `label` names);
+`label`, `number` and `seriesId` are left out for a viewer who may not list that series, and whenever `current`
+is. A run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed
+chapters that names no source and is not `now`) carries `downloads: false`.
 
 **Every chapter coming in** (since v0.48.1). The response also carries `activity: {active, recent}`: each chapter
 the server is downloading (`active`, oldest first) or finished in the last day (`recent`, newest first), whatever
@@ -345,8 +346,10 @@ limit; each id answers `{id, title?, outcome}` with `queued`, `already`, `nothin
 boundary), `unrouted` (no source of it is loaded), `denied` (a source outside the age limit) or `not_found` (no
 title — also for a series the caller cannot see). Audited as `download.archive`. The archive owns the listed
 numbers below a boundary — the series' floor, else a hair above the newest listed number; a series with no listing
-yet gets one at its first turn — and the sweep keeps the new releases above it (it reads the higher of the floor
-and the boundary while an archive is queued or paused); `chapter_floor` is never changed while it runs, and its
+yet gets one at its first turn, and one whose numbering waits for a review (#116) gets it at its first turn after
+the renumbering settles, in the numbers the series keeps (meanwhile `waiting.why: 'renumbering'`) — and the sweep
+keeps the new releases above it (it reads the higher of the floor and the boundary while an archive is queued or
+paused); `chapter_floor` is never changed while it runs, and its
 finish clears a Latest-N floor only if it is still the one it started from. It never searches other sites or
 follows new ones. It waits for every sweep, repair and source check, for the admin's pause and hours, for the disk
 floor, for anybody else's download on the same source or series, and for a source's cooldown; a refusal (403, 429)
@@ -359,12 +362,17 @@ otherwise, **404** to one who cannot see the series, **409** `done` for pause an
 chapter in flight finishes either way. The queue is `archive` on `GET /api/sources/jobs` (and alone on `GET
 /api/sources/archive`): `{paused, perHour, window, waiting?, series: [...]}`, each row `{seriesId, title, state,
 direction, done, left, failed, bytes, mine, current?, nextAt?, etaMs?, waiting?, attention?, queuedAt, startedAt,
-finishedAt?, note?}`, limited to the series the viewer can browse. The rows are read at most every ten seconds,
-unfiltered, and filtered on every call, so one viewer's answer is never another's. A finished row is listed for a
-day, or until dismissed when it left chapters behind (`attention.why: 'finished_with_gaps'`, with `note {capped,
-held, blocked}`). `POST /api/sources/add` takes `archive: true` ("Archive the rest slowly") and answers `archive`
-with the outcome: `later` on a download, which queues the rest once the first chapter is in and the listing is
-written, and starts on it when the add's own chapters are in; `nothing` when the selection was the whole listing.
+finishedAt?, note?}`, limited to the series the viewer can browse; `waiting.why` and `attention.why` take the
+values openapi.yaml's `ArchiveSeries` lists, and `left` never counts a chapter that has landed and waits for the
+library scan. The rows are read at most every ten seconds, unfiltered, and filtered on every call, so one viewer's
+answer is never another's. A finished row is listed for a day, or until dismissed when it left chapters behind
+(`attention.why: 'finished_with_gaps'`, with `note {capped, held, blocked}`). `POST /api/sources/add` takes
+`archive: true` ("Archive the rest slowly") and answers `archive` with the outcome: `later` on a download, which
+queues the rest once the first chapter is in and the listing is written, and starts on it when the add's own
+chapters are in; `later` too when the add left the series' numbering for an admin's review (a folder that already
+held chapters, below): it is queued, and where it starts is placed
+once the renumbering has settled, in the numbers the series keeps; `nothing` when the selection was the whole
+listing.
 `GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why: "archive"`, and
 `POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. The pacing is
 the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
@@ -472,7 +480,8 @@ changes, so an alert dismissed for one problem comes back for a new one.
 
 Since v0.41.0 an item also carries what can be **done** about it, so the same finding is actionable from a
 script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, `fill`, `retry`, `test`,
-`unblock`, `disable`, `merge`, `solver_reset`; `bookId`, `bookIds`, `seriesId`, `seriesIds`, `sourceId` and
+`unblock`, `disable`, `merge`, `solver_reset` and, since v0.49.0, `engine_solver`, `renumber` and `keep_numbers`
+(below); `bookId`, `bookIds`, `seriesId`, `seriesIds`, `sourceId` and
 `keep` (the copy a duplicate pair should keep: most live chapters, then most readers, then the older row)
 are the ids those actions need; `number`/`numbers` are the chapters it is about (a gap item carries at most
 100 numbers, an impossible-number item at most 20 ids); and `fixed` `{at, what}` says what has already been
@@ -484,7 +493,10 @@ stored rows: `{kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep
 `partial` for one saved with placeholder pages, which is offered `confirm_short` only), or `{kind:
 'failures', firstAt, lastAt, attempts, resetPending}` (`firstAt` is the first failure, which a Retry now no
 longer resets) — and `caveats: [{action, code, until?}]`, what an action will not be able to do, said before
-it is pressed (`fill`: `updates_paused`; `retry`: `source_cooling_down` with `until`, or `source_off`).
+it is pressed (`fill`: `updates_paused`, or `archiving`, below; `retry`: `source_cooling_down` with `until`, or
+`source_off`). The gaps outcome's `why` is the repair's verdict (`followed`, `no_candidate`, `cap`, `off`,
+`cooldown`, `listed`), or since v0.49.0 `posting_order` — the series is numbered by posting order, so no other
+source is searched — or `archiving`, below.
 `fix_short`, `fill`, `retry` and `solver_reset` are `POST /api/admin/tasks/repair/run`
 with the matching `only` and target; `confirm_short` is `POST /api/admin/books/:id/confirm-short`, and on a
 row that already carries `fixed` it is the withdrawal (`{confirmed: false}`); `delete` is `POST
@@ -511,6 +523,25 @@ disabled*, the check is `warn` with the summary *It cannot use its Cloudflare he
 there is a setting to write and a helper (`FLARESOLVERR_URL`) to share. A `frozen-series` item for an extension
 series now names the engine when it is the reason (*can't be reached because the extension engine isn't answering*
 / *is off*).
+
+**Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
+lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
+source, `sw:<id>` for an extension). Findings: a numbering change waiting for review — the detector's proposal
+(`renumber`, `keep_numbers`), an admin's choice not applied yet, or a remap an extension setting queued
+(`renumber`); a renumber whose journal is still open — being applied, or cut off by a restart, which the series'
+next check finishes — with no action; and a series whose source the detector only suspects of giving different
+posts one number (`renumber`, `keep_numbers`). As `info`: a series the detector numbered by posting order on its
+own in the last 14 days (`keep_numbers`), and one an admin kept on its source's numbers against a strong verdict
+(`renumber`). `renumber` is the plan, `GET /api/admin/series/:id/numbering`, then its `POST` with `confirm: true`;
+`keep_numbers` is the `POST` with `mode: 'source'`, which renames nothing on a proposal and answers
+`needs_confirm` with the plan back on a series already renumbered. The check is absent when no series has
+anything to say about its numbering.
+
+A gap the series' slow archive (#117) is going to fetch is the archive's. A gaps item whose every gap it is fetching
+is `info`, with `outcome.why: 'archiving'` and no `fixed`; the nightly repair's gap step leaves alone a series whose
+every gap it will fetch; and any gaps item with a gap the archive will fetch carries the caveat `{action: 'fill',
+code: 'archiving'}`, because `fill` fetches those numbers at once, at the normal pace (at most 20 a press, from the
+sources the series follows), instead of leaving them to the archive.
 
 `GET /api/admin/sources` (admin) is every source's stored health, and since v0.49.0 adds, per source, `live`
 (the last Test or daily check: `{at, by, state, stage, code, checks}`, or `null`), `failing` (the stages whose
@@ -1471,7 +1502,10 @@ finished runs, `worstMs` the sum of the waits the code bounds (null when a plann
 downloads a count, never folded into the time. `lastFull` is the newest full run that finished, a nightly the
 switch turned away (`skipped`) included and one a restart cut off (`interrupted`) not. `GET
 /api/admin/tasks/repair/runs?limit=1..50&id=` lists the kept runs, newest first: `{content: [{id, startedAt,
-finishedAt, origin, username, mine, kind, only, target, status, ms, stepMs, result, notes}]}`. Both are admin-only.
+finishedAt, origin, username, mine, kind, only, target, status, ms, stepMs, result, notes}]}`. `notes` (`{replaced,
+confirmed, followed, upgraded}`) names series by title alone, with no id to hold each one to the 18+ hide, so it
+is `null` unless the request carries `?adult=1`; a title in `target` or a skip is dropped for a viewer who may not
+list that series. Both are admin-only.
 
 What one run may cost is bounded by `REPAIR_HOURS`, `REPAIR_COUNT_MAX`, `REPAIR_SHORT_MAX` and
 `REPAIR_GAPS_MAX` (plus `REPAIR_PACE_MS`); their defaults and ranges, and the bounds that are fixed rather
@@ -1606,9 +1640,11 @@ setting, **addressed by key**: the engine addresses a write by its position on t
 update can move, so the server reads the screen again, finds the key's current position and checks the value
 against the setting's type and choices before sending it. It answers `{ ok, changed, applied, remap, preferences,
 usedBy, renumbers }`; **400** `unknown_pref`, `ambiguous_pref`, `disabled` or `bad_value`, **404**
-`unknown_source`, **502** `unreachable`. A changed numbering setting marks every series from the source that uses
-its numbers (not those numbered by posting order) with `numbering_pending = 'remap'` -- `remap` is how many --
-and each then waits for an admin to confirm its renaming below. A text setting is audited by its length only:
+`unknown_source`, **502** `unreachable` (the engine did not answer) or `extension_error` (it answered with the
+extension's own exception, whose first line is in `message`). A changed numbering setting marks every series from
+the source that uses its numbers (not those numbered by posting order) with `numbering_pending = 'remap'` -- `remap`
+is how many -- and each then waits for an admin to confirm its renaming below. A text setting is audited by its
+length only:
 extensions keep logins and keys in them.
 
 **Chapter numbering (v0.49.0, #116).** A source that gives many different posts one chapter number (Webtoons:
@@ -1620,19 +1656,26 @@ first, last }, extSourceId? } with `count`/`first`/`last` following `applied`; `
 copy in `GET /api/series/:id/versions` carries its own `title`. A series already in a library is never renamed
 unattended: `GET /api/admin/series/:id/numbering?mode=posting_order|source|remap` answers the plan -- every
 file's move with how its post was matched, the books no post matched (`parked`), shared numbers
-(`collisions`), `clean` with its `reasons`, and `tracker` -- changing nothing, and `POST
-/api/admin/series/:id/numbering` with `{ mode: 'auto' | 'source' | 'posting_order' | 'remap', confirm? }`
+(`collisions`), `clean` with its `reasons`, and `tracker` -- changing nothing (**502** `unreachable` when the source
+does not answer), and `POST /api/admin/series/:id/numbering` with
+`{ mode: 'auto' | 'source' | 'posting_order' | 'remap', confirm? }`
 answers `needs_confirm` with that plan until `confirm: true`, then `applied` (files renamed in place; book ids,
-progress, bookmarks and notes kept), `pending` (not applied yet; the series stays held) or `unchanged` (the
-numbering it already has: *Keep the source's numbers* renames nothing). **409** `busy` while chapters are being
-fetched into the folder. A manual choice is never undone by the detector. A confirmed apply that runs past a
-minute answers `pending` with `running: true` and carries on; the series' `numbering` says when it is done.
+progress, bookmarks and notes kept), `pending` (not applied yet; the series stays held: the source did not answer,
+or the apply was refused, with `error` saying why -- a file already at a target name, or another check inside the
+series -- and `plan.reasons` carrying `busy` when a download started meanwhile) or `unchanged` (the numbering it
+already has: *Keep the source's numbers* renames nothing). With `confirm`, **409** `busy` while chapters are being
+fetched into the folder or a check is inside the series -- the sweep, Check now, a listing refresh, Fill -- which
+would fetch into the old numbers after the renames; `message` says which. A manual choice is never undone by the
+detector. A confirmed apply that runs past a minute answers `pending` with `running: true` and carries on; the
+series' `numbering` says when it is done.
 
 Automatic numbering needs a STRONG verdict — at least 12 posts, at least half of them beyond the first on their
 number within one group, one number carrying five or more posts under at least three different names — from a
 source that reports its posting order (`ordered`: extension sources do); without the order it is a `hint` with
-`reason: 'no_order'`. An add numbers at once only when nothing is on disk under the folder: a folder that still
-holds chapters is added in the source's numbers with `pending: 'posting_order'`, for an admin to review. While a
+`reason: 'no_order'`. An add numbers at once only when nothing is on disk under the folder, or when the series
+kept an assignment for this source (it was removed and is added back): otherwise a folder that still holds
+chapters is added in the source's numbers with a renumbering pending, for an admin to review — `pending:
+'posting_order'`, or `'remap'` when the series was already numbered by posting order from another source. While a
 series waits (`pending` set), it downloads nothing: its listing is kept as it was, the sweep and a bulk *Fetch
 newest* skip it, and `POST /api/sources/fetch` and `POST /api/sources/fill` answer **409** `renumber_pending`.
 While it is numbered by posting order it takes chapters from its numbering source alone: `POST /api/sources/fill`

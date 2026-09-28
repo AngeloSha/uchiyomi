@@ -11,7 +11,9 @@
 #   KEEP=1 E2E_ADULT=1 bash web/test/e2e/up.sh   # fake-b declares itself adult: what walk42 needs
 #   E2E_EMBEDDED=1 bash web/test/e2e/up.sh   # no Postgres container: the image runs its own (DATABASE_URL unset)
 #   KEEP=1 E2E_ENGINE=fake E2E_ENGINE_MODE=down bash web/test/e2e/up.sh   # with the fake extension engine (walk49 engine)
-#   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49, every phase
+#   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # the stack for all of walk49
+#     -- which then needs E2E_ARCHIVE_FAST=1 on its own command too (walk49.mjs's header): this flag only sets the
+#     app's archive timing, and a walk without it skips the archive checks that need that timing
 #   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
 #   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
 #

@@ -23,7 +23,7 @@ Offline tab. Everything the server fetches, whoever started it, is under **Libra
   for an admin.
 - **Series | Downloads**, a switch under the Library page's title. The address remembers which
   (`/library/?view=downloads`), so Back and a shared link land on the same one.
-- **Each series as its cover with a ring**, like an app being installed, in up to five sections: **Running**,
+- **Each series as its cover with a ring**, like an app being installed, in up to five sections: **Running now**,
   **Queued** (waiting their turn at a busy source, and the slow archive below), **Needs attention** (a failed
   download, with **Try again**, which fetches exactly the chapters it did not land, **Dismiss** and **Open**),
   **Server tasks** (the scheduled check, the library repair with the step it is on, a bulk *Fetch newest*) and
@@ -216,16 +216,16 @@ script would take, over nights or days, and a restart never loses its place.
   notification and stay out of the digests.
 - **Where you watch it.** Library → Downloads, under **Queued**: each archived series is its cover under a still
   amber ring with an hourglass, *120 of 900* and about how long is left. Tap it for what it is doing (*Next chapter
-  in 12 minutes*, *The site asked us to slow down; trying again in 2 hours*), which way it fills, the space it will
-  still take and what failed so far, with **Pause**, **Resume** and **Stop archiving** for whoever queued it and
-  for admins, and **Open series**; admins also get **Pause all** / **Resume all**. The Library ring never turns for
-  it: while an archive is the only thing working, the ring is the same still, amber mark. **Needs attention** lists
-  an archive whose site keeps refusing, whose source has been missing or switched off for a day, that waits for
-  disk space, that has been paused for a week or has had its turns for three days with nothing coming in, and one
-  that finished with chapters it could not fetch, with why (*3 failed too many times*). *Came in today* sums up its
-  chapters per series (*Slow archive: 12 chapters today*). On the series page the band above the chapter list shows
-  the archive with the same keys, and the grey rows it is about to fetch fold into one line, *Ch. 1–880 · 880
-  chapters being archived slowly*. Health does not report the gaps an archive is filling as problems, and **Fill
+  in 12 minutes*, *A chapter failed on its site; trying again in 2 hours*), which way it fills, the space it will
+  still take and what failed so far, with **Pause**, **Resume** and **Stop archiving** for whoever queued it and for
+  admins, and **Open series**; admins also get **Pause all** / **Resume all**. The Library ring never turns for it:
+  while an archive is the only thing working, the ring is the same still, amber mark. **Needs attention** lists an
+  archive whose site keeps refusing, whose source has been missing or switched off for a day, that waits for disk
+  space, that has been paused for a week or has had its turns for three days with nothing coming in, and one that
+  finished with chapters it could not fetch, with why (*3 chapters failed too many times*). *Came in today* sums up
+  its chapters per series (*Slow archive: 12 chapters today*). On the series page the band above the chapter list
+  shows the archive with the same keys, and the grey rows it is about to fetch fold into one line, *Ch. 121–900 ·
+  780 chapters being archived slowly*. Health does not report the gaps an archive is filling as problems, and **Fill
   now** there still fetches them at once, at the usual pace.
 - **How it shares the work with the scheduled check.** The archive owns the chapters listed when it was queued (on
   a *Latest N* series, those below its floor); the check keeps taking everything newer. A series' own *Latest N*
@@ -257,9 +257,10 @@ of it: 226 posts read as 13 chapters, with dozens of versions under some of them
   renaming every chapter after it, and one inserted later takes a number between its neighbours (41.5). Everything
   reads the same numbers: the files (`Chapter 20.cbz`), the grey rows, versions, *Find missing chapters*, floors,
   read marks and trackers.
-- **New series are numbered as they are added.** The add dialog says so — *Numbered by posting order*, with
-  *Posting order: 226 · the source's own numbers: 13* — and **Keep the source's numbers** adds it the old way. On a
-  weaker sign (*Some posts share a chapter number*) it offers **Number by posting order** instead.
+- **New series are numbered as they are added.** The add dialog says so — *Numbered by posting order*, with *226
+  chapters by posting order · 13 by the source's own numbers* — and **Keep the source's numbers** adds it the old
+  way (*Keeping the source's own numbers*). On a weaker sign (*Some posts share a chapter number*) it offers
+  **Number by posting order** instead.
 - **A series already in your library is never renamed without you.** Its page says *Chapter numbers need a review*,
   and nothing new downloads for it until an admin opens **Review renumbering**: every file on disk, the number it
   has, the number it gets and the post it was matched to, anything that could not be matched (kept, at a free
@@ -280,7 +281,9 @@ of it: 226 posts read as 13 chapters, with dozens of versions under some of them
   is renamed until an admin confirms. Series numbered by posting order are not affected.
 - **Versions** show each copy's own title — twenty identical `—` rows under one number were how #116 looked — and
   say when copies look like different posts that share a number rather than versions of one chapter.
-- **Health** lists the series waiting for a renumbering review under *Chapter numbering*, with the same review.
+- **Health** has a *Chapter numbering* check: the series waiting for a renumbering review, with the same review and
+  **Keep the source's numbers**, and a renumbering still being finished; greyed, the series Uchiyomi numbered by
+  posting order on its own in the last two weeks.
 - **Trackers** are told the highest chapter you finished rounded down, so a finished 12.6 no longer reports 13.
 - The built-in **Madara** and **Manganato** engines keep one post per number and drop the rest before anything can
   see them, so this cannot help there; that is unchanged.
@@ -308,11 +311,20 @@ of it: 226 posts read as 13 chapters, with dozens of versions under some of them
   **Library → Downloads**.
 - **Chapter numbering applies by itself only to series you add from now on.** A series already in your library
   that a source numbers this way is held — nothing new downloads for it — until an admin reviews its plan on the
-  series page (or under Health's *Chapter numbering*) and applies it, or keeps the source's numbers. Applying one
-  renames its files and keeps every chapter's row: ids, reading progress, bookmarks and notes. **Use the source's
-  numbers** renames them back; going back to v0.48.4 does not. v0.48.4 does not know the new numbers: it reads that
-  source's own numbers again, so most new posts look like chapters it already has, and the few the source numbers
-  N.01 may be fetched a second time. Undo a renumbered series before going back.
+  series page (or under Health's *Chapter numbering*) and applies it, or keeps the source's numbers. The one
+  exception is a series with no chapters on the server yet (a *Nothing yet* add, say): there is nothing to rename,
+  so its next check numbers it by posting order without asking. Applying a plan renames the files and keeps every
+  chapter's row: ids, reading progress, bookmarks and notes. **Use the source's numbers** renames them back; going
+  back to v0.48.4 does not. v0.48.4 does not know the new numbers: it reads that source's own numbers again, so most
+  new posts look like chapters it already has, and the few the source numbers N.01 may be fetched a second time.
+  Before going back, press **Use the source's numbers** on every series numbered by posting order, whether it was
+  added that way or renumbered.
+- **Chapter names filled in before v0.49.0 count as a match.** Since v0.46.0 Uchiyomi has filled in a chapter's
+  missing name from the source's chapter list. From v0.49.0 on, such a name is marked as copied, so the renumbering
+  never takes it as proof of which post a file is. A name filled in before then carries no mark: for those chapters
+  a match by name counts, as a name the file came with does. Their plan does not point them out as matched only by
+  the old chapter list, and an extension setting that changes the source's numbers without moving any file settles
+  by itself. Look at those chapters' matches in the plan before you confirm.
 - **Extension settings**: changing one that renumbers a source (the Webtoons extension's *Use sequential chapter
   numbering*) holds every series from that source that uses its numbers until an admin reviews each on its page.
 - **The slow archive starts with nothing queued.** Its defaults: 4 chapters an hour per source, no time window, and
@@ -336,12 +348,13 @@ of it: 226 posts read as 13 chapters, with dozens of versions under some of them
     for its renumbering; a fill from another source into a series numbered by posting order, and following one for
     it (`POST /api/admin/series/:id/sources`), answer **409** `posting_order`.
   - Everything else only adds fields and routes (api.md has them), among them: the repair run's id in its answer,
-    `GET /api/admin/tasks/repair/status` and `/runs`, Health's `outcome`, `caveats` and source evidence, the Test's
-    `state` and `stage`, `live`, `failing`, `evidence` and `testMs` on `GET /api/admin/sources`, the `progress` on
-    the source check's 409, the scan's counts on `POST /api/refresh` (to an admin), the job cards' `left`, `origin`
-    and `cover`, `POST /api/admin/extensions/solver`, the slow archive's routes and its `archive` objects,
-    `archive` and `numbering` on `POST /api/sources/add`, the numbering and extension-settings routes, and
-    `numbering` on the detail and the listing.
+    `GET /api/admin/tasks/repair/status` and `/runs`, Health's `outcome`, `caveats`, source evidence and `numbering`
+    check (with its `renumber` and `keep_numbers` actions), the Test's `state` and `stage`, `live`, `failing`,
+    `evidence` and `testMs` on `GET /api/admin/sources`, the `progress` on the source check's 409, the scan's counts
+    on `POST /api/refresh` (to an admin), the job cards' `left`, `origin` and `cover`,
+    `POST /api/admin/extensions/solver`, the slow archive's routes and its `archive` objects, `archive` and
+    `numbering` on `POST /api/sources/add`, the numbering and extension-settings routes, and `numbering` on the
+    detail and the listing.
 
 ## v0.48.4 — 2026-09-26
 

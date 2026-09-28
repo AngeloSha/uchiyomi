@@ -208,7 +208,7 @@ says how many are in hand. The chips:
 - **Archive slowly** (since v0.49.0) — for anyone who may download; a key on a laptop, and under **More** on a
   phone. It queues every selected series for the slow archive, which fetches what each is missing a chapter at a
   time over nights or days (section 4, *Fetching a whole series slowly*), and one message sums it up — *12 series
-  queued for the slow archive · 3 had nothing older to fetch*.
+  queued for the slow archive · 3 series had nothing older to fetch*.
 - **Move to library** and **Remove from library** — admins only; on a phone they sit behind **More**.
   *Remove from library* asks *Remove {n} series from the library?* and says what it does not do: **no files
   are deleted**, the chapters stay exactly where they are on disk, and everyone's reading progress, history,
@@ -478,7 +478,7 @@ Back and a shared link land on the same one.
 
 The view shows each series as its cover with a ring, like an app being installed, in up to five sections:
 
-- **Running** — what is downloading now: your adds and Fetches (the ring fills with *chapters done / chapters
+- **Running now** — what is downloading now: your adds and Fetches (the ring fills with *chapters done / chapters
   asked for*), and the series the server is fetching by itself — the scheduled check, *Check for new chapters*,
   a source you followed from *Find missing chapters*, the repair, *Fetch newest* (the ring turns). Under each
   cover: the chapter coming in and from where, or *Waiting for {source}* between chapters.
@@ -565,21 +565,22 @@ amber ring with an hourglass — it fills as chapters land and never turns — w
 long is left, or why the whole archive is waiting (*Only runs between 01:00 and 07:00*, in the server's hours;
 *Waiting for the scheduled check to finish*). A line above the covers gives the pace (*Slow archive: 4 chapters an
 hour per source*), and an admin's **Pause all** / **Resume all** and **Settings**. Tapping a cover says what this
-one is doing — *Fetching Ch. 121 now*, *Next chapter in 12 minutes*, *The site asked us to slow down; trying again
-in 2 hours*, *Waiting for another download from the same site* — which way it fills, about how much more space it
+one is doing — *Fetching Ch. 121 now*, *Next chapter in 12 minutes*, *A chapter failed on its site; trying again in
+2 hours*, *Waiting for another download from the same site* — which way it fills, about how much more space it
 will take, what failed so far and when it started, with **Pause**, **Resume**, **Stop archiving** and **Open
 series**. Only whoever queued it and admins get the keys; everyone else who can open the series sees the progress.
 The Library ring never turns for an archive (see *What is downloading*, above).
 
-On the series page the band above the chapter list shows the archive — *Archiving slowly · 120 of 900 · About 6
-days* — with the same keys and **Details**, and the grey rows it is about to fetch fold into one line, *Ch. 1–880
-· 880 chapters being archived slowly*, with **Show** (next section).
+On the series page the band above the chapter list shows the archive — *Archiving slowly · 120 of 900 · About 8
+days* — with the same keys and **Details**, and the grey rows it is about to fetch fold into one line,
+*Ch. 121–900 · 780 chapters being archived slowly*, with **Show** (next section).
 
 **Needs attention** lists an archive whose site keeps refusing, whose source has been missing or switched off for a
 day, that waits for disk space (an admin gets **Settings** there), that has been paused for a week, or that has had
 its turns for three days with nothing coming in. When nothing is left to fetch the archive is done: it says so on
-Came in today for a day, or — if it left chapters behind — stays under Needs attention with why (*3 failed too
-many times*, *1 is waiting for a preferred group*, *2 are only from a blocked group*) until you **Dismiss** it.
+Came in today for a day, or — if it left chapters behind — stays under Needs attention with why (*3 chapters failed
+too many times*, *1 chapter is waiting for a preferred group*, *2 chapters are only from a blocked group*) until you
+**Dismiss** it.
 Those chapters go back to the tools that handle them: the nightly repair's weekly retry, the release preferences.
 
 **Stopping.** **Stop archiving** asks first; the chapter in flight finishes, and everything that came in stays.
@@ -634,7 +635,7 @@ hold. Each grey row's caption says why it is not here:
   cover still works too. On a series with no chapter on disk the line starts open, since it is all there is,
   and stays open when you flip *Oldest/Newest*. **Archive slowly** beside *Fetch all* hands the same chapters to
   the slow archive instead (since v0.49.0; see *Fetching a whole series slowly* above).
-- Chapters **the slow archive is about to fetch** fold the same way into a line of their own, `Ch. 1–880 · 880
+- Chapters **the slow archive is about to fetch** fold the same way into a line of their own, `Ch. 121–900 · 780
   chapters being archived slowly · 120 of 900`, with **Show** and nothing to press: the archive takes them, and
   its keys are on the band above the list. A chapter it will not take — one that failed three times, is held for
   a group, or only a blocked group released — is not in that line.
@@ -743,11 +744,12 @@ floors, read marks and what a tracker is told — and a post's title loses the e
 contradict it.
 
 **Adding a series** numbered this way says so in the add dialog (section 6): *Numbered by posting order*, the
-sentence why, and *Posting order: 226 · the source's own numbers: 13*. **Keep the source's numbers** adds it the
-old way. On a weaker sign the dialog says *Some posts share a chapter number* and offers **Number by posting order**
-instead. Either switch changes the count and the *First* / *Latest* choices with it. Adding a series back into a
-folder that still holds its old files never renames them blind: it is added in the source's numbers and waits for
-a review, below.
+sentence why, and both counts side by side, *226 chapters by posting order · 13 by the source's own numbers*. **Keep
+the source's numbers** adds it the old way, and the notice then reads *Keeping the source's own numbers*. On a
+weaker sign the dialog says *Some posts share a chapter number* and offers **Number by posting order** instead.
+Either switch changes the count and the *First* / *Latest* choices with it. Adding a series back into a folder that
+still holds its old files never renames them blind: it is added in the source's numbers and waits for a review,
+below.
 
 **A series already in your library** is never renamed without an admin. When a check finds its source numbering
 it this way, its page says *Chapter numbers need a review*, its listing stays as it was, and nothing new downloads
@@ -755,13 +757,14 @@ for it — the scheduled check, *Fetch newest*, *Fetch* and *Find missing chapte
 fetched now would land under a number about to move. An admin opens **Review renumbering**, a sheet with the exact
 plan, read fresh from the source and changing nothing:
 
-- how many chapters are renamed, unchanged, or could not be matched, then every move — *Ch. 2 → Ch. 20 · E2 -
-  54-56* — sixty at a time, with **Show all**;
+- how many chapters will be renamed, stay unchanged, or could not be matched, then every move —
+  *Ch. 2 → Ch. 20 · E2 - 54-56* — sixty at a time, with **Show all**;
 - *Reading progress, bookmarks and notes stay with their chapters*: each file is renamed in place, and its
   chapter keeps its row;
-- a chapter no post matches keeps its file, at a free number just after the chapter before it; one matched only
-  by the old chapter list is pointed out to check before you confirm; files that land on one number keep their
-  files, the extra ones as *Chapter N (2)*;
+- a chapter no post matches keeps its file, at a free number just after the chapter before it; one matched only by
+  the old chapter list is pointed out to check before you confirm (a name Uchiyomi copied from that list into a
+  chapter before v0.49.0 is not known as copied, and counts as the chapter's own); when more than one file lands on
+  one number, every file is kept and the extra ones are named *Chapter N (2)*;
 - when the series is linked to a tracker, that it will be told the highest chapter you finished in the new
   numbers, which can be much higher than before.
 
@@ -1002,14 +1005,14 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
-- **Numbered by posting order** (since v0.49.0): when the source gives many different posts one chapter number —
-  the Webtoons extension on a series posted in parts — a note under the chapter count says so, and why (*Webtoons
-  gives many different posts the same chapter number (73 posts are all numbered 7).*), with the two readings side
-  by side, *Posting order: 226 · the source's own numbers: 13*. The series is added numbered 1 to 226 in the order
-  the posts came out (section 4, *Chapter numbering*); **Keep the source's numbers** adds it the old way, and the
-  count, the range and the *First* / *Latest* choices follow the switch. On a weaker sign the note reads *Some
-  posts share a chapter number* and the switch is **Number by posting order**. An admin also gets **Source
-  settings**, the extension's own settings (section 7).
+- **Numbered by posting order** (since v0.49.0): when the source gives many different posts one chapter number — the
+  Webtoons extension on a series posted in parts — a note under the chapter count says so, and why (*Webtoons gives
+  many different posts the same chapter number (73 posts are all numbered 7).*), with the two readings side by side,
+  *226 chapters by posting order · 13 by the source's own numbers*. The series is added numbered 1 to 226 in the
+  order the posts came out (section 4, *Chapter numbering*); **Keep the source's numbers** adds it the old way, and
+  the note's heading (*Keeping the source's own numbers*), the count, the range and the *First* / *Latest* choices
+  follow the switch. On a weaker sign the note reads *Some posts share a chapter number* and the switch is **Number
+  by posting order**. An admin also gets **Source settings**, the extension's own settings (section 7).
 - **Read a chapter first** (since v0.47.0, from a pull request by @Squeaks72): under **Add to library**, this
   opens the title straight from the source without adding it. Pick a chapter from its list — one copy per
   number, the one an add would take — scroll it, and step to the previous or next one; **Add to library** is
@@ -1212,8 +1215,9 @@ numbering* is the one [#116](https://github.com/AngeloSha/uchiyomi/issues/116) n
 before you touch it: changing it renumbers every series from that source that uses its numbers. When your library
 has any, the sheet asks once more (*Renumber 3 series?*), and then each of them waits on its series page, with
 nothing new downloading, until an admin reviews its renumbering (section 4, *Chapter numbering*): its files still
-carry the old numbers. Series numbered by posting order are not affected. The add dialog and the series page
-link straight to the settings of the extension a series comes from (**Source settings**). The details are in
+carry the old numbers. Series numbered by posting order are not affected. The numbering notice in the add dialog
+and on the series page links an admin straight to the settings of the extension the series comes from (**Source
+settings**), and so does its row under Health's *Chapter numbering*. The details are in
 [extensions.md](extensions.md#an-extensions-own-settings).
 
 ### The other direction: Uchiyomi *inside* Mihon or Tachimanga
@@ -1317,7 +1321,7 @@ another tab.
   repair stored: *No source has a longer copy*, *Followed {source}*, *No other source lists them*, *Failing since
   {date}* (which a Retry now no longer resets to today).
 - **While any repair runs** — yours, another admin's, the nightly — a strip at the top of the page says what it is
-  (*Repairing: Fill gaps*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
+  (*Repairing: Gap fill*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
   what it is on, how long it has been going and usually takes, and the searches it has left, with **Stop**, which
   ends it between two targets. A card whose step is running has a small working mark in its header. A key that
   would start a repair waits while a chapter sweep or another repair runs, and says why.
@@ -1421,10 +1425,11 @@ when the answer was no — nobody else lists them, the series already follows as
 searching other sources is switched off — never because a run did not get round to it: a series the nightly
 had no search left for is not marked as checked at all, and is looked at on the next run.
 
-**Gaps the slow archive is filling** (since v0.49.0) are not findings. A gap that lies wholly among the chapters an
-active archive is working through (section 4, *Fetching a whole series slowly*) is shown greyed as being archived
-slowly, and the nightly repair leaves it to the archive. **Fill now** is still there, and fetches those chapters at
-once, at the usual pace, instead of waiting for the archive.
+**Gaps the slow archive is filling** (since v0.49.0) are not findings. When a series' slow archive is fetching
+every one of its gaps — what an archive takes is fixed when it is queued (section 4, *Fetching a whole series
+slowly*) — the row is greyed as being archived slowly, and the nightly repair leaves the series to the archive. Any
+other gap keeps the row a finding. **Fill now** is still there, and fetches the archive's chapters at once, at the
+usual pace, instead of waiting for it; the row says so before you press it.
 
 A source you turned off yourself -- one at a time on Providers, or a whole language at once on Extensions --
 is listed greyed under *Source health* so the count stays visible, but it never makes the check amber: it is
@@ -1469,11 +1474,18 @@ Cloudflare helper*, with **Connect** wherever there is a setting to change. Seri
 update now say why under *Series that can no longer update*: *…can't be reached because the extension engine isn't
 answering*, or *is off*, instead of "over the source limit".
 
-**Chapter numbering** (since v0.49.0, [#116](https://github.com/AngeloSha/uchiyomi/issues/116)) lists the series
-waiting for a renumbering review, by name: a source that numbers many different posts the same was found under
-them, an undo is waiting, or an extension setting changed the source's numbers (section 4, *Chapter numbering*).
-Nothing new downloads for them until an admin decides, so each row carries the same choice as its series page —
-review the plan and apply it, or keep the source's numbers — and **Open** leads to the series.
+**Chapter numbering** (since v0.49.0, [#116](https://github.com/AngeloSha/uchiyomi/issues/116)) lists, by name, the
+series whose numbering needs an admin (section 4, *Chapter numbering*). Most are held — nothing new downloads for
+them until an admin decides: a source that numbers many different posts the same was found under them (**Review
+renumbering** or **Keep the source's numbers**, the same choice as on the series page); an admin's choice, a
+renumbering or its undo, waits to be applied, or an extension setting changed the source's numbers (**Review
+renumbering**); or a renumbering is being carried out, or was cut off by a restart, which the series' next check
+finishes, so that row has no key. A weaker sign on a series in the source's numbers is a finding too, with the same
+two keys, though that series keeps updating. Greyed, for reference: a series Uchiyomi numbered by posting order on
+its own in the last two weeks, with **Keep the source's numbers** to go back (after the same review), and one an
+admin kept on the source's numbers although its source numbers this way, with **Review renumbering**. **Open** leads
+to the series page, with its renumbering plan open on a row that waits for review; a row about an extension's source
+also links to that extension's own settings (**Source settings**).
 
 ![Library health](shots/admin-health.webp)
 
@@ -1836,9 +1848,10 @@ sweep*, or *switched off · on demand* when the switch under **Admin → Setting
 off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
 the sweep it is detached, so the message only says it started; its line shows what it did when it is done and
 keeps it across restarts, for example: *2000 page counts stamped, 28625 still to count · short: 3 replaced,
-5 confirmed, 12 left · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4
-unblocked*. A run that was stopped says so before its counts (*stopped for a restart*, *stopped: the download
-disk is at its floor*), and a nightly that was switched off reads *switched off*.
+5 confirmed, 12 left unchanged · gaps: 5 series, 2 followed a new source, 9 chapters fetched · 41 failures reset ·
+solver reset, 4 sources unblocked · took 4 min*. A run that was stopped says so before its counts (*stopped for
+a restart*, *stopped: free space on the download disk is below the minimum*), and a nightly that was switched off
+reads *switched off*.
 
 Since v0.49.0 that line is always the last **full** run — the nightly, or *Run now* here — marked *(nightly)* or
 *(run by hand)*. A fix pressed on one Health row used to replace it (and, after a restart, move the nightly's
@@ -2177,7 +2190,7 @@ by itself: the updater trusts the rows, so every such chapter reads *up to date*
 cannot open it. Run **Admin → Tasks → Verify chapter files**. It starts in the background — the toast says
 so — and the Tasks line shows what it found when it is done (and keeps it across restarts): *one folder
 looked unmounted and was left alone: /library-dl, 4000 checked, 312 missing, marked for the next sweep, 7
-missing in the read library, not marked*. It looks for every chapter's file and marks the ones Uchiyomi
+missing in a library you built by hand, not marked*. It looks for every chapter's file and marks the ones Uchiyomi
 downloaded that are gone as *deleted from the server* — the row and everyone's reading history stay — and the next update sweep
 (or *Fetch newest* on the Library page) downloads them again onto the same rows, so nobody's place moves.
 
@@ -2299,9 +2312,9 @@ source's numbers**; either way the series updates again.
 **The slow archive is not fetching anything.** Library → Downloads says why — under the covers when the whole
 archive is waiting, and on a series' own sheet (tap its cover) otherwise: it is between chapters (at the default
 pace about a quarter of an hour, now and then much longer), another download is using the same site, the site is
-cooling down or asked us to slow down, a check or a repair is running, it is outside the hours it may run (the
-server's local time), or the download disk is below its floor (**Admin → Settings → Downloads**). After a restart
-its first look waits ten minutes.
+cooling down, asked for a slower pace or refused a chapter, a check or a repair is running, it is outside the hours
+it may run (the server's local time), or the download disk is below its floor (**Admin → Settings → Downloads**).
+After a restart its first look waits ten minutes.
 
 **An extension source says `Cloudflare bypass currently disabled`.** The extension engine has no browser of its own
 and has to be told about a FlareSolverr; the compose files set `FLARESOLVERR_ENABLED` and `FLARESOLVERR_URL` on its
