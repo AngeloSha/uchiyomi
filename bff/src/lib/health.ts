@@ -1231,7 +1231,10 @@ export async function solverHealth(): Promise<HealthCheck> {
   // unreachable, rate-limited or unrecognisable, and `isBehind` answers false whenever either side cannot be
   // parsed. Being out of date is worth SAYING; it is never worth turning a working solver into a warning,
   // and a health page must not be able to fail because github.com is having an afternoon.
-  const latest = await latestSolverVersion();
+  // The release's tag ('v3.5.2': githubRelease.ts reads tag_name), bare. The summary and the row's title put their
+  // own "v" before it, and read "vv3.5.2". Reintroduce the tag as it is: "the solver's newer release is named with
+  // one v" in health.int.test.ts fails.
+  const latest = (await latestSolverVersion())?.replace(/^v/i, '') ?? null;
   const behind = isBehind(ping.version, latest);
   return {
     id: 'solver',

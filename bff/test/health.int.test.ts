@@ -1122,3 +1122,34 @@ test('a post the source deleted is a hole, not a gap', { skip: DSN ? false : 'se
     await q('DELETE FROM lib_series WHERE id = $1', [S_HOLE]);
   }
 });
+
+/**
+ * The solver's row named a newer FlareSolverr "vv3.5.2": GitHub's tag already starts with its "v", and the summary
+ * and the row's title put one before it. Reintroduce the tag as it is (drop the replace in solverHealth): the first
+ * assertion.
+ */
+test("the solver's newer release is named with one v", { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { solverHealth } = await import('../src/lib/health');
+  const { resetSolverVersionCache } = await import('../src/lib/solverVersion');
+  const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+  const { englishOf } = await import('../src/lib/said');
+  await migrate();
+  const realFetch = globalThis.fetch;
+  // The solver answers as FlareSolverr does, and GitHub with a release tagged the way FlareSolverr tags them.
+  globalThis.fetch = (async (u: any) => String(u).startsWith('https://api.github.com/')
+    ? new Response(JSON.stringify({ tag_name: 'v3.5.2' }), { status: 200, headers: { 'content-type': 'application/json' } })
+    : new Response(JSON.stringify({ msg: 'FlareSolverr is ready!', version: '3.4.6' }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+  resetSolverVersionCache();
+  forgetSolverPing();
+  try {
+    const row = await solverHealth();
+    assert.equal(row.summary, 'Ready (v3.4.6) — v3.5.2 is available', 'the solver\'s newer release is named with one v');
+    assert.deepEqual(row.items.map((i) => i.title), ['v3.4.6 → v3.5.2']);
+    assert.equal(englishOf(row.summarySaid), row.summary, 'the codes say the same');
+  } finally {
+    globalThis.fetch = realFetch;
+    resetSolverVersionCache();
+    forgetSolverPing();
+  }
+});
