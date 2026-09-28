@@ -90,3 +90,12 @@ test('junk in the column reads as no evidence, never a crash', () => {
   assert.deepEqual(openFailures('nope' as any, NOW), []);
   assert.deepEqual(openFailures({ search: { failAt: 'not a date' } } as any, NOW), []);
 });
+
+test('a site that says it is offline keeps that kind through the evidence (v0.49.1)', () => {
+  // Health words the stage by its kind; folded into 'error' it would read as an unknown fault. Reintroduce by dropping
+  // 'site_offline' from openFailures' kind list: the kind reads 'error'.
+  const s: Stages = { chapters: { failAt: ago(MIN), failBy: 'sweep', streak: 1, kind: 'site_offline', error: 'site_offline: the site says it is offline ("x")' } };
+  assert.equal(openFailures(s, NOW)[0].kind, 'site_offline');
+  assert.deepEqual(liveStagesPatch({ passed: [], failure: { stage: 'search', kind: 'site_offline', error: 'e' } }, 'test', ago(0)),
+    { search: { failAt: ago(0), failBy: 'test', error: 'e', kind: 'site_offline' } });
+});

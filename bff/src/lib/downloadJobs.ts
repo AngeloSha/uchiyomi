@@ -17,7 +17,8 @@
  * persisted result of the last one.
  */
 
-export type RunKind = 'sweep' | 'repair' | 'newest';
+/** `find_sources` (v0.49.1): a Find other sources run (lib/findSources.ts). Admins only; it downloads nothing. */
+export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources';
 
 export interface RunCard {
   kind: RunKind;
@@ -58,6 +59,8 @@ export interface RunCard {
    * Absent: it may download.
    */
   downloads?: false;
+  /** v0.49.1, a Find other sources run: how many sources it has followed so far, across its series. */
+  followed?: number;
   /** Someone asked it to stop: it does, after the chapter in flight. */
   cancelRequested?: boolean;
   reason?: string;

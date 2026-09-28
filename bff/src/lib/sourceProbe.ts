@@ -14,9 +14,15 @@ import { unnumberedOf, type SourceAdapter, type SourceChapter } from './sources/
 import type { Probe } from './sourceDiagnosis';
 import type { Stage } from './sourceEvidence';
 import { coverSanity } from './sources/imgAttr';
+import { isSiteOffline } from './sources/offline';
 
-/** How a stage failed. `timeout` is OUR deadline and makes the run inconclusive, never a failure of the source. */
-export type SmokeKind = 'error' | 'empty' | 'timeout' | 'unnumbered';
+/**
+ * How a stage failed. `timeout` is OUR deadline and makes the run inconclusive, never a failure of the source.
+ * `site_offline` (v0.49.1): the site answered with its own offline notice -- a failure, with the kind that says so.
+ */
+export type SmokeKind = 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline';
+/** A thrown error's kind: the classified offline notice keeps its own, everything else is an error. */
+const kindOf = (e: string): SmokeKind => (isSiteOffline(e) ? 'site_offline' : 'error');
 export interface Check {
   name: string;
   ok: boolean;
@@ -165,8 +171,8 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     // answers is still empty" in sourceProbe.test.ts reads inconclusive.
     if (thrown === undefined && late !== undefined && !empty) return outOfTime('Search', 'search', late);
     if (thrown !== undefined) {
-      checks.push({ name: 'Search', ok: false, detail: clip(thrown), stage: 'search', kind: 'error', error: full(thrown) });
-      fail({ stage: 'search', kind: 'error', error: full(thrown) });
+      checks.push({ name: 'Search', ok: false, detail: clip(thrown), stage: 'search', kind: kindOf(thrown), error: full(thrown) });
+      fail({ stage: 'search', kind: kindOf(thrown), error: full(thrown) });
     } else {
       const detail = 'no results — markup may not match this engine';
       checks.push({ name: 'Search', ok: false, detail, stage: 'search', kind: 'empty', error: detail });
@@ -216,8 +222,8 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   }
   if (!answered) {
     const err = firstErr ?? 'no search hit to open';
-    checks.push({ name: 'Series / chapters', ok: false, detail: clip(err), stage: 'chapters', kind: 'error', error: full(err) });
-    fail({ stage: 'chapters', kind: 'error', error: full(err) });
+    checks.push({ name: 'Series / chapters', ok: false, detail: clip(err), stage: 'chapters', kind: kindOf(err), error: full(err) });
+    fail({ stage: 'chapters', kind: kindOf(err), error: full(err) });
     return done();
   }
   checks.push({ name: 'Series page', ok: !!title, detail: title ? clip(title) : 'no data', stage: 'chapters', ...(title ? {} : { kind: 'empty' as const }) });
@@ -228,8 +234,8 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     if (title) passed.push('chapters');
     else fail({ stage: 'chapters', kind: 'empty', error: 'the series page returned no data' });
   } else {
-    const kind: SmokeKind = firstErr !== undefined ? 'error' : unnumbered ? 'unnumbered' : 'empty';
-    const detail = kind === 'error' ? firstErr! : kind === 'unnumbered'
+    const kind: SmokeKind = firstErr !== undefined ? kindOf(firstErr) : unnumbered ? 'unnumbered' : 'empty';
+    const detail = kind === 'error' || kind === 'site_offline' ? firstErr! : kind === 'unnumbered'
       ? `none with a usable number (${unnumbered} without)`
       : `none found (${hits.length} title${hits.length === 1 ? '' : 's'} tried)`;
     checks.push({ name: 'Chapters', ok: false, detail: clip(detail), stage: 'chapters', kind, error: full(detail) });
@@ -259,7 +265,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     }
   }
   if (pagesErr === undefined && late !== undefined && !empty) return outOfTime('Pages', 'pages', late);
-  const kind: SmokeKind = pagesErr !== undefined ? 'error' : 'empty';
+  const kind: SmokeKind = pagesErr !== undefined ? kindOf(pagesErr) : 'empty';
   const detail = pagesErr ?? `none found (${candidates.length} chapter${candidates.length === 1 ? '' : 's'} tried)`;
   checks.push({ name: 'Pages', ok: false, detail: clip(detail), stage: 'pages', kind, error: full(detail) });
   fail({ stage: 'pages', kind, error: full(detail) });

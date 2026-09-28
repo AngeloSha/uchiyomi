@@ -11,6 +11,7 @@ import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
 import { HUNT_MAX_SOURCES, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { visibleToAll } from './visibility';
+import { altTitlesFor } from './altTitles';
 
 /**
  * Name a chapter from ANOTHER source, when its own source only ever says "Chapter 12" (#85, @Squeaks72's idea,
@@ -98,7 +99,9 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
   const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId).catch(() => null), 0);
-  const primary = { title: s.title, altTitles: [], numbers };
+  // The other names the series goes by (v0.49.1, lib/altTitles.ts): a donor that files the work under one of them
+  // is this series by name -- exactly, never by containment, and then measured both ways (autoFollow.ts).
+  const primary = { title: s.title, altTitles: await altTitlesFor(seriesId), numbers };
   const usable = (id: string) => {
     const src = getSource(id);
     if (!src || id === s.source_id || !allowed(id) || !sameLanguage(want, src.lang)) return null;

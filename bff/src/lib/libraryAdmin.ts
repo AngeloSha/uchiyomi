@@ -18,6 +18,7 @@ import { allWritable, containedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
+import { carryAltTitles } from './altTitles';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
 import { toStoredRel, dirnameRel } from './relPath';
@@ -168,6 +169,11 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     );
     await qq(`DELETE FROM listing_progress WHERE series_id = $1`, [fromId]);
     await reconcileListingProgress({ run: qq, seriesId: intoId });
+    // The other names (v0.49.1, lib/altTitles.ts) go with the chapters: an admin who merged two rows has said they
+    // are one work, and the absorbed row's names are that work's names -- a search for another source asks under
+    // them. The survivor keeps its own row where both had a name. Reintroduce by dropping this: "a merge carries
+    // the other names to the survivor" in altTitles.int.test.ts finds them still on the absorbed row.
+    await carryAltTitles(qq, fromId, intoId);
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
@@ -246,6 +252,8 @@ const SERIES_KEYED_TABLES = [
   // v0.49.0: a series' posting-order numbers (#116) and its slow archive (#117). Both cascade from lib_series,
   // but naming them gives the audit its counts, like every other table here.
   'series_post_numbers', 'archive_queue',
+  // v0.49.1: the other names a series goes by (lib/altTitles.ts). Cascades too; named for the same count.
+  'series_alt_titles',
 ] as const;
 
 export interface ForgetRefusal {

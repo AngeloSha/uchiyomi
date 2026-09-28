@@ -630,6 +630,95 @@ components:
         lastResult: { type: [string, "null"], enum: [ok, error, null], description: Whichever of the last success and the last failure is newer; null before the first delivery. }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    AltTitles:
+      type: object
+      description: >-
+        The other names a series goes by (since v0.49.1), the names a person chose first: an admin's, then a
+        tracker import's, then those read from its main source's description.
+      required: [titles]
+      properties:
+        titles:
+          type: array
+          items:
+            type: object
+            required: [title, norm, origin, addedBy, createdAt]
+            properties:
+              title: { type: string }
+              norm: { type: string, description: "The key the name is compared and removed by: lower case, letters and digits only (DELETE .../alt-titles/{norm})." }
+              origin:
+                type: string
+                enum: [admin, import, description]
+                description: "`admin` typed by hand, `import` a tracker's synonym kept when an import added the series, `description` read from the series' main source's own description."
+              addedBy: { type: [string, "null"], description: "The admin's username; null for a name the server read, or for an account since deleted." }
+              createdAt: { type: string, format: date-time }
+    FindResult:
+      type: object
+      description: What a Find other sources run did for one series (since v0.49.1).
+      required: [seriesId, followed]
+      properties:
+        seriesId: { type: string }
+        title: { type: string, description: "Left out for a series the viewer may not list (the 18+ hide, above all); the entry stays." }
+        followed:
+          type: array
+          description: The sources it now follows, in scan order.
+          items:
+            type: object
+            required: [sourceId, name, chapters]
+            properties:
+              sourceId: { type: string }
+              name: { type: string }
+              chapters: { type: integer, minimum: 0, description: The distinct chapter numbers that source lists. }
+        why:
+          type: string
+          enum: [posting_order, no_match, full, refused, not_tried]
+          description: >-
+            Only when nothing was followed. `posting_order`: numbered by posting order, so no follower is ever
+            merged (not searched). `full`: the series already follows two sources (not searched). `refused`: a
+            source carried the title and the judgement refused it (another book by its numbering or title), or the
+            series lists under three chapter numbers, which no judgement can be made against (not searched).
+            `no_match`: the sources that answered do not carry it. `not_tried`: time, a stop or a shutdown cut it
+            short, no source could be asked, or none answered -- never "not found".
+    FindRunSummary:
+      type: object
+      description: One Find other sources run, without its per-series results (since v0.49.1).
+      required: [id, status, total, done, followed, startedBy, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [running, done, stopped, failed, interrupted]
+          description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it (a shutdown, or a row found still running after a restart)."
+        total: { type: integer, minimum: 0, description: Series in its scope. }
+        done: { type: integer, minimum: 0, description: Series settled so far; a stopped run's rest are in `results` as not_tried but not counted here. }
+        followed: { type: integer, minimum: 0, description: Sources followed, across its series. }
+        startedBy: { type: [string, "null"], description: "The admin who started it, by username (never the account id); null for an account since deleted." }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        sourceId: { type: string, description: The source whose series it was about, when the scope was a source. }
+        sourceName: { type: string, description: That source's display name, or its id when it is not loaded. }
+    FindRun:
+      description: A Find other sources run in full (since v0.49.1).
+      allOf:
+        - $ref: "#/components/schemas/FindRunSummary"
+        - type: object
+          required: [results]
+          properties:
+            current:
+              type: object
+              description: The series it is on now, while it runs; left out for a series the viewer may not list.
+              required: [seriesId, title]
+              properties:
+                seriesId: { type: string }
+                title: { type: string }
+            waiting:
+              type: string
+              enum: [sweep, repair, check]
+              description: While it runs, what it is waiting on before its next series.
+            results:
+              type: array
+              description: One entry per series settled, in the order they were asked about; after the run ends, one for every series in its scope.
+              items:
+                $ref: "#/components/schemas/FindResult"
 paths:
   /livez:
     get:
@@ -1981,7 +2070,10 @@ paths:
         chip says. The age cap still applies — a source above it is never a candidate. Since v0.49.0 (#116) a
         series numbered by posting order is scanned on its own source alone, in the numbers the series keeps;
         every other source it follows is listed with `why: posting_order` and never asked, and no other source
-        is searched.
+        is searched. Since v0.49.1 each source is asked under the series' title, up to three of its other names
+        (GET /api/admin/series/{id}/alt-titles) and then `altTitle`, one at a time until one finds it; a hit for an
+        other name counts only when its title EQUALS that name (never by containment). Reading the series' own
+        source here keeps the other names its description lists.
       requestBody:
         required: false
         content:
@@ -2504,8 +2596,10 @@ paths:
                     description: >-
                       The server's own runs, one card each: `sweep` (checking every series for new chapters),
                       `repair` (the library repair; `done`/`total` count its steps and `step` names the one it
-                      is on) and `newest` (a bulk "Fetch newest"). An admin sees every run, the account that
-                      started a bulk run sees that one; nobody else sees any. A finished run stays listed for a
+                      is on), `newest` (a bulk "Fetch newest") and, since v0.49.1, `find_sources` (Find other
+                      sources: `done`/`total` count series, `followed` the sources it followed, and it downloads
+                      nothing). An admin sees every run, the account that started a bulk run sees that one (never a
+                      find_sources run, which is an admin's alone); nobody else sees any. A finished run stays listed for a
                       day. `current` is the series it is inside, left out when this viewer may not list that
                       series (since v0.49.0 for every viewer, not only under the 18+ hide).
                     items:
@@ -2513,7 +2607,7 @@ paths:
                       additionalProperties: false
                       required: [kind, startedAt, status, done, total, fetched, failed, mine]
                       properties:
-                        kind: { type: string, enum: [sweep, repair, newest] }
+                        kind: { type: string, enum: [sweep, repair, newest, find_sources] }
                         startedAt: { type: integer }
                         finishedAt: { type: integer }
                         status: { type: string, enum: [running, done, cancelled, error] }
@@ -2534,6 +2628,7 @@ paths:
                         label: { type: string, description: "Since v0.49.0, a repair: the series title or source name a one-row Health fix is about. Left out, with number and seriesId, for a viewer who may not list that series, and whenever current is." }
                         number: { type: number, description: Since v0.49.0, a repair about one chapter -- its number. }
                         seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
+                        followed: { type: integer, minimum: 0, description: "Since v0.49.1, a find_sources run: the sources it has followed so far, across its series." }
                         downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
@@ -2659,7 +2754,7 @@ paths:
     post:
       tags:
         - sources
-      summary: Stop one of the server's own runs (sweep, repair, bulk Fetch newest) after the chapter in flight.
+      summary: Stop one of the server's own runs (sweep, repair, bulk Fetch newest, Find other sources) after the chapter in flight.
       operationId: postApiSourcesRunsKindCancel
       description: >-
         Since v0.47.0 (#82). An admin, or the account that started a bulk "Fetch newest". Checked between
@@ -2671,7 +2766,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [sweep, repair, newest]
+            enum: [sweep, repair, newest, find_sources]
       security:
         - bearer: []
       responses:
@@ -2695,7 +2790,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [sweep, repair, newest]
+            enum: [sweep, repair, newest, find_sources]
       security:
         - bearer: []
       responses:
@@ -2805,7 +2900,8 @@ paths:
         on the listing: { verdict (strong, hint, none), applied (posting_order when the add will number the
         posts 1..K in posting order, else source), ordered, posts, numbers, biggest { number, posts }, examples,
         alt { count, first, last } (the other reading, for the dialog's switch), extSourceId? }; `count`,
-        `first` and `last` follow `applied`.
+        `first` and `last` follow `applied`. Since v0.49.1, when the source and id are some series' main source,
+        the other names its description lists are kept for that series (GET /api/admin/series/{id}/alt-titles).
         This route deliberately does NOT honour the 18+ reveal (v0.42.0), and neither does POST
         /api/sources/add: both are explicit acts on a source and a series the caller just named, and the
         reveal governs what appears unasked. The age cap does apply and answers 403 by id.
@@ -3027,6 +3123,9 @@ paths:
         undo a deliberate deletion, but an add is somebody asking for the chapter now. When the whole
         selection is already here the answer carries `alreadyHere` with `chapters: 0` and `started: false`,
         and the series is still routed, floored, listed and given its cover as any other add would.
+        Since v0.49.1 the add keeps the other names its source's description lists (GET
+        /api/admin/series/{id}/alt-titles), before `alsoFollow` is judged, so a candidate that names the work by
+        one of them matches -- exactly, and measured by the numbering both ways.
 
       requestBody:
         required: false
@@ -6503,6 +6602,124 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "busy (with `confirm`): chapters are being fetched for this series, or a check is inside it -- the sweep, Check now, a listing refresh, Fill -- and would fetch into the old numbers after the renames; try again when that ends. `message` says which."
+  /api/admin/series/{id}/alt-titles:
+    get:
+      tags:
+        - admin
+      summary: "The other names a series goes by (since v0.49.1)."
+      operationId: getApiAdminSeriesIdAltTitles
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Where they come
+        from: an admin (POST below), a tracker import's synonyms when the import added the series, and the series'
+        main source's own description -- "Alternative Titles:"-style lines, Latin script only, each name's key at
+        least five characters, at most twenty -- read when the series is added and whenever that source's details
+        are read again (so a description's name removed here returns while the source still lists it). Every
+        search for another source -- Find other sources, the add's auto-follow, the nightly hunt, borrowed chapter
+        names and Find missing chapters -- asks under the title and up to three of these, and an other name
+        matches EXACTLY, never by containment, and is then measured by the numbering both ways. A merge carries the
+        names to the survivor; Forget erases them. The idea and the parsing are @TIGamingTV's (PR #119).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The names.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AltTitles"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    post:
+      tags:
+        - admin
+      summary: "Add an other name to a series by hand (since v0.49.1)."
+      operationId: postApiAdminSeriesIdAltTitles
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers the
+        whole list, as GET does. Refused before anything is written: 400 `non_latin` (letters that are not Latin
+        script normalise to nothing and could never be compared), 400 `too_short` (a key under five letters or
+        digits is a word, not an identity), 409 `exists` (the series already goes by it: a stored name with the same
+        key, or its own title). Audited as `series.alt_title.add`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200, description: Trimmed. }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The names, with the new one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AltTitles"
+        "400":
+          description: "`bad_request`, `non_latin` or `too_short`"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`exists`: the series already goes by that name"
+  /api/admin/series/{id}/alt-titles/{norm}:
+    delete:
+      tags:
+        - admin
+      summary: "Forget one of a series' other names, by its key (since v0.49.1)."
+      operationId: deleteApiAdminSeriesIdAltTitlesNorm
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers the
+        list as it now is. Idempotent: a key the series does not have answers the list unchanged. Audited as
+        `series.alt_title.remove`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: norm
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The names.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AltTitles"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
   /api/admin/series/{id}/restore:
     post:
       tags:
@@ -7909,6 +8126,14 @@ paths:
         a strong verdict. Its actions are `renumber` (GET, then POST with `confirm`,
         /api/admin/series/{id}/numbering) and `keep_numbers` (POST with mode `source`); items carry `seriesId`
         and `sourceId`. The check is absent when no series has anything to say about its numbering.
+        Since v0.49.1 a `sources` item whose source is failing (or turned off) and is the MAIN source of at least one
+        series carries the action `find_sources` with `findSeries`, how many series a Find other sources run over
+        its `sourceId` would search for (POST /api/admin/sources/find {sourceId}; the run's `total`); so does a
+        `frozen-series` item whose reason is its source (no longer installed, switched off, over the source limit
+        -- not the extension engine), which then names that `sourceId` too. An evidence line's `kind` and a
+        diagnosis `code` can be `site_offline`: the site answered with its own offline or maintenance notice
+        (reason "The site says it is offline (its own page)", fix "Wait for the site to come back, or find other
+        sources for its series.") -- a failure of the source, never an empty listing.
       security:
         - bearer: []
       responses:
@@ -8511,6 +8736,129 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "409":
           description: "Conflict: already exists, already running, or duplicate"
+  /api/admin/sources/find:
+    get:
+      tags:
+        - admin
+      summary: "Find other sources: whether a run is going, the running (or else the newest) run in full, and the kept runs (since v0.49.1)."
+      operationId: getApiAdminSourcesFind
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. {running, run,
+        recent}: `run` is the running run, else the newest one, with every series' result; `recent` the kept runs
+        (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`.
+        A series the viewer may not list (the 18+ hide, above all) keeps its entry in `results` without its
+        `title`, and is left out of `current`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [running, run, recent]
+                properties:
+                  running: { type: boolean }
+                  run:
+                    oneOf:
+                      - $ref: "#/components/schemas/FindRun"
+                      - type: "null"
+                  recent:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FindRunSummary"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: "Find other sources: search other sources for many series at once, and follow the ones that are them, in the background (since v0.49.1)."
+      operationId: postApiAdminSourcesFind
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body
+        `{seriesIds}` (the series named, up to 500, in the order given; a hidden, merged or unknown id is dropped) or
+        `{sourceId}` (every series whose MAIN source is that id -- the "this source is down" case Health's
+        `find_sources` action sends; the series that follow nothing first). One run at a time, in the background:
+        1.5 s between the series that searched, waiting while a sweep, a library repair or the daily source check
+        runs, stopping at once on POST .../find/stop, Cancel on its card, or a shutdown. Per series: skipped when
+        numbered by posting order or already following two sources; otherwise searched on the sources the series
+        may reach (an adult source only for an adult series) in scan order -- never its main source, never one it
+        already follows, never one disabled or cooling down (read per series) -- under its title and up to three of
+        its other names (an other name matched exactly), stopping once its free follower slots are filled or three
+        sources carried the title, within a wall of 90 s. Each candidate is judged as the add's auto-follow judges
+        one (title, then the numbering both ways unless an exact main title on ten or more numbers) and followed
+        under the follower cap, with this admin as its author. The searches report nothing to source health: a
+        source that fails one is neither put in a cooldown nor marked failing. When the run ends, every series that
+        gained a source gets a listing refresh, 1.5 s apart, in the background (nothing is downloaded: the sweep
+        takes the new chapters from there), and the Health summary is refreshed. Audited as `source.find` {runId,
+        scope, status, total, done, followed, series} when it ends, and each follow as `series.follow_source` with
+        `via: find_sources`. While it runs, GET /api/sources/jobs carries its card (kind `find_sources`) to admins.
+        The idea is @TIGamingTV's (PR #119).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    seriesIds: { type: array, maxItems: 500, items: { type: string } }
+                - type: object
+                  additionalProperties: false
+                  required: [sourceId]
+                  properties:
+                    sourceId: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, total]
+                properties:
+                  runId: { type: string, format: uuid }
+                  total: { type: integer, minimum: 1, description: The series it will ask about. }
+        "400":
+          description: "`bad_request` (a malformed body, or both scopes at once) or `empty_scope` (nothing named is a series this admin may see)"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "`busy`: a run is already going; `runId` names it"
+  /api/admin/sources/find/stop:
+    post:
+      tags:
+        - admin
+      summary: "Stop the running Find other sources run at once (since v0.49.1)."
+      operationId: postApiAdminSourcesFindStop
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The series in
+        flight keeps what it already followed and is otherwise `not_tried`, as is every series not reached; the run
+        ends `stopped`. `stopped` is false when no run was going. Audited as `source.find.stop`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stopped]
+                properties:
+                  stopped: { type: boolean }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/{id}/test:
     post:
       tags:
@@ -8534,7 +8882,9 @@ paths:
         v0.49.0 the answer adds {state, stage, ms, recorded}; the verdict is recorded in source_health.live_* and
         the per-stage evidence Health reads (never status, consecutive, blocked_until or checked_at); `code` is
         never `ok` when `ok` is false, and can be `extension_error` (the engine answered with the extension's own
-        error) or `unnumbered`.
+        error) or `unnumbered`. Since v0.49.1 it can be `site_offline`: the site answered with its own offline or
+        maintenance notice (a small page whose title says so, with none of the engine's own markup), and the
+        failing check's `kind` says `site_offline` too.
       parameters:
         - name: id
           in: path
