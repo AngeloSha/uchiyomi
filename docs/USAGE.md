@@ -75,7 +75,9 @@ The **Library** tab is your whole collection, and every way to narrow it lives i
 sorting, which library, read state, publication status, format and genre. On a laptop the panel sits down
 the left of the grid; on a phone it opens from **Filters** at the top. Genres are listed biggest-first with
 how many series each holds, and formats (Manhwa, Manhua, Webtoon…) are kept separate from moods like Horror
-and Romance. Picking two genres shows series that are in **both**. Each cover shows a **NEW** ribbon when
+and Romance. Picking two genres shows series that are in **both**. With more than one source in the
+library, two more sections appear: **Main source** shows the series added from a source, and **Any source**
+the series that read from it at all, as their main source or a linked one. Each cover shows a **NEW** ribbon when
 there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
 filters currently show.
 
@@ -175,7 +177,8 @@ source, an extension and a translation group are, in five lines.
 Progress, favorites, and history are **per-user**, so each account has its own.
 
 **Filtering the library.** The Library page has a **Filters** button: read state (not started / reading /
-finished), publication status, and genres. Picking several genres means all of them. Active filters show as
+finished), publication status, genres, and the source a series comes from
+(**Main source** / **Any source**). Picking several genres means all of them. Active filters show as
 chips under the header with a count, and they live in the URL, so the back button works and you can share a
 filtered view.
 

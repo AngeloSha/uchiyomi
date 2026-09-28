@@ -259,8 +259,28 @@ function condSql(cond: any, params: any[], hasUser = false): string {
     return cond.readStatus.operator === 'isNot' ? `NOT (${sql})` : `(${sql})`;
   }
 
+  // Which source a series comes from (the library's source filters). `mainSource` is the source it
+  // was added from; `anySource` is that OR one it follows as a fallback (series_sources). The id is compared
+  // as stored, so a source that is no longer installed still filters. Correlated on `sv.id` -- the alias
+  // every listing reads series through -- because an unqualified `id` inside the subquery is its own row's.
+  if (cond.mainSource && cond.mainSource.value != null) {
+    params.push(String(cond.mainSource.value));
+    const ex = `EXISTS (SELECT 1 FROM lib_series src_s WHERE src_s.id = sv.id AND src_s.source_id = $${params.length})`;
+    return cond.mainSource.operator === 'isNot' ? `NOT ${ex}` : ex;
+  }
+  if (cond.anySource && cond.anySource.value != null) {
+    params.push(String(cond.anySource.value));
+    const n = params.length;
+    const ex = `(EXISTS (SELECT 1 FROM lib_series src_s WHERE src_s.id = sv.id AND src_s.source_id = $${n})
+                 OR EXISTS (SELECT 1 FROM series_sources src_f WHERE src_f.series_id = sv.id AND src_f.source_id = $${n}))`;
+    return cond.anySource.operator === 'isNot' ? `NOT ${ex}` : ex;
+  }
+
   throw new UnsupportedFilter(Object.keys(cond).filter((k) => k !== 'operator')[0] || 'unknown');
 }
+
+/** Exposed for tests: the translator is pure apart from the params it pushes. */
+export const _condSql = condSql;
 
 /**
  * @param perUser whether the `mine`/`fav` joins are present in the FROM clause. The per-user sorts name
@@ -426,6 +446,33 @@ export const owned = {
          FROM ranked
         GROUP BY key
         ORDER BY count(*) DESC, key ASC`,
+      p.values as any[],
+    );
+  },
+
+  /**
+   * Every source the viewer's library comes from, for the library's two source filters: `main` counts the
+   * series added from it, `any` the series that read from it at all -- added from it, or following it as a
+   * fallback. Counted over browseSrc, so the numbers are the ones the filtered grid will show (the same
+   * disclosure rule as genreOverview: a source only this viewer's hidden libraries use is not named).
+   * `name` is null here; the route names it from the registry.
+   */
+  librarySources: async (ctx: ViewCtx) => {
+    const p = new Params();
+    const src = browseSrc(ctx, p);
+    return q<{ id: string; label: string | null; main: number; any: number }>(
+      `WITH vs AS (SELECT sv.id FROM ${src}),
+       used AS (
+         SELECT s.id AS series_id, s.source_id, s.source AS label, true AS main
+           FROM lib_series s JOIN vs ON vs.id = s.id WHERE s.source_id IS NOT NULL
+         UNION ALL
+         SELECT ss.series_id, ss.source_id, NULL AS label, false AS main
+           FROM series_sources ss JOIN vs ON vs.id = ss.series_id
+       )
+       SELECT source_id AS id, max(label) AS label,
+              count(DISTINCT series_id) FILTER (WHERE main)::int AS main,
+              count(DISTINCT series_id)::int AS any
+         FROM used GROUP BY source_id ORDER BY count(DISTINCT series_id) DESC, source_id`,
       p.values as any[],
     );
   },

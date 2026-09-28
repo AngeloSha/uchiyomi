@@ -1062,6 +1062,32 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/library/sources:
+    get:
+      tags:
+        - library
+      summary: The sources the viewer's library comes from, with series counts -- the library's source filters.
+      operationId: getApiLibrarySources
+      description: >-
+        `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
+        the source, `any` the series that read from it at all (added from it, or following it as a fallback).
+        Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
+        the ones the filtered grid shows. `installed` is false for a source whose extension is gone; its series
+        still filter. Empty on a Komga backend. Use the ids as `mainSource` / `anySource` in POST
+        /api/series/search.
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
   /api/trending:
     get:
       tags:
@@ -1191,7 +1217,11 @@ paths:
       summary: "Search and page the library: the grid, the search page, browse-by-genre and the command palette all
         use this."
       description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
-        read-scoped API token may call it (the one non-GET a read token can use)."
+        read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
+        (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
+        `genre`, `author`, and -- owned library only -- `mainSource` (the source a series was added from, by id)
+        and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
+        `unsupported_filter`."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult

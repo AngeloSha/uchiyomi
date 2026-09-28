@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2002
+    "strings": 2008
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -2005,5 +2005,11 @@
   "Still no answer": "Toujours pas de réponse",
   "Tried once, at {time} · next try {when}": "Essayé une fois, à {time} · prochain essai {when}",
   "In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.": "Dans le fichier .env à côté de votre docker-compose.yml, s’il y a une ligne {name} sans valeur après le =, supprimez-la.",
-  "Then set {name} on Uchiyomi to the engine’s address and restart Uchiyomi:": "Puis, sur Uchiyomi, réglez {name} sur l’adresse du moteur et redémarrez Uchiyomi :"
+  "Then set {name} on Uchiyomi to the engine’s address and restart Uchiyomi:": "Puis, sur Uchiyomi, réglez {name} sur l’adresse du moteur et redémarrez Uchiyomi :",
+  "Main source": "Source principale",
+  "Any source": "Toute source",
+  "Series added from this source.": "Séries ajoutées depuis cette source.",
+  "Series that read from this source, as their main source or a linked one.": "Séries qui lisent depuis cette source, comme principale ou liée.",
+  "Main: {name}": "Principale : {name}",
+  "Any: {name}": "Toute : {name}"
 }
