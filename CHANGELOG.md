@@ -72,11 +72,11 @@ chapters*.
 
 - **The server's sentences are translated.** Health's summaries, notes and rows, the header's warning, a source's
   diagnosis and its fix, why a download stopped or a run ended, and a refused renumbering or extension setting were
-  English in every language. The server now sends each with a code beside its English, which is unchanged, and the
-  page says it in your language: counts with their singulars, and dates and times in your own time zone, where the
+  English in every language. The server now sends each with a code beside its English, and the page says it in your
+  language: counts with their singulars, and dates and times in your own time zone, where the
   English prints UTC with no zone. A code the page does not know, from a newer server, leaves that whole line in
-  English, never half of it. That is about 400 new sentences in each of the eight languages, machine-translated:
-  corrections are welcome.
+  English, never half of it. That is about 400 new sentences in each of the eight languages, machine-translated and
+  then read by a native-level reviewer per language: corrections are still welcome.
 - The pointer to removed series said *Admin → Removed*, a tab that does not exist. It says *Admin → Library*.
 
 ### Fixes
@@ -128,9 +128,14 @@ chapters*.
   them, so going back is safe.
 - Nothing to change in compose files or settings, and no new environment variables.
 - **For scripts** ([api.md](docs/api.md)):
-  - Every English field that Health, the downloads and the refusals send is unchanged. Beside each, a `…Said` field
-    carries its code: `summarySaid`, `noteSaid`, `detailSaid`, `titleSaid`, `fixSaid`, `reasonSaid`, `messageSaid`
-    and `errorSaid` (the `Said` schema in openapi.yaml), and `noteCode` on the public source list.
+  - The English fields that Health, the downloads and the refusals send are as before, but for five sentences the
+    translation review corrected: the Extension engine's summary *Turned off* is *Switched off*; `too_slow`'s reason
+    reads *This source answers, but takes longer than the time it is given.*; the *Impossible chapter numbers* note
+    quotes *Delete chapters* and says a bookmarked chapter is *skipped*; the *Chapter numbering* note quotes the
+    Webtoons switch as *Use sequential chapter numbering*; and a source that cannot be named is *its source* inside
+    a sentence. Beside each field, a `…Said` field carries its code: `summarySaid`, `noteSaid`, `detailSaid`,
+    `titleSaid`, `fixSaid`, `reasonSaid`, `messageSaid` and `errorSaid` (the `Said` schema in openapi.yaml), and
+    `noteCode` on the public source list.
   - New routes: `GET` and `POST /api/admin/series/{id}/alt-titles`, `DELETE /api/admin/series/{id}/alt-titles/{norm}`,
     `GET` and `POST /api/admin/sources/find` and `POST /api/admin/sources/find/stop`. A run's `results[].why` is one
     of `posting_order`, `full`, `too_few`, `no_source`, `refused`, `no_answer`, `followed_already`, `no_match` and
