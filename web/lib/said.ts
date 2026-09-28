@@ -481,7 +481,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
     return m === 1 ? tr('{n} downloaded chapters in 1 folder are on disk but not in the library', { n }) : tr('{n} downloaded chapters in {m} folders are on disk but not in the library', { n, m });
   },
   'missing.unreadable': (p) => (num(p, 'n') === 1 ? tr('1 folder in the downloads could not be read') : tr('{n} folders in the downloads could not be read', { n: num(p, 'n') })),
-  'missing.none': (p) => tr('every chapter file in the downloads folder is in the library ({n} checked)', { n: num(p, 'checked') }),
+  'missing.none': (p) => (num(p, 'checked') === 1
+    ? tr('every chapter file in the downloads folder is in the library (1 checked)')
+    : tr('every chapter file in the downloads folder is in the library ({n} checked)', { n: num(p, 'checked') })),
   'missing.compared': (p) => (p.fs
     ? tr('Every chapter file under {root} ({fs}), against the library.', { root: str(p, 'root'), fs: str(p, 'fs') })
     : tr('Every chapter file under {root}, against the library.', { root: str(p, 'root') })),

@@ -2322,7 +2322,8 @@ function Extensions({ span = '' }: { span?: string }) {
       const said = enabled
         ? (r.changed === 1 ? tr('Showing {lang} — 1 source on', { lang }) : tr('Showing {lang} — {n} sources on', { lang, n: r.changed }))
         : (r.changed === 1 ? tr('Hidden {lang} — 1 source off', { lang }) : tr('Hidden {lang} — {n} sources off', { lang, n: r.changed }));
-      toast(r.skipped ? `${said} · ${tr('{n} not switched on: over the source limit', { n: r.skipped })}` : said, 'success');
+      const over = r.skipped === 1 ? tr('1 not switched on: over the source limit') : tr('{n} not switched on: over the source limit', { n: r.skipped });
+      toast(r.skipped ? `${said} · ${over}` : said, 'success');
     } catch (e: any) { toast(msgOf(e, enabled ? tr('Could not show {lang}', { lang }) : tr('Could not hide {lang}', { lang })), 'error'); }
     setBusy(null);
     setHiding(null);

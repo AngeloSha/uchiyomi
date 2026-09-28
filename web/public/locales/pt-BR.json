@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2486
+    "strings": 2488
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -2489,5 +2489,7 @@
   "Find other sources ({n} series)": "Encontrar outras fontes ({n} séries)",
   "No other source lists it besides the one it already follows": "Nenhuma outra fonte a lista além da que ela já segue",
   "No source followed": "Nenhuma fonte seguida",
-  "its source": "a fonte da série"
+  "its source": "a fonte da série",
+  "1 not switched on: over the source limit": "1 não ativada: acima do limite de fontes",
+  "every chapter file in the downloads folder is in the library (1 checked)": "todos os arquivos de capítulo da pasta de downloads estão na biblioteca (1 verificado)"
 }

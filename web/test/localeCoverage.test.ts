@@ -149,6 +149,22 @@ const counts = (k: string) => [...k.matchAll(COUNT)].map((m) => ({ at: m.index! 
 const numberPair = (one: string, many: string) =>
   many === `${one}s` || many === `${one}es` || (one.endsWith('y') && many === `${one.slice(0, -1)}ies`)
   || (one.endsWith("'s") && many === `${one.slice(0, -2)}s'`);
+/**
+ * A count before a participle or "not" is asked for its pair too: English does not inflect "2 checked" or "3 not switched
+ * on", but most of the eight languages agree them with the count ("1 vérifiés", "1 non activées" in French; the v0.49.1
+ * translation review found both).
+ */
+const AGREES_ABROAD = /^(\p{Ll}+ed|not)$/u;
+/**
+ * Keys with such a count that shipped before that rule, each reading wrong at 1 in some language. ⚠️ Frozen like
+ * SHIPPED_UNPAIRED: fix one by adding its singular and deleting it here, never by adding to it.
+ */
+const AGREEING_UNPAIRED = [
+  '{n} selected', '{n} filed by hand', '{n} saved', '{n} deleted', '{n} not here yet',
+  '{n} skipped: not downloaded by Uchiyomi', '{n} skipped: bookmarked by a reader',
+  'Delete all {n} downloaded chapters of “{title}”?', 'Delete all {n} downloaded chapters on this device?',
+];
+const AGREEING_UNPAIRED_MAX = 9;
 /** Verbs and determiners that agree with the count, singular → plural. */
 const AGREE: Record<string, string> = {
   has: 'have', is: 'are', was: 'were', needs: 'need', comes: 'come', does: 'do', keeps: 'keep', fails: 'fail',
@@ -205,6 +221,8 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     '{n} folders are more than {max} levels deep and were not looked into (LIBRARY_MAX_DEPTH)',
   '1 series that came from extensions keeps its chapters and gets no new ones until it is back':
     '{n} series that came from extensions keep their chapters and get no new ones until it is back',
+  'the library still marks it deleted, and no scan has read the file since':
+    'the library still marks these {n} deleted, and no scan has read the files since',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
@@ -216,6 +234,8 @@ const NOT_PAIRED: Record<string, string> = {
   'did not answer {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
   // v0.49.1 (lib/said.ts): a duplicate row names its copies only past two (bff lib/health.ts duplicateSeries).
   '{n} copies — merge them one pair at a time': 'said only for three copies or more: never 1',
+  'Switched off after {n} failed deliveries in a row. Fix it, then switch it back on.':
+    'a target switches itself off only at bff notify AUTO_DISABLE_AFTER (10) failures in a row: never 1',
 };
 /**
  * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its
@@ -254,12 +274,12 @@ test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", a
   const all = [...keys.keys()];
   const lonely: string[] = [];
   for (const k of all) {
-    if (NOT_PAIRED[k] || SHIPPED_UNPAIRED.includes(k)) continue;
+    if (NOT_PAIRED[k] || SHIPPED_UNPAIRED.includes(k) || AGREEING_UNPAIRED.includes(k)) continue;
     if (IRREGULAR_PAIRS[k]) { if (!keys.has(IRREGULAR_PAIRS[k])) lonely.push(`${k} has no plural (${IRREGULAR_PAIRS[k]})`); continue; }
     if (Object.values(IRREGULAR_PAIRS).includes(k)) continue;
     for (const c of counts(k)) {
       // A plural half is `{n}` before a plural noun; `{n} failed` pairs with "1 failed" but is not asked to.
-      if (!c.one && !/^\p{Ll}+s$/u.test(c.word)) continue;
+      if (!c.one && !/^\p{Ll}+s$/u.test(c.word) && !AGREES_ABROAD.test(c.word)) continue;
       if (!otherHalf(all, k, c.at, c.one)) lonely.push(`${k} has no ${c.one ? 'plural' : 'singular'}`);
     }
   }
@@ -273,13 +293,18 @@ test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", a
   assert.equal(otherHalf(probe, '{n} sources need a look', 0, false), '1 source needs a look', 'the verb agreeing with the count is not allowed for');
   assert.equal(otherHalf(probe, '1 chapter saved.', 0, true), undefined, 'punctuation that differs paired');
   // The lists only shrink: an entry whose key is gone (or was paired) is deleted, not kept as a hole.
-  for (const k of [...Object.keys(NOT_PAIRED), ...SHIPPED_UNPAIRED, ...Object.keys(IRREGULAR_PAIRS)]) {
+  for (const k of [...Object.keys(NOT_PAIRED), ...SHIPPED_UNPAIRED, ...AGREEING_UNPAIRED, ...Object.keys(IRREGULAR_PAIRS)]) {
     assert.ok(keys.has(k), `${k} is no longer in the app: drop it from the list`);
   }
   for (const k of SHIPPED_UNPAIRED) {
     const c = counts(k).filter((x) => !x.one);
     assert.ok(c.length && c.some((x) => !otherHalf(all, k, x.at, false)), `${k} has its singular now: delete it from SHIPPED_UNPAIRED`);
   }
+  for (const k of AGREEING_UNPAIRED) {
+    const c = counts(k).filter((x) => !x.one);
+    assert.ok(c.length && c.some((x) => !otherHalf(all, k, x.at, false)), `${k} has its singular now: delete it from AGREEING_UNPAIRED`);
+  }
   // Frozen, and held to it: a new lone plural cannot be parked here. Lower this as entries are fixed.
   assert.ok(SHIPPED_UNPAIRED.length <= SHIPPED_UNPAIRED_MAX, `SHIPPED_UNPAIRED grew to ${SHIPPED_UNPAIRED.length}: give the new key its singular instead`);
+  assert.ok(AGREEING_UNPAIRED.length <= AGREEING_UNPAIRED_MAX, `AGREEING_UNPAIRED grew to ${AGREEING_UNPAIRED.length}: give the new key its singular instead`);
 });
