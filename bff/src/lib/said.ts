@@ -118,11 +118,12 @@ const EN = {
   'numbering.sharedMany': ({ name }: { name: string | null }) => `${name ?? 'Its source'} gives many different posts the same number`,
   'numbering.interrupted': () => 'A renumber was interrupted before it finished; the next check of this series finishes it.',
   'numbering.applying': () => 'Its confirmed renumber is being applied now.',
+  // "its source" mid-sentence; "Its source" only where it opens one (the three above).
   'numbering.remap': ({ name }: { name: string | null }) =>
-    `An extension setting changed ${name ?? 'Its source'}'s chapter numbers; the chapters on disk wait to be matched to the new ones.`,
+    `An extension setting changed ${name ?? 'its source'}'s chapter numbers; the chapters on disk wait to be matched to the new ones.`,
   'numbering.reviewWaits': () => 'numbering them by posting order waits for your review.',
   'numbering.askedWaits': () => 'Numbering by posting order, as asked, waits to be applied.',
-  'numbering.sourceWaits': ({ name }: { name: string | null }) => `Going back to ${name ?? 'Its source'}'s own numbers waits to be applied.`,
+  'numbering.sourceWaits': ({ name }: { name: string | null }) => `Going back to ${name ?? 'its source'}'s own numbers waits to be applied.`,
   'numbering.since': ({ at }: { at: string }) => `numbered by posting order since ${day(at)}.`,
   'numbering.hint': () => 'they may be different chapters listed as versions of one.',
   'numbering.kept': () => "you chose to keep the source's own numbers.",

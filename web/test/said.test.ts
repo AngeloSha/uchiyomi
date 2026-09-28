@@ -239,6 +239,32 @@ test('every diagnosis the server can reach reads as its English: each reason by 
   assert.equal(diagnosisFix({ fix: 'as sent' }), 'as sent');
 });
 
+test('a source that could not be named is "its source" inside a sentence, and opens one with a capital', async (t) => {
+  if (!haveBff) { t.skip('no bff/ beside web/ in this checkout'); return; }
+  // One key, "Its source", read "An extension setting changed Its source's chapter numbers" and "Going back to Its
+  // source's own numbers" (the v0.49.1 translation review, all eight languages). Reintroduce 'Its source' in the
+  // server's remap: "the server's fallback is capitalised mid-sentence"; sourceName in the web's: "the web's fallback
+  // reads otherwise than the server"; drop opensOnOwnWords: French "sa source numérote…"; cap every sentence: "a
+  // source's own name loses its case".
+  const server = (await import(join(BFF, 'said.ts'))) as { SAID_ENGLISH: Record<string, (p: never) => string> };
+  for (const code of ['numbering.remap', 'numbering.sourceWaits']) {
+    const en = (server.SAID_ENGLISH[code] as (p: { name: null }) => string)({ name: null });
+    assert.match(en, /\bits source's\b/, `${code}: the server's fallback is capitalised mid-sentence`);
+    assert.equal(saidText({ code, params: { name: null } }, '\0'), en, `${code}: the web's fallback reads otherwise than the server`);
+  }
+  assert.match(saidText({ code: 'numbering.sharedMany', params: { name: null } }, '\0'), /^Its source gives /, 'a sentence that opens on it lost its capital');
+  try {
+    setActiveLocale('fr');
+    setActiveDict(JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', 'fr.json'), 'utf8')));
+    assert.match(saidText({ code: 'numbering.remap', params: { name: null } }, '\0'), /^Sa source numérote /, 'French opens the sentence on it in lower case');
+    assert.match(saidText({ code: 'numbering.sourceWaits', params: { name: null } }, '\0'), /propres à sa source /, 'French capitalises it mid-sentence');
+    assert.match(saidText({ code: 'numbering.remap', params: { name: 'mangapill' } }, '\0'), /^mangapill numérote /, 'a source\'s own name loses its case');
+  } finally {
+    setActiveLocale('en');
+    setActiveDict({});
+  }
+});
+
 test('a line is joined the reader\'s way, and a code this build does not know leaves all of it in English', () => {
   const parts: Said[] = [
     { code: 'gaps.live', params: { n: 3 } }, { code: 'gaps.quiet', params: { n: 2 } }, { code: 'ignored', params: { n: 1 } },

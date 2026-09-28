@@ -232,7 +232,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('1 missing — {ranges}', { ranges: str(p, 'ranges') })
     : tr('{n} missing — {ranges}', { n: num(p, 'n'), ranges: str(p, 'ranges') })),
 
-  // ---- Chapter numbering (#116). A source that could not be named at all is "Its source".
+  // ---- Chapter numbering (#116). A source that could not be named at all is "Its source" where it opens the sentence,
+  // "its source" inside one.
   'numbering.live': (p) => (num(p, 'n') === 1 ? tr('1 series waits for a numbering review') : tr('{n} series wait for a numbering review', { n: num(p, 'n') })),
   'numbering.none': () => tr('No numbering change waits for a review'),
   'numbering.lately': (p) => (num(p, 'n') === 1 ? tr('1 numbered by posting order lately') : tr('{n} numbered by posting order lately', { n: num(p, 'n') })),
@@ -244,10 +245,10 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'numbering.sharedMany': (p) => tr('{name} gives many different posts the same number', { name: sourceName(p) }),
   'numbering.interrupted': () => tr('A renumber was interrupted before it finished; the next check of this series finishes it.'),
   'numbering.applying': () => tr('Its confirmed renumber is being applied now.'),
-  'numbering.remap': (p) => tr('An extension setting changed {name}\'s chapter numbers; the chapters on disk wait to be matched to the new ones.', { name: sourceName(p) }),
+  'numbering.remap': (p) => opensOnOwnWords(p, tr('An extension setting changed {name}\'s chapter numbers; the chapters on disk wait to be matched to the new ones.', { name: sourceNameMid(p) })),
   'numbering.reviewWaits': () => tr('numbering them by posting order waits for your review.'),
   'numbering.askedWaits': () => tr('Numbering by posting order, as asked, waits to be applied.'),
-  'numbering.sourceWaits': (p) => tr('Going back to {name}\'s own numbers waits to be applied.', { name: sourceName(p) }),
+  'numbering.sourceWaits': (p) => opensOnOwnWords(p, tr('Going back to {name}\'s own numbers waits to be applied.', { name: sourceNameMid(p) })),
   'numbering.since': (p) => tr('numbered by posting order since {date}.', { date: dayText(p.at) }),
   'numbering.hint': () => tr('they may be different chapters listed as versions of one.'),
   'numbering.kept': () => tr('you chose to keep the source\'s own numbers.'),
@@ -718,6 +719,23 @@ const WORDS: Record<string, (p: P) => string | null> = {
 /** A numbering row's source, by name; "Its source" when there was none to name. */
 function sourceName(p: P): string {
   return p.name == null ? tr('Its source') : str(p, 'name');
+}
+
+/**
+ * The same inside a sentence: "changed its source's chapter numbers", where one key read "changed Its source's…" (the
+ * v0.49.1 translation review). A translation may put the name first all the same (German, French and Russian open
+ * the renumbering sentences on it): `opensOnOwnWords` raises its first letter there.
+ */
+function sourceNameMid(p: P): string {
+  return p.name == null ? tr('its source') : str(p, 'name');
+}
+
+/**
+ * A sentence that opens on the page's own words for a source it could not name starts with a capital. Only then: a
+ * source's own name keeps its case ("mangapill numérote…"), as the 'then' join keeps it.
+ */
+function opensOnOwnWords(p: P, sentence: string): string {
+  return p.name == null ? cap(sentence) : sentence;
 }
 
 /** Every code this build words, for the test that holds them to the server's registry and unions. */
