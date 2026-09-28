@@ -401,7 +401,10 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
     const shown = (await status(adminTok, '?adult=1')).json();
     assert.equal(shown.run.current.title, TITLE);
     assert.equal(shown.lastFull.result.skips[0].target.title, TITLE);
-    assert.ok((await runs('?adult=1')).body.includes(TITLE), 'the notes too, with the reveal on');
+    // On the parsed field: the run's target label carries the title too, so a match anywhere in the body would pass
+    // with the notes dropped for everyone (integration-2 review).
+    const revealed = (await runs('?adult=1')).json().content.find((r: any) => r.id === planted[1].id);
+    assert.ok(String(revealed?.notes?.replaced?.[0] ?? '').includes(TITLE), 'the notes too, with the reveal on');
   } finally {
     repairState.running = false;
     repairState.live = null;

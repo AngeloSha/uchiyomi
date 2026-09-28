@@ -445,7 +445,7 @@ test('one add/detail lookup is one failure in a row, however many of its calls t
     // The note is fire-and-forget (a reader is waiting on this lookup): wait for the streak to reach what one note
     // per lookup makes, then a little longer for a second one, if the code wrote two. Waiting only for the stage to
     // EXIST let the second lookup's check read before its note landed on a loaded host (fm review).
-    for (let i = 0; i < 40 && ((await row(LOOKUP))?.stages?.chapters?.streak ?? 0) < want; i++) await pause(25);
+    for (let i = 0; i < 40 && ((await row(LOOKUP))?.stages?.chapters?.streak ?? 0) < want; i++) await pause(50);
     await pause(150);
     return (await row(LOOKUP))?.stages?.chapters?.streak;
   };
@@ -468,7 +468,7 @@ test('one add/detail lookup is one failure in a row, however many of its calls t
   // source has one, as any source that was ever tested or failed does.
   await q('INSERT INTO source_health (source_id) VALUES ($1) ON CONFLICT (source_id) DO NOTHING', [LOOKUP_OK]);
   await seriesAndChapters(getSource(LOOKUP_OK)!, 'x1');
-  for (let i = 0; i < 40 && !(await row(LOOKUP_OK))?.stages?.chapters; i++) await pause(25);
+  for (let i = 0; i < 40 && !(await row(LOOKUP_OK))?.stages?.chapters; i++) await pause(50);
   await pause(150);
   const st = (await row(LOOKUP_OK)).stages.chapters;
   assert.ok(st.okAt, 'the chapters the lookup listed are a success at that stage');

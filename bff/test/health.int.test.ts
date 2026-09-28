@@ -869,14 +869,19 @@ test('the failures row says since when, how often, and what Retry now cannot do 
 const S_ARCH = 's_health_arch', S_ARCH_UP = 's_health_arch_up';
 
 /**
- * #117 x Health (the critic's "health-clarity vs issue-117"): a series' slow archive owns every listed number below
- * its boundary and is fetching them a few an hour, so a hole wholly below it is the archive's work in progress --
- * listed for reference, with the outcome `archiving` in place of whatever an older search concluded -- and Fill now
- * says what it will do differently (caveat `archiving`: at once, at normal pace). A hole reaching above the
- * boundary stays a finding; a finished archive owns nothing.
+ * #117 x Health (the critic's "health-clarity vs issue-117"): a series' slow archive fetches every number listed below
+ * its boundary a few an hour, so a hole it takes whole is its work in progress -- listed for reference, with the
+ * outcome `archiving` in place of whatever an older search concluded -- and Fill now says what it will do differently
+ * (caveat `archiving`: at once, at normal pace). A hole reaching above the boundary stays a finding; a finished
+ * archive owns nothing. Only what it will really fetch, and only while it fetches (integration-2 review): a number the
+ * source does not list, or one the archive gave up on, is a gap like any other, and so is every hole of a paused
+ * archive, or of any archive while the admin has paused them all.
  *
  * Reintroduce by dropping `archived` from chapterGaps: the first assertion finds a live finding. Drop the caveat
- * builder's archive half: the caveat assertions find none.
+ * builder's archive half: the caveat assertions find none. Count every number below the boundary (archiveHoles
+ * without its listing): "a number the source does not list is not the archive's" reads archiving. Count a paused
+ * archive: "paused, nothing is fetching them" does; leave the admin's pause out of archiveHoles: "nor while every
+ * archive is paused" does.
  */
 test("a gap below an active archive's boundary is the archive's, and Fill now says it fetches it at once", { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
@@ -895,6 +900,11 @@ test("a gap below an active archive's boundary is the archive's, and Fill now sa
     [S_ARCH, JSON.stringify({ at: new Date().toISOString(), have_count: 5, why: 'listed', sweep: 3 })]);
   await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 8.5), ($2, 'queued', 5.5)
            ON CONFLICT (series_id) DO UPDATE SET state = EXCLUDED.state, boundary = EXCLUDED.boundary`, [S_ARCH, S_ARCH_UP]);
+  // What the sources list: the archive fetches listed numbers, and only those.
+  const list = (sid: string, n: number) => q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1,$2,'test','{}'::jsonb)
+    ON CONFLICT (series_id, number) DO NOTHING`, [sid, n]);
+  for (const n of [4, 5, 6]) await list(S_ARCH, n);
+  for (const n of [2, 3, 4, 6, 7, 8]) await list(S_ARCH_UP, n);
   const gaps = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps');
   const item = (c: any, id: string) => c.items.find((i: any) => i.seriesId === id);
   try {
@@ -913,9 +923,12 @@ test("a gap below an active archive's boundary is the archive's, and Fill now sa
     assert.notEqual(up.info, true, 'a hole reaching above the boundary is still a finding');
     assert.notEqual(up.outcome?.why, 'archiving');
     assert.deepEqual(up.caveats, [{ action: 'fill', code: 'archiving' }], 'though Fill now still fetches its lower part at once');
-    // Paused, the archive still owns its part (the sweep floors at a paused archive's boundary too).
+    // Paused, nothing is fetching them: the hole is not being archived, whatever it is waiting for (the sweep still
+    // floors at a paused archive's boundary). The older answer stands; Fill now still fetches them at once.
     await q(`UPDATE archive_queue SET state = 'paused' WHERE series_id = $1`, [S_ARCH]);
-    assert.equal(item(await gaps(), S_ARCH).outcome?.why, 'archiving');
+    c = await gaps();
+    assert.equal(item(c, S_ARCH).outcome?.why, 'listed', 'paused, nothing is fetching them: not being archived');
+    assert.deepEqual(item(c, S_ARCH).caveats, [{ action: 'fill', code: 'archiving' }]);
     // Finished, it has lifted its boundary: a gap again, with the older answer it had.
     await q(`UPDATE archive_queue SET state = 'done' WHERE series_id = $1`, [S_ARCH]);
     c = await gaps();
@@ -926,7 +939,29 @@ test("a gap below an active archive's boundary is the archive's, and Fill now sa
     await q(`UPDATE archive_queue SET state = 'queued' WHERE series_id = $1`, [S_ARCH]);
     await q('UPDATE lib_series SET gaps_checked_at = NULL, gaps_result = NULL WHERE id = $1', [S_ARCH]);
     assert.equal(item(await gaps(), S_ARCH).info, true, "a hole nobody searched for is the archive's too");
+    // The same hole, never searched, is a finding again whenever nothing is fetching it.
+    await q(`UPDATE archive_queue SET state = 'paused' WHERE series_id = $1`, [S_ARCH]);
+    assert.notEqual(item(await gaps(), S_ARCH).info, true, "a paused archive's hole is a finding: nothing is fetching it");
+    await q(`UPDATE archive_queue SET state = 'queued' WHERE series_id = $1`, [S_ARCH]);
+    await q('UPDATE server_settings SET archive_paused = true WHERE id = 1');
+    try {
+      assert.notEqual(item(await gaps(), S_ARCH).info, true, 'nor while every archive is paused');
+    } finally {
+      await q('UPDATE server_settings SET archive_paused = false WHERE id = 1');
+    }
+    assert.equal(item(await gaps(), S_ARCH).info, true, 'PREMISE: resumed, the archive\'s again');
+    // A number the source does not list is not the archive's: it never fetches it, and read as being archived the
+    // hole was never searched for until the archive finished, weeks on.
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 5', [S_ARCH]);
+    c = await gaps();
+    assert.notEqual(item(c, S_ARCH).info, true, "a number the source does not list is not the archive's");
+    assert.deepEqual(item(c, S_ARCH).caveats, [{ action: 'fill', code: 'archiving' }], 'though Fill now still fetches the rest at once');
+    // Nor is one it gave up on: past the sweep's retry cap, the archive leaves it too.
+    await list(S_ARCH, 5);
+    await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, attempts) VALUES ($1, 5, 'test', 'error', 99)`, [S_ARCH]);
+    assert.notEqual(item(await gaps(), S_ARCH).info, true, 'nor one it gave up on');
   } finally {
+    await q('UPDATE server_settings SET archive_paused = false WHERE id = 1');
     await q('DELETE FROM archive_queue WHERE series_id = ANY($1)', [[S_ARCH, S_ARCH_UP]]);
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S_ARCH, S_ARCH_UP]]);
   }
@@ -976,6 +1011,10 @@ test('the numbering check names every series waiting for a numbering review, wit
     assert.deepEqual(pending.actions, ['renumber', 'keep_numbers']);
     assert.notEqual(pending.info, true);
     assert.match(pending.detail, /gives 213 of 226 posts a number another post has \(73 are all 7\)/);
+    // nb-web is no adapter this process has loaded (an extension the engine is not serving): the source is named as
+    // the series was added. Reintroduce by falling back to the id (`getSource(src)?.name || src` in numberingCheck):
+    // "nb-web gives ...".
+    assert.match(pending.detail, /^Webtoons \(health\) gives/, 'a source that is not loaded is named as the series was added, not by its id');
     assert.match(pending.detail, /Nothing downloads for this series/);
     assert.deepEqual(item(c, NB[1]).actions, ['renumber'], 'a remap is confirmed, never declined');
     assert.match(item(c, NB[1]).detail, /extension setting changed/);

@@ -239,6 +239,26 @@ test('a renumber that starts, or commits, while the walk looks is not a missing 
   assert.equal((await pruned(B.three)).pruned_at, null, 'a renumber that committed while the walk looked');
 });
 
+test("a large renumber that starts while the walk looks does not get the root refused", { skip }, async () => {
+  // The walk read Later's thirty rows with no renumber on the series, and looked for their files after the renumber
+  // had renamed them away: thirty "missing" files of thirty-five, 94 %, and the whole-root rule refused the download
+  // root before the rows were asked again -- the file of Present that really went left unmarked, and the volume
+  // reported as not there (integration-2 review). Asked again before anything is decided, the moved rows count for
+  // nothing.
+  // Reintroduce by asking only after the whole-root rules (verifyChapterFiles): the root is refused.
+  await seed();
+  const L = 's_vf_later';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id) VALUES ($1,$2,'Renumbered later','vf/Later',30,$3)`, [L, SRC, LIB]);
+  for (let n = 1; n <= 30; n++) await book(`b_vf_l${n}`, L, n, `vf/Later/Chapter ${n}.cbz`, DL);
+  const r = await verifyChapterFiles({
+    beforeMark: async () => { await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"temp"}'::jsonb WHERE id = $1`, [L]); },
+  });
+  assert.deepEqual(r.unmounted, [], 'a large renumber that starts while the walk looks does not get the root refused');
+  assert.equal((await pruned(B.three)).pruned_reason, 'missing', 'and the file that really went is marked');
+  assert.equal((await pruned('b_vf_l1')).pruned_at, null, 'the renumbered rows are not');
+  assert.equal(r.checked, 6, 'nor counted as looked at');
+});
+
 test('a removed folder among present ones is marked, not mistaken for a missing volume', { skip }, async () => {
   // Gone's folder is not there at all while Present's is: that is a series whose files went (Delete files,
   // or a hand), and its rows are honestly marked. Reintroduce by reporting a root as unmounted when ANY

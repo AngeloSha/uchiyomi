@@ -40,7 +40,9 @@ const KEEP = 's_nr_keep', FKEEP = 'Webtoons (nr)/Keep';
 const REMAP = 's_nr_remap', FREMAP = 'Webtoons (nr)/Remap';
 const NOOP = 's_nr_noop', FNOOP = 'Webtoons (nr)/Noop';
 const VISIT = 's_nr_visit', FVISIT = 'Webtoons (nr)/Visit';
-const ALL = [HELD, KEEP, REMAP, NOOP, VISIT];
+const NOOPT = 's_nr_nooptr', FNOOPT = 'Webtoons (nr)/Noop Tracked';
+const GONE = 's_nr_gone';
+const ALL = [HELD, KEEP, REMAP, NOOP, VISIT, NOOPT, GONE];
 
 const POSTS = DSN ? istreveliaPosts() : [];
 const EPISODES = DSN ? webtoonsNumbers(POSTS, false) : [];
@@ -240,6 +242,25 @@ test('a remap that renames nothing settles by itself', { skip }, async () => {
   assert.deepEqual(stamps, [[1, 'nr-1'], [2, 'nr-21'], [3, 'nr-42']], 'which post each file is, written down');
 });
 
+test('a tracker link does not hold a remap that renames nothing', { skip }, async () => {
+  // A tracker is told the highest chapter read in the new numbers once a series is renumbered, which is why a plan
+  // with one linked is never clean ('tracker'). A remap that renames nothing moves no number, so there is nothing to
+  // tell it, and it settles by itself like any other (integration-2 review: nothing tested it). Reintroduce by holding
+  // a remap for any reason at all (settleNumbering's noop: `reasons.length === 0`): the check answers
+  // renumber_pending.
+  sequential = false;
+  await seedSeries(NOOPT, FNOOPT, { numbering_pending: 'remap' });
+  for (const [raw, k] of HELD_BOOKS) await seedBook(NOOPT, FNOOPT, raw, k);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1, 'anilist', 'nr-noop')`, [NOOPT]);
+  const { updateSeries } = await import('../src/lib/updater');
+  const up = await updateSeries(NOOPT, 0);
+  assert.deepEqual(up.renumber?.plan?.reasons, ['tracker'], 'PREMISE: the tracker is the plan\'s one reason');
+  assert.equal(up.outcome, 'ok', 'a tracker link does not hold a remap that renames nothing');
+  assert.equal(up.renumber?.state, 'applied');
+  assert.equal((await rowOf(NOOPT)).numbering_pending, null);
+  assert.deepEqual(filesIn(FNOOPT), ['Chapter 1.cbz', 'Chapter 2.cbz', 'Chapter 3.cbz'], 'nothing renamed');
+});
+
 test('a renumber waits for a check inside the series', { skip }, async () => {
   // busyFolders and the activity list only cover a chapter downloading. A check that has read its listing and
   // have-set but is not downloading yet would fetch into the old numbers after the renames (#116 review).
@@ -302,4 +323,17 @@ test('every viewer of a series reads its numbering; one walled off from it reads
   } finally {
     await q('UPDATE lib_series SET age_rating = NULL WHERE id = $1', [HELD]);
   }
+});
+
+test("an extension the engine is not serving is named as the series was added, not by its id", { skip }, async () => {
+  // numberingSummary names the numbering source by its loaded adapter; with the engine down (or the extension not
+  // loaded) there is none, and the notice read "sw:9090 gives many different posts..." (the s17 review). The name the
+  // series was added under is the next best, when the numbering source is its own. Reintroduce by answering the id
+  // (`getSource(src)?.name ?? src` in numberingSummary): the notice names sw:9090.
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, numbering_pending, numbering_source)
+           VALUES ($1, 'Webtoons.com (EN)', 'Gone Engine', 'Webtoons.com (EN)/Gone Engine', 0, $2, 'sw:9090', 'gone', 'posting_order', 'sw:9090')`, [GONE, LIB]);
+  const l = await inject('GET', `/api/series/${GONE}/listing`);
+  assert.equal(l.statusCode, 200, l.body);
+  assert.equal(l.json().numbering?.sourceName, 'Webtoons.com (EN)', 'an extension the engine is not serving is named as the series was added');
+  assert.equal(l.json().numbering?.extSourceId, '9090', 'and its settings are still linked by id');
 });

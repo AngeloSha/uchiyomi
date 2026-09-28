@@ -9,7 +9,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeSuwayomi, istreveliaPosts, webtoonsNumbers, SOURCE_IDS, type FakeSuwayomi } from './fixtures/fakeSuwayomi';
@@ -56,7 +56,10 @@ const S11 = 's_nb_fetch', FOLDER11 = 'Webtoons (test)/Istrevelia Fetch';
 const S12 = 's_nb_healed', FOLDER12 = 'Webtoons (test)/Istrevelia Healed';
 const S13 = 's_nb_fresh', FOLDER13 = 'Webtoons (test)/Istrevelia Fresh';
 const S14 = 's_nb_kept', FOLDER14 = 'Webtoons (test)/Istrevelia Kept';
-const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16];
+// A journal found by a run while another runs it (integration-2 review, a blocker).
+const S17 = 's_nb_race', FOLDER17 = 'Webtoons (test)/Istrevelia Race';
+const S18 = 's_nb_resumed', FOLDER18 = 'Webtoons (test)/Istrevelia Resumed Twice';
+const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18];
 /** How many times the follower was asked for its chapter list. */
 let folAsked = 0;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
@@ -697,4 +700,109 @@ test('an apply refreshes the header summary', { skip }, async () => {
   } finally {
     setSummaryRefresh();
   }
+});
+
+// ---- a journal and the runs that find it (integration-2 review, a blocker) ----------------------------------------
+
+/**
+ * A chain on disk, with bytes of its own in each file: raw 1 holds post 2 and raw 2 holds post 21, so the move 1 -> 2
+ * lands where the move 2 -> 21 leaves -- a journal run twice moves post 2's file on over post 21's. And a read mark on
+ * post 63 (raw 4, a chapter the server does not hold), which the commit moves through its map.
+ */
+async function seedChain(id: string, folder: string) {
+  await seedSeries(id, folder, { numbering_pending: 'posting_order', numbering_source: WEB });
+  await seedBook(id, folder, 1, 2);
+  await seedBook(id, folder, 2, 21);
+  writeFileSync(join(DL, folder, 'Chapter 1.cbz'), 'post 2 bytes');
+  writeFileSync(join(DL, folder, 'Chapter 2.cbz'), 'post 21 bytes');
+  await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies) VALUES ($1, 4, $2, $3, $4::jsonb, 'available', '[]'::jsonb)`,
+    [id, post(63).title, WEB, JSON.stringify(post(63))]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1, $2, 4)`, [adminId, id]);
+  const plan = await numbering.requestNumbering(id, 'posting_order', { userId: adminId });
+  assert.deepEqual(plan.plan.moves.map((m: any) => [m.from, m.to, m.via]).sort((a: any, b: any) => a[0] - b[0]), [[1, 2, 'rename'], [2, 21, 'rename']], 'PREMISE: a chain');
+}
+const bytesIn = (folder: string, file: string) => (existsSync(join(DL, folder, file)) ? readFileSync(join(DL, folder, file), 'utf8') : null);
+const marksOf = async (id: string) =>
+  (await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1 AND user_id = $2', [id, adminId])).map((x: any) => Number(x.n));
+/** A hook that stops the first run through it until `open`, and lets every later one through. */
+function stopFirst() {
+  let open!: () => void, reached!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const there = new Promise<void>((r) => { reached = r; });
+  let first = true;
+  return { open, there, hook: async () => { if (first) { first = false; reached(); await gate; } } };
+}
+/** Until `there`, or a PREMISE failure if `run` settles first (it never reached the hook). */
+const reach = (there: Promise<void>, run: Promise<unknown>) =>
+  Promise.race([there, run.then(() => { throw new Error('PREMISE: the run reached its hook'); })]);
+
+test('a check that starts while a confirmed renumber applies does not run its journal a second time', { skip }, async () => {
+  // The apply's journal is on the row from its first rename until its commit, and a check of the series that starts
+  // meanwhile -- the sweep reaching it, Check now, a repair step's listing refresh, the archive's listing read -- finds
+  // it and resumes it, waiting for the scans the apply holds. It then ran the copy it had read: the finished journal
+  // a second time, post 2's file over post 21's and every read mark mapped again (the mark on post 63, which the map
+  // has no entry for, deleted). Reintroduce by running that copy (drop the read in runJournal): post 21's file holds
+  // post 2's bytes.
+  await seedChain(S17, FOLDER17);
+  const stop = stopFirst();
+  numbering.renumberHooks.afterFirstPhase = stop.hook;
+  let applied: any, checked: any;
+  try {
+    const applying = numbering.requestNumbering(S17, 'posting_order', { confirm: true, userId: adminId });
+    await reach(stop.there, applying);
+    const checking = updater.updateSeries(S17, 0);
+    // Long enough for the check to read the journal and wait for the scans (two small reads).
+    await new Promise((r) => setTimeout(r, 500));
+    stop.open();
+    [applied, checked] = await Promise.all([applying, checking]);
+  } finally {
+    stop.open();
+    numbering.renumberHooks.afterFirstPhase = undefined;
+  }
+  assert.equal(applied?.state, 'applied');
+  assert.equal(checked?.outcome, 'ok', 'the check goes on, in the new numbers');
+  assert.equal(bytesIn(FOLDER17, 'Chapter 21.cbz'), 'post 21 bytes', 'post 21 is at 21, not overwritten by a second run of the journal');
+  assert.equal(bytesIn(FOLDER17, 'Chapter 2.cbz'), 'post 2 bytes', 'post 2 is at 2');
+  assert.deepEqual(filesIn(FOLDER17), ['Chapter 2.cbz', 'Chapter 21.cbz']);
+  assert.deepEqual(await marksOf(S17), [63], 'the read mark moved once, to post 63');
+});
+
+test('a resume that waited behind another finishes the journal from where that one left it', { skip }, async () => {
+  // Two runs find a journal a crash left (the sweep and Check now, say): the first resumes it and the second waits for
+  // the scans the first holds. The first renames every file and fails before its commit, leaving the journal in its
+  // second phase; the second had read it in its first, and ran that phase again over the renamed files. Reintroduce
+  // by running the copy read before the wait (drop `j = now` in runJournal): post 21's file holds post 2's bytes.
+  await seedChain(S18, FOLDER18);
+  numbering.renumberHooks.afterFirstPhase = () => { throw new Error('simulated crash'); };
+  try {
+    await assert.rejects(numbering.requestNumbering(S18, 'posting_order', { confirm: true, userId: adminId }), /simulated crash/);
+  } finally {
+    numbering.renumberHooks.afterFirstPhase = undefined;
+  }
+  assert.equal((await q(`SELECT renumber_plan->>'phase' AS phase FROM lib_series WHERE id = $1`, [S18]))[0].phase, 'rename', 'PREMISE: a journal in its first phase');
+  const stop = stopFirst();
+  let crashed = false;
+  numbering.renumberHooks.afterFirstPhase = stop.hook;
+  numbering.renumberHooks.afterSecondPhase = () => { if (!crashed) { crashed = true; throw new Error('simulated crash'); } };
+  let first: any, second: any;
+  try {
+    const resuming = updater.updateSeries(S18, 0);
+    await reach(stop.there, resuming);
+    const waiting = updater.updateSeries(S18, 0);
+    await new Promise((r) => setTimeout(r, 500));
+    stop.open();
+    [first, second] = await Promise.all([resuming, waiting]);
+  } finally {
+    stop.open();
+    numbering.renumberHooks.afterFirstPhase = undefined;
+    numbering.renumberHooks.afterSecondPhase = undefined;
+  }
+  assert.equal(first?.outcome, 'renumber_pending', 'PREMISE: the first resume failed after its renames');
+  assert.equal(second?.outcome, 'ok', 'the second finished it');
+  assert.equal(bytesIn(FOLDER18, 'Chapter 21.cbz'), 'post 21 bytes', 'a resume that waited behind another finishes the journal from where that one left it');
+  assert.equal(bytesIn(FOLDER18, 'Chapter 2.cbz'), 'post 2 bytes');
+  assert.deepEqual(filesIn(FOLDER18), ['Chapter 2.cbz', 'Chapter 21.cbz']);
+  assert.deepEqual(await marksOf(S18), [63]);
+  const row = (await q('SELECT numbering, numbering_pending, renumber_plan FROM lib_series WHERE id = $1', [S18]))[0];
+  assert.deepEqual([row.numbering, row.numbering_pending, row.renumber_plan], ['posting_order', null, null]);
 });

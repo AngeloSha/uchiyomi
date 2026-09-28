@@ -355,6 +355,9 @@ async function directionOf(seriesId: string, listedMin: number | null): Promise<
 
 export type ArchiveActOutcome = 'ok' | 'not_found' | 'forbidden' | 'done';
 
+/** A row's `renumbered` mark (#116), carried into a note that replaces the rest: `{}` when it has none. */
+const KEEP_RENUMBERED = `CASE WHEN note ? 'renumbered' THEN jsonb_build_object('renumbered', note->'renumbered') ELSE '{}'::jsonb END`;
+
 /**
  * Pause, resume or stop one archive. Its enqueuer may, and any admin; anyone else who can see the series is
  * refused (403), and one who cannot is told there is nothing there (404), as for a download card. Pause and
@@ -379,16 +382,25 @@ export async function archiveAct(act: 'pause' | 'resume' | 'stop', seriesId: str
     // What it landed and has not scanned yet is scanned now: stopped, nothing else would until the next batch --
     // up to twenty minutes of a series page reading "0 chapters" over chapters that came in (#117 review).
     // Reintroduce by dropping this: "a stop scans in what it landed" in archive.int.test.ts finds no book rows.
-    if (unscanned.has(seriesId)) await flushArchiveScan();
+    // Started, not waited for: it is a walk of the whole library, and a Stop that waited on one inside its request
+    // could outlive the proxy on a large library and read as failed although it went through (integration-2 review).
+    // Reintroduce by waiting: "a stop does not wait for the library scan" there.
+    if (unscanned.has(seriesId)) void track(flushArchiveScan());
   } else {
     if (row.state === 'done') return 'done';
+    // A pause and a resume replace the note, but not the mark a renumber left on it (`renumbered`, #116): a paused
+    // row is not looked at, so the renumber's new direction is settled at its first look after the resume -- dropped
+    // here, it was never settled, and the archive went on filling in the direction of the old numbers (integration-2
+    // review).
+    // Reintroduce by building the note without it: "a renumber moves a paused archive too" in archive.int.test.ts
+    // starts chapter 1.
     if (act === 'pause') {
-      await q(`UPDATE archive_queue SET state = 'paused', note = jsonb_build_object('pausedAt', $2::timestamptz)
+      await q(`UPDATE archive_queue SET state = 'paused', note = jsonb_build_object('pausedAt', $2::timestamptz) || ${KEEP_RENUMBERED}
                 WHERE series_id = $1 AND state = 'queued'`, [seriesId, new Date(clock())]);
     } else {
       // Resumed is a fresh start: its three days without progress (attentionOf) count from now, and a listing that
       // failed is read at its next turn rather than on the ladder it was paused on.
-      await q(`UPDATE archive_queue SET state = 'queued', note = jsonb_build_object('progressAt', $2::text)
+      await q(`UPDATE archive_queue SET state = 'queued', note = jsonb_build_object('progressAt', $2::text) || ${KEEP_RENUMBERED}
                 WHERE series_id = $1 AND state = 'paused'`, [seriesId, new Date(clock()).toISOString()]);
     }
   }
@@ -414,11 +426,16 @@ export function archiveForget(seriesId: string): void {
 // A renumber (#116), from both sides (the critic's "issue-116 vs issue-117"). Before its plan reads the series' books,
 // what this archive landed and has not scanned yet is scanned in: a plan is built from lib_books, so a file with no
 // row would keep its old name through the renames and be scanned in afterwards under a number that is another
-// post's by then. After it commits, the numbers remembered for the series are forgotten; the commit has moved the
-// row's boundary and floor itself, and the next tick settles its direction (note.renumbered).
+// post's by then. The scan is started, not waited for, and the plan says `busy` until it is done (lib/numbering.ts
+// beforePlan). After it commits, the numbers remembered for the series are forgotten; the commit has moved the row's
+// boundary and floor itself, and the next tick settles its direction (note.renumbered).
 // Reintroduce by dropping the first: "scanned in before the plan read the books" in archive.int.test.ts finds no
 // book in the plan (and "scanned in before the apply read the books", none in the apply).
-onBeforeRenumberPlan(async (seriesId) => { if (unscanned.has(seriesId)) await flushArchiveScan(); });
+onBeforeRenumberPlan((seriesId) => {
+  if (!unscanned.has(seriesId)) return false;
+  void track(flushArchiveScan());
+  return true;
+});
 onRenumbered((_folder, _map, seriesId) => archiveForget(seriesId));
 
 /** A slow-archive chapter is being fetched into this folder right now: the fetch route's 409 says so. */

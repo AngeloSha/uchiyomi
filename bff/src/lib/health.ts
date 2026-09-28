@@ -31,7 +31,7 @@ import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downlo
 import { applyIgnores, ignoredTail, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
-import { activeArchiveBoundaries } from './archiveBoundaries';
+import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
 import type { NumberingNote } from './numbering';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
@@ -135,8 +135,8 @@ export type HealthOutcome =
       /**
        * huntCandidates' verdict, as lib/repair.ts stores it: followed | no_candidate | cap | off | cooldown | listed |
        * posting_order (#116: the series is numbered by posting order, and no other source can fill it). Or
-       * `archiving` (#117), from no search at all: every missing number lies below the boundary of the series'
-       * active slow archive, which is fetching them. `at` is null then, and the counts are zero.
+       * `archiving` (#117), from no search at all: every missing number is listed below the boundary of the series'
+       * slow archive, which is fetching them (not paused). `at` is null then, and the counts are zero.
        */
       why: string | null;
       followed: string | null;
@@ -261,8 +261,8 @@ interface HeldSeries {
   gapsResult: StoredGaps | null;
   /** Automatic updates on: off, nothing but Fill now will ever fetch its gaps (a caveat on that row). */
   autoUpdate: boolean;
-  /** The boundary of the series' active slow archive (#117), which owns every listed number below it; null for none. */
-  archiveBoundary: number | null;
+  /** What the series' slow archive (#117) is going to fetch of its holes, and whether it is paused; null for none. */
+  archive: ArchiveHoles | null;
 }
 
 /**
@@ -284,7 +284,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
        FROM lib_series ls WHERE ${visibleToAll('ls')} ORDER BY ls.title`,
   );
   // One read for every archive: a handful of rows, where a per-series query would double the page's cost.
-  const archiving = await activeArchiveBoundaries();
+  const archiving = await archiveHoles(undefined, CHAPTER_RETRY_CAP);
   const out: HeldSeries[] = [];
   for (const s of series) {
     out.push({
@@ -294,7 +294,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       gapsCheckedAt: s.gaps_checked_at,
       gapsResult: s.gaps_result ?? null,
       autoUpdate: s.auto_update !== false,
-      archiveBoundary: archiving.get(s.id) ?? null,
+      archive: archiving.get(s.id) ?? null,
     });
   }
   return out;
@@ -387,14 +387,17 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // ⚠️ Still only while the conclusion is fresh: a hole the sweep was going to fetch a fortnight ago and
     // still has not is a finding again, not a promise.
     const sweepsIt = !!g && typeof g.sweep === 'number' && r.missing > 0 && g.sweep >= r.missing;
-    // #117: the series' slow archive owns every listed number below its boundary and is fetching them a few an
-    // hour, so a hole wholly below it is the archive's work in progress, not a finding -- and not a search, which
-    // is why the repair's gap step leaves such a series alone (lib/repair.ts stepGaps). Its outcome says so in
-    // place of whatever an older search concluded. A hole reaching above the boundary stays a finding: the sweep
-    // owns that part. Reintroduce by dropping `archived`: "a gap below an active archive's boundary is the
-    // archive's" in health.int.test.ts finds a live finding.
-    const boundary = r.s.archiveBoundary ?? undefined;
-    const archived = boundary !== undefined && r.gaps.every((x) => x.hi < boundary);
+    // #117: the series' slow archive is fetching the numbers listed below its boundary a few an hour, so a hole it
+    // takes whole is its work in progress, not a finding -- and not a search, which is why the repair's gap step
+    // leaves such a series alone (lib/repair.ts stepGaps). Its outcome says so in place of whatever an older search
+    // concluded. Only what it will really fetch (lib/archiveBoundaries.ts archiveHoles): a hole reaching above the
+    // boundary, or holding a number the source does not list, stays a finding -- the sweep owns the part above, and
+    // nothing fetches the unlisted one. So does every hole of a PAUSED archive: nothing is fetching those now, and
+    // "being archived" over them for weeks hid them. Reintroduce by dropping `archived`: "a gap below an active
+    // archive's boundary is the archive's" in health.int.test.ts finds a live finding; by counting every number
+    // below the boundary, or a paused archive, its "not listed" and "paused" assertions read archiving.
+    const takes = r.gaps.map((x) => archiveTakes(r.s.archive ?? undefined, x.lo, x.hi));
+    const archived = !!r.s.archive && !r.s.archive.paused && r.gaps.every((x, i) => takes[i] === x.count);
     const info = archived || (fresh && ((answered && unchanged) || sweepsIt));
     const what = g ? gapConclusion(g) : null;
     // What Fill now will do that the row would not otherwise say: fetch at once, at normal pace, numbers the
@@ -402,7 +405,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // series' gaps, which nothing else ever will.
     const caveats: HealthCaveat[] = [
       ...(!r.s.autoUpdate ? [{ action: 'fill' as const, code: 'updates_paused' as const }] : []),
-      ...(boundary !== undefined && r.gaps.some((x) => x.lo < boundary) ? [{ action: 'fill' as const, code: 'archiving' as const }] : []),
+      ...(takes.some((n) => n > 0) ? [{ action: 'fill' as const, code: 'archiving' as const }] : []),
     ];
     return {
       seriesId: r.s.id,

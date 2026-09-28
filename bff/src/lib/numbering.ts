@@ -253,14 +253,22 @@ const renumberListeners: Array<(folder: string, map: ReadonlyMap<number, number>
 export function onRenumbered(fn: (folder: string, map: ReadonlyMap<number, number>, seriesId: string) => void): void { renumberListeners.push(fn); }
 /**
  * Asked before a series' plan reads its books: whoever holds chapters of it on disk that the library has not scanned
- * yet scans them in first (the slow archive scans what it lands in batches, lib/archive.ts). A plan is built from
- * lib_books, so a file with no row yet would keep its old name through the renumber and be scanned in afterwards
- * under a number that is another post's by then.
+ * yet starts scanning them in, and answers true (the slow archive scans what it lands in batches, lib/archive.ts). A
+ * plan is built from lib_books, so a file with no row yet would keep its old name through the renumber and be scanned
+ * in afterwards under a number that is another post's by then: until the scan is done the plan is `busy`, shown and
+ * never applied. The scan is not waited for. It is a walk of the whole library, and a plan or a confirmation that
+ * waited on one inside its request could outlive the proxy on a large library, or on a network share, and read as
+ * failed (integration-2 review). Reintroduce by waiting: "a plan does not wait for the library scan" in
+ * archive.int.test.ts.
  */
-const beforePlanHooks: Array<(seriesId: string) => Promise<void>> = [];
-export function onBeforeRenumberPlan(fn: (seriesId: string) => Promise<void>): void { beforePlanHooks.push(fn); }
-async function beforePlan(seriesId: string): Promise<void> {
-  for (const fn of beforePlanHooks) await fn(seriesId).catch((e) => console.warn(`[numbering] ${seriesId}: ${(e as Error)?.message || e}`));
+const beforePlanHooks: Array<(seriesId: string) => boolean> = [];
+export function onBeforeRenumberPlan(fn: (seriesId: string) => boolean): void { beforePlanHooks.push(fn); }
+function beforePlan(seriesId: string): boolean {
+  let waiting = false;
+  for (const fn of beforePlanHooks) {
+    try { if (fn(seriesId)) waiting = true; } catch (e) { console.warn(`[numbering] ${seriesId}: ${(e as Error)?.message || e}`); }
+  }
+  return waiting;
 }
 
 /** A download running into the folder, whoever started it: a rename now would race the file it is writing. */
@@ -293,9 +301,10 @@ interface Built {
  * Every fact planRenumber needs, gathered for one series: its books (the raw number the file carries; for the
  * undo, the number an unwritable root keeps in its override), the posts of the numbering they move to, and the
  * context -- audited Replace… picks, the listing's chosen posts, the floor, which roots can be renamed in, a
- * tracker link, a running download.
+ * tracker link, a running download. `waiting`: chapters of the series are still being scanned in (beforePlan), so
+ * the plan is busy too.
  */
-async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], mode: RenumberMode): Promise<Built> {
+async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], mode: RenumberMode, waiting = false): Promise<Built> {
   const books = await q<{ id: string; root: string; file: string; number: number; ov: number | null; title: string | null; chapter_name: string | null;
     chapter_name_source: string | null; published_at: Date | null; source_chapter_id: string | null; picked_at: Date | null; pruned_at: Date | null }>(
     `SELECT b.id, b.root, b.file, b.number::float8 AS number, o.number::float8 AS ov, b.title, b.chapter_name, b.chapter_name_source,
@@ -383,7 +392,7 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
   }
   const tracker = !!(await one<{ n: number }>('SELECT 1 AS n FROM series_trackers WHERE series_id = $1 LIMIT 1', [s.id]).catch(() => null));
   const plan = planRenumber(planBooks, { mode, posts }, {
-    picks, listing, keep, writable, tracker, busy: folderBusy(s.folder),
+    picks, listing, keep, writable, tracker, busy: waiting || folderBusy(s.folder),
     floor: s.chapter_floor == null ? null : Number(s.chapter_floor),
     // A posting assignment is persisted with the apply: the parked books' numbers are reserved in it.
     reserveParked: rows != null,
@@ -586,12 +595,31 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
   scheduleHealthSummaryRefresh();
 }
 
-/** Renames and rows, from a journal already in lib_series.renumber_plan. Scans held, the folder busy. */
-async function runJournal(seriesId: string, j: Journal, fresh: boolean): Promise<void> {
+/**
+ * Renames and rows, from a journal already in lib_series.renumber_plan. Scans held, the folder busy. False when a
+ * resume found nothing left to finish.
+ *
+ * ⚠️ A RESUME RUNS THE JOURNAL AS IT STANDS ONCE IT HOLDS THE SCANS, never the copy it read before it waited for them.
+ * It waits behind whoever holds them -- the confirmed apply that wrote this very journal (a check that starts while
+ * one runs finds its journal on the row), or another resume of it -- and by then the journal may be finished and
+ * cleared, replaced, or carried into its second phase. Run again from the stale copy, the first phase moved whatever
+ * sat at a move's old name -- in a chain (1 -> 2, 2 -> 21), post 2's freshly renamed file -- to its temporary name,
+ * the second phase renamed it over post 21's file, and the commit remapped every read mark a second time, deleting
+ * each one the map has no entry for (integration-2 review, a blocker).
+ * Reintroduce by running the copy that was read before the wait (drop the read below): "a check that starts while a
+ * confirmed renumber applies" in numbering.int.test.ts finds post 21's file overwritten. Drop only `j = now` (the
+ * phase the journal has reached): "a resume that waited behind another" there finds it overwritten too.
+ */
+async function runJournal(seriesId: string, j: Journal, fresh: boolean): Promise<boolean> {
   const mine = !busyFolders.has(j.folder);
   if (mine) busyFolders.add(j.folder);
   try {
-    await withScansHeld(async () => {
+    return await withScansHeld(async () => {
+      if (!fresh) {
+        const now = (await one<{ plan: Journal | null }>('SELECT renumber_plan AS plan FROM lib_series WHERE id = $1', [seriesId]))?.plan;
+        if (!now || now.id !== j.id) return false;
+        j = now;
+      }
       if (j.phase === 'rename') {
         try {
           await firstPhase(j);
@@ -606,6 +634,7 @@ async function runJournal(seriesId: string, j: Journal, fresh: boolean): Promise
       await secondPhase(j);
       await renumberHooks.afterSecondPhase?.();
       await commit(seriesId, j);
+      return true;
     });
   } finally {
     if (mine) busyFolders.delete(j.folder);
@@ -635,13 +664,14 @@ async function applyRenumber(s: SeriesForPlan, built: Built): Promise<void> {
 /**
  * Finish an apply a crash interrupted. Idempotent: a file already at its final name is left there, one at its
  * temporary name is moved on, one still at its old name (the crash came mid-way through the first phase) is
- * moved through both. The rows follow from the journal alone.
+ * moved through both. The rows follow from the journal alone. False when there was nothing to finish: no journal,
+ * or one another run finished while this one waited (runJournal).
  */
 export async function resumeRenumber(seriesId: string): Promise<boolean> {
   const r = await one<{ renumber_plan: Journal | null }>('SELECT renumber_plan FROM lib_series WHERE id = $1', [seriesId]);
   const j = r?.renumber_plan;
   if (!j || j.v !== 1) return false;
-  await runJournal(seriesId, j, false);
+  if (!(await runJournal(seriesId, j, false))) return false;
   console.log(`[numbering] ${seriesId}: finished a renumber a restart had interrupted`);
   return true;
 }
@@ -678,8 +708,9 @@ export async function settleNumbering(
   if (runsInside(s.id) > 1) return { state: 'busy', numbering: s, error: CHECKING_NOW };
   settling.add(s.id);
   try {
-    await beforePlan(s.id);
-    const built = await buildRenumber(s, sourceId, raw, mode);
+    // Chapters still coming into the library hold it like a download into the folder does: `busy`, and the scan
+    // that lets it through has been started.
+    const built = await buildRenumber(s, sourceId, raw, mode, beforePlan(s.id));
     if (built.plan.reasons.includes('busy')) return { state: 'busy', numbering: s, plan: built.plan, tracker: built.tracker };
     const rows = built.plan.moves.length + built.plan.parked.length;
     // The owner's rule for v0.49.0: a series in a library is renamed only when an admin has seen the plan.
@@ -728,10 +759,9 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
   if (!adapter || !ref) return null;
   const raw = await withTimeout(adapter.listChapters(ref), budgetFor(adapter, PLAN_LIST_TIMEOUT)).catch(() => null);
   if (!raw?.length) return null;
-  // The plan an admin is shown is the one a confirmation would apply: chapters on disk that no scan has taken in
-  // yet are scanned in first, as settleNumbering does.
-  await beforePlan(seriesId);
-  const built = await buildRenumber(s, sourceId!, raw, mode);
+  // The plan an admin is shown is the one a confirmation would apply: while chapters on disk that no scan has taken
+  // in yet are being scanned in, it says `busy`, as the confirmation would (settleNumbering).
+  const built = await buildRenumber(s, sourceId!, raw, mode, beforePlan(seriesId));
   return { plan: built.plan, tracker: built.tracker };
 }
 

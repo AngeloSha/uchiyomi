@@ -214,7 +214,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
   // A renumber a crash interrupted is finished before anything here reads lib_books: its files are at their new
-  // names and its rows at their old ones until then. One that cannot be finished keeps the series held.
+  // names and its rows at their old ones until then. One that cannot be finished keeps the series held. A journal
+  // whose apply is still running (a check that starts during a confirmed renumber finds it on the row) is waited for
+  // and then found finished, never run a second time (lib/numbering.ts runJournal).
   if (s.renumber_plan) {
     const done = await resumeRenumber(seriesId).then(() => true, (e) => {
       console.warn(`[numbering] ${s.title}: the interrupted renumber could not be finished: ${(e as Error)?.message || e}`);
