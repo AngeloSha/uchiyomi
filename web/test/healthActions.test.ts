@@ -74,8 +74,9 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // source's numbers asks the route as it stands, without confirm.
   { action: 'renumber', labels: ["tr('Review renumbering')"], wants: /onRun: \(\) => setPlan\(\{ action: a, mode: 'next' \}\)/ },
   { action: 'keep_numbers', labels: ["tr('Keep the source’s numbers')"], wants: /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/numbering`, \{ json: \{ mode: 'source' \} \}\)/ },
-  // v0.49.1: every series whose main source is the row's, in ONE background run (POST /api/admin/sources/find).
-  { action: 'find_sources', labels: ["tr('Find other sources')"], wants: /onRun: \(\) => \{ if \(item\.sourceId\) void fr\?\.start\(slotKey, \{ sourceId: item\.sourceId \}\); \}/ },
+  // v0.49.1: every series whose main source is the row's, in ONE background run (POST /api/admin/sources/find). Its
+  // label is the counted one in healthCopy.ts ("Find other sources (189 series)"), whose tr() findSources.test.ts holds.
+  { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => \{ if \(item\.sourceId\) void fr\?\.start\(slotKey, \{ sourceId: item\.sourceId \}\); \}/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {

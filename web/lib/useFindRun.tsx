@@ -3,8 +3,8 @@
  * Starting, following and stopping "Find other sources" runs (v0.49.1), the way lib/useRepairRun.tsx does repairs.
  *
  * One run at a time server-wide, in the background: POST /api/admin/sources/find answers 202 with the run's id, GET
- * says how far the running one has got (or what the newest one did), POST …/stop asks it to stop after the series it
- * is on. A press here:
+ * says how far the running one has got (or what the newest one did), POST …/stop stops it at once (the series in
+ * flight is not tried unless it already followed a source). A press here:
  * - keeps its slot -- starting, then awaiting its run's id, then settling while the page is asked again, then ended --
  *   so the key that started it says what it is doing, and then what it did;
  * - polls every 2 s while any run goes or one it started is not yet seen to end;
@@ -32,9 +32,12 @@ export const fetchFind = () => api<FindStatus>('/api/admin/sources/find');
 export interface FindRunApi {
   status: FindStatus | undefined;
   slots: Readonly<Record<string, FindSlot>>;
-  /** Start a run for a slot. A refusal (409 busy, 400 nothing to search) lands on the slot and in a notice. */
+  /**
+   * Start a run for a slot. A refusal (409 busy, 400 nothing to search or too many series) lands on the slot and in a
+   * notice.
+   */
   start: (slot: string, scope: FindScope) => Promise<FindSlot>;
-  /** Ask the running run to stop after the series it is on. */
+  /** Stop the running run, at once. */
   stop: (slot?: string) => Promise<void>;
   /** The run a slot started, once the status names it: running, or the newest finished one. */
   runOf: (slot: string) => FindRun | null;
@@ -45,7 +48,10 @@ const codeOf = (e: unknown): string | null => {
   try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
 };
 
-/** A start that did not start, in words: another run (409 `busy`), nothing to search (400), or the server's message. */
+/**
+ * A start that did not start, in words: another run (409 `busy`), nothing to search (400 `empty_scope`), too many
+ * series (400 `bad_request`), or the server's message.
+ */
 export const findRefusal = (e: unknown): string =>
   startRefusal(e instanceof ApiError ? e.status : null, codeOf(e)) ?? msgOf(e, tr('Could not start the search'));
 

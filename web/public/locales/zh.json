@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2056
+    "strings": 2062
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2017,9 +2017,8 @@
   "Not tried": "未尝试",
   "Earlier searches": "之前的搜索",
   "Show results": "查看结果",
-  "Stopping after this series…": "本系列完成后停止…",
   "Find more sources": "寻找更多来源",
-  "Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.": "用此标题和它的其他名称搜索其他来源，并关注标题和章节编号都对得上的来源。",
+  "Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.": "用此标题和它的其他名称搜索其他来源，并关注所有标题和章节编号都对得上的来源。",
   "Could not add that name": "无法添加该名称",
   "Other names": "其他名称",
   "Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.": "其他来源可能用另一个名称列出这部作品。搜索来源时也会用这些名称，名称必须完全一致。",
@@ -2029,11 +2028,11 @@
   "Too short: a name needs at least 5 letters or digits.": "太短：名称至少需要 5 个字母或数字。",
   "Only names in Latin letters can be matched: English or romanised.": "只能匹配拉丁字母的名称：英文或罗马字。",
   "This series already has that name.": "这部作品已有该名称。",
-  "Up to about a minute per series": "每个系列最多约一分钟",
+  "Up to about a minute and a half per series": "每个系列最多约一分半钟",
   "No other source lists it under its title or other names": "没有其他来源用它的标题或其他名称列出它",
   "Found a possible match, but it did not pass the title and chapter-number check": "找到了可能的匹配，但没有通过标题和章节编号的检查",
   "Already follows as many other sources as a series may": "已关注了一个系列所能关注的最多其他来源",
-  "Not tried: the search was stopped or ran out of time before it got there": "未尝试：搜索在轮到它之前被停止或时间用完",
+  "Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there": "未尝试：搜索在轮到它之前被停止、时间用完或被重启中断",
   "1 source followed": "关注了 1 个来源",
   "{n} sources followed": "关注了 {n} 个来源",
   "Nothing found for 1 series": "1 个系列未找到",
@@ -2059,5 +2058,12 @@
   "Could not stop the search": "无法停止搜索",
   "Looking for other sources for 1 series… Library → Downloads shows how it goes.": "正在为 1 个系列寻找其他来源… 可在 书库 → 下载 中查看进度。",
   "Looking for other sources for {n} series… Library → Downloads shows how it goes.": "正在为 {n} 个系列寻找其他来源… 可在 书库 → 下载 中查看进度。",
-  "The search was stopped or ran out of time before it got to these.": "搜索在轮到这些之前被停止或时间用完。"
+  "The search was stopped, ran out of time or was interrupted by a restart before it got to these.": "搜索在轮到这些之前被停止、时间用完或被重启中断。",
+  "Too few chapters to compare (fewer than 3)": "章节太少，无法比较（少于 3 章）",
+  "No other source could be asked": "没有可以询问的其他来源",
+  "No other source answered": "没有其他来源响应",
+  "Hidden by the 18+ filter": "已被 18+ 过滤隐藏",
+  "Too many series for one search: 500 at most": "一次搜索的系列太多：最多 500 个",
+  "Find other sources (1 series)": "寻找其他来源（1 个系列）",
+  "Find other sources ({n} series)": "寻找其他来源（{n} 个系列）"
 }

@@ -90,7 +90,7 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   };
   const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST');
   const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
-  // A "Find other sources" run stops through its own route (v0.49.1), after the series it is on.
+  // A "Find other sources" run stops through its own route (v0.49.1), at once.
   const cancelRun = (kind: string) => call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
   const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE');
   // Try again is a Fetch of what did not land: the same route, the same checks (the series' visibility, its
@@ -363,10 +363,13 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   // A Health press is about one series -- the way to it (the server drops it for a viewer who may not list that
   // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
   const history = admin && r.kind === 'repair';
-  // v0.49.1: a "Find other sources" run steps series by series, stops after the one it is on, and keeps what it did
-  // per series -- which series got which sources -- a press away, while it runs and after.
+  // v0.49.1: a "Find other sources" run steps series by series, stops at once when asked, and keeps what it did per
+  // series -- which series got which sources -- a press away, while it runs and after.
   const find = r.kind === 'find_sources';
   const [results, setResults] = useState(false);
+  // ONE sentence split around its placeholder, so the series name is its own bidi run (<bdi>): inside the Arabic
+  // sentence a title ending in "!" printed the "!" at the wrong end of the name.
+  const [nowBefore, nowAfter] = tr('Now: {title}').split('{title}');
   return (
     <li data-task={r.kind} data-state={r.status} className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
@@ -375,13 +378,15 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         <p className="truncate text-sm font-medium text-fog-100" data-task-name>{name}</p>
         {step && <p className="mt-0.5 truncate text-[12px] text-fog-300">{step}</p>}
         {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
-        {running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{tr('Now: {title}', { title: r.current.title })}</p>}
+        {running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{nowBefore}<bdi>{r.current.title}</bdi>{nowAfter}</p>}
         <p className="mt-0.5 text-[11px] text-fog-500">
           {running
             ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })
             : relativeTime(new Date(r.finishedAt ?? r.startedAt).toISOString())}
         </p>
-        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{find ? tr('Stopping after this series…') : tr('Stopping after this chapter…')}</p>}
+        {/* A find run stops at once -- the series in flight is not tried unless it already followed a source -- so it
+            says the plain word, never "after this series". */}
+        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{find ? tr('Stopping…') : tr('Stopping after this chapter…')}</p>}
         {/* A stopped find run downloaded nothing to keep: what it followed stays followed, and its results say which. */}
         {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{find ? tr('Stopped before it finished') : tr('Cancelled; what landed is kept.')}</p>}
         {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{r.reason}</p>}

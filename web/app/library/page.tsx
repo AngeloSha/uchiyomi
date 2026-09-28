@@ -263,8 +263,8 @@ function LibraryInner() {
    * pausing for a chapter sweep, a repair or the daily check -- that follows a source only where the title and the
    * chapter numbers match. Minutes or hours for a big selection, so nothing here follows it: the notice says where it
    * shows (Library -> Downloads, Server tasks, with its results), and select mode ends as for any bulk action. Another
-   * run going (409, one at a time server-wide) or nothing the server may search for (400) is said, and the selection
-   * stays. The idea is @TIGamingTV's (PR #119).
+   * run going (409, one at a time server-wide), nothing the server may search for (400 `empty_scope`) or more than 500
+   * series (400 `bad_request`) is said, and the selection stays. The idea is @TIGamingTV's (PR #119).
    */
   const findSelected = async () => {
     setActing(true);

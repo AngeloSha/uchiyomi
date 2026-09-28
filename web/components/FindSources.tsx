@@ -40,9 +40,9 @@ function whenLine(run: FindRunSummary): string {
 }
 
 /**
- * The run as one action row. While it runs the row's key is Stop (after the series it is on); a finished run has no
- * key -- its words are what it did. `label` is the run's name, or -- where the sheet's title already is the name --
- * its status, which the line under it then does not say again.
+ * The run as one action row. While it runs the row's key is Stop (at once: the series in flight is not tried unless
+ * it already followed a source); a finished run has no key -- its words are what it did. `label` is the run's name,
+ * or -- where the sheet's title already is the name -- its status, which the line under it then does not say again.
  */
 export function FindRunRow({ run, onStop, stopping, label }: { run: FindRun; onStop?: () => void; stopping?: boolean; label?: string }) {
   const running = run.status === 'running';
@@ -56,11 +56,18 @@ export function FindRunRow({ run, onStop, stopping, label }: { run: FindRun; onS
   return <ActionList actions={[spec]} />;
 }
 
-/** One series and what became of it. */
-function ResultRow({ r, onOpen }: { r: FindResult; onOpen: () => void }) {
+/**
+ * One series and what became of it. The server leaves the title out for a series this admin may not list -- the 18+
+ * hide, a tidy screen they chose -- and the row says so instead: an empty link read as a blank line between two
+ * series (the review's s5-01), and a name of the page's own making would be one the series does not have. Not a link
+ * either: its only words would be the placeholder.
+ */
+export function FindResultRow({ r, onOpen }: { r: FindResult; onOpen: () => void }) {
   return (
     <li data-find-result={r.seriesId} className="min-w-0 py-2">
-      <Link href={seriesHref(r.seriesId)} onClick={onOpen} className="block truncate text-sm text-fog-100 hover:text-accent" dir="auto">{r.title}</Link>
+      {r.title
+        ? <Link href={seriesHref(r.seriesId)} onClick={onOpen} className="block truncate text-sm text-fog-100 hover:text-accent" dir="auto">{r.title}</Link>
+        : <p data-find-hidden className="truncate text-sm text-fog-500">{tr('Hidden by the 18+ filter')}</p>}
       {r.followed.length > 0
         ? r.followed.map((f) => (
           <p key={f.sourceId} className="mt-0.5 flex min-w-0 gap-1.5 text-[11px] text-fog-400">
@@ -82,7 +89,7 @@ function Group({ id, title, rows, note, onOpen }: { id: string; title: string; r
       </h3>
       {note && <p className="mt-1 text-[11px] leading-relaxed text-fog-500">{note}</p>}
       <ul role="list" className="divide-y divide-ink-800/70">
-        {rows.map((r) => <ResultRow key={r.seriesId} r={r} onOpen={onOpen} />)}
+        {rows.map((r) => <FindResultRow key={r.seriesId} r={r} onOpen={onOpen} />)}
       </ul>
     </section>
   );
@@ -108,6 +115,8 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
   const data: FindStatus | undefined = q.data;
   const run = data?.run ?? null;
   const g = groupResults(run?.results);
+  // What the run never reached, once it is over -- stopped, out of time, or cut short by a restart, whose unreached
+  // series the server lists as not tried exactly as a stop's.
   const untried = run && run.status !== 'running' ? notTriedIds(run) : [];
   const retry = again.slots.retry;
   const stop = async () => {
@@ -140,18 +149,21 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
               <Group id="found" title={tr('New sources')} rows={g.found} onOpen={onClose} />
               <Group id="nothing" title={tr('Nothing found')} rows={g.nothing} onOpen={onClose} />
               <Group id="skipped" title={tr('Skipped')} rows={g.skipped} onOpen={onClose} />
-              <Group id="not-tried" title={tr('Not tried')} rows={g.notTried} note={tr('The search was stopped or ran out of time before it got to these.')} onOpen={onClose} />
+              <Group id="not-tried" title={tr('Not tried')} rows={g.notTried} onOpen={onClose}
+                note={tr('The search was stopped, ran out of time or was interrupted by a restart before it got to these.')} />
             </>
           )}
           {earlier.length > 0 && (
             <section data-find-group="earlier" className="mt-5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Earlier searches')}</h3>
               <ul role="list" className="mt-1 space-y-1.5">
+                {/* The status word leads each line, so the summary after it leaves its own out: "Stopped before it
+                    finished · 6m ago · Stopped before it finished · 3 of 7 series" said it twice. */}
                 {earlier.map((r) => (
                   <li key={r.id} className="text-[11px] leading-relaxed text-fog-400">
                     <span className="text-fog-300">{runStatusWord(r.status)}</span>
                     {whenLine(r) && <span className="text-fog-500"> · {whenLine(r)}</span>}
-                    <span className="text-fog-500"> · {findSummary(r)}</span>
+                    <span className="text-fog-500"> · {findSummary(r, { status: false })}</span>
                   </li>
                 ))}
               </ul>

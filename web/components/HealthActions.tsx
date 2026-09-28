@@ -308,11 +308,12 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         };
       // v0.49.1: every visible series whose main source is this row's source (a failing source, or a series that can no
       // longer update because of its source), in ONE background run. The key carries the run's own state -- working with
-      // its Stop, then what it did -- and waits, saying why, while another run goes (one at a time, server-wide).
+      // its Stop, then what it did -- and waits, saying why, while another run goes (one at a time, server-wide). Its
+      // label says how many series that is, "Find other sources (189 series)": the count was in its title alone.
       case 'find_sources':
         return {
           ...base, ...findGate(fr?.status, findNow.kind === 'working' || findNow.kind === 'starting'),
-          state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: tr('Find other sources'),
+          state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: copy.label({ ...ctx, n: item.findSeries }),
           onRun: () => { if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId }); },
         };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --

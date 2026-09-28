@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2056
+    "strings": 2062
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2017,9 +2017,8 @@
   "Not tried": "Не обработаны",
   "Earlier searches": "Прошлые поиски",
   "Show results": "Показать результаты",
-  "Stopping after this series…": "Остановится после этой серии…",
   "Find more sources": "Найти ещё источники",
-  "Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.": "Ищет в других источниках по этому названию и другим названиям серии и начинает отслеживать источник, у которого совпадают название и номера глав.",
+  "Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.": "Ищет в других источниках по этому названию и другим названиям серии и начинает отслеживать те, у которых совпадают название и номера глав.",
   "Could not add that name": "Не удалось добавить это название",
   "Other names": "Другие названия",
   "Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.": "Другие источники могут называть эту серию иначе. Поиск источников использует и эти названия, и название должно совпадать точно.",
@@ -2029,11 +2028,11 @@
   "Too short: a name needs at least 5 letters or digits.": "Слишком коротко: в названии нужно не меньше 5 букв или цифр.",
   "Only names in Latin letters can be matched: English or romanised.": "Сравнивать можно только названия латиницей: английские или в транслитерации.",
   "This series already has that name.": "У этой серии уже есть такое название.",
-  "Up to about a minute per series": "До минуты на серию",
+  "Up to about a minute and a half per series": "До полутора минут на серию",
   "No other source lists it under its title or other names": "Ни один другой источник не показывает её ни под названием, ни под другими названиями",
   "Found a possible match, but it did not pass the title and chapter-number check": "Нашлось возможное совпадение, но оно не прошло проверку названия и номеров глав",
   "Already follows as many other sources as a series may": "Уже отслеживает столько других источников, сколько можно серии",
-  "Not tried: the search was stopped or ran out of time before it got there": "Не обработана: поиск остановили или у него кончилось время, прежде чем он до неё дошёл",
+  "Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there": "Не обработана: поиск остановили, у него кончилось время или его прервал перезапуск, прежде чем он до неё дошёл",
   "1 source followed": "Добавлен 1 источник",
   "{n} sources followed": "Добавлено источников: {n}",
   "Nothing found for 1 series": "Ничего не найдено для 1 серии",
@@ -2059,5 +2058,12 @@
   "Could not stop the search": "Не удалось остановить поиск",
   "Looking for other sources for 1 series… Library → Downloads shows how it goes.": "Ищем другие источники для 1 серии… Ход поиска — в разделе Библиотека → Загрузки.",
   "Looking for other sources for {n} series… Library → Downloads shows how it goes.": "Ищем другие источники (серий: {n})… Ход поиска — в разделе Библиотека → Загрузки.",
-  "The search was stopped or ran out of time before it got to these.": "Поиск остановили или у него кончилось время, прежде чем он дошёл до этих серий."
+  "The search was stopped, ran out of time or was interrupted by a restart before it got to these.": "Поиск остановили, у него кончилось время или его прервал перезапуск, прежде чем он дошёл до этих серий.",
+  "Too few chapters to compare (fewer than 3)": "Слишком мало глав для сравнения (меньше 3)",
+  "No other source could be asked": "Не удалось опросить ни один другой источник",
+  "No other source answered": "Ни один другой источник не ответил",
+  "Hidden by the 18+ filter": "Скрыто фильтром 18+",
+  "Too many series for one search: 500 at most": "Слишком много серий для одного поиска: не больше 500",
+  "Find other sources (1 series)": "Найти другие источники (1 серия)",
+  "Find other sources ({n} series)": "Найти другие источники (серий: {n})"
 }

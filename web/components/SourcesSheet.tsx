@@ -157,7 +157,8 @@ function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
   const busy = state.kind === 'starting' || state.kind === 'working';
   const spec: ActionSpec = {
     id: 'find-more', label: tr('Find more sources'), state,
-    what: tr('Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.'),
+    // "the ones": a run follows every source that matches, up to the free follower slots -- two, often.
+    what: tr('Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.'),
     ...findGate(fr.status, busy),
     onRun: () => { void fr.start('series', { seriesIds: [id] }); },
     buttonProps: { 'data-find-more': id } as ActionSpec['buttonProps'],
@@ -221,7 +222,9 @@ function OtherNames({ id }: { id: string }) {
         {tr('Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.')}
       </p>
       {isLoading && <div className="skeleton h-9 rounded-lg" />}
-      {!isLoading && !!error && <p className="text-xs text-rose-300">{msgOf(error, tr('Could not load the other names'))}</p>}
+      {/* `dir="auto"`: the server's own message, when it sends one, is English, which in Arabic printed its full stop
+          first. */}
+      {!isLoading && !!error && <p dir="auto" className="text-xs text-rose-300">{msgOf(error, tr('Could not load the other names'))}</p>}
       {!isLoading && !error && !titles.length && <p className="text-xs text-fog-500">{tr('No other names yet.')}</p>}
       {titles.length > 0 && (
         <ul className="divide-y divide-ink-800/70">
@@ -239,7 +242,9 @@ function OtherNames({ id }: { id: string }) {
         </ul>
       )}
       <form className="mt-2 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); void add(); }}>
-        <input value={draft} onChange={(e) => { setDraft(e.target.value); setRefusal(null); }} maxLength={200}
+        {/* `dir="auto"`, as the names above: a typed name takes its own direction. In the Arabic page it inherited
+            right-to-left, and "WALK tale other-name!" showed as "!WALK tale other-name" (the review's ar-s1m-04). */}
+        <input dir="auto" value={draft} onChange={(e) => { setDraft(e.target.value); setRefusal(null); }} maxLength={200}
           placeholder={tr('Add another name…')} aria-label={tr('Add another name…')}
           aria-invalid={refusal ? true : undefined} aria-describedby={refusal ? `alt-refusal-${id}` : undefined}
           className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900/60 px-2.5 py-1.5 text-sm text-fog-100 outline-hidden transition focus:border-accent/60" />

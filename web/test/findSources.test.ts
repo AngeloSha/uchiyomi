@@ -20,11 +20,11 @@ import {
   groupResults, notTriedIds, progressLine, seriesOutcome, startRefusal, FIND_SERIES_MAX_MS,
   type FindResult, type FindRun, type FindStatus,
 } from '../lib/findSources';
-import { ACTION_COPY } from '../lib/healthCopy';
+import { ACTION_COPY, runStatusWord } from '../lib/healthCopy';
 import { answerView, diagnosisFix, diagnosisReason, evidenceView, healthRowEvidence, type StageLine } from '../lib/sourceEvidence';
 import { runProgress, runTitle, type RunCard } from '../lib/jobs';
 import { navRing, runName, type SourceJobs } from '../lib/serverDownloads';
-import { FindRunRow } from '../components/FindSources';
+import { FindResultRow, FindRunRow } from '../components/FindSources';
 
 (globalThis as any).React = React;
 const ROOT = join(__dirname, '..');
@@ -62,17 +62,22 @@ test("'not tried' is never 'nothing found': four groups, each in the run's order
     res('g', { why: 'not_tried' }),
     // A follow wins over any reason sent beside it.
     res('h', { followed: [followed('Asura')], why: 'full' }),
+    // The v0.49.1 review's m2/m3: decided without a search (too few chapters, no source to ask) is skipped; asked with
+    // no answer was searched.
+    res('i', { why: 'too_few' }),
+    res('j', { why: 'no_source' }),
+    res('k', { why: 'no_answer' }),
   ]);
   assert.deepEqual(g.found.map((r) => r.seriesId), ['a', 'h']);
-  assert.deepEqual(g.nothing.map((r) => r.seriesId), ['b', 'd'], 'a series never searched reads as nothing found');
-  assert.deepEqual(g.skipped.map((r) => r.seriesId), ['e', 'f'], 'a series skipped on purpose reads as nothing found');
+  assert.deepEqual(g.nothing.map((r) => r.seriesId), ['b', 'd', 'k'], 'a series never searched reads as nothing found');
+  assert.deepEqual(g.skipped.map((r) => r.seriesId), ['e', 'f', 'i', 'j'], 'a series nobody searched for reads as nothing found');
   assert.deepEqual(g.notTried.map((r) => r.seriesId), ['c', 'g']);
   assert.deepEqual(notTriedIds(run({ status: 'stopped', results: [res('c', { why: 'not_tried' }), res('b', { why: 'no_match' })] })), ['c']);
 });
 
 test('every reason is a sentence, and "not tried" says so rather than "not found"', () => {
   // Reintroduce a missing case (drop 'full' from findWhyLine): it reads the fallback "Nothing found" and fails here.
-  const whys = ['no_match', 'refused', 'full', 'posting_order', 'not_tried'];
+  const whys = ['no_match', 'refused', 'full', 'posting_order', 'too_few', 'no_source', 'no_answer', 'not_tried'];
   const lines = whys.map(findWhyLine);
   for (const [i, why] of whys.entries()) {
     assert.ok(lines[i] && lines[i] !== why && !/\b[a-z]+_[a-z]+\b/.test(lines[i]), `'${why}' has no words`);
@@ -125,7 +130,6 @@ test('a run as a status line: working with its Stop, then what it did -- amber w
   const stopped = findRunState(run({ status: 'stopped', finishedAt: 5 }));
   assert.ok(stopped.kind === 'done' && stopped.partial === true && /^Stopped before it finished/.test(stopped.outcome));
   assert.deepEqual(findRunState(run({ status: 'failed', finishedAt: 7 })), { kind: 'failed', finishedAt: 7, reason: 'The search failed; the server log says why' });
-  assert.deepEqual(findRunState(run({ status: 'interrupted', finishedAt: 7 })), { kind: 'failed', finishedAt: 7, reason: 'Interrupted by a restart' });
   assert.deepEqual(findRunState(null), { kind: 'idle' });
 });
 
@@ -181,9 +185,9 @@ test('one run at a time: a key waits, saying why, while another goes; its own ru
   assert.deepEqual(findGate(status({ running: true, run: run() }), true), {}, 'the key whose own run is going is disabled (it is the Stop)');
   assert.deepEqual(findGate(status(), false), {});
   assert.deepEqual(findGate(undefined, false), {});
-  // The refusals of a start, in words: 409 is another run, 400 an empty scope; anything else is the caller's.
+  // The refusals of a start, in words: 409 is another run, 400 `empty_scope` nothing to search (m10 has the rest).
   assert.equal(startRefusal(409, 'busy'), busy, 'another run going reads as a failure');
-  assert.equal(startRefusal(400, 'bad_request'), 'No series to search for', 'nothing to search for reads as a failure');
+  assert.equal(startRefusal(400, 'empty_scope'), 'No series to search for', 'nothing to search for reads as a failure');
   assert.equal(startRefusal(500, null), null);
 });
 
@@ -259,12 +263,12 @@ test("Health's key: what it does for how many series, how, and how long before t
   for (const fact of [/1\.5 seconds apart/, /chapter sweep, a repair or the daily check/, /up to 3 other names/, /never asks this source/, /posting order is skipped/]) {
     assert.match(how, fact);
   }
-  // How long: the pace and the search's own wall per series, rounded up -- or per series when the row does not say.
-  assert.equal(FIND_SERIES_MAX_MS, 61_500);
-  assert.equal(c.eta({ n: 189 }), 'Up to 4 hours');
-  assert.equal(c.eta({ n: 6 }), 'Up to 7 minutes');
-  assert.equal(c.eta({}), 'Up to about a minute per series');
-  assert.equal(findEta(0), 'Up to about a minute per series');
+  // How long: the pace and the run's own wall per series, rounded up -- or per series when the row does not say (the
+  // test "m7: the estimate is the run's own wall" below).
+  assert.equal(c.eta({ n: 189 }), 'Up to 5 hours');
+  assert.equal(c.eta({ n: 6 }), 'Up to 10 minutes');
+  assert.equal(c.eta({}), 'Up to about a minute and a half per series');
+  assert.equal(findEta(0), 'Up to about a minute and a half per series');
 });
 
 test('a Health row: Find other sources posts the source, and its run has a key group and a status line of its own', () => {
@@ -351,7 +355,7 @@ test("Server tasks: the run's card is named as a noun, counts its follows, stops
   assert.match(view, /const cancelRun = \(kind: string\) => call\(kind === 'find_sources' \? '\/api\/admin\/sources\/find\/stop' : `\/api\/sources\/runs\/\$\{kind\}\/cancel`, 'POST'\);/,
     "the run's Stop posts the generic cancel");
   const task = slice(view, 'function TaskRow(', 'function CameInTile(');
-  assert.match(task, /\{find \? tr\('Stopping after this series…'\) : tr\('Stopping after this chapter…'\)\}/, 'a find run stops "after this chapter"');
+  assert.match(task, /\{find \? tr\('Stopping…'\) : tr\('Stopping after this chapter…'\)\}/, 'a find run stops "after this chapter", or "after this series"');
   assert.match(task, /\{find \? tr\('Stop'\) : tr\('Cancel'\)\}/);
   assert.match(task, /\{find && admin && \(\s*<button type="button" onClick=\{\(\) => setResults\(true\)\}/, 'the card has no way to its results');
   assert.match(task, /\{results && <FindResultsSheet onClose=\{\(\) => setResults\(false\)\} \/>\}/);
@@ -402,4 +406,176 @@ test('the run row renders its Stop while it runs, no key once it is over, and sa
   const head = seen(renderToStaticMarkup(createElement(FindRunRow, { run: stopped, label: 'Stopped before it finished' })));
   assert.equal(head.split('Stopped before it finished').length - 1, 1, "the sheet's head says the stop twice");
   assert.match(head, /12 of 189 series · 3 sources followed/, "the sheet's head lost how far the run got");
+});
+
+/* ================================================================ the v0.49.1 review's findings, each by its number */
+
+test('M1: a run a restart cut short reads like a stopped one -- amber, counted, its unreached series offered again', () => {
+  // The server lists every series an interrupted run never reached as `not_tried`, exactly as a stop's. Reintroduce the
+  // red `failed` state for 'interrupted' in findRunState: "an interrupted run reads as a failure" fails. Reintroduce
+  // `run.status === 'stopped'` alone in findSummary's count: "an interrupted run counts none of the series it never
+  // reached" fails.
+  const rows = [res('a', { followed: [followed('A')] }), res('b', { why: 'no_match' }), res('c', { why: 'not_tried' }), res('d', { why: 'not_tried' })];
+  const cut = run({ status: 'interrupted', total: 4, done: 2, followed: 1, finishedAt: '2026-09-28T11:00:00Z', results: rows });
+  const s = findRunState(cut);
+  assert.equal(s.kind, 'done', 'an interrupted run reads as a failure');
+  if (s.kind === 'done') {
+    assert.equal(s.partial, true, 'an interrupted run reads as a clean success');
+    assert.equal(s.outcome, 'Interrupted by a restart · 2 of 4 series · 1 source followed · Nothing found for 1 series · 2 series not tried');
+    // Closed when the server came back, not when it went down: no "Took".
+    assert.equal(s.tookMs, undefined, 'an interrupted run says it took until the server came back');
+  }
+  // Exactly a stop's words but the first, and without it where a label already says it.
+  assert.equal(findSummary({ ...cut, status: 'stopped' }), 'Stopped before it finished · 2 of 4 series · 1 source followed · Nothing found for 1 series · 2 series not tried');
+  assert.equal(findSummary(cut, { status: false }), '2 of 4 series · 1 source followed · Nothing found for 1 series · 2 series not tried');
+  // A series with no row at all (a run closed before the server listed them) still counts as not tried.
+  assert.equal(findSummary({ ...cut, total: 7 }, { status: false }), '2 of 7 series · 1 source followed · Nothing found for 1 series · 5 series not tried',
+    'an interrupted run counts none of the series it never reached');
+  // The retry key: every finished run's not-tried rows, an interrupted one's included.
+  assert.deepEqual(notTriedIds(cut), ['c', 'd']);
+  const sheet = slice(code(read('components/FindSources.tsx')), 'export function FindResultsSheet(', 'export function FindRunCard(');
+  assert.match(sheet, /const untried = run && run\.status !== 'running' \? notTriedIds\(run\) : \[\];/, 'the retry key is offered after a stop only');
+});
+
+test('m1: a series the viewer may not list keeps its row -- a placeholder, its reason, and no link', () => {
+  // The server drops the title of a series hidden by the 18+ filter; the row rendered an empty link, a blank line
+  // between two series (the review's s5-01). Reintroduce the plain `<Link …>{r.title}</Link>`: "a hidden series reads
+  // as a blank link" fails.
+  const hidden = renderToStaticMarkup(createElement(FindResultRow, { r: { seriesId: 'x', followed: [], why: 'no_match' }, onOpen: () => {} }));
+  assert.doesNotMatch(hidden, /<a\b/, 'a hidden series reads as a blank link');
+  assert.match(hidden, /data-find-hidden[^>]*>Hidden by the 18\+ filter</, 'a hidden series has no words in place of its title');
+  assert.match(hidden, /No other source lists it under its title or other names/, 'a hidden series loses its reason');
+  // A named one is a link to its series, in its own direction.
+  const shown = renderToStaticMarkup(createElement(FindResultRow, { r: res('y', { why: 'no_match' }), onOpen: () => {} }));
+  assert.match(shown, /<a [^>]*href="[^"]*id=y"[^>]*>Y<\/a>/);
+  assert.doesNotMatch(shown, /data-find-hidden/);
+});
+
+test('m2/m3: every reason in its own words -- too few chapters, no source to ask and no answer are not "not tried"', () => {
+  // Reintroduce the old not_tried sentence ("…was stopped or ran out of time…"): the series a restart cut off read as
+  // stopped, and "not_tried leaves the restart out" fails. Drop one of the new cases: it reads "Nothing found".
+  assert.equal(findWhyLine('too_few'), 'Too few chapters to compare (fewer than 3)', "'too_few' is not said as the review words it");
+  assert.equal(findWhyLine('no_source'), 'No other source could be asked', "'no_source' is not said as the review words it");
+  assert.equal(findWhyLine('no_answer'), 'No other source answered', "'no_answer' is not said as the review words it");
+  assert.equal(findWhyLine('refused'), 'Found a possible match, but it did not pass the title and chapter-number check');
+  assert.equal(findWhyLine('not_tried'), 'Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there',
+    'not_tried leaves the restart out');
+  const sheet = code(read('components/FindSources.tsx'));
+  assert.match(sheet, /note=\{tr\('The search was stopped, ran out of time or was interrupted by a restart before it got to these\.'\)\}/,
+    "the Not tried section's note leaves the restart out");
+  // Decided without a search is skipped; asked, with no answer, was searched.
+  const r = run({ status: 'done', done: 3, total: 3, followed: 0, results: [res('a', { why: 'too_few' }), res('b', { why: 'no_source' }), res('c', { why: 'no_answer' })] });
+  assert.equal(findSummary(r), '0 sources followed · Nothing found for 1 series · 2 series skipped', 'a series decided without a search counts as nothing found');
+});
+
+test('m5: no status is said twice -- an earlier search, and the head of a run a restart cut short', () => {
+  // Reintroduce `findSummary(r)` under Earlier searches: "Stopped before it finished · 6m ago · Stopped before it
+  // finished · 3 of 7 series" (the review's s6-02), and "an earlier search says its status twice" fails.
+  const sheet = code(read('components/FindSources.tsx'));
+  const earlier = slice(sheet, "{tr('Earlier searches')}", '</section>');
+  assert.match(earlier, /<span className="text-fog-300">\{runStatusWord\(r\.status\)\}<\/span>/);
+  assert.match(earlier, /\{findSummary\(r, \{ status: false \}\)\}/, 'an earlier search says its status twice');
+  // The head of an interrupted run: its label says it once, and the line under it what the run did.
+  const seen = (html: string) => html.replace(/<span role="status"[^>]*>[^<]*<\/span>/g, '');
+  const cut = run({ status: 'interrupted', total: 7, done: 1, followed: 0, finishedAt: '2026-09-28T11:00:00Z', results: [res('a', { why: 'no_match' })] });
+  const head = seen(renderToStaticMarkup(createElement(FindRunRow, { run: cut, label: runStatusWord('interrupted') })));
+  assert.equal(head.split('Interrupted by a restart').length - 1, 1, "the interrupted head says 'Interrupted by a restart' twice");
+  assert.match(head, /1 of 7 series · 0 sources followed · Nothing found for 1 series · 6 series not tried/, 'the interrupted head does not say what the run did');
+  // Health's card, named as a run: the restart leads its line, once.
+  const card = seen(renderToStaticMarkup(createElement(FindRunRow, { run: cut })));
+  assert.equal(card.split('Interrupted by a restart').length - 1, 1, 'the card says the restart twice, or not at all');
+});
+
+test('m6: a run waiting for a sweep, a repair or the daily check says so, on the row and the card', () => {
+  // While it waits, `current` still names the series it asked about last. Reintroduce `detail: run.current?.title`
+  // alone: the row reads "12 of 189 series · Solo Leveling" for as long as the sweep takes, and "the waiting run says
+  // it is on a series" fails.
+  const waiting = run({ waiting: 'check', current: { seriesId: 's9', title: 'Solo Leveling' } });
+  const w = findRunState(waiting);
+  assert.ok(w.kind === 'working');
+  if (w.kind === 'working') {
+    assert.equal(w.step, '12 of 189 series · 3 sources followed');
+    assert.equal(w.detail, 'Waiting for the source check to finish', 'the waiting run says it is on a series');
+  }
+  // The slow archive's words for the same three waits (lib/archive.ts waitingText).
+  const sweep = findRunState(run({ total: 1, done: 0, followed: 0, waiting: 'sweep', current: { seriesId: 's9', title: 'Solo Leveling' } }));
+  assert.ok(sweep.kind === 'working' && sweep.step === 'Waiting for the scheduled check to finish' && sweep.detail === undefined,
+    'a run of one that waits says it is searching');
+  const repair = findRunState(run({ waiting: 'repair' }));
+  assert.ok(repair.kind === 'working' && repair.detail === 'Waiting for the library repair to finish');
+  const on = findRunState(run({ waiting: null, current: { seriesId: 's9', title: 'Solo Leveling' } }));
+  assert.ok(on.kind === 'working' && on.detail === 'Solo Leveling', 'a run that is not waiting lost the series it is on');
+  // Health's card (FindRunRow) and a row's key (findSlotState) both say it.
+  const card = renderToStaticMarkup(createElement(FindRunRow, { run: waiting, onStop: () => {} }));
+  assert.match(card, /12 of 189 series · 3 sources followed · Waiting for the source check to finish/, 'the card does not say the run waits');
+  const key = findSlotState({ phase: 'awaiting', startedAt: 5, runId: 'r1' }, waiting, () => {});
+  assert.ok(key.kind === 'working' && key.detail === 'Waiting for the source check to finish', "the row's key does not say the run waits");
+});
+
+test("m7: the estimate is the run's own wall per series (90 s) plus the 1.5 s pace", () => {
+  // Reintroduce the hunt's wall (`1_500 + 60_000`): aqua's 189 series read "Up to 4 hours" for a run that may take
+  // nearly five, and "the estimate is the hunt's wall, not the run's" fails.
+  assert.equal(FIND_SERIES_MAX_MS, 91_500, "the estimate is the hunt's wall, not the run's");
+  assert.equal(findEta(189), 'Up to 5 hours');
+  assert.equal(findEta(6), 'Up to 10 minutes');
+  assert.equal(findEta(1), 'Up to 2 minutes');
+  assert.equal(findEta(null), 'Up to about a minute and a half per series');
+});
+
+test('m10: a refused start is read by its code first -- too many series is not "no series"', () => {
+  // Reintroduce `if (status === 400) return tr('No series to search for')`: a Library selection of 600 read "No series
+  // to search for", and "more than 500 series reads as none" fails.
+  assert.equal(startRefusal(400, 'bad_request'), 'Too many series for one search: 500 at most', 'more than 500 series reads as none');
+  assert.equal(startRefusal(400, 'empty_scope'), 'No series to search for');
+  // Anything else is the caller's: the server's own message, or "Could not start the search".
+  assert.equal(startRefusal(400, 'something_new'), null, 'an unknown refusal reads as no series');
+  assert.equal(startRefusal(400, null), null);
+  // Every key and the Library read it through findRefusal: the words, else the server's own message.
+  const hook = code(read('lib/useFindRun.tsx'));
+  assert.match(hook, /startRefusal\(e instanceof ApiError \? e\.status : null, codeOf\(e\)\) \?\? msgOf\(e, tr\('Could not start the search'\)\)/);
+});
+
+test('m11: a typed or source name takes its own direction', () => {
+  // The review's ar-s1m-04: in Arabic the field showed "WALK tale other-name!" as "!WALK tale other-name". Reintroduce
+  // the field without `dir="auto"`: "the other-name field takes the page's direction" fails.
+  const names = slice(code(read('components/SourcesSheet.tsx')), 'function OtherNames(', 'const emptyStat');
+  assert.match(names, /<input dir="auto" value=\{draft\}/, "the other-name field takes the page's direction");
+  assert.match(names, /<span dir="auto" className="block truncate text-sm text-fog-100" title=\{a\.title\}>\{a\.title\}<\/span>/, "a stored name takes the page's direction");
+  assert.match(names, /<p dir="auto" className="text-xs text-rose-300">\{msgOf\(error, tr\('Could not load the other names'\)\)\}<\/p>/,
+    "the server's English message takes the page's direction");
+  // The run card's series name is a run of its own inside the translated sentence.
+  const task = slice(code(read('components/ServerDownloadsView.tsx')), 'function TaskRow(', 'function CameInTile(');
+  assert.match(task, /const \[nowBefore, nowAfter\] = tr\('Now: \{title\}'\)\.split\('\{title\}'\);/);
+  assert.match(task, /\{nowBefore\}<bdi>\{r\.current\.title\}<\/bdi>\{nowAfter\}/, "the run card's series name is not isolated");
+  // The results: a title in its own direction, a followed source's name isolated.
+  const row = renderToStaticMarkup(createElement(FindResultRow, { r: res('a', { followed: [followed('Asura Scans!')] }), onOpen: () => {} }));
+  assert.match(row, /<a [^>]*dir="auto"[^>]*>A<\/a>/);
+  assert.match(row, /<bdi[^>]*>Asura Scans!<\/bdi>/);
+});
+
+test("m13: a Health row's key says how many series it searches for, counted in pairs", () => {
+  // On a row of "Series that can no longer update" the key searches EVERY series of that source, and the count was
+  // only in its tooltip. Reintroduce `label: tr('Find other sources')` in HealthRow's arm: "the row's key does not say
+  // how many series" fails.
+  const c = ACTION_COPY.find_sources;
+  assert.equal(c.label({ n: 189 }), 'Find other sources (189 series)');
+  assert.equal(c.label({ n: 1 }), 'Find other sources (1 series)');
+  assert.equal(c.label({}), 'Find other sources', "the card's legend says a count it does not have");
+  const row = slice(code(read('components/HealthActions.tsx')), 'export function HealthRow', 'const SCAN_CHECKS');
+  const arm = slice(row, "case 'find_sources':", "case 'renumber':");
+  assert.match(arm, /label: copy\.label\(\{ \.\.\.ctx, n: item\.findSeries \}\)/, "the row's key does not say how many series");
+  // One key per number, so a language that inflects the noun can: "(1 Serie)", "(189 Serien)".
+  const de = JSON.parse(read('public/locales/de.json'));
+  setActiveDict(de);
+  try {
+    assert.equal(c.label({ n: 1 }), de['Find other sources (1 series)']);
+    assert.equal(c.label({ n: 189 }), de['Find other sources ({n} series)'].replace('{n}', '189'));
+  } finally { setActiveDict({}); }
+});
+
+test('nit: Find more sources says it follows the sources that match -- a run can follow two', () => {
+  // Reintroduce "…and follows one whose title and chapter numbers match": "Find more sources promises one source" fails.
+  const find = slice(code(read('components/SourcesSheet.tsx')), 'function FindMore(', 'function OtherNames(');
+  assert.match(find, /what: tr\('Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match\.'\),/,
+    'Find more sources promises one source');
 });

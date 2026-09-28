@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2056
+    "strings": 2062
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -2017,9 +2017,8 @@
   "Not tried": "Não tentadas",
   "Earlier searches": "Buscas anteriores",
   "Show results": "Ver resultados",
-  "Stopping after this series…": "Parando depois desta série…",
   "Find more sources": "Encontrar mais fontes",
-  "Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.": "Busca nas outras fontes por este título e seus outros nomes, e segue uma cujo título e números de capítulo batam.",
+  "Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.": "Busca nas outras fontes por este título e seus outros nomes, e segue as que tiverem título e números de capítulo que batem.",
   "Could not add that name": "Não foi possível adicionar esse nome",
   "Other names": "Outros nomes",
   "Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.": "Outras fontes podem listar esta série com outro nome. As buscas por fontes também usam esses nomes, e um nome precisa bater exatamente.",
@@ -2029,11 +2028,11 @@
   "Too short: a name needs at least 5 letters or digits.": "Curto demais: um nome precisa de pelo menos 5 letras ou dígitos.",
   "Only names in Latin letters can be matched: English or romanised.": "Só dá para comparar nomes em alfabeto latino: em inglês ou romanizados.",
   "This series already has that name.": "Esta série já tem esse nome.",
-  "Up to about a minute per series": "Até cerca de um minuto por série",
+  "Up to about a minute and a half per series": "Até cerca de um minuto e meio por série",
   "No other source lists it under its title or other names": "Nenhuma outra fonte a lista pelo título nem pelos outros nomes",
   "Found a possible match, but it did not pass the title and chapter-number check": "Achou uma possível correspondência, mas ela não passou na verificação de título e números de capítulo",
   "Already follows as many other sources as a series may": "Já segue tantas outras fontes quanto uma série pode",
-  "Not tried: the search was stopped or ran out of time before it got there": "Não tentada: a busca foi parada ou ficou sem tempo antes de chegar lá",
+  "Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there": "Não tentada: a busca foi parada, ficou sem tempo ou foi interrompida por uma reinicialização antes de chegar lá",
   "1 source followed": "1 fonte seguida",
   "{n} sources followed": "{n} fontes seguidas",
   "Nothing found for 1 series": "Nada encontrado para 1 série",
@@ -2059,5 +2058,12 @@
   "Could not stop the search": "Não foi possível parar a busca",
   "Looking for other sources for 1 series… Library → Downloads shows how it goes.": "Procurando outras fontes para 1 série… Biblioteca → Downloads mostra o andamento.",
   "Looking for other sources for {n} series… Library → Downloads shows how it goes.": "Procurando outras fontes para {n} séries… Biblioteca → Downloads mostra o andamento.",
-  "The search was stopped or ran out of time before it got to these.": "A busca foi parada ou ficou sem tempo antes de chegar a estas."
+  "The search was stopped, ran out of time or was interrupted by a restart before it got to these.": "A busca foi parada, ficou sem tempo ou foi interrompida por uma reinicialização antes de chegar a estas.",
+  "Too few chapters to compare (fewer than 3)": "Poucos capítulos para comparar (menos de 3)",
+  "No other source could be asked": "Nenhuma outra fonte pôde ser consultada",
+  "No other source answered": "Nenhuma outra fonte respondeu",
+  "Hidden by the 18+ filter": "Oculta pelo filtro +18",
+  "Too many series for one search: 500 at most": "Séries demais para uma busca: no máximo 500",
+  "Find other sources (1 series)": "Encontrar outras fontes (1 série)",
+  "Find other sources ({n} series)": "Encontrar outras fontes ({n} séries)"
 }

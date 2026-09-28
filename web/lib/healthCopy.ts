@@ -214,7 +214,12 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   // run (lib/useFindRun.tsx), and Library -> Downloads shows it under Server tasks. `n` is how many series it would
   // search for, when the row says (HealthItem.findSeries). The idea is @TIGamingTV's (PR #119).
   find_sources: {
-    label: () => tr('Find other sources'),
+    // A row's key says how many series it searches for: on a row of "Series that can no longer update" it is every
+    // series of that source, not the one row, and the count was only in the key's tooltip. The card's legend, with
+    // no count, is the verb alone.
+    label: (c) => (c.n === 1 ? tr('Find other sources (1 series)')
+      : c.n && c.n > 1 ? tr('Find other sources ({n} series)', { n: c.n })
+        : tr('Find other sources')),
     what: (c) => (c.n === 1
       ? tr('Searches the other sources for the 1 series that comes from this source, and follows the ones whose title and chapter numbers match.')
       : c.n && c.n > 1

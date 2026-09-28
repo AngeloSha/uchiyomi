@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2056
+    "strings": 2062
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2017,9 +2017,8 @@
   "Not tried": "لم تُجرَّب",
   "Earlier searches": "عمليات بحث سابقة",
   "Show results": "عرض النتائج",
-  "Stopping after this series…": "يتوقف بعد هذه السلسلة…",
   "Find more sources": "البحث عن مزيد من المصادر",
-  "Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.": "يبحث في المصادر الأخرى بهذا العنوان وأسمائه الأخرى، ويتابع مصدرًا يتطابق عنوانه وأرقام فصوله.",
+  "Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.": "يبحث في المصادر الأخرى بهذا العنوان وأسمائه الأخرى، ويتابع المصادر التي يتطابق عنوانها وأرقام فصولها.",
   "Could not add that name": "تعذّرت إضافة هذا الاسم",
   "Other names": "أسماء أخرى",
   "Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.": "قد تدرج مصادر أخرى هذه السلسلة باسم آخر. يستخدم البحث عن المصادر هذه الأسماء أيضًا، ويجب أن يتطابق الاسم تمامًا.",
@@ -2029,11 +2028,11 @@
   "Too short: a name needs at least 5 letters or digits.": "قصير جدًا: يحتاج الاسم إلى 5 أحرف أو أرقام على الأقل.",
   "Only names in Latin letters can be matched: English or romanised.": "لا يمكن مطابقة إلا الأسماء المكتوبة بحروف لاتينية: بالإنجليزية أو بالكتابة اللاتينية.",
   "This series already has that name.": "لهذه السلسلة هذا الاسم بالفعل.",
-  "Up to about a minute per series": "حتى دقيقة تقريبًا لكل سلسلة",
+  "Up to about a minute and a half per series": "حتى دقيقة ونصف تقريبًا لكل سلسلة",
   "No other source lists it under its title or other names": "لا يدرجها أي مصدر آخر بعنوانها أو بأسمائها الأخرى",
   "Found a possible match, but it did not pass the title and chapter-number check": "عُثر على تطابق محتمل، لكنه لم يجتز فحص العنوان وأرقام الفصول",
   "Already follows as many other sources as a series may": "تتابع بالفعل أقصى عدد من المصادر الأخرى يُسمح به لسلسلة",
-  "Not tried: the search was stopped or ran out of time before it got there": "لم تُجرَّب: أُوقف البحث أو نفد وقته قبل أن يصل إليها",
+  "Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there": "لم تُجرَّب: أُوقف البحث أو نفد وقته أو قاطعته إعادة تشغيل قبل أن يصل إليها",
   "1 source followed": "تمت متابعة مصدر واحد",
   "{n} sources followed": "تمت متابعة {n} مصدر",
   "Nothing found for 1 series": "لم يُعثر على شيء لسلسلة واحدة",
@@ -2059,5 +2058,12 @@
   "Could not stop the search": "تعذّر إيقاف البحث",
   "Looking for other sources for 1 series… Library → Downloads shows how it goes.": "جارٍ البحث عن مصادر أخرى لسلسلة واحدة… تعرض المكتبة ← التنزيلات سير البحث.",
   "Looking for other sources for {n} series… Library → Downloads shows how it goes.": "جارٍ البحث عن مصادر أخرى لـ {n} سلسلة… تعرض المكتبة ← التنزيلات سير البحث.",
-  "The search was stopped or ran out of time before it got to these.": "أُوقف البحث أو نفد وقته قبل أن يصل إلى هذه."
+  "The search was stopped, ran out of time or was interrupted by a restart before it got to these.": "أُوقف البحث أو نفد وقته أو قاطعته إعادة تشغيل قبل أن يصل إلى هذه.",
+  "Too few chapters to compare (fewer than 3)": "عدد الفصول قليل جدًا للمقارنة (أقل من 3)",
+  "No other source could be asked": "تعذّر سؤال أي مصدر آخر",
+  "No other source answered": "لم يستجب أي مصدر آخر",
+  "Hidden by the 18+ filter": "مخفية بمرشّح +18",
+  "Too many series for one search: 500 at most": "عدد السلاسل كبير جدًا لبحث واحد: 500 على الأكثر",
+  "Find other sources (1 series)": "البحث عن مصادر أخرى (سلسلة واحدة)",
+  "Find other sources ({n} series)": "البحث عن مصادر أخرى ({n} سلسلة)"
 }
