@@ -9,6 +9,7 @@
  * is gone and Library -> Downloads shows it all (lib/serverDownloads.ts `downloadSections`).
  */
 import { keys, t as tr } from './i18n';
+import { followedText } from './findSources';
 
 export interface JobCard {
   folder: string;
@@ -25,7 +26,8 @@ export interface JobCard {
   cancelled?: boolean;
 }
 
-export type RunKind = 'sweep' | 'repair' | 'newest';
+/** `find_sources` (v0.49.1): a "Find other sources" run, admins only. It follows sources and downloads nothing. */
+export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources';
 
 /**
  * The repair's steps, in the order a run takes them (bff lib/repair.ts REPAIR_STEPS), each in the words a
@@ -54,6 +56,8 @@ export interface RunCard {
   fetched: number;
   failed: number;
   current?: { id: string; title: string };
+  /** A `find_sources` run's follows so far: one per (series, source). */
+  followed?: number;
   step?: string;
   cancelRequested?: boolean;
   reason?: string;
@@ -103,6 +107,8 @@ export function mayCancel(j: JobCard, admin: boolean): boolean {
 export function runTitle(kind: RunKind): string {
   return kind === 'sweep' ? tr('Checking for new chapters')
     : kind === 'repair' ? tr('Library repair')
+    // A noun, as the repair's runs are named (healthCopy.ts kindLabel), never the key's "Find other sources".
+    : kind === 'find_sources' ? tr('Other-source search')
     : tr('Fetch newest');
 }
 
@@ -119,6 +125,8 @@ export function runProgress(r: RunCard): string {
   }
   if (r.fetched) bits.push(tr('{n} chapters saved', { n: r.fetched }));
   if (r.failed) bits.push(tr('{n} could not be saved', { n: r.failed }));
+  // A find run saves nothing; what it has done is follow sources.
+  if (r.followed) bits.push(followedText(r.followed));
   return bits.join(' · ');
 }
 

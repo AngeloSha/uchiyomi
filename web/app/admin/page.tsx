@@ -20,6 +20,8 @@ import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardAction
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
+import { FindRunProvider } from '@/lib/useFindRun';
+import { FindRunCard } from '@/components/FindSources';
 import { checkTitle } from '@/lib/healthCopy';
 import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
@@ -43,7 +45,7 @@ import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
 import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
 import { SourceEvidence } from '@/components/SourceEvidence';
-import { checkAllLabel, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
+import { checkAllLabel, diagnosisReason, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
 import { useTicker } from '@/lib/ticker';
 
 /**
@@ -647,7 +649,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     try {
       const r = await api<TestAnswer & { probe?: { finalUrl?: string } }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
       setTested((m) => new Map(m).set(id, r));
-      toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
+      toast(r.ok ? tr('That source is working') : (diagnosisReason(r.diagnosis) || tr('That source is still failing')), r.ok ? 'success' : 'error');
       inval();
     } catch (e: any) {
       toast(msgOf(e, tr('Could not test that source')), 'error');
@@ -1974,9 +1976,11 @@ function Health() {
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
   // overview uses, so the shape of the panel is the verdict. The repair provider holds the live run and its
-  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx).
+  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx); the find provider
+  // (v0.49.1) follows a "Find other sources" run for the rows that offer it and for its card under the checks.
   return (
     <RepairRunProvider onEnded={recheck}>
+    <FindRunProvider onEnded={recheck}>
       <div className="board">
         {/* Wraps: at phone width the sentence and the key do not fit on one line (v0.48.3). */}
         <div className="full flex flex-wrap items-center justify-between gap-3">
@@ -2070,8 +2074,10 @@ function Health() {
           );
         })}
 
+        <FindRunCard />
         <RepairHistory />
       </div>
+    </FindRunProvider>
     </RepairRunProvider>
   );
 }

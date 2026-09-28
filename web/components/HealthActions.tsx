@@ -41,7 +41,9 @@ import {
   pagePlan, pageRecord, recordFor, runTouches, solverDown, stepFindings, type RepairEstimate, type RepairStatus,
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
-import { testStep } from '@/lib/sourceEvidence';
+import { useFindRun } from '@/lib/useFindRun';
+import { findGate, findSlotState } from '@/lib/findSources';
+import { diagnosisReason, testStep } from '@/lib/sourceEvidence';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
 import type { HealthAction, HealthCheck, HealthItem } from '@/lib/types';
 
@@ -106,6 +108,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const toast = useToast();
   const qc = useQueryClient();
   const rr = useRepairRun();
+  const fr = useFindRun();
   const { status, slots } = rr;
   const slotKey = `item:${check.id}:${rowKey}`;
   const slot = slots[slotKey];
@@ -139,6 +142,11 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     slot, run: live, record, action: repairAction ?? 'fix_short',
     onStop: live && touch === 'target' ? () => { void rr.stop(slotKey); } : undefined,
   });
+  // v0.49.1: a "Find other sources" run started from this row. It is a background run of minutes or hours, so it keeps
+  // a key group and a status line of its own (below): the row's Test, Clear block and Turn off stay usable meanwhile,
+  // where one busy key would disable every key of its group for the whole run.
+  const findSlot = fr?.slots[slotKey];
+  const findNow = findSlotState(findSlot, fr?.runOf(slotKey), () => { void fr?.stop(slotKey); });
   // The newest of the two is the row's line.
   const useSync = !!sync && sync.state.kind !== 'idle' && (repairState.kind === 'idle' || sync.at >= (slot?.startedAt ?? live?.startedAt ?? record?.finishedAt ?? 0));
   const rowNow: ActionState = useSync ? sync!.state : repairState;
@@ -261,9 +269,9 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         return {
           ...base, label: tr('Test'),
           onRun: () => act(a, async () => {
-            const r = await api<{ ok: boolean; diagnosis?: { reason?: string; fix?: string } }>(
+            const r = await api<{ ok: boolean; diagnosis?: { code?: string; reason?: string; fix?: string } }>(
               `/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/test`, { method: 'POST' });
-            return r.ok ? { text: tr('That source is working') } : { text: r.diagnosis?.reason || tr('That source is still failing'), ok: false };
+            return r.ok ? { text: tr('That source is working') } : { text: diagnosisReason(r.diagnosis) || tr('That source is still failing'), ok: false };
           }, testStep(check.testMs)),
         };
       case 'unblock':
@@ -298,6 +306,15 @@ export function HealthRow({ check, item, rowKey, links, children }: {
             return { text };
           }),
         };
+      // v0.49.1: every visible series whose main source is this row's source (a failing source, or a series that can no
+      // longer update because of its source), in ONE background run. The key carries the run's own state -- working with
+      // its Stop, then what it did -- and waits, saying why, while another run goes (one at a time, server-wide).
+      case 'find_sources':
+        return {
+          ...base, ...findGate(fr?.status, findNow.kind === 'working' || findNow.kind === 'starting'),
+          state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: tr('Find other sources'),
+          onRun: () => { if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId }); },
+        };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
       // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen
       // which file becomes which chapter.
@@ -323,7 +340,9 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         return null;
     }
   };
-  const specs = actions.map(spec).filter((s): s is ActionSpec => !!s);
+  const all = actions.map(spec).filter((s): s is ActionSpec => !!s);
+  const specs = all.filter((s) => s.id !== 'find_sources');
+  const finds = all.filter((s) => s.id === 'find_sources');
   // The stored outcome, unless the status line under the keys already says the same thing ("Every source has
   // the same short copy" twice, one above the other, read as two findings).
   const stored = outcomeLine(item.outcome);
@@ -343,8 +362,14 @@ export function HealthRow({ check, item, rowKey, links, children }: {
       {caveats.map((c) => (
         <p key={c.text} data-health-caveat={c.tone} className={`mt-1 text-[11px] leading-relaxed ${c.tone === 'calm' ? 'text-fog-400' : 'text-amber-300/90'}`}>{c.text}</p>
       ))}
-      {specs.length > 0 && <ActionKeys actions={specs} className="mt-2" />}
+      {(specs.length > 0 || finds.length > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {specs.length > 0 && <ActionKeys actions={specs} />}
+          {finds.length > 0 && <ActionKeys actions={finds} />}
+        </div>
+      )}
       <ActionStatus state={rowNow} />
+      {finds.length > 0 && <ActionStatus state={findNow} />}
 
       {/* #116: the plan a numbering key opened (on <body>, itself). Its Confirm is this row's press. */}
       {plan && item.seriesId && (

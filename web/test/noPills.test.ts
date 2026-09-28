@@ -54,6 +54,9 @@ const SURFACES = [
   'lib/numbering.ts',
   'lib/sourcePrefs.ts',
   'lib/versions.ts',
+  // v0.49.1, Find other sources: the run's row, its results and Health's card.
+  'components/FindSources.tsx',
+  'lib/findSources.ts',
 ];
 
 /**
@@ -96,6 +99,9 @@ const SLICES: [string, string, string, string][] = [
   // Step 17 (#116): the add dialog's numbering notice and its switch -- a text block with a start-edge rule, beside
   // the dialog's own chips that stay. The last function in the file: an empty `to` reads to its end.
   ['components/AddSeriesDialog.tsx', 'Add dialog: the numbering notice', 'function AddNumberingNotice(', ''],
+  // v0.49.1: the Sources sheet's Find more sources and Other names -- keys and a plain list, beside the sheet's
+  // Prefer/Block chips, which stay.
+  ['components/SourcesSheet.tsx', 'Sources sheet: Find more sources and Other names', 'function FindMore(', 'const emptyStat'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

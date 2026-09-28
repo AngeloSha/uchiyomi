@@ -24,6 +24,7 @@ import { useLayer } from '@/lib/layers';
 import { useReduceEffects } from '@/lib/effects';
 import { readView, type LibraryView } from '@/lib/libraryView';
 import { kickDownloads, useDownloadsRing } from '@/lib/useServerDownloads';
+import { findRefusal } from '@/lib/useFindRun';
 import { ProgressRing } from '@/components/ProgressRing';
 import { ServerDownloadsView } from '@/components/ServerDownloadsView';
 
@@ -257,6 +258,27 @@ function LibraryInner() {
     setActing(false);
   };
 
+  /**
+   * Look for other sources for the selection (v0.49.1): ONE background run on the server -- 1.5 s between series,
+   * pausing for a chapter sweep, a repair or the daily check -- that follows a source only where the title and the
+   * chapter numbers match. Minutes or hours for a big selection, so nothing here follows it: the notice says where it
+   * shows (Library -> Downloads, Server tasks, with its results), and select mode ends as for any bulk action. Another
+   * run going (409, one at a time server-wide) or nothing the server may search for (400) is said, and the selection
+   * stays. The idea is @TIGamingTV's (PR #119).
+   */
+  const findSelected = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ runId: string; total: number }>('/api/admin/sources/find', { method: 'POST', json: { seriesIds: [...picked] } });
+      const n = r?.total ?? picked.size;
+      toast(n === 1 ? tr('Looking for other sources for 1 series… Library → Downloads shows how it goes.')
+        : tr('Looking for other sources for {n} series… Library → Downloads shows how it goes.', { n }), 'info', { busy: true });
+      void kickDownloads(qc);
+      settle();
+    } catch (e) { toast(findRefusal(e), 'error'); }
+    setActing(false);
+  };
+
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
@@ -416,12 +438,15 @@ function LibraryInner() {
       {series && selecting && picked.size > 0 && (
         <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
-              count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
-              from lg up there is room and they are chips like the rest. (The bar's bottom padding was `pb-8`
-              until v0.49.0, clearance for the floating downloads pill, which is gone.) "Archive slowly" (#117)
-              is the same: a key from lg up, a row of More on a phone -- which is why More is there for anyone
-              who may download, not only admins. From lg up the row is wider than the phone's, so its eight
-              actions stay one row in English at 1024 px. */}
+              count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet). (The bar's
+              bottom padding was `pb-8` until v0.49.0, clearance for the floating downloads pill, which is gone.)
+              "Archive slowly" (#117) is a key from lg up and a row of More on a phone -- which is why More is
+              there for anyone who may download, not only admins.
+              ⚠️ v0.49.1: the admin actions -- Move to library, Remove from library and Find other sources -- are
+              behind More at EVERY width, so More stays for admins from lg up. Measured with the app's CSS and
+              fonts (240 selected): Find other sources as a ninth key needed 1081 px, two rows in English at 1024
+              AND 1280 px (the row is capped at 1024), where eight took 940 of 992; with the three behind More it
+              is one row, 735 px in English and 822 in German, where German took two rows before. */}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-5xl">
             <span className="me-auto text-sm font-medium text-fog-100">
               {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : tr('{n} selected', { n: picked.size })}
@@ -432,10 +457,8 @@ function LibraryInner() {
             {/* Server-side fetch, so it follows the same permission as the Add button and the series
                 page's Fetch: a member who may not download does not see it. */}
             {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="chip text-xs disabled:opacity-50">{tr('Fetch newest')}</button>}
-            {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Move to library')}</button>}
-            {isAdmin && <button disabled={acting} onClick={() => setRemoving(true)} className="chip hidden text-xs text-rose-300 disabled:opacity-50 lg:inline-flex">{tr('Remove from library')}</button>}
             {canDownload(user) && <button disabled={acting} onClick={archiveSelected} className="btn-key hidden lg:inline-flex">{tr('Archive slowly')}</button>}
-            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
+            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className={`chip text-xs disabled:opacity-50 ${isAdmin ? '' : 'lg:hidden'}`} aria-haspopup="dialog">{tr('More')}</button>}
             {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
                 downloads, and a bar frozen for all of it left navigating away as the only way out. Cancel stops
                 the polling and leaves select mode; the run completes server-side. Reintroduce with a plain
@@ -451,9 +474,10 @@ function LibraryInner() {
           {/* `pb-2`: the sheet's nav clearance is 4 px short of the nav's measured height (see the series
               page), and the last row here would otherwise end 3 px under it. */}
           <div className="space-y-1 pb-2">
+            {/* From lg up Archive slowly is a key in the bar, and More is only there for the admin rows below. */}
             {canDownload(user) && (
               <button onClick={() => { setMore(false); void archiveSelected(); }}
-                className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60 lg:hidden">
                 {tr('Archive slowly')}
               </button>
             )}
@@ -462,6 +486,10 @@ function LibraryInner() {
                 <button onClick={() => { setMore(false); setMoving(true); }}
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
                   {tr('Move to library')}
+                </button>
+                <button onClick={() => { setMore(false); void findSelected(); }} data-find-selected
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Find other sources')}
                 </button>
                 <button onClick={() => { setMore(false); setRemoving(true); }}
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">

@@ -25,6 +25,7 @@ import {
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { archiveProgressText } from '@/lib/archive';
 import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
+import { FindResultsSheet } from '@/components/FindSources';
 
 // lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
 // notes pin (partialSurfaces.test.ts) reads.
@@ -89,7 +90,8 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   };
   const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST');
   const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
-  const cancelRun = (kind: string) => call(`/api/sources/runs/${kind}/cancel`, 'POST');
+  // A "Find other sources" run stops through its own route (v0.49.1), after the series it is on.
+  const cancelRun = (kind: string) => call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
   const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE');
   // Try again is a Fetch of what did not land: the same route, the same checks (the series' visibility, its
   // listing, the 300 cap, a 409 while the series is busy), and a new job that takes the failed card's place.
@@ -361,6 +363,10 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   // A Health press is about one series -- the way to it (the server drops it for a viewer who may not list that
   // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
   const history = admin && r.kind === 'repair';
+  // v0.49.1: a "Find other sources" run steps series by series, stops after the one it is on, and keeps what it did
+  // per series -- which series got which sources -- a press away, while it runs and after.
+  const find = r.kind === 'find_sources';
+  const [results, setResults] = useState(false);
   return (
     <li data-task={r.kind} data-state={r.status} className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
@@ -375,18 +381,23 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
             ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })
             : relativeTime(new Date(r.finishedAt ?? r.startedAt).toISOString())}
         </p>
-        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{tr('Stopping after this chapter…')}</p>}
-        {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{tr('Cancelled; what landed is kept.')}</p>}
+        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{find ? tr('Stopping after this series…') : tr('Stopping after this chapter…')}</p>}
+        {/* A stopped find run downloaded nothing to keep: what it followed stays followed, and its results say which. */}
+        {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{find ? tr('Stopped before it finished') : tr('Cancelled; what landed is kept.')}</p>}
         {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{r.reason}</p>}
-        {(r.seriesId || history) && (
+        {(r.seriesId || history || (find && admin)) && (
           <p className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
             {r.seriesId && <Link href={seriesHref(r.seriesId, r.number)} className="text-accent hover:underline">{tr('Open')} ›</Link>}
             {history && <Link href="/admin/?tab=Health#repairs" className="text-accent hover:underline">{tr('Recent repairs')} ›</Link>}
+            {find && admin && (
+              <button type="button" onClick={() => setResults(true)} data-find-results-open className="text-accent hover:underline">{tr('Show results')} ›</button>
+            )}
           </p>
         )}
+        {results && <FindResultsSheet onClose={() => setResults(false)} />}
       </div>
       {mine && running && !r.cancelRequested && (
-        <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{tr('Cancel')}</button>
+        <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{find ? tr('Stop') : tr('Cancel')}</button>
       )}
       {mine && !running && (
         <button type="button" onClick={() => onDismiss(r.kind)} className="btn-key">{tr('Dismiss')}</button>

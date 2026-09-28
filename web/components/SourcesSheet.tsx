@@ -10,7 +10,8 @@
 // a sheet is dismissed by a tap outside or Escape and a draft would go with it.
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import type { GroupStat, Series, SeriesGroups, SeriesSource, StoredPrefs } from '@/lib/types';
 import { t as tr } from '@/lib/i18n';
 import { chapterLabel, relativeTime } from '@/lib/format';
@@ -26,6 +27,10 @@ import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
 import { preferFirst } from '@/lib/sourceOrder';
+import { ActionKeys, ActionStatus, type ActionSpec } from '@/components/ActionList';
+import type { ActionState } from '@/lib/actionState';
+import { altKey, altOriginLabel, altRefusal, findGate, findSlotState, seriesOutcome, type AltTitle } from '@/lib/findSources';
+import { useFindRuns } from '@/lib/useFindRun';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -125,6 +130,124 @@ export function useCheckNow(id: string, onDone: () => void) {
     } catch (e) { setChecking(false); toast(msgOf(e, tr('Could not start a check')), 'error'); }
   };
   return { checking, checkNow };
+}
+
+/** The error code of a refusal (`{ error: 'too_short' }`), or null. */
+const codeOf = (e: unknown): string | null => {
+  try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
+};
+
+/**
+ * "Find more sources" (v0.49.1): a run of the server's "Find other sources" for this one series -- the title and its
+ * other names searched on the other sources, a source followed only where the title and the chapter numbers match
+ * -- followed here until it ends, and then what it did for this series: the sources it followed, or why none. The
+ * sheet may be closed meanwhile; the run goes on, and what it followed is in the list above next time. One run at a
+ * time server-wide: while another goes, the key waits and says why. The idea is @TIGamingTV's (PR #119).
+ */
+function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
+  const fr = useFindRuns({ onEnded: onFound });
+  const slot = fr.slots.series;
+  const run = fr.runOf('series');
+  const live = findSlotState(slot, run, () => { void fr.stop('series'); });
+  // Ended: what it did for THIS series, not the run's counts (a run of one says "1 series · 1 source followed").
+  const mine = slot?.phase === 'ended' ? seriesOutcome(run, id) : null;
+  const state: ActionState = mine
+    ? { kind: 'done', finishedAt: slot?.finishedAt ?? Date.now(), outcome: mine.text, ...(mine.partial ? { partial: true } : {}) }
+    : live;
+  const busy = state.kind === 'starting' || state.kind === 'working';
+  const spec: ActionSpec = {
+    id: 'find-more', label: tr('Find more sources'), state,
+    what: tr('Searches the other sources under this title and its other names, and follows one whose title and chapter numbers match.'),
+    ...findGate(fr.status, busy),
+    onRun: () => { void fr.start('series', { seriesIds: [id] }); },
+    buttonProps: { 'data-find-more': id } as ActionSpec['buttonProps'],
+  };
+  return (
+    <div data-find-more-block className="mt-4 pb-1">
+      <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">{spec.what}</p>
+      <ActionKeys actions={[spec]} />
+      <ActionStatus state={state} />
+    </div>
+  );
+}
+
+/**
+ * The other names this series goes by (v0.49.1, PR #119's list): what a search for other sources asks under besides
+ * the title, and what a candidate's own title may match -- exactly, never by containment. Read from a source's
+ * description, typed by an admin, or brought in by an import. Every add and remove answers with the whole list, which
+ * replaces the one shown. A refused name says why under the field: its key is under five letters or digits, it is
+ * not in Latin letters (only those can be compared), or the series already has it.
+ */
+function OtherNames({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const key = ['series-alt-titles', id];
+  const { data, isLoading, error } = useQuery({
+    queryKey: key,
+    queryFn: () => api<{ titles: AltTitle[] }>(`/api/admin/series/${encodeURIComponent(id)}/alt-titles`),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const titles = data?.titles ?? [];
+  const add = async () => {
+    const title = draft.trim();
+    if (!title) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      qc.setQueryData(key, await api<{ titles: AltTitle[] }>(`/api/admin/series/${encodeURIComponent(id)}/alt-titles`, { json: { title } }));
+      setDraft('');
+    } catch (e) {
+      const why = altRefusal(codeOf(e));
+      if (why) setRefusal(why);
+      else toast(msgOf(e, tr('Could not add that name')), 'error');
+    }
+    setBusy(false);
+  };
+  const remove = async (a: AltTitle) => {
+    setBusy(true);
+    try {
+      qc.setQueryData(key, await api<{ titles: AltTitle[] }>(`/api/admin/series/${encodeURIComponent(id)}/alt-titles/${encodeURIComponent(altKey(a))}`, { method: 'DELETE' }));
+    } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
+    setBusy(false);
+  };
+  return (
+    <section data-alt-titles className="mt-5">
+      <Eyebrow>{tr('Other names')}</Eyebrow>
+      <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">
+        {tr('Other sources may list this series under another name. Searches for sources use these names too, and a name must match exactly.')}
+      </p>
+      {isLoading && <div className="skeleton h-9 rounded-lg" />}
+      {!isLoading && !!error && <p className="text-xs text-rose-300">{msgOf(error, tr('Could not load the other names'))}</p>}
+      {!isLoading && !error && !titles.length && <p className="text-xs text-fog-500">{tr('No other names yet.')}</p>}
+      {titles.length > 0 && (
+        <ul className="divide-y divide-ink-800/70">
+          {titles.map((a) => (
+            <li key={altKey(a)} data-alt-title={altKey(a)} className="flex items-center gap-2 py-1.5">
+              <span className="min-w-0 flex-1">
+                {/* A name in any script, in its own direction. */}
+                <span dir="auto" className="block truncate text-sm text-fog-100" title={a.title}>{a.title}</span>
+                {altOriginLabel(a.origin) && <span className="block text-[11px] text-fog-500">{altOriginLabel(a.origin)}</span>}
+              </span>
+              <button type="button" onClick={() => remove(a)} disabled={busy} aria-label={tr('Remove {name}', { name: a.title })}
+                className="shrink-0 px-1 text-fog-500 hover:text-rose-400 disabled:opacity-50">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="mt-2 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); void add(); }}>
+        <input value={draft} onChange={(e) => { setDraft(e.target.value); setRefusal(null); }} maxLength={200}
+          placeholder={tr('Add another name…')} aria-label={tr('Add another name…')}
+          aria-invalid={refusal ? true : undefined} aria-describedby={refusal ? `alt-refusal-${id}` : undefined}
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900/60 px-2.5 py-1.5 text-sm text-fog-100 outline-hidden transition focus:border-accent/60" />
+        <button type="submit" disabled={busy || !draft.trim()} className="btn-key">{tr('Add')}</button>
+      </form>
+      {refusal && <p id={`alt-refusal-${id}`} role="alert" data-alt-refusal className="mt-1 text-[11px] leading-relaxed text-rose-300">{refusal}</p>}
+    </section>
+  );
 }
 
 /** A row for a group the stored lists name but nothing lists any more: it still needs a row, or it could never be un-blocked. */
@@ -287,6 +410,9 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   const [busy, setBusy] = useState(false);
   const [savingPref, setSavingPref] = useState(false);
   const isAdmin = !!admin;
+  // The other names and Find more sources ask routes of their own, so they follow the account, not the scanlators
+  // payload: an admin whose groups route failed still has them.
+  const { isAdmin: adminAccount } = useAuth();
   const sources = series?.sources ?? [];
 
   // The stored lists, with a local copy that is written the moment a control is tapped and dropped again
@@ -559,6 +685,14 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
           );
         })}
       </section>
+
+      {/* Last, below Translated by: Prefer and Block live there, and at 390 px every line above them is one they lose.
+          Find more sources goes under the names it searches with -- for a series with no source too: one scanned from
+          disk may gain its first one this way, and the server says so when there is nothing it may search for. */}
+      {adminAccount && <OtherNames id={id} />}
+      {adminAccount && (
+        <FindMore id={id} onFound={() => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions', 'series-alt-titles']) qc.invalidateQueries({ queryKey: [k, id] }); }} />
+      )}
     </Sheet>
   );
 }
