@@ -717,6 +717,7 @@ GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
+GET    /api/library/sources
 GET    /api/updates               GET    /api/adult-filter
 POST   /api/updates/seen          POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
@@ -730,6 +731,14 @@ GET    /api/series/:id/groups        GET    /api/series/:id/versions
 POST   /api/series/:id/listing-progress
 DELETE /api/series/:id/listing-progress
 ```
+
+**Filtering the library by source.** On the owned backend, `POST /api/series/search` accepts two more
+conditions: `mainSource` (the source a series was added from, by id) and `anySource` (that, or a source it
+follows as a fallback). Both take `is` / `isNot`, and a source whose extension is gone still filters.
+`GET /api/library/sources` lists `{id, name, main, any, installed}` for every source the viewer's library
+comes from, busiest first: `main` counts the series added from it, `any` the series that read from it at all.
+It is counted over what the viewer may list, so the numbers match the filtered grid, and it is empty on a
+Komga backend.
 
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
 any source the series has been followed on (`POST /api/admin/series/:id/sources`, below); each entry is

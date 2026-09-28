@@ -47,7 +47,7 @@ test('the Downloads view fetches no grid and shows none of the series controls',
   assert.match(src, /\{!series && <ServerDownloadsView focusFolder=\{params\.get\('folder'\)\} \/>\}/, 'the Downloads view is not the view');
   assert.match(src, /onRefresh=\{series \? onRefresh : \(\) => kickDownloads\(qc\)\}/, 'pull to refresh in Downloads rescans the library instead of asking for the jobs');
   // The selection belongs to the grid it was made in.
-  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, lib, view\]\);/, 'a selection outlives a switch to Downloads');
+  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, lib, src, anysrc, view\]\);/, 'a selection outlives a switch to Downloads');
 });
 
 test('the underline slides only when motion is welcome', () => {
