@@ -33,6 +33,8 @@ export interface SourceVerdict {
   code: Diagnosis['code'];
   reason: string;
   fix: string;
+  /** v0.49.1: `fix` as its code (lib/sourceDiagnosis.ts FixCode), for the web to word; `reason` is worded by `code`. */
+  fixSaid?: Diagnosis['fixSaid'];
   ok: boolean;
   /** pass / fail / inconclusive (our own deadline ended the test before anything failed). */
   state: 'pass' | 'fail' | 'inconclusive';
@@ -220,7 +222,7 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
       let action: SourceVerdict['action'] | undefined;
       if (autoFix && d.code === 'moved' && r.probe?.finalUrl && await followMove(src.id, r.probe.finalUrl)) {
         action = 'followed-move';
-        d = { ...d, code: 'ok', reason: '', fix: '', silent: false, needsProbe: false, actor: 'none' };
+        d = { ...d, code: 'ok', reason: '', fix: '', fixSaid: undefined, silent: false, needsProbe: false, actor: 'none' };
         // followMove proved the new address with a passing smoke test before keeping it.
         state = 'pass';
       }
@@ -236,7 +238,7 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
       ).catch(() => {});
 
       verdicts.push({
-        id: src.id, name: src.name, code: d.code, reason: d.reason, fix: d.fix, ok: state === 'pass', state,
+        id: src.id, name: src.name, code: d.code, reason: d.reason, fix: d.fix, ...(d.fixSaid ? { fixSaid: d.fixSaid } : {}), ok: state === 'pass', state,
         stage: state === 'pass' ? null : r.stage, kind: state === 'pass' ? null : r.smoke.failure?.kind ?? null,
         actor: d.actor, action,
       });

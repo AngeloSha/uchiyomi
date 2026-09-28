@@ -632,6 +632,9 @@ test('a file already at a target name refuses the apply, and says so', { skip },
   assert.equal(r.state, 'pending', 'not applied');
   // Carried to the answer (#116 review): the page said "the source may not have answered" and an admin retried forever.
   assert.match(r.error ?? '', /Chapter 21\.cbz is already on disk/, 'a file already at a target name refuses the apply');
+  // v0.49.1: and as its code, with the file it names, for the page to say in the reader's language (lib/said.ts).
+  assert.equal(r.errorSaid?.code, 'renumber.onDisk', 'the refusal is not said by its code');
+  assert.match(r.errorSaid?.params?.file ?? '', /\/Chapter 21\.cbz$/, 'the file the refusal names is not its parameter');
   assert.deepEqual(filesIn(FOLDER10), ['Chapter 2.cbz', 'Chapter 21.cbz']);
   const { readFileSync } = await import('node:fs');
   assert.equal(readFileSync(join(DL, FOLDER10, 'Chapter 21.cbz'), 'utf8'), 'a stray file of somebody\'s', 'the stray is intact');

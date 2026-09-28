@@ -5,7 +5,7 @@
 // would let a rule drift away from reality while the test kept passing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { diagnose, currentError, HealthFacts, DiagnosisCode } from '../src/lib/sourceDiagnosis';
+import { diagnose, currentError, HealthFacts, DiagnosisCode, REASONS } from '../src/lib/sourceDiagnosis';
 
 // The engine's own words, as an extension source stores them: suwayomi/client.ts prefixes every GraphQL
 // error with `suwayomi: ` and the tail is the exception text verbatim from issue #54's log. A `flaresolverr:`
@@ -143,6 +143,12 @@ test('NO PUBLIC SENTENCE LEAKS INFRASTRUCTURE', () => {
     const d = diagnose(...(args as Parameters<typeof diagnose>));
     assert.equal(d.code, expected, `fixture for ${expected} produced ${d.code}`);
     seen.add(d.code);
+    // v0.49.1: a reason is its code's (REASONS), which is how the web words it by `code` alone; and every verdict
+    // with a fix carries the fix's own code (FixCode) for the web to word. Reintroduce a rule whose reason is not
+    // its code's sentence: "the reason for X is not its code's" fails; a D() with a bare string fix: "no fix code".
+    assert.equal(d.reason, REASONS[d.code], `the reason for ${d.code} is not its code's`);
+    if (d.code !== 'ok') assert.match(d.fixSaid?.code ?? '', /^fix\./, `${d.code}: no fix code`);
+    else assert.equal(d.fixSaid, undefined, 'ok has no fix, and no fix code');
     assert.doesNotMatch(
       d.reason,
       // suwayomi / java.: since #115 an engine-answered error is a live input, and its text names the engine

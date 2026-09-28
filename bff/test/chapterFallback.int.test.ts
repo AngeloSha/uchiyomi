@@ -210,6 +210,8 @@ test('a copy that was not kept leaves the downloads at once', { skip }, async ()
   assert.deepEqual(open(11), [], 'a copy that was not kept leaves the downloads at once');
   const ended = listActivity().recent.find((e) => e.folder === 'Fallback Tale' && e.number === 11 && e.source === PRI);
   assert.deepEqual([ended?.status, ended?.reason], ['failed', 'arrived with 1 page missing; not kept'], 'ended as not kept, as the wait would have ended it');
+  // v0.49.1: the same, as its codes (lib/said.ts).
+  assert.deepEqual(ended?.reasonSaid, [{ code: 'activity.arrived', params: { n: 1 } }, { code: 'activity.notKept' }]);
 
   // Two copies short by a page each: the first is written, and the other leaves the downloads too.
   failures.set(`${PRI}/drop-two/4`, 404);

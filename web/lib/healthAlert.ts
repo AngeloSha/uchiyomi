@@ -8,6 +8,8 @@
 // The data is `GET /api/admin/health/summary`, which answers from a stored report and never runs the checks
 // (bff lib/healthSummary.ts). Nothing here is for other accounts: the route is admin-only, its text names
 // sources and folders, and there is nothing an ordinary reader could do about any of it.
+import { checkTitle } from './healthCopy';
+import { checkSummary, joinPart, type Said } from './said';
 
 export type HealthTone = 'warn' | 'problem';
 
@@ -15,10 +17,24 @@ export interface HealthSummary {
   at: string;
   worst: 'ok' | HealthTone;
   count: number;
+  /** The worst check's "Title: summary", in the server's English: `checks[0]`'s. */
   headline: string | null;
   /** Changes only when WHICH checks found something changes, not when a count inside one moves. */
   key: string;
-  checks: Array<{ id: string; title: string; status: 'ok' | HealthTone; summary: string }>;
+  /** Worst first. `summarySaid` (v0.49.1): the summary as codes (lib/said.ts). */
+  checks: Array<{ id: string; title: string; status: 'ok' | HealthTone; summary: string; summarySaid?: Said[] }>;
+}
+
+/**
+ * The banner's and the marker's sentence in the reader's language: the worst check's title and summary, which the
+ * server's `headline` is the English of ("Source health: 1 source is failing or blocked" in every language, until
+ * v0.49.1). A summary stored by an older server carries no codes and reads as it was stored.
+ */
+export function headlineText(s: Pick<HealthSummary, 'headline' | 'checks'> | null | undefined): string | null {
+  if (!s?.headline) return null;
+  const c = s.checks?.[0];
+  if (!c?.summarySaid?.length) return s.headline;
+  return joinPart(checkTitle(c), checkSummary(c), 'colon');
 }
 
 /** The marker's colour, or null for no marker at all: a clean report shows nothing. */

@@ -19,6 +19,7 @@ import { sourceCover } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { reasonText, type Said } from '@/lib/said';
 import { followable } from '@/lib/scanlators';
 import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
@@ -53,7 +54,7 @@ interface Scan {
   /** The scan itself broke (not one source): said instead of a list. */
   failed?: string;
 }
-interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string }
+interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string; reasonSaid?: Said[] }
 
 /** The error code in an API refusal (`{error: 'plan_stale'}`), or null. */
 function codeOf(e: unknown): string | null {
@@ -315,7 +316,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       <Modal title={tr('Filling in the gaps')} onClose={onClose}>
         <p className="text-sm text-fog-400">
           {job?.reason
-            ? job.reason
+            ? reasonText(job)
             : tr('This runs in the background. You can close this and it will keep going.')}
         </p>
         <div className="mt-4">

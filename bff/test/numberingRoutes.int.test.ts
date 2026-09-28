@@ -159,6 +159,9 @@ test('the plan is shown before anything moves, and applied only on confirm', { s
     const busy = await inject('POST', `/api/admin/series/${HELD}/numbering`, { mode: 'posting_order', confirm: true });
     assert.equal(busy.statusCode, 409, busy.body);
     assert.equal(busy.json().error, 'busy');
+    // v0.49.1: which busy it is, as the code the page words (lib/said.ts), beside the English. Reintroduce the bare
+    // { error, message }: the page could tell the two busys apart only by comparing English sentences.
+    assert.deepEqual(busy.json().messageSaid, { code: 'renumber.downloading' }, 'a download in the folder is not said by its code');
   } finally {
     busyFolders.delete(FHELD);
   }
@@ -285,6 +288,7 @@ test('a renumber waits for a check inside the series', { skip }, async () => {
     const r = await inject('POST', `/api/admin/series/${VISIT}/numbering`, { mode: 'posting_order', confirm: true });
     assert.equal(r.statusCode, 409, `a check inside the series: the confirmation is refused -- ${r.body}`);
     assert.equal(r.json().error, 'busy');
+    assert.deepEqual(r.json().messageSaid, { code: 'renumber.checking' }, 'a check inside the series is not said by its code');
   } finally {
     c.open();
   }

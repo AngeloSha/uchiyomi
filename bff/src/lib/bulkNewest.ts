@@ -29,6 +29,7 @@ import { persistScan, setBookDates, setBookMeta } from './library';
 import { runtime } from './runtime';
 import type { SourceChapter } from './sources';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
+import { say } from './said';
 import { withOrigin } from './downloadActivity';
 
 export type NewestOutcome = 'downloaded' | 'up_to_date' | 'skipped' | 'failed';
@@ -128,7 +129,7 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
     // The loop below settles every series itself; only something outside it (a state write) can reach
     // here, and the run must still end, or every later click is a 409 until a restart.
     console.warn(`[bulk/newest] run failed: ${(e as Error)?.message || e}`);
-    endRun(card, 'error', 'The run failed. The server log has the details.');
+    endRun(card, 'error', say('run.failed'));
   }).finally(() => { state.running = false; if (card.status === 'running') endRun(card, 'done'); });
   return { total: input.ids.length };
 }

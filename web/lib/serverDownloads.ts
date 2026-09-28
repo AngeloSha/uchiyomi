@@ -23,6 +23,7 @@ import { kindLabel } from './healthCopy';
 import { ringFraction, type RingValue } from './ring';
 import { archiveItems, type ArchiveItem, type ArchiveView } from './archive';
 import type { AutoFollow } from './types';
+import type { Said } from './said';
 
 export type Origin = 'add' | 'fetch' | 'fill' | 'check' | 'sweep' | 'repair' | 'bulk' | 'refetch' | 'server' | 'archive';
 
@@ -41,6 +42,8 @@ export interface ActivityEntry {
   finishedAt?: number;
   pages?: number;
   reason?: string;
+  /** v0.49.1: `reason` as codes lib/said.ts words; absent for a download's own error, shown as sent. */
+  reasonSaid?: Said[];
   mine?: boolean;
 }
 

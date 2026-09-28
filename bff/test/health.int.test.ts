@@ -56,9 +56,42 @@ async function setup() {
 const find = (r: any, id: string) => r.checks.find((c: any) => c.id === id);
 const titles = (c: any) => c.items.map((i: any) => i.title);
 
+/**
+ * v0.49.1: every sentence a check sends carries its codes (lib/said.ts), and the codes say exactly its English --
+ * read back from the registry alone (englishOf) -- so the page's words are always about what the server said.
+ * Called on each report the tests below build, whatever their fixtures reach. Reintroduce by writing a summary as a
+ * bare `summary:` string: "<check> sends its summary without codes" fails; by giving `gaps.detail` the wrong count:
+ * "its codes say something else" fails.
+ */
+async function assertSaid(checks: any[]): Promise<number> {
+  const { englishOf } = await import('../src/lib/said');
+  let n = 0;
+  for (const c of checks.filter(Boolean)) {
+    assert.ok(c.summarySaid?.length, `${c.id} sends its summary without codes`);
+    assert.equal(englishOf(c.summarySaid), c.summary, `${c.id}: the summary's codes say something else`);
+    if (c.note) assert.equal(englishOf(c.noteSaid), c.note, `${c.id}: the note's codes say something else`);
+    else assert.equal(c.noteSaid, undefined, `${c.id}: codes for a note it does not have`);
+    for (const it of c.items) {
+      n++;
+      if (it.titleSaid) assert.equal(englishOf(it.titleSaid), it.title, `${c.id}: the title's code says something else`);
+      // The database's own refusal of a folder is the one detail sent as it is: only it has the words.
+      if (c.id === 'library-scan' && !it.detailSaid) continue;
+      assert.ok(it.detailSaid?.length, `${c.id}: "${it.detail}" is sent without codes`);
+      const back = englishOf(it.detailSaid);
+      if (back !== null) assert.equal(back, it.detail, `${c.id}: "${it.detail}" -- its codes say something else`);
+      else {
+        // A diagnosis's fix inside a row keeps its own code (lib/sourceDiagnosis.ts FixCode), and ends the line.
+        assert.ok(it.detailSaid.at(-1).code.startsWith('fix.') && it.detail.endsWith(it.diagnosis?.fix), `${c.id}: "${it.detail}" has a code nobody knows`);
+      }
+    }
+  }
+  return n;
+}
+
 test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async (t) => {
   const { q, health } = await setup();
   const report = await health.runHealthChecks();
+  await assertSaid(report.checks);
 
   await t.test('reports every check and a timestamp', () => {
     assert.ok(Date.parse(report.generatedAt) > 0);
@@ -157,6 +190,7 @@ test('a series with no working source is listed, one with a working source is no
     const report = await runHealthChecks();
     const check = report.checks.find((c: any) => c.id === 'frozen-series');
     assert.ok(check, 'the check exists');
+    assert.ok(await assertSaid(report.checks) > 0);
     assert.equal(check.status, 'warn');
     const titles = check.items.map((i: any) => i.title);
     assert.ok(titles.includes('Frozen Fixture'), `the frozen series is named: ${titles.join(', ')}`);
@@ -206,6 +240,7 @@ test('a dead primary with a live follower is reference, not a warning; with a de
   try {
     const check = (await runHealthChecks()).checks.find((c: any) => c.id === 'frozen-series');
     assert.ok(check, 'the check exists');
+    await assertSaid([check]);
     const covered = check.items.find((i: any) => i.title === 'Covered Fixture');
     assert.ok(covered, 'the series with a dead primary is still listed');
     assert.equal(covered.info, true, 'a dead primary with a live follower is not frozen');
@@ -249,6 +284,7 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
   try {
     const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'up', title: string) => {
       const c = await frozenSeries(noIgnores(), engine);
+      await assertSaid([c]);
       return { detail: c.items.find((i) => i.title === title)!.detail, note: c.note ?? '' };
     };
     for (const engine of ['off', 'switched_off'] as const) {
@@ -308,6 +344,7 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
   });
   try {
     const first = (await runHealthChecks()).checks.find((c: any) => c.id === 'sources');
+    await assertSaid([first]);
     assert.equal(first.status, 'warn', 'a source that is down is still a warning');
     const n1 = counts(first);
     assert.equal(n1.failing, n1.live, `the verdict counts only live faults (summary: ${first.summary})`);
@@ -335,6 +372,7 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
     await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[DOWN, UNUSED]]);
     const second = (await runHealthChecks()).checks.find((c: any) => c.id === 'sources');
+    await assertSaid([second]);
     const n2 = counts(second);
     assert.equal(second.status, n2.live ? 'warn' : 'ok', 'a page with only switched-off sources is ok');
     assert.equal(n2.failing, n2.live, `still only live faults in the verdict (summary: ${second.summary})`);
@@ -363,6 +401,7 @@ test('a blocked source offers Clear block, and a source with a cooldown is a fin
            VALUES ($1, 'blocked', false, now() + interval '1 hour', 4)`, [BLOCKED]);
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
     const row = c.items.find((i: any) => i.title === BLOCKED);
     assert.ok(row, 'listed');
     // A cooldown is happening NOW, so it is a finding whether or not a series uses the source: something is
@@ -429,6 +468,7 @@ test('a stored error older than the last success is history, not a fix to go and
   );
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
     const stale = c.items.find((i: any) => i.title === STALE);
     assert.ok(stale, 'still listed: the empty streak is a live fact');
     assert.doesNotMatch(stale.detail, /Cloudflare interstitial|re-test/, `stale: an error older than the last success must not become a fix (${stale.detail})`);
@@ -458,6 +498,7 @@ test('a source that keeps outrunning its budget is listed, as Providers already 
            VALUES ($1, 'test', 'Slow Fixture', $1, 3, $2, 's1')`, [S_SLOW, SLOW]);
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
     const row = c.items.find((i: any) => i.sourceId === SLOW);
     assert.ok(row, 'listed');
     assert.notEqual(row.info, true, 'a series depends on it, so it is a finding');
@@ -569,6 +610,7 @@ test('an impossible chapter number is offered for deletion, unless it was renumb
   }
   const outlier = async () => {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'outliers');
+    await assertSaid([c]);
     return c.items.find((i: any) => i.title === 'Outlier Fixture');
   };
   try {
@@ -634,6 +676,7 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
   await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_SHORT}_6`]);
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'short-chapters');
+    await assertSaid([c]);
     const of = (n: number) => c.items.find((i: any) => i.bookId === `b_${S_SHORT}_${n}`);
     const ours = of(3);
     assert.ok(ours, 'our own short chapter is reported');
@@ -692,6 +735,7 @@ test('a gap the repair has already looked into is greyed until its answer goes s
   }
   const item = async () => {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
+    await assertSaid([c]);
     return c.items.find((i: any) => i.title === 'Gaps Result Fixture');
   };
   // The stamp and the conclusion at the same time, as a finished run leaves them; `concluded` apart from the
@@ -796,6 +840,7 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
   await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','hl-dup-1','Dup'), ($2,'anilist','hl-dup-1','Dup')`, [D1, D2]);
   const item = async () => {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'duplicates');
+    await assertSaid([c]);
     return c.items.find((i: any) => (i.seriesIds ?? []).includes(D1));
   };
   try {
@@ -840,7 +885,11 @@ test('the failures row says since when, how often, and what Retry now cannot do 
   await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
            VALUES ($1, 1, $2, 'error', 'x', 2, now() - interval '1 hour', '2026-09-01T00:00:00Z'),
                   ($1, 2, $2, 'error', 'y', 1, now() - interval '2 hours', NULL)`, [S_FAIL, SRC]);
-  const row = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-failures').items.find((i: any) => i.sourceId === SRC);
+  const row = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-failures');
+    await assertSaid([c]);
+    return c.items.find((i: any) => i.sourceId === SRC);
+  };
   try {
     const r = await row();
     assert.equal(r.outcome?.kind, 'failures');
@@ -905,7 +954,11 @@ test("a gap below an active archive's boundary is the archive's, and Fill now sa
     ON CONFLICT (series_id, number) DO NOTHING`, [sid, n]);
   for (const n of [4, 5, 6]) await list(S_ARCH, n);
   for (const n of [2, 3, 4, 6, 7, 8]) await list(S_ARCH_UP, n);
-  const gaps = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps');
+  const gaps = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
+    await assertSaid([c]);
+    return c;
+  };
   const item = (c: any, id: string) => c.items.find((i: any) => i.seriesId === id);
   try {
     let c = await gaps();
@@ -998,7 +1051,11 @@ test('the numbering check names every series waiting for a numbering review, wit
   await seed(NB[5], { numbering_note: note('hint') });
   await seed(NB[6], { numbering: 'posting_order', numbering_by: 'auto', numbering_changed_at: new Date(Date.now() - 20 * 86_400_000), numbering_note: note('strong') });
   await seed(NB[7], { numbering_pending: 'posting_order', numbering_by: 'manual' });
-  const check = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'numbering');
+  const check = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'numbering');
+    await assertSaid([c]);
+    return c;
+  };
   const item = (c: any, id: string) => c.items.find((i: any) => i.seriesId === id);
   try {
     const c = await check();

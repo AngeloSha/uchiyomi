@@ -6,6 +6,7 @@
 // numbers -- is numbered 1..K in the order the posts came out. New adds are numbered so at once; a series already
 // in a library is renamed only when an admin has seen the plan and confirmed it.
 import { t as tr } from './i18n';
+import { saidText, type Said } from './said';
 
 export type NumberingMode = 'source' | 'posting_order';
 export type RenumberMode = 'posting_order' | 'source' | 'remap';
@@ -95,6 +96,8 @@ export interface NumberingAnswer {
    * leave its library root (bff lib/numbering.ts RenumberRefused). Absent from a server that does not carry it yet.
    */
   error?: string;
+  /** v0.49.1: `error` as a code lib/said.ts words, with the file it names. */
+  errorSaid?: Said;
   numbering: NumberingSummary | null;
 }
 
@@ -185,37 +188,39 @@ const checkingLine = (): string => tr('This series is being checked right now. T
  * told to retry, and retried, for a reason that was never the source: the rename still running past the request,
  * the server's own refusal, chapters being fetched into the folder, and only then the source.
  */
-export function pendingLine(r: Pick<NumberingAnswer, 'running' | 'error' | 'plan'>): string {
+export function pendingLine(r: Pick<NumberingAnswer, 'running' | 'error' | 'errorSaid' | 'plan'>): string {
   if (r.running) return tr('Still renaming. The series page shows the new numbers when it is done.');
-  // A refusal names a file ("Chapter 21.cbz is already on disk"), which stays as sent; the check is a sentence.
-  if (r.error) return r.error === CHECKING_NOW ? checkingLine() : r.error;
+  // A refusal names a file ("Chapter 21.cbz is already on disk"): in the reader's language by its code (v0.49.1),
+  // the file's name as it is; from an older server, the check by its sentence and the rest as sent.
+  if (r.error) return saidText(r.errorSaid, r.error === CHECKING_NOW ? checkingLine() : r.error);
   if (r.plan?.reasons.includes('busy')) return busyLine();
   return tr('It could not be applied yet. The source may not have answered; try again in a moment.');
 }
 
 /** The body of a refused API call, or nothing when it is not JSON. */
-function bodyOf(e: unknown): { error?: string; message?: string } {
+function bodyOf(e: unknown): { error?: string; message?: string; messageSaid?: Said } {
   try { return JSON.parse((e as { body?: string } | null)?.body || '{}'); } catch { return {}; }
 }
 
 /**
- * A refused numbering request, in words: its two `busy`s are said here in the reader's language -- a download in
- * the folder, or a check inside the series -- and the rest as sent.
+ * A refused numbering request, in words: in the reader's language by its code (`messageSaid`, v0.49.1). From an
+ * older server, its two `busy`s are told apart by their sentence -- a download in the folder, or a check inside
+ * the series -- and the rest is as sent.
  */
 export function refusalText(e: unknown, fallback: string): string {
   const j = bodyOf(e);
-  if (j.error === 'busy') return j.message === CHECKING_NOW ? checkingLine() : busyLine();
-  return j.message || fallback;
+  const old = j.error === 'busy' ? (j.message === CHECKING_NOW ? checkingLine() : busyLine()) : j.message || fallback;
+  return saidText(j.messageSaid, old);
 }
 
 /**
- * A plan that could not be shown, in words: the route's 502 `unreachable` -- the source did not answer the fresh
- * listing -- in the reader's language, anything else as sent.
+ * A plan that could not be shown, in words: in the reader's language by its code; from an older server, its 502
+ * `unreachable` -- the source did not answer the fresh listing -- by the error, and anything else as sent.
  */
 export function planErrorText(e: unknown, fallback: string): string {
   const j = bodyOf(e);
-  if (j.error === 'unreachable') return tr('The source did not answer, so there is no plan to show. Try again in a moment.');
-  return j.message || fallback;
+  const old = j.error === 'unreachable' ? tr('The source did not answer, so there is no plan to show. Try again in a moment.') : j.message || fallback;
+  return saidText(j.messageSaid, old);
 }
 
 /**

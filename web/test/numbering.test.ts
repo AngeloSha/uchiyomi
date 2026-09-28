@@ -202,8 +202,14 @@ test('the numbering route\'s two busy answers and its missing plan are each said
   // The web's copy of the server's sentence is the server's own, word for word, or no message ever matches it.
   const bff = readFileSync(join(ROOT, '..', 'bff', 'src', 'lib', 'numbering.ts'), 'utf8');
   assert.ok(bff.includes(`export const CHECKING_NOW = '${CHECKING_NOW}';`), 'bff lib/numbering.ts CHECKING_NOW no longer reads as the web\'s copy');
+  // v0.49.1: the route sends the check's busy as its code (lib/said.ts `renumber.checking`), whose English is
+  // CHECKING_NOW word for word -- web/test/said.test.ts holds the registry's English to the web's.
   const route = readFileSync(join(ROOT, '..', 'bff', 'src', 'routes', 'numbering.ts'), 'utf8');
-  assert.match(route, /reply\.code\(409\)\.send\(\{ error: 'busy', message: CHECKING_NOW \}\)/, 'the route no longer sends the check\'s busy with CHECKING_NOW');
+  assert.match(route, /runsInside\(id\) > 0\) return reply\.code\(409\)\.send\(refusal\('busy', say\('renumber\.checking'\)\)\)/, 'the route no longer sends the check\'s busy as its own code');
+  // Worded by its code, whatever the English said.
+  const coded = (code: string) => ({ body: JSON.stringify({ error: 'busy', message: 'anything', messageSaid: { code } }) });
+  assert.equal(refusalText(coded('renumber.checking'), 'x'), CHECKING_NOW, 'a coded busy is not worded by its code');
+  assert.equal(refusalText(coded('renumber.downloading'), 'x'), 'Chapters are being fetched for this series. Try again when that ends.');
   // The plan's 502: the source did not answer the fresh listing.
   assert.equal(planErrorText({ body: JSON.stringify({ error: 'unreachable', message: 'The source did not answer, so there is no plan to show. Try again in a moment.' }) }, 'x'),
     'The source did not answer, so there is no plan to show. Try again in a moment.');
@@ -216,6 +222,12 @@ test('the numbering route\'s two busy answers and its missing plan are each said
     'The extension engine did not answer. Try again in a moment.', 'the engine not answering is said as the server\'s English');
   assert.equal(prefErrorText({ body: JSON.stringify({ error: 'extension_error', message: 'The extension failed: 403' }) }, 'x'), 'The extension failed: 403');
   assert.equal(prefErrorText(new Error('boom'), 'fallback'), 'fallback');
+  // v0.49.1: a refusal with its code is worded by it (lib/said.ts), whatever its English said; so is a refused apply.
+  // Reintroduce the bare `j.message || fallback` in prefErrorText, or `r.error` in pendingLine: these read the English.
+  assert.equal(prefErrorText({ body: JSON.stringify({ error: 'bad_value', message: 'English', messageSaid: { code: 'pref.noChoice', params: { label: 'Image quality', value: 'ultra' } } }) }, 'x'),
+    'Image quality has no choice "ultra".', 'a coded settings refusal is said as its English');
+  assert.equal(pendingLine({ error: 'English', errorSaid: { code: 'renumber.onDisk', params: { file: 'Chapter 21.cbz' } } }), 'Chapter 21.cbz is already on disk',
+    'a coded refused apply is said as its English');
   const settings = code(read('components/ExtensionSettings.tsx'));
   assert.match(settings, /\{prefErrorText\(error, tr\('The extension engine did not answer\. Try again in a moment\.'\)\)\}/, 'the settings sheet shows the server\'s English');
   assert.match(settings, /toast\(prefErrorText\(e, tr\('Could not change that setting'\)\), 'error'\)/);

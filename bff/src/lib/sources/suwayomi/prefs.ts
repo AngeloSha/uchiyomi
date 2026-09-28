@@ -23,6 +23,7 @@
 // Field names, argument and input shapes were read off the pinned engine's schema
 // (test/fixtures/suwayomi-v2.3.2243-schema.json: Preference, SourcePreferenceChangeInput, UpdateSourcePreferencePayload).
 import { gql as defaultGql, type Gql } from './client';
+import { say, type Part } from '../../said';
 
 /** The five kinds of preference, as the settings sheet draws them. `text` is the engine's EditTextPreference. */
 export type PrefType = 'switch' | 'checkbox' | 'list' | 'multiselect' | 'text';
@@ -153,8 +154,9 @@ export function toPrefs(nodes: unknown): SourcePref[] {
 }
 
 export type PrefErrorCode = 'unknown_pref' | 'ambiguous_pref' | 'disabled' | 'bad_value';
+/** A write the client got wrong: its code, and its sentence with the code the web words it by (lib/said.ts `pref.*`). */
 export class PrefError extends Error {
-  constructor(public code: PrefErrorCode, message: string) { super(message); }
+  constructor(public code: PrefErrorCode, public said: Part) { super(said.text); }
 }
 
 /** The longest text an EditText takes from here: a user agent or a base URL, not a document. */
@@ -170,20 +172,20 @@ export function validatePrefValue(p: SourcePref, value: unknown): PrefValue {
   switch (p.type) {
     case 'switch':
     case 'checkbox':
-      if (typeof value !== 'boolean') throw new PrefError('bad_value', `${label} takes on or off.`);
+      if (typeof value !== 'boolean') throw new PrefError('bad_value', say('pref.onOff', { label }));
       return value;
     case 'list':
-      if (typeof value !== 'string' || !(p.entryValues ?? []).includes(value)) throw new PrefError('bad_value', `${label} has no choice "${String(value).slice(0, 40)}".`);
+      if (typeof value !== 'string' || !(p.entryValues ?? []).includes(value)) throw new PrefError('bad_value', say('pref.noChoice', { label, value: String(value).slice(0, 40) }));
       return value;
     case 'multiselect': {
-      if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) throw new PrefError('bad_value', `${label} takes a list of its choices.`);
+      if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) throw new PrefError('bad_value', say('pref.choices', { label }));
       const bad = value.find((v) => !(p.entryValues ?? []).includes(v));
-      if (bad !== undefined) throw new PrefError('bad_value', `${label} has no choice "${String(bad).slice(0, 40)}".`);
+      if (bad !== undefined) throw new PrefError('bad_value', say('pref.noChoice', { label, value: String(bad).slice(0, 40) }));
       return [...new Set(value as string[])];
     }
     case 'text':
-      if (typeof value !== 'string') throw new PrefError('bad_value', `${label} takes text.`);
-      if (value.length > PREF_TEXT_MAX) throw new PrefError('bad_value', `${label} is too long.`);
+      if (typeof value !== 'string') throw new PrefError('bad_value', say('pref.text', { label }));
+      if (value.length > PREF_TEXT_MAX) throw new PrefError('bad_value', say('pref.tooLong', { label }));
       return value;
   }
 }
@@ -191,9 +193,9 @@ export function validatePrefValue(p: SourcePref, value: unknown): PrefValue {
 /** The one preference a key names on the current screen, or why a write cannot go to it. */
 export function prefByKey(prefs: readonly SourcePref[], key: string): SourcePref {
   const hits = prefs.filter((p) => p.key === key);
-  if (!hits.length) throw new PrefError('unknown_pref', 'This extension has no such setting any more. Reopen its settings.');
+  if (!hits.length) throw new PrefError('unknown_pref', say('pref.unknown'));
   // Two preferences under one key: no position could be the right one, so neither is written.
-  if (hits.length > 1) throw new PrefError('ambiguous_pref', 'This extension lists that setting twice, so Uchiyomi cannot tell which to change.');
+  if (hits.length > 1) throw new PrefError('ambiguous_pref', say('pref.ambiguous'));
   return hits[0];
 }
 
@@ -242,7 +244,7 @@ export interface PrefWrite {
 export async function writeSourcePref(id: string, key: string, value: unknown, run: Gql = defaultGql): Promise<PrefWrite> {
   const { preferences } = await readSourcePrefs(id, run);
   const before = prefByKey(preferences, key);
-  if (!before.enabled) throw new PrefError('disabled', `${before.title || before.key} cannot be changed in this version of the extension.`);
+  if (!before.enabled) throw new PrefError('disabled', say('pref.disabled', { label: before.title || before.key }));
   const v = validatePrefValue(before, value);
   const d = await run<{ updateSourcePreference: { preferences: unknown } | null }>(
     updatePrefMutation(before.type), { source: id, position: before.position, value: v }, 20000,

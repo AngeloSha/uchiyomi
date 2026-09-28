@@ -9,6 +9,7 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
 import { IcHourglass } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { reasonText } from '@/lib/said';
 import { chaptersLeft } from '@/lib/chapterRows';
 import { fetchingLabel, fetchingToast, mayCancel } from '@/lib/jobs';
 import { downloadsHref } from '@/lib/libraryView';
@@ -116,7 +117,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
       {failed && (
         <div data-band-state="failed" className="card flex flex-wrap items-center gap-x-3 gap-y-2 border-amber-500/40 px-3 py-2.5">
           <p dir="auto" className="min-w-0 flex-1 basis-48 text-[13px] leading-snug text-amber-300">
-            {failed.job.reason || tr('Fetch stopped. Try another source or wait.')}
+            {reasonText(failed.job) || tr('Fetch stopped. Try another source or wait.')}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {failed.retry.length > 0 && <button type="button" onClick={() => retry(failed.retry)} className="btn-key">{tr('Try again')}</button>}

@@ -22,9 +22,10 @@ import { logAudit } from '../lib/audit';
 import { visibleToAll } from '../lib/visibility';
 import { suwayomiConfigured, swAdapterId } from '../lib/sources';
 import { readSourcePrefs, writeSourcePref, PrefError, type SourcePref } from '../lib/sources/suwayomi/prefs';
-import { CHECKING_NOW, folderBusy, numberingSummary, planFor, requestNumbering } from '../lib/numbering';
+import { folderBusy, numberingSummary, planFor, requestNumbering } from '../lib/numbering';
 import { runsInside } from '../lib/updater';
 import type { RenumberMode } from '../lib/postingOrder';
+import { say, saidOf, type Part } from '../lib/said';
 import { clearDetailCacheFor } from './sources';
 
 /** Mihon source ids are 64-bit integers (the engine's LongString); anything else is not a source id. */
@@ -33,8 +34,13 @@ const SOURCE_ID = /^-?\d{1,20}$/;
 /** How long a confirmed renumber may run inside the request before it is answered `pending` and left to finish. */
 const APPLY_BUDGET_MS = 60_000;
 
-const notConfigured = (reply: FastifyReply) =>
-  reply.code(400).send({ error: 'not_configured', message: 'No extension server is configured.' });
+/**
+ * A refusal's body: its code, its sentence, and the sentence's code with what fills it (v0.49.1, lib/said.ts), so
+ * the page says it in the reader's language where it used to print the English.
+ */
+const refusal = (error: string, said: Part) => ({ error, message: said.text, messageSaid: saidOf(said) });
+
+const notConfigured = (reply: FastifyReply) => reply.code(400).send(refusal('not_configured', say('pref.notConfigured')));
 
 /**
  * The engine's answer to `source(id)` for an id it does not have is graphql-java's "declared as a non null type"
@@ -48,13 +54,13 @@ const notConfigured = (reply: FastifyReply) =>
  */
 const engineFailure = (reply: FastifyReply, e: unknown) => {
   const msg = (e as Error)?.message || '';
-  if (/non null type|NullPointerException/i.test(msg)) return reply.code(404).send({ error: 'unknown_source', message: 'The extension server has no such source.' });
+  if (/non null type|NullPointerException/i.test(msg)) return reply.code(404).send(refusal('unknown_source', say('pref.unknownSource')));
   if (msg.startsWith('suwayomi: ')) {
     // The first line, without graphql-java's "Exception while fetching data (/source/preferences) : " in front.
     const said = msg.slice('suwayomi: '.length).split('\n')[0].replace(/^Exception while fetching data \([^)]*\) : /, '').trim().slice(0, 300);
-    return reply.code(502).send({ error: 'extension_error', message: `The extension failed: ${said}` });
+    return reply.code(502).send(refusal('extension_error', say('pref.extensionFailed', { error: said })));
   }
-  return reply.code(502).send({ error: 'unreachable', message: 'The extension server did not answer. Try again in a moment.' });
+  return reply.code(502).send(refusal('unreachable', say('pref.unreachable')));
 };
 
 /** A preference as the settings sheet gets it: no position -- nothing a client sends is ever addressed by one. */
@@ -98,7 +104,7 @@ export default async function numberingRoutes(app: FastifyInstance) {
     try {
       w = await writeSourcePref(id, b.data.key, b.data.value);
     } catch (e) {
-      if (e instanceof PrefError) return reply.code(400).send({ error: e.code, message: e.message });
+      if (e instanceof PrefError) return reply.code(400).send(refusal(e.code, e.said));
       return engineFailure(reply, e);
     }
     const adapterId = swAdapterId(id);
@@ -146,7 +152,7 @@ export default async function numberingRoutes(app: FastifyInstance) {
     // What the page would ask about: the change waiting for review, else the other numbering.
     const mode: RenumberMode = (asked as RenumberMode | undefined) ?? s.numbering_pending ?? (s.numbering === 'posting_order' ? 'source' : 'posting_order');
     const p = await planFor(id, mode).catch(() => null);
-    if (!p) return reply.code(502).send({ error: 'unreachable', message: 'The source did not answer, so there is no plan to show. Try again in a moment.' });
+    if (!p) return reply.code(502).send(refusal('unreachable', say('renumber.unreachable')));
     return { mode, plan: p.plan, tracker: p.tracker, numbering: await numberingSummary(id) };
   });
 
@@ -162,13 +168,11 @@ export default async function numberingRoutes(app: FastifyInstance) {
     if (!s) return reply.code(404).send({ error: 'not_found' });
     // A rename under a download writing into the folder would race the file it is writing; say so now rather
     // than answer `pending` for a reason the page cannot show.
-    if (b.data.confirm && folderBusy(s.folder)) {
-      return reply.code(409).send({ error: 'busy', message: 'Chapters are being fetched for this series. Try again when that ends.' });
-    }
+    if (b.data.confirm && folderBusy(s.folder)) return reply.code(409).send(refusal('busy', say('renumber.downloading')));
     // The same for a run inside the series that is not downloading yet -- the sweep or a check reading its listing:
     // it would fetch into the old numbers after the renames (#116 review). Reintroduce by dropping it: "a renumber
     // waits for a check inside the series" in numberingRoutes.int.test.ts is answered 200 `pending`, not 409.
-    if (b.data.confirm && runsInside(id) > 0) return reply.code(409).send({ error: 'busy', message: CHECKING_NOW });
+    if (b.data.confirm && runsInside(id) > 0) return reply.code(409).send(refusal('busy', say('renumber.checking')));
     const work = requestNumbering(id, b.data.mode, { confirm: b.data.confirm, userId: userIdOf(req) });
     // A confirmed apply lists the source and renames every file; a slow source must not turn into a proxy
     // timeout that reads as a failure while the rename carries on. Past the budget it is `pending`, and the page

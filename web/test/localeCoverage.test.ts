@@ -153,6 +153,8 @@ const numberPair = (one: string, many: string) =>
 const AGREE: Record<string, string> = {
   has: 'have', is: 'are', was: 'were', needs: 'need', comes: 'come', does: 'do', keeps: 'keep', fails: 'fail',
   goes: 'go', lands: 'land', stays: 'stay', matches: 'match', qualifies: 'qualify', it: 'they', its: 'their', this: 'these',
+  // v0.49.1, Health's own sentences (lib/said.ts).
+  waits: 'wait', contains: 'contain', uses: 'use', appears: 'appear', shares: 'share', holds: 'hold', belongs: 'belong',
 };
 /** A word and the punctuation after it, apart. */
 const split = (w: string) => { const m = /^(.*?)([.,;:!?…)]*)$/u.exec(w)!; return { core: m[1], tail: m[2] }; };
@@ -193,6 +195,15 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   'Ch. {n} · 1 chapter being archived slowly': 'Ch. {a}–{b} · {n} chapters being archived slowly',
   // One try has no "since" (i18n pass 1): the singular says when it was, the plural since when.
   'Tried once, at {time} · next try {when}': 'Tried {n} times since {time} · next try {when}',
+  // v0.49.1, Health's own sentences (lib/said.ts): two or three words agree with the count.
+  '1 lost its primary but still follows another': '{n} lost their primary but still follow another',
+  'left out 1 folder or file it could not read': 'left out {n} folders or files it could not read',
+  '1 folder belongs to series someone removed, and was left alone; Admin → Library puts a series back.':
+    '{n} folders belong to series someone removed, and were left alone; Admin → Library puts a series back.',
+  '1 folder is more than {max} levels deep and was not looked into (LIBRARY_MAX_DEPTH)':
+    '{n} folders are more than {max} levels deep and were not looked into (LIBRARY_MAX_DEPTH)',
+  '1 series that came from extensions keeps its chapters and gets no new ones until it is back':
+    '{n} series that came from extensions keep their chapters and get no new ones until it is back',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
@@ -202,6 +213,8 @@ const NOT_PAIRED: Record<string, string> = {
   'rate-limited us {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
   'refused us {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
   'did not answer {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
+  // v0.49.1 (lib/said.ts): a duplicate row names its copies only past two (bff lib/health.ts duplicateSeries).
+  '{n} copies — merge them one pair at a time': 'said only for three copies or more: never 1',
 };
 /**
  * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its

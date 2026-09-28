@@ -21,6 +21,7 @@ import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/Re
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
 import { checkTitle } from '@/lib/healthCopy';
+import { checkNote, checkSummary, diagnosisFix, diagnosisReason, itemDetail, itemTitle } from '@/lib/said';
 import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
 import { Backdrop, Img, OnBody } from '@/components/ui';
@@ -392,8 +393,9 @@ function NeedsAttention({ health, className = '' }: {
             return (
               <div key={c.id} className={`relative rounded-2xl border px-3 py-2.5 ${TONE_SURFACE[m.tone]}`}>
                 <StatusEdge tone={m.tone} inset="inset-y-3" />
-                <p className="flex items-center gap-1.5 text-sm font-medium text-fog-100"><StatusMark tone={m.tone} title={m.label} />{c.title}</p>
-                <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
+                {/* In the reader's language: the title by the check's id, the summary by its codes (lib/said.ts). */}
+                <p className="flex items-center gap-1.5 text-sm font-medium text-fog-100"><StatusMark tone={m.tone} title={m.label} />{checkTitle(c)}</p>
+                <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{checkSummary(c)}</p>
               </div>
             );
           })}
@@ -647,7 +649,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     try {
       const r = await api<TestAnswer & { probe?: { finalUrl?: string } }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
       setTested((m) => new Map(m).set(id, r));
-      toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
+      toast(r.ok ? tr('That source is working') : (diagnosisReason(r.diagnosis) || tr('That source is still failing')), r.ok ? 'success' : 'error');
       inval();
     } catch (e: any) {
       toast(msgOf(e, tr('Could not test that source')), 'error');
@@ -814,7 +816,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
             <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('moved to a new address, which Uchiyomi now uses')}</p>
           ))}
           {sweep.needsAttention.map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {v.fix || v.reason}</p>
+            <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {diagnosisFix(v) || diagnosisReason(v)}</p>
           ))}
           {/* Our own deadline, not a verdict on the site: named, never counted as failing. */}
           {(sweep.inconclusive || []).map((v: any) => (
@@ -2022,7 +2024,7 @@ function Health() {
                     <StatusMark {...mark} size="xs" />
                     <CardProgress checkId={c.id} />
                   </p>
-                  <p dir="auto" className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
+                  <p dir="auto" className="mt-0.5 text-[11px] text-fog-500">{checkSummary(c)}</p>
                 </div>
                 {expandable && (
                   <>
@@ -2038,7 +2040,7 @@ function Health() {
               {isOpen && (
                 <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
                   <HealthCardActions check={c} />
-                  {c.note && <p data-health-note dir="auto" className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+                  {c.note && <p data-health-note dir="auto" className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{checkNote(c)}</p>}
                   <div className="divide-y divide-ink-800/70">
                     {c.items.map((it, i) => (
                       <HealthRow key={rowKeys[i]} rowKey={rowKeys[i]} check={c} item={it}
@@ -2053,10 +2055,11 @@ function Health() {
                             {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
                           </Link>
                         ))}>
-                        {/* The server's own words, in English (a title in any script): `dir="auto"`, or in an Arabic
-                            page a sentence's full stop and closing bracket land at its start. */}
-                        <p dir="auto" className="break-words text-sm text-fog-100">{it.title}</p>
-                        <p dir="auto" className="text-[11px] text-fog-500">{it.detail}</p>
+                        {/* The server's words, in the reader's language where it sent their codes (lib/said.ts) and
+                            in English where it could not (a folder's own error); a title in any script: `dir="auto"`,
+                            or in an Arabic page a sentence's full stop and closing bracket land at its start. */}
+                        <p dir="auto" className="break-words text-sm text-fog-100">{itemTitle(it)}</p>
+                        <p dir="auto" className="text-[11px] text-fog-500">{itemDetail(it)}</p>
                         {/* #115: the stage lines and the fix, through the component Providers uses too, and only
                             where they say something (healthRowEvidence). Among the row's words, above its keys: the
                             source rows have no Open link beside them, so the lines take the row's full width. */}

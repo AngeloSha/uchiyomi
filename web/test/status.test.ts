@@ -151,5 +151,5 @@ test('Overview\'s Needs attention tiles: the tint from this vocabulary, the star
   assert.match(tile![1], /(^|\s)relative(\s|$)/, 'the tile is not positioned, so its edge would sit against the card');
   assert.doesNotMatch(tiles, /HEALTH_TONE/, 'the tile still reads the Health capsules\' tints');
   assert.match(tiles, /<StatusEdge tone=\{m\.tone\} inset="inset-y-3" \/>/, 'the tile has no start edge');
-  assert.match(tiles, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>\{c\.title\}/, 'the verdict has no shape or name beside the title');
+  assert.match(tiles, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>\{checkTitle\(c\)\}/, 'the verdict has no shape or name beside the title');
 });

@@ -160,7 +160,9 @@ reporting `ok` and kept being fetched first.
 
 `note` is one sentence saying what is wrong, or `null` when nothing is. It is written for readers, so it
 never contains a hostname, a component name or any part of the recorded error. The operator-facing half of
-the diagnosis, which does name containers and config files, is only on the admin routes.
+the diagnosis, which does name containers and config files, is only on the admin routes. Since v0.49.1
+`noteCode` is the diagnosis code the sentence belongs to (every code has one sentence), so a client can say it in
+its reader's language.
 
 `POST /api/admin/sources/:id/test` (admin) probes a source right now: for a source that has a homepage of
 its own it fetches that homepage directly, without the Cloudflare solver, and then exercises the adapter
@@ -262,7 +264,8 @@ has been scanned in — the add that started it was answered before that row exi
 names no series itself (a Fetch, a fill, a refetch) carries the id of the series row holding its folder. A
 finished job is swept a day after it ends (five minutes before v0.47.0); a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
-a `reason` naming the source and how far it got, and since v0.49.0 `left`: the chapters it did not land,
+a `reason` naming the source and how far it got (since v0.49.1 with its codes, `reasonSaid`; a run card's and an
+activity entry's `reason` too), and since v0.49.0 `left`: the chapters it did not land,
 ascending and at most 300, which is what a Try again sends back as `numbers` to `POST /api/sources/fetch` --
 only on a failed Fetch or add (`origin` `fetch` or `add`), since a fill's and a refetch's chapters are not ones
 that route can take again. Every card carries `origin` (`add`, `fetch`, `fill` or `refetch`). An
@@ -476,7 +479,22 @@ for a week. Short chapters use confirm-short, which already records the same jud
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
 own six-hourly run stored, never by running the checks. `key` changes only when *which* checks found something
-changes, so an alert dismissed for one problem comes back for a new one.
+changes, so an alert dismissed for one problem comes back for a new one. Since v0.49.1 each of `checks` (worst
+first) carries `summarySaid`: `headline` is `checks[0]`'s title and summary in English, and a client words it from
+the check's id and those codes.
+
+**The server's sentences as codes** (since v0.49.1). Every sentence the Health report, the downloads and the
+numbering and extension-settings routes write in English also comes as codes, beside it: a `Said` is `{code,
+params?, join?}` — `code` stable (`gaps.live`, `sources.failing`, `job.partial`, `renumber.onDisk`,
+`pref.noChoice`, a diagnosis's `fix.moved`…), `params` what fills it (counts as numbers, moments as ISO strings,
+names, file names and a system's own error text as strings), and, in a field that is a list, `join` how a part
+joins the one before it (`clause` "a; b" when absent, `sentence`, `period`, `dash`, `dashCap`, `paren`, `colon`).
+The fields: a check's `summarySaid` and `noteSaid`, an item's `detailSaid` and `titleSaid`, a diagnosis's
+`fixSaid` (its `reason` is its `code`'s sentence), a download card's and an activity entry's `reasonSaid` (a list),
+a run card's `reasonSaid`, a refusal's `messageSaid`, and a numbering answer's `errorSaid`. The English is
+unchanged and always there: a client that does not know a code shows it, and the web app does exactly that for a
+whole line when any of its codes is new to it. Moments are ISO so a client says them in its reader's time zone;
+the English prints them in UTC with no zone. The codes and their English are `bff/src/lib/said.ts`.
 
 Since v0.41.0 an item also carries what can be **done** about it, so the same finding is actionable from a
 script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, `fill`, `retry`, `test`,
@@ -1641,7 +1659,9 @@ update can move, so the server reads the screen again, finds the key's current p
 against the setting's type and choices before sending it. It answers `{ ok, changed, applied, remap, preferences,
 usedBy, renumbers }`; **400** `unknown_pref`, `ambiguous_pref`, `disabled` or `bad_value`, **404**
 `unknown_source`, **502** `unreachable` (the engine did not answer) or `extension_error` (it answered with the
-extension's own exception, whose first line is in `message`). A changed numbering setting marks every series from
+extension's own exception, whose first line is in `message`). Since v0.49.1 every refusal also carries
+`messageSaid` (a `pref.*` code, with the setting's title and the refused value, or the exception's line, as
+parameters). A changed numbering setting marks every series from
 the source that uses its numbers (not those numbered by posting order) with `numbering_pending = 'remap'` -- `remap`
 is how many -- and each then waits for an admin to confirm its renaming below. A text setting is audited by its
 length only:
@@ -1665,7 +1685,9 @@ or the apply was refused, with `error` saying why -- a file already at a target 
 series -- and `plan.reasons` carrying `busy` when a download started meanwhile) or `unchanged` (the numbering it
 already has: *Keep the source's numbers* renames nothing). With `confirm`, **409** `busy` while chapters are being
 fetched into the folder or a check is inside the series -- the sweep, Check now, a listing refresh, Fill -- which
-would fetch into the old numbers after the renames; `message` says which. A manual choice is never undone by the
+would fetch into the old numbers after the renames; `message` says which, and since v0.49.1 `messageSaid` too
+(`renumber.downloading` or `renumber.checking`), as a refused apply's `error` comes with `errorSaid`
+(`renumber.onDisk` or `renumber.leavesRoot` with the `file`). A manual choice is never undone by the
 detector. A confirmed apply that runs past a minute answers `pending` with `running: true` and carries on; the
 series' `numbering` says when it is done.
 

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { english, say, saids, type Part, type Said } from './said';
 
 /**
  * Every chapter this server downloads, whatever started it -- so a person can see what is coming in.
@@ -43,6 +44,11 @@ export interface ActivityEntry {
   pages?: number;
   /** Why it failed, or how many pages a partial chapter is missing. */
   reason?: string;
+  /**
+   * v0.49.1: `reason` as codes the web words (lib/said.ts `activity.*`) -- the pages a chapter arrived or was saved
+   * without. A download's own error has none: those are the site's or the downloader's words, shown as sent.
+   */
+  reasonSaid?: Said[];
   /** Arrived incomplete, and the caller has not yet decided whether to keep it (`holdPartial`). */
   heldAt?: number;
 }
@@ -94,7 +100,25 @@ export function onFinished(fn: FinishedListener): () => void {
 }
 
 /** An incomplete chapter nobody wrote: how it ends, whether its caller said so (`drop`) or HOLD_MS ran out. */
-const notKept = (x: ActivityEntry) => endDownload(x.id, { status: 'failed', reason: `${x.reason}; not kept` });
+const notKept = (x: ActivityEntry) => endDownload(x.id, { status: 'failed', ...reasonOf([...partsOf(x), say('activity.notKept')]) });
+
+/** An entry's reason as parts again: its codes when it has them, else its English as sent. */
+const partsOf = (x: Pick<ActivityEntry, 'reason' | 'reasonSaid'>): Part[] =>
+  x.reasonSaid?.length === 1 && x.reason !== undefined ? [{ ...x.reasonSaid[0], text: x.reason }]
+    : x.reason !== undefined ? [say('text', { text: x.reason })] : [];
+/** A reason's English and its codes, as the entry carries them. */
+const reasonOf = (parts: Part[]) => ({ reason: english(parts), reasonSaid: saids(parts) });
+
+/**
+ * The codes of a reason this module wrote, from its English: what activityLog.ts reads back after a restart, where
+ * only the English was stored. Anything else -- a download's own error -- has none, and is shown as sent.
+ */
+export function reasonSaidOf(reason: string): Said[] | undefined {
+  const m = /^(arrived|saved) with (\d+) pages? missing(; not kept)?$/.exec(reason);
+  if (!m) return undefined;
+  const n = Number(m[2]);
+  return saids([say(m[1] === 'arrived' ? 'activity.arrived' : 'activity.saved', { n }), m[3] ? say('activity.notKept') : null]);
+}
 
 function prune(now = Date.now()) {
   for (const x of [...live.values()]) {
@@ -121,7 +145,9 @@ export function startedDownload(id: number): void {
  * The end of one download. `skipped` (the file was already there) leaves no trace: nothing came in, and a
  * sweep over a full library would otherwise list every chapter it did not fetch.
  */
-export function endDownload(id: number, outcome: { status: 'done' | 'partial' | 'failed'; pages?: number; reason?: string } | 'skipped'): void {
+export function endDownload(
+  id: number, outcome: { status: 'done' | 'partial' | 'failed'; pages?: number; reason?: string; reasonSaid?: Said[] } | 'skipped',
+): void {
   const x = live.get(id);
   if (!x) return;
   live.delete(id);
@@ -159,11 +185,11 @@ export function holdPartial(id: number, hold: {
   const x = live.get(id);
   if (!x) return;
   x.heldAt = Date.now();
-  x.reason = `arrived with ${hold.missing.length} page${hold.missing.length === 1 ? '' : 's'} missing`;
+  Object.assign(x, reasonOf([say('activity.arrived', { n: hold.missing.length })]));
   const write = hold.write.bind(hold);
   hold.write = async () => {
     const w = await write();
-    endDownload(id, { status: 'partial', pages: w.pages, reason: `saved with ${w.missing.length} page${w.missing.length === 1 ? '' : 's'} missing` });
+    endDownload(id, { status: 'partial', pages: w.pages, ...reasonOf([say('activity.saved', { n: w.missing.length })]) });
     return w;
   };
   // Ended when its caller settles on something else (lib/chapterFallback.ts): left to HOLD_MS, a copy that was not

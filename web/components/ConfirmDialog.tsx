@@ -9,6 +9,7 @@
 // where the action moves other people's data — deleting a series a household is reading, merging two.
 import { useEffect, useRef, useState } from 'react';
 import { t as tr } from '@/lib/i18n';
+import { saidText } from '@/lib/said';
 import { confirmsTitle } from '@/lib/confirmTitle';
 import { useLayer } from '@/lib/layers';
 
@@ -185,10 +186,14 @@ export function ConfirmDialog({
   );
 }
 
-/** Pull the server's human-readable message out of an ApiError, falling back to something useful. */
+/**
+ * Pull the server's human-readable message out of an ApiError, falling back to something useful: in the reader's
+ * language when the refusal carries its code (`messageSaid`, v0.49.1, lib/said.ts), else as the server wrote it.
+ */
 export const msgOf = (e: any, fallback: string): string => {
   try {
-    return JSON.parse(e?.body || '{}').message || fallback;
+    const j = JSON.parse(e?.body || '{}');
+    return saidText(j.messageSaid, j.message || fallback);
   } catch {
     return fallback;
   }

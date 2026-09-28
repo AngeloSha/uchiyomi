@@ -436,6 +436,13 @@ export interface WalkIssue {
   folder: string;
   reason: WalkReason;
   detail: string;
+  /**
+   * v0.49.1: what `detail` says, as data, so Health words it in the reader's language (lib/said.ts `walk.*`):
+   * the `ancestor` a loop leads back to ('' the root), the `n` entries it could not check and the first `names`,
+   * the `n` folders past the depth cap and the cap (`max`), the folder cap, and the error of a walk that `failed`
+   * outright. An unreadable folder's or a failed stat's `detail` is the error code alone and needs none.
+   */
+  params?: { ancestor?: string; n?: number; names?: string[]; max?: number; failed?: string };
 }
 export interface WalkResult {
   found: FoundSeries[];
@@ -511,7 +518,10 @@ export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platfor
      */
     const ancestor = chain.find((a) => a.key === key);
     if (ancestor && ancestor.names === names()) {
-      issues.push({ folder: rel, reason: 'loop', detail: `the same folder as ${ancestor.rel ? `"${ancestor.rel}"` : 'the root'}, reached again through a mount` });
+      issues.push({
+        folder: rel, reason: 'loop', detail: `the same folder as ${ancestor.rel ? `"${ancestor.rel}"` : 'the root'}, reached again through a mount`,
+        params: { ancestor: ancestor.rel },
+      });
       return;
     }
     if (reported.has(key)) sharedIds++;
@@ -526,6 +536,7 @@ export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platfor
       issues.push({
         folder: rel, reason: 'unchecked',
         detail: `${n} entr${n === 1 ? 'y' : 'ies'} could not be checked: ${listing.unchecked.slice(0, 3).map((x) => `"${x}"`).join(', ')}${n > 3 ? ', …' : ''}`,
+        params: { n, names: listing.unchecked.slice(0, 3) },
       });
     }
 
@@ -552,9 +563,17 @@ export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platfor
 
   await walk(root, '', 0, []);
   if (tooDeep) {
-    issues.push({ folder: '', reason: 'depth', detail: `${tooDeep} folder${tooDeep === 1 ? ' is' : 's are'} more than ${MAX_DEPTH} levels deep and ${tooDeep === 1 ? 'was' : 'were'} not looked into (LIBRARY_MAX_DEPTH)` });
+    issues.push({
+      folder: '', reason: 'depth', params: { n: tooDeep, max: MAX_DEPTH },
+      detail: `${tooDeep} folder${tooDeep === 1 ? ' is' : 's are'} more than ${MAX_DEPTH} levels deep and ${tooDeep === 1 ? 'was' : 'were'} not looked into (LIBRARY_MAX_DEPTH)`,
+    });
   }
-  if (capped) issues.push({ folder: '', reason: 'limit', detail: `the walk stopped after ${MAX_DIRS.toLocaleString('en-US')} folders; the rest were not looked into` });
+  if (capped) {
+    issues.push({
+      folder: '', reason: 'limit', params: { max: MAX_DIRS },
+      detail: `the walk stopped after ${MAX_DIRS.toLocaleString('en-US')} folders; the rest were not looked into`,
+    });
+  }
   return { found, issues, sharedIds };
 }
 
@@ -658,7 +677,7 @@ export interface ScanReport {
   walkProblems: number;
   /** Folders that shared a disk id with another folder and were scanned all the same (see `findSeriesDirs`). */
   sharedIds: number;
-  /** Folders passed over because their series was removed: on purpose, and put back under Admin → Removed. */
+  /** Folders passed over because their series was removed: on purpose, and put back under Admin → Library. */
   removed: number;
 }
 /** Walk findings that leave nothing out: a loop refused is the guard working, and the depth cap is a setting. */
@@ -756,7 +775,7 @@ async function scanOnce(): Promise<ScanResult> {
     walks.push({
       root, label,
       ...(await findSeriesDirs(root).catch((e): WalkResult => ({
-        found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}` }],
+        found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}`, params: { failed: errCode(e) } }],
       }))),
     });
   }

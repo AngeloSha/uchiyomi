@@ -73,7 +73,8 @@ function fillScanView(st: FillScan) {
 /** Test seam. */
 export function _clearFillScans(): void { fillScans.clear(); }
 import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
-import { notInLibrary, notInLibraryReason } from '../lib/downloadCensus';
+import { notInLibrary, notInLibraryParts } from '../lib/downloadCensus';
+import { english, joined, say, saids, type Part, type Said } from '../lib/said';
 import { diskSpelling } from '../lib/libraryAdmin';
 import { isDesktop } from '../lib/desktop';
 import { newSeriesId } from '../lib/ids';
@@ -127,6 +128,8 @@ interface Job {
   title: string; total: number; done: number;
   status: 'downloading' | 'done' | 'error';
   reason?: string;
+  /** v0.49.1: `reason` as codes the web words in the reader's language (lib/said.ts `job.*`). */
+  reasonSaid?: Said[];
   /** When it started, for Library -> Downloads (#82). */
   startedAt?: number;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
@@ -287,7 +290,18 @@ export interface DownloadJobInput {
 }
 
 /** The sentence on a job that stopped because someone pressed Cancel. */
-const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} chapter${j.total === 1 ? '' : 's'}.`;
+/** Set a card's reason: its English, and its codes beside it. */
+function tell(j: Job, ...parts: Array<Part | null | false>): void {
+  j.reason = english(parts);
+  j.reasonSaid = saids(parts);
+}
+/** "3 of 5 chapters saved.", after the sentence that says why the job stopped. */
+const savedSoFar = (j: Job) => joined('period', say('job.saved', { done: j.done, total: j.total }));
+/** A cancelled job's reason: how far it got, and what it lost before the Cancel. */
+const cancelledParts = (j: Job, failures: number) => [
+  say('job.cancelled', { done: j.done, total: j.total }),
+  failures > 0 && joined('sentence', say('job.notSaved', { n: failures })),
+];
 
 /**
  * Fetch a list of chapters into a series folder as one job card, detached from the request.
@@ -499,7 +513,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       } catch (e: any) {
         const j = jobs.get(folder);
         if (e?.diskFull) {
-          if (j) { j.status = 'error'; j.reason = `Not enough free space: ${String(e.message)}. ${j.done} of ${j.total} chapters saved.`; j.finishedAt = Date.now(); }
+          if (j) { j.status = 'error'; tell(j, say('job.noSpace', { error: String(e.message) }), savedSoFar(j)); j.finishedAt = Date.now(); }
           await settle(ch, false);
           break;
         }
@@ -518,13 +532,13 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
             const why = out.switched.why === 'refusing' ? whyBySource.get(out.switched.from) ?? 'refusing' : out.switched.why;
             whyBySource.set(out.switched.from, why);
             (j.switched ??= []).push({ number: ch.number, from: out.switched.from, to: out.via, why });
-            j.reason = why === 'rate_limited'
-              ? `${nameOf(out.switched.from)} asked us to slow down \u2014 continued from ${nameOf(out.via)}`
-              : `${nameOf(out.switched.from)} could not serve chapter ${ch.number} \u2014 took it from ${nameOf(out.via)}`;
+            tell(j, why === 'rate_limited'
+              ? say('job.slowedDown', { from: nameOf(out.switched.from), to: nameOf(out.via) })
+              : say('job.switched', { from: nameOf(out.switched.from), number: ch.number, to: nameOf(out.via) }));
           }
           if (out.kind === 'partial') {
             j.partial = (j.partial ?? 0) + 1;
-            j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+            tell(j, say('job.partial', { number: ch.number, n: out.missing.length }));
           }
           if (j.done % 5 === 0) await persistScan().catch(logScanError);
         }
@@ -540,17 +554,17 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         await settle(ch, false);
         if (refusing.has(out.via)) {
           if (j) {
-            j.reason = `${nameOf(out.via)} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
+            tell(j, say('job.stopped', { source: nameOf(out.via) }), savedSoFar(j));
             if (exhausted()) { j.status = 'error'; j.finishedAt = Date.now(); }
           }
         } else if (j) {
-          j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
+          tell(j, say('job.failed', { n: failures, error: String(out.err?.message || out.err).slice(0, 120) }));
         }
         // NOT counted: a chapter that was not written must never advance the bar.
       }
       // Every source this job could draw on has refused: the rest of the queue has nowhere to land.
       if (refusing.size && exhausted()) {
-        if (j && j.status !== 'error') { j.status = 'error'; j.reason ??= `${j.done} of ${j.total} chapters saved.`; j.finishedAt = Date.now(); }
+        if (j && j.status !== 'error') { j.status = 'error'; if (j.reason === undefined) tell(j, say('job.saved', { done: j.done, total: j.total })); j.finishedAt = Date.now(); }
         break;
       }
     }
@@ -575,13 +589,13 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     const j = jobs.get(folder);
     if (j && unindexed.length) {
       j.status = 'error'; j.finishedAt = Date.now();
-      j.reason = notInLibraryReason(folder, unindexed);
+      tell(j, ...notInLibraryParts(folder, unindexed));
     }
     // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
     // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.
     if (j && j.status !== 'error' && j.cancelRequested) {
       j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
-      j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+      tell(j, ...cancelledParts(j, failures));
     } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
     noteLeft();
   });
@@ -1356,7 +1370,7 @@ export async function addSeriesFromSource(opts: {
           const j = jobs.get(folder);
           if (j) {
             j.partial = (j.partial ?? 0) + 1;
-            j.reason = `Chapter ${toFetch[0].number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+            tell(j, say('job.partial', { number: toFetch[0].number, n: out.missing.length }));
           }
         }
       } else if (out.kind === 'skipped' && out.why === 'on_disk') {
@@ -1370,15 +1384,16 @@ export async function addSeriesFromSource(opts: {
     if (!firstPages) {
       // A full disk used to read as "this title may be licensed", which sends a person off to try another
       // source for a problem no source can fix.
-      const why = diskFull
-        ? `Not enough free space to download: ${diskFull}.`
+      const whyPart = diskFull
+        ? say('job.noSpaceToDownload', { error: diskFull })
         : blockReason
-        ? `${src.name} is currently ${blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for'} downloads.`
-        : 'No downloadable chapters here — this title may be licensed or hosted externally on this source.';
+        ? say('job.refusing', { source: src.name, status: blockReason })
+        : say('job.undownloadable');
+      const why = whyPart.text;
       if (opts.wait === false) {
         // Detached: the caller has already been told the download started, so this card IS the failure
         // report. It is deliberately not swept -- see sweepJobs -- and is dismissed by hand.
-        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []); }
+        const j = jobs.get(folder); if (j) { j.status = 'error'; tell(j, whyPart); j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []); }
       } else {
         // Awaited: the caller gets a real HTTP answer and has its own reporting, so leaving a card behind
         // would just be noise -- the bulk importer would strand one per failed title.
@@ -1453,14 +1468,14 @@ export async function addSeriesFromSource(opts: {
           if (e?.diskFull) {
             if (j) {
               j.status = 'error';
-              j.reason = `Not enough free space: ${String(e.message)}. ${j.done} of ${j.total} chapters saved.`;
+              tell(j, say('job.noSpace', { error: String(e.message) }), savedSoFar(j));
               j.finishedAt = Date.now();
             }
             break;
           }
           failures++;
           if (seriesId) await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: source!, err: e }).catch(() => {});
-          if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(e?.message || e).slice(0, 120)}`;
+          if (j) tell(j, say('job.failed', { n: failures, error: String(e?.message || e).slice(0, 120) }));
           continue;
         }
         const j = jobs.get(folder);
@@ -1473,7 +1488,7 @@ export async function addSeriesFromSource(opts: {
             j.done++;
             if (out.kind === 'partial') {
               j.partial = (j.partial ?? 0) + 1;
-              j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+              tell(j, say('job.partial', { number: ch.number, n: out.missing.length }));
             }
             if (j.done % 5 === 0) await persistScan().catch(logScanError);
           }
@@ -1489,7 +1504,7 @@ export async function addSeriesFromSource(opts: {
           }
           if (j) {
             j.status = 'error';
-            j.reason = `${src.name} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
+            tell(j, say('job.stopped', { source: src.name }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
           break;
@@ -1499,16 +1514,15 @@ export async function addSeriesFromSource(opts: {
         if (seriesId) await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: out.via, err: out.err }).catch(() => {});
         if (refusing.has(out.via)) {
           if (j) {
-            const status = out.err?.blockStatus;
             j.status = 'error';
-            j.reason = `${src.name} stopped part-way: it is ${status === 'rate_limited' ? 'rate-limiting' : status === 'blocked' ? 'blocking' : 'unreachable for'} downloads. ${j.done} of ${j.total} chapters saved.`;
+            tell(j, say('job.stoppedRefusing', { source: src.name, status: String(out.err?.blockStatus ?? '') }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
           break;
         }
         // ANY other failure -- a permission error, a chapter with no readable pages -- must not advance
         // the bar. The next chapter may still be healthy, so keep going as the old loop did.
-        if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
+        if (j) tell(j, say('job.failed', { n: failures, error: String(out.err?.message || out.err).slice(0, 120) }));
       }
       noteLeft();
       await persistScan().catch(logScanError);
@@ -1523,10 +1537,10 @@ export async function addSeriesFromSource(opts: {
       const unindexed = await notInLibrary(folder, [...landed.map((l) => l.number), ...onDisk]).catch(() => [] as number[]);
       if (j && unindexed.length) {
         j.status = 'error'; j.finishedAt = Date.now();
-        j.reason = notInLibraryReason(folder, unindexed);
+        tell(j, ...notInLibraryParts(folder, unindexed));
       } else if (j && j.status !== 'error' && j.cancelRequested) {
         j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
-        j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+        tell(j, ...cancelledParts(j, failures));
       } else if (j && j.status !== 'error') {
         // "Done" has to mean everything landed. A run that lost chapters ends as an error carrying the
         // count, because a green tick over a short library is worse than no tick at all: it tells you to
@@ -1851,6 +1865,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // This route is cached client-side under one query key that does not vary by account, so there is
           // deliberately no admin branch here: two shapes for one cache key leak on a shared device.
           note: d ? d.reason : null,
+          // v0.49.1: the diagnosis code the note is the sentence of, so the web says it in the reader's language
+          // (a reason belongs to its code: lib/sourceDiagnosis.ts REASONS). The code is as public as the sentence.
+          noteCode: d ? d.code : null,
         };
       }),
     };

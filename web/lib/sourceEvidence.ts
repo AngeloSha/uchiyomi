@@ -13,6 +13,7 @@
  */
 import { t as tr, keys } from './i18n';
 import { formatClock, relativeTime } from './format';
+import { diagnosisFix, diagnosisReason, itemDetail, type Said } from './said';
 import type { Tone } from './status';
 
 export type Stage = 'search' | 'chapters' | 'pages' | 'images';
@@ -53,7 +54,8 @@ export interface TestAnswer {
   ok: boolean;
   timedOut?: boolean;
   checks: TestCheck[];
-  diagnosis?: { code: string; reason?: string; fix?: string };
+  /** `reason` is worded by `code`, `fix` by `fixSaid` (v0.49.1, lib/said.ts). */
+  diagnosis?: { code: string; reason?: string; fix?: string; fixSaid?: Said };
   state?: 'pass' | 'fail' | 'inconclusive';
   stage?: Stage | null;
   ms?: number;
@@ -149,13 +151,15 @@ export function answerView(t: TestAnswer): EvidenceView {
 
   const failedLine = rows.some((r) => r.glyph === 'fail');
   const d = t.diagnosis;
+  // The verdict in the reader's language: the reason by its code, the fix by its own (lib/said.ts).
+  const reason = diagnosisReason(d);
   let head: EvidenceView['head'];
   if (t.ok && !failedLine) head = { tone: 'ok', text: tr('Working normally.') };
   else if (t.ok) head = { tone: 'warn', text: tr('Works, but not everything checked out') };
   else if (t.state === 'inconclusive' || (t.timedOut && !failedLine)) {
-    head = { tone: 'warn', text: d?.reason || tr('The test ran out of time. That alone is not proof it is broken.') };
-  } else head = { tone: 'problem', text: d?.reason || tr('That source is still failing') };
-  return { head, rows, fix: t.ok ? null : d?.fix || null };
+    head = { tone: 'warn', text: reason || tr('The test ran out of time. That alone is not proof it is broken.') };
+  } else head = { tone: 'problem', text: reason || tr('That source is still failing') };
+  return { head, rows, fix: t.ok ? null : diagnosisFix(d) || null };
 }
 
 /** "5m ago · by the daily check". */
@@ -217,8 +221,9 @@ export function evidenceView(
 export interface SourceHealthRow {
   info?: boolean;
   detail?: string;
+  detailSaid?: Said[];
   evidence?: StageLine[] | null;
-  diagnosis?: { fix?: string } | null;
+  diagnosis?: { fix?: string; fixSaid?: Said } | null;
 }
 
 /**
@@ -230,10 +235,11 @@ export interface SourceHealthRow {
  * same sentence twice, one line apart.
  */
 export function healthRowEvidence(it: SourceHealthRow): { lines: StageLine[] | null; fix: string | null } {
-  const fix = it.diagnosis?.fix || null;
+  // Both in the reader's language (lib/said.ts), so "already in the detail" compares like with like.
+  const fix = diagnosisFix(it.diagnosis) || null;
   return {
     lines: it.evidence ?? null,
-    fix: fix && !it.info && !(it.detail ?? '').includes(fix) ? fix : null,
+    fix: fix && !it.info && !itemDetail({ detail: it.detail ?? '', detailSaid: it.detailSaid }).includes(fix) ? fix : null,
   };
 }
 

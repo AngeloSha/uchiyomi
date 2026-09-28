@@ -141,6 +141,15 @@ test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with t
     /^Search failing since \d{4}-\d\d-\d\d \d\d:\d\d — This source's extension reported an error\. Last tested .* by Test; no series use it$/,
     it.detail);
   assert.doesNotMatch(it.detail, /\.;/, 'a period, then a semicolon');
+  // v0.49.1: the same line as its codes (lib/said.ts), which the page words in the reader's language and time zone:
+  // the stage and when as data, the reason by its diagnosis code, the fix by its own. Reintroduce the English-only
+  // detail: this finds no codes.
+  const { englishOf } = await import('../src/lib/said');
+  assert.deepEqual(it.detailSaid.map((s: any) => s.code), ['sources.failing', 'sources.reason', 'sources.tested', 'sources.uses']);
+  assert.equal(englishOf(it.detailSaid), it.detail, 'the codes say something else');
+  assert.deepEqual(it.detailSaid[0].params.stage, 'search');
+  assert.ok(!Number.isNaN(Date.parse(it.detailSaid[0].params.since)), 'the time is sent as a moment, not as UTC words');
+  assert.match(it.diagnosis.fixSaid?.code ?? '', /^fix\.extensionFailed$/);
   assert.equal(it.evidence.find((e: any) => e.stage === 'search').state, 'fail');
   assert.match(it.evidence.find((e: any) => e.stage === 'search').error, ENGINE_WORDS);
   assert.equal(it.diagnosis.code, 'extension_error');
