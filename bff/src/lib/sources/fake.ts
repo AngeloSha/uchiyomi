@@ -4,10 +4,17 @@
 // compose script alone, is what makes an ordinary install incapable of discovering a host-side test stub
 // by accident. The value is a comma-separated list of `adapter-id=http://host:port` pairs.
 import type { SourceAdapter, SourceChapter, SourceSeries } from './types';
+import { offlineNotice, siteOffline } from './offline';
 
 type Json = Record<string, unknown>;
 
 const trimBase = (value: string): string => value.trim().replace(/\/+$/, '');
+
+/**
+ * The stub's own markup, for offlineNotice (lib/sources/offline.ts): every answer a WORKING stub gives about a series
+ * or a chapter is JSON naming a `sourceId`. An HTML page carrying one is the site working, whatever its title says.
+ */
+export const FAKE_MARKUP = /"sourceId"\s*:/;
 
 /** Parse the test knob without accepting an entry that cannot be an adapter id and an absolute URL. */
 export function fakeSourceConfig(raw = process.env.FAKE_SOURCE_URLS || ''): Array<{ id: string; base: string }> {
@@ -40,6 +47,16 @@ async function json(base: string, path: string, missing = false): Promise<any> {
   });
   if (missing && r.status === 404) return null;
   if (!r.ok) throw Object.assign(new Error(`fake source ${r.status}`), { status: r.status });
+  // Rig-only (v0.49.1): the stub's `offline` behaviour answers every route with a small HTML page, the way aqua has
+  // since 2026-09-23. A site engine that parses such a page to nothing asks the REAL offlineNotice whether it is the
+  // site's own notice and throws the classified error when it is (madara.ts, manganato.ts); this asks the same
+  // question of the same function, so the walk (web/test/e2e/walk491.mjs) sees Health's "The site says it is
+  // offline", its evidence and its diagnosis come out of the product's own path. Any other HTML is a plain failure.
+  if (/^text\/html/i.test(r.headers.get('content-type') || '')) {
+    const said = offlineNotice(await r.text(), FAKE_MARKUP);
+    if (said) throw siteOffline(said);
+    throw Object.assign(new Error(`fake source answered HTML, not JSON (${r.status})`), { status: r.status });
+  }
   return r.json();
 }
 
