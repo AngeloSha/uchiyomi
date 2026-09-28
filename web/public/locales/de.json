@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2488
+    "strings": 2489
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -2491,5 +2491,6 @@
   "No source followed": "Keine Quelle verfolgt",
   "its source": "die Quelle",
   "1 not switched on: over the source limit": "1 nicht eingeschaltet: über dem Quellenlimit",
-  "every chapter file in the downloads folder is in the library (1 checked)": "jede Kapiteldatei im Download-Ordner ist in der Bibliothek (1 geprüft)"
+  "every chapter file in the downloads folder is in the library (1 checked)": "jede Kapiteldatei im Download-Ordner ist in der Bibliothek (1 geprüft)",
+  "Rate this": "Bewerten"
 }

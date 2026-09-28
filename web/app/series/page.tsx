@@ -1609,7 +1609,7 @@ function SeriesInner() {
       </Link>
       <div className="mt-1 flex items-center justify-between">
         <StarRating value={rating} onSet={setStars} />
-        <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
+        <span className="text-xs text-fog-500">{rating ? `${rating}/5` : tr('Rate this')}</span>
       </div>
       {canDownload(user) && (series?.booksCount ?? 0) >= 3 && (
         <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">

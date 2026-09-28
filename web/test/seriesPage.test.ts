@@ -263,3 +263,11 @@ test('the header counts chapters or volumes in the reader\'s words, one key to a
   assert.match(page, /series \? <>\{bookCountText\(series\.booksCount, mostlyVolumes\)\}<\/> : null,/, 'the header count is bare English again');
   assert.doesNotMatch(page, /mostlyVolumes \? 'volumes' : 'chapters'/, 'the header count is bare English again');
 });
+
+test('an unrated series says "Rate this" in the reader\'s words', () => {
+  // It was a bare string literal beside the stars, English in every language (the v0.49.1 translation review, pt-BR).
+  // Reintroduce the literal: "Rate this is bare English again".
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /\{rating \? `\$\{rating\}\/5` : tr\('Rate this'\)\}/, 'Rate this is bare English again');
+  assert.doesNotMatch(page, /: 'Rate this'\}/, 'Rate this is bare English again');
+});
