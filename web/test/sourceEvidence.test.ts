@@ -49,13 +49,21 @@ test('a failed Test leads with its reason, names the failing stage, and never sa
   assert.equal(v.rows[0].error, ENGINE, 'the engine\'s own words, in full (the row clamps them)');
   assert.equal(v.rows[1].detail, 'not reached');
   assert.equal(v.fix, 'Update the extension under Extensions.');
+  // v0.49.1: the fix by its own code when it has one (lib/said.ts), in the reader's language, not as the server wrote it.
+  // Reintroduce `d?.fix` in answerView: this reads the English.
+  const coded = answerView(ballTest({ diagnosis: { code: 'moved', reason: 'x', fix: 'English', fixSaid: { code: 'fix.moved', params: { host: 'new.example' } } } }));
+  assert.equal(coded.fix, 'The site now redirects to new.example. Update its address in Admin, Sources, Providers.', 'a coded fix is said as the server wrote it');
 });
 
 test('#115 itself: a failed Test whose diagnosis has no reason is still not "Working normally."', () => {
-  // Reintroduce `d?.reason || 'Working normally.'` as the failing head: the head reads "Working normally.".
-  const v = answerView(ballTest({ diagnosis: { code: 'unknown' } }));
+  // Reintroduce `d?.reason || 'Working normally.'` as the failing head: the head reads "Working normally.". A code
+  // this build has words for is never without a reason (v0.49.1 words it by its code, lib/said.ts), so the one with
+  // nothing to say is a code from a newer server that sent no sentence either.
+  const v = answerView(ballTest({ diagnosis: { code: 'from_a_newer_server' } }));
   assert.equal(v.head?.text, 'That source is still failing');
   assert.equal(v.head?.tone, 'problem');
+  assert.equal(answerView(ballTest({ diagnosis: { code: 'unknown' } })).head?.text, 'This source needs a check from an admin.',
+    'a known code without its sentence is not worded by its code');
 });
 
 test('"Working normally." only under a pass with no ✗ on screen', () => {

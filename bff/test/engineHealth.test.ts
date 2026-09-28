@@ -90,6 +90,20 @@ test('a helper that is off: a warning with Connect while sources are seen behind
   assert.match(local.items[0].detail, /points at localhost, where no helper runs/);
 });
 
+test('a source is named as it names itself, even where its name opens a sentence', async () => {
+  // v0.49.1's codes joined the names to the sentence before them as a new sentence, whose first letter is raised:
+  // "…fail until it is. Mangapill fails because of it." -- the English changed, and the name was no longer the
+  // source's. Reintroduce `joined('sentence', seen)` in engineHealth.ts: "a lower-case source name is capitalised".
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const off = { supported: true as const, enabled: false, url: OURS };
+  const failing = extensionEngine(base({ solver: off, cloudflare: [{ sourceId: 'sw:1', name: 'mangapill', bypass: true }] }))!;
+  assert.equal(failing.items[0].detail,
+    'The engine’s own Cloudflare helper is not in use: it is switched off. Extension sources on Cloudflare-protected sites fail until it is. mangapill fails because of it.',
+    'a lower-case source name is capitalised');
+  const fronted = extensionEngine(base({ solver: off, cloudflare: [{ sourceId: 'sw:2', name: 'comick.io', bypass: false }] }))!;
+  assert.match(fronted.items[0].detail, /fail until it is\. comick\.io is behind Cloudflare\.$/, 'a lower-case source name is capitalised');
+});
+
 test('no solver of our own to share: no Connect, and the detail says what to set first', async () => {
   const { extensionEngine } = await import('../src/lib/engineHealth');
   const c = extensionEngine(base({ ourSolver: '', solver: { supported: true, enabled: false, url: '' }, cloudflare: [{ sourceId: 'sw:1', name: 'A', bypass: true }] }))!;
@@ -177,4 +191,45 @@ test('a failure that has since passed is not evidence: only what is failing now 
   assert.deepEqual(ev.map((e) => [e.sourceId, e.bypass]), [
     ['sw:fronted', false], ['sw:live', true], ['sw:stored', true], ['sw:test', true], ['sw:thrice', true],
   ]);
+});
+
+test('every sentence of the row carries its codes, and they say exactly its English', async () => {
+  // v0.49.1 (lib/said.ts): the page words the row in the reader's language from its codes, so the codes must say
+  // what the English says, in every state -- read back from the registry alone. Reintroduce a bare `summary:`
+  // string in any branch: "<state> sends its summary without codes" fails; point a note at the wrong code: "the
+  // codes say something else" fails.
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const { englishOf } = await import('../src/lib/said');
+  const cf = (name: string, bypass: boolean) => ({ sourceId: `sw:${name}`, name, bypass });
+  const many = ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((n) => cf(n, true));
+  const states: Array<[string, Partial<Deps>]> = [
+    ['off', { state: 'off', linked: 1 }],
+    ['switched off', { state: 'switched_off', linked: 3 }],
+    ['unreachable', { state: 'unreachable', linked: 2, error: 'ECONNREFUSED', retry: { attempts: 1 } }],
+    ['unreachable on desktop', { state: 'unreachable', desktop: true, linked: 2 }],
+    ['unread, refusing', { solver: null, cloudflare: [cf('Ball', true)] }],
+    ['unread, refusing, no solver', { solver: null, ourSolver: '', cloudflare: many }],
+    ['unread', { solver: null, registering: true }],
+    ['unsupported, refusing', { solver: { supported: false, enabled: false, url: '' }, cloudflare: [cf('Ball', true)] }],
+    ['unsupported, refusing, desktop', { desktop: true, solver: { supported: false, enabled: false, url: '' }, cloudflare: [cf('Ball', true)] }],
+    ['unsupported', { solver: { supported: false, enabled: false, url: '' } }],
+    ['ok', { registering: true }],
+    ['other', { solver: { supported: true, enabled: true, url: 'http://elsewhere:8191' } }],
+    ['other, desktop', { desktop: true, solver: { supported: true, enabled: true, url: 'http://elsewhere:8191' } }],
+    ['off, failing', { solver: { supported: true, enabled: false, url: OURS }, cloudflare: [cf('Ball', true), cf('Dex', true)] }],
+    ['off, failing, a lower-case name', { solver: { supported: true, enabled: false, url: OURS }, cloudflare: [cf('mangapill', true)] }],
+    ['localhost, fronted', { solver: { supported: true, enabled: true, url: 'http://localhost:8191' }, cloudflare: [cf('Ball', false)] }],
+    ['off, nothing seen, no solver', { solver: { supported: true, enabled: false, url: OURS }, ourSolver: '', version: null }],
+  ];
+  for (const [what, over] of states) {
+    const c = extensionEngine(base(over));
+    assert.ok(c, what);
+    assert.ok(c!.summarySaid?.length, `${what} sends its summary without codes`);
+    assert.equal(englishOf(c!.summarySaid), c!.summary, `${what}: the summary's codes say something else`);
+    assert.equal(c!.note ? englishOf(c!.noteSaid) : c!.noteSaid, c!.note ?? undefined, `${what}: the note's codes say something else`);
+    for (const it of c!.items) {
+      assert.equal(englishOf(it.titleSaid), it.title, `${what}: the title's code says something else`);
+      assert.equal(englishOf(it.detailSaid), it.detail, `${what}: "${it.detail}" -- the codes say something else`);
+    }
+  }
 });

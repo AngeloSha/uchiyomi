@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { q, one } from './db';
 import { runHealthChecks, type HealthReport, type HealthStatus } from './health';
 import { runtime } from './runtime';
+import type { Said } from './said';
 
 /**
  * The Health report, boiled down to what the header needs (#101, @Squeaks72's proposal).
@@ -19,14 +20,19 @@ export interface HealthSummary {
   worst: HealthStatus;
   /** How many checks found something. */
   count: number;
-  /** The worst check's own sentence, e.g. "Chapter failures: 3 chapters across 2 sources keep failing". */
+  /**
+   * The worst check's own sentence, e.g. "Chapter failures: 3 chapters across 2 sources keep failing": `checks[0]`'s
+   * title and summary, in English. The web says it in the reader's language from `checks[0]` (its title by id, its
+   * `summarySaid`).
+   */
   headline: string | null;
   /**
    * Which checks found something, and how badly: the banner comes back when THIS changes, not when a count
    * inside a check moves -- "4 chapters" instead of "3" is the same problem, still dismissed. Empty when clean.
    */
   key: string;
-  checks: Array<{ id: string; title: string; status: HealthStatus; summary: string }>;
+  /** Worst first: the first is the headline's. `summarySaid` (v0.49.1) is `summary` as codes (lib/said.ts). */
+  checks: Array<{ id: string; title: string; status: HealthStatus; summary: string; summarySaid?: Said[] }>;
 }
 
 const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };
@@ -43,7 +49,7 @@ export function summarise(report: HealthReport): HealthSummary {
     count: found.length,
     headline: found[0] ? `${found[0].title}: ${found[0].summary}` : null,
     key,
-    checks: found.map((c) => ({ id: c.id, title: c.title, status: c.status, summary: c.summary })),
+    checks: found.map((c) => ({ id: c.id, title: c.title, status: c.status, summary: c.summary, ...(c.summarySaid ? { summarySaid: c.summarySaid } : {}) })),
   };
 }
 

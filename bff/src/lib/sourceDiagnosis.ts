@@ -13,8 +13,13 @@
 //
 // The fixes that send an admin to a container, a compose file or an env var go through `forDesktop`: the
 // desktop app has none of those, and its answer is Uchiyomi's own built-in helper and a restart.
+//
+// v0.49.1: the web says both halves in the reader's language. A reason is its code's (REASONS); a fix carries a
+// code of its own (FixCode, with the stage or host that fills it) beside its English, which web/lib/said.ts
+// words -- and web/test/said.test.ts runs diagnose() over every rule and holds the two to each other.
 import type { SourceStatus } from './sourceHealth';
 import type { Stage } from './sourceEvidence';
+import type { Said } from './said';
 import { forDesktop } from './desktop';
 
 export type DiagnosisCode =
@@ -119,10 +124,13 @@ export interface Diagnosis {
    * One sentence, safe for any signed-in reader. Never contains a hostname, a component name, an HTTP
    * status or any part of `last_error`. This is a closed set of hand-written sentences rather than a
    * sanitised version of the stored string, because a scrubber eventually leaks and a fixed list cannot.
+   * It is always its code's (REASONS), so the web words it by `code`.
    */
   reason: string;
   /** ADMIN ONLY. May name FlareSolverr, compose files, config paths, and the host a site moved to. */
   fix: string;
+  /** v0.49.1: `fix` as its code and what fills it, for the web to word (absent for no fix, or one written without). */
+  fixSaid?: Said;
   actor: Actor;
   /** True when the failure never threw. The class of bug this whole module exists to make visible. */
   silent: boolean;
@@ -133,10 +141,35 @@ export interface Diagnosis {
 /** Enough empties in a row to mean something. Each one is a separate ten-minute cache window. */
 export const EMPTY_SUSPECT = 3;
 
+/**
+ * Every fix, by code. A fix that names the stage it failed at (`stage`), the host a site moved to (`host`), the
+ * transport's error (`transport`) or the latest-page budget (`seconds`) carries it as a parameter; one with a
+ * desktop wording keeps one code, and the web picks the words the way the server picked them (isDesktop).
+ */
+export type FixCode =
+  | 'fix.solverCrash' | 'fix.solverDown' | 'fix.solverTimeout' | 'fix.bypassOff' | 'fix.engineLogin' | 'fix.engineDown'
+  | 'fix.engineTimeout' | 'fix.challenge' | 'fix.cdnRefuses' | 'fix.rateLimited' | 'fix.unreachable' | 'fix.siteTimeout'
+  | 'fix.extensionFailed' | 'fix.timeout' | 'fix.disabled' | 'fix.moved' | 'fix.unreachableAt' | 'fix.cdnAnswered403'
+  | 'fix.nothingToDo' | 'fix.solverBroken' | 'fix.markupChanged' | 'fix.unknownLive' | 'fix.unnumbered'
+  | 'fix.emptySearch' | 'fix.emptyChapters' | 'fix.emptyPages' | 'fix.testTimeout' | 'fix.tooSlow' | 'fix.unknown'
+  | 'fix.unexplained';
+
+/** A fix: its English, and its code with what fills it. */
+interface Fix { text: string; said: Said }
+const fixed = (code: FixCode, text: string, params?: Record<string, string | number | null>): Fix =>
+  ({ text, said: { code, ...(params ? { params } : {}) } });
+
+/** A fix written as a bare string carries no code, and the web shows it as it is. */
 const D = (
-  code: DiagnosisCode, reason: string, fix: string, actor: Actor,
+  code: DiagnosisCode, reason: string, fix: string | Fix, actor: Actor,
   opts: { silent?: boolean; needsProbe?: boolean } = {},
-): Diagnosis => ({ code, reason, fix, actor, silent: !!opts.silent, needsProbe: !!opts.needsProbe });
+): Diagnosis => {
+  const f = typeof fix === 'string' ? { text: fix } : fix;
+  return {
+    code, reason, fix: f.text, ...('said' in f && f.text ? { fixSaid: f.said } : {}), actor,
+    silent: !!opts.silent, needsProbe: !!opts.needsProbe,
+  };
+};
 
 const NEEDS_ADMIN = 'This source needs a check from an admin.';
 
@@ -157,23 +190,23 @@ const whileStage = (c: RuleCtx) => (c.stage ? ` while ${STAGE_WORD[c.stage]}` : 
 const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   [/chromedriver.*exited|devtoolsactiveport|session not created/i, () =>
     D('solver_crash', NEEDS_ADMIN,
-      forDesktop(
+      fixed('fix.solverCrash', forDesktop(
         "The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.",
         "The browser inside Uchiyomi's built-in Cloudflare helper crashed. Quit and reopen Uchiyomi to restart it.",
-      ),
+      )),
       'admin')],
 
   [/httpconnectionpool|max retries exceeded|newconnectionerror|failed to establish a new connection/i, () =>
     D('solver_down', NEEDS_ADMIN,
-      forDesktop(
+      fixed('fix.solverDown', forDesktop(
         'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.',
         "Uchiyomi's built-in Cloudflare helper is not answering. Quit and reopen Uchiyomi to restart it.",
-      ),
+      )),
       'admin')],
 
   [/timeout after [\d.]+ seconds|error solving the challenge/i, () =>
     D('solver_timeout', NEEDS_ADMIN,
-      'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.',
+      fixed('fix.solverTimeout', 'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
       'admin')],
 
   // Suwayomi's own CloudflareInterceptor throws exactly these words when the ENGINE's FlareSolverr
@@ -189,10 +222,10 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   // precisely the people it is for. Name the shipped names as examples and point at the value they have.
   [/cloudflare bypass currently disabled/i, () =>
     D('cf_challenge', 'This source is protected by a check we could not get past.',
-      forDesktop(
+      fixed('fix.bypassOff', forDesktop(
         "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.",
         "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.",
-      ),
+      )),
       'admin')],
 
   // The engine itself did not answer, or its own HTTP layer refused us. ABOVE every site rule: "suwayomi 403" is
@@ -202,30 +235,32 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
     const auth = /^suwayomi 40[13]\b/.test(c.err ?? '');
     return D('upstream_down', 'The extension server did not answer.',
       auth
-        ? forDesktop(
+        ? fixed('fix.engineLogin', forDesktop(
           "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.",
           "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.",
-        )
-        : forDesktop(
+        ))
+        : fixed('fix.engineDown', forDesktop(
           'This is the Suwayomi extension server, not the site. Check that container.',
           "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.",
-        ), 'admin');
+        )), 'admin');
   }],
 
   // The engine did not answer in time: our wait, on the engine, says nothing about the site behind it.
   [/^suwayomi timeout after \d+ms/i, (c) =>
     D('timeout', 'This source did not answer in time.',
-      `The extension engine did not answer in time${whileStage(c)}. It may be busy with a slow site or a long chapter list; re-test, and if it keeps happening, check the engine's own log.`,
+      fixed('fix.engineTimeout',
+        `The extension engine did not answer in time${whileStage(c)}. It may be busy with a slow site or a long chapter list; re-test, and if it keeps happening, check the engine's own log.`,
+        { stage: c.stage ?? null }),
       'admin', { needsProbe: true })],
 
   [/just a moment|cf-chl|cf_clearance|cloudflare|challenge/i, () =>
     D('cf_challenge', 'This source is protected by a check we could not get past.',
-      'A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.',
+      fixed('fix.challenge', 'A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.'),
       'admin')],
 
   [/\b403\b|forbidden|access denied/i, () =>
     D('edge_403', 'This source is blocking this server right now.',
-      "The site's CDN is refusing this server outright with a 403. A challenge solver cannot fix that; it is usually a datacentre-IP block. Change egress or drop the source.",
+      fixed('fix.cdnRefuses', "The site's CDN is refusing this server outright with a 403. A challenge solver cannot fix that; it is usually a datacentre-IP block. Change egress or drop the source."),
       'admin')],
 
   // Since v0.40.0 a 429 is not only waited out: the downloader remembers it per source (lib/pace.ts) and
@@ -235,12 +270,12 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   // the two.
   [/\b429\b|rate.?limit|too many requests|slow down/i, () =>
     D('rate_limited', 'This source asked us to slow down.',
-      'The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.',
+      fixed('fix.rateLimited', 'The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.'),
       'wait')],
 
   [/enotfound|eai_again|econnrefused|unknownhostexception|connectexception/i, () =>
     D('unreachable', 'This source is not answering right now.',
-      'The address could not be reached at all. Check the URL. The site may be gone.', 'admin')],
+      fixed('fix.unreachable', 'The address could not be reached at all. Check the URL. The site may be gone.'), 'admin')],
 
   // From here on the engine DID answer (`suwayomi: ` is a GraphQL error, suwayomi/client.ts): what failed is the
   // extension, talking to its site. BELOW the Cloudflare, 403, rate-limit and unreachable rules, which read the
@@ -248,12 +283,16 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   // blamed the engine container for the extension's own exception (#115).
   [/^suwayomi: .*(?:sockettimeoutexception|\btimed? ?out\b)/i, (c) =>
     D('timeout', 'This source did not answer in time.',
-      `The extension engine answered, but the site behind the extension did not answer it in time${whileStage(c)}. Often transient: re-test. If it persists, the site may be down or slow for the engine.`,
+      fixed('fix.siteTimeout',
+        `The extension engine answered, but the site behind the extension did not answer it in time${whileStage(c)}. Often transient: re-test. If it persists, the site may be down or slow for the engine.`,
+        { stage: c.stage ?? null }),
       'admin', { needsProbe: true })],
 
   [/^suwayomi: /i, (c) =>
     D('extension_error', "This source's extension reported an error.",
-      `The extension engine answered, but the extension itself failed${whileStage(c)}. Usually the site changed or refused the extension: update the extension (Admin → Extensions), check its settings, or open the site in a browser. The engine's own message is shown with the test.`,
+      fixed('fix.extensionFailed',
+        `The extension engine answered, but the extension itself failed${whileStage(c)}. Usually the site changed or refused the extension: update the extension (Admin → Extensions), check its settings, or open the site in a browser. The engine's own message is shown with the test.`,
+        { stage: c.stage ?? null }),
       'admin')],
 
   // Deliberately last, and deliberately NOT confident. `withTimeout` throws this after discarding whatever
@@ -261,7 +300,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   // time. Guessing here is how you tell someone to go and fix the wrong thing.
   [/^timeout\b/i, () =>
     D('timeout', 'This source did not answer in time.',
-      'A timeout alone does not say why. Re-test it: that distinguishes a moved domain, a challenge that never completed, and a genuinely slow site.',
+      fixed('fix.timeout', 'A timeout alone does not say why. Re-test it: that distinguishes a moved domain, a challenge that never completed, and a genuinely slow site.'),
       'admin', { needsProbe: true })],
 ];
 
@@ -271,6 +310,33 @@ const hostOf = (u?: string): string | null => {
 };
 
 const MARKUP_DRIFT = 'This source stopped listing new titles. An admin needs to check it.';
+/** The fix for a search that answers with nothing, from a live test or from three empty answers in a row. */
+const EMPTY_SEARCH = 'It answers without an error but returns nothing, which usually means the site changed its markup or is serving a challenge page. Re-test it to find out which.';
+
+/**
+ * Each code's public sentence. A reason belongs to its code, whichever rule found it -- which is what lets the web
+ * word it by `code` alone (and lib/said.ts's `sources.reason` put it in a Health row). sourceDiagnosis.test.ts
+ * holds every rule's reason to this.
+ */
+export const REASONS: Readonly<Record<DiagnosisCode, string>> = {
+  ok: '',
+  disabled: 'This source is switched off.',
+  moved: "This source's website moved. An admin needs to point it at the new address.",
+  edge_403: 'This source is blocking this server right now.',
+  cf_challenge: 'This source is protected by a check we could not get past.',
+  solver_crash: NEEDS_ADMIN,
+  solver_down: NEEDS_ADMIN,
+  solver_timeout: NEEDS_ADMIN,
+  timeout: 'This source did not answer in time.',
+  too_slow: 'This source answers, but more slowly than it is given.',
+  markup_drift: MARKUP_DRIFT,
+  unreachable: 'This source is not answering right now.',
+  rate_limited: 'This source asked us to slow down.',
+  upstream_down: 'The extension server did not answer.',
+  extension_error: "This source's extension reported an error.",
+  unnumbered: 'This source lists chapters without numbers Uchiyomi can use.',
+  unknown: NEEDS_ADMIN,
+};
 
 /**
  * What is wrong with this source, and what to do.
@@ -281,7 +347,7 @@ const MARKUP_DRIFT = 'This source stopped listing new titles. An admin needs to 
  */
 export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagnosis {
   if (f.disabled) {
-    return D('disabled', 'This source is switched off.', 'Turn it back on in Admin, Sources, Providers.', 'admin');
+    return D('disabled', 'This source is switched off.', fixed('fix.disabled', 'Turn it back on in Admin, Sources, Providers.'), 'admin');
   }
 
   const err = f.lastError || '';
@@ -296,11 +362,11 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
     const now = hostOf(probe.finalUrl);
     if (base && now && base !== now) {
       return D('moved', "This source's website moved. An admin needs to point it at the new address.",
-        `The site now redirects to ${now}. Update its address in Admin, Sources, Providers.`, 'admin');
+        fixed('fix.moved', `The site now redirects to ${now}. Update its address in Admin, Sources, Providers.`, { host: now }), 'admin');
     }
     if (probe.transport && /enotfound|eai_again|econnrefused/i.test(probe.transport)) {
       return D('unreachable', 'This source is not answering right now.',
-        `The address could not be reached (${probe.transport}). Check the URL. The site may be gone.`, 'admin');
+        fixed('fix.unreachableAt', `The address could not be reached (${probe.transport}). Check the URL. The site may be gone.`, { transport: probe.transport }), 'admin');
     }
     // Everything below reads the homepage's status, so it only applies when a homepage was actually asked.
     // For an extension source nothing was (the engine talks to the site, not this server), and a rule that
@@ -311,12 +377,12 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       // the challenge page and says nothing about whether the source works.
       if (probe.httpStatus === 403 && !probe.needsSolver) {
         return D('edge_403', 'This source is blocking this server right now.',
-          "The site's CDN answered 403 to a direct request. A challenge solver cannot fix that; it is usually a datacentre-IP block.",
+          fixed('fix.cdnAnswered403', "The site's CDN answered 403 to a direct request. A challenge solver cannot fix that; it is usually a datacentre-IP block."),
           'admin');
       }
       if (probe.httpStatus === 429) {
         return D('rate_limited', 'This source asked us to slow down.',
-          'Nothing to do. The cooldown widens automatically and clears itself.', 'wait');
+          fixed('fix.nothingToDo', 'Nothing to do. The cooldown widens automatically and clears itself.'), 'wait');
       }
       // The inference that matters most: the site answered us fine from this very container, so whatever
       // the stored error blames, the broken component is the solver and not the site.
@@ -324,15 +390,15 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         const hit = RULES.find(([re]) => re.test(err))?.[1]({ err });
         if (hit && hit.code.startsWith('solver_')) return hit;
         return D('solver_down', NEEDS_ADMIN,
-          forDesktop(
+          fixed('fix.solverBroken', forDesktop(
             'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.',
             "The site answers fine from this computer, so Uchiyomi's built-in Cloudflare helper is the broken part. Quit and reopen Uchiyomi to restart it.",
-          ),
+          )),
           'admin');
       }
       if (probe.httpStatus === 200 && probe.looksHtml && suspect) {
         return D('markup_drift', MARKUP_DRIFT,
-          'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.',
+          fixed('fix.markupChanged', 'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.'),
           'admin', { silent: true });
       }
     }
@@ -346,11 +412,11 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         const e = fl.error || '';
         for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
         return D('unknown', NEEDS_ADMIN,
-          `The live test failed while ${word}, and the error matches nothing known. It is shown with the test.`, 'admin');
+          fixed('fix.unknownLive', `The live test failed while ${word}, and the error matches nothing known. It is shown with the test.`, { stage: fl.stage }), 'admin');
       }
       if (fl.kind === 'unnumbered') {
         return D('unnumbered', 'This source lists chapters without numbers Uchiyomi can use.',
-          "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Extensions), or Ignore it here.",
+          fixed('fix.unnumbered', "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Extensions), or Ignore it here."),
           'admin');
       }
       if (fl.kind === 'empty') {
@@ -363,10 +429,10 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         if (why && (why.code === 'cf_challenge' || why.code.startsWith('solver_'))) return why;
         return D('markup_drift', MARKUP_DRIFT,
           fl.stage === 'search'
-            ? 'It answers without an error but returns nothing, which usually means the site changed its markup or is serving a challenge page. Re-test it to find out which.'
+            ? fixed('fix.emptySearch', EMPTY_SEARCH)
             : fl.stage === 'chapters'
-              ? 'It finds titles, but lists no chapters for the titles it tried, which usually means the chapter list moved or changed its markup. Re-add it with auto-detect, or update the extension.'
-              : 'It lists chapters, but no pages for the chapters it tried, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.',
+              ? fixed('fix.emptyChapters', 'It finds titles, but lists no chapters for the titles it tried, which usually means the chapter list moved or changed its markup. Re-add it with auto-detect, or update the extension.')
+              : fixed('fix.emptyPages', 'It lists chapters, but no pages for the chapters it tried, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.'),
           'admin', { silent: true, needsProbe: fl.stage === 'search' });
       }
       // Our own deadline. With a current stored error, the stored rules below speak -- they name a cause (a
@@ -384,7 +450,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
           for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
         }
         return D('timeout', 'This source did not answer in time.',
-          `The live test ran out of time while ${word}. That alone is not proof it is broken: re-test, and if it keeps happening, raise SOURCE_TEST_TIMEOUT_MS or look at the site itself.`,
+          fixed('fix.testTimeout', `The live test ran out of time while ${word}. That alone is not proof it is broken: re-test, and if it keeps happening, raise SOURCE_TEST_TIMEOUT_MS or look at the site itself.`, { stage: fl.stage }),
           'admin', { needsProbe: true });
       }
     }
@@ -394,31 +460,30 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
   // the generic timeout rule would shrug at it. Repeatedly outrunning the budget is not an unknown cause; it
   // is a known one with a specific fix, and it is the fault that made a working source disappear.
   if ((f.slowStreak ?? 0) >= EMPTY_SUSPECT) {
-    const budget = f.budgetMs ? `${Math.round(f.budgetMs / 1000)}s` : 'the time allowed';
+    const seconds = f.budgetMs ? Math.round(f.budgetMs / 1000) : null;
+    const budget = seconds !== null ? `${seconds}s` : 'the time allowed';
     return D('too_slow',
       'This source answers, but more slowly than it is given.',
-      `It keeps taking longer than ${budget} to return its newest page. Raise SOURCE_LATEST_TIMEOUT_MS if the wait is acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.`,
+      fixed('fix.tooSlow', `It keeps taking longer than ${budget} to return its newest page. Raise SOURCE_LATEST_TIMEOUT_MS if the wait is acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.`, { seconds }),
       'admin');
   }
 
   for (const [re, make] of RULES) if (re.test(err)) return make({ err });
 
   if (suspect) {
-    return D('markup_drift', MARKUP_DRIFT,
-      'It answers without an error but returns nothing, which usually means the site changed its markup or is serving a challenge page. Re-test it to find out which.',
-      'admin', { silent: true, needsProbe: true });
+    return D('markup_drift', MARKUP_DRIFT, fixed('fix.emptySearch', EMPTY_SEARCH), 'admin', { silent: true, needsProbe: true });
   }
 
   if (err) {
     return D('unknown', NEEDS_ADMIN,
-      'The recorded error does not match anything known. Re-test it for a live verdict.', 'admin', { needsProbe: true });
+      fixed('fix.unknown', 'The recorded error does not match anything known. Re-test it for a live verdict.'), 'admin', { needsProbe: true });
   }
 
   // A live test that just FAILED is never "working normally", whatever the stored record says (#115: the Test
   // result printed "Working normally." under a ✗).
   if (probe && probe.adapterOk === false) {
     return D('unknown', NEEDS_ADMIN,
-      'The live test failed, and nothing recorded explains it. Re-test it and read the failing step.', 'admin', { needsProbe: true });
+      fixed('fix.unexplained', 'The live test failed, and nothing recorded explains it. Re-test it and read the failing step.'), 'admin', { needsProbe: true });
   }
 
   return D('ok', '', '', 'none');

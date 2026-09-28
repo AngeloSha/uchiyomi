@@ -480,15 +480,19 @@ test('every string the Health keys, legends and live strip render is in all eigh
 });
 
 test("Health prints the server's words in their own direction: every finding's title and detail, a card's summary and note", () => {
-  // The final screenshot review, in Arabic (390-ar-health-row-failed-why.png): the server's English -- not
-  // translated, and not to be -- took the page's right-to-left direction, so a sentence printed its full stop at
-  // its start (".This source needs a check from an admin") and a closing bracket flipped. Reintroduce the plain
-  // `<p className="text-[11px] text-fog-500">{it.detail}</p>`: "a finding's detail takes the page's direction" fails.
+  // The final screenshot review, in Arabic (390-ar-health-row-failed-why.png): the server's English took the
+  // page's right-to-left direction, so a sentence printed its full stop at its start (".This source needs a check
+  // from an admin") and a closing bracket flipped. v0.49.1 words them in the reader's language (lib/said.ts), but a
+  // source's name, a folder or a site's own error inside one is in any script, and a server older than that still
+  // sends English. Reintroduce the plain `<p className="text-[11px] text-fog-500">{itemDetail(it)}</p>`: "a
+  // finding's detail takes the page's direction" fails.
   const src = code(read(PAGE));
   const health = src.slice(src.indexOf('function Health()'), src.indexOf('function DesktopUpdateNote('));
-  const printed: [string, string][] = [["a finding's title", 'it.title'], ["a finding's detail", 'it.detail'], ["a card's summary", 'c.summary'], ["a card's note", 'c.note']];
+  const printed: [string, string][] = [
+    ["a finding's title", 'itemTitle(it)'], ["a finding's detail", 'itemDetail(it)'], ["a card's summary", 'checkSummary(c)'], ["a card's note", 'checkNote(c)'],
+  ];
   for (const [what, expr] of printed) {
-    const at = [...health.matchAll(new RegExp(`<p\\b([^>]*)>\\{${expr.replace('.', '\\.')}\\}</p>`, 'g'))];
+    const at = [...health.matchAll(new RegExp(`<p\\b([^>]*)>\\{${expr.replace(/[.()]/g, '\\$&')}\\}</p>`, 'g'))];
     assert.ok(at.length > 0, `${what} is no longer printed in a <p> of its own -- update this test`);
     for (const m of at) assert.match(m[1], /\bdir="auto"/, `${what} takes the page's direction, its full stop at its start in Arabic`);
   }

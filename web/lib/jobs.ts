@@ -9,6 +9,7 @@
  * is gone and Library -> Downloads shows it all (lib/serverDownloads.ts `downloadSections`).
  */
 import { keys, t as tr } from './i18n';
+import type { Said } from './said';
 
 export interface JobCard {
   folder: string;
@@ -17,6 +18,8 @@ export interface JobCard {
   done: number;
   status: string;
   reason?: string;
+  /** v0.49.1: `reason` as codes lib/said.ts words (`reasonText`). */
+  reasonSaid?: Said[];
   startedAt?: number;
   finishedAt?: number;
   /** This account started it: it may cancel it (an admin is offered every Cancel). */
@@ -57,6 +60,8 @@ export interface RunCard {
   step?: string;
   cancelRequested?: boolean;
   reason?: string;
+  /** v0.49.1: `reason` as a code lib/said.ts words (`reasonText`). */
+  reasonSaid?: Said;
   mine?: boolean;
   /**
    * `false` on a run that cannot download a chapter: a one-row Health fix that only resets the solver, counts

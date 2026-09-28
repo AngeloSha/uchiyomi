@@ -16,7 +16,7 @@
  */
 import { q } from './db';
 import {
-  onFinished, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
+  onFinished, reasonSaidOf, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
   type ActivityEntry, type ActivityStatus, type Origin,
 } from './downloadActivity';
 
@@ -98,7 +98,8 @@ export async function startActivityLog(now = Date.now()): Promise<number> {
     origin: r.origin as Origin, by: r.by_user, status: r.status as ActivityStatus,
     startedAt: new Date(r.started_at).getTime(), finishedAt: new Date(r.finished_at).getTime(),
     ...(r.pages !== null ? { pages: r.pages } : {}),
-    ...(r.reason !== null ? { reason: r.reason } : {}),
+    // Only the English was stored: its codes are read back from it, where this server wrote it (v0.49.1).
+    ...(r.reason !== null ? { reason: r.reason, ...(reasonSaidOf(r.reason) ? { reasonSaid: reasonSaidOf(r.reason) } : {}) } : {}),
   })));
   return rows.length;
 }

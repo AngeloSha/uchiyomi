@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { IcAlert, IcHourglass, IcX } from '@/components/icons';
 import { ART } from '@/lib/art';
 import { t as tr } from '@/lib/i18n';
+import { joinPart, reasonText } from '@/lib/said';
 import { durationText, relativeTime } from '@/lib/format';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, mayCancel, repairStepLabel, runProgress, type RunCard } from '@/lib/jobs';
@@ -212,7 +213,7 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
                 <li key={j.folder} className="card flex min-w-0 items-start gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-fog-100">{j.title}</p>
-                    <p dir="auto" className="mt-0.5 text-[12px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
+                    <p dir="auto" className="mt-0.5 text-[12px] text-fog-400">{reasonText(j) || tr('Cancelled; what landed is kept.')}</p>
                   </div>
                   {(isAdmin || j.mine) && (
                     <button type="button" onClick={() => dismissJob(j.folder)} className="btn-key">{tr('Dismiss')}</button>
@@ -299,7 +300,7 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
         <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-300"><IcAlert width={18} height={18} /></span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-fog-100">{runName(r)}</p>
-          <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{r.reason || tr('Stopped.')}</p>
+          <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{reasonText(r) || tr('Stopped.')}</p>
           {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
           {a.dismiss && (
             <div className="mt-2 flex flex-wrap gap-2">
@@ -320,9 +321,9 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
         {a.kind === 'job' ? (
           <>
             {/* The reason has always been recorded; the strip used to say only "Download stopped." for every cause.
-                `dir="auto"`: it is the server's sentence, in English, and in an Arabic page its full stop would
-                otherwise jump to the front. */}
-            <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{a.job.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+                In the reader's language since v0.49.1 (lib/said.ts), but a source's name or a site's own error in
+                it can be in any script: `dir="auto"`, or in an Arabic page its full stop would jump to the front. */}
+            <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{reasonText(a.job) || tr('Fetch stopped. Try another source or wait.')}</p>
             {jobNoteLines(a.job, nameOf).map((line, i) => <p key={i} className="mt-0.5 text-[11px] leading-snug text-fog-400">{line}</p>)}
             {/* Which kind of download it was: a fill or a Fetch again has no Try again (the server sends no
                 `left` for them), and this says why the card is not like the others. */}
@@ -331,8 +332,8 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
         ) : (
           <>
             {a.failed.slice(0, 3).map((f) => (
-              <p key={f.id} className="mt-0.5 text-[12px] leading-relaxed text-amber-300">
-                {tr('Ch. {n} could not be saved', { n: f.number })}{f.reason ? `: ${f.reason}` : ''}
+              <p key={f.id} dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">
+                {f.reason ? joinPart(tr('Ch. {n} could not be saved', { n: f.number }), reasonText(f), 'colon') : tr('Ch. {n} could not be saved', { n: f.number })}
               </p>
             ))}
             {a.failed.length > 3 && <p className="mt-0.5 text-[11px] text-fog-500">{tr('and {n} more', { n: a.failed.length - 3 })}</p>}
@@ -377,7 +378,7 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         </p>
         {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{tr('Stopping after this chapter…')}</p>}
         {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{tr('Cancelled; what landed is kept.')}</p>}
-        {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{r.reason}</p>}
+        {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{reasonText(r)}</p>}
         {(r.seriesId || history) && (
           <p className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
             {r.seriesId && <Link href={seriesHref(r.seriesId, r.number)} className="text-accent hover:underline">{tr('Open')} ›</Link>}

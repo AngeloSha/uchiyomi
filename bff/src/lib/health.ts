@@ -23,16 +23,17 @@ import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
 import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
-import { diagnose, currentError, STAGE_WORD, type DiagnosisCode } from './sourceDiagnosis';
+import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
-import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
+import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
-import { applyIgnores, ignoredTail, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
+import { applyIgnores, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
-import { forDesktop } from './desktop';
+import { forDesktop, isDesktop } from './desktop';
 import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
 import type { NumberingNote } from './numbering';
+import { detailOf, joined, noteOf, own, say, saidOf, summaryOf, type Part, type Said } from './said';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -64,6 +65,13 @@ export interface HealthItem {
   titles?: string[];
   title: string;
   detail: string;
+  /**
+   * v0.49.1: `detail` as codes the web words in the reader's language (lib/said.ts), and `title` where the server
+   * wrote it in English rather than naming something ("Cloudflare helper", "Downloads / (the folder itself)").
+   * Absent: shown as sent -- a folder's own error, a row from before v0.49.1.
+   */
+  detailSaid?: Said[];
+  titleSaid?: Said;
   /**
    * Listed for reference, never a reason to warn. A check's status is decided by the items WITHOUT this
    * flag, so a source the operator switched off, or a version that is merely behind, can be shown without
@@ -117,8 +125,11 @@ export interface HealthItem {
   evidence?: StageLine[];
   /** The last deliberate live check: the Test button ('test') or the daily check ('sweep'). */
   tested?: { at: string; by: 'test' | 'sweep' | null; state: 'pass' | 'fail' | 'inconclusive' | null; stage: Stage | null };
-  /** The verdict behind the row, admin half included: one verdict on screen, from the stored evidence. */
-  diagnosis?: { code: DiagnosisCode; reason: string; fix: string };
+  /**
+   * The verdict behind the row, admin half included: one verdict on screen, from the stored evidence. `reason` is
+   * worded by its `code`; `fixSaid` (v0.49.1) is the fix's own code (lib/sourceDiagnosis.ts FixCode).
+   */
+  diagnosis?: { code: DiagnosisCode; reason: string; fix: string; fixSaid?: Said };
   /** How many series use the source (primaries and followers). */
   series?: number;
 }
@@ -196,6 +207,9 @@ export interface HealthCheck {
   summary: string;
   /** what this check cannot see — shown so nobody reads more into a green result than it deserves */
   note?: string;
+  /** v0.49.1: `summary` and `note` as codes the web words in the reader's language (lib/said.ts). */
+  summarySaid?: Said[];
+  noteSaid?: Said[];
   items: HealthItem[];
   /** #115, 'sources' only: how long one Test may take (the smoke test's wall plus the homepage probe). */
   testMs?: number;
@@ -230,6 +244,11 @@ function truncate<T extends { info?: boolean }>(rows: T[]): { items: T[]; hidden
 /** A check's verdict, from the items that are findings: the invariant, written once. */
 const verdict = (items: HealthItem[], bad: HealthStatus = 'warn'): HealthStatus =>
   items.some((i) => !i.info) ? bad : 'ok';
+
+/** A summary's "; 2 ignored": the findings an admin chose to stop being told about (lib/healthIgnore.ts). */
+const ignoredPart = (n: number): Part | null => (n ? say('ignored', { n }) : null);
+/** A note's " 3 more not shown.": the rows past the slice. */
+const hiddenPart = (n: number): Part | null => (n > 0 ? joined('sentence', say('hidden', { n })) : null);
 
 /**
  * The shape lib/repair.ts stores in `lib_series.gaps_result`.
@@ -412,7 +431,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       title: r.s.title,
       // The conclusion is `outcome` now, rendered by the page in the reader's language; the detail is the
       // finding alone.
-      detail: `${r.missing} missing — ${ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges}`,
+      ...detailOf([say('gaps.detail', { n: r.missing, ranges: ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges })]),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
       ...(archived ? {
@@ -458,17 +477,13 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     id: 'chapter-gaps',
     title: 'Chapter gaps',
     status: verdict(items),
-    summary: (live
-      ? `${live} series ${live === 1 ? 'has' : 'have'} missing chapters`
-      : 'No gaps that need attention')
-      + (quiet ? `; ${quiet} already looked into` : '')
-      + (archiving ? `; ${archiving} being archived slowly` : '')
-      + ignoredTail(ignored),
-    note:
-      'Gaps are normal when a source skipped a number or a series is still being downloaded. "Fill now" runs the ' +
-      'repair\'s gap search for one series: it looks for another source that carries our numbering on both sides of ' +
-      'the hole, follows it and fetches. A series it has already asked about is greyed with what it found.' +
-      (hidden ? ` ${hidden} more not shown.` : ''),
+    ...summaryOf([
+      live ? say('gaps.live', { n: live }) : say('gaps.none'),
+      quiet > 0 && say('gaps.quiet', { n: quiet }),
+      archiving > 0 && say('gaps.archiving', { n: archiving }),
+      ignoredPart(ignored),
+    ]),
+    ...noteOf([say('gaps.note'), hiddenPart(hidden)]),
     items: shown,
   };
 }
@@ -512,33 +527,37 @@ async function numberingCheck(): Promise<HealthCheck | null> {
     const note = r.numbering_note;
     const src = r.numbering_source ?? note?.source ?? r.source_id;
     // The source as a person knows it: the loaded adapter's name, else the name the series was added under when
-    // this is its own source (an extension the engine is not serving right now), else the id.
-    const name = (src && getSource(src)?.name) || (src && src === r.source_id ? r.source_name : null) || src || 'Its source';
-    const shared = note && note.posts ? `${name} gives ${note.extras} of ${note.posts} posts a number another post has`
-      + (note.biggest ? ` (${note.biggest.posts} are all ${note.biggest.number})` : '') : `${name} gives many different posts the same number`;
+    // this is its own source (an extension the engine is not serving right now), else the id. Null when there is no
+    // source to name at all: the English says "Its source", the web its own words for it.
+    const name = (src && getSource(src)?.name) || (src && src === r.source_id ? r.source_name : null) || src || null;
+    const shared = note && note.posts
+      ? note.biggest
+        ? say('numbering.sharedMost', { name, extras: note.extras, posts: note.posts, most: note.biggest.posts, number: note.biggest.number })
+        : say('numbering.shared', { name, extras: note.extras, posts: note.posts })
+      : say('numbering.sharedMany', { name });
     const base = { seriesId: r.id, title: r.title, ...(src ? { sourceId: src } : {}) };
-    const held = 'Nothing downloads for this series until then.';
+    const held = joined('sentence', say('numbering.held'));
     const auto = r.numbering_by !== 'manual';
     let item: HealthItem | null = null;
     if (r.journal) {
-      item = { ...base, detail: `A renumber was interrupted before it finished; the next check of this series finishes it. ${held}` };
+      item = { ...base, ...detailOf([say('numbering.interrupted'), held]) };
     } else if (r.numbering_pending === 'remap') {
-      item = { ...base, detail: `An extension setting changed ${name}'s chapter numbers; the chapters on disk wait to be matched to the new ones. ${held}`, actions: ['renumber'] };
+      item = { ...base, ...detailOf([say('numbering.remap', { name }), held]), actions: ['renumber'] };
     } else if (r.numbering_pending === 'posting_order') {
       item = auto
-        ? { ...base, detail: `${shared}; numbering them by posting order waits for your review. ${held}`, actions: ['renumber', 'keep_numbers'] }
-        : { ...base, detail: `Numbering by posting order, as asked, waits to be applied. ${held}`, actions: ['renumber'] };
+        ? { ...base, ...detailOf([shared, say('numbering.reviewWaits'), held]), actions: ['renumber', 'keep_numbers'] }
+        : { ...base, ...detailOf([say('numbering.askedWaits'), held]), actions: ['renumber'] };
     } else if (r.numbering_pending === 'source') {
-      item = { ...base, detail: `Going back to ${name}'s own numbers waits to be applied. ${held}`, actions: ['renumber'] };
+      item = { ...base, ...detailOf([say('numbering.sourceWaits', { name }), held]), actions: ['renumber'] };
     } else if (r.numbering === 'posting_order' && auto) {
       const at = r.changed_at ? Date.parse(r.changed_at) : NaN;
       if (Number.isFinite(at) && now - at < NUMBERED_SHOWN_MS) {
-        item = { ...base, detail: `${shared}; numbered by posting order since ${new Date(at).toISOString().slice(0, 10)}.`, actions: ['keep_numbers'], info: true };
+        item = { ...base, ...detailOf([shared, say('numbering.since', { at: new Date(at).toISOString() })]), actions: ['keep_numbers'], info: true };
       }
     } else if (r.numbering !== 'posting_order' && note?.verdict === 'hint' && auto) {
-      item = { ...base, detail: `${shared}; they may be different chapters listed as versions of one.`, actions: ['renumber', 'keep_numbers'] };
+      item = { ...base, ...detailOf([shared, say('numbering.hint')]), actions: ['renumber', 'keep_numbers'] };
     } else if (r.numbering === 'source' && !auto && note?.verdict === 'strong') {
-      item = { ...base, detail: `${shared}; you chose to keep the source's own numbers.`, actions: ['renumber'], info: true };
+      item = { ...base, ...detailOf([shared, say('numbering.kept')]), actions: ['renumber'], info: true };
     }
     if (item) items.push(item);
   }
@@ -550,17 +569,11 @@ async function numberingCheck(): Promise<HealthCheck | null> {
     id: 'numbering',
     title: 'Chapter numbering',
     status: verdict(items),
-    summary: (live
-      ? `${live} series ${live === 1 ? 'waits' : 'wait'} for a numbering review`
-      : 'No numbering change waits for a review')
-      + (numbered ? `; ${numbered} numbered by posting order lately` : ''),
-    note:
-      'Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs ' +
-      'to). A new series from such a source is numbered by posting order; one already in your library is renumbered only ' +
-      'when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays ' +
-      'with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "sequential chapter numbering" ' +
-      'setting, under Admin → Extensions, is the other way out.' +
-      (hidden ? ` ${hidden} more not shown.` : ''),
+    ...summaryOf([
+      live ? say('numbering.live', { n: live }) : say('numbering.none'),
+      numbered > 0 && say('numbering.lately', { n: numbered }),
+    ]),
+    ...noteOf([say('numbering.note'), hiddenPart(hidden)]),
     items: shown,
   };
 }
@@ -611,7 +624,7 @@ async function shortChapters(): Promise<HealthCheck> {
       bookId: r.id,
       number: Number(r.number),
       title: r.title,
-      detail: `Chapter ${r.number} has ${r.pages} page${r.pages === 1 ? '' : 's'}`,
+      ...detailOf([say('short.detail', { number: Number(r.number), pages: r.pages })]),
       // Confirmed rows keep exactly one chip, and it is the one that undoes the confirmation: the repair
       // skips a chapter somebody has already called short, so "Fix" on one would do nothing at all.
       actions: confirmed || partial ? ['confirm_short'] : owned ? ['fix_short', 'confirm_short'] : ['confirm_short'],
@@ -632,16 +645,11 @@ async function shortChapters(): Promise<HealthCheck> {
     id: 'short-chapters',
     title: 'Suspiciously short chapters',
     status: verdict(items, 'problem'),
-    summary: (live
-      ? `${live} chapter${live === 1 ? '' : 's'} contain only one or two images`
-      : 'No truncated chapters found')
-      + (quiet ? `; ${quiet} confirmed short at the source` : ''),
-    note:
-      'Counted nightly by the repair task, which opens the chapter files nobody has read yet, so this is no longer ' +
-      'limited to chapters someone has opened. Half-chapters are excluded since author notices really are one page. ' +
-      '"Fix" replaces the chapter only if another source has a longer copy; "It\'s fine" records that it really is ' +
-      'this short, and the nightly stops looking at it.' +
-      (hidden ? ` ${hidden} more not shown.` : ''),
+    ...summaryOf([
+      live ? say('short.live', { n: live }) : say('short.none'),
+      quiet > 0 && say('short.quiet', { n: quiet }),
+    ]),
+    ...noteOf([say('short.note'), hiddenPart(hidden)]),
     items: shown,
   };
 }
@@ -704,14 +712,14 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     ...(r.blocked_until
       ? { caveats: [{ action: 'retry' as const, code: 'source_cooling_down' as const, until: new Date(r.blocked_until).toISOString() }] }
       : r.disabled ? { caveats: [{ action: 'retry' as const, code: 'source_off' as const }] } : {}),
-    detail:
-      `${r.chapters} chapter${r.chapters === 1 ? '' : 's'} in ${r.series} series since ` +
-      `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}` +
-      `${r.capped ? `, ${r.capped} left alone after ${CHAPTER_RETRY_CAP}` : ''}; ` +
-      `latest: "${r.latest_title}" ch ${r.latest_number} (${r.latest_status}` +
+    ...detailOf([say('failures.detail', {
+      n: r.chapters, series: r.series, since: new Date(r.since).toISOString(), tries: r.attempts, capped: r.capped, cap: CHAPTER_RETRY_CAP,
+      title: r.latest_title, number: Number(r.latest_number), status: r.latest_status,
       // 160, not 80: since v0.40.0 the reason ends with the evidence -- ` (page 80: 200 image/webp 88 B;
-      // page 12: 404)` -- and that tail is the part that says WHICH theory is right. At 80 it was cut.
-      `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 160)}` : ''})`,
+      // page 12: 404)` -- and that tail is the part that says WHICH theory is right. At 80 it was cut. The
+      // downloader's own words, which the web shows as they are.
+      reason: r.latest_reason ? String(r.latest_reason).slice(0, 160) : null,
+    })]),
   }));
   const ignored = applyIgnores('chapter-failures', all, ctx, !readFailed);
   const live = rows.filter((_, i) => !all[i].info);
@@ -721,18 +729,13 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     id: 'chapter-failures',
     title: 'Chapters that would not download',
     status: verdict(all),
-    summary: (live.length
-      ? `${total} chapter${total === 1 ? '' : 's'} across ${live.length} source${live.length === 1 ? '' : 's'} keep failing`
-      : 'Every attempted chapter landed') + ignoredTail(ignored),
-    note:
-      'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
-      `They clear themselves the moment the chapter lands. After ${CHAPTER_RETRY_CAP} failed tries the nightly sweep leaves a chapter alone ` +
-      'until the nightly repair gives it another chance a week later; "Retry now" does that for this source at once, ' +
-      'and "Find missing chapters" on the series still fetches it on purpose. ' +
-      // Not a failure row: a chapter saved short is on disk and readable, so it is not in this ledger at
-      // all. Said here because this is where an admin looks for "why is a chapter not whole".
-      'A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.' +
-      (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
+    ...summaryOf([
+      live.length ? say('failures.live', { n: total, m: live.length }) : say('failures.none'),
+      ignoredPart(ignored),
+    ]),
+    // The note's last sentence is not about a failure row: a chapter saved short is on disk and readable, so it is
+    // not in this ledger at all. Said here because this is where an admin looks for "why is a chapter not whole".
+    ...noteOf([say('failures.note', { cap: CHAPTER_RETRY_CAP }), hiddenPart(rows.length - 20)]),
     items,
   };
 }
@@ -780,26 +783,27 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
   }
   const frozen = unrouted.filter((r) => !followed.has(r.id));
   const covered = unrouted.filter((r) => followed.has(r.id));
-  const why = (r: typeof rows[number]) =>
-    // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
-    // above names but a series page cannot see.
-    r.switched_off ? 'switched off' : r.still_enabled ? forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit') : 'no longer installed';
+  // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
+  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see.
+  const why = (r: typeof rows[number], p: { n: number; source: string }): Part =>
+    r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
   // engine: its own row (engineHealth.ts) and Admin → Extensions say how to bring it back.
-  const engineWhy = (r: typeof rows[number]): string | null =>
-    !r.source_id?.startsWith('sw:') || engine === 'up' ? null
-      : engine === 'unreachable' ? 'the extension engine isn’t answering' : 'the extension engine is off';
-  const found: HealthItem[] = frozen.map((r) => ({
-    seriesId: r.id,
-    title: r.title,
-    key: `series:${r.id}`,
-    detail: !r.source_id
-      ? `${r.books_count} chapters; no source recorded`
-      : engineWhy(r)
-        ? `${r.books_count} chapters; its source ${r.source_id} can’t be reached because ${engineWhy(r)}`
-        : `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`,
-  }));
+  const engineWhy = (r: typeof rows[number]): boolean => !!r.source_id?.startsWith('sw:') && engine !== 'up';
+  const found: HealthItem[] = frozen.map((r) => {
+    const p = { n: r.books_count, source: r.source_id ?? '' };
+    return {
+      seriesId: r.id,
+      title: r.title,
+      key: `series:${r.id}`,
+      ...detailOf([!r.source_id
+        ? say('frozen.noSource', { n: r.books_count })
+        : engineWhy(r)
+          ? say(engine === 'unreachable' ? 'frozen.engineDown' : 'frozen.engineOff', p)
+          : why(r, p)]),
+    };
+  });
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
   const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
@@ -807,7 +811,7 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
     items.push({
       seriesId: r.id,
       title: r.title,
-      detail: `primary ${r.source_id ?? '(none)'} gone; still following ${followed.get(r.id)!.join(', ')}`,
+      ...detailOf([say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
       info: true,
     });
   }
@@ -815,18 +819,16 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
     id: 'frozen-series',
     title: 'Series that can no longer update',
     status: stuck ? 'warn' : 'ok',
-    summary: (stuck
-      ? `${stuck} series ${stuck === 1 ? 'has' : 'have'} no working source`
-      : 'Every series has a working source') +
-      (covered.length ? `; ${covered.length} lost ${covered.length === 1 ? 'its' : 'their'} primary but still follow${covered.length === 1 ? 's' : ''} another` : '') +
-      ignoredTail(ignored),
-    note:
-      (frozen.some((r) => engineWhy(r))
-        ? 'Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back. '
-        : '') +
-      'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
-      'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.' +
-      (frozen.length > 20 ? ` ${frozen.length - 20} more not shown.` : ''),
+    ...summaryOf([
+      stuck ? say('frozen.live', { n: stuck }) : say('frozen.none'),
+      covered.length > 0 && say('frozen.covered', { n: covered.length }),
+      ignoredPart(ignored),
+    ]),
+    ...noteOf([
+      frozen.some((r) => engineWhy(r)) && say('frozen.engineNote'),
+      joined('sentence', say('frozen.note')),
+      hiddenPart(frozen.length - 20),
+    ]),
     items,
   };
 }
@@ -841,9 +843,7 @@ export function sourceLabel(id: string, engineName?: string | null): string {
   return getSource(id)?.name || engineName || id;
 }
 
-const STAGE_LABEL: Record<Stage, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
-const when = (t: string | number | Date) => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
-const TESTED_BY: Record<string, string> = { test: 'by Test', sweep: 'by the daily check' };
+const iso = (t: string | number | Date) => new Date(t).toISOString();
 
 async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
@@ -921,12 +921,12 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     // A block whose deadline has passed is not actually holding anything back; say so rather than
     // leaving the operator thinking the source is still down.
     const state = r.disabled
-      ? 'turned off by you'
+      ? say('sources.turnedOff')
       : until && until < now
-        ? `block expired, will retry on next use (was ${r.status})`
+        ? say('sources.expired', { status: r.status })
         : until
-          ? `${r.status} until ${when(until)}`
-          : r.status;
+          ? say('sources.until', { status: r.status, until: iso(until) })
+          : say('sources.status', { status: r.status });
     // The plain-language cause and its fix, rather than the raw string. This page is admin-only, so it gets the
     // operator half of the diagnosis, which is the half that names what to actually go and do.
     //
@@ -944,45 +944,49 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       // The confirmed failure is live evidence of the most specific kind: its stage and its own error.
       lead && !r.disabled ? { adapterOk: false, failure: { stage: lead.stage, kind: lead.kind, error: lead.error } } : undefined,
     );
-    const uses = r.series ? `${r.series} series use it` : 'no series use it';
-    const tested = r.live_at
-      ? `last tested ${when(r.live_at)}${TESTED_BY[r.live_by ?? ''] ? ` ${TESTED_BY[r.live_by!]}` : ''}` : '';
-    let detail: string;
+    const uses = say('sources.uses', { n: r.series });
+    const tested = r.live_at ? say('sources.tested', { at: iso(r.live_at), by: r.live_by }) : null;
+    let detail: Part[];
     let info = false;
     let members: string[] = [];
     if (r.disabled) {
       off++;
       info = true;
-      detail = `${state}; ${uses}`;
+      detail = [state, uses];
     } else if (failing.length) {
       // Leads with the stage: "Search failing since …" is what an admin looking for Manga Ball needs first. The
       // reason is a sentence of its own, so what follows it starts the next one: appended as "; last tested",
       // it read "…needs a check from an admin.; last tested …".
-      const also = failing.length > 1 ? ` (also ${failing.slice(1).map((f) => STAGE_LABEL[f.stage].toLowerCase()).join(', ')})` : '';
-      const rest = [tested, uses].filter(Boolean).join('; ');
-      const reason = d.reason ? `${/[.!?]$/.test(d.reason) ? d.reason : `${d.reason}.`} ` : '';
-      detail = `${STAGE_LABEL[lead.stage]} failing since ${when(lead.since)}${also} — ${reason}${rest[0].toUpperCase()}${rest.slice(1)}`;
+      const rest = [tested, uses].filter((p): p is Part => !!p);
+      detail = [
+        say('sources.failing', { stage: lead.stage, since: iso(lead.since), also: failing.slice(1).map((f) => f.stage) }),
+        ...(d.reason ? [joined('dash', say('sources.reason', { diagnosis: d.code }))] : []),
+        joined(d.reason ? 'sentence' : 'dashCap', rest[0]),
+        ...rest.slice(1),
+      ];
       // What an Ignore covers: the failing stages. A NEW stage failing is a new finding (healthIgnore covered()).
       members = failing.map((f) => f.stage);
     } else if (traffic(r)) {
       info = unused(r);
       if (info) idle++;
-      const why = d.code === 'ok' ? '' : ` — ${d.fix || d.reason}`;
-      detail = `${state}; ${uses}${why}`;
+      detail = [
+        state, uses,
+        ...(d.code === 'ok' ? [] : [joined('dash', d.fix ? own(d.fixSaid, d.fix) : say('sources.reason', { diagnosis: d.code }))]),
+      ];
     } else if (inconclusive) {
       unfinished++;
       info = true;
-      detail = `the last test ran out of time while ${STAGE_WORD[r.live_stage ?? 'search']} — not proof it is broken${tested ? `; ${tested}` : ''}; ${uses}`;
+      detail = [say('sources.inconclusive', { stage: r.live_stage ?? 'search' }), tested, uses].filter((p): p is Part => !!p);
     } else {
       untested++;
       info = true;
       const days = Math.floor((now - new Date(open[0].at).getTime()) / DAY_MS);
-      detail = `${STAGE_LABEL[open[0].stage]} failed ${days} days ago and nothing has checked it since — test it again; ${uses}`;
+      detail = [say('sources.stale', { stage: open[0].stage, at: iso(open[0].at), days }), uses];
     }
     items.push({
       title: sourceLabel(r.source_id, r.engine_name),
       sourceId: r.source_id,
-      detail,
+      ...detailOf(detail),
       // Test always: it is the one action that answers "is this still true?", and it records, never escalates.
       // Clear block whenever there is a block to clear, expired or not -- clearing also wipes the escalation
       // memory (consecutive), which is what makes the next cooldown fifteen minutes instead of seventy-five.
@@ -996,7 +1000,7 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       ...(info ? { info: true } : { key: `source:${r.source_id}`, members }),
       evidence: stageLines(r.stages),
       ...(r.live_at ? { tested: { at: new Date(r.live_at).toISOString(), by: r.live_by, state: r.live_state, stage: r.live_stage } } : {}),
-      diagnosis: { code: d.code, reason: d.reason, fix: d.fix },
+      diagnosis: { code: d.code, reason: d.reason, fix: d.fix, ...(d.fixSaid ? { fixSaid: d.fixSaid } : {}) },
       series: r.series,
     });
   }
@@ -1006,22 +1010,16 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     id: 'sources',
     title: 'Source health',
     status: live ? 'warn' : 'ok',
-    summary: (live
-      ? `${live} source${live === 1 ? ' is' : 's are'} failing or blocked`
-      // Never "all responding" over a source that is failing unused, or that nobody could test to the end.
-      : idle + unfinished + untested
-        ? 'Nothing is failing that your library uses'
-        : 'All sources responding normally')
-      + (off ? `; ${off} turned off by you` : '')
-      + (idle ? `; ${idle} no series use` : '')
-      + (unfinished ? `; ${unfinished} could not finish a test` : '')
-      + ignoredTail(ignored),
-    note: 'A source is failing when a Test or the daily check fails at a step (search, chapter list, page list), '
-        + 'or when ordinary use fails at the same step three times in a row; downloading images is a step of its own. '
-        + 'Only a later success at that same step clears it. Testing never changes a cooldown. '
-        + 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve; if several '
-        + 'fail at once and all of them mention the solver, check the solver rather than the sites. '
-        + 'A cooldown on a source no series uses is listed for reference only, and so is a test that ran out of time.',
+    ...summaryOf([
+      live ? say('sources.live', { n: live })
+        // Never "all responding" over a source that is failing unused, or that nobody could test to the end.
+        : idle + unfinished + untested ? say('sources.unused') : say('sources.none'),
+      off > 0 && say('sources.off', { n: off }),
+      idle > 0 && say('sources.idle', { n: idle }),
+      unfinished > 0 && say('sources.unfinished', { n: unfinished }),
+      ignoredPart(ignored),
+    ]),
+    ...noteOf([say('sources.note')]),
     testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,
     items,
   };
@@ -1074,8 +1072,7 @@ async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
         // Only a pair gets the chip. Three copies of one entry is two merges in an order somebody has to
         // choose, and a button that quietly picks one is how a library loses a series it cannot get back.
         ...(r.ids.length === 2 ? { actions: ['merge' as const] } : {}),
-        detail: 'Same AniList entry'
-          + (r.ids.length > 2 ? `; ${r.ids.length} copies — merge them one pair at a time` : ''),
+        ...detailOf([say('dupes.same'), r.ids.length > 2 && say('dupes.copies', { n: r.ids.length })]),
       };
     });
   const ignored = applyIgnores('duplicates', items, ctx);
@@ -1084,13 +1081,8 @@ async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     id: 'duplicates',
     title: 'Duplicate series',
     status: verdict(items),
-    summary: (live
-      ? `${live} title${live === 1 ? ' appears' : 's appear'} to be in the library twice`
-      : 'No duplicates found') + ignoredTail(ignored),
-    note:
-      'Detected by two series matching the same AniList entry, so it catches copies added from different ' +
-      'sources under different names. Progress tracking works best with one copy of each. Merging is one-way and ' +
-      'never automatic: the nightly repair leaves these alone and you confirm each one.',
+    ...summaryOf([live ? say('dupes.live', { n: live }) : say('dupes.none'), ignoredPart(ignored)]),
+    ...noteOf([say('dupes.note')]),
     items,
   };
 }
@@ -1143,7 +1135,7 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
     items.push({
       seriesId: r.s.id,
       title: r.s.title,
-      detail: `${books.length} chapter(s) up to ${books[0].number}, but the series sits around ${Math.round(r.med)}`,
+      ...detailOf([say('outliers.detail', { n: books.length, top: Number(books[0].number), median: Math.round(r.med) })]),
       bookIds: books.slice(0, MAX_BOOK_IDS).map((b) => b.id),
       numbers: books.slice(0, MAX_BOOK_IDS).map((b) => Number(b.number)),
       actions: ['delete'],
@@ -1160,15 +1152,8 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
     id: 'outliers',
     title: 'Impossible chapter numbers',
     status: verdict(items, 'problem'),
-    summary: (live
-      ? `${live} series ${live === 1 ? 'has' : 'have'} chapters numbered far beyond the rest`
-      : 'No out-of-range chapters') + ignoredTail(ignored),
-    note:
-      'Catches chapters scraped from a site\'s sidebar widget, which belong to a different series. The parser ' +
-      'now guards against this, so anything here predates that fix. Deleting is never automatic and the nightly ' +
-      'repair never renumbers: "Delete chapter(s)" removes the files (a bookmarked chapter is refused), and a ' +
-      'wrong number can be corrected on the series page instead.' +
-      (items.length > MAX_ITEMS ? ` ${items.length - MAX_ITEMS} more not shown.` : ''),
+    ...summaryOf([live ? say('outliers.live', { n: live }) : say('outliers.none'), ignoredPart(ignored)]),
+    ...noteOf([say('outliers.note'), hiddenPart(items.length - MAX_ITEMS)]),
     items: items.slice(0, MAX_ITEMS),
   };
 }
@@ -1199,14 +1184,8 @@ export async function solverBlaming(): Promise<string[]> {
   return rows.map((r) => r.source_id);
 }
 
-/**
- * " (v3.4.6)" for FlareSolverr, whose versions are numbers; the desktop helper's is `uchiyomi-desktop-0.44.0`,
- * deliberately not semver-shaped (desktop/src/solver/server.ts), and read "vuchiyomi-desktop-…" with the v.
- */
-export function solverVersionLabel(version?: string): string {
-  if (!version) return '';
-  return ` (${/^\d/.test(version) ? 'v' : ''}${version})`;
-}
+/** Lives in lib/said.ts now, with the sentence it is part of; re-exported for the callers that import it here. */
+export { solverVersionLabel } from './said';
 
 export async function solverHealth(): Promise<HealthCheck> {
   const ping = await solverPing();
@@ -1214,29 +1193,30 @@ export async function solverHealth(): Promise<HealthCheck> {
 
   const url = solverUrl();
   if (!ping.ok) {
+    const error = ping.error || null;
     return {
       id: 'solver',
       title: 'Cloudflare solver',
       status: blaming.length ? 'problem' : 'warn',
       // ⚠️ Desktop: the helper's address carries its access token as the path, so it is named, never
-      // printed (a screenshot in a bug report would hand the token to anyone who reads it).
-      summary: forDesktop(`Not answering at ${url}`, 'Not answering') + (ping.error ? ` (${ping.error})` : ''),
-      note: forDesktop(
-        'Sources on Cloudflare-protected sites cannot work without it. Check the container is running '
-          + 'and that FLARESOLVERR_URL points at it.',
-        "Sources on Cloudflare-protected sites cannot work without it. Uchiyomi's built-in Cloudflare helper "
-          + "isn't answering; quit and reopen Uchiyomi.",
-      ),
+      // printed (a screenshot in a bug report would hand the token to anyone who reads it) -- nor sent as a
+      // parameter for the page to print.
+      ...summaryOf([say('solver.down', { url: isDesktop() ? undefined : url, error })]),
+      ...noteOf([say('solver.downNote')]),
       // The solver itself is the first item, not just the sources blaming it. Every other check on this page
       // holds "no items means ok", and a solver that is simply absent has nothing to list -- so without this
       // it would report a warning with an empty body, which reads as a page bug rather than a finding.
       items: [
-        { title: forDesktop(url, 'Cloudflare helper'), detail: ping.error ? `not answering (${ping.error})` : 'not answering' },
+        {
+          title: forDesktop(url, 'Cloudflare helper'),
+          ...(isDesktop() ? { titleSaid: saidOf(say('solver.helper')) } : {}),
+          ...detailOf([say('solver.notAnswering', { error })]),
+        },
         // No "Reset solver sessions" chip while it is down. The reset clears what THIS process remembers
         // about a solver that is answering; on one that is not, it would be a button that reports success
         // and changes nothing, which is worse than no button. The repair's solver step refuses for the
         // same reason.
-        ...blaming.map((id) => ({ title: sourceLabel(id), sourceId: id, detail: 'failing, and its recorded error names the solver' })),
+        ...blaming.map((id) => ({ title: sourceLabel(id), sourceId: id, ...detailOf([say('solver.names')]) })),
       ],
     };
   }
@@ -1250,22 +1230,16 @@ export async function solverHealth(): Promise<HealthCheck> {
     id: 'solver',
     title: 'Cloudflare solver',
     status: blaming.length ? 'warn' : 'ok',
-    summary: blaming.length
-      ? `Answering, but ${blaming.length} source${blaming.length === 1 ? '' : 's'} recently failed inside it`
-      : `Ready${solverVersionLabel(ping.version)}${behind ? ` — v${latest} is available` : ''}`,
-    note: blaming.length
-      ? forDesktop(
-        'It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default '
-        + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.',
-        'It responds, but it has been failing mid-request; quit and reopen Uchiyomi to restart it.',
-      )
-      : undefined,
+    ...summaryOf([blaming.length
+      ? say('solver.blaming', { n: blaming.length })
+      : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null })]),
+    ...noteOf([blaming.length > 0 && say('solver.failingNote')]),
     items: [
       // `info`: this row and `status: 'ok'` coexist on purpose, see the note above. Without the flag it
       // contradicted the page's "no items means ok" rule, and the health test could only hold that rule
       // because no test machine ever had an out-of-date solver.
       ...(behind
-        ? [{ title: `v${ping.version} → v${latest}`, detail: 'a newer solver is out; Cloudflare changes often break older ones', info: true }]
+        ? [{ title: `v${ping.version} → v${latest}`, ...detailOf([say('solver.behind')]), info: true }]
         : []),
       // The solver answers, so the stale part is what this process remembers about it: a cf_clearance
       // cookie Cloudflare has since rotated, and origins stamped unsolvable. That is what the chip clears,
@@ -1274,7 +1248,7 @@ export async function solverHealth(): Promise<HealthCheck> {
       ...blaming.map((id) => ({
         title: sourceLabel(id),
         sourceId: id,
-        detail: 'its last failure happened inside the solver',
+        ...detailOf([say('solver.inside')]),
         actions: ['solver_reset' as const],
       })),
     ],
@@ -1308,8 +1282,8 @@ async function updateCheck(): Promise<HealthCheck> {
   if (!on) {
     return {
       id: 'update', title: 'Version', status: 'ok',
-      summary: running ? `Running v${running} — update checks are off` : 'Update checks are off',
-      note: 'Nothing is requested while this is off. Turn it on under Settings → Server to be told when a release is out.',
+      ...summaryOf([running ? say('version.offRunning', { version: running }) : say('version.off')]),
+      ...noteOf([say('version.offNote')]),
       items: [],
     };
   }
@@ -1318,16 +1292,16 @@ async function updateCheck(): Promise<HealthCheck> {
   const behind = isBehind(running, latest);
   return {
     id: 'update', title: 'Version', status: 'ok',
-    summary: !running ? 'Could not read the running version'
-      : behind ? `Running v${running} — ${latest} is available`
-      : latest ? `Running v${running} — up to date`
-      : `Running v${running}`,
+    ...summaryOf([!running ? say('version.unknown')
+      : behind ? say('version.behind', { version: running, latest: latest! })
+      : latest ? say('version.current', { version: running })
+      : say('version.running', { version: running })]),
     // ⚠️ Said out loud, because "up to date" and "we could not ask" look identical on a page and only one of
     // them is a reason to relax. GitHub being unreachable or rate-limited is a normal Tuesday.
-    note: latest ? undefined : 'GitHub could not be reached just now, so this is not a clean bill of health.',
+    ...noteOf([!latest && say('version.unasked')]),
     // `info` for the same reason as the solver's version row: advisory, and never the reason the page is amber.
     items: behind
-      ? [{ title: `v${running} → ${latest}`, detail: 'a newer release is published; see the changelog before upgrading', info: true }]
+      ? [{ title: `v${running} → ${latest}`, ...detailOf([say('version.newer')]), info: true }]
       : [],
   };
 }
@@ -1344,28 +1318,21 @@ async function extensionCap(): Promise<HealthCheck> {
   const load = lastSuwayomiLoad();
   const skipped = load?.skipped ?? 0;
   const cap = env.SUWAYOMI_MAX_SOURCES;
+  const title = say('cap.title');
   return {
     id: 'extension-cap',
     title: 'Extension source limit',
     status: skipped ? 'warn' : 'ok',
     // "0 of 25" is a measurement only when the engine answered; after a failed load it is the absence of
     // one, and the cap warning would silently vanish for the length of an outage.
-    summary: skipped
-      ? `${skipped} enabled source${skipped === 1 ? ' is' : 's are'} not registered — over the limit of ${cap}`
+    ...summaryOf([skipped
+      ? say('cap.over', { n: skipped, cap })
       : load && !load.reachable
-        ? `engine unreachable at the last load; nothing is registered (limit ${cap})`
-        : `${load?.registered ?? 0} of ${cap} extension sources in use`,
-    note: forDesktop(
-      'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' +
-        'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.',
-      'Every registered source is searched at once, which is why there is a limit. Hide the languages you don\'t read ' +
-        'to get under it.',
-    ),
+        ? say('cap.unreachable', { cap })
+        : say('cap.inUse', { n: load?.registered ?? 0, cap })]),
+    ...noteOf([say('cap.note')]),
     items: skipped
-      ? [forDesktop(
-        { title: 'SUWAYOMI_MAX_SOURCES', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.` },
-        { title: 'Source limit', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide the languages you don't read.` },
-      )]
+      ? [{ title: title.text, titleSaid: saidOf(title), ...detailOf([say('cap.detail', { n: skipped, cap })]) }]
       : [],
   };
 }
@@ -1386,58 +1353,58 @@ async function libraryScan(): Promise<HealthCheck> {
   const r = lastScanReport();
   const where = await rootsNote();
   if (!r) {
-    return { id: 'library-scan', title: 'Library scan', status: 'ok', summary: 'no scan has run since the server started', note: where, items: [] };
+    return { id: 'library-scan', title: 'Library scan', status: 'ok', ...summaryOf([say('scan.none')]), ...noteOf([where]), items: [] };
   }
   const n = r.skippedTotal;
   const w = r.walkProblems;
-  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
-  const parts = [
-    ...(n ? [`could not index ${n} folder${s(n, '', 's')}`] : []),
-    ...(w ? [`left out ${w} folder${s(w, '', 's')} or file${s(w, '', 's')} it could not read`] : []),
-  ];
-  const label = (root: 'library' | 'downloads', folder: string) =>
-    `${root === 'downloads' ? 'Downloads' : 'Library'} / ${folder || '(the folder itself)'}`;
-  const notes = [
-    'Runs after every download, sweep and manual scan. Every other folder is still indexed when one fails.',
-    ...(r.sharedIds
-      ? [`${r.sharedIds} folder${s(r.sharedIds, ' shares', 's share')} a disk id with another folder (Unraid user shares and some network drives report ids like this). All of them were scanned; before v0.48.2 each one was skipped, with everything in it.`]
-      : []),
-    ...(r.removed ? [`${r.removed} folder${s(r.removed, ' belongs', 's belong')} to series someone removed, and ${s(r.removed, 'was', 'were')} left alone; Admin → Removed puts a series back.`] : []),
-    ...(where ? [where] : []),
-  ];
+  // A folder as the rows name it: which root, and where under it.
+  const label = (root: 'library' | 'downloads', folder: string) => {
+    const t = say('folder', { root, folder });
+    return { title: t.text, titleSaid: saidOf(t) };
+  };
   return {
     id: 'library-scan',
     title: 'Library scan',
     status: n || w ? 'problem' : 'ok',
-    summary: parts.length
-      ? `the last scan ${parts.join(' and ')}; ${n + w === 1 ? 'its' : 'their'} chapters are on disk but not in the library`
-      : `the last scan indexed ${r.series} series, ${r.books} chapters`,
-    note: notes.join(' '),
+    ...summaryOf([n || w ? say('scan.problems', { n, w }) : say('scan.indexed', { series: r.series, books: r.books })]),
+    ...noteOf([
+      say('scan.note'),
+      r.sharedIds > 0 && joined('sentence', say('scan.shared', { n: r.sharedIds })),
+      r.removed > 0 && joined('sentence', say('scan.removed', { n: r.removed })),
+      where && joined('sentence', where),
+    ]),
     items: [
-      ...r.skipped.map((k) => ({ title: label(k.root, k.folder), detail: k.error })),
+      // The database's own refusal, which only it can word: shown as sent.
+      ...r.skipped.map((k) => ({ ...label(k.root, k.folder), detail: k.error })),
       ...r.walk.map((i) => ({
-        title: label(i.root, i.folder),
-        detail: WALK_WORDS[i.reason](i.detail),
+        ...label(i.root, i.folder),
+        ...detailOf([walkPart(i)]),
         ...(QUIET_WALK.has(i.reason) ? { info: true } : {}),
       })),
     ].slice(0, MAX_ITEMS),
   };
 }
 
-const WALK_WORDS: Record<WalkReason, (detail: string) => string> = {
-  unreadable: (d) => `could not be read (${d}), so nothing in it is in the library`,
-  unchecked: (d) => d,
-  stat: (d) => `could not be checked (${d}), so nothing in it is in the library`,
-  loop: (d) => `not scanned twice: ${d}`,
-  depth: (d) => d,
-  limit: (d) => d,
-};
+/**
+ * What the walk said about one folder (lib/library.ts WalkIssue), in Health's words. An issue without its
+ * `params` (built before v0.49.1, or by a test by hand) says its own `detail`.
+ */
+function walkPart(i: { reason: WalkReason; detail: string; params?: WalkIssue['params'] }): Part {
+  const p = i.params ?? {};
+  switch (i.reason) {
+    case 'unreadable': return p.failed !== undefined ? say('walk.failed', { error: p.failed }) : say('walk.unreadable', { error: i.detail });
+    case 'stat': return say('walk.stat', { error: i.detail });
+    case 'loop': return say('walk.loop', p.ancestor !== undefined ? { ancestor: p.ancestor } : { detail: i.detail });
+    case 'unchecked': return p.n !== undefined ? say('walk.unchecked', { n: p.n, names: p.names ?? [] }) : say('text', { text: i.detail });
+    case 'depth': return p.n !== undefined && p.max !== undefined ? say('walk.depth', { n: p.n, max: p.max }) : say('text', { text: i.detail });
+    case 'limit': return p.max !== undefined ? say('walk.limit', { max: p.max }) : say('text', { text: i.detail });
+  }
+}
 
 /** Which filesystem each root is on: the first thing anyone needs to know about a folder that goes missing. */
-async function rootsNote(): Promise<string | undefined> {
+async function rootsNote(): Promise<Part | null> {
   const [lib, dl] = await Promise.all([fsTypeOf(LIBRARY_ROOT), fsTypeOf(DL_ROOT)]);
-  const parts = [...(lib ? [`Library: ${lib}`] : []), ...(dl ? [`Downloads: ${dl}`] : [])];
-  return parts.length ? `${parts.join(' · ')}.` : undefined;
+  return lib || dl ? say('roots', { library: lib, downloads: dl }) : null;
 }
 
 /**
@@ -1447,18 +1414,24 @@ async function rootsNote(): Promise<string | undefined> {
 export function downloadsNotes(
   c: Pick<Census, 'root' | 'fsType' | 'noScan' | 'scanCapped' | 'pending' | 'removed' | 'truncated'>, strays: number,
 ): string[] {
-  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  return downloadsNoteParts(c, strays).map((p) => p.text);
+}
+
+/** downloadsNotes' sentences, with their codes for the web: one part each, joined as sentences. */
+function downloadsNoteParts(
+  c: Pick<Census, 'root' | 'fsType' | 'noScan' | 'scanCapped' | 'pending' | 'removed' | 'truncated'>, strays: number,
+): Part[] {
   return [
-    `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
+    say('missing.compared', { root: c.root, fs: c.fsType ?? null }),
     // v0.49.0: the card has its own Scan now. Reintroduce the Tasks route: "the downloads check points at its own
     // Scan now" in healthNotes.test.ts reads Admin → Tasks.
-    ...(c.noScan ? ['No library scan has run since the server started; Scan now below runs one.'] : []),
-    ...(c.scanCapped ? ['The last scan stopped at its folder limit, so some folders were never looked into.'] : []),
-    ...(c.pending ? [`${c.pending} landed after the last scan began and ${s(c.pending, 'waits', 'wait')} for the next one.`] : []),
-    ...(c.removed ? [`${c.removed} belong${s(c.removed, 's', '')} to series someone removed (Admin → Removed puts one back).`] : []),
-    ...(strays ? [`${strays} folder${s(strays, ' holds', 's hold')} files of your own where the scan never reads chapters; listed, not counted.`] : []),
-    ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
-  ];
+    ...(c.noScan ? [say('missing.noScan')] : []),
+    ...(c.scanCapped ? [say('missing.capped')] : []),
+    ...(c.pending ? [say('missing.pending', { n: c.pending })] : []),
+    ...(c.removed ? [say('missing.removed', { n: c.removed })] : []),
+    ...(strays ? [say('missing.strays', { n: strays })] : []),
+    ...(c.truncated ? [say('missing.truncated')] : []),
+  ].map((p, i) => (i ? joined('sentence', p) : p));
 }
 
 /**
@@ -1470,21 +1443,27 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   const base = { id: 'downloads-missing', title: 'Downloads missing from the library' };
   const c = await downloadCensus().catch((e) => e as Error);
   if (c instanceof Error) {
-    return { ...base, status: 'warn', summary: `could not be checked just now: ${String(c.message).slice(0, 160)}`, items: [] };
+    return { ...base, status: 'warn', ...summaryOf([say('missing.error', { error: String(c.message).slice(0, 160) })]), items: [] };
   }
-  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
   // What needs someone: everything but a stray file of the person's own where the scan never reads chapters
   // (lib/downloadCensus.ts countsAsMissing). Those are listed, dimmed, and never turn the check red -- the only
   // way to clear one would be to move the person's own file.
   const strays = c.missing.filter((m) => !countsAsMissing(m)).length;
+  const title = (folder: string) => {
+    const t = say('folder', { root: 'downloads', folder });
+    return { title: t.text, titleSaid: saidOf(t) };
+  };
   const all: Array<HealthItem & { members?: string[] }> = [
     ...c.unreadable.map((u) => ({
-      title: `Downloads / ${u.folder || '(the folder itself)'}`, detail: `could not be read (${u.error})`,
+      ...title(u.folder), ...detailOf([say('missing.folderUnreadable', { error: u.error })]),
       key: `unreadable:${u.folder}`,
     })),
     ...c.missing.map((m) => ({
-      title: `Downloads / ${m.folder || '(the folder itself)'}`,
-      detail: `${m.files.length} chapter${s(m.files.length, '', 's')} not in the library (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})${m.reason ? `: ${m.reason}` : ''}`,
+      ...title(m.folder),
+      ...detailOf([
+        say('missing.files', { n: m.files.length, files: m.files.slice(0, 3), cut: m.files.length > 3 }),
+        m.reason ? joined('colon', own(m.reasonSaid, m.reason)) : null,
+      ]),
       ...(m.seriesId ? { seriesId: m.seriesId } : {}),
       // Ignored while the files are these ones: another chapter landing in the folder unseen is a new finding.
       ...(countsAsMissing(m) ? { key: `folder:${m.folder}`, members: m.files } : { info: true }),
@@ -1494,17 +1473,17 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   const live = c.missing.filter((m) => countsAsMissing(m) && all.some((it) => it.key === `folder:${m.folder}` && !it.info));
   const n = live.reduce((k, m) => k + m.files.length, 0);
   const unread = all.filter((it) => it.key?.startsWith('unreadable:') && !it.info).length;
-  const notes = downloadsNotes(c, strays);
   const { items } = truncate(all);
   return {
     ...base,
     status: n || unread ? 'problem' : 'ok',
-    summary: (n
-      ? `${n} downloaded chapter${s(n, '', 's')} in ${live.length} folder${s(live.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
-      : unread
-        ? `${unread} folder${s(unread, '', 's')} in the downloads could not be read`
-        : `every chapter file in the downloads folder is in the library (${c.files} checked)`) + ignoredTail(ignored),
-    note: notes.join(' '),
+    ...summaryOf([
+      n ? say('missing.live', { n, m: live.length })
+        : unread ? say('missing.unreadable', { n: unread })
+        : say('missing.none', { checked: c.files }),
+      ignoredPart(ignored),
+    ]),
+    ...noteOf(downloadsNoteParts(c, strays)),
     items,
   };
 }

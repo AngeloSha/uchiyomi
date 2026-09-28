@@ -64,6 +64,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
+import { say } from './said';
 import { updateSeries, CHAPTER_RETRY_CAP, LIST_TIMEOUT, type Landed } from './updater';
 import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor, HUNT_WALL_MS, HUNT_MAX_SOURCES } from './sourceHunt';
 import { SOLVER_BUDGET_MS } from './sources/budget';
@@ -1692,7 +1693,7 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
       // A nightly run the switch turned away did nothing, and a card saying "Library repair: done" would
       // claim otherwise; it goes, rather than ending.
       if (r.skipped) dismissRun('repair');
-      else endRun(card, r.stopped === 'disk' ? 'error' : 'done', r.stopped === 'disk' ? 'The library disk is full.' : undefined);
+      else endRun(card, r.stopped === 'disk' ? 'error' : 'done', r.stopped === 'disk' ? say('run.diskFull') : undefined);
       // ⚠️ Only a FULL run is the Tasks line, in memory and in the row a restart reads (and the row server.ts
       // arms the first nightly from). A one-row Fix is in repair_runs and nowhere else. Persisted like the
       // cleanup's and the verify's: the Tasks panel promises to keep the last run, and a restart must not
@@ -1717,7 +1718,7 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
         repairState.lastResult = null;
         await q('UPDATE server_settings SET repair_last_run = now(), repair_last_result = NULL WHERE id = 1').catch(() => {});
       }
-      endRun(card, 'error', 'The repair failed. The server log has the details.');
+      endRun(card, 'error', say('run.repairFailed'));
       log?.error(e);
       throw e;
     } finally {

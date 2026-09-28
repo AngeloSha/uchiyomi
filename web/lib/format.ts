@@ -73,8 +73,9 @@ export function chapterName(b: { chapterName?: string | null }): string {
 //   relativeTimeShort  the same, where a column has room for the amount only: "5m" / "5 Min."
 
 let locale = 'en';
+type Formatter = Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.ListFormat | Intl.DateTimeFormat;
 /** Built Intl formatters, per locale and unit; cleared when the language changes. */
-const formatters = new Map<string, Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.ListFormat>();
+const formatters = new Map<string, Formatter>();
 
 /**
  * The language the Intl formatters below speak. I18nProvider sets it beside the dictionary (lib/i18n.ts
@@ -116,7 +117,11 @@ export function activeLocale(): string {
  */
 const intlTag = (): string => `${locale}-u-nu-latn`;
 
-function cached<T extends Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.ListFormat>(key: string, make: () => T): T {
+/**
+ * The formatter `key` names, built once per language: building one is far dearer than using it, and a Health page
+ * says hundreds of numbers and dates. lib/said.ts shares it, with its own keys ("said:…").
+ */
+export function cached<T extends Formatter>(key: string, make: () => T): T {
   let f = formatters.get(key) as T | undefined;
   if (!f) { f = make(); formatters.set(key, f); }
   return f;

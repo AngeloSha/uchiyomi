@@ -630,6 +630,28 @@ components:
         lastResult: { type: [string, "null"], enum: [ok, error, null], description: Whichever of the last success and the last failure is newer; null before the first delivery. }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    Said:
+      type: object
+      description: >-
+        One sentence the server says, as a code a client can word in its reader's language (since v0.49.1; bff
+        lib/said.ts, and lib/sourceDiagnosis.ts for a diagnosis's `fix.*` codes). Always sent BESIDE the English
+        field it words -- `summary`/`summarySaid`, `note`/`noteSaid`, `detail`/`detailSaid`, `title`/`titleSaid`,
+        `fix`/`fixSaid`, `reason`/`reasonSaid`, `message`/`messageSaid`, `error`/`errorSaid` -- never instead of it:
+        a client that does not know a code shows the English, and the English is unchanged. A field that is a
+        list of these is one line of parts, each joined to the one before it as `join` says.
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: "Stable, e.g. gaps.live, sources.failing, missing.files, job.partial, renumber.onDisk, pref.noChoice, fix.moved; `text` is a string the server had no code for, in `params.text`, to show as it is."
+        params:
+          type: object
+          additionalProperties: true
+          description: "What fills the sentence: counts as numbers, moments as ISO 8601 strings (the English prints them in UTC, with no zone), names, file names and a system's own error text as strings, lists as arrays."
+        join:
+          type: string
+          enum: [clause, sentence, then, period, dash, dashCap, paren, colon]
+          description: "How this part joins the one before it: \"a; b\" (clause, the default when absent), a new sentence (its first letter raised), a new sentence as it is (then: one that opens on a name, whose case is the name's), \"a. B\", \"a — b\" (dashCap raises the next letter), \"a (b)\", \"a: b\"."
 paths:
   /livez:
     get:
@@ -1882,7 +1904,8 @@ paths:
           description: >-
             { content: [Source], hiddenAdult }. Only the fields added in v0.33.0 and v0.42.0 are described
             here; the rest of the shape is the registry entry (id, name, lang, latest, popular, used,
-            status, blockedUntil, note).
+            status, blockedUntil, note). Since v0.49.1 `noteCode` is the diagnosis code whose sentence `note` is
+            (a reason belongs to its code), so a client can say it in its reader's language; null with `note`.
           content:
             application/json:
               schema:
@@ -2423,6 +2446,10 @@ paths:
         (ArchiveView): the slow archive's queue, its rows limited to the series this viewer can browse and
         filtered per request (never one viewer's answer replayed to another); its chapters are in `activity`
         with origin `archive`.
+        Since v0.49.1 a `reason` comes with its codes (Said, beside the unchanged English): a card's `reasonSaid`
+        (Said[], `job.*`, a source's name and a site's own error as parameters), a run's `reasonSaid` (Said,
+        `run.*`), and an activity entry's `reasonSaid` (Said[], `activity.*`) where the server wrote the reason --
+        a download's own error has none, and is shown as sent.
       security:
         - bearer: []
       responses:
@@ -6455,7 +6482,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "502":
-          description: The source did not answer, so there is no plan (unreachable)
+          description: "The source did not answer, so there is no plan (unreachable). Since v0.49.1 with `messageSaid` (Said, renumber.unreachable) beside `message`."
     post:
       tags:
         - admin
@@ -6471,7 +6498,10 @@ paths:
         yet, and the series stays held: the source did not answer; the apply was refused (`error` says why -- a
         file already at a target name, or another check inside the series -- and `plan.reasons` carries `busy`
         when a download started meanwhile); or it took longer than a minute and carries on (`running: true`).
-        A manual choice is never undone by the detector.
+        A manual choice is never undone by the detector. Since v0.49.1 a refused apply carries `errorSaid` (Said:
+        renumber.onDisk or renumber.leavesRoot with the `file`, or renumber.checking) beside `error`, and a 409
+        `busy` carries `messageSaid` -- renumber.downloading (a download is writing into the folder) or
+        renumber.checking (another run is inside the series) -- which tells the two apart without reading English.
       parameters:
         - name: id
           in: path
@@ -7570,7 +7600,7 @@ paths:
         "404":
           description: The extension server has no such source (unknown_source)
         "502":
-          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`"
+          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`. Since v0.49.1 every refusal of this route and its POST carries `messageSaid` (Said, `pref.*`; the exception's line is `params.error`) beside `message`."
     post:
       tags:
         - admin
@@ -7909,6 +7939,12 @@ paths:
         a strong verdict. Its actions are `renumber` (GET, then POST with `confirm`,
         /api/admin/series/{id}/numbering) and `keep_numbers` (POST with mode `source`); items carry `seriesId`
         and `sourceId`. The check is absent when no series has anything to say about its numbering.
+        Since v0.49.1 every sentence also comes as codes (Said, beside the English, which is unchanged): a check's
+        `summarySaid` and `noteSaid`, an item's `detailSaid` and, where the server wrote the title in English rather
+        than naming something ("Cloudflare helper", "Downloads / (the folder itself)"), `titleSaid`; a `sources`
+        item's `diagnosis` adds `fixSaid` (its `reason` is its `code`'s sentence). Moments go as ISO strings, so a
+        client says them in its reader's time zone. The one detail without codes is a library-scan row carrying the
+        database's own refusal of a folder, shown as it is.
       security:
         - bearer: []
       responses:
@@ -7931,7 +7967,9 @@ paths:
         what the server's own six-hourly run stored. `count` is how many checks found something, `headline` the
         worst one's "Title: summary", and `key` changes only when WHICH checks found something (or how badly)
         changes -- not when a count inside one moves -- so a client can re-show a dismissed alert exactly then.
-        `summary` is null until the first report after an upgrade.
+        `summary` is null until the first report after an upgrade. Since v0.49.1 each of `checks` carries
+        `summarySaid` (Said[]), worst first: the headline is `checks[0]`'s title and summary, which a client words
+        from its id and those codes; a summary stored before then has none.
       security:
         - bearer: []
       responses:
@@ -8480,7 +8518,8 @@ paths:
       operationId: getApiAdminSourcesCheck
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
         `result` is the finished sweep's answer (verdicts, needsAttention, inconclusive, notified), kept in memory
-        until the next run starts.
+        until the next run starts. Since v0.49.1 a verdict with a `fix` carries `fixSaid` (Said, a `fix.*` code) beside
+        it; its `reason` is its `code`'s sentence.
       security:
         - bearer: []
       responses:
@@ -8534,7 +8573,8 @@ paths:
         v0.49.0 the answer adds {state, stage, ms, recorded}; the verdict is recorded in source_health.live_* and
         the per-stage evidence Health reads (never status, consecutive, blocked_until or checked_at); `code` is
         never `ok` when `ok` is false, and can be `extension_error` (the engine answered with the extension's own
-        error) or `unnumbered`.
+        error) or `unnumbered`. Since v0.49.1 `diagnosis` adds `fixSaid` (Said: the fix's own `fix.*` code, with
+        the stage, host, transport error or budget that fills it); `reason` is always its `code`'s sentence.
       parameters:
         - name: id
           in: path

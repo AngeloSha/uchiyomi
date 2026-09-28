@@ -21,6 +21,7 @@ import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from '
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
+import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 
@@ -793,8 +794,8 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
     try {
       const r = await sweep({ ...sweepOpts, card });
       endRun(card, r.stopped === 'disk' ? 'error' : 'done',
-        r.stopped === 'disk' ? 'The library disk is full.'
-          : r.stopped === 'budget' ? "Stopped at this run's chapter limit; the rest wait for the next one."
+        r.stopped === 'disk' ? say('run.diskFull')
+          : r.stopped === 'budget' ? say('run.chapterLimit')
           : undefined);
       runtime.lastUpdate = Date.now();
       // Persisted so a restart schedules the remainder of the interval rather than a whole new one.
@@ -835,7 +836,7 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
       // were this one. Last run moves to now, the result is cleared, and the reason is in `docker logs`.
       runtime.lastUpdate = Date.now();
       runtime.lastUpdateResult = null;
-      endRun(card, 'error', 'The update run failed. The server log has the details.');
+      endRun(card, 'error', say('run.updateFailed'));
       log.error(e);
       return null;
     } finally {

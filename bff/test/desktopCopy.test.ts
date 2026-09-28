@@ -109,19 +109,22 @@ test('every forDesktop call in bff/src gives the desktop a sentence with no Dock
  * dropped and whitespace collapsed, files in path order and calls in source order. Each prints exactly what
  * v0.43.0 printed in that spot before the desktop work wrapped it (every entry was checked against that tree's
  * source). A server message you MEAN to change: change its entry here in the same commit, so review sees it.
+ * v0.49.1 moved Health's to lib/said.ts, where each sentence gets the code the web words it by: the same words, one
+ * file over, and the extension limit's row as two calls -- its title and its detail -- where it was one object.
  */
 const SERVER_ARMS = [
   "lib/backup.ts: 'pg_dump not found in the image — the backup task needs the postgresql client installed'",
   "lib/backup.ts: `cannot write to ${env.BACKUP_DIR} — the backup directory must be writable by uid 10002. ` + `If it is a host folder, run: docker run --rm -v <that folder>:/b alpine chown 10002:10002 /b`",
   "lib/fsGuard.ts: `Check that the volume is mounted. In docker-compose.yml the library is mounted at ${dir}.`",
   "lib/fsGuard.ts: { ok: false, reason: `${dir} is not writable: it is owned by uid ${ownerUid} and this container runs as uid ${me}`, fix: ownerUid >= 0 ? `Set PUID=${ownerUid} (and PGID to its group) in your .env and restart. ` + `Alternatively, and only if you are sure nothing else uses these files, give them to the app: ` + `chown -R ${me}:${me} <your library path>` : `Set PUID and PGID to the owner of your library, then restart.`, }",
-  "lib/health.ts: 'over the source limit (SUWAYOMI_MAX_SOURCES)'",
-  "lib/health.ts: `Not answering at ${url}`",
-  "lib/health.ts: 'Sources on Cloudflare-protected sites cannot work without it. Check the container is running ' + 'and that FLARESOLVERR_URL points at it.'",
   "lib/health.ts: url",
-  "lib/health.ts: 'It responds, but it has been failing mid-request. Chrome needs far more than Docker\\'s default ' + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.'",
-  "lib/health.ts: 'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' + 'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.'",
-  "lib/health.ts: { title: 'SUWAYOMI_MAX_SOURCES', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.` }",
+  "lib/said.ts: 'over the source limit (SUWAYOMI_MAX_SOURCES)'",
+  "lib/said.ts: `Not answering at ${url}`",
+  "lib/said.ts: 'Sources on Cloudflare-protected sites cannot work without it. Check the container is running ' + 'and that FLARESOLVERR_URL points at it.'",
+  "lib/said.ts: 'It responds, but it has been failing mid-request. Chrome needs far more than Docker\\'s default ' + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.'",
+  "lib/said.ts: 'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' + 'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.'",
+  "lib/said.ts: 'SUWAYOMI_MAX_SOURCES'",
+  "lib/said.ts: `${n} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.`",
   "lib/sourceDiagnosis.ts: \"The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.\"",
   "lib/sourceDiagnosis.ts: 'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.'",
   "lib/sourceDiagnosis.ts: \"The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.\"",

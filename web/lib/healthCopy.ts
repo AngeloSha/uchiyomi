@@ -23,8 +23,8 @@ import type { RepairCurrent, RepairEstimate, RepairLiveRun, RepairPhase, RepairR
 // ---- check titles ------------------------------------------------------------------------------------
 
 /**
- * Each check's title by id, in the English the server sends, so the page can translate it (the server's
- * summaries, details and notes stay English: a known limit). A check the page does not know shows the
+ * Each check's title by id, in the English the server sends, so the page can translate it; since v0.49.1 its
+ * summaries, notes and rows come as codes too, worded by lib/said.ts. A check the page does not know shows the
  * server's own title.
  */
 const CHECK_TITLE_KEYS = keys(

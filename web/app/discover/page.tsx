@@ -7,6 +7,7 @@ import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { reasonText } from '@/lib/said';
 import { isDesktop } from '@/lib/desktop';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
@@ -499,10 +500,10 @@ export default function DiscoverPage() {
                   // line used to show the same sentence whatever had actually happened.
                   // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                   // reason with it: the row was filtered to `downloading` and `reason` was never declared.
-                  <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+                  <p dir="auto" className="mt-1 text-[11px] text-amber-300">{reasonText(j) || tr('Fetch stopped. Try another source or wait.')}</p>
                 ) : j.cancelled ? (
                   // Stopped by its Cancel (#82): `done`, but "Fetched" in emerald would claim the whole run landed.
-                  <p className="mt-1 text-[11px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
+                  <p dir="auto" className="mt-1 text-[11px] text-fog-400">{reasonText(j) || tr('Cancelled; what landed is kept.')}</p>
                 ) : j.total === 0 && j.autoFollow ? (
                   // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
                   // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat

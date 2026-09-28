@@ -227,6 +227,8 @@ test("a person's download stops after the chapter in flight, for its starter or 
     assert.equal(end.cancelled, true);
     assert.equal(end.done, 1, 'the chapter in flight did not land');
     assert.match(end.reason, /^Cancelled after 1 of 4 chapters\./);
+    // v0.49.1: as its code too, for the downloads view to word (lib/said.ts).
+    assert.deepEqual(end.reasonSaid?.[0], { code: 'job.cancelled', params: { done: 1, total: 4 } });
     assert.equal((await cancel(ids.admin, 'admin')).statusCode, 409, 'a stopped job took a cancel');
   } finally {
     await app.close();

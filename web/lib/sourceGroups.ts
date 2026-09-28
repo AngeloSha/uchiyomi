@@ -13,6 +13,7 @@
 // `t as tr`, as every component does: the string extractor scans for `tr(` with a literal, and a bare `t(`
 // would leave this key out of every locale file while the app compiled and rendered it in English.
 import { t as tr } from './i18n';
+import { diagnosisReason } from './said';
 
 export interface Src {
   id: string;
@@ -35,6 +36,8 @@ export interface Src {
    * files) on the admin routes. Null when nothing is wrong.
    */
   note?: string | null;
+  /** v0.49.1: the diagnosis code `note` is the sentence of, so it reads in the reader's language (lib/said.ts). */
+  noteCode?: string | null;
   /** How many series in the library came from this source. See `budgetFor`. */
   used?: number;
 }
@@ -86,11 +89,13 @@ export function budgetFor(sources: Src[], max = 6): Src[] {
  * said two while three rows glowed. The default here is what makes the dot and the count agree.
  */
 export function noteFor(src: Src, state: SrcState): { dot: 'ok' | 'warn' | 'idle' | 'quiet'; note: string | null } {
+  // The server's sentence in the reader's language, by its diagnosis code (v0.49.1); its English without one.
+  const note = src.note ? diagnosisReason({ code: src.noteCode, reason: src.note }) || src.note : null;
   if (state === 'ok') return { dot: 'ok', note: null };
-  if (state === 'blocked') return { dot: 'warn', note: src.note ?? tr('Could not be reached right now.') };
+  if (state === 'blocked') return { dot: 'warn', note: note ?? tr('Could not be reached right now.') };
   // The case this exists for: the request succeeded and came back empty. Only the server knows whether that
   // means "nothing new" or "I could not read the page", and `note` is how it says so.
-  if (state === 'empty') return src.note ? { dot: 'warn', note: src.note } : { dot: 'quiet', note: null };
+  if (state === 'empty') return note ? { dot: 'warn', note } : { dot: 'quiet', note: null };
   return { dot: 'idle', note: null };
 }
 

@@ -114,6 +114,14 @@ test('a write is checked against the preference before it is sent', { skip }, as
     const r = await post(body);
     assert.equal(r.statusCode, 400, `${JSON.stringify(body)}: ${r.body}`);
     assert.equal(r.json().error, code, JSON.stringify(body));
+    // v0.49.1: the refusal's sentence as its code too (lib/said.ts `pref.*`), so the sheet says it in the reader's
+    // language; its English reads back from the code alone. Reintroduce `{ error: e.code, message: e.message }`:
+    // this finds no code.
+    if (code !== 'bad_request') {
+      const { englishOf } = await import('../src/lib/said');
+      assert.match(r.json().messageSaid?.code ?? '', /^pref\./, `${JSON.stringify(body)}: no code for the sheet to word`);
+      assert.equal(englishOf(r.json().messageSaid), r.json().message, `${JSON.stringify(body)}: the code says something else`);
+    }
   }
   assert.deepEqual(fake!.prefWrites, [], 'nothing refused reached the engine');
   assert.deepEqual(await pending(), { [PLAIN]: null, [POSTED]: null, [OTHER]: null, [GONE]: null });
@@ -173,6 +181,7 @@ test('an engine that does not answer is a 502, not an empty sheet', { skip }, as
     const r = await get();
     assert.equal(r.statusCode, 502, r.body);
     assert.equal(r.json().error, 'unreachable');
+    assert.deepEqual(r.json().messageSaid, { code: 'pref.unreachable' });
   } finally {
     fake!.setMode('up');
   }
@@ -189,6 +198,8 @@ test("an extension's own exception is not the engine being down", { skip }, asyn
     assert.equal(r.statusCode, 502, r.body);
     assert.equal(r.json().error, 'extension_error', "an extension's own exception is not the engine being down");
     assert.equal(r.json().message, 'The extension failed: Unable to build the settings of this source');
+    // The extension's own words ride as a parameter, for the page to put inside its own sentence.
+    assert.deepEqual(r.json().messageSaid, { code: 'pref.extensionFailed', params: { error: 'Unable to build the settings of this source' } });
   } finally {
     fake!.reset();
   }

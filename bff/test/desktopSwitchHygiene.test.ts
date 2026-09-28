@@ -61,6 +61,9 @@ const IS_DESKTOP_ALLOWED = new Set([
   'lib/platform.ts', // the desktop app is its own platform: its engine is a download, not a container
   'lib/extensionEngine.ts', // the engine's helper address carries the in-app helper's token on desktop: never sent
   'lib/engineHealth.ts', // a desktop engine never downloaded is no row at all; its helper on 127.0.0.1 is right
+  // v0.49.1: the Health solver row's codes (lib/said.ts). The helper's address carries its token on desktop, so it
+  // is never a parameter there, and the row's title is the helper's name rather than the address.
+  'lib/health.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {

@@ -116,6 +116,18 @@ test('THE REPORTED BUG: a broken source must not look like a quiet one', () => {
   assert.equal(noteFor(quiet, 'empty').note, null);
 });
 
+test('a source\'s note reads in the reader\'s language, by its diagnosis code', () => {
+  // v0.49.1: the note is the server's English; `noteCode` is the diagnosis it is the sentence of, and the page words
+  // that (lib/said.ts). The web's words are the server's but for one, "the extension engine" where the server says
+  // "server": the difference this can see in English. Reintroduce `note: src.note` in noteFor: this reads "server".
+  const engine = src({ id: 'engine', note: 'The extension server did not answer.', noteCode: 'upstream_down' });
+  assert.equal(noteFor(engine, 'blocked').note, 'The extension engine did not answer.', 'a note is not worded by its diagnosis code');
+  assert.equal(noteFor(engine, 'empty').note, 'The extension engine did not answer.');
+  // A code this build does not know (a newer server), or none: the note as sent.
+  assert.equal(noteFor(src({ id: 'new', note: 'as sent', noteCode: 'from_a_newer_server' }), 'blocked').note, 'as sent');
+  assert.equal(noteFor(src({ id: 'old', note: 'as sent' }), 'blocked').note, 'as sent');
+});
+
 test('a healthy or unasked source says nothing', () => {
   assert.deepEqual(noteFor(src({ id: 'a' }), 'ok'), { dot: 'ok', note: null });
   assert.deepEqual(noteFor(src({ id: 'a' }), 'idle'), { dot: 'idle', note: null });

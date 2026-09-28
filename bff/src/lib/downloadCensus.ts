@@ -16,6 +16,7 @@ import { q } from './db';
 import { DL_ROOT, SKIP_DIR, SCAN_MAX_DEPTH, listDir, nodeFs, lastScanReport, type WalkFs, type ScanReport, type WalkReason } from './library';
 import { chapterFileRel } from './downloader';
 import { visibleToAll } from './visibility';
+import { english, joined, say, saidOf, type Part, type Said } from './said';
 
 /** What the downloader writes and the scanner reads as a chapter file (EPUBs need opening, and are not ours). */
 const CHAPTER_FILE = /\.(cbz|cbr|zip|rar|pdf)$/i;
@@ -53,6 +54,8 @@ export interface MissingFolder {
   /** Chapter file names in it that are not in the library. */
   files: string[];
   reason: string | null;
+  /** v0.49.1: `reason` as a code the web words (lib/said.ts `census.*`). */
+  reasonSaid?: Said;
   kind: MissingKind;
   /**
    * At least one file is named the way the downloader names a chapter, so this app wrote it. A stray `.zip` or
@@ -126,16 +129,26 @@ const HIDES_SUBTREE: ReadonlySet<WalkReason> = new Set<WalkReason>(['unreadable'
  * includes when no scan has run.
  */
 export function scanReasonFor(folder: string, report: ScanReport | null = lastScanReport()): string | null {
+  return scanReasonPart(folder, report)?.text ?? null;
+}
+
+/** scanReasonFor's sentence, with its code for the web (lib/said.ts `census.*`). */
+export function scanReasonPart(folder: string, report: ScanReport | null = lastScanReport()): Part | null {
   if (!report) return null;
   const skip = report.skipped.find((s) => s.root === 'downloads' && s.folder === folder);
-  if (skip) return `the library refused it: ${skip.error}`;
+  if (skip) return say('census.refused', { error: skip.error });
   const walk = report.walk.find((w) => w.root === 'downloads' && HIDES_SUBTREE.has(w.reason) && within(folder, w.folder));
   if (!walk) return null;
-  const where = walk.folder === folder ? 'the folder' : `"${walk.folder || 'the downloads folder'}", above it,`;
+  // The folder the walk's trouble was in, when it is one above this one ('' is the downloads folder itself).
+  const above = walk.folder === folder ? undefined : walk.folder;
   switch (walk.reason) {
-    case 'unreadable': return `the scan could not read ${where}: ${walk.detail}`;
-    case 'stat': return `the scan could not check ${where}: ${walk.detail}`;
-    default: return `the scan took ${where} for a loop: ${walk.detail}`;
+    case 'unreadable':
+      return walk.params?.failed !== undefined
+        ? say('census.failed', { above, error: walk.params.failed })
+        : say('census.unreadable', { above, error: walk.detail });
+    case 'stat': return say('census.stat', { above, error: walk.detail });
+    default:
+      return say('census.loop', walk.params?.ancestor !== undefined ? { above, ancestor: walk.params.ancestor } : { above, detail: walk.detail });
   }
 }
 
@@ -256,24 +269,27 @@ async function takeCensus(root: string, fsx: WalkFs): Promise<Census> {
     const ours = names.some((n) => OURS.test(n));
     // Where the files sit comes first: it is true whatever the scan did, and no rescan changes it.
     const holder = [...indexedFolders].find((f) => f !== folder && within(folder, f));
-    let reason: string | null = !folder
-      ? 'chapter files straight in the downloads folder: only a folder can be a series'
+    let reason: Part | null = !folder
+      ? say('census.loose')
       : folder.split('/').length > SCAN_MAX_DEPTH
-        ? `more than ${SCAN_MAX_DEPTH} folders deep, and the scan looks no deeper (LIBRARY_MAX_DEPTH)`
+        ? say('census.deep', { max: SCAN_MAX_DEPTH })
         : holder
-          ? `inside "${holder}", which the scan reads as a series, and a series' subfolders are not looked into`
+          ? say('census.inside', { holder })
           : null;
     let kind: MissingKind = reason ? 'layout' : 'unexplained';
     if (!reason) {
-      reason = scanReasonFor(folder, report);
+      reason = scanReasonPart(folder, report);
       if (reason) kind = 'scan';
     }
     const pruned = files.filter((f) => f.pruned).length;
     if (!reason && pruned === files.length) {
-      reason = `the library still marks ${pruned === 1 ? 'it' : `these ${pruned}`} deleted, and no scan has read ${pruned === 1 ? 'the file' : 'the files'} since`;
+      reason = say('census.deleted', { n: pruned });
       kind = 'deleted';
     }
-    return { folder, files: names, reason, kind, ours, ...(idOf.has(folder) ? { seriesId: idOf.get(folder)! } : {}) };
+    return {
+      folder, files: names, reason: reason?.text ?? null, ...(reason ? { reasonSaid: saidOf(reason) } : {}), kind, ours,
+      ...(idOf.has(folder) ? { seriesId: idOf.get(folder)! } : {}),
+    };
   });
 
   return {
@@ -313,9 +329,15 @@ export async function notInLibrary(folder: string, numbers: number[]): Promise<n
 
 /** The job card's words for chapters that landed on disk and not in the library. */
 export function notInLibraryReason(folder: string, numbers: number[]): string {
-  const list = numbers.slice(0, 5).join(', ') + (numbers.length > 5 ? ` and ${numbers.length - 5} more` : '');
-  const one = numbers.length === 1;
-  const why = scanReasonFor(folder);
-  return `Chapter${one ? '' : 's'} ${list} ${one ? 'is' : 'are'} on disk, but the library scan could not add ${one ? 'it' : 'them'}`
-    + `${why ? ` (${why})` : ''}. Admin → Health → Downloads missing from the library has the details.`;
+  return english(notInLibraryParts(folder, numbers));
+}
+
+/** notInLibraryReason's parts, with their codes for the web (lib/said.ts). */
+export function notInLibraryParts(folder: string, numbers: number[]): Part[] {
+  const why = scanReasonPart(folder);
+  return [
+    say('job.notInLibrary', { n: numbers.length, numbers: numbers.slice(0, 5), more: Math.max(0, numbers.length - 5) }),
+    ...(why ? [joined('paren', why)] : []),
+    joined('period', say('job.healthDetails')),
+  ];
 }

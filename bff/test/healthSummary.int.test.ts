@@ -35,6 +35,14 @@ test('the headline is the worst check, and the key follows WHICH checks found so
 
   const clean = summarise(report(check('gaps', 'ok')));
   assert.deepEqual([clean.worst, clean.count, clean.headline, clean.key], ['ok', 0, null, '']);
+
+  // v0.49.1: each check's summary codes ride along, worst first, so the header says the headline in the reader's
+  // language (web lib/healthAlert.ts headlineText); the headline itself stays the English. Reintroduce by dropping
+  // `summarySaid` from summarise: the header prints English in every language again, and this fails.
+  const said = [{ code: 'sources.live', params: { n: 2 } }];
+  const w = summarise(report({ ...check('sources', 'warn', '2 sources are failing or blocked'), summarySaid: said }, check('gaps', 'ok')));
+  assert.deepEqual(w.checks[0].summarySaid, said, 'the headline check\'s codes are not in the summary');
+  assert.equal(w.headline, 'SOURCES: 2 sources are failing or blocked');
 });
 
 test('the Health route stores what it found, and the summary route answers from that without running checks', { skip }, async () => {

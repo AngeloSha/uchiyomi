@@ -1,5 +1,6 @@
 // Loose shapes for the Komga DTOs we consume (only the fields Uchiyomi uses).
 import type { LiveVerdict, StageLine } from './sourceEvidence';
+import type { Said } from './said';
 
 export interface UchiyomiFlags {
   favorite: boolean;
@@ -390,6 +391,12 @@ export interface HealthItem {
   title: string;
   detail: string;
   /**
+   * v0.49.1: `detail`, and `title` where the server wrote it in English ("Cloudflare helper", a folder), as codes
+   * lib/said.ts words in the reader's language. Absent: shown as sent (a folder's own error, an older server).
+   */
+  detailSaid?: Said[];
+  titleSaid?: Said;
+  /**
    * Listed for reference, never a reason to warn -- a source switched off, a short chapter the admin has
    * already confirmed. A check's status is decided by the items WITHOUT this flag, and they render dimmed.
    */
@@ -424,8 +431,8 @@ export interface HealthItem {
   evidence?: StageLine[];
   /** The last deliberate live check: the Test button ('test') or the daily check ('sweep'). */
   tested?: LiveVerdict;
-  /** The verdict behind the row, admin half included. */
-  diagnosis?: { code: string; reason: string; fix: string };
+  /** The verdict behind the row, admin half included. `reason` is worded by `code`, `fix` by `fixSaid` (lib/said.ts). */
+  diagnosis?: { code: string; reason: string; fix: string; fixSaid?: Said };
   /** How many series use the source (primaries and followers). */
   series?: number;
 }
@@ -460,6 +467,9 @@ export interface HealthCheck {
   summary: string;
   /** what this check cannot see -- shown so nobody reads more into a green result than it deserves */
   note?: string;
+  /** v0.49.1: `summary` and `note` as codes lib/said.ts words in the reader's language. */
+  summarySaid?: Said[];
+  noteSaid?: Said[];
   items: HealthItem[];
   /** #115, 'sources' only: how long one Test may take, for the Test key's running clock. */
   testMs?: number;

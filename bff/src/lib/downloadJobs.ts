@@ -17,6 +17,8 @@
  * persisted result of the last one.
  */
 
+import { saidOf, type Part, type Said } from './said';
+
 export type RunKind = 'sweep' | 'repair' | 'newest';
 
 export interface RunCard {
@@ -61,6 +63,8 @@ export interface RunCard {
   /** Someone asked it to stop: it does, after the chapter in flight. */
   cancelRequested?: boolean;
   reason?: string;
+  /** v0.49.1: `reason` as a code the web words (lib/said.ts `run.*`). */
+  reasonSaid?: Said;
 }
 
 const runs = new Map<RunKind, RunCard>();
@@ -79,12 +83,12 @@ export function beginRun(kind: RunKind, by: string | null, total = 0): RunCard {
  * Close a run's card. A card whose cancel was asked for ends `cancelled` whatever the caller says, unless the
  * run failed outright: "Cancelled" is the true account of a run that stopped because someone said so.
  */
-export function endRun(card: RunCard, status: 'done' | 'error', reason?: string): void {
+export function endRun(card: RunCard, status: 'done' | 'error', reason?: Part): void {
   card.status = status === 'error' ? 'error' : card.cancelRequested ? 'cancelled' : 'done';
   card.finishedAt = Date.now();
   card.current = undefined;
   card.step = undefined;
-  if (reason) card.reason = reason;
+  if (reason) { card.reason = reason.text; card.reasonSaid = saidOf(reason); }
 }
 
 /** Whether the run of this kind was asked to stop. What the loops check, between chapters and between series. */

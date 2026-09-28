@@ -203,6 +203,11 @@ test('a Fetch whose chapter is on disk but cannot be indexed says so on its card
   // "Fetching 1 chapters" for a second, then nothing, which is exactly what #109 reported.
   assert.equal(c?.status, 'error', JSON.stringify(c));
   assert.match(c?.reason ?? '', /Chapter 1 is on disk, but the library scan could not add it \(the library refused it: refused for the test/);
+  // v0.49.1: the card's reason as codes too, the database's refusal riding as a parameter, and they say its English
+  // (lib/said.ts englishOf). Reintroduce `j.reason = notInLibraryReason(…)` alone: no codes, and this fails.
+  const { englishOf } = await import('../src/lib/said');
+  assert.deepEqual(c?.reasonSaid?.map((s: any) => s.code), ['job.notInLibrary', 'census.refused', 'job.healthDetails']);
+  assert.equal(englishOf(c?.reasonSaid), c?.reason, 'the card\'s codes say something else');
   await q(`DELETE FROM users WHERE username = 'sr-admin'`).catch(() => {});
 });
 

@@ -78,6 +78,12 @@ test('an incomplete chapter is partial once kept, and failed if it never is', as
   await hold.write();
   assert.equal(act.listActivity().recent[0].status, 'partial');
   assert.match(act.listActivity().recent[0].reason!, /2 pages missing/);
+  // v0.49.1: and as its code, which the downloads view words in the reader's language (lib/said.ts). Read back from
+  // the English too, which is all a restart keeps (lib/activityLog.ts). Reintroduce the bare English reason: no code.
+  assert.deepEqual(act.listActivity().recent[0].reasonSaid, [{ code: 'activity.saved', params: { n: 2 } }]);
+  assert.deepEqual(act.reasonSaidOf('arrived with 1 page missing; not kept'),
+    [{ code: 'activity.arrived', params: { n: 1 } }, { code: 'activity.notKept' }]);
+  assert.equal(act.reasonSaidOf('HTTP 404 on page 3'), undefined, 'a download\'s own error is shown as sent, never guessed at');
 
   const dropped = act.beginDownload({ folder: 'F', title: 'T', number: 6, source: 's' });
   act.holdPartial(dropped, { missing: [1], write: async () => ({ pages: 9, missing: [1] }) });

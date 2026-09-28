@@ -48,6 +48,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { logAudit } from './audit';
 import { updateSeries, runsInside } from './updater';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
+import { say, saidOf, type Part, type Said } from './said';
 
 /** How a series' chapters are numbered: by the source, or by posting order. NULL in the row is "automatic". */
 export type NumberingMode = 'source' | 'posting_order';
@@ -450,7 +451,10 @@ function pathsOf(j: Journal, m: PlanMove): { from: string; tmp: string; to: stri
   return from && to ? { from, tmp: from + TMP(j), to } : null;
 }
 
-class RenumberRefused extends Error {}
+/** An apply refused before it renamed anything: its sentence, with the code the web words it by (lib/said.ts). */
+class RenumberRefused extends Error {
+  constructor(public said: Part) { super(said.text); }
+}
 
 /** Nothing the plan does not own may be overwritten: a file already at a target name that no move vacates. */
 async function checkTargets(j: Journal): Promise<void> {
@@ -458,8 +462,8 @@ async function checkTargets(j: Journal): Promise<void> {
   const vacated = new Set(renames.map((m) => `${m.root}\u0000${m.fromFile}`));
   for (const m of renames) {
     const p = pathsOf(j, m);
-    if (!p) throw new RenumberRefused(`${m.fromFile}: the path leaves its library root`);
-    if (!vacated.has(`${m.root}\u0000${m.file}`) && await exists(p.to)) throw new RenumberRefused(`${m.file} is already on disk`);
+    if (!p) throw new RenumberRefused(say('renumber.leavesRoot', { file: m.fromFile }));
+    if (!vacated.has(`${m.root}\u0000${m.file}`) && await exists(p.to)) throw new RenumberRefused(say('renumber.onDisk', { file: m.file }));
   }
 }
 
@@ -678,7 +682,11 @@ export async function resumeRenumber(seriesId: string): Promise<boolean> {
 
 /** What settleNumbering did. `needs_review` and `busy` leave the series held: no downloads, its listing kept. */
 export type SettleState = 'none' | 'applied' | 'needs_review' | 'busy';
-export interface Settled { state: SettleState; numbering: NumberingRow; plan?: RenumberPlan; tracker?: boolean; error?: string }
+export interface Settled {
+  state: SettleState; numbering: NumberingRow; plan?: RenumberPlan; tracker?: boolean; error?: string;
+  /** v0.49.1: `error` as a code the web words (lib/said.ts `renumber.*`). */
+  errorSaid?: Said;
+}
 
 /** One settle per series at a time, in this process. */
 const settling = new Set<string>();
@@ -705,7 +713,7 @@ export async function settleNumbering(
   // confirmation route refuses first (routes/numbering.ts); this covers the moment between its test and this run.
   // Reintroduce by dropping it: "a renumber waits for a check inside the series" in numberingRoutes.int.test.ts
   // finds the files renamed under the check.
-  if (runsInside(s.id) > 1) return { state: 'busy', numbering: s, error: CHECKING_NOW };
+  if (runsInside(s.id) > 1) return { state: 'busy', numbering: s, error: CHECKING_NOW, errorSaid: saidOf(say('renumber.checking')) };
   settling.add(s.id);
   try {
     // Chapters still coming into the library hold it like a download into the folder does: `busy`, and the scan
@@ -730,7 +738,7 @@ export async function settleNumbering(
       await applyRenumber(s, built);
     } catch (e) {
       if (!(e instanceof RenumberRefused)) throw e;
-      return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker, error: e.message };
+      return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker, error: e.message, errorSaid: saidOf(e.said) };
     }
     const after = await one<NumberingRow>(`SELECT ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [s.id]);
     return { state: 'applied', numbering: after ?? s, plan: built.plan, tracker: built.tracker };
@@ -774,7 +782,7 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
  */
 export async function requestNumbering(
   seriesId: string, mode: NumberingChoice | 'remap', opts: { confirm?: boolean; userId?: string | null } = {},
-): Promise<{ state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged'; plan?: RenumberPlan; tracker?: boolean; error?: string } | null> {
+): Promise<{ state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged'; plan?: RenumberPlan; tracker?: boolean; error?: string; errorSaid?: Said } | null> {
   const s = await one<NumberingRow & { source_id: string | null }>(`SELECT source_id, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]);
   if (!s) return null;
   // What a confirmed check did, as the POST answers it. `pending` carries why when the check knows (#116 review): a
@@ -782,14 +790,14 @@ export async function requestNumbering(
   // the page used to word as "the source may not have answered" and so sent an admin to retry forever.
   // Reintroduce by dropping `error`: "a stray file at a target name refuses the apply" in numbering.int.test.ts
   // finds no reason in the answer.
-  const confirmed = async (): Promise<{ state: 'applied' | 'pending'; plan?: RenumberPlan; tracker?: boolean; error?: string }> => {
+  const confirmed = async (): Promise<{ state: 'applied' | 'pending'; plan?: RenumberPlan; tracker?: boolean; error?: string; errorSaid?: Said }> => {
     const r = await updateSeries(seriesId, 0, { confirmRenumber: true });
     await logAudit('series.numbering', { userId: opts.userId ?? null, detail: { id: seriesId, mode, state: r.renumber?.state ?? r.outcome } });
     scheduleHealthSummaryRefresh();
     return {
       state: r.renumber?.state === 'applied' ? 'applied' : 'pending',
       ...(r.renumber?.plan ? { plan: r.renumber.plan, tracker: r.renumber.tracker } : {}),
-      ...(r.renumber?.error ? { error: r.renumber.error } : {}),
+      ...(r.renumber?.error ? { error: r.renumber.error, ...(r.renumber.errorSaid ? { errorSaid: r.renumber.errorSaid } : {}) } : {}),
     };
   };
   if (mode === 'remap') {

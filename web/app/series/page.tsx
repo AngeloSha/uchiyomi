@@ -16,6 +16,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
+import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
@@ -815,7 +816,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
 
 /** The one job the page started, and when: `dataUpdatedAt` is compared against `at`, see below. */
 interface StartedJob { folder: string; at: number }
-interface SourceJob { folder: string; status: string; reason?: string }
+interface SourceJob { folder: string; status: string; reason?: string; reasonSaid?: Said[] }
 
 /** The localStorage key for the per-device "Show chapters not on the server yet" switch in the Filter sheet. */
 const SHOW_GHOSTS_KEY = 'uchiyomi.showGhosts';
@@ -1407,7 +1408,7 @@ function SeriesInner() {
         }
         if (i === chunks.length - 1) break;
         const ended = await awaitJob(res.folder);
-        if (ended?.status === 'error') { toast(ended.reason || tr('Fetch stopped. Try another source or wait.'), 'error'); break; }
+        if (ended?.status === 'error') { toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error'); break; }
       }
     } catch (e) {
       toast(msgOf(e, tr('Could not start.')), 'error');

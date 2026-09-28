@@ -109,9 +109,6 @@ export function applyIgnores(
   return ignored;
 }
 
-/** The summary's tail for ignored findings: "; 2 ignored". */
-export const ignoredTail = (n: number): string => (n ? `; ${n} ignored` : '');
-
 /**
  * How long an ignore outlives its finding. A week, not a day: a source that is slow every few days is exactly what
  * someone ignores, and it must not come back each time it has one good day. A problem gone for a week and back
