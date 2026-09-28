@@ -342,6 +342,24 @@ test('the token is required, compared exactly, and nothing else is served', asyn
   assert.equal((await fetch(`${srv.url}/nope`)).status, 404);
 });
 
+test('a debug route answers by its own name only, never by what every object inherits', async () => {
+  // CodeQL #39: the name after /_debug/ was looked up on the routes object as it is, so "constructor" answered
+  // Object() and "__proto__" threw inside the request handler. Reintroduce that lookup: "/_debug/constructor is
+  // served" fails (first, before a name that would throw).
+  const s3 = await startSolverServer({ backend: fake, token: TOKEN, appVersion: 't', debugRoutes: { pool: () => ({ busy: 0 }) } });
+  try {
+    const r = await fetch(`${s3.url}/_debug/pool`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { busy: 0 });
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__', 'nope']) {
+      assert.equal((await fetch(`${s3.url}/_debug/${name}`)).status, 404, `/_debug/${name} is served`);
+    }
+    assert.equal((await fetch(`${s3.url}/_debug/`)).status, 404);
+  } finally {
+    await s3.close();
+  }
+});
+
 test('Host must be 127.0.0.1:<port> (DNS rebinding), any Origin is refused (CSRF)', async () => {
   const http = await import('node:http');
   const raw = (headers: Record<string, string>) => new Promise<number>((resolve, reject) => {

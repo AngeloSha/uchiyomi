@@ -254,7 +254,11 @@ export async function startSolverServer(opts: SolverServerOptions): Promise<Solv
       });
       return;
     }
-    const dbg = rest.startsWith('/_debug/') ? opts.debugRoutes?.[rest.slice('/_debug/'.length)] : undefined;
+    // Its own routes only. Looked up on the object as it is, a name reached what every object inherits:
+    // "/_debug/constructor" answered Object(), and "/_debug/__proto__" threw inside this handler (CodeQL #39).
+    const routes = opts.debugRoutes;
+    const name = rest.startsWith('/_debug/') ? rest.slice('/_debug/'.length) : '';
+    const dbg = routes && name && Object.hasOwn(routes, name) ? routes[name] : undefined;
     if (dbg && req.method === 'GET') {
       Promise.resolve(dbg()).then((v) => json(res, 200, v), (e) => json(res, 500, { error: String(e) }));
       return;
