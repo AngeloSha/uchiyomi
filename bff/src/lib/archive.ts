@@ -936,17 +936,23 @@ async function runChapter(
         number: n, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
         ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
       };
-      if (gen === generation) {
-        await noteUnscanned(r.series_id, r.folder, n, {
-          landed, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
-        }, clock());
-      }
       await archiveHooks.afterLanding?.(r.series_id, n);
       // A chapter in is progress: its three days without any (attentionOf) start again, and so do its idle turns.
       const counted = await q<{ n: number }>(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
                 note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1
                 RETURNING done_count AS n`,
       [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => [] as Array<{ n: number }>);
+      // Taken as waiting for its scan in the step that counts it, and the view's rows read again: `left` loses it as
+      // `done` gains it. Noted before the count, a look in between took it off `left` while `done` did not count it yet,
+      // and so did rows read before the count, cached until the turn ended: "0 of 13" of 14 (v0.49.1 final walk).
+      // Reintroduce by noting it before the count: "at its landing" in archive.int.test.ts reads 0 of 13; by dropping the
+      // invalidateArchiveView() here: "once counted" does.
+      if (gen === generation) {
+        await noteUnscanned(r.series_id, r.folder, n, {
+          landed, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
+        }, clock());
+        invalidateArchiveView();
+      }
       // The first chapter an archive lands for a series the library holds nothing of (`first`) is scanned in at once;
       // the rest wait for a batch (maybeFlush). Until the batch, a series added with nothing but its archive read
       // "0 chapters · none fetched yet" under a band saying "1 of 14", and Came in today showed its tile with no cover
@@ -1274,6 +1280,8 @@ interface SharedRow {
   done: number; failed: number; bytes: number; left: number | null; addedBy: string | null; primary: string | null;
   createdAt: number; startedAt: number | null; finishedAt: number | null; lastAt: number | null;
   note: (Partial<DoneNote> & QueuedNote & { pausedAt?: string }) | null;
+  /** The numbers `left` counts: compose() takes a chapter waiting for its scan off `left` only while it is one of them. */
+  leftNumbers: number[];
 }
 let viewCache: { at: number; rows: SharedRow[]; pace: Map<string, PaceRow>; settings: ArchiveSettings } | null = null;
 export function invalidateArchiveView(): void { viewCache = null; }
@@ -1285,8 +1293,8 @@ async function sharedRows(): Promise<NonNullable<typeof viewCache>> {
   const rows = await q<any>(
     `SELECT a.series_id, s.title, s.folder, a.state, a.direction, a.done_count, a.failed_count, a.bytes, a.added_by, s.source_id,
             a.created_at, a.started_at, a.finished_at, a.last_at, a.note,
-            CASE WHEN a.state = 'done' OR a.boundary IS NULL THEN NULL ELSE (
-              SELECT count(*)::int FROM series_listing l WHERE l.series_id = a.series_id AND ${eligibleSql('l', 'a', '$1')}) END AS left_n
+            CASE WHEN a.state = 'done' OR a.boundary IS NULL THEN NULL ELSE ARRAY(
+              SELECT l.number FROM series_listing l WHERE l.series_id = a.series_id AND ${eligibleSql('l', 'a', '$1')}) END AS left_numbers
        FROM archive_queue a JOIN lib_series s ON s.id = a.series_id
       WHERE ${visibleToAll('s')}
       ORDER BY a.created_at, a.series_id`,
@@ -1295,8 +1303,9 @@ async function sharedRows(): Promise<NonNullable<typeof viewCache>> {
   const shared: SharedRow[] = rows.map((r) => ({
     seriesId: r.series_id, title: r.title, folder: r.folder, state: r.state, direction: r.direction,
     done: Number(r.done_count) || 0, failed: Number(r.failed_count) || 0, bytes: Number(r.bytes) || 0,
-    left: r.left_n == null ? null : Number(r.left_n), addedBy: r.added_by, primary: r.source_id,
+    left: r.left_numbers == null ? null : r.left_numbers.length, addedBy: r.added_by, primary: r.source_id,
     createdAt: ms(r.created_at) ?? now, startedAt: ms(r.started_at), finishedAt: ms(r.finished_at), lastAt: ms(r.last_at), note: r.note,
+    leftNumbers: r.left_numbers ?? [],
   }));
   const pace = new Map((await q<PaceRow>('SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace')
     .catch(() => [])).map((p) => [p.source_id, p]));
@@ -1347,7 +1356,12 @@ function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<s
   // Landed and not scanned yet is not left: the library does not hold it until the batch scan, and "1 of 15" over
   // a series that has all fourteen of its chapters on disk read as work to come (#117 review).
   // Reintroduce by answering the stored count: "left counts what is still to come" in archive.int.test.ts.
-  const left = r.left == null ? null : Math.max(0, r.left - (unscanned.get(r.seriesId)?.items.size ?? 0));
+  // Taken off only while `left` still counts it, by its number: the scan puts a chapter in the library before
+  // flushArchiveScan lets it go, and rows read in between no longer count it. Taken off by how many waited, it went
+  // twice there, and a series' first chapter, which is scanned in at once, read "1 of 13" of its 14 (v0.49.1 final walk).
+  // Reintroduce by subtracting how many wait: "in the library and still waiting" in archive.int.test.ts reads 1 of 13.
+  const waiting = unscanned.get(r.seriesId)?.items;
+  const left = r.left == null ? null : r.left - (waiting ? r.leftNumbers.filter((n) => waiting.has(n)).length : 0);
   // Calendar time, not running time: the running average leaves the hours outside the window out
   // (outsideCycleMs), so an ETA from it alone read "about a day" for what a 01:00-07:00 window takes four to do.
   const share = openShare(c.settings.windowFrom, c.settings.windowTo);

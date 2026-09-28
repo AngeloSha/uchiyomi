@@ -1135,6 +1135,92 @@ test('what the archive scans in is not left, and the view says so at once', { sk
   assert.equal(await left(), 2, 'once it is scanned in, still not left');
 });
 
+test("what came in and what is left add up to the whole, from a first chapter's landing until its scan lets it go", { skip }, async () => {
+  // The cover and its sheet say `done` of `done + left` (web/lib/archive.ts). A series' first chapter is scanned in at
+  // once, and the scan puts it in the library before flushArchiveScan lets it go from what waits: rows read in between
+  // no longer counted it in `left`, compose() took it off again, and Walk Gap read "1 of 13" of its 14 (v0.49.1 final
+  // walk). Before that, taken as waiting before it was counted, it read "0 of 13" from its landing until its turn ended.
+  // Looked at in each of those moments, each one held: at its landing (archiveHooks.afterLanding); counted, with its turn
+  // held where it next writes its source's pace row and its scan not started (withScansHeld); in the library, with the
+  // scan held on its last write before it lets the chapter go, the series' Updates row; and let go.
+  // Reintroduce by noting it before the count (runChapter): "at its landing" reads 0 of 13. By dropping the
+  // invalidateArchiveView() beside the count: "once counted" reads 0 of 13. By subtracting how many wait (compose): "in
+  // the library and still waiting" reads 1 of 13.
+  const { withScansHeld } = await import('../src/lib/library');
+  const { pool } = await import('../src/lib/db');
+  const s = await series('whole', A, Array.from({ length: 14 }, (_, i) => i + 1));
+  await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, 0)
+           ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = 0`, [adminId, s.id]);
+  /** What its cover says: what came in, of what came in and what is left (web/lib/archive.ts archiveProgressText). */
+  const cover = async () => {
+    const v = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+    return v && v.left != null ? `${v.done} of ${v.done + v.left}` : JSON.stringify(v ?? null);
+  };
+  /** A row lock on a connection of its own: whatever writes that row waits there until it is let go. */
+  const lockRow = async (sql: string, params: unknown[]) => {
+    const c = await pool.connect();
+    await c.query('BEGIN');
+    await c.query(sql, params);
+    let gone = false;
+    return async () => { if (gone) return; gone = true; await c.query('ROLLBACK').catch(() => {}); c.release(); };
+  };
+  /** Waited for, not timed: a statement beginning `head` waits on a lock, so it got that far and no further. */
+  const waitsAt = async (head: string) => {
+    for (let i = 0; i < 500; i++) {
+      const w = await one(`SELECT count(*)::int AS n FROM pg_stat_activity
+                            WHERE datname = current_database() AND wait_event_type = 'Lock' AND ltrim(query) LIKE $1`, [`${head}%`]);
+      if (w.n > 0) return true;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return false;
+  };
+  let atLanding: string | undefined;
+  let letTurnGo: (() => Promise<void>) | undefined;
+  arch.archiveHooks.afterLanding = async (id) => {
+    if (id !== s.id) return;
+    atLanding = await cover();
+    letTurnGo = await lockRow('SELECT 1 FROM archive_pace WHERE source_id = $1 FOR UPDATE', [A]);
+  };
+  const letScanGo = await lockRow('SELECT 1 FROM series_seen WHERE series_id = $1 FOR UPDATE', [s.id]);
+  // Held from before the landing, so the scan it starts waits here. `open` is set once the hold has begun.
+  let open: (() => void) | undefined;
+  const held = withScansHeld(() => new Promise<void>((r) => { open = r; }));
+  try {
+    assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+    assert.deepEqual((await tick()).started.map((x) => x.number), [1]);
+    assert.ok(await waitsAt('UPDATE archive_pace SET backoff_level'), 'PREMISE: its turn is held past its count');
+    assert.equal(atLanding, '0 of 14', 'at its landing, before its count');
+    assert.equal(Number((await row(s.id)).done_count), 1, 'PREMISE: counted');
+    assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'PREMISE: and not in the library yet');
+    assert.equal(await cover(), '1 of 14', 'once counted');
+
+    for (let i = 0; i < 200 && !open; i++) await new Promise((r) => setTimeout(r, 10));
+    open?.();
+    assert.ok(await waitsAt('UPDATE series_seen'), 'PREMISE: its scan has put it in the library, and has not let it go');
+    assert.deepEqual((await q('SELECT number FROM lib_books WHERE series_id = $1', [s.id])).map((b: any) => Number(b.number)), [1],
+      'PREMISE: the library holds it');
+    // Its turn ends, and its end has the view's rows read again, with the chapter in the library and not let go yet:
+    // the read the walk's page was shown.
+    await letTurnGo?.();
+    for (let i = 0; i < 1000 && arch.archiveBusy(s.folder); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(arch.archiveBusy(s.folder), false, 'PREMISE: its turn is over');
+    assert.equal(arch.archiveScanPending(s.folder, 1), true, 'PREMISE: and the archive still has it as waiting for its scan');
+    assert.equal(await cover(), '1 of 14', 'in the library and still waiting, it is not taken off twice');
+
+    await letScanGo();
+    await arch.archiveIdle();
+    assert.equal(arch.archiveScanPending(s.folder, 1), false, 'PREMISE: let go');
+    assert.equal(await cover(), '1 of 14', 'let go');
+  } finally {
+    arch.archiveHooks.afterLanding = undefined;
+    await letTurnGo?.();
+    await letScanGo();
+    for (let i = 0; i < 200 && !open; i++) await new Promise((r) => setTimeout(r, 10));
+    open?.();
+    await held;
+  }
+});
+
 test('a turn after days of waiting is not a stall, in flight or refused once', { skip }, async () => {
   // Five hundred series on one site take days each to come round. Counted from when a turn STARTS, a chapter in
   // flight after such a wait read "stalled" until it landed, and one refusal until the next turn, days later (the
