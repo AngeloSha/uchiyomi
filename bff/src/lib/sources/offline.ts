@@ -15,6 +15,13 @@
 // when ALL of these hold: it is small (under OFFLINE_MAX_BYTES of HTML -- a theme's real pages are far larger), its
 // <title> or first <h1> says so in so many words, and it carries none of the engine's own markup. And it is only
 // ever asked about a page that parsed to nothing: a page with results is never an offline page, whatever it says.
+//
+// ⚠️ What it does not change: the cooldowns. Discover (routes/sources.ts, the latest and popular pages) and global
+// search (lib/searchAll.ts) report this error as they report any failure -- reportFail, classified `down` -- so an
+// offline site someone keeps browsing or searching is put in the normal escalating cooldown, five minutes growing to
+// thirty. The sweep skips a source in a cooldown (updater.ts, blockedNow), so the first sweep check after the site
+// comes back can wait up to thirty minutes. Deliberate: a site that answers only its notice has failed the request,
+// and the escalation is what keeps a down site from being asked on every visit. docs/api.md says so too.
 import { plainText } from '../htmlText';
 
 /** The kind every classified error carries, and the prefix of its message (what a stored error is read by). */

@@ -657,7 +657,7 @@ components:
       required: [seriesId, followed]
       properties:
         seriesId: { type: string }
-        title: { type: string, description: "Left out for a series the viewer may not list (the 18+ hide, above all); the entry stays." }
+        title: { type: string, description: "Left out for a series the viewer may not list (the 18+ hide, above all), and for one no longer in the library when a restart's run was closed; the entry stays." }
         followed:
           type: array
           description: The sources it now follows, in scan order.
@@ -670,14 +670,20 @@ components:
               chapters: { type: integer, minimum: 0, description: The distinct chapter numbers that source lists. }
         why:
           type: string
-          enum: [posting_order, no_match, full, refused, not_tried]
+          enum: [posting_order, full, too_few, no_source, refused, no_answer, followed_already, no_match, not_tried]
           description: >-
-            Only when nothing was followed. `posting_order`: numbered by posting order, so no follower is ever
-            merged (not searched). `full`: the series already follows two sources (not searched). `refused`: a
-            source carried the title and the judgement refused it (another book by its numbering or title), or the
-            series lists under three chapter numbers, which no judgement can be made against (not searched).
-            `no_match`: the sources that answered do not carry it. `not_tried`: time, a stop or a shutdown cut it
-            short, no source could be asked, or none answered -- never "not found".
+            Only when nothing was followed, and exactly what happened. `posting_order`: numbered by posting order, so
+            no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
+            or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
+            which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
+            every one turned off, cooling down, adult for a clean series, or one it follows already (not searched).
+            `refused`: a source carried the title and did not pass the title and chapter-number check (another book).
+            `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
+            chapters, so nothing could be judged. `followed_already`: the sources that answered do not carry it, and
+            the series already follows another source -- which does, so it is not "no other source lists it".
+            `no_match`: the sources that answered do not carry it, and it follows no other source. `not_tried`: a
+            stop, the series' 90 s wall or a restart cut it short (rarely also a series deleted or merged away before
+            or during its turn) -- never "not found".
     FindRunSummary:
       type: object
       description: One Find other sources run, without its per-series results (since v0.49.1).
@@ -687,9 +693,9 @@ components:
         status:
           type: string
           enum: [running, done, stopped, failed, interrupted]
-          description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it (a shutdown, or a row found still running after a restart)."
+          description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it -- a shutdown, where the run closes its own row, or a row found still running after a restart, closed at boot. Either way `results` then lists every series it never reached as `not_tried`, as a stopped run does."
         total: { type: integer, minimum: 0, description: Series in its scope. }
-        done: { type: integer, minimum: 0, description: Series settled so far; a stopped run's rest are in `results` as not_tried but not counted here. }
+        done: { type: integer, minimum: 0, description: Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here. }
         followed: { type: integer, minimum: 0, description: Sources followed, across its series. }
         startedBy: { type: [string, "null"], description: "The admin who started it, by username (never the account id); null for an account since deleted." }
         startedAt: { type: string, format: date-time }
@@ -716,7 +722,7 @@ components:
               description: While it runs, what it is waiting on before its next series.
             results:
               type: array
-              description: One entry per series settled, in the order they were asked about; after the run ends, one for every series in its scope.
+              description: "One entry per series settled, in the order they were asked about; after the run ends -- done, stopped or interrupted -- one for every series in its scope, those it never reached as `not_tried`."
               items:
                 $ref: "#/components/schemas/FindResult"
 paths:
@@ -2629,6 +2635,7 @@ paths:
                         number: { type: number, description: Since v0.49.0, a repair about one chapter -- its number. }
                         seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
                         followed: { type: integer, minimum: 0, description: "Since v0.49.1, a find_sources run: the sources it has followed so far, across its series." }
+                        waiting: { type: string, enum: [sweep, repair, check], description: "Since v0.49.1, a find_sources run: what it waits on before its next series while it waits -- a chapter sweep, a library repair or the daily source check (GET /api/admin/sources/find's run.waiting). Absent otherwise; `current` is then still the series it did last." }
                         downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
@@ -6613,11 +6620,12 @@ paths:
         from: an admin (POST below), a tracker import's synonyms when the import added the series, and the series'
         main source's own description -- "Alternative Titles:"-style lines, Latin script only, each name's key at
         least five characters, at most twenty -- read when the series is added and whenever that source's details
-        are read again (so a description's name removed here returns while the source still lists it). Every
-        search for another source -- Find other sources, the add's auto-follow, the nightly hunt, borrowed chapter
-        names and Find missing chapters -- asks under the title and up to three of these, and an other name
-        matches EXACTLY, never by containment, and is then measured by the numbering both ways. A merge carries the
-        names to the survivor; Forget erases them. The idea and the parsing are @TIGamingTV's (PR #119).
+        are read again. A name removed here (DELETE below) stays removed however often the source lists it, until an
+        admin types it again. Every search for another source -- Find other sources, the add's auto-follow, the
+        nightly hunt, borrowed chapter names and Find missing chapters -- asks under the title and up to three of
+        these, and an other name matches EXACTLY, never by containment, and is then measured by the numbering both
+        ways. A merge carries the names to the survivor; Forget erases them. The idea and the parsing are
+        @TIGamingTV's (PR #119).
       parameters:
         - name: id
           in: path
@@ -6649,7 +6657,8 @@ paths:
         whole list, as GET does. Refused before anything is written: 400 `non_latin` (letters that are not Latin
         script normalise to nothing and could never be compared), 400 `too_short` (a key under five letters or
         digits is a word, not an identity), 409 `exists` (the series already goes by it: a stored name with the same
-        key, or its own title). Audited as `series.alt_title.add`.
+        key, or its own title). A name removed earlier comes back this way, as an admin's name. Audited as
+        `series.alt_title.add`.
       parameters:
         - name: id
           in: path
@@ -6692,7 +6701,9 @@ paths:
       operationId: deleteApiAdminSeriesIdAltTitlesNorm
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers the
-        list as it now is. Idempotent: a key the series does not have answers the list unchanged. Audited as
+        list as it now is. The name stays removed, whatever its origin: it is kept out of every list and search,
+        and neither a later read of the main source's description nor an import brings it back (POST brings it
+        back). Idempotent: a key the series does not have answers the list unchanged. Audited as
         `series.alt_title.remove`.
       parameters:
         - name: id
@@ -8745,7 +8756,8 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. {running, run,
         recent}: `run` is the running run, else the newest one, with every series' result; `recent` the kept runs
-        (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`.
+        (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`,
+        with every series it never reached in `results` as `not_tried`.
         A series the viewer may not list (the 18+ hide, above all) keeps its entry in `results` without its
         `title`, and is left out of `current`.
       security:

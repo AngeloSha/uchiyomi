@@ -198,7 +198,10 @@ the site to come back, or find other sources for its series.*): a site engine (M
 nothing on a page checks whether the page is the site's own offline or maintenance notice -- small (under 8 KB),
 its title or first heading saying so, with none of the engine's own markup -- and fails with that kind instead of
 answering an empty list. The sweep then treats the source as one that did not answer (the listing stands, no
-empty streak), and the per-stage evidence records the failure with `kind: site_offline`.
+empty streak), and the per-stage evidence records the failure with `kind: site_offline`. The cooldowns are not
+changed by it: Discover and global search report the failure as they report any other, so an offline site that
+someone keeps browsing or searching goes into the normal escalating cooldown (5 minutes, growing to 30). The sweep
+skips a source in a cooldown, so the first sweep check after the site comes back can wait up to 30 minutes.
 
 `POST /api/admin/sources/check` (admin) runs the source watchdog immediately instead of waiting for its
 daily sweep. It probes every enabled source and smoke-tests its adapter, one at a time because they share a
@@ -1564,11 +1567,13 @@ names it goes by: `GET /api/admin/series/:id/alt-titles` answers `{titles: [{tit
 createdAt}]}`, an admin's names first. `origin` is `admin` (typed here), `import` (a tracker's synonyms, kept
 when an import added the series) or `description` (read from the series' main source's own description --
 "Alternative Titles:"-style lines at the start of a line, Latin script only, each key at least five characters,
-at most twenty -- when the series is added and whenever that source's details are read again, so a description
-name removed by hand returns while the source still lists it). `addedBy` is a username (null for a name the
-server read). `POST {title}` adds one and answers the list: **400** `non_latin` or `too_short` (a key under five
-letters or digits), **409** `exists` (the same key, or the series' own title). `DELETE .../alt-titles/:norm`
-removes one by its key and answers the list; it is idempotent. A merge carries the names to the survivor, and
+at most twenty -- when the series is added and whenever that source's details are read again). `addedBy` is a
+username (null for a name the server read). `POST {title}` adds one and answers the list: **400** `non_latin` or
+`too_short` (a key under five letters or digits), **409** `exists` (the same key, or the series' own title).
+`DELETE .../alt-titles/:norm` removes one by its key and answers the list; it is idempotent. A removed name stays
+removed, whatever its origin -- out of every list and search, and not brought back by a later read of the source's
+description or by an import -- until an admin types it again with `POST`, which makes it theirs. A merge carries
+the names to the survivor, and
 Forget erases them. Every search for another source asks under the title and up to three of these -- Find other
 sources below, the add's `alsoFollow` judgement, the nightly source hunt, borrowed chapter names and Find
 missing chapters (`POST /api/sources/fill/scan`, before the typed `altTitle`) -- and an other name matches
@@ -1589,15 +1594,25 @@ its searches report nothing to source health (a site that fails one is neither p
 failing). `GET /api/admin/sources/find` answers `{running, run, recent}`: `run` is the running run or else the
 newest, `{id, status: running|done|stopped|failed|interrupted, total, done, followed, startedBy (a username),
 startedAt, finishedAt?, sourceId?, sourceName?, current?: {seriesId, title}, waiting?: sweep|repair|check,
-results: [{seriesId, title, followed: [{sourceId, name, chapters}], why?: posting_order|no_match|full|refused|
-not_tried}]}`, and `recent` the newest 20 runs without `results` or `current`. `not_tried` is what time, a stop or
-a shutdown cut short -- never "not found"; a series the viewer may not list keeps its entry without `title`.
+results: [{seriesId, title?, followed: [{sourceId, name, chapters}], why?}]}`, and `recent` the newest 20 runs
+without `results` or `current`. `why` is set when nothing was followed, and says exactly what happened. Decided
+without a search: `posting_order`, `full` (two sources followed already), `too_few` (fewer than three chapter
+numbers, which nothing can be measured against) and `no_source` (no other source to ask: all turned off, cooling
+down or excluded). After one: `refused` (a candidate failed the title and chapter-number check), `no_answer`
+(nothing answered, or the source that carried it did not answer for its chapters), `followed_already` (nothing
+new, for a series that already follows another source -- which lists it) and `no_match` (nothing, and the series
+follows no other source). `not_tried` is what a stop, the series' 90 s wall or a restart cut short -- never "not
+found". A run that ends stopped or `interrupted` lists every series it never reached as `not_tried`: a shutdown
+gives the run a few seconds to close its own row, and a row still running after a restart is closed at boot the
+same way, from the series ids its scope resolved to when it started. A series the viewer may not list keeps its
+entry without `title`.
 `POST /api/admin/sources/find/stop` stops the run at once (`{stopped}`; false when none was going). When a run
 ends, every series that gained a source gets a listing refresh, 1.5 s apart (nothing is downloaded: the sweep
 takes the new chapters from there), the Health summary is refreshed, and `source.find` is audited with the scope
 and the counts (each follow as `series.follow_source` with `via: find_sources`). While it runs, `GET
 /api/sources/jobs` carries its card to admins: `kind: find_sources`, `done`/`total` in series, `followed`,
-`current` (hidden like any run's), `downloads: false`. On Health, a failing (or turned-off) source that is some
+`current` (hidden like any run's), `downloads: false`, and `waiting` (`sweep`, `repair` or `check`, as the run's
+own `waiting`) while it waits for one of those. On Health, a failing (or turned-off) source that is some
 series' main source carries the action `find_sources` with `findSeries`, and so does a "Series that can no longer
 update" row whose reason is its source.
 

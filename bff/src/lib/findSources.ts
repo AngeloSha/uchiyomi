@@ -27,13 +27,15 @@
 // Its manners are the slow archive's and bulk Fetch newest's: one run at a time, 1.5 s between the series it asks
 // about, waiting while a sweep, a repair or the daily source check runs, stopping at a series boundary on shutdown
 // or when an admin says stop. Per series it stops asking once the free follower slots are filled or three
-// sources carry the title (the fill scan's three-source stop), and gives up after a wall; what time or a stop cut
-// short is `not_tried` -- never "not found".
+// sources carry the title (the fill scan's three-source stop), and gives up after a wall; what a stop, the wall or
+// a restart cut short is `not_tried` -- never "not found" -- and every other outcome says what it was (FindWhy).
 //
 // When it ends, every series that gained a follower gets a listing refresh (updateSeries with nothing to download,
 // the follow route's own), 1.5 s apart in the background, so the new source's chapters show on the series page
 // and the sweep takes them from there, without a burst. The run is kept in source_find_runs (newest 20), so the
-// result outlives the tab and a restart; a row still `running` after a restart is closed as `interrupted`.
+// result outlives the tab and a restart. A shutdown gives the run a moment to close its own row (server.ts,
+// findSettledWithin); a row still `running` after a restart is closed as `interrupted` all the same, with every
+// series it never reached listed as `not_tried`, exactly as a stopped run lists them.
 import { randomUUID } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { q, one } from './db';
@@ -66,18 +68,39 @@ export const FIND_QUIET_POLL_MS = 5_000;
 export const FIND_KEEP = 20;
 /** How long a stop waits for the series in flight to finish writing a follow it has started. */
 const STOP_GRACE_MS = 1_000;
+/**
+ * How long a shutdown waits for the run to close its own row (server.ts): a stop is seen within a quarter of a
+ * second and the series in flight gets STOP_GRACE_MS, so this is room to spare, and short enough for any shutdown.
+ */
+export const FIND_SHUTDOWN_MS = 3_000;
 
 export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupted';
 /**
- * Why a series gained no source. `posting_order`: numbered by posting order, so no follower is ever merged (not
- * searched). `full`: it already follows MAX_FOLLOWERS sources (not searched). `refused`: a source carried the
- * title and judgeCandidate refused it (another book by the numbering or the title), or the series lists too few
- * numbers for any judgement at all. `no_match`: the sources that answered do not carry it. `not_tried`: time, a
- * stop or a shutdown cut it short, no other source could be asked, or none answered -- never "not found".
+ * Why a series gained no source, each for exactly what happened (the web words every code):
+ * - `posting_order`: numbered by posting order, so no follower is ever merged (not searched);
+ * - `full`: it already follows MAX_FOLLOWERS sources (not searched), or a hunt filled the last slot meanwhile;
+ * - `too_few`: it lists under MIN_HAVE chapter numbers, which no candidate can be measured against (not searched);
+ * - `no_source`: no other source could be asked -- every one disabled, cooling down, adult for a clean series, or
+ *   one it already follows (not searched);
+ * - `refused`: a source carried the title and judgeCandidate refused it, by the title or by the chapter numbers;
+ * - `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
+ *   chapters, so nothing could be judged;
+ * - `followed_already`: every source that answered lists nothing that is this series, and the series already
+ *   follows another source (which does list it: `no_match` would say no other source does);
+ * - `no_match`: the sources that answered do not carry it, and it follows no other source;
+ * - `not_tried`: a stop, the series' wall or a restart cut it short -- never "not found". (Rarely also a series
+ *   deleted or merged away before or during its turn, or one whose own search failed outright: the server log
+ *   says why.)
  */
-export type FindWhy = 'posting_order' | 'no_match' | 'full' | 'refused' | 'not_tried';
+export type FindWhy =
+  | 'posting_order' | 'full' | 'too_few' | 'no_source'
+  | 'refused' | 'no_answer' | 'followed_already' | 'no_match' | 'not_tried';
 export interface FoundSource { sourceId: string; name: string; chapters: number }
-export interface FindResult { seriesId: string; title: string; followed: FoundSource[]; why?: FindWhy }
+/**
+ * `title` is left out for a series the viewer may not list (routes/findSources.ts), and for one a restart's close
+ * could no longer find in the library.
+ */
+export interface FindResult { seriesId: string; title?: string; followed: FoundSource[]; why?: FindWhy }
 export type FindScope = { seriesIds: string[] } | { sourceId: string };
 
 interface ActiveRun {
@@ -117,10 +140,28 @@ export const findRunning = (): string | null => active?.id ?? claimed;
 /**
  * Close every row still `running` that is not the run this process is going: its process went away under it.
  * At boot (server.ts), and before every start and every read, so no row reads "running" for a run nobody runs.
+ *
+ * It closes as `interrupted` and, as a stopped run does, lists every series of its scope it never settled as
+ * `not_tried`, in the run's order, with the title the library has for it: the answer accounts for the whole scope,
+ * and the web offers those series again. The scope holds the resolved ids for either kind (startFind), so a run
+ * over a source lists the series it resolved to then, not whatever that source's series are now. One statement:
+ * two reads closing the same row at once cannot both append (the second finds it no longer running). Reintroduce by
+ * setting the status alone: "a restart lists every series the run never reached as not tried" in
+ * findSources.int.test.ts finds them missing.
  */
 export async function closeInterruptedFindRuns(): Promise<void> {
-  await q(`UPDATE source_find_runs SET status = 'interrupted', finished_at = COALESCE(finished_at, now())
-            WHERE status = 'running' AND id::text IS DISTINCT FROM $1`, [findRunning()]);
+  await q(
+    `UPDATE source_find_runs r SET status = 'interrupted', finished_at = COALESCE(r.finished_at, now()),
+            results = r.results || COALESCE((
+              SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+                       'seriesId', x.id, 'title', COALESCE(o.title, s.title), 'followed', '[]'::jsonb,
+                       'why', 'not_tried')) ORDER BY x.n)
+                FROM jsonb_array_elements_text(r.scope -> 'seriesIds') WITH ORDINALITY AS x(id, n)
+                LEFT JOIN lib_series s ON s.id = x.id
+                LEFT JOIN series_overrides o ON o.series_id = x.id
+               WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r.results) e
+                                  WHERE e ->> 'seriesId' = x.id)), '[]'::jsonb)
+      WHERE r.status = 'running' AND r.id::text IS DISTINCT FROM $1`, [findRunning()]);
 }
 
 /**
@@ -139,7 +180,11 @@ export async function startFind(
     const list = 'sourceId' in scope ? await seriesOfMainSource(scope.sourceId, ctx) : await seriesByIds(scope.seriesIds, ctx);
     if (!list.length) { claimed = null; return { empty: true }; }
     await closeInterruptedFindRuns();
-    const stored = 'sourceId' in scope ? { sourceId: scope.sourceId } : { seriesIds: list.map((s) => s.id) };
+    // The ids it resolved to, for either kind: what closeInterruptedFindRuns lists as not tried if the process goes
+    // away under the run. Reintroduce by storing {sourceId} alone: "a restart lists every series the run never
+    // reached as not tried" in findSources.int.test.ts finds no seriesIds in the scope.
+    const ids = list.map((s) => s.id);
+    const stored = 'sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids };
     await q(`INSERT INTO source_find_runs (id, started_by, status, scope, total) VALUES ($1, $2, 'running', $3::jsonb, $4)`,
       [id, userId, JSON.stringify(stored), list.length]);
     const card = beginRun('find_sources', userId, list.length);
@@ -172,11 +217,18 @@ export function stopFind(): boolean {
   return true;
 }
 
-/** Wait until no sweep, repair or daily source check is running: they own the sources while they go. */
+/**
+ * Wait until no sweep, repair or daily source check is running: they own the sources while they go. What it waits
+ * on is the run's (GET /api/admin/sources/find, run.waiting) and its card's (GET /api/sources/jobs), so Server tasks
+ * says why the run is paused. Reintroduce by leaving the card out: "it waits while a sweep runs, and says so" in
+ * findSources.int.test.ts reads no `waiting` on the card.
+ */
 async function waitQuiet(a: ActiveRun): Promise<boolean> {
   for (;;) {
     if (isStopped(a)) return false;
     a.waiting = runtime.updating ? 'sweep' : runtime.repairing ? 'repair' : checkRunning() ? 'check' : null;
+    if (a.waiting) a.card.waiting = a.waiting;
+    else delete a.card.waiting;
     if (!a.waiting) return true;
     await nap(a, quietMs);
   }
@@ -232,6 +284,7 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
     a.results.push(...rest);
     a.current = null;
     a.waiting = null;
+    delete a.card.waiting;
     await q(`UPDATE source_find_runs SET status = $2, finished_at = now(), done = $3, followed = $4,
                     results = results || $5::jsonb WHERE id = $1`,
       [a.id, status, a.done, a.followed, JSON.stringify(rest)]).catch((e) => console.warn(`[find] could not close the run: ${(e as Error)?.message || e}`));
@@ -273,7 +326,7 @@ async function findFor(
     ({ result: { seriesId: s.id, title: s.title, followed: [...progress], ...(why && !progress.length ? { why } : {}) }, asked });
   const row = await one<{ title: string; source_id: string | null; numbering: string | null }>(
     `SELECT s.title, s.source_id, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [s.id]);
-  // Hidden or merged away since the run started: nothing to follow onto.
+  // Hidden or merged away since the run started: nothing to follow onto, and nothing asked.
   if (!row) return end('not_tried', false);
   // Before anything else: no follower of a posting-order series is ever merged (lib/updater.ts), so none is sought.
   if (row.numbering === 'posting_order') return end('posting_order', false);
@@ -283,8 +336,10 @@ async function findFor(
   if (free <= 0) return end('full', false);
   const numbers = await numbersOf(s.id);
   // judgeCandidate refuses every candidate of a series listing under MIN_HAVE numbers before asking anything, so
-  // no source is searched for one: the answer is the refusal, without the traffic.
-  if (numbers.length < MIN_HAVE) return end('refused', false);
+  // no source is searched for one: `too_few`, decided from the database -- not `refused`, which says a candidate was
+  // found and failed the check. Reintroduce by answering `refused` here: "each series says why it gained nothing"
+  // in findSources.int.test.ts reads refused for the series with two numbers.
+  if (numbers.length < MIN_HAVE) return end('too_few', false);
 
   const names = await altTitlesFor(s.id, SEARCH_NAMES);
   const allowed = await sweepAllowedFor(await seriesIsAdult(s.id));
@@ -300,14 +355,17 @@ async function findFor(
       if (h?.blocked_until && new Date(h.blocked_until).getTime() > now) return false;
       return !!getSource(id);
     });
-  if (!order.length) return end('not_tried', false);
+  // Nothing left to ask: `no_source`, never `not_tried`, which is only what a stop, the wall or a restart cut short.
+  // Reintroduce by answering not_tried: "each series says why it gained nothing" reads it for the series whose
+  // every other source is turned off.
+  if (!order.length) return end('no_source', false);
 
   const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers };
   const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id), 0);
   const deadline = Date.now() + wallMs;
   const left = () => deadline - Date.now();
   const judged: Array<Judgement | null> = new Array(order.length).fill(null);
-  let carriers = 0, ok = 0, answered = 0, asked = false, refused = false, cut = false;
+  let carriers = 0, ok = 0, answered = 0, asked = false, refused = false, unjudged = false, cut = false;
   const enough = () => ok >= free || carriers >= FIND_CARRIERS;
   // Scan order, under the hunt's slots (FIFO, so the order is the order sources are asked in). A source whose turn
   // comes after enough carried the title is not asked at all.
@@ -330,22 +388,28 @@ async function findFor(
       if (!j) { cut = true; return; }
       judged[i] = j;
       if (j.why === 'ok') ok++;
-      // `unreachable` / `unavailable` is a candidate that could not be judged, not one that was refused.
-      else if (j.why === 'title_differs' || j.why === 'numbering_differs' || j.why === 'too_few_listed') refused = true;
-      else cut = true;
+      // Failed the title or the chapter-number check: the one thing `refused` says. (`too_few_listed` cannot come
+      // back: a series listing too few numbers ended `too_few` before any search.)
+      else if (j.why === 'title_differs' || j.why === 'numbering_differs') refused = true;
+      // `unreachable` / `unavailable`: the source that carried the title did not answer for its chapters, so the
+      // candidate could not be judged -- a source that did not answer, not a refusal and not the wall.
+      else unjudged = true;
     } finally { releaseHuntSlot(); }
   }));
 
   // The follows, in scan order, so which of several good sources the series takes is the order they were asked
   // in and not whichever answered first. Under followJudged's cap and lock: a hunt that followed one meanwhile
   // turns the next into `cap`.
-  let capped = false;
+  let capped = false, gone = false;
   for (const j of judged) {
     if (!j || j.why !== 'ok') continue;
     if (progress.length >= free || isStopped(a)) break;
     const written = await followJudged(s.id, j, { addedBy: a.userId }).catch(() => 'gone' as const);
     if (written === 'cap') { capped = true; break; }
-    if (written !== 'inserted') break;
+    // Deleted or merged away while its turn ran (or the write failed): nothing to follow onto, and a source that
+    // lines up was found -- so not "no match". Reintroduce by breaking without it: "a series deleted while its search
+    // runs ends not tried" in findSources.int.test.ts reads no_match.
+    if (written !== 'inserted') { gone = true; break; }
     const chapters = new Set((j.chapters ?? []).map((c) => c.number)).size;
     progress.push({ sourceId: j.source, name: j.name, chapters });
     await logAudit('series.follow_source', {
@@ -358,9 +422,21 @@ async function findFor(
   }
   if (progress.length) return end(undefined, asked);
   if (capped) return end('full', asked);
-  if (isStopped(a)) return end('not_tried', asked);
+  if (gone || isStopped(a)) return end('not_tried', asked);
   if (refused) return end('refused', asked);
-  if (cut || !answered) return end('not_tried', asked);
+  // The wall: a source it never got to ask, or a judgement it could not wait for.
+  if (cut) return end('not_tried', asked);
+  // Every source in the order went away before its turn (uninstalled mid-series): none could be asked after all.
+  if (!asked) return end('no_source', false);
+  // Asked, and no answer to judge by: none of the sources answered, or the one that carried the title did not
+  // answer for its chapters. Reintroduce `not_tried` for either: "each series says why it gained nothing" reads it
+  // for the series whose one source throws, and for the one whose carrier's chapter list does not load.
+  if (unjudged || !answered) return end('no_answer', asked);
+  // Every source that answered was asked under every name and lists nothing that is this series. "No other source
+  // lists it" would be false for a series that already follows one -- that source does -- so it says so instead.
+  // Reintroduce by dropping this line: "each series says why it gained nothing" reads no_match for the series that
+  // follows a source already.
+  if (followers.size) return end('followed_already', asked);
   return end('no_match', asked);
 }
 
@@ -463,4 +539,17 @@ export function setFindTiming(t: { paceMs?: number; wallMs?: number; quietMs?: n
 export async function findSettled(): Promise<void> {
   await lastRun.catch(() => {});
   await refreshing?.catch(() => {});
+}
+
+/**
+ * A shutdown (server.ts, once runtime.stopping is set): wait for the run going now to close its own row --
+ * `interrupted`, every series it never reached listed as `not_tried`, its audit line written -- but never longer
+ * than `ms`, because a shutdown must not hang on a slow site. Whatever it does not finish, the next boot's
+ * closeInterruptedFindRuns does. Reintroduce by not waiting (dropping the call from server.ts): "a shutdown lets
+ * the run close its own row" in findSources.int.test.ts finds the handler without it.
+ */
+export async function findSettledWithin(ms = FIND_SHUTDOWN_MS): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([findSettled(), new Promise<void>((r) => { timer = setTimeout(r, ms); })]);
+  clearTimeout(timer);
 }

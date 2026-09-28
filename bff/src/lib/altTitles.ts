@@ -163,11 +163,13 @@ const OWN_KEY = (param: string) =>
 /**
  * Every stored name of a series. A person's word first -- a name an admin typed, then a tracker's synonyms, then
  * what a description listed -- because a search uses only the first few (SEARCH_NAMES), and a name somebody chose
- * must not lose its turn to the twentieth name a description listed.
+ * must not lose its turn to the twentieth name a description listed. A name an admin removed (removed_at, see
+ * removeAltTitle) is not a name of the series: not listed, not searched under, not matched.
  */
 export async function altTitleRows(seriesId: string): Promise<AltTitleRow[]> {
   return q<AltTitleRow>(
-    `SELECT title, norm, origin, added_by, created_at FROM series_alt_titles WHERE series_id = $1
+    `SELECT title, norm, origin, added_by, created_at FROM series_alt_titles
+      WHERE series_id = $1 AND removed_at IS NULL
       ORDER BY CASE origin WHEN 'admin' THEN 0 WHEN 'import' THEN 1 ELSE 2 END, created_at, norm`, [seriesId],
   );
 }
@@ -184,6 +186,11 @@ export async function altTitlesFor(seriesId: string, limit?: number): Promise<st
  * typed is not demoted to "from a description" because a source also lists it. Names with a short key, no Latin
  * letters or the series' own title are dropped here too, so nothing reaches the table that the match rule would
  * refuse. Answers the names written.
+ *
+ * A name an admin removed stays removed for a description or an import: its tombstone is the row already stored,
+ * so reading the source's description again (every details read does) writes nothing. Only an admin typing it
+ * again brings it back, as their own name. Reintroduce by resurrecting it for every origin: "a name an admin
+ * removed does not come back" in altTitles.int.test.ts lists it again after the next details read.
  */
 export async function recordAltTitles(
   seriesId: string,
@@ -200,11 +207,16 @@ export async function recordAltTitles(
     rows.set(k, title);
   }
   if (!rows.size) return [];
+  const conflict = origin === 'admin'
+    ? `DO UPDATE SET title = EXCLUDED.title, origin = 'admin', added_by = EXCLUDED.added_by, created_at = now(),
+                     removed_at = NULL
+        WHERE series_alt_titles.removed_at IS NOT NULL`
+    : 'DO NOTHING';
   const written = await run<{ title: string }>(
     `INSERT INTO series_alt_titles (series_id, norm, title, origin, added_by)
      SELECT $1, x.n, x.t, $4, $5 FROM unnest($2::text[], $3::text[]) AS x(n, t)
       WHERE EXISTS (SELECT 1 FROM lib_series s WHERE s.id = $1) AND x.n IS DISTINCT FROM ${OWN_KEY('$1')}
-     ON CONFLICT (series_id, norm) DO NOTHING RETURNING title`,
+     ON CONFLICT (series_id, norm) ${conflict} RETURNING title`,
     [seriesId, [...rows.keys()], [...rows.values()], origin, opts.userId ?? null],
   );
   return written.map((r) => r.title);
@@ -236,11 +248,13 @@ export async function learnFromMainSource(sourceId: string, sourceSeriesId: stri
 /**
  * A merge: the absorbed row's names become the survivor's, and leave the absorbed row (lib/libraryAdmin.ts). The
  * survivor keeps its own row where both had a name, and a name that is the survivor's own title is not carried.
+ * A removed name is carried as removed: the two rows are one work now, and a name an admin took off it must not
+ * come back as the survivor's (as a live name, or from the survivor's own description).
  */
 export async function carryAltTitles(run: typeof q, fromId: string, intoId: string): Promise<void> {
   await run(
-    `INSERT INTO series_alt_titles (series_id, norm, title, origin, added_by, created_at)
-     SELECT $2, a.norm, a.title, a.origin, a.added_by, a.created_at FROM series_alt_titles a
+    `INSERT INTO series_alt_titles (series_id, norm, title, origin, added_by, created_at, removed_at)
+     SELECT $2, a.norm, a.title, a.origin, a.added_by, a.created_at, a.removed_at FROM series_alt_titles a
       WHERE a.series_id = $1 AND a.norm IS DISTINCT FROM ${OWN_KEY('$2')}
      ON CONFLICT (series_id, norm) DO NOTHING`,
     [fromId, intoId],
@@ -248,7 +262,16 @@ export async function carryAltTitles(run: typeof q, fromId: string, intoId: stri
   await run('DELETE FROM series_alt_titles WHERE series_id = $1', [fromId]);
 }
 
-/** Forget one name. Idempotent: a name that is not there is simply not there afterwards either. */
+/**
+ * Forget one name: it is kept as a tombstone (removed_at), whatever its origin. The main source's description is
+ * read again whenever that source's details are, and a plain delete let a name it lists straight back in (the
+ * insert-if-missing in recordAltTitles). That holds for a name an admin typed or an import brought too, whenever
+ * the description happens to list the same name -- a tracker's romaji and a site's "Alternative Titles" line often
+ * do -- so every origin is kept, not only `description`. Idempotent: a name that is not there, or is removed
+ * already, stays as it is. Reintroduce by deleting the row: "a name an admin removed does not come back" in
+ * altTitles.int.test.ts lists it again after the next details read.
+ */
 export async function removeAltTitle(seriesId: string, norm: string): Promise<void> {
-  await q('DELETE FROM series_alt_titles WHERE series_id = $1 AND norm = $2', [seriesId, norm]);
+  await q(`UPDATE series_alt_titles SET removed_at = now()
+            WHERE series_id = $1 AND norm = $2 AND removed_at IS NULL`, [seriesId, norm]);
 }

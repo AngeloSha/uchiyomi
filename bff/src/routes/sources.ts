@@ -692,6 +692,7 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     else if (lookupError !== undefined) void noteStage(src.id, 'chapters', 'fail', { error: lookupError });
     // v0.49.1: when this pair is some series' MAIN source, its description is that series' own, and the other
     // names it lists are kept (lib/altTitles.ts) -- the fill scan's read of the series' own source is one of these.
+    // Only names not stored yet: one an admin removed stays removed (its tombstone is the row already there).
     // Detached and never throwing: a lookup must not wait on, or fail over, a ledger of names.
     if (series?.summary) void learnFromMainSource(src.id, sourceId, series.summary);
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
@@ -2164,7 +2165,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
                 listings.push(assessOne(f));
                 return;
               }
-            } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
+            } catch {
+              // One source failing is not the scan failing -- but it must not be silent. Nor is that source asked
+              // under the next name (v0.49.1): the site, the solver or the extension that failed one search is down
+              // for all of them, and every further name would cost it another whole search budget. sourceHunt.ts
+              // searchByNames stops the same way. Reintroduce by carrying on: "the fill scan asks a source that
+              // failed a search nothing more" in altTitles.int.test.ts finds it asked under the other name too.
+              failed = true;
+              break;
+            }
           }
         } finally {
           // Unless its chapter list has already taken over the entry.
