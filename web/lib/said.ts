@@ -43,6 +43,12 @@ const arabic = (): boolean => activeLocale() === 'ar';
 const intlTag = (): string => `${activeLocale()}-u-nu-latn`;
 /** A list's separator: "A, B" / "A、B" / "A، B". */
 const listSep = (): string => (cjk() ? '、' : arabic() ? '، ' : ', ');
+/**
+ * Between two clauses of one sentence, as a comma joins them. A list's mark everywhere but in Chinese, whose "、"
+ * separates listed nouns only: a clause there takes "，" (the v0.49.1 translation review). Japanese "、" is the comma
+ * of clauses too.
+ */
+const clauseSep = (): string => (/^zh/.test(activeLocale()) ? '，' : listSep());
 const cap = (s: string): string => {
   const first = s.charAt(0);
   try { return first.toLocaleUpperCase(activeLocale()) + s.slice(1); } catch { return first.toUpperCase() + s.slice(1); }
@@ -287,7 +293,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
     if (status === null) return null;
     const vars = { title: str(p, 'title'), number: num(p, 'number'), status, reason: str(p, 'reason') };
     const latest = p.reason ? tr('latest: "{title}" ch {number} ({status}: {reason})', vars) : tr('latest: "{title}" ch {number} ({status})', vars);
-    return joinPart([head, tries, capped].filter(Boolean).join(listSep()), latest, 'clause');
+    // Clauses, not a list: "since 20 Sep, tried up to 5 times, 1 left alone after 10".
+    return joinPart([head, tries, capped].filter(Boolean).join(clauseSep()), latest, 'clause');
   },
 
   // ---- Series that can no longer update. `source` is the series' source id.
@@ -441,7 +448,11 @@ const WORDS: Record<string, (p: P) => string | null> = {
       w ? (w === 1 ? tr('left out 1 folder or file it could not read') : tr('left out {n} folders or files it could not read', { n: w })) : '',
     ].filter(Boolean);
     let what = parts.join(' ');
-    try { what = cached('said:and', () => new Intl.ListFormat(intlTag(), { type: 'conjunction' })).format(parts); } catch { /* an old WebView: the two side by side */ }
+    // Two things the scan did, joined as "and" joins them. Chinese "和" joins nouns only: "无法索引 1 个文件夹和略过了 2
+    // 个…" (the v0.49.1 translation review), so there they are two clauses. The Japanese translation words both as
+    // nouns ("…フォルダー 1 件"), which its list joins as it should.
+    if (/^zh/.test(activeLocale())) what = parts.join(clauseSep());
+    else try { what = cached('said:and', () => new Intl.ListFormat(intlTag(), { type: 'conjunction' })).format(parts); } catch { /* an old WebView: the two side by side */ }
     return n + w === 1
       ? tr('the last scan {what}; its chapters are on disk but not in the library', { what })
       : tr('the last scan {what}; their chapters are on disk but not in the library', { what });

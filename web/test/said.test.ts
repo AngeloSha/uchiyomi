@@ -300,6 +300,35 @@ test('the notes quote a button and a switch as they are labelled, and say what t
   assert.ok(saidText({ code: 'numbering.note' }, '\0').includes(`"${title}"`), 'the numbering note quotes the switch by another name');
 });
 
+test('in Chinese, clauses are joined as clauses: never with the list mark "、" or the noun "和"', () => {
+  // failures.detail joined its clauses with the list mark ("…3 章、最多尝试了 5 次、…"), and the scan's two verb phrases
+  // with Intl.ListFormat ("无法索引 1 个文件夹和略过了 2 个…"); the v0.49.1 translation review. Reintroduce listSep in
+  // failures.detail: "Chinese joins clauses with the list mark"; ListFormat for zh: "Chinese joins verb phrases with 和".
+  const failures = { code: 'failures.detail', params: { n: 3, series: 2, since: ISO, tries: 5, capped: 1, cap: 10, title: 'Walk Tale', number: 7, status: 'down', reason: null } };
+  const scan = { code: 'scan.problems', params: { n: 1, w: 2 } };
+  const load = (lang: string) => JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', `${lang}.json`), 'utf8'));
+  try {
+    setActiveLocale('zh');
+    setActiveDict(load('zh'));
+    const f = saidText(failures, '\0');
+    assert.ok(f !== '\0' && !f.includes('、'), `Chinese joins clauses with the list mark: ${f}`);
+    assert.match(f, /，/);
+    const sc = saidText(scan, '\0');
+    assert.ok(sc !== '\0' && !/文件夹和/.test(sc), `Chinese joins verb phrases with 和: ${sc}`);
+    assert.match(sc, /个文件夹，略过了/);
+    // Japanese keeps its own: "、" is its comma of clauses, and its translation words the scan's two as nouns.
+    setActiveLocale('ja');
+    setActiveDict(load('ja'));
+    assert.match(saidText(failures, '\0'), /、/, 'Japanese lost its comma');
+  } finally {
+    setActiveLocale('en');
+    setActiveDict({});
+  }
+  // English as the server writes it.
+  assert.match(saidText(failures, '\0'), /since .+, tried up to 5 times, 1 left alone after 10; latest: /);
+  assert.match(saidText(scan, '\0'), /could not index 1 folder and left out 2 folders or files it could not read/);
+});
+
 test('a line is joined the reader\'s way, and a code this build does not know leaves all of it in English', () => {
   const parts: Said[] = [
     { code: 'gaps.live', params: { n: 3 } }, { code: 'gaps.quiet', params: { n: 2 } }, { code: 'ignored', params: { n: 1 } },
