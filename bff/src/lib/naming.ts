@@ -8,6 +8,15 @@ export function numFromName(name: string): number {
   return m ? parseFloat(m[1]) : 0;
 }
 
+/**
+ * lib_books.chapter_name_source of a chapter name the LISTING healed onto a book that had none (lib/seriesListing.ts):
+ * the name of whichever copy the listing chose for the number when the heal ran, not the file's own (#116). Every
+ * other non-null value is the id of the source a name was BORROWED from (lib/borrowNames.ts), which is why this one
+ * cannot be an adapter id: a custom site's id is [a-z0-9]+, an extension's is `sw:<digits>`. Its borrowed names are
+ * taken back without it, and a renumber reads it as the listing's guess, like a date (lib/postingOrder.ts).
+ */
+export const HEALED_NAME = ':listing';
+
 /** Sort by leading number first, falling back to locale compare — so "Chapter 9" precedes "Chapter 10". */
 export function naturalCmp(a: string, b: string): number {
   return numFromName(a) - numFromName(b) || a.localeCompare(b);

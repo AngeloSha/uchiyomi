@@ -46,7 +46,8 @@ import { listActivity, renumberFinished } from './downloadActivity';
 import { chooseReleases } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { logAudit } from './audit';
-import { updateSeries } from './updater';
+import { updateSeries, runsInside } from './updater';
+import { scheduleHealthSummaryRefresh } from './healthSummary';
 
 /** How a series' chapters are numbered: by the source, or by posting order. NULL in the row is "automatic". */
 export type NumberingMode = 'source' | 'posting_order';
@@ -122,6 +123,18 @@ export async function storedPosts(seriesId: string, sourceId: string, run: typeo
     sourceNumber: r.source_number == null ? null : numKey(Number(r.source_number)),
     title: r.title, publishedAt: isoOf(r.published_at), gone: r.gone_at != null,
   }));
+}
+
+/**
+ * The stored assignment a series' files were numbered by, when it is kept under another source than `sourceId`: the
+ * series was added back from a different source (an extension reinstalled under a new id). The source with the
+ * most stored posts is the one; an apply keeps one source's rows (commit), so there is normally one.
+ */
+async function priorPosts(seriesId: string, sourceId: string): Promise<PostNumber[]> {
+  const prior = await one<{ source_id: string }>(
+    `SELECT source_id FROM series_post_numbers WHERE series_id = $1 AND source_id <> $2
+      GROUP BY source_id ORDER BY count(*) DESC, source_id LIMIT 1`, [seriesId, sourceId]).catch(() => null);
+  return prior ? storedPosts(seriesId, prior.source_id) : [];
 }
 
 const sig = (r: PostNumber): string => JSON.stringify([
@@ -232,9 +245,23 @@ export async function decideNumbering(s: { id: string } & NumberingRow, sourceId
 const busyProbes: Array<(folder: string) => boolean> = [];
 /** routes/sources.ts registers its job map here: a Fetch, fill or add running for the folder. */
 export function registerBusyProbe(fn: (folder: string) => boolean): void { busyProbes.push(fn); }
-/** Told after a renumber commits, with the old -> new map: a failed job card's Try again list moves with it. */
-const renumberListeners: Array<(folder: string, map: ReadonlyMap<number, number>) => void> = [];
-export function onRenumbered(fn: (folder: string, map: ReadonlyMap<number, number>) => void): void { renumberListeners.push(fn); }
+/**
+ * Told after a renumber commits, with the old -> new map: a failed job card's Try again list moves with it, and the
+ * slow archive forgets the numbers it remembered for the series (lib/archive.ts).
+ */
+const renumberListeners: Array<(folder: string, map: ReadonlyMap<number, number>, seriesId: string) => void> = [];
+export function onRenumbered(fn: (folder: string, map: ReadonlyMap<number, number>, seriesId: string) => void): void { renumberListeners.push(fn); }
+/**
+ * Asked before a series' plan reads its books: whoever holds chapters of it on disk that the library has not scanned
+ * yet scans them in first (the slow archive scans what it lands in batches, lib/archive.ts). A plan is built from
+ * lib_books, so a file with no row yet would keep its old name through the renumber and be scanned in afterwards
+ * under a number that is another post's by then.
+ */
+const beforePlanHooks: Array<(seriesId: string) => Promise<void>> = [];
+export function onBeforeRenumberPlan(fn: (seriesId: string) => Promise<void>): void { beforePlanHooks.push(fn); }
+async function beforePlan(seriesId: string): Promise<void> {
+  for (const fn of beforePlanHooks) await fn(seriesId).catch((e) => console.warn(`[numbering] ${seriesId}: ${(e as Error)?.message || e}`));
+}
 
 /** A download running into the folder, whoever started it: a rename now would race the file it is writing. */
 export function folderBusy(folder: string): boolean {
@@ -270,9 +297,9 @@ interface Built {
  */
 async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], mode: RenumberMode): Promise<Built> {
   const books = await q<{ id: string; root: string; file: string; number: number; ov: number | null; title: string | null; chapter_name: string | null;
-    published_at: Date | null; source_chapter_id: string | null; picked_at: Date | null; pruned_at: Date | null }>(
-    `SELECT b.id, b.root, b.file, b.number::float8 AS number, o.number::float8 AS ov, b.title, b.chapter_name, b.published_at,
-            b.source_chapter_id, b.picked_at, b.pruned_at
+    chapter_name_source: string | null; published_at: Date | null; source_chapter_id: string | null; picked_at: Date | null; pruned_at: Date | null }>(
+    `SELECT b.id, b.root, b.file, b.number::float8 AS number, o.number::float8 AS ov, b.title, b.chapter_name, b.chapter_name_source,
+            b.published_at, b.source_chapter_id, b.picked_at, b.pruned_at
        FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id WHERE b.series_id = $1`, [s.id]);
   // Tried, not trusted from permission bits: a share can report writable and refuse the rename (lib/fsGuard.ts).
   const roots = new Map<string, boolean>();
@@ -283,7 +310,30 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
   let rows: PostNumber[] | null = null;
   let after: Built['after'];
   let keep: Map<number, string> | undefined;
-  if (mode === 'posting_order') {
+  // Whether the stored listing may vouch for a book's post (planRenumber's weakest pass): not when it is written in
+  // numbers the files are not in.
+  let listingSpeaks = true;
+  if (mode === 'remap' && s.numbering === 'posting_order') {
+    // A posting-order series whose numbering source changed under its files (#116 review): added back from another
+    // source -- an extension reinstalled under a new id, or another site -- while its files keep the posting
+    // numbers of the source they were numbered by. The target is the numbering source's OWN posting assignment,
+    // seeded from the stored one the files are in, so a post found again by url, or by title and day, keeps the
+    // number it had and a file of it renames nothing. Every post is a candidate for every book, as in any remap.
+    // ⚠️ Never the source's raw numbers: the row stays numbered by posting order, and its next check lists 1..K.
+    // Reintroduce by planning a remap from `raw` alone: "added back from another source" in numbering.int.test.ts
+    // renames the files to the source's own numbers.
+    let stored = await storedPosts(s.id, sourceId);
+    if (!stored.length) stored = await priorPosts(s.id, sourceId);
+    const a = assignPostingNumbers(postingSequence(raw), stored);
+    const fresh = new Set(a.added.map((r) => r.postId));
+    rows = a.rows;
+    posts = a.rows.map((r) => ({
+      postId: r.postId, number: r.number, from: fresh.has(r.postId) ? null : r.number, title: r.title, publishedAt: r.publishedAt,
+    }));
+    after = { numbering: 'posting_order', by: s.numbering_by, source: sourceId };
+    // The add wrote the listing in the new source's raw numbers; the files are in posting numbers.
+    listingSpeaks = false;
+  } else if (mode === 'posting_order') {
     const stored = await storedPosts(s.id, sourceId);
     const a = assignPostingNumbers(postingSequence(raw), stored);
     rows = a.rows;
@@ -309,10 +359,14 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
     after = { numbering: s.numbering, by: s.numbering_by, source: s.numbering_source };
   }
 
+  // `chapterNameSource` says where a chapter name came from when it is not the file's own (fixL2): a name borrowed
+  // from another source, or one the listing healed onto the book (lib/seriesListing.ts, HEALED_NAME). Neither is
+  // the name pass's exact evidence. Reintroduce by leaving it out: "a healed name chooses a post but never makes a
+  // plan clean" in numbering.int.test.ts reads a clean plan.
   const planBooks: PlanBook[] = books.map((b) => ({
     id: b.id, root: b.root, file: b.file,
     number: mode === 'source' && b.ov != null && !writable(b.root) ? Number(b.ov) : Number(b.number),
-    title: b.title, chapterName: b.chapter_name, publishedAt: isoOf(b.published_at),
+    title: b.title, chapterName: b.chapter_name, chapterNameSource: b.chapter_name_source, publishedAt: isoOf(b.published_at),
     sourceChapterId: b.source_chapter_id, pickedAt: isoOf(b.picked_at), pruned: b.pruned_at != null,
   }));
   // Replace… with a named copy is audited with the post it wrote (routes/admin.ts); the latest pick of a book wins.
@@ -321,14 +375,18 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
     `SELECT detail->'picks' AS picks FROM audit_log WHERE event = 'series.chapters_refetch' AND detail->>'id' = $1 ORDER BY at, id`, [s.id]).catch(() => []);
   for (const a of audits) for (const p of a.picks ?? []) if (p?.bookId && p.sourceId && (!p.source || p.source === sourceId)) picks.set(p.bookId, p.sourceId);
   const listing = new Map<number, string>();
-  for (const r of await q<{ number: number; cid: string | null; source_id: string }>(
-    `SELECT number::float8 AS number, chosen->>'sourceId' AS cid, source_id FROM series_listing WHERE series_id = $1`, [s.id]).catch(() => [])) {
-    if (r.cid && r.source_id === sourceId) listing.set(numKey(Number(r.number)), r.cid);
+  if (listingSpeaks) {
+    for (const r of await q<{ number: number; cid: string | null; source_id: string }>(
+      `SELECT number::float8 AS number, chosen->>'sourceId' AS cid, source_id FROM series_listing WHERE series_id = $1`, [s.id]).catch(() => [])) {
+      if (r.cid && r.source_id === sourceId) listing.set(numKey(Number(r.number)), r.cid);
+    }
   }
   const tracker = !!(await one<{ n: number }>('SELECT 1 AS n FROM series_trackers WHERE series_id = $1 LIMIT 1', [s.id]).catch(() => null));
   const plan = planRenumber(planBooks, { mode, posts }, {
     picks, listing, keep, writable, tracker, busy: folderBusy(s.folder),
     floor: s.chapter_floor == null ? null : Number(s.chapter_floor),
+    // A posting assignment is persisted with the apply: the parked books' numbers are reserved in it.
+    reserveParked: rows != null,
   });
   const pairs: Array<[number, number]> = posts.filter((p) => p.from != null && Number.isFinite(p.from))
     .map((p) => [numKey(p.from!), numKey(p.number)] as [number, number]);
@@ -500,7 +558,11 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
       const values = j.markMap.map(([from, to]) => { params.push(from, to); return `($${params.length - 1}::real, $${params.length}::real)`; });
       await qq(`UPDATE download_log d SET number = v.t FROM (VALUES ${values.join(',')}) AS v(f, t) WHERE d.folder = $1 AND d.number = v.f`, params as any[]);
     }
-    if (j.mode === 'posting_order' && j.rows) {
+    if (j.rows) {
+      // The assignment the files are in now, and only that one: another source's rows (the one a series added back
+      // from a new source was numbered by) described the files until this commit, and a later re-add from that
+      // source would apply them to files that are no longer in its numbers.
+      await qq('DELETE FROM series_post_numbers WHERE series_id = $1 AND source_id <> $2', [seriesId, j.sourceId]);
       await savePostNumbers(qq as typeof q, seriesId, j.sourceId, j.rows, await storedPosts(seriesId, j.sourceId, qq as typeof q));
     } else if (j.mode === 'source') {
       await qq('DELETE FROM series_post_numbers WHERE series_id = $1', [seriesId]);
@@ -509,15 +571,19 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
     // numbers that no longer mean what they did.
     await qq('DELETE FROM series_listing WHERE series_id = $1', [seriesId]);
     await qq(`DELETE FROM health_ignored WHERE check_id = 'chapter-gaps' AND item_key = $1`, [`series:${seriesId}`]);
+    // numbering_changed_at is when the NUMBERING changed (Health lists a series numbered by posting order on its own
+    // for two weeks after it): a remap keeps the numbering it had, and moves it only by re-matching files.
     await qq(
       `UPDATE lib_series SET numbering = $2, numbering_by = $3, numbering_source = $4, numbering_pending = NULL, renumber_plan = NULL,
-              numbering_changed_at = now() WHERE id = $1`,
+              numbering_changed_at = CASE WHEN numbering IS DISTINCT FROM $2 THEN now() ELSE numbering_changed_at END WHERE id = $1`,
       [seriesId, j.after.numbering, j.after.by, j.after.source],
     );
   });
   const map = new Map(j.markMap.map(([a, b]) => [numKey(a), numKey(b)] as [number, number]));
   renumberFinished(j.folder, map);
-  for (const fn of renumberListeners) { try { fn(j.folder, map); } catch { /* a card is not worth a renumber */ } }
+  for (const fn of renumberListeners) { try { fn(j.folder, map, seriesId); } catch { /* a card is not worth a renumber */ } }
+  // The Health page's numbering finding (and the header's mark with it) is about a series that is no longer held.
+  scheduleHealthSummaryRefresh();
 }
 
 /** Renames and rows, from a journal already in lib_series.renumber_plan. Scans held, the folder busy. */
@@ -587,6 +653,9 @@ export interface Settled { state: SettleState; numbering: NumberingRow; plan?: R
 /** One settle per series at a time, in this process. */
 const settling = new Set<string>();
 
+/** Why a renumber waits for another run inside its series (lib/updater.ts runsInside). */
+export const CHECKING_NOW = 'This series is being checked right now. Try again when that ends.';
+
 /**
  * Carry out a pending numbering change, when it may be carried out: with a person's confirmation, or with no
  * chapter row to move at all. Otherwise the plan is answered and nothing changes.
@@ -601,15 +670,31 @@ export async function settleNumbering(
     return { state: 'none', numbering: { ...s, numbering_pending: null } };
   }
   if (settling.has(s.id)) return { state: 'busy', numbering: s };
+  // Another run inside the series (the sweep, a check, Fill) read its listing and have-set in today's numbers and
+  // would fetch into them after the renames: the renumber waits for it, and the series stays held meanwhile. The
+  // confirmation route refuses first (routes/numbering.ts); this covers the moment between its test and this run.
+  // Reintroduce by dropping it: "a renumber waits for a check inside the series" in numberingRoutes.int.test.ts
+  // finds the files renamed under the check.
+  if (runsInside(s.id) > 1) return { state: 'busy', numbering: s, error: CHECKING_NOW };
   settling.add(s.id);
   try {
+    await beforePlan(s.id);
     const built = await buildRenumber(s, sourceId, raw, mode);
     if (built.plan.reasons.includes('busy')) return { state: 'busy', numbering: s, plan: built.plan, tracker: built.tracker };
     const rows = built.plan.moves.length + built.plan.parked.length;
     // The owner's rule for v0.49.0: a series in a library is renamed only when an admin has seen the plan.
     // Reintroduce by applying without the confirmation: "an existing series is held for review, not renamed" in
     // numbering.int.test.ts reads outcome 'ok' ("held, whatever the plan").
-    if (rows > 0 && !opts.confirm) return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker };
+    // One exception, because it renames nothing: a remap (the source's numbers moved under the files, or a series
+    // came back from a new source) whose every book keeps its number, each matched by evidence of its own -- never
+    // a date or the listing's guess, nothing parked, no collision; a tracker link does not matter when no number
+    // moves. The numbering does not change; only which post each file is gets written down. Held for a
+    // confirmation, it stopped every series of a source whose setting changed nothing for them until an admin
+    // confirmed each one (#116 review). Reintroduce by holding it: "a remap that renames nothing settles by
+    // itself" in numberingRoutes.int.test.ts reads renumber_pending.
+    const noop = mode === 'remap' && built.plan.reasons.every((r) => r === 'tracker')
+      && !built.plan.parked.length && built.plan.moves.every((m) => m.via === 'none');
+    if (rows > 0 && !opts.confirm && !noop) return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker };
     try {
       await applyRenumber(s, built);
     } catch (e) {
@@ -643,6 +728,9 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
   if (!adapter || !ref) return null;
   const raw = await withTimeout(adapter.listChapters(ref), budgetFor(adapter, PLAN_LIST_TIMEOUT)).catch(() => null);
   if (!raw?.length) return null;
+  // The plan an admin is shown is the one a confirmation would apply: chapters on disk that no scan has taken in
+  // yet are scanned in first, as settleNumbering does.
+  await beforePlan(seriesId);
   const built = await buildRenumber(s, sourceId!, raw, mode);
   return { plan: built.plan, tracker: built.tracker };
 }
@@ -656,9 +744,24 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
  */
 export async function requestNumbering(
   seriesId: string, mode: NumberingChoice | 'remap', opts: { confirm?: boolean; userId?: string | null } = {},
-): Promise<{ state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged'; plan?: RenumberPlan; tracker?: boolean } | null> {
+): Promise<{ state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged'; plan?: RenumberPlan; tracker?: boolean; error?: string } | null> {
   const s = await one<NumberingRow & { source_id: string | null }>(`SELECT source_id, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]);
   if (!s) return null;
+  // What a confirmed check did, as the POST answers it. `pending` carries why when the check knows (#116 review): a
+  // refusal's own words (`error`, e.g. "Chapter 21.cbz is already on disk") and the plan's reasons ('busy'), which
+  // the page used to word as "the source may not have answered" and so sent an admin to retry forever.
+  // Reintroduce by dropping `error`: "a stray file at a target name refuses the apply" in numbering.int.test.ts
+  // finds no reason in the answer.
+  const confirmed = async (): Promise<{ state: 'applied' | 'pending'; plan?: RenumberPlan; tracker?: boolean; error?: string }> => {
+    const r = await updateSeries(seriesId, 0, { confirmRenumber: true });
+    await logAudit('series.numbering', { userId: opts.userId ?? null, detail: { id: seriesId, mode, state: r.renumber?.state ?? r.outcome } });
+    scheduleHealthSummaryRefresh();
+    return {
+      state: r.renumber?.state === 'applied' ? 'applied' : 'pending',
+      ...(r.renumber?.plan ? { plan: r.renumber.plan, tracker: r.renumber.tracker } : {}),
+      ...(r.renumber?.error ? { error: r.renumber.error } : {}),
+    };
+  };
   if (mode === 'remap') {
     // The source's own numbers moved under the files (an extension setting changed, routes/numbering.ts): the
     // numbering is the same, only the matching is new, so a remap is confirmed as it stands and never chosen.
@@ -667,18 +770,14 @@ export async function requestNumbering(
       const p = await planFor(seriesId, 'remap');
       return { state: 'needs_confirm', ...(p ? { plan: p.plan, tracker: p.tracker } : {}) };
     }
-    const r = await updateSeries(seriesId, 0, { confirmRenumber: true });
-    await logAudit('series.numbering', { userId: opts.userId ?? null, detail: { id: seriesId, mode, state: r.renumber?.state ?? r.outcome } });
-    return {
-      state: r.renumber?.state === 'applied' ? 'applied' : 'pending',
-      ...(r.renumber?.plan ? { plan: r.renumber.plan, tracker: r.renumber.tracker } : {}),
-    };
+    return confirmed();
   }
   if (mode === 'auto') {
     await q(`UPDATE lib_series SET numbering_by = NULL,
                     numbering = CASE WHEN numbering = 'source' THEN NULL ELSE numbering END,
                     numbering_pending = CASE WHEN numbering_pending = 'source' THEN NULL ELSE numbering_pending END
               WHERE id = $1`, [seriesId]);
+    scheduleHealthSummaryRefresh();
     return { state: 'unchanged' };
   }
   if ((s.numbering ?? 'source') === mode) {
@@ -687,6 +786,8 @@ export async function requestNumbering(
     // source's own numbers moved under the files, and it stays.
     await q(`UPDATE lib_series SET numbering = $2, numbering_by = 'manual',
                     numbering_pending = CASE WHEN numbering_pending = 'remap' THEN 'remap' ELSE NULL END WHERE id = $1`, [seriesId, mode]);
+    // Health's numbering finding for it is gone, and the header's mark with it (lib/healthSummary.ts).
+    scheduleHealthSummaryRefresh();
     return { state: 'unchanged' };
   }
   if (!opts.confirm) {
@@ -695,12 +796,7 @@ export async function requestNumbering(
   }
   await q(`UPDATE lib_series SET numbering_pending = $2, numbering_by = 'manual',
                   numbering_source = COALESCE(numbering_source, source_id) WHERE id = $1`, [seriesId, mode]);
-  const r = await updateSeries(seriesId, 0, { confirmRenumber: true });
-  await logAudit('series.numbering', { userId: opts.userId ?? null, detail: { id: seriesId, mode, state: r.renumber?.state ?? r.outcome } });
-  return {
-    state: r.renumber?.state === 'applied' ? 'applied' : 'pending',
-    ...(r.renumber?.plan ? { plan: r.renumber.plan, tracker: r.renumber.tracker } : {}),
-  };
+  return confirmed();
 }
 
 /** What the series page says about a series' numbering (the listing route's `numbering`). */
@@ -708,13 +804,17 @@ export async function numberingSummary(seriesId: string): Promise<{
   mode: NumberingMode | null; by: string | null; pending: RenumberMode | null; note: NumberingNote | null;
   changedAt: string | null; sourceName: string | null; extSourceId?: string;
 } | null> {
-  const r = await one<NumberingRow & { source_id: string | null; numbering_changed_at: Date | null }>(
-    `SELECT source_id, numbering_changed_at, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]).catch(() => null);
+  const r = await one<NumberingRow & { source_id: string | null; source: string | null; numbering_changed_at: Date | null }>(
+    `SELECT source_id, source, numbering_changed_at, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]).catch(() => null);
   if (!r) return null;
   const src = r.numbering_source ?? r.numbering_note?.source ?? r.source_id;
+  // The name a person knows: the loaded adapter's, else -- an extension the engine is not serving right now -- the
+  // name the series was added under, when this is its own source. The raw id ("sw:2522335540328470744 gives many
+  // different posts...") only when there is nothing better (#116 review).
+  const sourceName = src ? getSource(src)?.name ?? (src === r.source_id && r.source ? r.source : src) : null;
   return {
     mode: r.numbering, by: r.numbering_by, pending: r.numbering_pending, note: r.numbering_note,
-    changedAt: isoOf(r.numbering_changed_at), sourceName: src ? getSource(src)?.name ?? src : null,
+    changedAt: isoOf(r.numbering_changed_at), sourceName,
     ...(src && isSwAdapterId(src) ? { extSourceId: src.slice(SW_PREFIX.length) } : {}),
   };
 }

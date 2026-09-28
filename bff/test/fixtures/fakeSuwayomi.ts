@@ -47,6 +47,11 @@ export interface FakePref {
   entryValues?: string[];
   /** A disabled preference is left alone by updateSourcePreference, silently, as on the engine. */
   enabled?: boolean;
+  /**
+   * The extension's own change listener refuses every value (returns false): updateSourcePreference answers as usual
+   * and nothing is stored -- a write the engine "took" that did not happen (modelled).
+   */
+  keeps?: boolean;
   visible?: boolean;
   dialogTitle?: string | null;
   dialogMessage?: string | null;
@@ -95,8 +100,11 @@ export interface FakeSource {
   preferences: FakePref[];
   /** What updateSourcePreference stored, by key. */
   prefValues: Record<string, unknown>;
-  /** Stages that always fail for this source, whatever the mode (a string is the exception message). */
-  fail: Partial<Record<FakeStage, true | string>>;
+  /**
+   * Stages that always fail for this source, whatever the mode (a string is the exception message). `preferences`:
+   * its preference screen (setupPreferenceScreen) throws, only when named here, never by a mode.
+   */
+  fail: Partial<Record<FakeStage | 'preferences', true | string>>;
   /** How many times a preference write made the engine rebuild the source. */
   reloads: number;
   mangas: FakeManga[];

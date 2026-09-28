@@ -1320,8 +1320,21 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     if (p.kind === 'edittext') Object.assign(out, { currentValue: current ?? null, default: p.default ?? null, text: current ?? null, ...dialog });
     return out;
   }
-  /** Source.getSourcePreferencesRaw: builds the screen AND remembers it for the next updateSourcePreference. */
+  /**
+   * Source.getSourcePreferencesRaw: builds the screen AND remembers it for the next updateSourcePreference. An
+   * extension whose setupPreferenceScreen throws (`fail.preferences`) fails the field with its own exception: the
+   * engine answered, the extension failed -- the case #115 is about, on the settings sheet (modelled frames).
+   */
   function readPreferences(src) {
+    const forced = src.fail?.preferences;
+    if (forced) {
+      const cls = src.pkgName.split('.').pop();
+      const klass = cls.charAt(0).toUpperCase() + cls.slice(1);
+      throw new EngineException('java.lang.Exception', typeof forced === 'string' ? forced : 'java.lang.Exception', [
+        `${src.pkgName}.${klass}.setupPreferenceScreen(${klass}.kt:1)`,
+        'suwayomi.tachidesk.manga.impl.Source.getSourcePreferencesRaw(Source.kt:1)',
+      ]);
+    }
     const screen = [...src.preferences];
     if (screen.length) st.screens.set(src.id, screen);
     return screen.map((p) => prefView(src, p));
@@ -1491,9 +1504,13 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
               ['suwayomi.tachidesk.graphql.mutations.SourceMutation.updateSourcePreference$lambda$0(SourceMutation.kt:334)']);
           }
           if (pref.kind === 'multiselect') v = [...new Set(v)];
-          src.prefValues[pref.key] = v;
-          src.reloads++; // GetSource.unregisterSource: the next call builds the source afresh with the new value
-          st.prefWrites.push({ source: src.id, position, key: pref.key, value: v });
+          // `keeps`: the extension's OnPreferenceChangeListener answers false, so Android never stores the value --
+          // and the engine answers the mutation as if it had (modelled; the listener is the extension's own code).
+          if (!pref.keeps) {
+            src.prefValues[pref.key] = v;
+            src.reloads++; // GetSource.unregisterSource: the next call builds the source afresh with the new value
+            st.prefWrites.push({ source: src.id, position, key: pref.key, value: v });
+          }
         }
         return { preferences: readPreferences(src), source: sourceView(src), clientMutationId: input.clientMutationId ?? null };
       },

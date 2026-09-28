@@ -84,7 +84,7 @@ let savedPrefs: unknown = null;
 const fileOf = (key: string, n: number) => join(ROOT, S(key), `Chapter ${n}.cbz`);
 const bookId = (key: string, n: number) => `${S(key)}_b${n}`;
 const row = async (key: string, n: number) =>
-  (await q('SELECT id, source_id, scanlator, pages, picked_at, upgrade_tried_at FROM lib_books WHERE id = $1', [bookId(key, n)]))[0];
+  (await q('SELECT id, source_id, scanlator, pages, picked_at, upgrade_tried_at, source_chapter_id FROM lib_books WHERE id = $1', [bookId(key, n)]))[0];
 
 /**
  * A series added from PRIMARY and following FOLLOWER, holding chapters 1-5 as five-page files from OTHER,
@@ -99,9 +99,10 @@ async function series(key: string) {
   mkdirSync(join(ROOT, S(key)), { recursive: true });
   for (let n = 1; n <= 5; n++) {
     writeFileSync(fileOf(key, n), HELD);
-    await q(`INSERT INTO lib_books (id, series_id, source, root, file, number, title, pages, source_id, scanlator)
-             VALUES ($1,$2,'T!gu',$3,$4,$5,$6,5,$7,$8)`,
-    [bookId(key, n), S(key), ROOT, `${S(key)}/Chapter ${n}.cbz`, n, `Chapter ${n}`, PRIMARY, OTHER]);
+    // Stamped with the copy it was written from, as a v0.49.0 landing stamps it (lib_books.source_chapter_id).
+    await q(`INSERT INTO lib_books (id, series_id, source, root, file, number, title, pages, source_id, scanlator, source_chapter_id)
+             VALUES ($1,$2,'T!gu',$3,$4,$5,$6,5,$7,$8,$9)`,
+    [bookId(key, n), S(key), ROOT, `${S(key)}/Chapter ${n}.cbz`, n, `Chapter ${n}`, PRIMARY, OTHER, `${PRIMARY}-c${n}`]);
   }
   await updateSeries(S(key), 0); // the listing the step starts from
   asked.length = 0;
@@ -178,6 +179,10 @@ test("on: a chapter from another group is replaced by the preferred group's copy
     if (b.scanlator === GOOD) {
       swapped++;
       assert.equal(b.source_id, FOLLOWER, 'the provenance still names the old source');
+      // The post the new file was written from (#116 review): the stamp named the REPLACED copy, which the versions
+      // view trusts first and a remap takes as proof. Reintroduce by dropping `chapterId` from restampBook (or from
+      // replaceWithGroup's call): this reads the old copy's id.
+      assert.equal(b.source_chapter_id, `${FOLLOWER}-c${n}`, 'a group upgrade restamps the chapter id');
       assert.notDeepEqual(readFileSync(fileOf('on', n)), HELD, `chapter ${n} was restamped but not rewritten`);
     } else {
       assert.deepEqual(readFileSync(fileOf('on', n)), HELD, `chapter ${n} was rewritten without being restamped`);

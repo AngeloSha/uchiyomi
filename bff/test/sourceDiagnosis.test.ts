@@ -372,6 +372,11 @@ test('an engine timeout names the engine, not a wall it never reaches', () => {
   assert.doesNotMatch(d.fix, /SOURCE_TEST_TIMEOUT_MS/);
   // Our own wall, with nothing said, keeps its sentence.
   assert.match(diagnose(clean, { adapterOk: false, failure: { stage: 'pages', kind: 'timeout' } }).fix, /SOURCE_TEST_TIMEOUT_MS/);
+  // With a current stored cause, that cause speaks: the engine's 30 s ran out behind the wall the stored error
+  // names, and "the engine did not answer" would send an admin to a healthy container (integration-1 review).
+  const late = { adapterOk: false, failure: { stage: 'search' as const, kind: 'timeout' as const, error: 'suwayomi timeout after 30000ms' } };
+  assert.equal(diagnose(facts({ lastError: 'Just a moment...' }), late).code, 'cf_challenge', 'an engine timeout outranked a current stored cause');
+  assert.equal(diagnose(facts({ lastError: ENGINE_BYPASS_OFF }), late).code, 'cf_challenge', "and the engine's own bypass switched off");
 });
 
 test('a stored error is current until a success comes after it', () => {

@@ -205,6 +205,20 @@ export function inWindow(hour: number, from: number | null | undefined, to: numb
   return from < to ? hour >= from && hour < to : hour >= from || hour < to;
 }
 
+/**
+ * The share of a day the window [from, to) is open: 1 for "any time" (either end null, or from === to, as inWindow
+ * reads them), 6/24 for 01-07, 1/24 for a one-hour window; one crossing midnight counts both of its sides.
+ *
+ * What turns running time into calendar time for an ETA. The running cycle (ewmaCycle) leaves the hours outside
+ * the window out of every sample (archivePlan.ts outsideCycleMs), so an estimate from it alone is how long the
+ * archive runs, and "about a day" for what a 01:00-07:00 window takes four days to finish.
+ */
+export function openShare(from: number | null | undefined, to: number | null | undefined): number {
+  if (from == null || to == null || from === to) return 1;
+  const hours = from < to ? to - from : 24 - from + to;
+  return Math.min(1, Math.max(1, hours) / 24);
+}
+
 /** The next time the local clock reads `from`:00, `now` included: when a closed window opens. */
 export function windowOpensAt(now: number, from: number): number {
   const d = new Date(now);

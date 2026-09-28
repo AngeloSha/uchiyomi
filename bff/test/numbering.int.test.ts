@@ -43,7 +43,20 @@ const S2 = 's_nb_crash1', FOLDER2 = 'Webtoons (test)/Istrevelia Crash One';
 const S3 = 's_nb_crash2', FOLDER3 = 'Webtoons (test)/Istrevelia Crash Two';
 const S4 = 's_nb_follow', FOLDER4 = 'Webtoons (test)/Istrevelia Followed';
 const S5 = 's_nb_override', FOLDER5 = 'Webtoons (test)/Istrevelia Read Only';
-const ALL = [S, S2, S3, S4, S5];
+// Added back into a folder that already holds books (#116 review): from the same source, with and without its stored
+// assignment, and from another source. The folders are the add's own: `<source name>/<title>`.
+const REV = 'nb-revive';
+const S7 = 's_nb_rv_raw', FOLDER7 = 'Webtoons (revive)/Istrevelia one';
+const S8 = 's_nb_rv_kept', FOLDER8 = 'Webtoons (revive)/Istrevelia two';
+const S9 = 's_nb_rv_moved', FOLDER9 = 'Webtoons (revive)/Istrevelia three';
+const S15 = 's_nb_rv_parked', FOLDER15 = 'Webtoons (revive)/Istrevelia four';
+const S16 = 's_nb_rv_holes', FOLDER16 = 'Webtoons (revive)/Istrevelia five';
+const S10 = 's_nb_stray', FOLDER10 = 'Webtoons (test)/Istrevelia Stray';
+const S11 = 's_nb_fetch', FOLDER11 = 'Webtoons (test)/Istrevelia Fetch';
+const S12 = 's_nb_healed', FOLDER12 = 'Webtoons (test)/Istrevelia Healed';
+const S13 = 's_nb_fresh', FOLDER13 = 'Webtoons (test)/Istrevelia Fresh';
+const S14 = 's_nb_kept', FOLDER14 = 'Webtoons (test)/Istrevelia Kept';
+const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16];
 /** How many times the follower was asked for its chapter list. */
 let folAsked = 0;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
@@ -61,6 +74,8 @@ const post = (k: number) => ({
   publishedAt: new Date(POSTS[k - 1].uploadDate).toISOString(), order: k, url: POSTS[k - 1].url, pages: 1,
 });
 const listing = () => POSTS.map((_: unknown, i: number) => post(i + 1)).sort((a: any, b: any) => a.number - b.number || a.order - b.order);
+/** The same posts from another source: its own chapter ids, the same urls, titles and dates (an extension reinstalled). */
+const revived = () => listing().map((c: any) => ({ ...c, sourceId: c.sourceId.replace('ist-', 'rv-') }));
 
 /** The books a v0.48 install holds: raw number -> the post whose file it is (the 46th is the FIFTH post of 3). */
 const HELD: Array<[number, number]> = [[1, 1], [2, 21], [3, 46], [5, 85], [6, 110], [7, 138], [8, 212]];
@@ -96,6 +111,14 @@ before(async () => {
     async latest() { return []; },
   } as any);
   registerAdapter({
+    id: REV, name: 'Webtoons (revive)',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: REV, title: `Istrevelia ${sid}` }; },
+    async listChapters() { return revived(); },
+    async getPageUrls(id: string) { return [`https://example.invalid/${encodeURIComponent(id)}/p1.png`]; },
+    async latest() { return []; },
+  } as any);
+  registerAdapter({
     id: FOL, name: 'Follower (test)',
     async search() { return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: FOL, title: 'Istrevelia' }; },
@@ -105,7 +128,7 @@ before(async () => {
   } as any);
   await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[WEB, FOL, `sw:${SOURCE_IDS.webtoons}`]]);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Numbered',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
-  await q('DELETE FROM lib_series WHERE id = ANY($1) OR folder = $2', [ALL, 'Webtoons.com/Istrevelia']);
+  await q('DELETE FROM lib_series WHERE id = ANY($1) OR folder = $2 OR folder LIKE $3', [ALL, 'Webtoons.com/Istrevelia', 'Webtoons (revive)/%']);
   await q('DELETE FROM download_log WHERE folder = $1', [FOLDER]);
 
   const Fastify = (await import('fastify')).default;
@@ -127,7 +150,7 @@ after(async () => {
   numbering.renumberHooks.afterSecondPhase = undefined;
   await app?.close();
   await fake?.close();
-  await q('DELETE FROM lib_series WHERE id = ANY($1) OR folder = $2', [ALL, 'Webtoons.com/Istrevelia']).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1) OR folder = $2 OR folder LIKE $3', [ALL, 'Webtoons.com/Istrevelia', 'Webtoons (revive)/%']).catch(() => {});
   await q('DELETE FROM download_log WHERE folder = $1', [FOLDER]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q(`DELETE FROM users WHERE username = 'nb-admin'`).catch(() => {});
@@ -426,8 +449,252 @@ test('a chapter in a root the server cannot rename in moves by override, and the
   assert.equal(r.state, 'applied');
   const b2 = (await q('SELECT b.number::float8 AS n, b.file, o.number::float8 AS ov FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id WHERE b.id = $1', [`${S5}_b2`]))[0];
   assert.deepEqual([Number(b2.n), b2.file, Number(b2.ov)], [2, `${FOLDER5}/Chapter 2.cbz`, 21], 'the file stays; its override carries the post\'s number');
+  // A book downloaded before names were stamped has none, and the listing heals it -- by the override-aware number
+  // as well (lib/seriesListing.ts): raw 2 is post 21 here. Reintroduce `b.number = v.n` in replaceListing's heal:
+  // the read-only book is named after post 2 ("and its own name" below).
+  await q('UPDATE lib_books SET chapter_name = NULL WHERE id = $1', [`${S5}_b2`]);
   // Reintroduce by reading the raw number in updateSeries' have-set: raw 2 reads as held, post 2 is skipped and
   // post 3 is fetched instead.
   const up = await updater.updateSeries(S5, 1);
   assert.deepEqual(up.landed.map((x: any) => x.number), [2], 'post 2 is missing, whatever the read-only file is called');
+  // The landing of post 2 stamps post 2, not the read-only book whose RAW number is 2 (#116 review): its chapter id
+  // is the evidence every later remap trusts first. Reintroduce the raw match in setBookMeta/setBookDates
+  // (library.ts BOOK_NUMBER): post 21 is stamped as post 2.
+  const ro = (await q('SELECT source_chapter_id, chapter_name, published_at FROM lib_books WHERE id = $1', [`${S5}_b2`]))[0];
+  assert.equal(ro.source_chapter_id, 'ist-21', 'the read-only post 21 keeps its own stamp after post 2 lands');
+  // Healed as the heal names a listed number (lib/seriesListing.ts): the listing's own row for post 21.
+  const l21 = (await q('SELECT title FROM series_listing WHERE series_id = $1 AND number = 21', [S5]))[0]?.title;
+  assert.equal(ro.chapter_name, chapterName(l21, 21), 'and its own name, healed as post 21');
+  assert.equal(new Date(ro.published_at).toISOString(), post(21).publishedAt, 'and its own date');
+});
+
+// ---- added back into a folder that already holds books (#116 review) ---------------------------------------------
+
+/** A series removed from the library, its files left on disk: what an add of the same folder revives. */
+async function seedRemoved(id: string, folder: string, cols: Record<string, unknown> = {}) {
+  const keys = ['id', 'source', 'title', 'folder', 'books_count', 'library_id', 'source_id', 'source_series_id', 'auto_update', 'deleted_at', ...Object.keys(cols)];
+  const vals = [id, 'Webtoons (revive)', folder.split('/')[1], folder, 0, LIB, REV, folder.split(' ').pop(), true, new Date(), ...Object.values(cols)];
+  await q(`INSERT INTO lib_series (${keys.join(',')}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(',')})`, vals);
+}
+const addRevived = (sourceId: string) => app.inject({
+  method: 'POST', url: '/api/sources/add', headers: { authorization: token },
+  payload: { source: REV, sourceId, chapterFrom: 'none', archive: true },
+});
+
+test('a folder that already holds books is added for review, never numbered blind', { skip }, async () => {
+  // Raw v0.48 files and no assignment to read them by: numbering the listing 1..226 over files still at the source's
+  // 1..8 would file post 21 as post 2 and never fetch posts 1..8. Reintroduce by skipping addNumbering's books guard
+  // (`if (false && books && ...)`): the listing is 226 rows and nothing waits for a review.
+  await seedRemoved(S7, FOLDER7);
+  for (const [raw, k] of [[1, 1], [2, 21], [3, 46]]) await seedBook(S7, FOLDER7, raw, k);
+  const r = await addRevived('one');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().seriesId, S7, 'the row is revived');
+  const row = (await q('SELECT numbering, numbering_pending, numbering_source FROM lib_series WHERE id = $1', [S7]))[0];
+  assert.deepEqual([row.numbering, row.numbering_pending, row.numbering_source], [null, 'posting_order', REV], 'added for review');
+  const nums = (await q('SELECT number::float8 AS n FROM series_listing WHERE series_id = $1', [S7])).map((x: any) => Number(x.n));
+  assert.equal(nums.length, 13, 'the listing in the source\'s own numbers, as the files are');
+  assert.deepEqual(filesIn(FOLDER7), ['Chapter 1.cbz', 'Chapter 2.cbz', 'Chapter 3.cbz'], 'nothing renamed');
+  // Its "archive the rest slowly" waits for the review too (the critic: never enqueue while numbering_pending is
+  // set). Reintroduce by answering the enqueue's own `queued` (routes/sources.ts archiveRest): this reads queued.
+  assert.equal(r.json().archive, 'later', 'a revived folder waits for its review');
+  const aq = (await q('SELECT state, boundary FROM archive_queue WHERE series_id = $1', [S7]))[0];
+  assert.deepEqual([aq?.state, aq?.boundary], ['queued', null], 'queued, with its boundary placed once the numbers settle');
+});
+
+test('added back with its assignment kept, a series is in posting numbers at once', { skip }, async () => {
+  const { assignPostingNumbers, postingSequence } = await import('../src/lib/postingOrder');
+  await seedRemoved(S8, FOLDER8, { numbering: 'posting_order', numbering_by: 'auto', numbering_source: REV });
+  await numbering.savePostNumbers(q, S8, REV, assignPostingNumbers(postingSequence(revived())).rows);
+  for (const k of [1, 21, 46]) await seedBook(S8, FOLDER8, k, k);
+  const r = await addRevived('two');
+  assert.equal(r.statusCode, 200, r.body);
+  const row = (await q('SELECT numbering, numbering_pending FROM lib_series WHERE id = $1', [S8]))[0];
+  assert.deepEqual([row.numbering, row.numbering_pending], ['posting_order', null], 'its files are in the numbers it keeps');
+  const nums = (await q('SELECT number::float8 AS n FROM series_listing WHERE series_id = $1 ORDER BY number', [S8])).map((x: any) => Number(x.n));
+  assert.deepEqual(nums, Array.from({ length: 226 }, (_, i) => i + 1));
+  assert.deepEqual(filesIn(FOLDER8), ['Chapter 1.cbz', 'Chapter 21.cbz', 'Chapter 46.cbz']);
+});
+
+test('added back from another source, a posting-order series keeps its posting numbers', { skip }, async () => {
+  // Its files are in the posting numbers of the source it was numbered by ('nb-old', an extension since reinstalled
+  // under a new id); the add marks a remap. A remap of a posting-order row used to target the NEW source's raw
+  // numbers while the row stayed posting-ordered: confirmed, it renamed the files to 1..13 with (2), (3) suffixes, and
+  // the next check listed 1..226 over them. Now its target is the new source's posting assignment, seeded from the
+  // old one, so each post keeps its number and nothing is renamed -- and a remap that renames nothing settles by
+  // itself. Reintroduce by planning the remap from the raw listing (buildRenumber): the check holds it for review.
+  const { assignPostingNumbers, postingSequence } = await import('../src/lib/postingOrder');
+  await seedRemoved(S9, FOLDER9, { numbering: 'posting_order', numbering_by: 'auto', numbering_source: 'nb-old' });
+  const old = listing().map((c: any) => ({ ...c, sourceId: c.sourceId.replace('ist-', 'old-') }));
+  await numbering.savePostNumbers(q, S9, 'nb-old', assignPostingNumbers(postingSequence(old)).rows);
+  for (const k of [1, 21, 46]) await seedBook(S9, FOLDER9, k, k);
+  const r = await addRevived('three');
+  assert.equal(r.statusCode, 200, r.body);
+  const row0 = (await q('SELECT numbering, numbering_pending, numbering_source FROM lib_series WHERE id = $1', [S9]))[0];
+  assert.deepEqual([row0.numbering, row0.numbering_pending, row0.numbering_source], ['posting_order', 'remap', REV]);
+  const since = '2026-05-01T00:00:00.000Z';
+  await q('UPDATE lib_series SET numbering_changed_at = $2 WHERE id = $1', [S9, since]);
+  const up = await updater.updateSeries(S9, 0);
+  assert.equal(up.outcome, 'ok', 'added back from another source, it is not held');
+  assert.equal(up.renumber?.state, 'applied');
+  const row = (await q('SELECT numbering, numbering_pending, numbering_source FROM lib_series WHERE id = $1', [S9]))[0];
+  assert.deepEqual([row.numbering, row.numbering_pending, row.numbering_source], ['posting_order', null, REV]);
+  assert.deepEqual(filesIn(FOLDER9), ['Chapter 1.cbz', 'Chapter 21.cbz', 'Chapter 46.cbz'], 'nothing renamed');
+  assert.deepEqual((await q('SELECT number::float8 AS n FROM lib_books WHERE series_id = $1 ORDER BY number', [S9])).map((x: any) => Number(x.n)), [1, 21, 46]);
+  const stored = await q('SELECT source_id, count(*)::int AS n FROM series_post_numbers WHERE series_id = $1 GROUP BY source_id', [S9]);
+  assert.deepEqual(stored, [{ source_id: REV, n: 226 }], "one source's assignment: the one its files are in");
+  // The numbering did not change, only which post each file is: Health's "numbered by posting order lately" (two
+  // weeks from numbering_changed_at) is not news again. Reintroduce `numbering_changed_at = now()` in commit().
+  const changed = (await q('SELECT numbering_changed_at AS at FROM lib_series WHERE id = $1', [S9]))[0].at;
+  assert.equal(new Date(changed).toISOString(), since, 'a remap keeps when the numbering changed');
+});
+
+test('remapping a posting-order series: no raw listing vouches for a book, and a parked book keeps its number reserved', { skip }, async () => {
+  // The remap of a series added back from another source stores the new source's posting assignment, and plans every
+  // file against it. The listing the add stored is in the new source's RAW numbers, not the posting numbers the files
+  // are in, so it vouches for no book: reintroduce by letting it speak (drop `listingSpeaks = false` in
+  // buildRenumber) and the nameless chapter 3 is matched to raw chapter 3's post -- another post's number. A book no
+  // post matches is parked, and its number has to be reserved in that assignment, as a posting_order apply reserves
+  // it, or a post inserted later could be given the very number the parked file holds: reintroduce by leaving
+  // `reserveParked` out of buildRenumber's plan context, and no reserved slot is stored.
+  const { assignPostingNumbers, postingSequence, EXTRA_PREFIX } = await import('../src/lib/postingOrder');
+  await seedRemoved(S15, FOLDER15, { numbering: 'posting_order', numbering_by: 'auto', numbering_source: 'nb-old' });
+  const old = listing().map((c: any) => ({ ...c, sourceId: c.sourceId.replace('ist-', 'old-') }));
+  await numbering.savePostNumbers(q, S15, 'nb-old', assignPostingNumbers(postingSequence(old)).rows);
+  for (const k of [1, 21]) await seedBook(S15, FOLDER15, k, k);
+  // A file of the owner's that is no post of either source, and post 3 downloaded before chapters had names.
+  const bare = async (n: number, title: string) => {
+    writeFileSync(join(DL, FOLDER15, `Chapter ${n}.cbz`), 'x'.repeat(100));
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ($1,$2,'Webtoons (revive)',$3,$4,$5,$6)`,
+      [`${S15}_b${n}`, S15, `${FOLDER15}/Chapter ${n}.cbz`, n, title, DL]);
+  };
+  await bare(300, 'A poster the owner scanned');
+  await bare(3, 'Chapter 3');
+  const r = await addRevived('four');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal((await q('SELECT numbering_pending FROM lib_series WHERE id = $1', [S15]))[0].numbering_pending, 'remap');
+  const c = await numbering.requestNumbering(S15, 'remap', { confirm: true, userId: adminId });
+  assert.equal(c?.state, 'applied', JSON.stringify(c?.plan?.reasons ?? c));
+  assert.deepEqual((c?.plan?.moves ?? []).filter((m: any) => m.how === 'listing').map((m: any) => [m.bookId, m.to]), [],
+    'the raw listing vouches for no book');
+  const parked = new Map<string, number>((c?.plan?.parked ?? []).map((m: any) => [m.bookId, m.to]));
+  assert.deepEqual([...parked.keys()].sort(), [`${S15}_b3`, `${S15}_b300`], `the nameless and the owner's file are parked: ${JSON.stringify(c?.plan?.moves)}`);
+  const extras = await q(`SELECT post_id, number::float8 AS n FROM series_post_numbers WHERE series_id = $1 AND post_id LIKE $2 ORDER BY post_id`, [S15, `${EXTRA_PREFIX}%`]);
+  assert.deepEqual(extras.map((x: any) => [x.post_id, Number(x.n)]),
+    [...parked].map(([id, to]) => [`${EXTRA_PREFIX}${id}`, to]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    "the parked book's number is reserved");
+});
+
+test('added back from another source, each file keeps the number it was given, holes and all', { skip }, async () => {
+  // Its files are in the posting numbers of the old source's assignment, made when that source did not list post 3:
+  // every later post is one lower than its place in today's listing. The new source's assignment is seeded from that
+  // one, so each post keeps the number its file has. Reintroduce by seeding only from the new source's own rows
+  // (drop priorPosts in buildRenumber): the posts are numbered by position, post 21 moves from 20 to 21, and the
+  // check holds the series for a review.
+  const { assignPostingNumbers, postingSequence } = await import('../src/lib/postingOrder');
+  await seedRemoved(S16, FOLDER16, { numbering: 'posting_order', numbering_by: 'auto', numbering_source: 'nb-old' });
+  const old = listing().filter((c: any) => c.sourceId !== 'ist-3').map((c: any) => ({ ...c, sourceId: c.sourceId.replace('ist-', 'old-') }));
+  await numbering.savePostNumbers(q, S16, 'nb-old', assignPostingNumbers(postingSequence(old)).rows);
+  await seedBook(S16, FOLDER16, 1, 1);
+  await seedBook(S16, FOLDER16, 20, 21); // post 21, the old source's 20th
+  const r = await addRevived('five');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal((await q('SELECT numbering_pending FROM lib_series WHERE id = $1', [S16]))[0].numbering_pending, 'remap');
+  const up = await updater.updateSeries(S16, 0);
+  assert.equal(up.renumber?.state, 'applied', 'each file keeps the number it was given: nothing to confirm');
+  assert.deepEqual(filesIn(FOLDER16), ['Chapter 1.cbz', 'Chapter 20.cbz'], 'nothing renamed');
+  const n3 = (await q(`SELECT number::float8 AS n FROM series_post_numbers WHERE series_id = $1 AND post_id = 'rv-3'`, [S16]))[0];
+  assert.ok(n3 && Number(n3.n) > 2 && Number(n3.n) < 3, `post 3, new to it, goes between 2 and 3 (${n3?.n})`);
+});
+
+test('a file already at a target name refuses the apply, and says so', { skip }, async () => {
+  // On POSIX a rename replaces its target silently: a stray `Chapter 21.cbz` no scan has taken in would be lost to
+  // post 21's. Reintroduce by dropping checkTargets in applyRenumber: the stray is overwritten and the plan applied.
+  await seedSeries(S10, FOLDER10, { numbering_pending: 'posting_order', numbering_source: WEB });
+  await seedBook(S10, FOLDER10, 2, 21);
+  writeFileSync(join(DL, FOLDER10, 'Chapter 21.cbz'), 'a stray file of somebody\'s');
+  const { setSummaryRefresh } = await import('../src/lib/healthSummary');
+  let runs = 0;
+  setSummaryRefresh(async () => { runs++; }, { everyMs: 20 });
+  let r: any;
+  try {
+    r = await numbering.requestNumbering(S10, 'posting_order', { confirm: true, userId: adminId });
+    // The confirmation made it an admin's change, applied or not: Health words it so (reintroduce by dropping the
+    // refresh from requestNumbering's confirmed(): nothing refreshes).
+    for (let i = 0; i < 40 && !runs; i++) await new Promise((res) => setTimeout(res, 25));
+    assert.ok(runs >= 1, 'a confirmation refreshes the header summary, applied or not');
+  } finally {
+    setSummaryRefresh();
+  }
+  assert.equal(r.state, 'pending', 'not applied');
+  // Carried to the answer (#116 review): the page said "the source may not have answered" and an admin retried forever.
+  assert.match(r.error ?? '', /Chapter 21\.cbz is already on disk/, 'a file already at a target name refuses the apply');
+  assert.deepEqual(filesIn(FOLDER10), ['Chapter 2.cbz', 'Chapter 21.cbz']);
+  const { readFileSync } = await import('node:fs');
+  assert.equal(readFileSync(join(DL, FOLDER10, 'Chapter 21.cbz'), 'utf8'), 'a stray file of somebody\'s', 'the stray is intact');
+  const row = (await q('SELECT renumber_plan, numbering_pending FROM lib_series WHERE id = $1', [S10]))[0];
+  assert.deepEqual([row.renumber_plan, row.numbering_pending], [null, 'posting_order'], 'no journal, still held for review');
+});
+
+test('the refresh that holds a series holds its fetch', { skip }, async () => {
+  // The first Fetch after an upgrade -- before any sweep -- runs the refresh that first marks a Webtoons series for
+  // review, and went on from the raw listing into a series held from that moment. Reintroduce by checking only
+  // before the refresh (POST /api/sources/fetch): a job starts for raw 4.
+  await seedSeries(S11, FOLDER11);
+  for (const [raw, k] of [[1, 1], [2, 21], [3, 46]]) await seedBook(S11, FOLDER11, raw, k);
+  const copy = { sourceId: 'ist-63', source: WEB, groups: [], scanlator: null, lang: null, pages: 1, publishedAt: null, title: post(63).title };
+  await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies) VALUES ($1, 4, $2, $3, $4::jsonb, 'available', $5::jsonb)`,
+    [S11, post(63).title, WEB, JSON.stringify({ ...post(63), source: WEB }), JSON.stringify([copy])]);
+  const f = await app.inject({ method: 'POST', url: '/api/sources/fetch', headers: { authorization: token }, payload: { seriesId: S11, numbers: [4] } });
+  assert.equal(f.statusCode, 409, f.body);
+  assert.equal(f.json().error, 'renumber_pending', 'the refresh that holds a series holds its fetch');
+  assert.equal((await q('SELECT numbering_pending FROM lib_series WHERE id = $1', [S11]))[0].numbering_pending, 'posting_order');
+  assert.ok(!existsSync(join(DL, FOLDER11, 'Chapter 4.cbz')), 'nothing fetched');
+});
+
+test('a healed name chooses a post but never makes a plan clean', { skip }, async () => {
+  // A book downloaded before names were stamped had its name healed from the listing's chosen copy (seriesListing.ts,
+  // HEALED_NAME): the listing's guess, as a date is (fixL2). Reintroduce by leaving chapterNameSource out of
+  // buildRenumber's books: the move reads 'name' and the plan clean.
+  const { HEALED_NAME, chapterName } = await import('../src/lib/naming');
+  await seedSeries(S12, FOLDER12, { numbering_pending: 'posting_order', numbering_source: WEB });
+  mkdirSync(join(DL, FOLDER12), { recursive: true });
+  writeFileSync(join(DL, FOLDER12, 'Chapter 2.cbz'), 'x'.repeat(100));
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, chapter_name, chapter_name_source)
+           VALUES ($1,$2,'Webtoons (test)',$3,2,'Chapter 2',$4,$5,$6)`,
+    [`${S12}_b2`, S12, `${FOLDER12}/Chapter 2.cbz`, DL, chapterName(post(21).title, post(21).number), HEALED_NAME]);
+  const r = await numbering.requestNumbering(S12, 'posting_order', { userId: adminId });
+  assert.equal(r.state, 'needs_confirm');
+  assert.deepEqual([r.plan.moves[0].to, r.plan.moves[0].how], [21, 'listing'], 'the healed name still chooses post 21');
+  assert.equal(r.plan.clean, false, 'a healed name chooses a post but never makes a plan clean');
+});
+
+test('an apply refreshes the header summary', { skip }, async () => {
+  // Health's numbering finding goes with the renumber, and the header's mark with it (lib/healthSummary.ts).
+  // Reintroduce by dropping scheduleHealthSummaryRefresh from commit(): nothing refreshes.
+  const { setSummaryRefresh } = await import('../src/lib/healthSummary');
+  let runs = 0;
+  setSummaryRefresh(async () => { runs++; }, { everyMs: 20 });
+  try {
+    await seedSeries(S13, FOLDER13);
+    const r = await updater.updateSeries(S13, 0);
+    assert.equal(r.renumber?.state, 'applied', 'nothing to rename, applied by the check itself');
+    for (let i = 0; i < 40 && !runs; i++) await new Promise((res) => setTimeout(res, 25));
+    assert.ok(runs >= 1, 'an apply refreshes the header summary');
+
+    // A choice that renames nothing takes the finding away as surely: "Keep the source's numbers", and handing the
+    // series back to the detector. Reintroduce by dropping the refresh from either branch of requestNumbering: that
+    // half reads no refresh.
+    await seedSeries(S14, FOLDER14, { numbering_pending: 'posting_order', numbering_source: WEB });
+    runs = 0;
+    assert.equal((await numbering.requestNumbering(S14, 'source', { userId: adminId }))?.state, 'unchanged');
+    for (let i = 0; i < 40 && !runs; i++) await new Promise((res) => setTimeout(res, 25));
+    assert.ok(runs >= 1, "keeping the source's numbers refreshes the header summary");
+    runs = 0;
+    assert.equal((await numbering.requestNumbering(S14, 'auto', { userId: adminId }))?.state, 'unchanged');
+    for (let i = 0; i < 40 && !runs; i++) await new Promise((res) => setTimeout(res, 25));
+    assert.ok(runs >= 1, 'handing it back to the detector refreshes it too');
+  } finally {
+    setSummaryRefresh();
+  }
 });

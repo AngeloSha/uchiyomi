@@ -363,11 +363,14 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
   await q('DELETE FROM lib_series WHERE id = $1', [AS]);
   await q(`INSERT INTO lib_series (id, source, title, folder, library_id) VALUES ($1,'test',$2,$1,$3)`, [AS, TITLE, LIB]);
   const skips = [{ step: 'short', target: { seriesId: AS, bookId: 'b_rr_adult', title: TITLE, number: 3 }, why: 'folder_busy' }];
+  // `notes` name series by title alone: planted too, or the history's assertion below could not fail (the
+  // integration-1 review's probe). Reintroduce by sending notes as stored in the runs route: 'the history' fails.
+  const notes = { replaced: [`${TITLE} ch 3 (2 -> 20)`], confirmed: [], followed: [`${TITLE} -> rp-b`], upgraded: [] };
   const planted = await q<{ id: string }>(
-    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result) VALUES
-       (gen_random_uuid(), now(), now(), 'nightly', 'full', '{}'::jsonb, 'done', 5, $1::jsonb),
-       (gen_random_uuid(), now(), now(), 'manual', 'fill', $2::jsonb, 'done', 5, $1::jsonb) RETURNING id`,
-    [JSON.stringify({ skips }), JSON.stringify({ seriesId: AS, label: TITLE })]);
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result, notes) VALUES
+       (gen_random_uuid(), now(), now(), 'nightly', 'full', '{}'::jsonb, 'done', 5, $1::jsonb, $3::jsonb),
+       (gen_random_uuid(), now(), now(), 'manual', 'fill', $2::jsonb, 'done', 5, $1::jsonb, $3::jsonb) RETURNING id`,
+    [JSON.stringify({ skips }), JSON.stringify({ seriesId: AS, label: TITLE }), JSON.stringify(notes)]);
   clearRunDigest();
   const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
   repairState.finishedAt = Date.now();
@@ -398,6 +401,7 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
     const shown = (await status(adminTok, '?adult=1')).json();
     assert.equal(shown.run.current.title, TITLE);
     assert.equal(shown.lastFull.result.skips[0].target.title, TITLE);
+    assert.ok((await runs('?adult=1')).body.includes(TITLE), 'the notes too, with the reveal on');
   } finally {
     repairState.running = false;
     repairState.live = null;
@@ -405,6 +409,30 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
     await q('DELETE FROM repair_runs WHERE id = ANY($1)', [planted.map((r) => r.id)]);
     await q('DELETE FROM lib_series WHERE id = $1', [AS]);
     await q('DELETE FROM libraries WHERE id = $1', [LIB]);
+    clearRunDigest();
+  }
+});
+
+test("the Tasks line's origin is null while the history has not caught up with the run it shows", { skip }, async () => {
+  // The integration-1 review: the run check had no test of its own -- removed, the test above still passed. A result
+  // naming a run the history's newest full run is not (the history lags a run that has just written the Tasks line)
+  // has no origin to show: another run's would be a lie. Reintroduce `lastFull?.origin ?? null` in the Tasks route:
+  // this reads 'manual'.
+  const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
+  const { clearRunDigest } = await import('../src/lib/repairRuns');
+  const earlier = (await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms)
+     VALUES (gen_random_uuid(), now(), now(), 'manual', 'full', '{}'::jsonb, 'done', 5) RETURNING id`))[0].id;
+  clearRunDigest();
+  repairState.finishedAt = Date.now();
+  repairState.lastResult = { ok: true, counted: 1, run: '00000000-0000-4000-8000-00000000abcd' };
+  try {
+    const row = await repairRow();
+    assert.equal(row.lastResult?.run, '00000000-0000-4000-8000-00000000abcd');
+    assert.equal(row.lastOrigin, null, "the Tasks line's origin is null while the history has not caught up with the run it shows");
+  } finally {
+    Object.assign(repairState, was);
+    await q('DELETE FROM repair_runs WHERE id = $1', [earlier]);
     clearRunDigest();
   }
 });

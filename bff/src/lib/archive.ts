@@ -50,12 +50,14 @@ import { seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { notInLibrary } from './downloadCensus';
 import { visible, visibleToAll, sourceAllowedFor, Params, type ViewCtx } from './visibility';
 import { firstRunFloor } from './desktop';
+import { onBeforeRenumberPlan, onRenumbered } from './numbering';
 import {
   ARCHIVE_DEFAULTS, PER_HOUR_RANGE, pageGapRange, nextBreakMs, backoffUntil, inWindow, windowOpensAt, ewmaCycle,
-  etaMs, cycleMs,
+  etaMs, expectedCycleMs, openShare,
 } from './archivePace';
 import {
   directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor, listingRetryAt, outsideCycleMs,
+  shownGlobalWait,
   type ArchiveDirection, type GlobalWait, type SeriesWait, type SourceState, type DoneNote, type Attention,
 } from './archivePlan';
 
@@ -87,6 +89,11 @@ const SCAN_WAIT_MS = 20 * MIN;
 const DISK_WAIT_MS = 30 * MIN;
 /** The shared rows behind every viewer's view are read at most this often. */
 const VIEW_TTL_MS = 10_000;
+/**
+ * What a chapter is taken to cost before a source has a running cycle of its own: the ETA's fallback, the same
+ * minute the web's estimate assumes (web/lib/archive.ts TYPICAL_CHAPTER_MS), so the two say the same thing.
+ */
+const TYPICAL_CHAPTER_MS = 60_000;
 
 export type ArchiveLog = { info(msg: string): void; warn(msg: string): void; error(err: unknown): void };
 const consoleLog: ArchiveLog = {
@@ -113,7 +120,7 @@ const flights = new Map<string, Flight>();
 interface Unscanned {
   folder: string;
   firstAt: number;
-  items: Map<number, { landed?: Landed; chapterId?: string; publishedAt?: string; newRow: boolean }>;
+  items: Map<number, { landed?: Landed; publishedAt?: string; newRow: boolean }>;
 }
 const unscanned = new Map<string, Unscanned>();
 /** Numbers a scan could not index although the file is there: stepped over until a restart, never refetched. */
@@ -273,12 +280,22 @@ function eligibleSql(l: string, a: string, capParam: string): string {
  *
  * A finished row is re-opened with its counts reset. `nothing` when the listing leaves nothing to fetch below
  * the boundary; a series with no listing yet is queued, and its first turn reads one.
+ *
+ * ⚠️ A series whose numbers are about to change (#116: a renumber waits for an admin's review, or a journal for
+ * its finish) is queued WITHOUT a boundary: one placed now would be in the numbers the renumber replaces, and the
+ * listing it counts "nothing left" from is the old one. The tick skips the row while the renumber is pending
+ * ('renumbering') and its first turn afterwards reads the renumbered listing and places the boundary there -- the
+ * enqueue the critic asked to happen after the settle, kept on the row so a restart keeps it too. The add path
+ * answers such an enqueue `later` (routes/sources.ts archiveRest).
+ * Reintroduce by placing the boundary anyway: "queued behind a pending renumber" in archive.int.test.ts finds a
+ * boundary in the source's numbers.
  */
 export async function enqueueArchive(seriesId: string, by: string | null, ctx: ViewCtx): Promise<EnqueueOutcome> {
   const p = new Params();
-  const s = await one<{ id: string; source_id: string | null; floor: number | null; extra: string[] }>(
+  const s = await one<{ id: string; source_id: string | null; floor: number | null; extra: string[]; renumbering: boolean }>(
     `SELECT s.id, s.source_id, s.chapter_floor::real AS floor,
-            ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id) AS extra
+            ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id) AS extra,
+            (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS renumbering
        FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', ctx, p)}`,
     p.values as any[],
   );
@@ -294,9 +311,9 @@ export async function enqueueArchive(seriesId: string, by: string | null, ctx: V
   if (row && row.state !== 'done') return 'already';
 
   const floor = s.floor == null ? null : Number(s.floor);
-  const lst = await one<{ max: number | null; min: number | null }>(
+  const lst = s.renumbering ? null : await one<{ max: number | null; min: number | null }>(
     'SELECT max(number) AS max, min(number) AS min FROM series_listing WHERE series_id = $1', [seriesId]);
-  const boundary = boundaryFor({ floor, listedMax: lst?.max == null ? null : Number(lst.max) });
+  const boundary = s.renumbering ? null : boundaryFor({ floor, listedMax: lst?.max == null ? null : Number(lst.max) });
   let direction: ArchiveDirection = 'up';
   if (boundary != null && lst?.max != null) {
     const left = await one<{ n: number }>(
@@ -359,6 +376,10 @@ export async function archiveAct(act: 'pause' | 'resume' | 'stop', seriesId: str
   if (!who.admin && !(who.userId && row.added_by === who.userId)) return 'forbidden';
   if (act === 'stop') {
     await q('DELETE FROM archive_queue WHERE series_id = $1', [seriesId]);
+    // What it landed and has not scanned yet is scanned now: stopped, nothing else would until the next batch --
+    // up to twenty minutes of a series page reading "0 chapters" over chapters that came in (#117 review).
+    // Reintroduce by dropping this: "a stop scans in what it landed" in archive.int.test.ts finds no book rows.
+    if (unscanned.has(seriesId)) await flushArchiveScan();
   } else {
     if (row.state === 'done') return 'done';
     if (act === 'pause') {
@@ -390,23 +411,20 @@ export function archiveForget(seriesId: string): void {
   invalidateArchiveView();
 }
 
+// A renumber (#116), from both sides (the critic's "issue-116 vs issue-117"). Before its plan reads the series' books,
+// what this archive landed and has not scanned yet is scanned in: a plan is built from lib_books, so a file with no
+// row would keep its old name through the renames and be scanned in afterwards under a number that is another
+// post's by then. After it commits, the numbers remembered for the series are forgotten; the commit has moved the
+// row's boundary and floor itself, and the next tick settles its direction (note.renumbered).
+// Reintroduce by dropping the first: "scanned in before the plan read the books" in archive.int.test.ts finds no
+// book in the plan (and "scanned in before the apply read the books", none in the apply).
+onBeforeRenumberPlan(async (seriesId) => { if (unscanned.has(seriesId)) await flushArchiveScan(); });
+onRenumbered((_folder, _map, seriesId) => archiveForget(seriesId));
+
 /** A slow-archive chapter is being fetched into this folder right now: the fetch route's 409 says so. */
 export function archiveBusy(folder: string): boolean {
   for (const f of flights.values()) if (f.folder === folder) return true;
   return false;
-}
-
-/**
- * The boundary of every active archive, for Health and the repair (#117 + health-clarity): a gap wholly below it
- * is the archive's work in progress, not a finding. Queued and paused only; a finished archive has lifted its.
- */
-export async function activeArchiveBoundaries(seriesIds?: readonly string[]): Promise<Map<string, number>> {
-  const rows = await q<{ series_id: string; boundary: number }>(
-    `SELECT series_id, boundary FROM archive_queue WHERE state IN ('queued', 'paused') AND boundary IS NOT NULL
-        AND ($1::text[] IS NULL OR series_id = ANY($1::text[]))`,
-    [seriesIds ? [...seriesIds] : null],
-  ).catch(() => []);
-  return new Map(rows.map((r) => [r.series_id, Number(r.boundary)]));
 }
 
 // ── the scheduler ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -424,10 +442,15 @@ export interface TickReport {
 
 /**
  * archive_queue.note on a queued row: when it last moved forward (a chapter came in, its first listing placed the
- * boundary, it was resumed; created_at before any of those), and the ladder of a listing that could not be read.
- * A paused row's note is {pausedAt}, a finished one's the DoneNote; each replaces this.
+ * boundary, it was resumed; created_at before any of those), the ladder of a listing that could not be read, how
+ * many turns it has FINISHED since its last progress with nothing to show (`idleTurns`: a failed chapter, a read
+ * that gave no listing), since when its source has been missing or switched off (`goneSince`, so a restart does
+ * not start that day again), and that a renumber moved its numbers (`renumbered`, #116: its direction is settled
+ * again at the next look). A paused row's note is {pausedAt}, a finished one's the DoneNote; each replaces this.
  */
-interface QueuedNote { progressAt?: string; listingFails?: number; listingRetryAt?: string }
+interface QueuedNote {
+  progressAt?: string; listingFails?: number; listingRetryAt?: string; idleTurns?: number; goneSince?: string; renumbered?: string;
+}
 
 interface QueuedRow {
   series_id: string; boundary: number | null; direction: ArchiveDirection; added_by: string | null; note: QueuedNote | null;
@@ -497,7 +520,29 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   for (const id of [...lastWaits.keys()]) if (!seen.has(id)) lastWaits.delete(id);
   if (!rows.length) return report;
 
-  const needsListing = (r: QueuedRow) => r.boundary == null || (ms(r.source_checked_at) ?? 0) < now - LISTING_STALE_MS;
+  // Which of them have a stored listing at all. A renumber (#116) deletes the series' listing and its check writes
+  // the new one a moment later; a look in between found no candidate and FINISHED the archive -- boundary lifted,
+  // floor cleared -- with the back catalogue never fetched. No listing is read first, like no boundary.
+  // Reintroduce by dropping `!listed.has`: "a look between a renumber and its listing" in archive.int.test.ts
+  // finds the archive done.
+  const listed = new Set((await q<{ series_id: string }>(
+    'SELECT DISTINCT series_id FROM series_listing WHERE series_id = ANY($1::text[])', [[...seen]]).catch(() => [])).map((r) => r.series_id));
+  const needsListing = (r: QueuedRow) => r.boundary == null || !listed.has(r.series_id) || (ms(r.source_checked_at) ?? 0) < now - LISTING_STALE_MS;
+  for (const r of rows) {
+    if (r.renumbering || needsListing(r)) continue;
+    // A renumber moved the series' numbers under its row (#116): which way it fills is settled again, from the
+    // renumbered listing, as it was at the enqueue (the commit moved the boundary and the floor itself).
+    // Reintroduce by keeping the direction: "a renumber moves the archive" in archive.int.test.ts reads 'up'.
+    if (r.note?.renumbered) {
+      const lst = await one<{ min: number | null }>('SELECT min(number) AS min FROM series_listing WHERE series_id = $1', [r.series_id]).catch(() => null);
+      r.direction = await directionOf(r.series_id, lst?.min == null ? null : Number(lst.min));
+      await q(`UPDATE archive_queue SET direction = $2, note = note - 'renumbered' WHERE series_id = $1`, [r.series_id, r.direction]).catch(() => {});
+    }
+    // A listing ladder from a failed REFRESH, with the listing still in hand: updateSeries stamps a source that did
+    // not answer as checked, so the listing reads fresh again and chapters go on from it -- and the ladder is over.
+    // Left on the row, the next failed read a week on resumed it at the old rung.
+    if (r.note?.listingFails) await noteListing(r.series_id, true, false, now);
+  }
   const picking = rows.filter((r) => !r.renumbering && !needsListing(r)).map((r) => r.series_id);
   const cands = await candidatesFor(picking);
 
@@ -521,10 +566,25 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   };
 
   const claimed = new Set<string>();
+  /** Notes a look writes on the rows (goneSince), awaited before it answers: a view read right after sees them. */
+  const notes: Array<Promise<unknown>> = [];
   const wait = (r: QueuedRow, w: SeriesWait) => {
     report.waits[r.series_id] = w;
     const had = lastWaits.get(r.series_id);
-    lastWaits.set(r.series_id, had?.wait.why === w.why ? { wait: w, since: had.since } : { wait: w, since: now });
+    // Since when a source has been missing or switched off is kept on the row as well: in memory only, every restart
+    // started its day again, and on the desktop app -- which restarts with the app -- it could never reach a day
+    // and show under Needs attention (#117 review).
+    const gone = w.why === 'source_missing' || w.why === 'disabled';
+    const kept = gone && r.note?.goneSince ? Date.parse(r.note.goneSince) : NaN;
+    const since = Number.isFinite(kept) ? Math.min(kept, had?.wait.why === w.why ? had.since : now)
+      : had?.wait.why === w.why ? had.since : now;
+    lastWaits.set(r.series_id, { wait: w, since });
+    if (gone && !r.note?.goneSince) {
+      notes.push(q(`UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('goneSince', $2::text)
+                      WHERE series_id = $1 AND state = 'queued'`, [r.series_id, new Date(since).toISOString()]).catch(() => []));
+    } else if (!gone && r.note?.goneSince) {
+      notes.push(q(`UPDATE archive_queue SET note = note - 'goneSince' WHERE series_id = $1`, [r.series_id]).catch(() => []));
+    }
   };
 
   for (const r of rows) {
@@ -599,6 +659,7 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
       track(runListing(r, S, set, rand, generation));
     }
   }
+  await Promise.all(notes);
   return report;
 }
 
@@ -698,7 +759,11 @@ async function runListing(r: QueuedRow, S: string, set: ArchiveSettings, rand: (
     if (res.outcome !== 'ok') {
       deps.log.warn(`the listing of "${r.title}" could not be read (${res.outcome})`);
     } else if (r.boundary != null) {
-      got = true;
+      // A refresh counts when a listing is there afterwards: a source that answers with nothing leaves the previous
+      // listing standing (lib/updater.ts), and after a renumber (#116) there is none to leave. Counted as read on
+      // the answer alone, a series whose listing a renumber had deleted was asked for it again every minute.
+      got = !!(await one('SELECT 1 AS x FROM series_listing WHERE series_id = $1 LIMIT 1', [r.series_id]));
+      if (!got) deps.log.warn(`the source of "${r.title}" lists no chapters for it`);
     } else {
       const f = await one<{ floor: number | null }>('SELECT chapter_floor::real AS floor FROM lib_series WHERE id = $1', [r.series_id]);
       const lst = await one<{ max: number | null; min: number | null }>(
@@ -734,14 +799,15 @@ async function runListing(r: QueuedRow, S: string, set: ArchiveSettings, rand: (
 /**
  * The listing ladder on the series' row (archive_queue.note, QueuedNote): cleared by a read that gave a listing --
  * the first one, which placed the boundary, is progress -- and one step higher after a read that did not, with
- * when to read again. Queued rows only: a pause replaces the note, and a resume starts afresh anyway.
+ * when to read again; a read that did not is also a turn with nothing to show (idleTurns). Queued rows only: a
+ * pause replaces the note, and a resume starts afresh anyway.
  */
 async function noteListing(seriesId: string, got: boolean, placed: boolean, now: number): Promise<void> {
   const at = new Date(now).toISOString();
   if (got) {
     await q(
       `UPDATE archive_queue SET note = (COALESCE(note, '{}'::jsonb) - 'listingFails' - 'listingRetryAt')
-              || CASE WHEN $2 THEN jsonb_build_object('progressAt', $3::text) ELSE '{}'::jsonb END
+              || CASE WHEN $2 THEN jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) ELSE '{}'::jsonb END
         WHERE series_id = $1 AND state = 'queued'`,
       [seriesId, placed, at],
     ).catch(() => {});
@@ -751,10 +817,27 @@ async function noteListing(seriesId: string, got: boolean, placed: boolean, now:
   const fails = (Number(row?.note?.listingFails) || 0) + 1;
   const retry = new Date(listingRetryAt(fails, now, ARCHIVE_DEFAULTS.backoffMs)).toISOString();
   await q(
-    `UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('listingFails', $2::int, 'listingRetryAt', $3::text)
+    `UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('listingFails', $2::int, 'listingRetryAt', $3::text,
+              'idleTurns', COALESCE((note->>'idleTurns')::int, 0) + 1)
       WHERE series_id = $1 AND state = 'queued'`,
     [seriesId, fails, retry],
   ).catch((e) => deps.log.warn(`could not write when to read the listing again: ${(e as Error)?.message || e}`));
+}
+
+/**
+ * A chapter's turn is over: the idle count on the series' row (attentionOf 'stalled' reads it). A chapter that came
+ * in is progress and starts the count again, a failed one adds to it; one found on disk, or cut short by the disk
+ * floor, is neither -- nothing was asked of the site, or the site was never at fault.
+ */
+async function noteTurn(seriesId: string, landed: boolean, now: number): Promise<void> {
+  await q(
+    landed
+      ? `UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $2::text, 'idleTurns', 0)
+          WHERE series_id = $1 AND state = 'queued'`
+      : `UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('idleTurns', COALESCE((note->>'idleTurns')::int, 0) + 1)
+          WHERE series_id = $1 AND state = 'queued'`,
+    landed ? [seriesId, new Date(now).toISOString()] : [seriesId],
+  ).catch(() => {});
 }
 
 async function runChapter(
@@ -794,18 +877,21 @@ async function runChapter(
     }
     if (out && (out.kind === 'landed' || out.kind === 'partial')) {
       bytes = await stat(join(DL_ROOT, chapterFileRel(r.folder, n))).then((s) => s.size, () => 0);
+      // The source chapter it came from rides on the landing, as the sweep's does (updater.ts Landed.chapterId):
+      // setBookMeta stamps lib_books.source_chapter_id with it after the scan, so a later renumber (#116) knows
+      // exactly which post the file is.
       const landed: Landed = {
-        number: n, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+        number: n, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
         ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
       };
       if (gen === generation) {
         await noteUnscanned(r.series_id, r.folder, n, {
-          landed, chapterId: out.chapterUsed.sourceId, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
+          landed, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
         }, clock());
       }
-      // A chapter in is progress: its three days without any (attentionOf) start again.
+      // A chapter in is progress: its three days without any (attentionOf) start again, and so do its idle turns.
       await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
-                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text) WHERE series_id = $1`,
+                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1`,
       [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => {});
       // A chapter the site let through ends its refusal run. Taken from another followed source instead, the
       // chosen one did NOT let it through: a refusal there still backs it off, landed or not -- and so does one
@@ -818,6 +904,7 @@ async function runChapter(
     } else if (out?.kind === 'failed') {
       await noteChapterFailure({ seriesId: r.series_id, title: r.title, number: n, sourceId: out.via, err: out.err });
       await q('UPDATE archive_queue SET failed_count = failed_count + 1 WHERE series_id = $1', [r.series_id]).catch(() => {});
+      await noteTurn(r.series_id, false, clock());
       await backOff(out.via || S, out.err);
       await backOffAlternates(asked, [S, out.via]);
     }
@@ -843,7 +930,11 @@ async function runChapter(
       })
       : now - t0 + brk;
     // The running average moves only on a chapter the site was asked for: one found on disk cost it nothing.
-    const cycle = skippedOnDisk ? pace?.cycle_ms ?? null : ewmaCycle(pace?.cycle_ms ?? null, sample, cycleMs(set.perHour));
+    // Capped against what a chapter of this length really costs at this rate (expectedCycleMs, lane 2's arithmetic),
+    // not the configured cycle: past the floor a chapter and its break outrun the hour's share, and a cap at
+    // the share cut every real sample short.
+    const cycle = skippedOnDisk ? pace?.cycle_ms ?? null
+      : ewmaCycle(pace?.cycle_ms ?? null, sample, expectedCycleMs({ perHour: set.perHour, chapterMs: now - t0, minBreakMs: minBreakMs() }));
     const reason = diskFull ? 'disk'
       : out?.kind === 'failed' ? String(out.err?.blockStatus ?? classify(out.err) ?? 'failed')
       : out?.kind ?? 'error';
@@ -970,7 +1061,7 @@ async function finishSeries(seriesId: string, now: number): Promise<boolean> {
 
 // ── scanning what landed ──────────────────────────────────────────────────────────────────────────────────────
 
-async function noteUnscanned(seriesId: string, folder: string, n: number, item: { landed?: Landed; chapterId?: string; publishedAt?: string; newRow?: boolean }, now: number): Promise<void> {
+async function noteUnscanned(seriesId: string, folder: string, n: number, item: { landed?: Landed; publishedAt?: string; newRow?: boolean }, now: number): Promise<void> {
   let u = unscanned.get(seriesId);
   if (!u) { u = { folder, firstAt: now, items: new Map() }; unscanned.set(seriesId, u); }
   if (item.newRow === undefined) {
@@ -978,7 +1069,7 @@ async function noteUnscanned(seriesId: string, folder: string, n: number, item: 
     const had = await one('SELECT 1 FROM lib_books WHERE series_id = $1 AND number = $2::real LIMIT 1', [seriesId, n]).catch(() => null);
     item = { ...item, newRow: !had };
   }
-  u.items.set(n, { landed: item.landed, chapterId: item.chapterId, publishedAt: item.publishedAt, newRow: item.newRow ?? false });
+  u.items.set(n, { landed: item.landed, publishedAt: item.publishedAt, newRow: item.newRow ?? false });
 }
 
 /** Scan when five chapters are waiting, or the oldest has waited twenty minutes. */
@@ -993,8 +1084,9 @@ let flushing: Promise<void> | null = null;
 
 /**
  * Scan what the archive landed into the library, then stamp it as the sweep stamps what it lands: release dates,
- * group and source, and the source chapter it came from (lib_books.source_chapter_id, so a later renumber, #116,
- * matches the file exactly). Serialised; a call during one waits for it and then scans again.
+ * group and source, and the source chapter it came from (lib_books.source_chapter_id, through setBookMeta and
+ * Landed.chapterId, so a later renumber, #116, matches the file exactly). Serialised; a call during one waits for
+ * it and then scans again.
  *
  * ⚠️ AND RAISE THE UPDATES BASELINE by exactly the rows the scan added. /api/updates counts a favourite's
  * chapters minus what its reader has seen (series_seen), so without this a favourite being archived would read
@@ -1017,7 +1109,6 @@ export function flushArchiveScan(): Promise<void> {
       const items = [...u.items.values()];
       await setBookDates(u.folder, nums.flatMap((n) => (u.items.get(n)?.publishedAt ? [{ number: n, publishedAt: u.items.get(n)!.publishedAt }] : []))).catch(() => {});
       await setBookMeta(u.folder, items.flatMap((i) => (i.landed ? [i.landed] : []))).catch(() => {});
-      await stampChapterIds(u.folder, nums.flatMap((n) => (u.items.get(n)?.chapterId ? [{ number: n, id: u.items.get(n)!.chapterId! }] : [])));
       const unindexed = new Set(await notInLibrary(u.folder, nums).catch(() => [] as number[]));
       if (unindexed.size && gen === generation) {
         const set = stuck.get(seriesId) ?? new Set<number>();
@@ -1038,23 +1129,12 @@ export function flushArchiveScan(): Promise<void> {
         if (live) { for (const n of nums) live.items.delete(n); if (!live.items.size) unscanned.delete(seriesId); }
       }
     }
+    // The shared rows counted `left` before these were in the library; the view subtracts what is still unscanned.
+    invalidateArchiveView();
   })();
   flushing = next;
   void next.finally(() => { if (flushing === next) flushing = null; }).catch(() => {});
   return next;
-}
-
-/** lib_books.source_chapter_id for what landed, by folder and RAW number, as setBookMeta stamps its columns. */
-async function stampChapterIds(folder: string, rows: Array<{ number: number; id: string }>): Promise<void> {
-  if (!rows.length) return;
-  const params: unknown[] = [folder];
-  const values = rows.map((r) => { params.push(r.number, r.id); return `($${params.length - 1}::real, $${params.length}::text)`; });
-  await q(
-    `UPDATE lib_books b SET source_chapter_id = v.cid
-       FROM (VALUES ${values.join(',')}) AS v(n, cid), lib_series s
-      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n AND b.source_chapter_id IS DISTINCT FROM v.cid`,
-    params,
-  ).catch(() => {});
 }
 
 // ── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1170,20 +1250,29 @@ function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<s
     state: r.state, now, failed: r.failed, note, finishedAt: r.finishedAt, pausedAt: Number.isFinite(pausedAt) ? pausedAt : null,
     backoffLevel: pace?.backoff_level ?? 0, backoffSince: ms(pace?.last_at), wait: w?.wait ?? null, waitSince: w?.since ?? null,
     global: r.state === 'queued' ? lastGlobal?.wait ?? null : null,
-    progressSince: Number.isFinite(progressAt) ? progressAt : r.createdAt, lastTurnAt: r.lastAt,
+    progressSince: Number.isFinite(progressAt) ? progressAt : r.createdAt, idleTurns: Number(r.note?.idleTurns) || 0,
   });
   if (!shownDone({ state: r.state, finishedAt: r.finishedAt, attention, now })) return null;
   // When it next goes: its source's break or backoff, or its own listing ladder when that is what it waits on.
   const nextAtMs = r.state === 'queued'
     ? Math.max(pace ? Math.max(ms(pace.next_at) ?? 0, ms(pace.backoff_until) ?? 0) : 0, w?.wait.why === 'listing' ? w.wait.until ?? 0 : 0)
     : 0;
-  const cyc = pace?.cycle_ms ?? cycleMs(c.settings.perHour);
+  // Before the source has a running average, what a typical chapter costs at this rate (lane 2's expectedCycleMs,
+  // which the web's own estimate mirrors, web/lib/archive.ts), not the hour's bare share.
+  const cyc = pace?.cycle_ms ?? expectedCycleMs({ perHour: c.settings.perHour, chapterMs: TYPICAL_CHAPTER_MS, minBreakMs: minBreakMs() });
+  // Landed and not scanned yet is not left: the library does not hold it until the batch scan, and "1 of 15" over
+  // a series that has all fourteen of its chapters on disk read as work to come (#117 review).
+  // Reintroduce by answering the stored count: "left counts what is still to come" in archive.int.test.ts.
+  const left = r.left == null ? null : Math.max(0, r.left - (unscanned.get(r.seriesId)?.items.size ?? 0));
+  // Calendar time, not running time: the running average leaves the hours outside the window out
+  // (outsideCycleMs), so an ETA from it alone read "about a day" for what a 01:00-07:00 window takes four to do.
+  const share = openShare(c.settings.windowFrom, c.settings.windowTo);
   return {
     seriesId: r.seriesId, title: r.title, state: r.state, direction: r.direction,
-    done: r.done, left: r.left, failed: r.failed, bytes: r.bytes, addedBy: r.addedBy,
+    done: r.done, left, failed: r.failed, bytes: r.bytes, addedBy: r.addedBy,
     ...(flight ? { current: { number: flight.number!, startedAt: iso(flight.startedAt)! } } : {}),
     ...(nextAtMs > now && !flight ? { nextAt: iso(nextAtMs) } : {}),
-    ...(r.state !== 'done' && r.left != null ? { etaMs: etaMs({ left: r.left, sharing: (src && queuedOn.get(src)) || 1, cycleMs: cyc }) } : {}),
+    ...(r.state !== 'done' && left != null ? { etaMs: Math.round(etaMs({ left, sharing: (src && queuedOn.get(src)) || 1, cycleMs: cyc }) / share) } : {}),
     ...(w ? { waiting: { why: w.wait.why, ...(w.wait.until ? { until: iso(w.wait.until) } : {}), ...(w.wait.source ? { source: w.wait.source } : {}) } } : {}),
     ...(attention ? { attention: { why: attention.why, since: iso(attention.since)! } } : {}),
     queuedAt: iso(r.createdAt)!, startedAt: iso(r.startedAt) ?? null,
@@ -1213,7 +1302,9 @@ export async function archiveView(mayBrowse: (seriesId: string) => boolean, me: 
   }
   const rows = c.rows.map((r) => compose(r, c, queuedOn, now)).filter((x): x is NonNullable<typeof x> => !!x);
   const s = c.settings;
-  const g = s.paused ? { why: 'paused' as const } : lastGlobal?.wait ?? null;
+  // What the last look concluded, unless the settings have moved on since: a 'paused' left from before a Resume all
+  // (or a window since cleared) lingered on the view until the next look (#117 review).
+  const g = shownGlobalWait({ paused: s.paused, windowFrom: s.windowFrom, windowTo: s.windowTo }, lastGlobal?.wait ?? null);
   return {
     paused: s.paused, perHour: s.perHour,
     window: s.windowFrom != null && s.windowTo != null && s.windowFrom !== s.windowTo ? { from: s.windowFrom, to: s.windowTo } : null,

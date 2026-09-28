@@ -410,8 +410,10 @@ components:
         `listing` (its listing must be read before its next chapter, and the last read gave none: read again at
         `until`, 1 h, 3 h, 12 h, then a day apart), `renumbering` (a renumber is pending for it). `attention` puts
         it under Needs attention: `backoff` (refused twice in a row), `source_missing` or `disabled` (for over a
-        day), `disk`, `stalled` (paused a week, or queued three days without a chapter coming in although it had
-        its turns), `finished_with_gaps` (done, with `note` saying what was left behind).
+        day), `disk`, `stalled` (paused a week, or queued three days without a chapter coming in over at least two
+        finished turns that brought nothing -- a turn in flight or one refusal is not a stall), `finished_with_gaps`
+        (done, with `note` saying what was left behind). Chapters landed but not scanned in yet are already out of
+        `left`.
       required: [seriesId, title, state, direction, done, left, failed, bytes, mine, queuedAt, startedAt]
       properties:
         seriesId: { type: string }
@@ -424,8 +426,8 @@ components:
         bytes: { type: integer, description: Bytes the archive has written. }
         mine: { type: boolean, description: This account queued it, and so may pause, resume or stop it (as may an admin). }
         current: { type: object, properties: { number: { type: number }, startedAt: { type: string, format: date-time } } }
-        nextAt: { type: string, format: date-time, description: When its source may next be asked. }
-        etaMs: { type: integer, description: "About how long until the rest is in: left x the series sharing its source x the running average time per chapter." }
+        nextAt: { type: string, format: date-time, description: "When it may next go: its source's break or backoff, or its own listing retry." }
+        etaMs: { type: integer, description: "About how long until the rest is in: left x the series sharing its source x the running average time per chapter, in calendar time -- with a time window set, stretched by the share of the day the window is open." }
         waiting:
           type: object
           properties:
@@ -2175,7 +2177,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it)"
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why), `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it) or `renumber_pending` (since v0.49.0: the series waits for a numbering review, #116 -- asked again after the listing refresh, which is where the detector first marks one)"
   /api/sources/search-all:
     get:
       tags:
@@ -3119,8 +3121,10 @@ paths:
                     description: >-
                       Only when the request asked for `archive`: what became of the rest -- an outcome of POST
                       /api/sources/archive, or `later` on a download, which queues it once the first chapter is in
-                      and the listing is written (it then shows on GET /api/sources/jobs `archive`). `nothing` when
-                      the selection was the whole listing.
+                      and the listing is written (it then shows on GET /api/sources/jobs `archive`). `later` too when
+                      the add left the series' numbering for an admin's review (#116: a folder that already held
+                      books): it is queued, and its boundary is placed once the renumber has settled, in the numbers
+                      the series keeps. `nothing` when the selection was the whole listing.
         "400":
           description: Malformed body or parameter
         "401":
@@ -5657,7 +5661,8 @@ paths:
         origin: 'nightly' | 'manual', username (who pressed it; null for the nightly or a deleted account),
         mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
         {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
-        dropped when this viewer may not list that series.
+        dropped when this viewer may not list that series. `notes` names series by title alone, so it is null
+        for a viewer who hides 18+ titles.
       parameters:
         - name: limit
           in: query
@@ -6426,7 +6431,9 @@ paths:
         bookmarks and notes are kept) and answer `applied`. Choosing the numbering the series already has
         (Keep the source's numbers on a series waiting for review) renames nothing and answers `unchanged`.
         `remap` confirms the remap an extension setting queued. `pending` means the change could not be applied
-        yet (the source did not answer, or it took longer than a minute and carries on); the series stays held.
+        yet, and the series stays held: the source did not answer; the apply was refused (`error` says why -- a
+        file already at a target name, or another check inside the series -- and `plan.reasons` carries `busy`
+        when a download started meanwhile); or it took longer than a minute and carries on (`running: true`).
         A manual choice is never undone by the detector.
       parameters:
         - name: id
@@ -6448,7 +6455,7 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: "OK: { state (applied, pending, needs_confirm, unchanged), plan?, tracker?, numbering }"
+          description: "OK: { state (applied, pending, needs_confirm, unchanged), plan?, tracker?, error?, running?, numbering }"
         "400":
           description: Malformed body
         "401":
@@ -6458,7 +6465,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "busy: chapters are being fetched for this series; try again when that ends"
+          description: "busy (with `confirm`): chapters are being fetched for this series, or a check is inside it -- the sweep, Check now, a listing refresh, Fill -- and would fetch into the old numbers after the renames; try again when that ends. `message` says which."
   /api/admin/series/{id}/restore:
     post:
       tags:
@@ -7526,7 +7533,7 @@ paths:
         "404":
           description: The extension server has no such source (unknown_source)
         "502":
-          description: The extension server did not answer (unreachable)
+          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`"
     post:
       tags:
         - admin
@@ -7536,10 +7543,12 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The server
         reads the preference screen again, finds the key's current position, checks the value against the
         setting's type and choices, and only then writes it: the engine addresses a write by position, which an
-        extension update can move. A change to a numbering setting marks every series from this source that uses
-        the source's numbers for a remap (`numbering_pending = 'remap'`): each waits for an admin to confirm its
-        renaming (POST /api/admin/series/{id}/numbering, mode remap) before it updates again; series numbered by
-        posting order are unaffected. A text setting's value is audited by its length only.
+        extension update can move. A change to a numbering setting that the engine took (`applied`) marks every
+        series from this source that uses the source's numbers for a remap (`numbering_pending = 'remap'`): each
+        waits for an admin to confirm its renaming (POST /api/admin/series/{id}/numbering, mode remap) before it
+        updates again, unless its next check finds that every chapter keeps its number, which settles the remap
+        by itself; series numbered by posting order are unaffected. A text setting's value is audited by its
+        length only.
       parameters:
         - name: id
           in: path
@@ -7578,7 +7587,7 @@ paths:
         "404":
           description: The extension server has no such source (unknown_source)
         "502":
-          description: The extension server did not answer (unreachable)
+          description: "`unreachable`: the extension server did not answer; or `extension_error`: it answered with the extension's own exception, whose first line is in `message`"
   /api/admin/extensions/catalog:
     get:
       tags:
@@ -7835,7 +7844,7 @@ paths:
         hunt_off | download_failed | partial | confirmed_by_admin, asked?, answered?, best?, hunt?, missing?,
         by?} or {kind: 'failures', firstAt (the first failure, which a Retry now no longer resets), lastAt,
         attempts, resetPending}; and `caveats` [{action, code: updates_paused | source_cooling_down |
-        source_off, until?}], what an action will not be able to do, said before it is pressed. A short
+        source_off | archiving, until?}], what an action will not be able to do, said before it is pressed. A short
         chapter saved with placeholder pages is offered confirm_short only.
         Since v0.49.0 (#115) the `sources` check reads per-stage evidence: each item adds `evidence` [{stage:
         search | chapters | pages | images, state: ok | fail | unknown, at, by: test | sweep | traffic, kind:
@@ -7849,6 +7858,19 @@ paths:
         with the new action `engine_solver` (POST /api/admin/extensions/solver) when the helper is off or points
         at localhost -- a finding only while an extension source is seen behind Cloudflare. It is absent when no
         engine is set up and no series depends on one.
+        Since v0.49.0 (#117) a gap below an active slow archive's boundary is the archive's to fetch: a gaps item
+        whose every gap is below it is `info`, with outcome `why: 'archiving'` and no `fixed`, and any gaps item
+        with a gap below it carries the caveat {action: fill, code: archiving} -- the nightly repair leaves those
+        numbers to the archive, and Fill now fetches them at once, at normal pace. The gaps outcome's `why` also
+        reads `posting_order`: the series is numbered by posting order, so no other source is searched or
+        followed for it. A new check, `numbering` (#116, "Chapter numbering"), lists each series with a
+        numbering change waiting for review (the detector's proposal, an admin's choice not applied yet, or a
+        remap an extension setting queued), a renumber a restart interrupted, and a series whose source the
+        detector only suspects of giving different posts one number; as `info`, a series the detector numbered
+        by posting order on its own in the last 14 days, and one an admin kept in its source's numbers against
+        a strong verdict. Its actions are `renumber` (GET, then POST with `confirm`,
+        /api/admin/series/{id}/numbering) and `keep_numbers` (POST with mode `source`); items carry `seriesId`
+        and `sourceId`. The check is absent when no series has anything to say about its numbering.
       security:
         - bearer: []
       responses:

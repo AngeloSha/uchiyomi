@@ -159,18 +159,22 @@ export interface DoneNote { capped: number; held: number; blocked: number }
  * Needs attention, or not. A finished archive with anything left behind stays there until dismissed (DELETE);
  * a queued one is flagged when the disk floor has stopped everything, when its source has been gone or switched
  * off for a day, when its source keeps refusing (two in a row: one refusal is one bad hour), or when it has made
- * no progress for three days although it had its turns; a paused one after a week.
+ * no progress for three days although its turns kept coming to nothing; a paused one after a week.
  *
  * `progressSince`: when the series last moved forward -- a chapter came in, its first listing placed the
- * boundary, it was queued or resumed. `lastTurnAt`: when it last had its source's turn (archive_queue.last_at).
+ * boundary, it was queued or resumed. `idleTurns`: how many of its turns have ENDED since then with nothing to
+ * show -- a chapter that failed, a read that gave no listing (archive_queue.note.idleTurns).
  * ⚠️ A turn is not progress: every read of a listing that keeps failing, and every chapter that keeps failing,
  * is a turn, and counting turns as progress is how a series that asked its site for a dead listing once a
- * minute for days looked healthy. But a series that has had NO turn since its last progress is waiting behind
- * the others on its source -- five hundred series on one site at four an hour take days each to come round --
- * which is the archive working as the admin set it, not a stall.
+ * minute for days looked healthy. But a series waiting behind the others on its source -- five hundred series on
+ * one site at four an hour take days each to come round -- is the archive working as the admin set it, not a
+ * stall, and so is one whose turn has just come after such a wait: counted from when a turn STARTED, a chapter in
+ * flight after four days read "stalled" until it landed, and one refusal after the wait (a bad hour) read
+ * "stalled" until its next turn, days later (#117 review). Two finished turns with nothing in, at least.
  *
- * ⚠️ `waitSince` is kept in memory, so a restart starts a missing source's day again. Flagged a day late after a
- * restart is the price; flagged at once, every extension reload put series under Needs attention.
+ * `waitSince` is when the current wait began, the missing or disabled source's from the row itself (note.goneSince)
+ * once one was seen, so a restart does not start its day again; flagged at once, every extension reload put series
+ * under Needs attention.
  */
 export function attentionOf(o: {
   state: 'queued' | 'paused' | 'done';
@@ -185,7 +189,7 @@ export function attentionOf(o: {
   waitSince: number | null;
   global: GlobalWait | null | undefined;
   progressSince: number | null;
-  lastTurnAt: number | null;
+  idleTurns: number;
 }): Attention | null {
   if (o.state === 'done') {
     const gaps = (o.note?.capped ?? 0) + (o.note?.held ?? 0) + (o.note?.blocked ?? 0);
@@ -202,11 +206,28 @@ export function attentionOf(o: {
   }
   if (o.backoffLevel >= 2) return { why: 'backoff', since: o.backoffSince ?? o.now };
   // Reintroduce by dropping this: "no progress for three days while queued" in archivePlan.test.ts reads null, and
-  // a series that has asked its site for a dead listing for days shows nothing under Needs attention.
-  if (o.progressSince != null && o.now - o.progressSince >= NO_PROGRESS_MS && o.lastTurnAt != null && o.lastTurnAt > o.progressSince) {
+  // a series that has asked its site for a dead listing for days shows nothing under Needs attention. Reintroduce
+  // `idleTurns >= 1`: "one refusal after the wait is one bad hour" there reads stalled.
+  if (o.progressSince != null && o.now - o.progressSince >= NO_PROGRESS_MS && o.idleTurns >= IDLE_TURNS) {
     return { why: 'stalled', since: o.progressSince };
   }
   return null;
+}
+
+/** Finished turns with nothing to show, since the last progress, before three days of it are a stall. */
+export const IDLE_TURNS = 2;
+
+/**
+ * The server-wide wait a viewer is shown: the admin's pause as the settings say it now, else what the last look
+ * concluded -- unless the settings have since taken that reason away. A 'paused' from before a Resume all, or a
+ * 'window' from before the window was cleared, lingered on the view until the next look, which on a server that
+ * does not run the scheduler (a test, the desktop app shut) is never.
+ */
+export function shownGlobalWait(s: { paused: boolean; windowFrom: number | null; windowTo: number | null }, last: GlobalWait | null): GlobalWait | null {
+  if (s.paused) return { why: 'paused' };
+  if (!last || last.why === 'paused') return null;
+  if (last.why === 'window' && (s.windowFrom == null || s.windowTo == null || s.windowFrom === s.windowTo)) return null;
+  return last;
 }
 
 /**

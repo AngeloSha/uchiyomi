@@ -321,6 +321,86 @@ test("the header's mark is fresh by the time the sweep says it ended", { skip },
   }
 });
 
+test("an ask during the sweep's own refresh is not lost, and a report that never returns still ends the sweep", { skip }, async () => {
+  // The integration-1 review: while the sweep's end refresh reads, the sweep still holds the summary, so an ask then
+  // (a repair ending, a scan, an Ignore) was let go -- although the report may already have read past it. Reintroduce
+  // by dropping the `missed` re-arm in refreshHealthSummaryNow: one refresh, from the state before the ask.
+  const { setSummaryRefresh, scheduleHealthSummaryRefresh } = await import('../src/lib/healthSummary');
+  const { runSourceCheck, checkProgress, setSweepRefreshBound } = await import('../src/lib/sourceWatchdog');
+  let world = 'before';
+  const stored: string[] = [];
+  let first = true;
+  setSummaryRefresh(async () => {
+    const seen = world;
+    if (first) {
+      first = false;
+      // Mid-read, something changes what Health would say, and asks.
+      await pause(20);
+      world = 'after';
+      scheduleHealthSummaryRefresh();
+      await pause(80);
+    }
+    stored.push(seen);
+  }, { everyMs: 20 });
+  try {
+    await runSourceCheck({ autoFix: false });
+    for (let i = 0; i < 40 && stored.length < 2; i++) await pause(25);
+    assert.deepEqual(stored, ['before', 'after'], "an ask during the sweep's own refresh is not lost");
+  } finally {
+    setSummaryRefresh();
+  }
+
+  // A report that never comes back (a stalled mount under the downloads census) kept the sweep flag up until a
+  // restart: the daily check refused, every summary ask let go. Reintroduce the bare await in runSourceCheck:
+  // the sweep never ends, and this test times out.
+  setSweepRefreshBound(200);
+  let reading = false;
+  setSummaryRefresh(() => { reading = true; return new Promise<void>(() => {}); }, { everyMs: 20 });
+  try {
+    const t0 = Date.now();
+    const sweep = runSourceCheck({ autoFix: false });
+    // A sweep over this file's sources takes a second or two before its end refresh; waited for, never raced.
+    for (let i = 0; i < 600 && !reading; i++) await pause(50);
+    assert.ok(reading, 'PREMISE: the report is being read');
+    // While it reads, the sweep still runs, but it is on no source any more. Reintroduce by clearing `current` only
+    // after the report: the page names the last source tested as the one being tested, for as long as it reads.
+    assert.equal(checkProgress().running, true);
+    assert.equal(checkProgress().current, null, 'the source being tested is over before the report is read');
+    await sweep;
+    assert.equal(checkProgress().running, false, 'a report that never returns still ends the sweep');
+    assert.equal(checkProgress().current, null);
+    assert.ok(Date.now() - t0 < 30_000);
+  } finally {
+    setSweepRefreshBound();
+    setSummaryRefresh();
+  }
+});
+
+test('a sweep that ends during a repair leaves its refresh to the end of the repair', { skip }, async () => {
+  // The integration-1 review: nothing tested the repair rule for the sweep's own end refresh (only a Test's timer).
+  // The report must not run beside a repair. Reintroduce by dropping the runtime.repairing line from
+  // refreshHealthSummaryNow: the refresh runs while the repair does.
+  const { setSummaryRefresh } = await import('../src/lib/healthSummary');
+  const { runSourceCheck } = await import('../src/lib/sourceWatchdog');
+  const { runtime } = await import('../src/lib/runtime');
+  let runs = 0;
+  let during = 0;
+  setSummaryRefresh(async () => { runs++; if (runtime.repairing) during++; }, { everyMs: 20 });
+  runtime.repairing = true;
+  try {
+    await runSourceCheck({ autoFix: false });
+    await pause(100);
+    assert.equal(runs, 0, 'a sweep that ends during a repair leaves its refresh to the end of the repair');
+    runtime.repairing = false;
+    for (let i = 0; i < 40 && runs < 1; i++) await pause(25);
+    assert.equal(runs, 1, 'and it runs once the repair is over');
+    assert.equal(during, 0);
+  } finally {
+    runtime.repairing = false;
+    setSummaryRefresh();
+  }
+});
+
 test('three failures in a row in ordinary use are a finding, two are not, and a success starts the count again', { skip }, async () => {
   // Only the SQL in sourceHealth.ts (STAGE_MERGE) counts the streak and keeps `since`, under the row lock; the pure
   // sourceEvidence tests run on hand-built records. So these drive the real writer. Reintroduce `'streak', 1` in
@@ -361,18 +441,19 @@ test('one add/detail lookup is one failure in a row, however many of its calls t
   const { seriesAndChapters } = await import('../src/routes/sources');
   const boom = async () => { throw new Error('suwayomi: java.lang.Exception: site changed'); };
   assert.ok(registerAdapter({ id: LOOKUP, name: 'Lookup Source', search: async () => [], getSeries: boom, listChapters: boom, getPageUrls: async () => [] } as any));
-  const streakAfter = async () => {
-    // The note is fire-and-forget (a reader is waiting on this lookup): wait for it to land, then a little longer
-    // for a second one, if the code wrote two.
-    for (let i = 0; i < 40 && !(await row(LOOKUP))?.stages?.chapters; i++) await pause(25);
+  const streakAfter = async (want: number) => {
+    // The note is fire-and-forget (a reader is waiting on this lookup): wait for the streak to reach what one note
+    // per lookup makes, then a little longer for a second one, if the code wrote two. Waiting only for the stage to
+    // EXIST let the second lookup's check read before its note landed on a loaded host (fm review).
+    for (let i = 0; i < 40 && ((await row(LOOKUP))?.stages?.chapters?.streak ?? 0) < want; i++) await pause(25);
     await pause(150);
     return (await row(LOOKUP))?.stages?.chapters?.streak;
   };
   const one = await seriesAndChapters(getSource(LOOKUP)!, 'x1');
   assert.deepEqual(one, { series: null, chapters: [] });
-  assert.equal(await streakAfter(), 1, 'one lookup, one failure in a row');
+  assert.equal(await streakAfter(1), 1, 'one lookup, one failure in a row');
   await seriesAndChapters(getSource(LOOKUP)!, 'x1');
-  assert.equal(await streakAfter(), 2);
+  assert.equal(await streakAfter(2), 2);
   assert.equal(itemOf(await sourcesCheck(), LOOKUP), undefined, 'two lookups are not three failures in a row');
   assert.match((await row(LOOKUP)).stages.chapters.error, /site changed/);
 

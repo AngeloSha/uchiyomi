@@ -946,6 +946,18 @@ async function scanOnce(): Promise<ScanResult> {
 }
 
 /**
+ * The number setBookDates and setBookMeta match a landing to, as SQL over `lib_books b` and `lib_series s`: the raw
+ * lib_books.number (see setBookDates for why), except on a series numbered by posting order (#116), where it is
+ * the override-aware one. There a book in a root the renumber could not rename keeps the SOURCE's number as its
+ * raw number (another post's, now) and its own post's in book_overrides (lib/numbering.ts); matched raw, the
+ * landing of post 2 re-stamped the read-only post 21 with post 2's chapter id, name, group and date -- and the
+ * chapter id is the evidence every later remap trusts first (#116 review). Reintroduce the raw match: "a chapter in
+ * a root the server cannot rename in moves by override" in numbering.int.test.ts finds post 21 stamped as post 2.
+ */
+const BOOK_NUMBER = `(CASE WHEN s.numbering = 'posting_order'
+  THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END)`;
+
+/**
  * Stamp source release dates onto a series' books (matched by chapter number). Called after persistScan by the
  * add flow and the updater — the scanner itself never touches published_at, so stamps survive rescans.
  */
@@ -962,10 +974,12 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   // own chapter list and line up with what was parsed out of the filename it gave us. A manual correction
   // is about how a chapter is presented to the reader, not about which remote chapter this file is, so
   // honouring it here would stop release dates matching at all.
+  // ⚠️ Except under posting order (#116, BOOK_NUMBER): there the numbers are posts', and a book the renumber could
+  // not rename keeps its raw number with its post's in the override.
   await q(
     `UPDATE lib_books b SET published_at = v.p
      FROM (VALUES ${values.join(',')}) AS v(n, p), lib_series s
-     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n AND b.published_at IS DISTINCT FROM v.p`,
+     WHERE s.folder = $1 AND b.series_id = s.id AND ${BOOK_NUMBER} = v.n AND b.published_at IS DISTINCT FROM v.p`,
     params,
   );
 }
@@ -981,7 +995,8 @@ export { chapterName };
  * a number can change from one sweep to the next (a preferred group catches up, a block is added), and
  * stamping every listed number would relabel a file already on disk from group A as group B the moment
  * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
- * same reason: these numbers are the source's, not the override's.
+ * same reason: these numbers are the source's, not the override's -- and the same exception for a series numbered
+ * by posting order (BOOK_NUMBER), whose numbers are its posts'.
  *
  * `missing` is the 1-based list of placeholder pages when the chapter was saved partial (lib/partial.ts),
  * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
@@ -1012,7 +1027,7 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
             chapter_name_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.chapter_name_source END,
             source_chapter_id = COALESCE(v.cid, b.source_chapter_id)
      FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name, cid), lib_series s
-     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
+     WHERE s.folder = $1 AND b.series_id = s.id AND ${BOOK_NUMBER} = v.n
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src
             OR b.missing_pages IS DISTINCT FROM v.miss
             OR (v.name IS NOT NULL AND b.chapter_name IS DISTINCT FROM v.name)

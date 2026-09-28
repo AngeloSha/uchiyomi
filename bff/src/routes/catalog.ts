@@ -688,6 +688,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
         const titleOf = (c: ListingCopy) => (c.title ?? r.title ?? '').trim();
         const namesDiffer = (c: ListingCopy) => (r.copies ?? []).some((o) => o !== c && o.source === c.source
           && keysOf(o.groups ?? []) === keysOf(c.groups ?? []) && titleOf(o) !== titleOf(c));
+        // A chapter-id stamp decides only when it names one of this number's copies. One that names none -- the
+        // engine re-created its chapter ids (a reinstall), or the stamp outlived a replacement from another copy
+        // -- says nothing about which copy the file is, and the group and name rule below still can (#116 review).
+        // Reintroduce by trusting any stamp: "a stamp that names no listed copy falls back to the group" in
+        // groupsAndVersions.int.test.ts shows no copy on disk.
+        const stamped = (b: { source_chapter_id: string | null }) =>
+          !!b.source_chapter_id && (r.copies ?? []).some((o) => o.sourceId === b.source_chapter_id);
         return {
           number,
           copies: (r.copies ?? []).map((c) => {
@@ -718,7 +725,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
               // groupsAndVersions.int.test.ts reads [false].
               // A file stamped with the post it came from (v0.49.0, lib_books.source_chapter_id) is that post and no
               // other; the stamps below are for files older than that.
-              onDisk: here.some((b) => b.source_chapter_id
+              onDisk: here.some((b) => stamped(b)
                 ? b.source_chapter_id === c.sourceId && (b.source_id == null || b.source_id === c.source)
                 : b.scanlator
                 ? b.source_id === c.source && keysOf(groupsOf({ scanlator: b.scanlator })) === keys

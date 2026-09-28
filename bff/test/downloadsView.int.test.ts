@@ -489,3 +489,45 @@ test('a starter keeps their own card when it lands where they cannot browse, tit
   assert.ok(admin.seriesId, 'an admin reads the id');
   assert.deepEqual(admin.cover, { source: LANDS, url: LANDS_COVER });
 });
+
+test("an add's carrier card is its starter's, wherever the series lands", { skip }, async () => {
+  // A nothing-yet add (and one whose chapters are all here already) has no download, so a card is minted only to
+  // carry the follow results to the dialog's poll -- and it carried no starter, so an admin with the 18+ hide on,
+  // adding into an 18+ library, never saw their own results (integration-1 review). Reintroduce by dropping `by`
+  // from either carrier jobs.set in routes/sources.ts: that half finds no card.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const CARRIER = 'dv-carrier';
+  registerAdapter({
+    ...adapter(CARRIER),
+    async getSeries(sid: string) { return { sourceId: sid, source: CARRIER, title: 'Dv Carrier' }; },
+    async listChapters() { return chapters('carrier', CARRIER, 2).map(({ source: _s, ...c }) => c); },
+  } as any);
+  const w = who();
+  const add = (payload: Record<string, unknown>) => app.inject({
+    method: 'POST', url: '/api/sources/add', headers: w.admin,
+    payload: { source: CARRIER, sourceId: 'dv-carrier', alsoFollow: [{ source: ADDING, sourceId: 'dv-added' }], ...payload },
+  });
+  const r = await add({ chapterFrom: 'none' });
+  assert.equal(r.statusCode, 200, r.body);
+  const folder = r.json().folder as string;
+  // It lands in the 18+ library, which this admin's poll hides.
+  await q('UPDATE lib_series SET library_id = $2 WHERE folder = $1', [folder, LIB_X]);
+  const card = async () => (await jobsFor(w.admin, { hide: true })).content.find((j: any) => j.folder === folder);
+  const nothingYet = await card();
+  assert.ok(nothingYet, "a nothing-yet add's carrier card is its starter's");
+  assert.equal(nothingYet.mine, true);
+
+  // Added again, every chapter it selects already here: the other carrier card.
+  const id = (await q('SELECT id FROM lib_series WHERE folder = $1', [folder]))[0].id;
+  for (const n of [1, 2]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1,$2,'Zzz',$3,$4,$5,1)`,
+      [`${id}_b${n}`, id, `${folder}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [id]);
+  const again = await add({ chapterFrom: 'oldest', chapterCount: 2 });
+  assert.equal(again.statusCode, 200, again.body);
+  assert.equal(again.json().alreadyHere, 2, 'nothing to fetch: the held branch');
+  const held = await card();
+  assert.ok(held, "a held add's carrier card is its starter's");
+  assert.equal(held.mine, true);
+});

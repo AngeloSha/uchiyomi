@@ -20,6 +20,7 @@ import { getSource, type SourceChapter } from './sources';
 import { groupsOf, normGroup } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { chapterName } from './library';
+import { HEALED_NAME } from './naming';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
 export type ListingStatus = 'available' | 'held' | 'blocked';
@@ -180,6 +181,23 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
      * for the number again), in JavaScript, and written to `chapter_name` only -- never to `title`, the
      * filename's. A name already there is kept: the copy on disk named it -- unless it was BORROWED from
      * another source (lib/borrowNames.ts, `chapter_name_source`), which the chapter's own source outranks.
+     *
+     * ⚠️ And a healed name is MARKED as one (v0.49.0, `chapter_name_source` = HEALED_NAME): it is the name of the
+     * copy the listing chose for the number, which need not be the copy on disk -- for a book downloaded before
+     * names were stamped, it is the listing's guess, like the release date every sweep stamps (#116). Unmarked,
+     * a renumber took it for the file's own name and a plan built on it read clean. A name a landing stamps later
+     * (library.ts setBookMeta) is the file's own and clears the mark; the borrowed-name cleanup leaves it alone.
+     * Reintroduce by writing NULL: "the chapter's own name is never replaced" in borrowNames.int.test.ts finds no
+     * mark on the healed name.
+     * The number is the override-aware one under posting order, as setBookMeta's (lib/library.ts BOOK_NUMBER):
+     * the listing's numbers are posts' there, and a book the renumber could not rename keeps another post's
+     * number as its raw one.
+     * ⚠️ Nothing is healed while the series' numbering is in question (a change pending, or a renumber's journal):
+     * the listing is then in numbers its files may not be in -- an add from another source writes the source's raw
+     * numbers over files in posting numbers, a changed extension setting moves every number under the files -- so
+     * a name healed now is another post's, and the renumber's plan would take it as evidence. Reintroduce by
+     * healing regardless: "the raw listing vouches for no book" in numbering.int.test.ts finds a book moved to the
+     * post whose name the heal gave it.
      */
     const named = new Map<number, string>();
     for (const r of rows) {
@@ -188,15 +206,19 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
     }
     const all = [...named];
     for (let i = 0; i < all.length; i += 1000) {        // well inside Postgres's 65 535 parameters
-      const params: unknown[] = [seriesId];
+      const params: unknown[] = [seriesId, HEALED_NAME];
       const values = all.slice(i, i + 1000).map(([n, name]) => {
         params.push(n, name);
         return `($${params.length - 1}::real, $${params.length}::text)`;
       });
       await qq(
-        `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = NULL, updated_at = now()
-           FROM (VALUES ${values.join(',')}) AS v(n, name)
-          WHERE b.series_id = $1 AND b.number = v.n AND (b.chapter_name IS NULL OR b.chapter_name_source IS NOT NULL)`,
+        `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = $2, updated_at = now()
+           FROM (VALUES ${values.join(',')}) AS v(n, name), lib_series s
+          WHERE b.series_id = $1 AND s.id = b.series_id
+            AND (CASE WHEN s.numbering = 'posting_order'
+                      THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END) = v.n
+            AND (b.chapter_name IS NULL OR (b.chapter_name_source IS NOT NULL AND b.chapter_name_source <> $2))
+            AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL`,
         params,
       );
     }

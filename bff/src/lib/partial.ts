@@ -123,7 +123,7 @@ const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
  * (The repair's count step stamps `pages` as well, but only into a row that never had a count, from a
  * file on our own disk that nothing downloaded.)
  */
-export async function restampBook(bookId: string, abs: string, missing0: number[], via?: { source: string; scanlator?: string }): Promise<void> {
+export async function restampBook(bookId: string, abs: string, missing0: number[], via?: { source: string; scanlator?: string; chapterId?: string }): Promise<void> {
   const zip = new StreamZip.async({ file: abs });
   let pages = 0;
   try {
@@ -149,6 +149,14 @@ export async function restampBook(bookId: string, abs: string, missing0: number[
   if (via) {
     params.push(via.source, via.scanlator ?? null);
     set.push(`source_id = $${params.length - 1}`, `scanlator = $${params.length}`);
+    // The post the new file was written from (#116): a group upgrade or a completion from another copy is a
+    // landing too, and left alone the stamp named the REPLACED copy -- which the versions view trusts first
+    // (routes/catalog.ts onDisk) and every later remap takes as proof of which post the file is. Reintroduce by
+    // dropping it: "a group upgrade restamps the chapter id" in groupUpgrade.int.test.ts reads the old copy's.
+    if (via.chapterId) {
+      params.push(via.chapterId);
+      set.push(`source_chapter_id = $${params.length}`);
+    }
   }
   await q(`UPDATE lib_books SET ${set.join(', ')} WHERE id = $1`, params);
   // Every row, overrides included: an override made on a placeholder ("always skip this page") would hide
@@ -317,7 +325,7 @@ export async function completePartial(
     acceptPartial: (hold: { missing: number[] }) => hold.missing.length < missing.length,
   });
   if (out.kind === 'landed') {
-    await restampBook(book.id, abs, [], { source: out.via, scanlator: out.chapterUsed?.scanlator });
+    await restampBook(book.id, abs, [], { source: out.via, scanlator: out.chapterUsed?.scanlator, chapterId: out.chapterUsed?.sourceId });
     const after = (await stat(abs)).size;
     // Another source's copy is not the same file: say so when its page count differs, because every
     // reader's position in this chapter was measured against the old count.
@@ -325,7 +333,7 @@ export async function completePartial(
     return 'completed';
   }
   if (out.kind === 'partial') {
-    await restampBook(book.id, abs, out.missing, { source: out.via, scanlator: out.chapterUsed?.scanlator });
+    await restampBook(book.id, abs, out.missing, { source: out.via, scanlator: out.chapterUsed?.scanlator, chapterId: out.chapterUsed?.sourceId });
     console.warn(`${label}: ${out.via}'s copy has ${out.missing.length} missing against ${missing.length}, kept it${out.pages !== manifest.expected ? ` (${manifest.expected} → ${out.pages} pages)` : ''}`);
     return 'improved';
   }

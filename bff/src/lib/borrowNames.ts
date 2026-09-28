@@ -8,6 +8,7 @@ import { judgeCandidate, bounded, MIN_TRY_MS, type Judgement } from './autoFollo
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { chapterName } from './library';
+import { HEALED_NAME } from './naming';
 import { HUNT_MAX_SOURCES, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { visibleToAll } from './visibility';
 
@@ -177,14 +178,17 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
  * for itself.
  */
 export async function clearBorrowedNames(scope: { seriesId: string } | 'following-server'): Promise<number> {
+  // A name the listing healed (HEALED_NAME, lib/seriesListing.ts) is marked too, and is not a borrowed one: it is
+  // the series' own source's name, and it stays. Reintroduce by clearing every marked name: "switching it off takes
+  // back exactly what was borrowed" in borrowNames.int.test.ts takes the healed "Own Four" back too.
   const rows = scope === 'following-server'
     ? await q<{ id: string }>(
       `UPDATE lib_books b SET chapter_name = NULL, chapter_name_source = NULL, updated_at = now()
          FROM lib_series s
-        WHERE s.id = b.series_id AND s.borrow_names IS NULL AND b.chapter_name_source IS NOT NULL
-        RETURNING b.id`)
+        WHERE s.id = b.series_id AND s.borrow_names IS NULL AND b.chapter_name_source IS NOT NULL AND b.chapter_name_source <> $1
+        RETURNING b.id`, [HEALED_NAME])
     : await q<{ id: string }>(
       `UPDATE lib_books SET chapter_name = NULL, chapter_name_source = NULL, updated_at = now()
-        WHERE series_id = $1 AND chapter_name_source IS NOT NULL RETURNING id`, [scope.seriesId]);
+        WHERE series_id = $1 AND chapter_name_source IS NOT NULL AND chapter_name_source <> $2 RETURNING id`, [scope.seriesId, HEALED_NAME]);
   return rows.length;
 }

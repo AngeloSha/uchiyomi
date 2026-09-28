@@ -703,8 +703,16 @@ test('unfollowing a source takes its listing rows with it, and a stale row never
   const ghost20 = async () => (await listing()).json().content.find((g: any) => g.number === 20);
   assert.equal((await ghost20())?.sourceId, FOL, 'PREMISE: chapter 20 is listed, through the follower');
 
+  // The unfollow starts a refresh it does not wait for (routes/admin.ts), and that refresh rewrites the listing
+  // whole. Planted before it lands, the stale row below was wiped by it and the fetch read `not_listed` instead of
+  // `source_unavailable` -- red since the #116 numbering queries made the refresh slower (the s17 review). So the
+  // subtests start once the refresh has rewritten the listing: a row it wrote has a transaction id of its own.
+  const rewritten = async () => (await q(`SELECT xmin::text AS x FROM series_listing WHERE series_id = $1 ORDER BY number LIMIT 1`, [S]))[0]?.x;
+  const was = await rewritten();
   const un = await app.inject({ method: 'DELETE', url: `/api/admin/series/${S}/sources/${FOL}`, headers: { authorization: adminTok } });
   assert.equal(un.statusCode, 200, un.body);
+  for (let i = 0; i < 400 && (await rewritten()) === was; i++) await new Promise((res) => setTimeout(res, 25));
+  assert.notEqual(await rewritten(), was, "PREMISE: the unfollow's refresh has rewritten the listing");
 
   await t.test('its ghost is gone from the page at once', async () => {
     assert.equal(await ghost20(), undefined, 'the row the follower carried is still listed');

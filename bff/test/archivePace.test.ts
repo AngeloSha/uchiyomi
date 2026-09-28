@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ARCHIVE_DEFAULTS, PER_HOUR_RANGE, cycleMs, pageGapRange, drawGap, nextBreakMs, backoffUntil, inWindow,
-  windowOpensAt, ewmaCycle, etaMs, longBreakChance, expectedCycleMs,
+  windowOpensAt, ewmaCycle, etaMs, longBreakChance, expectedCycleMs, openShare,
 } from '../src/lib/archivePace';
 
 /** mulberry32: a small seeded generator, uniform over [0, 1). */
@@ -312,4 +312,16 @@ test('an ETA counts the turns the other series on the source take', () => {
   assert.equal(etaMs({ left: 100, sharing: 3, cycleMs: 15 * MIN }), 75 * HOUR, 'three series take turns');
   assert.equal(etaMs({ left: 0, sharing: 3, cycleMs: 15 * MIN }), 0);
   assert.equal(etaMs({ left: 10, sharing: 0, cycleMs: 15 * MIN }), 150 * MIN, 'it is always at least itself');
+});
+
+test('the share of a day a window is open turns running time into calendar time', () => {
+  // The running cycle leaves the hours outside the window out of every sample (archivePlan.ts outsideCycleMs), so an
+  // ETA from it is how long the archive RUNS; lib/archive.ts divides it by this. Reintroduce 1 for every window: a
+  // 01:00-07:00 window's 100 chapters read about a day for what takes four (#117 review).
+  assert.equal(openShare(null, null), 1, 'any time');
+  assert.equal(openShare(5, 5), 1, 'a window with no length is any time, as inWindow reads it');
+  assert.equal(openShare(1, 7), 6 / 24);
+  assert.equal(openShare(22, 6), 8 / 24, 'across midnight, both of its sides');
+  assert.equal(openShare(10, 11), 1 / 24);
+  assert.equal(etaMs({ left: 100, sharing: 1, cycleMs: 15 * MIN }) / openShare(1, 7), 100 * HOUR, 'a day of running is four of calendar');
 });
