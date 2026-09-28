@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2418
+    "strings": 2423
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2421,5 +2421,10 @@
   "With {app} and {db} containers, it is this one. Never use the one-container file in that case: it would start on a new, empty database.": "مع حاويتَي ⁦{app}⁩ و⁦{db}⁩، فهو هذا الملف. لا تستخدم ملف الحاوية الواحدة في هذه الحالة أبدًا: سيبدأ بقاعدة بيانات جديدة فارغة.",
   "Runs only while Uchiyomi is running, even when it is only in the tray or menu bar. If the PC sleeps at night, a night-time window will rarely get anything done.": "تعمل فقط ما دام Uchiyomi قيد التشغيل، حتى لو كان في علبة شريط المهام أو شريط القوائم فقط. وإذا دخل الكمبيوتر وضع السكون ليلًا، فنادرًا ما يُنجَز شيء في الساعات الليلية المحددة.",
   "Ch. {a}–{b} · {n} chapters in a paused slow archive": "الفصول {a}–{b} · {n} فصلًا في أرشفة بطيئة متوقفة مؤقتًا",
-  "Ch. {n} · 1 chapter in a paused slow archive": "الفصل {n} · فصل واحد في أرشفة بطيئة متوقفة مؤقتًا"
+  "Ch. {n} · 1 chapter in a paused slow archive": "الفصل {n} · فصل واحد في أرشفة بطيئة متوقفة مؤقتًا",
+  "Its Cloudflare helper is not answering": "مساعد Cloudflare الخاص به لا يستجيب",
+  "Ready (v{version}); its Cloudflare helper is not answering": "جاهز (v{version})؛ مساعد Cloudflare الخاص به لا يستجيب",
+  "Ready; its Cloudflare helper is not answering": "جاهز؛ مساعد Cloudflare الخاص به لا يستجيب",
+  "It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.": "إنه متصل بمساعد Cloudflare الخاص بـ Uchiyomi، وهذا المساعد لا يستجيب (صف «أداة حل Cloudflare» يوضح ما يجب فعله). تفشل مصادر الإضافات على المواقع المحمية بـ Cloudflare إلى أن يستجيب من جديد.",
+  "Its confirmed renumber is being applied now.": "إعادة ترقيمها المؤكَّدة تُطبَّق الآن."
 }

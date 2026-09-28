@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2418
+    "strings": 2423
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2421,5 +2421,10 @@
   "With {app} and {db} containers, it is this one. Never use the one-container file in that case: it would start on a new, empty database.": "{app} と {db} の 2 つのコンテナーなら、このファイルです。この場合、コンテナー 1 つ用のファイルは絶対に使わないでください。新しい空のデータベースで起動してしまいます。",
   "Runs only while Uchiyomi is running, even when it is only in the tray or menu bar. If the PC sleeps at night, a night-time window will rarely get anything done.": "Uchiyomi が動いている間だけ動作します（トレイやメニューバーに常駐しているだけでも構いません）。夜に PC がスリープするなら、夜間の時間帯ではほとんど進みません。",
   "Ch. {a}–{b} · {n} chapters in a paused slow archive": "第{a}–{b}話 · {n} 話（ゆっくりアーカイブは一時停止中）",
-  "Ch. {n} · 1 chapter in a paused slow archive": "第{n}話 · 1 話（ゆっくりアーカイブは一時停止中）"
+  "Ch. {n} · 1 chapter in a paused slow archive": "第{n}話 · 1 話（ゆっくりアーカイブは一時停止中）",
+  "Its Cloudflare helper is not answering": "Cloudflare ヘルパーが応答していません",
+  "Ready (v{version}); its Cloudflare helper is not answering": "準備完了（v{version}）；Cloudflare ヘルパーが応答していません",
+  "Ready; its Cloudflare helper is not answering": "準備完了；Cloudflare ヘルパーが応答していません",
+  "It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.": "Uchiyomi 自身の Cloudflare ヘルパーに接続されていますが、そのヘルパーが応答していません（対処法は「Cloudflare ソルバー」の行にあります）。再び応答するまで、Cloudflare で保護されたサイトの拡張ソースは失敗します。",
+  "Its confirmed renumber is being applied now.": "確定した番号の振り直しを現在適用しています。"
 }

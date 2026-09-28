@@ -242,6 +242,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   }),
   'numbering.sharedMany': (p) => tr('{name} gives many different posts the same number', { name: sourceName(p) }),
   'numbering.interrupted': () => tr('A renumber was interrupted before it finished; the next check of this series finishes it.'),
+  'numbering.applying': () => tr('Its confirmed renumber is being applied now.'),
   'numbering.remap': (p) => tr('An extension setting changed {name}\'s chapter numbers; the chapters on disk wait to be matched to the new ones.', { name: sourceName(p) }),
   'numbering.reviewWaits': () => tr('numbering them by posting order waits for your review.'),
   'numbering.askedWaits': () => tr('Numbering by posting order, as asked, waits to be applied.'),
@@ -546,6 +547,11 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('Ready (v{version}); its Cloudflare helper is not in use', { version: engineVersion(p) })
     : tr('Ready; its Cloudflare helper is not in use')),
   'engine.connectNote': () => tr('Connect points it at the helper Uchiyomi uses and switches it on; nothing restarts, and it stays that way unless the engine’s own container names another helper.'),
+  'engine.solverQuiet': () => tr('Its Cloudflare helper is not answering'),
+  'engine.readySolverQuiet': (p) => (p.version
+    ? tr('Ready (v{version}); its Cloudflare helper is not answering', { version: engineVersion(p) })
+    : tr('Ready; its Cloudflare helper is not answering')),
+  'engine.solverQuietDetail': () => tr('It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.'),
 
   // ---- A download job's reason. `source`, `from` and `to` are sources' names.
   'job.noSpace': (p) => tr('Not enough free space: {error}', { error: str(p, 'error') }),

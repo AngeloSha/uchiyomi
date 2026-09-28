@@ -544,7 +544,7 @@ async function numberingCheck(): Promise<HealthCheck | null> {
       // (v0.49.1): "interrupted" while the confirmed renumber was still applying. A greyed line while it runs: nothing
       // waits for anyone, and it ends by itself.
       // Reintroduce by answering "interrupted" for it: "while a confirmed renumber applies" in numbering.int.test.ts.
-      item = { ...base, detail: `Its confirmed renumber is being applied now. ${held.text}`, info: true };
+      item = { ...base, ...detailOf([say('numbering.applying'), held]), info: true };
     } else if (r.journal) {
       item = { ...base, ...detailOf([say('numbering.interrupted'), held]) };
     } else if (r.numbering_pending === 'remap') {

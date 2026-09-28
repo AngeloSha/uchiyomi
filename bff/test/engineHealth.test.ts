@@ -123,7 +123,7 @@ test('a solver that is not answering: the engine row says so too, never that it 
   assert.equal(seen.status, 'warn', 'a source seen behind Cloudflare makes it a finding');
   assert.equal(seen.summary, 'Its Cloudflare helper is not answering');
   assert.equal(findings(seen).length, 1);
-  assert.match(seen.items[0].detail, /Night Shelf is behind Cloudflare\./);
+  assert.match(seen.items[0].detail, /fail until it answers again\. Night Shelf is behind Cloudflare\.$/);
   // Answering, or not asked (the engine points elsewhere): as before.
   assert.match(extensionEngine(base({ solverAnswering: true }))!.summary, /^Ready, and it can get past Cloudflare/);
   assert.match(extensionEngine(base({ solverAnswering: null }))!.summary, /^Ready, and it can get past Cloudflare/);
@@ -245,6 +245,10 @@ test('every sentence of the row carries its codes, and they say exactly its Engl
     ['off, failing, a lower-case name', { solver: { supported: true, enabled: false, url: OURS }, cloudflare: [cf('mangapill', true)] }],
     ['localhost, fronted', { solver: { supported: true, enabled: true, url: 'http://localhost:8191' }, cloudflare: [cf('Ball', false)] }],
     ['off, nothing seen, no solver', { solver: { supported: true, enabled: false, url: OURS }, ourSolver: '', version: null }],
+    // Lane P2's sentences, given codes at the integration: our own solver not answering.
+    ['solver not answering', { solverAnswering: false }],
+    ['solver not answering, registering, no version', { solverAnswering: false, registering: true, version: null }],
+    ['solver not answering, seen', { solverAnswering: false, cloudflare: [cf('Ball', false), cf('mangapill', true)] }],
   ];
   for (const [what, over] of states) {
     const c = extensionEngine(base(over));

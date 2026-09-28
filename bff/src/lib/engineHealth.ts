@@ -129,16 +129,15 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
     // not answering" in engineHealth.test.ts reads it.
     if (d.solverAnswering === false) {
       const finding = d.cloudflare.length > 0;
-      const seen = finding ? ` ${say('engine.fronted', named(d.cloudflare)).text}` : '';
       return {
         ...base,
         status: finding ? 'warn' : 'ok',
-        summary: finding ? 'Its Cloudflare helper is not answering' : `${say('engine.ready', { version }).text}; its Cloudflare helper is not answering`,
+        ...summaryOf([finding ? say('engine.solverQuiet') : say('engine.readySolverQuiet', { version })]),
         ...noteOf([alone]),
         items: [{
-          title: 'Cloudflare helper',
-          detail: 'It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says '
-            + `what to do). Extension sources on Cloudflare-protected sites fail until it answers again.${seen}`,
+          ...titled(say('engine.helper')),
+          // 'then', as below: the sentence opens on the sources' names, which are theirs to spell.
+          ...detailOf([say('engine.solverQuietDetail'), finding && joined('then', say('engine.fronted', named(d.cloudflare)))]),
           ...(finding ? {} : { info: true }),
         }],
       };
