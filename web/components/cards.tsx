@@ -133,8 +133,8 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
   // somewhere else — "you were reading this on the device you're holding" is noise.
   const elsewhere = book.lastDevice && book.lastDevice.id !== deviceId() ? book.lastDevice : null;
   // A platform ("iPhone"), or "another device" in the reader's words -- never the English "Browser" an older sign-in
-  // stored for a platform it did not know.
-  const where = elsewhere ? shownDeviceName(elsewhere.name) || tr('another device') : '';
+  // stored for a platform it did not know, nor a sign-in method ("SSO") as if it were a place.
+  const where = elsewhere ? shownDeviceName(elsewhere.name, { device: true }) || tr('another device') : '';
   return (
     <Link
       href={`/reader/?book=${book.id}`}

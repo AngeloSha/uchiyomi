@@ -8,7 +8,7 @@ import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { scheduleText, taskResult } from '@/lib/tasks';
-import { joinSentences } from '@/lib/jobs';
+import { joinSentences, sentenceGap } from '@/lib/jobs';
 import { bytes, languageName, relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
@@ -193,7 +193,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   // Intl.PluralRules and a rules table; "1 members" does need fixing, and every language here can express
   // both forms as two strings.
   const facts = [
-    stats ? tr('{n} series', { n: stats.seriesTotal }) : null,
+    stats ? (stats.seriesTotal === 1 ? tr('1 series') : tr('{n} series', { n: stats.seriesTotal })) : null,
     // Desktop is one person: "1 member" there would describe a household that does not exist.
     stats && !isDesktop() ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
     stats ? tr('{size} cached', { size: bytes(stats.cacheBytes) }) : null,
@@ -779,7 +779,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
                     {statusMark(st)}
-                    <span className="text-[11px] text-fog-500">{tr('{n} series', { n: s.used ?? 0 })}</span>
+                    <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
                     <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
                   </div>
                   {evidenceOf(s, st)}
@@ -2305,17 +2305,29 @@ function Extensions({ span = '' }: { span?: string }) {
    */
   const toggleLang = async (l: ExtLang, enabled: boolean) => {
     const name = l.lang ?? 'none';
+    // Only a language with a code has the button (a source with none is reached by id), so this names a language.
+    const lang = languageName(name);
     setBusy(`__lang:${name}`);
     try {
       const r = await api<{ changed: number; skipped: number }>('/api/admin/extensions/sources/bulk', { json: { langs: [l.lang], enabled } });
       refreshAll();
       qc.invalidateQueries({ queryKey: ['ext-langs'] });
-      toast((enabled ? `Showing ${name} — ${r.changed} source${r.changed === 1 ? '' : 's'} on` : `Hidden ${name} — ${r.changed} source${r.changed === 1 ? '' : 's'} off`)
-        + (r.skipped ? ` (${r.skipped} over the source limit)` : ''), 'success');
-    } catch (e: any) { toast(msgOf(e, `Could not ${enabled ? 'show' : 'hide'} ${name}`), 'error'); }
+      // One sentence per count, in the reader's words (they were English in every language before v0.49.1).
+      const said = enabled
+        ? (r.changed === 1 ? tr('Showing {lang} — 1 source on', { lang }) : tr('Showing {lang} — {n} sources on', { lang, n: r.changed }))
+        : (r.changed === 1 ? tr('Hidden {lang} — 1 source off', { lang }) : tr('Hidden {lang} — {n} sources off', { lang, n: r.changed }));
+      toast(r.skipped ? `${said} · ${tr('{n} not switched on: over the source limit', { n: r.skipped })}` : said, 'success');
+    } catch (e: any) { toast(msgOf(e, enabled ? tr('Could not show {lang}', { lang }) : tr('Could not hide {lang}', { lang })), 'error'); }
     setBusy(null);
     setHiding(null);
   };
+
+  // The Languages panel's counts and the cap overflow line, one key per count: English in every language, and "1
+  // sources" in English, before v0.49.1.
+  const hiddenN = status.hiddenLangs?.length ?? 0;
+  const overCap = !status.skipped ? ''
+    : status.skipped === 1 ? tr('1 enabled source is not registered — over the limit of {cap}.', { cap: status.cap ?? 0 })
+    : tr('{n} enabled sources are not registered — over the limit of {cap}.', { n: status.skipped, cap: status.cap ?? 0 });
 
   const list = cat?.content || [];
 
@@ -2412,8 +2424,8 @@ function Extensions({ span = '' }: { span?: string }) {
           <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
             <button onClick={() => setShowLangs(!showLangs)} className="flex w-full items-center justify-between text-start">
               <span className="text-[11px] text-fog-300">
-                <span>Languages</span>
-                <span className="text-fog-500"> · {status.hiddenLangs?.length ?? 0} hidden</span>
+                <span>{tr('Languages')}</span>
+                <span className="text-fog-500"> · {hiddenN === 1 ? tr('1 hidden') : tr('{n} hidden', { n: hiddenN })}</span>
               </span>
               <span className="text-[11px] text-fog-500">{showLangs ? tr('Hide') : tr('Manage')}</span>
             </button>
@@ -2423,16 +2435,21 @@ function Extensions({ span = '' }: { span?: string }) {
                   const name = l.lang ?? 'none';
                   const on = l.enabled > 0;
                   const working = busy === `__lang:${name}`;
+                  const counts = [
+                    l.sources === 1 ? tr('1 source') : tr('{n} sources', { n: l.sources }),
+                    tr('{n} on', { n: l.enabled }),
+                    l.used === 1 ? tr('1 series') : tr('{n} series', { n: l.used }),
+                  ].join(' · ');
                   return (
                     <div key={name} className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-[11px] text-fog-300">
-                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'} title={name}>{l.lang === null ? name : languageName(name)}</span>
-                        <span className="text-fog-500"> · {l.sources} source{l.sources === 1 ? '' : 's'} · {l.enabled} on · {l.used} series</span>
+                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'} title={l.lang ?? undefined}>{l.lang === null ? tr('No language') : languageName(name)}</span>
+                        <span className="text-fog-500"> · {counts}</span>
                       </span>
                       {/* Sources that declare no language cannot be selected by one -- the server reaches those rows by id
                           only -- so the row is counts without a button. A language with nothing on can only be shown. */}
                       {l.lang === null ? (
-                        <span className="shrink-0 text-[10px] text-fog-600">no language declared</span>
+                        <span className="shrink-0 text-[10px] text-fog-600">{tr('no language declared')}</span>
                       ) : (
                         <button
                           onClick={() => (on ? (l.used > 0 ? setHiding(l) : toggleLang(l, false)) : toggleLang(l, true))}
@@ -2446,12 +2463,11 @@ function Extensions({ span = '' }: { span?: string }) {
                   );
                 })}
                 {langData && !langData.langs.length && (
-                  <p className="text-[10px] text-fog-600">No extension sources yet — add an extension and its languages appear here.</p>
+                  <p className="text-[10px] text-fog-600">{tr('No extension sources yet — add an extension and its languages appear here.')}</p>
                 )}
                 {!langData && <p className="text-[10px] text-fog-600">{tr('Loading…')}</p>}
                 <p className="text-[10px] leading-relaxed text-fog-600">
-                  Hiding a language switches its sources off and keeps them off when you add the next extension. Series
-                  from a hidden language stay readable but stop updating until you show it again.
+                  {tr('Hiding a language switches its sources off and keeps them off when you add the next extension. Series from a hidden language stay readable but stop updating until you show it again.')}
                 </p>
               </div>
             )}
@@ -2479,13 +2495,16 @@ function Extensions({ span = '' }: { span?: string }) {
 
           {/* The cap overflow used to be one line in the boot log: the panel counted the sources that were on,
               search reached fewer, and nothing showed the difference. */}
-          {!!status.skipped && (
+          {!!overCap && (
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
               <p className="min-w-0 flex-1 text-[11px] leading-snug text-amber-200">
-                {status.skipped} enabled source{status.skipped === 1 ? ' is' : 's are'} not registered — over the limit of {status.cap}.
-                {/* SUWAYOMI_MAX_SOURCES is an environment variable of the Docker install; desktop has no .env to raise it in. */}
-                <span className="text-amber-200/60">{isDesktop() ? ' Hide languages you don\'t read.' : ' Hide languages you don\'t read, or raise SUWAYOMI_MAX_SOURCES.'}</span>
+                {overCap}
+                {/* SUWAYOMI_MAX_SOURCES is an environment variable of the Docker install; desktop has no .env to raise it
+                    in. The name is copied into the sentence, never translated. */}
+                <span className="text-amber-200/60">{sentenceGap(overCap)}{isDesktop()
+                  ? tr('Hide languages you don’t read.')
+                  : tr('Hide languages you don’t read, or raise {name}.', { name: 'SUWAYOMI_MAX_SOURCES' })}</span>
               </p>
             </div>
           )}

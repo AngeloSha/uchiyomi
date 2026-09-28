@@ -24,6 +24,7 @@ import { getSource, SourceChapter } from './sources';
 import { classify, noteStage, reportFail, blockedNow, isDisabled } from './sourceHealth';
 import { writeAtomic } from './fsAtomic';
 import { downloadChapter, fetchPages, underGate, type DownloadInput } from './downloader';
+import { healFinished } from './downloadActivity';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
 // Existing chapter archives are untrusted source bytes. Keep adm-zip on its write-only path (the security
@@ -275,7 +276,14 @@ export async function completePartial(
         await writeAtomic(abs, out.toBuffer());
         await restampBook(book.id, abs, still);
         console.log(`${label}: ${filled.length} of ${missing.length} missing page${missing.length === 1 ? '' : 's'} fetched from ${src.id}${still.length ? `, ${still.length} still missing` : ''}`);
-        if (!still.length) return 'completed';
+        if (!still.length) {
+          // Whole, and no download said so: the holes were merged in here, so Came in today is told (v0.49.1). The
+          // other completions below are downloads, and a download that lands whole says it itself (endDownload).
+          // Reintroduce by dropping this: "a chapter the completion pass makes whole" in partialComplete.int.test.ts
+          // finds it still saved with pages missing.
+          healFinished(seriesFolder, book.number);
+          return 'completed';
+        }
         missing = still;
         result = 'improved';
       }
@@ -298,6 +306,12 @@ export async function completePartial(
           console.warn(`${label}: re-sliced on ${src.id} (${manifest.expected} → ${urls.length} pages), saved with ${hold.missing.length} missing`);
           missing = [...hold.missing];
           result = 'improved';
+        } else {
+          // A copy no better than ours is not kept, and its entry in the downloads ends now: left open, it waited out
+          // downloadActivity's HOLD_MS as a download still running, ten minutes of a spinning Library ring (the
+          // v0.49.0 fix in downloadWithFallback, missed here). Reintroduce by dropping it: "a re-sliced copy that is
+          // not kept" in partialComplete.int.test.ts finds it active.
+          hold?.drop?.();
         }
       }
     }

@@ -82,7 +82,10 @@ const minBreakMs = (): number => {
 const LISTING_STALE_MS = 7 * 24 * 3600_000;
 /** How many missing numbers are looked at per series per pick, for the ones already on disk to be stepped over. */
 const PICK_DEPTH = 5;
-/** Landed chapters are scanned into the library in batches: persistScan walks the whole library. */
+/**
+ * Landed chapters are scanned into the library in batches: persistScan walks the whole library. The first one an
+ * archive lands for a series the library holds nothing of is the exception, scanned in at once (runChapter).
+ */
 const SCAN_BATCH = 5;
 const SCAN_WAIT_MS = 20 * MIN;
 /** A full disk stops everything for this long before the free space is measured again. */
@@ -108,6 +111,11 @@ let deps: { busy: (folder: string) => boolean; log: ArchiveLog } = { busy: () =>
 let clock: () => number = () => Date.now();
 /** Tests only: replace the clock, so a break can be waited out without waiting. `null` restores it. */
 export function setArchiveClock(fn: (() => number) | null): void { clock = fn ?? (() => Date.now()); }
+/**
+ * Test seam: `afterLanding` is awaited in runChapter between a chapter's landing and its count -- the moment the
+ * downloads view already lists what landed, and the count has not yet said whether it was the series' first.
+ */
+export const archiveHooks: { afterLanding?: (seriesId: string, number: number) => void | Promise<void> } = {};
 
 /** A chapter (or a listing refresh) in flight, by the source it is on. One per source. */
 interface Flight { seriesId: string; number: number | null; folder: string; source: string; startedAt: number }
@@ -120,9 +128,18 @@ const flights = new Map<string, Flight>();
 interface Unscanned {
   folder: string;
   firstAt: number;
-  items: Map<number, { landed?: Landed; publishedAt?: string; newRow: boolean }>;
+  /** `now`: a series' first landing, being scanned in at once (runChapter); archiveScanPending names it. */
+  items: Map<number, { landed?: Landed; publishedAt?: string; newRow: boolean; now?: boolean }>;
 }
 const unscanned = new Map<string, Unscanned>();
+/**
+ * A series' first chapter from the archive while it is being fetched, by folder and number (flightKey): what
+ * archiveScanPending names until its unscanned item carries `now`. The downloads view lists a chapter the moment it
+ * lands, inside the download, and whether it was the first is known only after the count that follows: marked then, a
+ * look in between listed it before the library held it (v0.49.1 review). Marked before the download instead.
+ */
+const firstInFlight = new Set<string>();
+const flightKey = (folder: string, n: number): string => `${folder}\u0000${n}`;
 /** Numbers a scan could not index although the file is there: stepped over until a restart, never refetched. */
 const stuck = new Map<string, Set<number>>();
 /**
@@ -170,6 +187,7 @@ export function resetArchiveMemory(): void {
   myFolders.clear();
   flights.clear();
   unscanned.clear();
+  firstInFlight.clear();
   stuck.clear();
   lastGlobal = null;
   lastWaits.clear();
@@ -869,10 +887,27 @@ async function runChapter(
   // Every source this chapter asked, with what it failed with (undefined: it answered). The chosen copy's, and
   // each alternate downloadWithFallback turned to after it: every one of them was a request to a site.
   const asked = new Map<string, unknown>();
+  // The series' first chapter from its archive: scanned in the moment it lands (below), and marked for its whole
+  // flight.
+  let first = false;
+  const key = flightKey(r.folder, n);
   try {
     // Asked BEFORE the download, so what the scan adds can be told apart from a row that was already there (a
     // verify-marked missing file coming back is not a new chapter for the Updates count).
     const had = await one<{ x: number }>('SELECT 1 AS x FROM lib_books WHERE series_id = $1 AND number = $2::real LIMIT 1', [r.series_id, n]);
+    // Whether it is the first, asked beside `had` and before the download for the same reason. Only for a series the
+    // library holds nothing of: the scan walks the whole library, and a series the library already shows reads no
+    // "0 chapters" while a chapter waits for its batch. Every first landing walked it, and a bulk enqueue lands one
+    // first chapter per series on each source's first pass: a full scan each (v0.49.1 review).
+    // Reintroduce by leaving the library out (drop `in_library`): "a series the library already holds" in
+    // archive.int.test.ts finds a scan run, and chapter 3 in the library before its batch.
+    const was = await one<{ done: number; in_library: boolean }>(
+      `SELECT a.done_count AS done, EXISTS (SELECT 1 FROM lib_books b WHERE b.series_id = a.series_id) AS in_library
+         FROM archive_queue a WHERE a.series_id = $1`, [r.series_id]).catch(() => null);
+    first = !!was && Number(was.done) === 0 && !was.in_library;
+    // Reintroduce by marking it only once it is counted (drop this line): "listed in the downloads once the library
+    // holds it" in archive.int.test.ts finds it listed between its landing and its count.
+    if (first && gen === generation) firstInFlight.add(key);
     const sweepRule = await sweepAllowedFor(await seriesIsAdult(r.series_id));
     const allowed = (src: string) => sweepRule(src) && capOk(src);
     const meta = { series: r.title, summary: r.summary ?? undefined, author: r.author ?? undefined, genres: r.genres ?? undefined, url: r.web ?? undefined, status: r.status ?? undefined };
@@ -906,10 +941,26 @@ async function runChapter(
           landed, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
         }, clock());
       }
+      await archiveHooks.afterLanding?.(r.series_id, n);
       // A chapter in is progress: its three days without any (attentionOf) start again, and so do its idle turns.
-      await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
-                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1`,
-      [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => {});
+      const counted = await q<{ n: number }>(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
+                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1
+                RETURNING done_count AS n`,
+      [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => [] as Array<{ n: number }>);
+      // The first chapter an archive lands for a series the library holds nothing of (`first`) is scanned in at once;
+      // the rest wait for a batch (maybeFlush). Until the batch, a series added with nothing but its archive read
+      // "0 chapters · none fetched yet" under a band saying "1 of 14", and Came in today showed its tile with no cover
+      // (v0.49.1). Not awaited: the source's break and pace are this chapter's to write, whatever the scan takes.
+      // Reintroduce by leaving it to the batch: "the first chapter an archive lands" in archive.int.test.ts finds no
+      // book row.
+      if (first && Number(counted[0]?.n) === 1 && gen === generation) {
+        // `now` takes over from the flight's mark (firstInFlight), which ends with this chapter's turn: it keeps the
+        // chapter out of the downloads view until the scan is done. Reintroduce by dropping it: "listed in the
+        // downloads once the library holds it" in archive.int.test.ts finds it listed once its turn is over.
+        const item = unscanned.get(r.series_id)?.items.get(n);
+        if (item) item.now = true;
+        void track(flushArchiveScan());
+      }
       // A chapter the site let through ends its refusal run. Taken from another followed source instead, the
       // chosen one did NOT let it through: a refusal there still backs it off, landed or not -- and so does one
       // from an alternate asked on the way.
@@ -983,6 +1034,9 @@ async function runChapter(
     await q('UPDATE archive_queue SET current_number = NULL WHERE series_id = $1', [r.series_id]).catch(() => {});
     if (diskFull) deps.log.warn(`the library disk is at the downloader's floor; the archive waits ${DISK_WAIT_MS / MIN} minutes`);
     if (gen === generation) maybeFlush(now);
+    // The first chapter's mark goes with its flight; `now`, set when it was counted, holds it from here. Only this
+    // generation's: after a reset the same chapter's new flight may have put its own.
+    if (gen === generation) firstInFlight.delete(key);
     end(r, S, gen);
   }
 }
@@ -1087,6 +1141,19 @@ async function noteUnscanned(seriesId: string, folder: string, n: number, item: 
     item = { ...item, newRow: !had };
   }
   u.items.set(n, { landed: item.landed, publishedAt: item.publishedAt, newRow: item.newRow ?? false });
+}
+
+/**
+ * A series' first chapter from the archive, from before it is fetched (firstInFlight) until the scan it starts when it
+ * lands is done (`now`, runChapter). The downloads view lists it only once the library holds it (routes/sources.ts
+ * activityFor): a library scan takes seconds on a large library, and listed at once it put a tile with no cover in
+ * Came in today, and the series page re-read its chapters on the landing and still found none (v0.49.1). A later
+ * chapter, or the first of a series the library already holds, waits for its batch in plain sight, as before.
+ */
+export function archiveScanPending(folder: string, number: number): boolean {
+  if (firstInFlight.has(flightKey(folder, number))) return true;
+  for (const u of unscanned.values()) if (u.folder === folder && u.items.get(number)?.now) return true;
+  return false;
 }
 
 /** Scan when five chapters are waiting, or the oldest has waited twenty minutes. */
@@ -1337,12 +1404,18 @@ export async function archiveView(mayBrowse: (seriesId: string) => boolean, me: 
 export async function archiveSummaryFor(seriesId: string, me: string | null): Promise<{
   state: string; done: number; left: number | null; failed: number; etaMs?: number; nextAt?: string;
   waiting?: ArchiveSeriesView['waiting']; attention?: ArchiveSeriesView['attention']; mine: boolean;
+  pausedForAll: boolean;
 } | null> {
   const v = await archiveView((id) => id === seriesId, me);
   const r = v.series.find((x) => x.seriesId === seriesId);
   if (!r) return null;
   return {
     state: r.state, done: r.done, left: r.left, failed: r.failed, mine: r.mine,
+    // The admin's pause of every archive, which a queued row's state does not show. The page reads it from the queue
+    // (GET /api/sources/jobs), which a viewer who may not download is refused, and their run row said "being archived
+    // slowly" under it (v0.49.1). Reintroduce by leaving it out: "the series page" in archiveRoutes.int.test.ts finds
+    // the line silent about it.
+    pausedForAll: v.paused,
     ...(r.etaMs !== undefined ? { etaMs: r.etaMs } : {}), ...(r.nextAt ? { nextAt: r.nextAt } : {}),
     ...(r.waiting ? { waiting: r.waiting } : {}), ...(r.attention ? { attention: r.attention } : {}),
   };

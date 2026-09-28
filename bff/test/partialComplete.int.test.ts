@@ -379,3 +379,34 @@ test('replace is what bypasses the on-disk skip, and only replace', { skip }, as
   assert.equal(again?.pages, 5, 'with replace the file is fetched and written again');
   assert.equal(asked.length, 5);
 });
+
+test('a chapter the completion pass makes whole is no longer "saved with pages missing" in Came in today', { skip }, async () => {
+  // The completion pass merges the missing pages in place, and no download says so: Came in today kept its "1 chapter
+  // saved with pages missing" after a repair had healed that chapter (v0.49.1). Reintroduce by dropping healFinished
+  // from completePartial's same-copy branch: the entry still reads partial.
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  const of12 = () => listActivity().recent.filter((e) => e.folder === FOLDER && e.number === 12);
+  await partial(12);
+  assert.deepEqual(of12().map((e) => e.status), ['partial'], 'PREMISE: it came in with a page missing');
+  failing.delete('c12/3');
+  assert.equal(await completePartial(await row(12), { alternates: async () => [] }), 'completed');
+  assert.deepEqual(of12().map((e) => [e.status, e.reason]), [['done', undefined]],
+    'a chapter the completion pass makes whole is still saved with pages missing');
+});
+
+test('a re-sliced copy that is not kept leaves the downloads at once', { skip }, async () => {
+  // A re-sliced chapter is fetched whole, and what arrives short is kept only with fewer holes than ours. One no
+  // better was never dropped, so it waited out downloadActivity's HOLD_MS as a download still running: ten minutes of
+  // a spinning Library ring (v0.49.1, the linger v0.49.0 fixed in downloadWithFallback). Reintroduce by dropping the
+  // `drop` in completePartial's re-slice branch: it is active.
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  await partial(13); // five pages, the fourth missing
+  pageCount.set('c13', 6); // re-sliced to six...
+  failing.delete('c13/3');
+  failing.add('c13/5'); // ...and one short again: no better than ours
+  assert.equal(await completePartial(await row(13), { alternates: async () => [] }), 'unchanged', 'PREMISE: not kept');
+  const of13 = (e: { folder: string; number: number }) => e.folder === FOLDER && e.number === 13;
+  assert.deepEqual(listActivity().active.filter(of13), [], 'a re-sliced copy that is not kept is still downloading');
+  assert.ok(listActivity().recent.some((e) => of13(e) && e.status === 'failed' && /not kept/.test(e.reason ?? '')), 'it ended as not kept');
+  assert.deepEqual((await row(13)).missing_pages, [4], 'and ours is as it was');
+});

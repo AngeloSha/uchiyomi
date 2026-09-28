@@ -16,7 +16,7 @@
  */
 import { q } from './db';
 import {
-  onFinished, reasonSaidOf, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
+  onFinished, onHealed, reasonSaidOf, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
   type ActivityEntry, type ActivityStatus, type Origin,
 } from './downloadActivity';
 
@@ -49,6 +49,18 @@ function write(e: Readonly<ActivityEntry>): void {
   }
 }
 
+/**
+ * A chapter written down as `partial` is whole now (downloadActivity.ts healFinished): its rows say landed, so a
+ * restart does not bring the "saved with pages missing" back. After the writes queued before it, in the same line:
+ * the row it rewrites may be one of them.
+ */
+function heal(folder: string, number: number): void {
+  tail = tail.then(() => q(
+    `UPDATE download_log SET status = 'done', reason = NULL WHERE folder = $1 AND number = $2::real AND status = 'partial'`,
+    [folder, number],
+  )).then(() => {}, warn(`could not write down that ${folder} ch ${number} is whole now`));
+}
+
 /** Wait for every write (and prune) started so far. */
 export async function flushActivityLog(): Promise<void> {
   for (let t = tail; ; t = tail) { await t; if (t === tail) return; }
@@ -76,6 +88,7 @@ export async function startActivityLog(now = Date.now()): Promise<number> {
   if (!listening) {
     listening = true;
     onFinished(write);
+    onHealed(heal);
   }
   await pruneActivityLog(now);
   const since = new Date(now - ACTIVITY_TTL_MS);

@@ -41,7 +41,7 @@ test('a cleanup run that could not look says why, instead of reporting nothing d
   // deleted" is how it goes unnoticed for a month.
   assert.match(taskResult({ deleted: 0, bytes: 0, skipped: 'read_only' }), /not writable/);
   assert.match(taskResult({ deleted: 0, bytes: 0, skipped: 'shutdown' }), /restart/);
-  assert.match(taskResult({ deleted: 3, bytes: 9, failed: 2 }), /2 could not be deleted/);
+  assert.match(taskResult({ deleted: 3, bytes: 9, failed: 2 }), /2 chapters could not be deleted/);
 });
 
 test('a cleanup that stopped at a missing folder says the volume is missing, not that deletes failed', () => {
@@ -49,7 +49,7 @@ test('a cleanup that stopped at a missing folder says the volume is missing, not
   // deleted", which sends the admin to chmod a folder that is not there.
   const r = taskResult({ deleted: 2, bytes: 9, failed: 3, stopped: 'unmounted' });
   assert.match(r, /2 chapters deleted/);
-  assert.match(r, /3 could not be deleted/);
+  assert.match(r, /3 chapters could not be deleted/);
   assert.match(r, /volume mounted/, 'the unmounted stop is named');
   assert.doesNotMatch(taskResult({ deleted: 2, bytes: 9, failed: 0 }), /mounted/, 'a run that did not stop says nothing about volumes');
 });

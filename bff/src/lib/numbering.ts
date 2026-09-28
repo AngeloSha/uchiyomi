@@ -615,8 +615,14 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
  * phase the journal has reached): "a resume that waited behind another" there finds it overwritten too.
  */
 async function runJournal(seriesId: string, j: Journal, fresh: boolean): Promise<boolean> {
-  const mine = !busyFolders.has(j.folder);
-  if (mine) busyFolders.add(j.folder);
+  // The folder is marked busy while the renames run: a share of the one mark every run of a journal holds together.
+  // ⚠️ A share, not "mine if nobody marked it". A resume that waited behind another run found the folder marked by
+  // THAT run, took no mark of its own, and when that run failed and cleared its mark the resume took over and renamed
+  // with nothing marked -- a Fetch or the archive could write into the folder mid-rename (v0.49.1). Reintroduce by
+  // taking the mark only when the folder is free (`!busyFolders.has`): "a resume that waited behind another" in
+  // numbering.int.test.ts finds the folder free during its renames.
+  const unmark = markFolder(j.folder);
+  running.set(seriesId, (running.get(seriesId) ?? 0) + 1);
   try {
     return await withScansHeld(async () => {
       if (!fresh) {
@@ -641,8 +647,48 @@ async function runJournal(seriesId: string, j: Journal, fresh: boolean): Promise
       return true;
     });
   } finally {
-    if (mine) busyFolders.delete(j.folder);
+    unmark?.();
+    const left = (running.get(seriesId) ?? 1) - 1;
+    if (left > 0) running.set(seriesId, left);
+    else running.delete(seriesId);
   }
+}
+
+/** How many runs of a journal hold a share of their folder's busy mark, by folder. */
+const marks = new Map<string, number>();
+
+/**
+ * A share of the folder's busy mark for one run of a journal, and the way to give it back: the mark goes when the
+ * last share does. Null when the folder is marked by someone else (a download into it) -- that mark is theirs to
+ * clear, and a run that took it over would clear it under them.
+ */
+function markFolder(folder: string): (() => void) | null {
+  const held = marks.get(folder) ?? 0;
+  if (!held && busyFolders.has(folder)) return null;
+  marks.set(folder, held + 1);
+  busyFolders.add(folder);
+  return () => {
+    const left = (marks.get(folder) ?? 1) - 1;
+    if (left > 0) { marks.set(folder, left); return; }
+    marks.delete(folder);
+    busyFolders.delete(folder);
+  };
+}
+
+/**
+ * Journals being run in this process right now, by series: a confirmed apply, or a resume finishing one (counted,
+ * since a resume can wait behind the run it found). What tells Health's numbering row that a journal on the row is
+ * being carried out rather than left by a crash.
+ */
+const running = new Map<string, number>();
+
+/**
+ * A renumber of this series is being carried out right now, in this process: a confirmed apply from the moment its
+ * plan is built, or a resume finishing one. Health's numbering row read every journal on the row as "interrupted",
+ * this one included, while it was still applying (v0.49.1).
+ */
+export function renumberRunning(seriesId: string): boolean {
+  return settling.has(seriesId) || running.has(seriesId);
 }
 
 async function applyRenumber(s: SeriesForPlan, built: Built): Promise<void> {

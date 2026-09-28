@@ -291,6 +291,6 @@ test('no English words wrap a relativeTime: the phrase is in the reader\'s langu
   const cards = readFileSync(join(ROOT, 'components/cards.tsx'), 'utf8');
   assert.match(cards, /tr\('on \{device\} \{when\}', \{ device: where, when: relativeTime\(elsewhere\.at\) \}\)/,
     "the Continue card's 'on <device> <when>' is English around the reader's language");
-  assert.match(cards, /const where = elsewhere \? shownDeviceName\(elsewhere\.name\) \|\| tr\('another device'\) : '';/,
+  assert.match(cards, /const where = elsewhere \? shownDeviceName\(elsewhere\.name, \{ device: true \}\) \|\| tr\('another device'\) : '';/,
     "the Continue card names the device with a stored English fallback (\"on Browser\") instead of the reader's words");
 });

@@ -77,6 +77,11 @@ export interface ListingArchive {
   waiting?: ArchiveEntry['waiting'];
   attention?: ArchiveEntry['attention'];
   mine: boolean;
+  /**
+   * The admin's pause of every archive (`paused` on the queue), which a queued row's `state` does not show: for a
+   * viewer who may not download, and so cannot read the queue. Since v0.49.1; absent from an older server.
+   */
+  pausedForAll?: boolean;
 }
 
 /** POST /api/sources/archive's answer, one per series asked for. */

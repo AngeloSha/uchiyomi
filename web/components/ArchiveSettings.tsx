@@ -31,7 +31,7 @@ export function DownloadsSection({ data, save }: { data: any; save: Save }) {
       {/* On is "not paused": the column is archive_paused, and the switch says what an admin wants to know. */}
       <SwitchRow label={tr('Slow archive')}
         help={desktop
-          ? joinSentences(tr('Off pauses every archive; nothing queued is lost.'), tr('Runs only while Uchiyomi is running, even when it is only in the tray. If the PC sleeps at night, a night-time window will rarely get anything done.'))
+          ? joinSentences(tr('Off pauses every archive; nothing queued is lost.'), tr('Runs only while Uchiyomi is running, even when it is only in the tray or menu bar. If the PC sleeps at night, a night-time window will rarely get anything done.'))
           : tr('Off pauses every archive; nothing queued is lost.')}
         on={data.archive_paused !== true} onChange={(next) => save({ archivePaused: !next })} />
       <NumberRow label={tr('Chapters an hour, per source')} min={ARCHIVE_PACE.perHourRange[0]} max={ARCHIVE_PACE.perHourRange[1]} value={perHour}

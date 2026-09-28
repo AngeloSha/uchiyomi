@@ -193,7 +193,7 @@ export function taskResult(r: any): string {
     if (r.skipped === 'shutdown') return ` \u00b7 ${tr('stopped for a restart')}`;
     if (r.skipped) return ` \u00b7 ${tr('switched off')}`;
     const bits = [(r.deleted === 1 ? tr('1 chapter deleted') : tr('{n} chapters deleted', { n: r.deleted })), tr('{size} freed', { size: bytes(r.bytes || 0) })];
-    if (r.failed) bits.push(r.failed === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: r.failed }));
+    if (r.failed) bits.push(r.failed === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: r.failed }));
     // A run that stopped because EVERY due chapter's folder was missing along with its file is the download
     // volume not being mounted; the chapters it left are the ones still due. Without this line the result
     // reads as a quiet "0 chapters deleted" when the only fix is to mount the share, after which the next

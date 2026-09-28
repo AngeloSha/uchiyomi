@@ -14,7 +14,7 @@ import { visibleToAll } from './visibility';
 import { latestSolverVersion } from './solverVersion';
 import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
-import { solverPing, solverUrl } from './sources/flaresolverr';
+import { solverPingShared, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { lastSuwayomiLoad } from './sources/suwayomi/register';
@@ -32,7 +32,7 @@ import { applyIgnores, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, t
 import { chapterFileRel } from './downloader';
 import { forDesktop, isDesktop } from './desktop';
 import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
-import type { NumberingNote } from './numbering';
+import { renumberRunning, type NumberingNote } from './numbering';
 import { detailOf, joined, noteOf, own, say, saidOf, summaryOf, type Part, type Said } from './said';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
@@ -539,7 +539,13 @@ async function numberingCheck(): Promise<HealthCheck | null> {
     const held = joined('sentence', say('numbering.held'));
     const auto = r.numbering_by !== 'manual';
     let item: HealthItem | null = null;
-    if (r.journal) {
+    if (r.journal && renumberRunning(r.id)) {
+      // Its journal is on the row from the first rename to the commit, and Health read every journal as a crash's
+      // (v0.49.1): "interrupted" while the confirmed renumber was still applying. A greyed line while it runs: nothing
+      // waits for anyone, and it ends by itself.
+      // Reintroduce by answering "interrupted" for it: "while a confirmed renumber applies" in numbering.int.test.ts.
+      item = { ...base, detail: `Its confirmed renumber is being applied now. ${held.text}`, info: true };
+    } else if (r.journal) {
       item = { ...base, ...detailOf([say('numbering.interrupted'), held]) };
     } else if (r.numbering_pending === 'remap') {
       item = { ...base, ...detailOf([say('numbering.remap', { name }), held]), actions: ['renumber'] };
@@ -1188,7 +1194,8 @@ export async function solverBlaming(): Promise<string[]> {
 export { solverVersionLabel } from './said';
 
 export async function solverHealth(): Promise<HealthCheck> {
-  const ping = await solverPing();
+  // The ping the extension engine row reads too (engineHealth.ts): the two rows cannot disagree about the solver.
+  const ping = await solverPingShared();
   const blaming = await solverBlaming();
 
   const url = solverUrl();

@@ -1,3 +1,5 @@
+import { t as tr } from './i18n';
+
 // Stable per-install device id, used for refresh-token + download tracking.
 export function deviceId(): string {
   if (typeof window === 'undefined') return 'ssr';
@@ -30,7 +32,17 @@ export function deviceName(): string | undefined {
 /** The English fallbacks deviceName() stored before v0.49.0. Sessions keep them until they expire. */
 const STORED_FALLBACKS = new Set(['Browser', 'device']);
 
-/** A stored device name worth showing, or null for none -- the caller says "another device" in the reader's words. */
-export function shownDeviceName(name: string | null | undefined): string | null {
-  return name && !STORED_FALLBACKS.has(name) ? name : null;
+/**
+ * A stored device name worth showing, or null for none -- the caller says "another device" in the reader's words.
+ *
+ * Two names are the SERVER's, stored in English (bff routes/auth.ts) and shown in English everywhere until v0.49.1:
+ * 'This PC', the desktop app's own window, and 'SSO', a sign-in through single sign-on. Both are shown in the
+ * reader's language now. 'SSO' says how someone signed in, not where, so `device` (a sentence that reads "on
+ * {device}", ContinueCard's) leaves it unnamed: "on Single sign-on" is not a place.
+ */
+export function shownDeviceName(name: string | null | undefined, o: { device?: boolean } = {}): string | null {
+  if (!name || STORED_FALLBACKS.has(name)) return null;
+  if (name === 'This PC') return tr('This PC');
+  if (name === 'SSO') return o.device ? null : tr('Single sign-on');
+  return name;
 }

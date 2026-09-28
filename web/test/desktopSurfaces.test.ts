@@ -125,7 +125,9 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   // v0.49.0 (#72): the server's card is the setup screen (components/EngineSetup.tsx), whose steps name the shipped
   // container; engineSetup.test.ts pins them.
   assert.match(ext, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the server\'s own card is not the setup screen');
-  assert.match(admin, /\{isDesktop\(\) \? ' Hide languages you don\\'t read\.' : ' Hide languages you don\\'t read, or raise SUWAYOMI_MAX_SOURCES\.'\}/, 'the source-limit line names an env var on desktop, or changed on the server');
+  // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated.
+  assert.match(admin, /\{sentenceGap\(overCap\)\}\{isDesktop\(\)\s*\? tr\('Hide languages you don’t read\.'\)\s*: tr\('Hide languages you don’t read, or raise \{name\}\.', \{ name: 'SUWAYOMI_MAX_SOURCES' \}\)\}/,
+    'the source-limit line names an env var on desktop, or changed on the server');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));
   assert.match(card, /import \{ bridge, type EngineStatus \} from '@\/lib\/desktop';/);

@@ -338,7 +338,9 @@ which is also how a newly followed source's chapters arrive), `sweep` (the sched
 not listed. Each viewer gets the series they can browse; a folder that is not a series yet (an add's first chapter)
 goes to whoever started it and to admins. Since v0.49.0 `recent` survives a restart: every finished chapter is also
 written down (kept a week), and the last day of it, at most 500 entries, is read back when the server starts, with
-fresh `id`s.
+fresh `id`s. Since v0.49.1 a `partial` chapter that is whole now (the completion pass filled its pages, or a later
+download wrote it whole) reads `done`, there and in what is written down; and the slow archive's first chapter of a
+series the library holds nothing of, scanned into the library at once, is listed once the library holds it.
 
 **The slow archive** (since v0.49.0, #117). `POST /api/sources/archive {seriesIds}` (1-500) queues series to be
 fetched a chapter at a time, paced per source — by default four chapters an hour per source, a random 1.5-4 s
@@ -377,7 +379,9 @@ held chapters, below): it is queued, and where it starts is placed
 once the renumbering has settled, in the numbers the series keeps; `nothing` when the selection was the whole
 listing.
 `GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why: "archive"`, and
-`POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. The pacing is
+`POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. Since v0.49.1
+the listing's `archive` carries `pausedForAll`, the admin's pause of every archive (`paused` on the queue), which a
+queued row's `state` does not show: a viewer who may not download cannot read the queue. The pacing is
 the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
 `archiveWindowFrom`/`archiveWindowTo` (0-23, the server's local hours, together or not at all) and
 `archiveMinFreeGb` (1-2000); `GET /api/admin/settings` reads them back as `archive_paused`, `archive_per_hour`,
@@ -1624,9 +1628,10 @@ engine to talk to it answers `{ configured: false, reachable: false, off, platfo
 from `UCHIYOMI_PLATFORM`, Unraid's `HOST_OS` and the compose files' `EXTENSION_ENGINE`), and `linkedSeries`
 counts the series added through an extension. With one it adds `engine` (host and port), `platform`, `retry`
 (`{ attempts, since, nextAt }` while the registration retry runs: every 5 minutes after the first few, until
-the engine answers; otherwise `null`), `lastTry`, `linkedSeries` and, when the engine answers, `solver`
-(`{ supported, enabled, wiring, connectable, url }`, `wiring` one of `ok`, `off`, `localhost`, `other`,
-`unsupported`; `url` is never sent on desktop, where it carries the in-app helper's token). When the engine
+the engine answers; otherwise `null`), `lastTry` and `lastTryOk` (the last attempt to reach the engine, whoever
+made it -- this call's own look included -- and whether it answered; v0.49.1), `linkedSeries` and, when the engine
+answers, `solver` (`{ supported, enabled, wiring, connectable, url }`, `wiring` one of `ok`, `off`, `localhost`,
+`other`, `unsupported`; `url` is never sent on desktop, where it carries the in-app helper's token). When the engine
 answers but the last registration missed it, the call registers its sources before replying, which is what
 makes the setup screen's **Check again** a plain refetch. `POST /api/admin/extensions/solver` points the
 engine's own Cloudflare helper at the solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it on -- only when

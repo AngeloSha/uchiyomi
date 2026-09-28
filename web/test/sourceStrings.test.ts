@@ -160,3 +160,57 @@ test('a device the browser does not name is "another device" in the reader\'s wo
   assert.match(sessions, /\{shownDeviceName\(s\.device_name\) \|\| tr\('Device'\)\}/, 'Admin → Sessions shows a stored English fallback, or "Device" in English');
   assert.doesNotMatch(sessions, /device_name \|\| 'Device'/, 'Admin → Sessions still has the bare-English "Device"');
 });
+
+test('the device names the server stores in English are shown in the reader\'s words, and a sign-in method is no place', () => {
+  // v0.49.1: the desktop window signs in as 'This PC' and single sign-on as 'SSO' (bff routes/auth.ts), stored as the
+  // session's device name and shown in English in every language. Reintroduce by passing them through as stored:
+  // the German session list reads "This PC".
+  const de = JSON.parse(read('public/locales/de.json')) as Record<string, string>;
+  assert.ok(de['This PC'] && de['This PC'] !== 'This PC' && de['Single sign-on'] && de['Single sign-on'] !== 'Single sign-on', 'PREMISE: both are translated');
+  setActiveDict(de);
+  try {
+    assert.equal(shownDeviceName('This PC'), de['This PC'], 'the desktop window\'s stored name is shown in English');
+    assert.equal(shownDeviceName('SSO'), de['Single sign-on'], 'a single sign-on is shown as the English "SSO"');
+    assert.equal(shownDeviceName('iPhone'), 'iPhone', 'a platform is a name');
+    // "on {device}": a single sign-on says how, not where, so ContinueCard says "another device" for it.
+    assert.equal(shownDeviceName('SSO', { device: true }), null, 'a sign-in method reads as a place');
+    assert.equal(shownDeviceName('This PC', { device: true }), de['This PC']);
+  } finally {
+    setActiveDict({});
+  }
+  assert.match(read('components/cards.tsx'), /shownDeviceName\(elsewhere\.name, \{ device: true \}\) \|\| tr\('another device'\)/,
+    'the Continue card names a sign-in method as a device');
+});
+
+/** The source with its comments gone, JSX ones included: what renders, and what the checks below read. */
+const code = (src: string): string =>
+  src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+/**
+ * JSX text a person reads that is not a tr() call: words between a tag's `>` and the next `<`. Code has `(`, `;` or
+ * `=` in it (an arrow's `=>` then a call, a generic's `>` then its argument) and JSX text as good as never does.
+ */
+const bareText = (src: string): string[] =>
+  [...code(src).matchAll(/>([^<>{}();=]*[A-Za-z]{2,}[^<>{}();=]*)</g)].map((m) => m[1].trim()).filter(Boolean);
+/** A toast, a confirm or an error fallback written as an English template or string, not through tr(). */
+const bareCalls = (src: string): string[] =>
+  [...code(src).matchAll(/\b(?:toast|confirm|msgOf\([^,]+,)\s*\(?\s*(`[^`]*[A-Za-z]{3,}[^`]*`|'[^']*[A-Za-z]{3,}[^']*')/g)].map((m) => m[1]);
+
+test("Admin → Extensions → Languages and the Offline page say nothing in bare English", () => {
+  // v0.49.1: pre-existing English in every language -- the Languages panel's heading, counts, note, empty line and
+  // paragraph, the over-the-limit banner and the hide/show toasts; the Offline page's counts ("Deleted ${n} chapters",
+  // "12 chapters · …"), its confirms and its storage line. Reintroduce any one of them as it was: this names it.
+  const admin = read('app/admin/page.tsx');
+  const toggle = admin.slice(admin.indexOf('const toggleLang = async'), admin.indexOf('const list = cat?.content'));
+  const panel = toggle + admin.slice(admin.indexOf('{/* languages — a standing instruction'), admin.indexOf('Out of date is a thing to be told'));
+  assert.ok(toggle.includes('/api/admin/extensions/sources/bulk') && panel.includes("tr('Languages')"), 'PREMISE: the slices hold toggleLang and the Languages panel');
+  assert.deepEqual(bareText(panel), [], 'bare English text in the Languages panel');
+  assert.deepEqual(bareCalls(panel), [], 'a bare English toast in the Languages panel');
+  const offline = read('app/downloads/page.tsx');
+  assert.deepEqual(bareText(offline), [], 'bare English text on the Offline page');
+  assert.deepEqual(bareCalls(offline), [], 'a bare English toast or confirm on the Offline page');
+  assert.doesNotMatch(code(offline), /label: '[A-Z]/, 'a bare English button label on the Offline page');
+  // The counts beside them, one pair each (localeCoverage.test.ts holds every pair in the app to its other half).
+  assert.match(read('app/library/page.tsx'), /total === 1 \? tr\('1 series'\) : tr\('\{n\} series', \{ n: total \}\)/, 'the library counts its series in English');
+  assert.match(read('app/series/page.tsx'), /momentCount === 1 \? tr\('1 saved page'\)/, '"1 saved pages" on the series page');
+  assert.match(read('components/SourcePicker.tsx'), /count === 1 \? tr\('1 source'\)/, '"All sources · 1 sources" on Discover');
+});

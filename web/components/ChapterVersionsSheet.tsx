@@ -100,7 +100,7 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
                   {c.blocked && <span className="rounded-[4px] border border-rose-500/40 px-1.5 text-[10px] leading-4 text-rose-300">{tr('blocked group')}</span>}
                 </span>
                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-fog-500">
-                  {c.pages != null && <span>{tr('{n} pages', { n: c.pages })}</span>}
+                  {c.pages != null && <span>{c.pages === 1 ? tr('1 page') : tr('{n} pages', { n: c.pages })}</span>}
                   {c.publishedAt && <span>{relativeTime(c.publishedAt)}</span>}
                   {c.source && (
                     <span className="inline-flex min-w-0 items-center gap-1">

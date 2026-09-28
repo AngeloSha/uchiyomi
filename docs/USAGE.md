@@ -573,7 +573,9 @@ The Library ring never turns for an archive (see *What is downloading*, above).
 
 On the series page the band above the chapter list shows the archive — *Archiving slowly · 120 of 900 · About 8
 days* — with the same keys and **Details**, and the grey rows it is about to fetch fold into one line,
-*Ch. 121–900 · 780 chapters being archived slowly*, with **Show** (next section).
+*Ch. 121–900 · 780 chapters being archived slowly*, with **Show** (next section). While that archive is paused, or
+an admin has paused every archive, nothing is fetching them and the line says so: *Ch. 121–900 · 780 chapters in a
+paused slow archive*.
 
 **Needs attention** lists an archive whose site keeps refusing, whose source has been missing or switched off for a
 day, that waits for disk space (an admin gets **Settings** there), that has been paused for a week, or that has had
@@ -637,8 +639,9 @@ hold. Each grey row's caption says why it is not here:
   the slow archive instead (since v0.49.0; see *Fetching a whole series slowly* above).
 - Chapters **the slow archive is about to fetch** fold the same way into a line of their own, `Ch. 121–900 · 780
   chapters being archived slowly · 120 of 900`, with **Show** and nothing to press: the archive takes them, and
-  its keys are on the band above the list. A chapter it will not take — one that failed three times, is held for
-  a group, or only a blocked group released — is not in that line.
+  its keys are on the band above the list. While it is paused, or every archive is, the line reads `Ch. 121–900 ·
+  780 chapters in a paused slow archive · 120 of 900`, for everyone who can open the series. A chapter it will not
+  take — one that failed three times, is held for a group, or only a blocked group released — is not in that line.
 
 Nothing is asked of a source when you open the page. The listing is what the last check saw — the nightly
 sweep, or *Check now* — and the line under the title says how old it is on a wide screen (*checked 2 hours

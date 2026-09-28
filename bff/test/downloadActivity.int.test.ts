@@ -92,6 +92,34 @@ test('an incomplete chapter is partial once kept, and failed if it never is', as
   assert.equal(later.recent.find((e) => e.number === 6)?.status, 'failed');
 });
 
+test('a chapter that lands whole after landing with holes is no longer partial, and only that chapter', async () => {
+  // Came in today counted "1 chapter saved with pages missing" from the day's entries, and kept counting the first
+  // landing after a later one -- a refetch, the completion pass's other copy -- had written the chapter whole
+  // (v0.49.1). Reintroduce by dropping the healFinished call in endDownload: the first entry still reads partial.
+  const act = await import('../src/lib/downloadActivity');
+  act.clearActivity();
+  const partialOf = async (folder: string, n: number) => {
+    const id = act.beginDownload({ folder, title: 'T', number: n, source: 's' });
+    const hold = { missing: [2], write: async () => ({ pages: 10, missing: [2] }) };
+    act.holdPartial(id, hold);
+    await hold.write();
+  };
+  await partialOf('F', 7);
+  await partialOf('F', 8);
+  await partialOf('G', 7);
+  const whole = act.beginDownload({ folder: 'F', title: 'T', number: 7, source: 's2' });
+  act.endDownload(whole, { status: 'done', pages: 10 });
+  const said = (folder: string, n: number) => act.listActivity().recent.filter((e) => e.folder === folder && e.number === n).map((e) => [e.status, e.reason]);
+  assert.deepEqual(said('F', 7), [['done', undefined], ['done', undefined]], 'a chapter that landed whole later is still saved with pages missing');
+  assert.deepEqual(said('F', 8), [['partial', 'saved with 1 page missing']], 'another chapter of the series is healed with it');
+  assert.deepEqual(said('G', 7), [['partial', 'saved with 1 page missing']], 'the same number in another series is healed with it');
+  // What the completion pass calls when it fills the holes in place, with no download to say so.
+  assert.equal(act.healFinished('F', 8), 1);
+  assert.equal(act.healFinished('F', 8), 0, 'twice is once');
+  assert.deepEqual(said('F', 8), [['done', undefined]]);
+  act.clearActivity();
+});
+
 // ---------------------------------------------------------------------------------------------- the route
 const SRC = 'act-src';
 const LIB_A = 'lib_act_a';

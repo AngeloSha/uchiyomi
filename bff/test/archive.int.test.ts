@@ -135,6 +135,11 @@ async function series(key: string, src: string, numbers: number[], o: { floor?: 
 }
 
 const row = (id: string) => one('SELECT * FROM archive_queue WHERE series_id = $1', [id]);
+/**
+ * An archive that has landed a chapter of this series before. The first one it lands is scanned in at once (v0.49.1),
+ * and the tests that are about a chapter waiting for its batch scan need theirs to be a later one.
+ */
+const pastFirst = (id: string) => q('UPDATE archive_queue SET done_count = 1 WHERE series_id = $1', [id]);
 const pace = (src: string) => one('SELECT * FROM archive_pace WHERE source_id = $1', [src]);
 const tick = (o: Parameters<typeof arch.archiveTick>[0] = {}) => arch.archiveTick(o);
 const onDiskNums = (folder: string) => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].filter((n) => existsSync(join(DL, folder, `Chapter ${n}.cbz`)));
@@ -214,6 +219,7 @@ after(async () => {
 test('a restart keeps its place and its break', { skip }, async () => {
   const s = await series('restart', A, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   const q0 = await row(s.id);
   assert.equal(q0.direction, 'up', 'nothing held: from chapter one');
   assert.ok(Math.abs(Number(q0.boundary) - 10.001) < 1e-4, `the boundary is a hair above the newest listed (${q0.boundary})`);
@@ -915,6 +921,7 @@ test('a chapter the archive landed and has not scanned yet is in the plan a renu
   const { planFor } = await import('../src/lib/numbering');
   const s = await series('plan', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   await tick();
   await arch.archiveIdle();
   assert.deepEqual(onDiskNums(s.folder), [1]);
@@ -940,6 +947,7 @@ test('a confirmed renumber scans in what the archive landed before its apply rea
   const { requestNumbering } = await import('../src/lib/numbering');
   const s = await series('settle', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   await tick();
   await arch.archiveIdle();
   assert.deepEqual(onDiskNums(s.folder), [1]);
@@ -961,6 +969,7 @@ test('a confirmation with chapters still coming in does not wait for the library
   const { requestNumbering } = await import('../src/lib/numbering');
   const s = await series('settlewait', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   await tick();
   await arch.archiveIdle();
   assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'PREMISE: landed, and waiting for its batch scan');
@@ -970,9 +979,115 @@ test('a confirmation with chapters still coming in does not wait for the library
   assert.equal((await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id])).length, 1, 'and the scan it started ran');
 });
 
+test('the first chapter an archive lands for a series is scanned in at once, and the rest wait for a batch', { skip }, async () => {
+  // A batch is five chapters or twenty minutes, and until then the library does not hold what landed: a series added
+  // with nothing but its archive read "0 chapters · none fetched yet" under a band saying "1 of 3", and Came in today
+  // showed its tile with no cover (v0.49.1). Reintroduce by leaving the first chapter to the batch (drop the flush after
+  // the first landing in runChapter): no book row.
+  const s = await series('firstscan', A, [1, 2, 3]);
+  const books = async () => (await q('SELECT number FROM lib_books WHERE series_id = $1 ORDER BY number', [s.id])).map((b: any) => Number(b.number));
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual((await step()).started.map((x) => x.number), [1]);
+  assert.deepEqual(await books(), [1], 'the first chapter an archive lands is not in the library');
+  assert.equal(Number((await one('SELECT books_count FROM lib_series WHERE id = $1', [s.id])).books_count), 1, 'and the series counts it');
+  assert.deepEqual((await step()).started.map((x) => x.number), [2]);
+  assert.deepEqual(onDiskNums(s.folder), [1, 2]);
+  assert.deepEqual(await books(), [1], 'a later one waits for its batch');
+});
+
+test('the first chapter of a series the library already holds waits for its batch, as the rest do', { skip }, async () => {
+  // Only a series the library holds nothing of has its first chapter scanned in at once: until then its page reads
+  // "0 chapters". The scan walks the whole library, and it ran for every series' first chapter, one the library already
+  // showed too -- a bulk enqueue lands one first chapter per series on each source's first pass, a full scan each
+  // (v0.49.1 review). Reintroduce by leaving the library out (drop `in_library` in runChapter): a scan runs, and
+  // chapter 3 is in the library before its batch.
+  const { scanCount } = await import('../src/lib/library');
+  const s = await series('inlibrary', A, [1, 2, 3, 4], { held: [4] });
+  const books = async () => (await q('SELECT number FROM lib_books WHERE series_id = $1 ORDER BY number', [s.id])).map((b: any) => Number(b.number));
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  // Whether the downloads view keeps it out at its landing, before the count.
+  let kept: boolean | null = null;
+  arch.archiveHooks.afterLanding = (id, n) => { if (id === s.id) kept = arch.archiveScanPending(s.folder, n); };
+  const scans = scanCount();
+  try {
+    assert.deepEqual((await step()).started.map((x) => x.number), [3], 'PREMISE: down from the chapter it holds');
+  } finally {
+    arch.archiveHooks.afterLanding = undefined;
+  }
+  assert.deepEqual(onDiskNums(s.folder), [3], 'PREMISE: chapter 3 landed');
+  assert.equal(Number((await row(s.id)).done_count), 1, 'PREMISE: the first chapter this archive landed');
+  assert.equal(scanCount(), scans, 'the first chapter of a series the library already holds was scanned in at once');
+  assert.deepEqual(await books(), [4], 'and was in the library before its batch');
+  assert.equal(kept, false, 'the downloads view kept it out at its landing, for a scan that is not coming');
+});
+
+test("a series' first chapter from the archive is listed in the downloads once the library holds it", { skip }, async () => {
+  // Scanned in at once, but listed the moment it landed, while that scan still ran -- seconds on a large library:
+  // Came in today drew its tile before there was a cover, and the series page re-read its chapters on the landing and
+  // still found none (v0.49.1). Looked at twice, each at a moment of its own: stopped between its landing and its count
+  // (archiveHooks.afterLanding), and once its turn is over with its scan held.
+  // Reintroduce by listing it at once (drop `inLibrary` in routes/sources.ts activityFor), or by marking it only when
+  // it is counted (drop the firstInFlight mark in runChapter): the first look lists it. By dropping `now` on its
+  // unscanned item when it is counted: the second does.
+  const { withScansHeld, scanCount } = await import('../src/lib/library');
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register((await import('../src/routes/sources')).default);
+  await app.ready();
+  const s = await series('heldscan', A, [1, 2, 3]);
+  const listed = async () => ((await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: { authorization: `Bearer ${app.jwt.sign({ sub: adminId, role: 'admin' })}` } }))
+    .json().activity.recent as Array<{ folder: string; number: number }>).filter((e) => e.folder === s.folder).map((e) => e.number);
+  // Stopped between its landing and its count until `go`: there the day's list already has it, and nothing has said yet
+  // whether it was the first.
+  let reached = false;
+  let there!: () => void, go!: () => void;
+  const atLanding = new Promise<void>((r) => { there = r; });
+  const gate = new Promise<void>((r) => { go = r; });
+  arch.archiveHooks.afterLanding = async (id) => { if (id === s.id) { reached = true; there(); await gate; } };
+  // Held from before the landing, so the scan it starts waits here. `open` is set once the hold has begun.
+  let open: (() => void) | undefined;
+  const held = withScansHeld(() => new Promise<void>((r) => { open = r; }));
+  try {
+    const scans = scanCount();
+    assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+    assert.deepEqual((await tick()).started.map((x) => x.number), [1]);
+    // The archive's runs end only past the gate: idle first means the chapter never landed.
+    await Promise.race([atLanding, arch.archiveIdle()]);
+    assert.ok(reached, 'PREMISE: chapter one reached its landing');
+    assert.ok(listActivity().recent.some((e) => e.folder === s.folder && e.number === 1), 'PREMISE: chapter one landed');
+    assert.equal(Number((await row(s.id)).done_count), 0, 'PREMISE: and is not counted yet');
+    assert.deepEqual(await listed(), [], 'the first chapter is listed before the library holds it');
+    go();
+    // Waited for, not timed: the turn ends by itself, and the scan cannot start until the hold is let go.
+    for (let i = 0; i < 1000 && arch.archiveBusy(s.folder); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(arch.archiveBusy(s.folder), false, 'PREMISE: its turn is over');
+    assert.equal(Number((await row(s.id)).done_count), 1, 'PREMISE: counted');
+    assert.equal(scanCount(), scans, 'PREMISE: and its scan is held');
+    assert.deepEqual(await listed(), [], 'the first chapter is listed before the library holds it, once its turn is over');
+  } finally {
+    go();
+    arch.archiveHooks.afterLanding = undefined;
+    // A hold that had not begun yet begins and ends at once.
+    for (let i = 0; i < 200 && !open; i++) await new Promise((r) => setTimeout(r, 10));
+    open?.();
+    await held;
+  }
+  try {
+    await arch.archiveIdle();
+    assert.equal(arch.archiveScanPending(s.folder, 1), false);
+    assert.deepEqual(await listed(), [1], 'and listed once it does');
+  } finally {
+    await app.close();
+  }
+});
+
 test('a stop scans in what it landed, and what landed is not counted as left', { skip }, async () => {
   const s = await series('stopscan', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   await tick();
   await arch.archiveIdle();
   // Reintroduce by answering the stored count (compose): "1 of 3" over chapter one on disk reads 3 left.
@@ -1010,6 +1125,7 @@ test('what the archive scans in is not left, and the view says so at once', { sk
   // flushArchiveScan: this reads 3 left.
   const s = await series('rescan', A, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await pastFirst(s.id);
   await tick();
   await arch.archiveIdle();
   const left = async () => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id)?.left;

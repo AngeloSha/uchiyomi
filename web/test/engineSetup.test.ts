@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
-  PLATFORM_CHIPS, STEP_TEXT, dataPlace, dataWarning, defaultPlatform, headline, offSteps, onSteps, stillLine,
+  PLATFORM_CHIPS, STEP_TEXT, dataPlace, dataWarning, defaultPlatform, headline, lastTryLine, offSteps, onSteps, stillLine,
   type Headline, type Platform, type Step,
 } from '../lib/engineSetup';
 import { healthLinks } from '../lib/healthLinks';
@@ -55,7 +55,7 @@ test('switched off on Compose: take the switch line out and start it, never "emp
   }
   const ext = unset.find((s) => s.command?.endsWith('docker-compose.external-db.yml'));
   assert.deepEqual(ext?.vars, { app: 'uchiyomi', db: 'uchiyomi-db' }, 'the external-database layout is not named by its containers');
-  assert.match(ext?.text ?? '', /Never the one-container file there: it would start on a new, empty database\./, 'the empty-database trap is not said');
+  assert.match(ext?.text ?? '', /Never use the one-container file in that case: it would start on a new, empty database\./, 'the empty-database trap is not said');
   assert.deepEqual(unset.find((s) => s.command?.endsWith('docker-compose.split.yml'))?.vars, { bff: 'uchiyomi-bff', web: 'uchiyomi-web', db: 'uchiyomi-db' });
   assert.match(unset[1].text, /or copy the engine’s lines from that file into yours/, 'adding the lines by hand is not offered');
   assert.equal(unset.at(-1)?.command, 'docker compose up -d');
@@ -159,6 +159,22 @@ test('the card polls the status while it is looked at, and Check again refetches
   assert.doesNotMatch(src, /rounded-full/, 'a capsule');
   const admin = code(read('app/admin/page.tsx'));
   assert.match(admin, /<EngineReadyFoot status=\{status\} desktop=\{isDesktop\(\)\} \/>/, 'the ready panel lost its helper line and Turning it off');
+});
+
+/**
+ * v0.49.1: "Last tried" named the last registration, so right after Check again on an engine that had stopped
+ * answering after a good one it said "Last tried 3 hours ago", a success. The server now sends the last attempt and
+ * how it went. Reintroduce by answering the plain line whatever the outcome: the first assertion fails; by reading
+ * it outside the waiting card, or the old `lastTry` line in EngineSetup.tsx, the last one does.
+ */
+test('"Last tried" is the last attempt to reach the engine, and says when it did not answer', () => {
+  const ago = new Date(Date.now() - 20_000).toISOString();
+  assert.match(lastTryLine({ lastTry: ago, lastTryOk: false }), /^Last tried .+ · no answer$/, 'a try that got no answer reads as the plain line');
+  assert.doesNotMatch(lastTryLine({ lastTry: ago, lastTryOk: true }), /no answer/);
+  assert.match(lastTryLine({ lastTry: ago }), /^Last tried \S/, 'a server that sends no outcome gets the plain line');
+  assert.equal(lastTryLine({ lastTry: null, lastTryOk: false }), '', 'no try, no line');
+  const src = code(read('components/EngineSetup.tsx'));
+  assert.match(src, /: waiting \? lastTryLine\(status\) \|\| null : null;/, 'the waiting card does not read the last try through lastTryLine');
 });
 
 test('the engine row on Health opens the Extensions tab', () => {

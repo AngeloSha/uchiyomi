@@ -14,6 +14,7 @@ import { suwayomiConfigured } from './sources/suwayomi/client';
 import { engineOffReason, type EngineState } from './sources/suwayomi/engineState';
 import { ourSolverUrl, solverWiring, type EngineSolver } from './sources/suwayomi/engineSolver';
 import { lastSuwayomiLoad, suwayomiRetryState } from './sources/suwayomi/register';
+import { solverPingShared } from './sources/flaresolverr';
 import { detailOf, joined, noteOf, say, saidOf, summaryOf, type Part } from './said';
 
 export interface EngineCheckDeps {
@@ -32,6 +33,11 @@ export interface EngineCheckDeps {
   cloudflare: CloudflareEvidence[];
   /** It answers, but the last registration missed it (the retry or the status route registers it shortly). */
   registering?: boolean;
+  /**
+   * Whether Uchiyomi's own solver answers, as Health's Cloudflare solver row read it (flaresolverr.ts
+   * solverPingShared). Asked only while the engine's helper points at it; null or absent when not asked.
+   */
+  solverAnswering?: boolean | null;
 }
 
 const TITLE = 'Extension engine';
@@ -114,6 +120,29 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
   // Registering, and nothing else to say: the note is that sentence alone.
   const alone = registering ? say('engine.registering') : null;
   if (wiring === 'ok') {
+    // Pointed at Uchiyomi's own solver, which is a way past Cloudflare only while it answers. After Connect this row
+    // said "it can get past Cloudflare" beside the solver's own row saying it was not answering (v0.49.1): it says
+    // what that row says now, from the same ping. A finding only while extension sources are seen behind Cloudflare,
+    // as for a helper that is off below; otherwise a greyed line. No Connect: it is connected, and the fix is the
+    // solver's, which its own row names.
+    // Reintroduce by answering "Ready, and it can get past Cloudflare" whatever the solver said: "a solver that is
+    // not answering" in engineHealth.test.ts reads it.
+    if (d.solverAnswering === false) {
+      const finding = d.cloudflare.length > 0;
+      const seen = finding ? ` ${say('engine.fronted', named(d.cloudflare)).text}` : '';
+      return {
+        ...base,
+        status: finding ? 'warn' : 'ok',
+        summary: finding ? 'Its Cloudflare helper is not answering' : `${say('engine.ready', { version }).text}; its Cloudflare helper is not answering`,
+        ...noteOf([alone]),
+        items: [{
+          title: 'Cloudflare helper',
+          detail: 'It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says '
+            + `what to do). Extension sources on Cloudflare-protected sites fail until it answers again.${seen}`,
+          ...(finding ? {} : { info: true }),
+        }],
+      };
+    }
     return { ...base, status: 'ok', ...summaryOf([say('engine.readyCloudflare', { version })]), ...noteOf([alone]), items: [] };
   }
   if (wiring === 'other') {
@@ -170,15 +199,21 @@ export async function extensionEngineCheck(): Promise<HealthCheck | null> {
     });
   }
   const [probe, cloudflare] = await Promise.all([engineProbe(), cloudflareEvidence()]);
+  const ours = ourSolverUrl();
+  // The solver row's own ping (shared for a few seconds), and only when the engine's helper is Uchiyomi's solver: an
+  // engine that is down, or points elsewhere, has nothing to learn from it.
+  const viaOurs = probe.reachable && !!probe.solver && solverWiring(probe.solver, ours, desktop) === 'ok';
+  const solverAnswering = viaOurs ? (await solverPingShared()).ok : null;
   return extensionEngine({
     state: probe.reachable ? 'up' : 'unreachable',
     linked, desktop,
-    ourSolver: ourSolverUrl(),
+    ourSolver: ours,
     version: probe.version,
     error: probe.error,
     solver: probe.solver,
     retry: suwayomiRetryState(),
     cloudflare,
     registering: probe.reachable && !lastSuwayomiLoad()?.reachable,
+    solverAnswering,
   });
 }
