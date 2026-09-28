@@ -37,7 +37,7 @@ import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
 import { useContextMenu } from '@/components/ContextMenu';
 import { useLayer } from '@/lib/layers';
-import { kickDownloads } from '@/lib/useServerDownloads';
+import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { listingArchiveLine } from '@/lib/archive';
@@ -935,6 +935,10 @@ function SeriesInner() {
     retry: false,
   });
   const ghosts = useMemo(() => listing?.content ?? [], [listing]);
+  // Whether the slow archive on this series is paused -- its own, or everyone's (the archive view the downloads poll
+  // reads; no request of its own). Its numbers are not being fetched then, and their run row says so (v0.49.1).
+  const { data: serverJobs } = useServerDownloads();
+  const archivePaused = listing?.archive?.state === 'paused' || (!!listing?.archive && serverJobs?.archive?.paused === true);
   // The groups behind the supply line, the Sources & translations sheet and the group filter: one hook,
   // the route for the viewer's role (SourcesSheet.tsx says which), fetched once for all three.
   const { groups, admin: adminGroups, error: groupsError, isLoading: groupsLoading, checkedAt: groupsCheckedAt } = useSeriesGroups(id, isAdmin);
@@ -1445,7 +1449,7 @@ function SeriesInner() {
       const lines = [
         { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
         { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-        { n: other, text: other === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: other }) },
+        { n: other, text: other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: other }) },
       ].filter((l) => l.n > 0);
       if (res.applied === 0 && lines.length) {
         // ⚠️ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
@@ -1594,9 +1598,9 @@ function SeriesInner() {
         className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
         <IcMoments width={16} height={16} />
         {momentCount > 0
-          ? tr('{n} saved pages', { n: momentCount })
+          ? (momentCount === 1 ? tr('1 saved page') : tr('{n} saved pages', { n: momentCount }))
           : noteCount > 0
-            ? tr('{n} notes', { n: noteCount })
+            ? (noteCount === 1 ? tr('1 note') : tr('{n} notes', { n: noteCount }))
             : tr('Add a note')}
       </Link>
       <div className="mt-1 flex items-center justify-between">
@@ -1733,7 +1737,7 @@ function SeriesInner() {
             // itself (range or single number, plural or singular) is `runLabel`'s, where a test can reach
             // it. `lg:col-span-full` because on a desktop the list is an auto-fill grid and a sentence in
             // one 250 px cell wrapped to two lines while the "Show all" row below it already spanned the row.
-            const { key, args } = runLabel(r);
+            const { key, args } = runLabel(r, { paused: archivePaused });
             // The run's own numbers, from the same filtered list the row was built from, so "Fetch all 5"
             // fetches the five the sentence counts and not a sixth the group filter hid.
             const numbers = filteredGhosts.filter((g) => g.why === r.why && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);

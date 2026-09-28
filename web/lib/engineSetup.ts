@@ -11,6 +11,7 @@
 // extractor), and anything someone copies -- a command, a path, a variable -- is a literal, shown as code. A
 // translated `docker compose up -d` is a command that does not run.
 import { keys, t as tr } from './i18n';
+import { relativeTime } from './format';
 
 export type Platform = 'compose' | 'unraid' | 'casaos' | 'umbrel' | 'other' | 'desktop';
 
@@ -35,7 +36,12 @@ export interface EngineReport {
   /** Series added through an extension: what the engine's data is worth. */
   linkedSeries?: number;
   retry?: { attempts: number; since: string; nextAt: string } | null;
+  /**
+   * The last attempt to reach the engine, whoever made it (this status call's own look included), and whether it
+   * answered (v0.49.1; absent from an older server).
+   */
   lastTry?: string | null;
+  lastTryOk?: boolean | null;
   engine?: string;
   solver?: {
     supported: boolean;
@@ -77,7 +83,7 @@ export const STEP_TEXT = keys(
   'Then start it. Its data was kept, so your extensions are where you left them:',
   'In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.',
   'A compose file from before v0.49.0 may have no engine in it: replace yours with the current file for your layout, or copy the engine’s lines from that file into yours. With one {app} container, it is this one:',
-  'With {app} and {db} containers, it is this one. Never the one-container file there: it would start on a new, empty database.',
+  'With {app} and {db} containers, it is this one. Never use the one-container file in that case: it would start on a new, empty database.',
   'With {bff}, {web} and {db} containers, it is this one:',
   'Then start it:',
   'See whether the engine’s container is running:',
@@ -163,7 +169,7 @@ export function onSteps(p: Platform, h: Headline): Step[] {
           command: `curl -o docker-compose.yml ${RAW}/deploy/docker-compose.yml`,
         },
         {
-          text: 'With {app} and {db} containers, it is this one. Never the one-container file there: it would start on a new, empty database.',
+          text: 'With {app} and {db} containers, it is this one. Never use the one-container file in that case: it would start on a new, empty database.',
           vars: { app: 'uchiyomi', db: 'uchiyomi-db' },
           command: `curl -o docker-compose.yml ${RAW}/deploy/docker-compose.external-db.yml`,
         },
@@ -270,6 +276,17 @@ export function headlineText(h: Headline): string {
     : h === 'unset' ? tr('No extension engine is set up for this server.')
     : h === 'unreachable' ? tr('The extension engine isn’t answering')
     : '';
+}
+
+/**
+ * The waiting card's line when no retry runs: when Uchiyomi last tried to reach the engine, and how it went. It named
+ * the last registration before v0.49.1, so right after Check again on an engine that had stopped answering after a
+ * good one it said "Last tried 3 hours ago" -- a success. A server without `lastTryOk` gets the plain line.
+ */
+export function lastTryLine(s: Pick<EngineReport, 'lastTry' | 'lastTryOk'>): string {
+  if (!s.lastTry) return '';
+  const ago = relativeTime(s.lastTry);
+  return s.lastTryOk === false ? tr('Last tried {ago} · no answer', { ago }) : tr('Last tried {ago}', { ago });
 }
 
 /**

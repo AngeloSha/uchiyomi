@@ -5,6 +5,8 @@
 // a ghost that doubles a real chapter says "Ch. 12" twice.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, mergeRows, openableChapters, runLabel, whyLabel, type Row } from '../lib/chapterRows';
 import type { Book, Ghost } from '../lib/types';
 
@@ -224,4 +226,22 @@ test('chapters the slow archive is fetching are a run of their own, never one li
   // Opened, it unfolds like any run.
   const open = mergeRows([], ghosts, true, false, new Set([1]));
   assert.equal(open.filter((r) => r.kind === 'ghost').length, 50, 'an opened archive run does not unfold, or ignores the cap');
+});
+
+test("a paused archive's chapters are not \"being archived slowly\": nothing is fetching them", () => {
+  // v0.49.1: a paused archive's numbers still read `archive` (they are below its boundary), and the run row said they
+  // were being archived. Reintroduce by ignoring `paused` in runLabel: the first assertion reads "being archived
+  // slowly"; by not passing it from the series page, the last two fail.
+  const run = mergeRows([], Array.from({ length: 13 }, (_, i) => ghost(1 + i, 'archive')), true, false)[0] as Extract<Row, { kind: 'run' }>;
+  assert.deepEqual(runLabel(run, { paused: true }), { key: 'Ch. {a}–{b} · {n} chapters in a paused slow archive', args: { a: 1, b: 13, n: 13 } },
+    'a paused archive\'s chapters read as being archived');
+  const one = mergeRows([book(6)], [ghost(5, 'archive')], true, false)[0] as Extract<Row, { kind: 'run' }>;
+  assert.deepEqual(runLabel(one, { paused: true }), { key: 'Ch. {n} · 1 chapter in a paused slow archive', args: { n: 5 } });
+  assert.equal(runLabel(run, { paused: false }).key, 'Ch. {a}–{b} · {n} chapters being archived slowly', 'a running archive says so as before');
+  const floor = mergeRows([], [ghost(1, 'floor'), ghost(2, 'floor')], true, false)[0] as Extract<Row, { kind: 'run' }>;
+  assert.equal(runLabel(floor, { paused: true }).key, 'Ch. {a}–{b} · {n} older chapters not here yet', 'an older-chapters run is not the archive\'s');
+  const page = readFileSync(join(__dirname, '..', 'app/series/page.tsx'), 'utf8');
+  assert.match(page, /runLabel\(r, \{ paused: archivePaused \}\)/, 'the series page does not say whether the archive is paused');
+  assert.match(page, /archivePaused = listing\?\.archive\?\.state === 'paused' \|\| \(!!listing\?\.archive && serverJobs\?\.archive\?\.paused === true\)/,
+    'its own pause, and everyone\'s');
 });

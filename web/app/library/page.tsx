@@ -324,7 +324,7 @@ function LibraryInner() {
         {mayDownload && <ViewSwitch view={view} onView={(v) => setParam('view', v === 'series' ? '' : v)} />}
         {series && <>
         <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500`}>
-          {total != null && <>{total} series<span className="text-fog-600"> · </span></>}
+          {total != null && <>{total === 1 ? tr('1 series') : tr('{n} series', { n: total })}<span className="text-fog-600"> · </span></>}
           {/* Sorting moved into the panel, so the header has to keep saying what it is -- otherwise the
               order of two thousand covers is decided by something with no representation on screen. */}
           {tr('Sorted by {name}', { name: tr(active.label).toLowerCase() })}

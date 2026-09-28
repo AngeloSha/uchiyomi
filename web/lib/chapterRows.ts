@@ -143,6 +143,7 @@ export function whyLabel(g: Pick<Ghost, 'why'> & Partial<Pick<Ghost, 'attempts' 
 // Declared through `keys()` for the same reason as WHY_LABELS: they reach `tr()` through runLabel's return.
 const RUN_LABELS = keys('Ch. {a}–{b} · {n} older chapters not here yet', 'Ch. {n} · 1 older chapter not here yet');
 const ARCHIVE_RUN_LABELS = keys('Ch. {a}–{b} · {n} chapters being archived slowly', 'Ch. {n} · 1 chapter being archived slowly');
+const PAUSED_RUN_LABELS = keys('Ch. {a}–{b} · {n} chapters in a paused slow archive', 'Ch. {n} · 1 chapter in a paused slow archive');
 
 /**
  * The run row's sentence: the string key and its arguments, for `tr(key, args)`.
@@ -151,9 +152,12 @@ const ARCHIVE_RUN_LABELS = keys('Ch. {a}–{b} · {n} chapters being archived sl
  * under it), and the range form read "Ch. 5–5 · 1 older chapters" for it -- a range with one end and a
  * plural with one thing. The singular is its own key rather than an `s` bolted on, because in most of the
  * eight languages the plural is not a suffix.
+ *
+ * `paused`: the series' archive is paused, or everyone's is. Its numbers still read `archive` (they are its, below
+ * its boundary), but nothing is fetching them, and "being archived slowly" said it was (v0.49.1).
  */
-export function runLabel(r: Extract<Row, { kind: 'run' }>): { key: string; args: Record<string, string | number> } {
-  const labels = r.why === 'archive' ? ARCHIVE_RUN_LABELS : RUN_LABELS;
+export function runLabel(r: Extract<Row, { kind: 'run' }>, o: { paused?: boolean } = {}): { key: string; args: Record<string, string | number> } {
+  const labels = r.why === 'archive' ? (o.paused ? PAUSED_RUN_LABELS : ARCHIVE_RUN_LABELS) : RUN_LABELS;
   return r.count === 1
     ? { key: labels[1], args: { n: r.from } }
     : { key: labels[0], args: { a: r.from, b: r.to, n: r.count } };

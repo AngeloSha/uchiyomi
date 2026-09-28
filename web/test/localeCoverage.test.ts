@@ -191,6 +191,7 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
   '1 page is a placeholder; the chapter sweep re-fetches it': '{n} pages are placeholders; the chapter sweep re-fetches them',
   'Ch. {n} · 1 chapter being archived slowly': 'Ch. {a}–{b} · {n} chapters being archived slowly',
+  'Ch. {n} · 1 chapter in a paused slow archive': 'Ch. {a}–{b} · {n} chapters in a paused slow archive',
   // One try has no "since" (i18n pass 1): the singular says when it was, the plural since when.
   'Tried once, at {time} · next try {when}': 'Tried {n} times since {time} · next try {when}',
 };
@@ -218,17 +219,17 @@ const SHIPPED_UNPAIRED = [
   'Syncing {n} series you have already finished…',
   'This one stops working in {n} days. You can revoke it sooner.',
   'Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.',
-  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages', '{n} notes',
+  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages',
   '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
-  '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series', '{n} series would move',
+  '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series would move',
   '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
   'failed {n} times',
-  '{n} titles matched', '{n} sources', '{n} pages', '{n} chapters listed', '{n} chapters listed · none fetched yet',
-  '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.', '{n} saved pages',
+  '{n} titles matched', '{n} chapters listed', '{n} chapters listed · none fetched yet',
+  '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.',
   'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 42;
+const SHIPPED_UNPAIRED_MAX = 37;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

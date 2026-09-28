@@ -150,7 +150,7 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
               ))}
             </span>
             <span>{tr('All sources')}</span>
-            <span className="text-fog-500">· {tr('{n} sources', { n: count })}</span>
+            <span className="text-fog-500">· {count === 1 ? tr('1 source') : tr('{n} sources', { n: count })}</span>
             {troubled > 0 && <span className="text-amber-300">· {tr('{n} with issues', { n: troubled })}</span>}
           </button>
         )}

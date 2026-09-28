@@ -52,17 +52,25 @@ export default function DownloadsPage() {
     refresh();
   };
 
+  // Every count on this page is one pair of keys, in the reader's words: they were English in every language, and
+  // "Deleted 1 chapters" in English (v0.49.1).
+  const deleted = (n: number) => (n === 1 ? tr('Deleted 1 chapter') : tr('Deleted {n} chapters', { n }));
+
   const removeSeries = async (seriesId: string, title: string, count: number) => {
-    if (!window.confirm(`Delete all ${count} downloaded chapters of “${title}”?`)) return;
+    if (!window.confirm(count === 1
+      ? tr('Delete the downloaded chapter of “{title}”?', { title })
+      : tr('Delete all {n} downloaded chapters of “{title}”?', { n: count, title }))) return;
     const n = await deleteSeriesDownloads(seriesId);
-    toast(`Deleted ${n} chapters`, 'success');
+    toast(deleted(n), 'success');
     refresh();
   };
 
   const removeAll = async () => {
-    if (!window.confirm(`Delete all ${items.length} downloaded chapters on this device?`)) return;
+    if (!window.confirm(items.length === 1
+      ? tr('Delete the downloaded chapter on this device?')
+      : tr('Delete all {n} downloaded chapters on this device?', { n: items.length }))) return;
     const n = await clearAllDownloads();
-    toast(`Deleted ${n} chapters`, 'success');
+    toast(deleted(n), 'success');
     refresh();
   };
 
@@ -91,12 +99,12 @@ export default function DownloadsPage() {
           <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Offline')}</h1>
           <button onClick={sync} disabled={syncing || !online}
             className="flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850/70 px-3.5 py-2 text-xs text-fog-200 disabled:opacity-50">
-            <IcRefresh width={15} height={15} className={syncing ? 'animate-spin text-accent' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
+            <IcRefresh width={15} height={15} className={syncing ? 'animate-spin text-accent' : ''} /> {syncing ? tr('Syncing…') : tr('Sync now')}
           </button>
         </div>
         <div className="mt-1 flex items-center gap-2 text-xs text-fog-500">
-          <span>{items.length} chapters · {bytes(totalBytes)}</span>
-          {!online && <span className="inline-flex items-center gap-1 text-accent"><IcWifiOff width={13} height={13} /> offline</span>}
+          <span>{items.length === 1 ? tr('1 chapter') : tr('{n} chapters', { n: items.length })} · {bytes(totalBytes)}</span>
+          {!online && <span className="inline-flex items-center gap-1 text-accent"><IcWifiOff width={13} height={13} /> {tr('offline')}</span>}
           {items.length > 0 && (
             <button onClick={removeAll} className="ms-auto inline-flex items-center gap-1 text-fog-500 transition hover:text-red-400">
               <IcTrash width={13} height={13} />{tr('Delete all')}</button>
@@ -107,7 +115,7 @@ export default function DownloadsPage() {
             <div className="h-1.5 overflow-hidden rounded-full bg-ink-700">
               <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, (usage.usage / usage.quota) * 100)}%` }} />
             </div>
-            <p className="mt-1 text-[11px] text-fog-500">{bytes(usage.usage)} of {bytes(usage.quota)} device storage used</p>
+            <p className="mt-1 text-[11px] text-fog-500">{tr('{used} of {total} device storage used', { used: bytes(usage.usage), total: bytes(usage.quota) })}</p>
           </div>
         )}
       </header>
@@ -127,7 +135,7 @@ export default function DownloadsPage() {
             ? tr('Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.')
             : tr('Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.')}
           cta={/* no cta offline: it points at the library, which is built entirely from the server */
-            online ? { href: '/library', label: 'Browse library' } : undefined} />
+            online ? { href: '/library', label: tr('Browse library') } : undefined} />
       ) : (
         <div className="px-5 pt-4">
           {Object.entries(groups).map(([series, chapters]) => (
@@ -135,9 +143,9 @@ export default function DownloadsPage() {
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h2 className="min-w-0 truncate font-display text-base font-semibold text-fog-100">{series}</h2>
                 <div className="flex shrink-0 items-center gap-2 text-[11px] text-fog-500">
-                  <span>{chapters.length} ch · {bytes(chapters.reduce((a, c) => a + (c.totalBytes || 0), 0))}</span>
+                  <span>{chapters.length === 1 ? tr('1 chapter') : tr('{n} chapters', { n: chapters.length })} · {bytes(chapters.reduce((a, c) => a + (c.totalBytes || 0), 0))}</span>
                   <button onClick={() => removeSeries(chapters[0].seriesId, series, chapters.length)}
-                    className="inline-flex items-center gap-1 transition hover:text-red-400" aria-label={`Delete all of ${series}`}>
+                    className="inline-flex items-center gap-1 transition hover:text-red-400" aria-label={tr('Delete all of {title}', { title: series })}>
                     <IcTrash width={13} height={13} />
                   </button>
                 </div>
@@ -150,7 +158,7 @@ export default function DownloadsPage() {
                     </Link>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-fog-100">{c.title}</p>
-                      <p className="text-[11px] text-fog-500">{c.pageCount} pages · {bytes(c.totalBytes)}</p>
+                      <p className="text-[11px] text-fog-500">{c.pageCount === 1 ? tr('1 page') : tr('{n} pages', { n: c.pageCount })} · {bytes(c.totalBytes)}</p>
                     </div>
                     <button onClick={() => remove(c.bookId)} className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
                       <IcTrash width={16} height={16} />

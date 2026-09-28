@@ -90,7 +90,7 @@ export function ListsCard({ span = '' }: { span?: string }) {
             <Link key={c.id} href={`/collection/?id=${encodeURIComponent(c.id)}`}
               className="flex items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-850/50 px-3 py-2">
               <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-fog-500">{tr('{n} series', { n: c.item_count })}</span>
+              <span className="shrink-0 text-xs tabular-nums text-fog-500">{c.item_count === 1 ? tr('1 series') : tr('{n} series', { n: c.item_count })}</span>
             </Link>
           ))}
         </div>
