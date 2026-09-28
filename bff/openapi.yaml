@@ -1443,7 +1443,9 @@ paths:
                     type: [object, "null"]
                     description: >-
                       Since v0.49.0 (#117): the series' slow archive, or null -- `{state, done, left, failed, mine,
-                      etaMs?, nextAt?, waiting?, attention?}`, as in ArchiveSeries.
+                      pausedForAll, etaMs?, nextAt?, waiting?, attention?}`, as in ArchiveSeries. `pausedForAll`
+                      (since v0.49.1) is the admin's pause of every archive (`paused` on ArchiveView), which a queued
+                      row's `state` does not show, for a viewer who may not download and so cannot read the queue.
                   numbering:
                     type: [object, "null"]
                     description: >-
@@ -2423,7 +2425,7 @@ paths:
         (ArchiveView): the slow archive's queue, its rows limited to the series this viewer can browse and
         filtered per request (never one viewer's answer replayed to another); its chapters are in `activity`
         with origin `archive`. Since v0.49.1 a `partial` chapter that is whole now reads `done`, and the slow
-        archive's first chapter of a series is listed once the library holds it.
+        archive's first chapter of a series the library holds nothing of is listed once the library holds it.
       security:
         - bearer: []
       responses:

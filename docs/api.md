@@ -337,7 +337,7 @@ goes to whoever started it and to admins. Since v0.49.0 `recent` survives a rest
 written down (kept a week), and the last day of it, at most 500 entries, is read back when the server starts, with
 fresh `id`s. Since v0.49.1 a `partial` chapter that is whole now (the completion pass filled its pages, or a later
 download wrote it whole) reads `done`, there and in what is written down; and the slow archive's first chapter of a
-series, scanned into the library at once, is listed once the library holds it.
+series the library holds nothing of, scanned into the library at once, is listed once the library holds it.
 
 **The slow archive** (since v0.49.0, #117). `POST /api/sources/archive {seriesIds}` (1-500) queues series to be
 fetched a chapter at a time, paced per source — by default four chapters an hour per source, a random 1.5-4 s
@@ -376,7 +376,9 @@ held chapters, below): it is queued, and where it starts is placed
 once the renumbering has settled, in the numbers the series keeps; `nothing` when the selection was the whole
 listing.
 `GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why: "archive"`, and
-`POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. The pacing is
+`POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. Since v0.49.1
+the listing's `archive` carries `pausedForAll`, the admin's pause of every archive (`paused` on the queue), which a
+queued row's `state` does not show: a viewer who may not download cannot read the queue. The pacing is
 the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
 `archiveWindowFrom`/`archiveWindowTo` (0-23, the server's local hours, together or not at all) and
 `archiveMinFreeGb` (1-2000); `GET /api/admin/settings` reads them back as `archive_paused`, `archive_per_hour`,

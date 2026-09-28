@@ -264,8 +264,23 @@ test("the series page: its ghosts read 'archive' and it carries the archive's li
   assert.equal(body.archive.state, 'queued');
   assert.equal(body.archive.left, 4);
   assert.equal(body.archive.mine, true);
+  // v0.49.1: the admin's pause of every archive rides on the line. The page read it only from the queue, which a viewer
+  // who may not download is refused, and their run row said "being archived slowly" under the pause. Reintroduce by
+  // leaving it out of archiveSummaryFor: the line does not say; by answering false: the reader cannot tell.
+  assert.equal(body.archive.pausedForAll, false, 'the line does not say whether every archive is paused');
   const other = (await app.inject({ method: 'GET', url: `/api/series/${SA}/listing`, headers: h.other })).json();
   assert.equal(other.archive.mine, false, "another member sees it is not theirs to stop");
+
+  assert.equal((await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: h.nodl })).statusCode, 403, 'PREMISE: the queue is refused to them');
+  const patch = (archivePaused: boolean) => app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: h.admin, payload: { archivePaused } });
+  assert.equal((await patch(true)).statusCode, 200);
+  try {
+    const reader = (await app.inject({ method: 'GET', url: `/api/series/${SA}/listing`, headers: h.nodl })).json();
+    assert.equal(reader.archive.state, 'queued', "PREMISE: its own row is not paused");
+    assert.equal(reader.archive.pausedForAll, true, 'a viewer who may not download cannot tell every archive is paused');
+  } finally {
+    await patch(false);
+  }
 });
 
 test("the add dialog's 'archive the rest slowly'", { skip }, async () => {

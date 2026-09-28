@@ -17,9 +17,16 @@ const DSN = process.env.TEST_DATABASE_URL;
 let OURS = '';
 const SERIES = ['s_ee_one', 's_ee_two', 's_ee_gone', 's_ee_merged'];
 
-/** A FlareSolverr as its root answers a ping, and nothing more; `stop` is the container gone. */
+/**
+ * A FlareSolverr as its root answers a ping, and nothing more; `stop` is the container gone. `answerOnce` makes it
+ * answer the next request and refuse every one after it -- two pings a moment apart that disagree -- and counts them.
+ */
 async function startFakeSolver() {
+  let asked = 0;
+  let once = false;
   const srv = createServer((_req, res) => {
+    asked++;
+    if (once && asked > 1) { res.writeHead(503); res.end(); return; }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ msg: 'FlareSolverr is ready!', version: '3.4.6' }));
   });
@@ -28,7 +35,8 @@ async function startFakeSolver() {
   let open = true;
   // Keep-alive sockets included: a closed server still answers on a connection fetch kept open.
   const stop = () => (open ? new Promise<void>((r) => { open = false; srv.closeAllConnections(); srv.close(() => r()); }) : Promise.resolve());
-  return { url: `http://127.0.0.1:${port}`, stop };
+  const answerOnce = (on: boolean) => { once = on; asked = 0; };
+  return { url: `http://127.0.0.1:${port}`, stop, answerOnce, asked: () => asked };
 }
 
 async function setup() {
@@ -141,6 +149,28 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       }
       const back = await status();
       assert.equal(back.lastTryOk, true, 'the engine back: the last try answered');
+    });
+
+    /**
+     * v0.49.1: Health's look at the engine is a try too (extensionEngine.ts engineProbe notes it), so the card's "Last
+     * tried" never names an older good one over it. Reintroduce by leaving it out (drop noteSuwayomiTry from
+     * engineProbe): after a good registration, a probe that found the engine gone leaves the last try a good one.
+     */
+    await t.test("Health's look at the engine is a try of its own", async () => {
+      const { engineProbe, forgetEngineProbe } = await import('../src/lib/extensionEngine');
+      const loaded = await reg.loadSuwayomiSources();
+      assert.equal(loaded.reachable, true, 'PREMISE: a registration that found the engine');
+      assert.equal(reg.lastSuwayomiTry()?.ok, true, 'PREMISE: and that is the last try');
+      await fake.stop();
+      forgetEngineProbe();
+      try {
+        const probe = await engineProbe();
+        assert.equal(probe.reachable, false, 'PREMISE: Health found the engine gone');
+        assert.equal(reg.lastSuwayomiTry()?.ok, false, "Health's look at an engine that stopped answering is not the last try");
+      } finally {
+        await fake.start();
+        forgetEngineProbe();
+      }
     });
 
     await t.test('while the retry runs, the page can say how often it asked and when it asks next', async () => {
@@ -263,6 +293,38 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       const fixed = await extensionEngineCheck();
       assert.equal(fixed?.status, 'ok', 'Connect forgot the cached look, so the row clears at once');
       assert.match(fixed!.summary, /^Ready, and it can get past Cloudflare/);
+    });
+
+    /**
+     * v0.49.1: the two rows read ONE ping of the solver (flaresolverr.ts solverPingShared). Two pings a moment apart
+     * can disagree, and the page said "can get past Cloudflare" in one row beside "Not answering" in the other; a
+     * solver that answers only its first request is that moment. Reintroduce by pinging in each row (solverPing in
+     * engineHealth.ts extensionEngineCheck, or in health.ts solverHealth): the rows disagree.
+     */
+    await t.test("Health's engine row and solver row read one ping of the solver", async () => {
+      const { extensionEngineCheck } = await import('../src/lib/engineHealth');
+      const { solverHealth } = await import('../src/lib/health');
+      const { forgetEngineProbe } = await import('../src/lib/extensionEngine');
+      const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+      assert.equal(fake.settings.flareSolverrUrl, OURS, 'PREMISE: the engine is connected to our solver');
+      forgetEngineProbe();
+      forgetSolverPing();
+      solver.answerOnce(true);
+      // A solver that answers has its row ask GitHub for its latest release: no opinion here, and nothing leaves.
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = ((u: any, init?: any) => (String(u).startsWith('https://api.github.com/')
+        ? Promise.resolve(new Response('', { status: 404 })) : realFetch(u, init))) as typeof fetch;
+      try {
+        const [engineRow, solverRow] = await Promise.all([extensionEngineCheck(), solverHealth()]);
+        const solverUp = !/^Not answering/.test(solverRow.summary);
+        const engineUp = !/Cloudflare helper is not answering/i.test(engineRow!.summary);
+        assert.equal(engineUp, solverUp, `the two rows disagree about the solver: "${engineRow!.summary}" beside "${solverRow.summary}"`);
+        assert.equal(solver.asked(), 1, 'the solver was asked once for both rows');
+      } finally {
+        globalThis.fetch = realFetch;
+        solver.answerOnce(false);
+        forgetSolverPing();
+      }
     });
 
     /**

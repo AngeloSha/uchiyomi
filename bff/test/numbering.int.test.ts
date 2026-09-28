@@ -61,7 +61,9 @@ const S17 = 's_nb_race', FOLDER17 = 'Webtoons (test)/Istrevelia Race';
 const S18 = 's_nb_resumed', FOLDER18 = 'Webtoons (test)/Istrevelia Resumed Twice';
 // Health's numbering row while a confirmed renumber applies (v0.49.1).
 const S19 = 's_nb_applying', FOLDER19 = 'Webtoons (test)/Istrevelia Applying';
-const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18, S19];
+// A journal resumed inside a run that marked the folder busy itself (v0.49.1 review).
+const S20 = 's_nb_marked', FOLDER20 = 'Webtoons (test)/Istrevelia Marked';
+const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18, S19, S20];
 /** How many times the follower was asked for its chapter list. */
 let folAsked = 0;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
@@ -786,13 +788,16 @@ test('a resume that waited behind another finishes the journal from where that o
   let crashed = false;
   // v0.49.1: the second takes over after the first failed, and the first's mark on the folder went with it. Reintroduce
   // by taking the mark only when the folder is free (runJournal's markFolder answering `!busyFolders.has`): nothing
-  // marks it while the second renames.
+  // marks it while the second renames. And the first's end took the second off the runs Health reads (renumberRunning):
+  // reintroduce by counting a series' runs as one (runJournal's `running` set to 1, and deleted by whichever ends).
   const { busyFolders } = await import('../src/lib/bulkNewest');
   let busyWhileTakenOver: boolean | null = null;
+  let runningWhileTakenOver: boolean | null = null;
   numbering.renumberHooks.afterFirstPhase = stop.hook;
   numbering.renumberHooks.afterSecondPhase = () => {
     if (!crashed) { crashed = true; throw new Error('simulated crash'); }
     busyWhileTakenOver = busyFolders.has(FOLDER18);
+    runningWhileTakenOver = numbering.renumberRunning(S18);
   };
   let first: any, second: any;
   try {
@@ -810,13 +815,44 @@ test('a resume that waited behind another finishes the journal from where that o
   assert.equal(first?.outcome, 'renumber_pending', 'PREMISE: the first resume failed after its renames');
   assert.equal(second?.outcome, 'ok', 'the second finished it');
   assert.equal(busyWhileTakenOver, true, 'a resume that took over after a failed one renames with the folder marked busy');
+  assert.equal(runningWhileTakenOver, true, 'a resume that took over after a failed one renames with nothing running it, for Health');
   assert.equal(busyFolders.has(FOLDER18), false, 'and takes the mark away when it is done');
+  assert.equal(numbering.renumberRunning(S18), false, 'and nothing runs it once it is done');
   assert.equal(bytesIn(FOLDER18, 'Chapter 21.cbz'), 'post 21 bytes', 'a resume that waited behind another finishes the journal from where that one left it');
   assert.equal(bytesIn(FOLDER18, 'Chapter 2.cbz'), 'post 2 bytes');
   assert.deepEqual(filesIn(FOLDER18), ['Chapter 2.cbz', 'Chapter 21.cbz']);
   assert.deepEqual(await marksOf(S18), [63]);
   const row = (await q('SELECT numbering, numbering_pending, renumber_plan FROM lib_series WHERE id = $1', [S18]))[0];
   assert.deepEqual([row.numbering, row.numbering_pending, row.renumber_plan], ['posting_order', null, null]);
+});
+
+test('a resume inside a run that marked the folder itself leaves that mark to it', { skip }, async () => {
+  // A bulk "Fetch newest" marks the folder busy and then checks the series (updateSeries), and the check first finishes
+  // a journal a crash left. The resume takes no share of that mark (runJournal's markFolder answers null): it is not a
+  // journal's, and the run that made it clears it. With a share, the resume's end cleared it while the bulk run was
+  // still inside the folder, and a Fetch or the archive could write into it (v0.49.1 review). Reintroduce by always
+  // taking a share (drop markFolder's null branch): the mark is gone after the resume.
+  await seedChain(S20, FOLDER20);
+  numbering.renumberHooks.afterFirstPhase = () => { throw new Error('simulated crash'); };
+  try {
+    await assert.rejects(numbering.requestNumbering(S20, 'posting_order', { confirm: true, userId: adminId }), /simulated crash/);
+  } finally {
+    numbering.renumberHooks.afterFirstPhase = undefined;
+  }
+  const { busyFolders } = await import('../src/lib/bulkNewest');
+  assert.equal(busyFolders.has(FOLDER20), false, 'PREMISE: the crashed apply left no mark of its own');
+  // As bulkNewest does: the mark, then the check inside it, and the mark cleared by the run that made it.
+  busyFolders.add(FOLDER20);
+  let checked: any, markedAfter: boolean | null = null;
+  try {
+    checked = await updater.updateSeries(S20, 0);
+    markedAfter = busyFolders.has(FOLDER20);
+  } finally {
+    busyFolders.delete(FOLDER20);
+  }
+  assert.equal(checked?.outcome, 'ok', 'PREMISE: the check finished the journal');
+  assert.equal(bytesIn(FOLDER20, 'Chapter 21.cbz'), 'post 21 bytes', 'PREMISE: its renames are done');
+  assert.equal(markedAfter, true, 'a resume inside a run that marked the folder took that run\'s mark away');
 });
 
 test('while a confirmed renumber applies, Health says it is being applied, not that it was interrupted', { skip }, async () => {
@@ -826,10 +862,20 @@ test('while a confirmed renumber applies, Health says it is being applied, not t
   const { runHealthChecks } = await import('../src/lib/health');
   const row = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'numbering')?.items.find((i: any) => i.seriesId === S19);
   await seedChain(S19, FOLDER19);
+  // The apply writes its journal to the row a moment before its renames begin (applyRenumber), so it is counted as
+  // running from its plan on (settleNumbering's own mark): a Health check that read the row in that moment called it
+  // interrupted. Reintroduce by answering from the runs alone (drop `settling` in renumberRunning): the last assertion.
+  // A listener cannot be taken back, so it looks once: at the first plan built while `watching`, the apply's.
+  let watching = false, runningAtPlan: boolean | null = null;
+  numbering.onBeforeRenumberPlan((id: string) => {
+    if (watching && id === S19 && runningAtPlan === null) runningAtPlan = numbering.renumberRunning(id);
+    return false;
+  });
   const stop = stopFirst();
   numbering.renumberHooks.afterFirstPhase = stop.hook;
   let during: any, applied: any;
   try {
+    watching = true;
     const applying = numbering.requestNumbering(S19, 'posting_order', { confirm: true, userId: adminId });
     await reach(stop.there, applying);
     assert.ok((await q('SELECT renumber_plan FROM lib_series WHERE id = $1', [S19]))[0].renumber_plan, 'PREMISE: its journal is on the row');
@@ -837,6 +883,7 @@ test('while a confirmed renumber applies, Health says it is being applied, not t
     stop.open();
     applied = await applying;
   } finally {
+    watching = false;
     stop.open();
     numbering.renumberHooks.afterFirstPhase = undefined;
   }
@@ -847,4 +894,6 @@ test('while a confirmed renumber applies, Health says it is being applied, not t
   assert.equal(applied?.state, 'applied', 'PREMISE: and then it applied');
   // A journal nothing runs is still a crash's: the next check finishes it (health.int.test.ts pins that wording).
   assert.equal(numbering.renumberRunning(S19), false, 'nothing runs it once it is done');
+  assert.notEqual(runningAtPlan, null, 'PREMISE: the apply built its plan');
+  assert.equal(runningAtPlan, true, 'a confirmed renumber is not running while it builds its plan and writes its journal');
 });

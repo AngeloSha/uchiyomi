@@ -935,10 +935,13 @@ function SeriesInner() {
     retry: false,
   });
   const ghosts = useMemo(() => listing?.content ?? [], [listing]);
-  // Whether the slow archive on this series is paused -- its own, or everyone's (the archive view the downloads poll
-  // reads; no request of its own). Its numbers are not being fetched then, and their run row says so (v0.49.1).
+  // Whether the slow archive on this series is paused -- its own, or everyone's. Its numbers are not being fetched
+  // then, and their run row says so (v0.49.1). Everyone's from the archive view the downloads poll reads (no request of
+  // its own; it follows a Pause all within seconds), else from the listing: the poll is refused to a viewer who may
+  // not download, and their row went on saying "being archived slowly" under the pause.
   const { data: serverJobs } = useServerDownloads();
-  const archivePaused = listing?.archive?.state === 'paused' || (!!listing?.archive && serverJobs?.archive?.paused === true);
+  const archivePaused = !!listing?.archive && (listing.archive.state === 'paused'
+    || (serverJobs?.archive ? serverJobs.archive.paused : listing.archive.pausedForAll === true));
   // The groups behind the supply line, the Sources & translations sheet and the group filter: one hook,
   // the route for the viewer's role (SourcesSheet.tsx says which), fetched once for all three.
   const { groups, admin: adminGroups, error: groupsError, isLoading: groupsLoading, checkedAt: groupsCheckedAt } = useSeriesGroups(id, isAdmin);
