@@ -174,6 +174,54 @@ test('#116: the numbering check has a title, and its two keys say what they rena
   assert.equal(ACTION_COPY.keep_numbers.label({}), 'Keep the source’s numbers');
   assert.match(ACTION_COPY.keep_numbers.what({}), /already renumbered shows the plan back to the source’s numbers first/);
   assert.equal(ACTION_COPY.keep_numbers.eta({}), 'Takes a moment');
+  // Both keys have their what, how and how long (the web2 review found Keep's "How it works" missing). Reintroduce
+  // by dropping keep_numbers' `how`: this names it.
+  const how = ACTION_COPY.keep_numbers.how?.({}) ?? '';
+  assert.match(how, /^For a proposal nothing is renamed/, 'Keep the source’s numbers has no "How it works"');
+  assert.match(how, /renames the files only once you confirm\.$/, 'Keep\'s how does not say a renamed series is renamed back only on a confirmation');
+});
+
+test('every reason Health sends in a code has words on the page, read from the server\'s own unions', () => {
+  // The server says WHY in codes (bff lib/health.ts, lib/repair.ts) and the page words them; a code added there
+  // without words here reads as nothing, or as the raw code. Read from the server's unions, so a new one fails by
+  // name. Reintroduce by deleting GAP_WHY_BY.posting_order (or 'archiving'): "gap outcome 'posting_order' has no
+  // words" fails; delete caveatLine's 'archiving' case: "caveat 'archiving'" fails.
+  const health = read('../bff/src/lib/health.ts');
+  const repair = read('../bff/src/lib/repair.ts');
+  const union = (src: string, re: RegExp, what: string): string[] => {
+    const m = re.exec(src);
+    assert.ok(m, `${what} was not found in the server -- this scan is broken`);
+    const out = [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    assert.ok(out.length >= 2, `${what}: only ${out.length} codes read -- this scan is broken`);
+    return out;
+  };
+  // A sentence: not empty, not the code itself, and no snake_case code left in it.
+  const worded = (line: string, code: string) => !!line.trim() && line !== code && !/\b[a-z]+_[a-z_]+\b/.test(line);
+  // Gap outcomes: the repair's verdicts (GapsResult.why), and the one health.ts adds itself below an active archive.
+  const gapWhys = [...union(repair, /interface GapsResult \{[\s\S]*?\n  why: ([^;]+);/, 'GapsResult.why'),
+    ...[...health.matchAll(/kind: 'gaps' as const, at: null, why: '([a-z_]+)'/g)].map((m) => m[1])];
+  assert.ok(gapWhys.includes('posting_order') && gapWhys.includes('archiving'), `the gap reasons read: ${gapWhys.join(', ')}`);
+  const gap = { kind: 'gaps' as const, at: null, followed: null, coverage: null, fetched: 0, landed: 0, sweep: 0, capped: 0, unfillable: [], scanned: 1 };
+  for (const why of gapWhys) assert.ok(worded(outcomeLine({ ...gap, why }), why), `gap outcome '${why}' has no words`);
+  // Short-chapter outcomes: the repair's verdicts, and the two health.ts writes itself.
+  const shortWhys = [...union(repair, /type ShortWhy =\s*([^;]+);/, 'ShortWhy'), 'partial', 'confirmed_by_admin'];
+  assert.ok(health.includes("why: 'partial'") && health.includes("'confirmed_by_admin'"), 'health.ts no longer writes partial / confirmed_by_admin');
+  for (const why of shortWhys) assert.ok(worded(outcomeLine({ kind: 'short', at: null, why, missing: 2 }), why), `short outcome '${why}' has no words`);
+  // What an action cannot do, said before the press.
+  for (const code of union(health, /interface HealthCaveat \{[\s\S]*?\n  code: ([^;]+);/, 'HealthCaveat.code')) {
+    assert.ok(worded(caveatLine({ action: 'fill', code: code as never }), code), `caveat '${code}' has no words`);
+  }
+  // Why a run passed a target over, and why a chapter was not eligible (whyNotShort's answers).
+  for (const why of union(repair, /export type RepairSkipWhy =\s*([^;]+);/, 'RepairSkipWhy')) {
+    const line = skipLine({ step: 'gaps', why: why as never });
+    assert.ok(worded(line, why) && line !== 'Skipped', `skip '${why}' has no words`);
+  }
+  const notShort = repair.slice(repair.indexOf('async function whyNotShort'));
+  const details = [...notShort.slice(0, notShort.indexOf('\n}\n')).matchAll(/return '([a-z_]+)'/g)].map((m) => m[1]);
+  assert.ok(details.length >= 4, 'whyNotShort\'s answers were not read -- this scan is broken');
+  for (const detail of details) {
+    assert.notEqual(skipLine({ step: 'short', why: 'not_eligible', detail }), 'Skipped: it no longer qualifies', `not_eligible '${detail}' has no words of its own`);
+  }
 });
 
 test('the history names runs the way a person would, and says when one stopped', () => {

@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
-import { chapterLabel, chapterName, isVolumeName, relativeTime, relativeTimeShort } from '@/lib/format';
+import { bookCountText, chapterLabel, chapterName, isVolumeName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -1445,7 +1445,7 @@ function SeriesInner() {
       const lines = [
         { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
         { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-        { n: other, text: tr('{n} could not be deleted', { n: other }) },
+        { n: other, text: other === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: other }) },
       ].filter((l) => l.n > 0);
       if (res.applied === 0 && lines.length) {
         // ⚠️ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
@@ -1630,7 +1630,7 @@ function SeriesInner() {
   const metaBits: ReactNode[] = [
     author ? <span className="text-fog-300">by {author}</span> : null,
     meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
-    series ? <>{series.booksCount} {mostlyVolumes ? 'volumes' : 'chapters'}</> : null,
+    series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
     // yet"), with the source and the groups beside it, and one line saying it is enough.

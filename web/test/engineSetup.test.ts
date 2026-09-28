@@ -6,7 +6,7 @@
 // command only where there is one to run, and never a translated command.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
   PLATFORM_CHIPS, STEP_TEXT, dataPlace, dataWarning, defaultPlatform, headline, offSteps, onSteps, stillLine,
@@ -38,10 +38,26 @@ test('switched off on Compose: take the switch line out and start it, never "emp
   for (const { where, step } of everything()) {
     assert.doesNotMatch(shown(step), /emptying SUWAYOMI_URL|put that line back/i, `${where}: the pre-v0.49.0 advice is back`);
   }
-  // Not set up at all on Compose: an emptied SUWAYOMI_URL= line, or a file from before the switch existed.
+  // Not set up at all on Compose: an emptied SUWAYOMI_URL= line, or a file from before the engine was in it.
   const unset = onSteps('compose', 'unset');
   assert.equal(unset[0].vars?.name, 'SUWAYOMI_URL=');
-  assert.match(unset[1].command ?? '', /^curl -O https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/deploy\/docker-compose\.yml$/);
+  // The file for the install's layout, each told apart by the containers it runs (the docs2 finding): an install from
+  // before v0.18.0 may run the external-database layout as docker-compose.yml, and the one-container file in its place
+  // starts on a new, empty database. Reintroduce the one download for everyone: "only the one-container file" fails.
+  const RAW = 'https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy';
+  assert.deepEqual(unset.map((s) => s.command).filter((c) => c?.startsWith('curl')), [
+    `curl -o docker-compose.yml ${RAW}/docker-compose.yml`,
+    `curl -o docker-compose.yml ${RAW}/docker-compose.external-db.yml`,
+    `curl -o docker-compose.yml ${RAW}/docker-compose.split.yml`,
+  ], 'only the one-container file is offered, whatever the layout');
+  for (const f of ['docker-compose.yml', 'docker-compose.external-db.yml', 'docker-compose.split.yml']) {
+    assert.ok(existsSync(join(ROOT, '..', 'deploy', f)), `deploy/${f} is offered for download and is not in the repository`);
+  }
+  const ext = unset.find((s) => s.command?.endsWith('docker-compose.external-db.yml'));
+  assert.deepEqual(ext?.vars, { app: 'uchiyomi', db: 'uchiyomi-db' }, 'the external-database layout is not named by its containers');
+  assert.match(ext?.text ?? '', /Never the one-container file there: it would start on a new, empty database\./, 'the empty-database trap is not said');
+  assert.deepEqual(unset.find((s) => s.command?.endsWith('docker-compose.split.yml'))?.vars, { bff: 'uchiyomi-bff', web: 'uchiyomi-web', db: 'uchiyomi-db' });
+  assert.match(unset[1].text, /or copy the engine’s lines from that file into yours/, 'adding the lines by hand is not offered');
   assert.equal(unset.at(-1)?.command, 'docker compose up -d');
   // Not answering: look, start, read the log -- all on the shipped container.
   assert.deepEqual(onSteps('compose', 'unreachable').map((s) => s.command),

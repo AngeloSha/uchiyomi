@@ -247,7 +247,7 @@ function LibraryInner() {
   /**
    * Queue the selection for the slow archive (#117): each series' rest fetched a chapter at a time over days,
    * never in a burst. The server works out what is missing and says it per series; the notice sums it up
-   * ("12 series queued for the slow archive · 3 had nothing older to fetch"). Library -> Downloads shows them.
+   * ("12 series queued for the slow archive · 3 series had nothing older to fetch"). Library -> Downloads shows them.
    */
   const archiveEnqueue = useArchiveEnqueue();
   const archiveSelected = async () => {

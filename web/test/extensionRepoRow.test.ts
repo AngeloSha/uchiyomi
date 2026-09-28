@@ -150,6 +150,24 @@ test('one extension available is said in the singular', () => {
   assert.match(row, /cat\?\.total === 1\s*\?\s*tr\('\{n\} extension repositories · 1 extension available', \{ n: repos\.content\.length \}\)/, 'several repositories, one extension');
 });
 
+test('hiding a language asks on <body>, out of the Extensions card, in the reader\'s words', () => {
+  // The Extensions panel is a `.card`: its backdrop blur made it the containing block of the `fixed` dialog, which
+  // dimmed only the panel and could land off-screen (the web2 review's scan: the last dialog left inside a card),
+  // and its title, body and key were English templates. Reintroduce the bare `<ConfirmDialog` (no OnBody): the
+  // first assertion names it; put back `title={`Hide ${…}?`}`: "the title is English".
+  const at = ext.indexOf('{hiding && (');
+  assert.ok(at > 0, 'the hide confirmation is not where this test looks');
+  const dialog = ext.slice(at, ext.indexOf('/>', ext.indexOf('<ConfirmDialog', at)));
+  assert.match(dialog, /^\{hiding && \(\s*<OnBody>\s*<ConfirmDialog\b/, 'the hide confirmation is rendered inside the Extensions card');
+  assert.match(dialog, /title=\{tr\('Hide \{lang\}\?', \{ lang: /, 'the title is English');
+  // Its own key, not the bare "Hide", which is the app's collapse toggle ("收起" in Chinese).
+  assert.match(dialog, /confirmLabel=\{tr\('Hide \{lang\}', \{ lang: /, 'the key is English, or the collapse toggle\'s word');
+  assert.doesNotMatch(dialog, /`Hid(?:e|ing) \$\{/, 'the title or body is an English template');
+  // One sentence per count: "turns off 1 sources", and "1 series … they stay readable".
+  assert.match(dialog, /hiding\.enabled === 1\s*\? tr\('Hiding \{lang\} turns off 1 source\.'/, 'one source is said with the plural');
+  assert.match(dialog, /hiding\.used === 1\s*\? tr\('1 series from \{lang\} will stop updating/, 'one series is said with the plural');
+});
+
 test('the repository flow is translated in all eight languages', () => {
   // Reintroduce by deleting any one of these keys from public/locales/ar.json.
   const keys = new Set<string>([

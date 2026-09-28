@@ -76,7 +76,9 @@ export const STEP_TEXT = keys(
   'Open the .env file next to your docker-compose.yml and delete this line, or change its 0 to 1:',
   'Then start it. Its data was kept, so your extensions are where you left them:',
   'In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.',
-  'A docker-compose.yml from before v0.49.0 has no switch for it; download the current one next to your .env:',
+  'A compose file from before v0.49.0 may have no engine in it: replace yours with the current file for your layout, or copy the engine’s lines from that file into yours. With one {app} container, it is this one:',
+  'With {app} and {db} containers, it is this one. Never the one-container file there: it would start on a new, empty database.',
+  'With {bff}, {web} and {db} containers, it is this one:',
   'Then start it:',
   'See whether the engine’s container is running:',
   'Start it, and anything else that has stopped:',
@@ -151,7 +153,25 @@ export function onSteps(p: Platform, h: Headline): Step[] {
       return [
         // "With nothing after it" could mean after the = or after the line: it is the value that is empty.
         { text: 'In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.', vars: { name: `${URL_VAR}=` } },
-        { text: 'A docker-compose.yml from before v0.49.0 has no switch for it; download the current one next to your .env:', command: `curl -O ${RAW}/deploy/docker-compose.yml` },
+        // ⚠️ The file for the install's LAYOUT, never the one-container file for everyone (the trap docs/extensions.md
+        // and MIGRATING.md warn about): an install from before v0.18.0 may run the external-database layout under the
+        // name docker-compose.yml, and the one-container file in its place starts on a new, empty database. The
+        // containers `docker compose ps` lists say which layout it is; each file lands under the name `up` reads.
+        {
+          text: 'A compose file from before v0.49.0 may have no engine in it: replace yours with the current file for your layout, or copy the engine’s lines from that file into yours. With one {app} container, it is this one:',
+          vars: { app: 'uchiyomi' },
+          command: `curl -o docker-compose.yml ${RAW}/deploy/docker-compose.yml`,
+        },
+        {
+          text: 'With {app} and {db} containers, it is this one. Never the one-container file there: it would start on a new, empty database.',
+          vars: { app: 'uchiyomi', db: 'uchiyomi-db' },
+          command: `curl -o docker-compose.yml ${RAW}/deploy/docker-compose.external-db.yml`,
+        },
+        {
+          text: 'With {bff}, {web} and {db} containers, it is this one:',
+          vars: { bff: 'uchiyomi-bff', web: 'uchiyomi-web', db: 'uchiyomi-db' },
+          command: `curl -o docker-compose.yml ${RAW}/deploy/docker-compose.split.yml`,
+        },
         { text: 'Then start it:', command: UP },
       ];
     case 'unraid':

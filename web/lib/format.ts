@@ -28,6 +28,15 @@ export function isVolumeName(name?: string | null): boolean {
   return !!name && !CHAPTER_MARK.test(name) && (VOLUME_WORD.test(name) || VOLUME_SHORT.test(name));
 }
 
+/**
+ * "1 chapter", "12 chapters" -- or volumes, for a series stored as tomes: one key per count. The series header
+ * printed `{n} chapters` in bare English, and "1 chapters" (the e2e walk found it on Walk Gap's member band).
+ */
+export function bookCountText(n: number, volumes = false): string {
+  if (volumes) return n === 1 ? tr('1 volume') : tr('{n} volumes', { n });
+  return n === 1 ? tr('1 chapter') : tr('{n} chapters', { n });
+}
+
 export function chapterLabel(b: { metadata?: { number?: string; title?: string }; number?: number; name?: string }): string {
   const n = b.metadata?.number ?? (b.number != null ? String(b.number) : '');
   if (n) return isVolumeName(b.name || b.metadata?.title) ? `Vol. ${n}` : `Ch. ${n}`;

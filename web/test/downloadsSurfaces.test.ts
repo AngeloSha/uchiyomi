@@ -171,6 +171,18 @@ test('the slow archive\'s sheet and Stop confirmation open on <body>, whatever c
     'the chapter in flight on an attention row is shown nowhere but the sheet');
 });
 
+test('Stop archiving says where the rest goes: back to the scheduled check, or waiting under a Latest N or Nothing yet floor', () => {
+  // The docs2 review: the dialog said "the rest are left for you to fetch later" for every series. A stop drops the
+  // archive's row and its boundary (bff lib/archive.ts archiveAct), so the updater's floor is the series' own again
+  // (`max(chapter_floor, boundary)`): the scheduled check takes the rest, unless a Latest N or Nothing yet floor keeps
+  // it -- what the docs and the openapi DELETE say. Reintroduce the old body: this names it.
+  const src = code(read('components/ArchiveQueue.tsx'));
+  const stop = src.slice(src.indexOf('function StopConfirm('), src.indexOf('export function ArchiveKeys('));
+  assert.match(stop, /body=\{<p data-stop-body>\{tr\('Chapters already fetched stay\. The rest go back to the scheduled check, or wait for you on a Latest N or Nothing yet series\.'\)\}<\/p>\}/,
+    'Stop archiving says the rest waits for you on every series');
+  assert.doesNotMatch(stop, /left for you to fetch later/, 'the old sentence is back');
+});
+
 test('the Downloads view says when it could not read the server, with a way to ask again', () => {
   // Reintroduce the old `if (empty)` without the error branch: a 500 reads "Nothing is being fetched right now".
   const view = code(read('components/ServerDownloadsView.tsx'));

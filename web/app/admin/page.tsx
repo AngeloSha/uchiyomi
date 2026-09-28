@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { scheduleText, taskResult } from '@/lib/tasks';
 import { bytes, relativeTime } from '@/lib/format';
+import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
@@ -21,7 +22,7 @@ import { RepairRunProvider } from '@/lib/useRepairRun';
 import { checkTitle } from '@/lib/healthCopy';
 import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
-import { Backdrop, Img } from '@/components/ui';
+import { Backdrop, Img, OnBody } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -1276,10 +1277,12 @@ function Sessions() {
             <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{s.display_name || s.username}</p>
             {/* Phone folds device and ip under the name; from lg each takes its own track. */}
             <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-              {s.device_name || 'Device'}
+              {/* The stored name through the same mapping as Profile → Sessions: an older sign-in's English "Browser"
+                  is not shown, and no name is "Device" in the reader's words. */}
+              {shownDeviceName(s.device_name) || tr('Device')}
               <span className="lg:hidden"> · {s.ip || tr('unknown ip')} · {tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
             </p>
-            <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || 'unknown'}</p>
+            <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || tr('unknown ip')}</p>
             <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 items-center gap-2 justify-self-end lg:col-start-4 lg:row-span-1">
               <span className="hidden text-[11px] text-fog-500 lg:inline">{tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
               {/* `current` marks the caller's own session. The admin route does not send it yet, so this is
@@ -2404,7 +2407,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 <span>Languages</span>
                 <span className="text-fog-500"> · {status.hiddenLangs?.length ?? 0} hidden</span>
               </span>
-              <span className="text-[11px] text-fog-500">{showLangs ? 'Hide' : 'Manage'}</span>
+              <span className="text-[11px] text-fog-500">{showLangs ? tr('Hide') : tr('Manage')}</span>
             </button>
             {showLangs && (
               <div className="mt-2 space-y-1.5">
@@ -2427,7 +2430,8 @@ function Extensions({ span = '' }: { span?: string }) {
                           onClick={() => (on ? (l.used > 0 ? setHiding(l) : toggleLang(l, false)) : toggleLang(l, true))}
                           disabled={working}
                           className={`btn-key ${on ? '' : 'btn-key-primary'}`}>
-                          {working ? '…' : on ? 'Hide' : 'Show'}
+                          {/* Their own keys: the bare "Hide"/"Show" are the app's collapse toggles ("收起"/"展开"). */}
+                          {working ? '…' : on ? tr('Hide {lang}', { lang: name }) : tr('Show {lang}', { lang: name })}
                         </button>
                       )}
                     </div>
@@ -2445,15 +2449,24 @@ function Extensions({ span = '' }: { span?: string }) {
             )}
           </div>
 
+          {/* ⚠️ On <body>: this panel is a `.card`, whose backdrop blur makes it the containing block of a `fixed`
+              dialog -- only the panel dimmed, and on a tall one the dialog landed off-screen (the web2 review's scan
+              found it the last dialog left inside a card). One sentence per count, in the reader's words. */}
           {hiding && (
-            <ConfirmDialog
-              title={`Hide ${hiding.lang ?? 'none'}?`}
-              body={`Hiding ${hiding.lang ?? 'none'} turns off ${hiding.enabled} source${hiding.enabled === 1 ? '' : 's'}. ${hiding.used} series came from them and will stop updating until you show it again; they stay readable.`}
-              confirmLabel="Hide"
-              busy={busy === `__lang:${hiding.lang ?? 'none'}`}
-              onConfirm={() => toggleLang(hiding, false)}
-              onClose={() => setHiding(null)}
-            />
+            <OnBody>
+              <ConfirmDialog
+                title={tr('Hide {lang}?', { lang: hiding.lang ?? 'none' })}
+                body={`${hiding.enabled === 1
+                  ? tr('Hiding {lang} turns off 1 source.', { lang: hiding.lang ?? 'none' })
+                  : tr('Hiding {lang} turns off {n} sources.', { lang: hiding.lang ?? 'none', n: hiding.enabled })} ${hiding.used === 1
+                  ? tr('1 series from {lang} will stop updating until you show the language again, but stay readable.', { lang: hiding.lang ?? 'none' })
+                  : tr('{n} series from {lang} will stop updating until you show the language again, but stay readable.', { lang: hiding.lang ?? 'none', n: hiding.used })}`}
+                confirmLabel={tr('Hide {lang}', { lang: hiding.lang ?? 'none' })}
+                busy={busy === `__lang:${hiding.lang ?? 'none'}`}
+                onConfirm={() => toggleLang(hiding, false)}
+                onClose={() => setHiding(null)}
+              />
+            </OnBody>
           )}
 
           {/* The cap overflow used to be one line in the boot log: the panel counted the sources that were on,

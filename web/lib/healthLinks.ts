@@ -56,13 +56,22 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     // #72: the engine's row is about no series; its setup steps, Check again and Connect are on the Extensions tab.
     case 'extension-engine':
       return [{ href: '/admin/?tab=Extensions' }];
-    // #116: the finding is about a plan, so Open is the plan -- which file becomes which chapter -- on the series
-    // page. An extension source adds its own settings, where a numbering switch of its own may be the better fix
-    // (Webtoons' "sequential chapter numbering", the one #116's reporter needed).
+    // #116: a finding that waits for a renumbering review is about a plan, so Open is the plan -- which file becomes
+    // which chapter -- on the series page. Any other numbering row opens the series itself: the page's plan is the
+    // route's `next`, so "numbered by posting order lately" (info, keep_numbers) opened "Use the source's numbers"
+    // with a Rename key nobody asked for, and an interrupted renumber (no key; the next check finishes it) invited a
+    // Confirm over its journal (web2 review). An extension source adds its own settings either way, where a
+    // numbering switch of its own may be the better fix (Webtoons' "sequential chapter numbering", #116's).
+    // Reintroduce the plan for every row: "a series numbered by posting order lately opens a rename plan" in
+    // healthLinks.test.ts fails.
     case 'numbering':
       if (it.seriesId) {
         const ext = extSourceIdOf(it.sourceId);
-        return [{ href: numberingHref(it.seriesId) }, ...(ext ? [{ href: extensionSettingsHref(ext), label: tr('Source settings') }] : [])];
+        const review = !it.info && !!it.actions?.includes('renumber');
+        return [
+          { href: review ? numberingHref(it.seriesId) : seriesHref(it.seriesId) },
+          ...(ext ? [{ href: extensionSettingsHref(ext), label: tr('Source settings') }] : []),
+        ];
       }
       break;
   }

@@ -200,7 +200,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     const lines = [
       { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
       { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
-      { n: other, text: tr('{n} could not be deleted', { n: other }) },
+      { n: other, text: other === 1 ? tr('1 could not be deleted') : tr('{n} could not be deleted', { n: other }) },
     ].filter((l) => l.n > 0);
     // ⚠️ A delete that deleted nothing is not a success: a green "0 deleted" over unchanged rows is what a
     // refused delete used to look like, and the reason is what the admin needs in front of them.

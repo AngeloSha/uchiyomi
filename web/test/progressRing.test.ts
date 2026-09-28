@@ -218,7 +218,9 @@ test('CoverProgress: a veil and a ring per state, a glyph slot, a still amber ri
   const unread = html(createElement(CoverProgress, { state: 'waiting', progress: 'spin', tone: 'amber', static: true, label: 'Archiving slowly' }));
   assert.match(unread, /data-ring="still"/, 'an archive not sized yet shows a bare track, unlike its sheet and band');
   assert.doesNotMatch(unread, /animate-ring/, 'the slow archive\'s cover turns');
-  const queued = html(createElement(CoverProgress, { state: 'waiting', label: 'Queued' }));
+  // An explicit 'idle': the default IS 'spin', so a bare `{ state: 'waiting' }` checked the same path as "a queued
+  // cover turns" below and always failed first, and that name never surfaced (web2 review).
+  const queued = html(createElement(CoverProgress, { state: 'waiting', progress: 'idle', label: 'Queued' }));
   assert.match(queued, /data-ring="idle"/, 'a queued cover without a fraction shows one');
   // A queued download is not "working": without `static` a 'spin' stays the bare track, never a turn in Queued.
   assert.match(html(createElement(CoverProgress, { state: 'waiting', progress: 'spin', label: 'Queued' })), /data-ring="idle"/, 'a queued cover turns');

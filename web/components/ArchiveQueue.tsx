@@ -100,8 +100,10 @@ export function useArchiveEnqueue() {
 }
 
 /**
- * The confirmation before an archive stops. What landed stays, and the rest is not fetched by anything until
- * someone asks: a "Nothing yet" or Latest-N series has a floor the scheduled check does not go under.
+ * The confirmation before an archive stops. What landed stays. The row and its boundary go (bff lib/archive.ts
+ * archiveAct), so the series' floor is its own again (updater.ts: `max(chapter_floor, boundary)`): the scheduled
+ * check fetches the rest at its own pace, unless a "Nothing yet" or Latest-N floor keeps it for someone to fetch.
+ * It said "the rest are left for you to fetch later" for every series, which the docs and the code contradict.
  */
 function StopConfirm({ item, onClose, onStopped }: { item: ArchiveItem; onClose: () => void; onStopped?: () => void }) {
   const a = useArchiveActions();
@@ -109,7 +111,7 @@ function StopConfirm({ item, onClose, onStopped }: { item: ArchiveItem; onClose:
     <OnBody>
       <ConfirmDialog
         title={tr('Stop archiving {title}?', { title: item.title })}
-        body={<p>{tr('Chapters already fetched stay; the rest are left for you to fetch later.')}</p>}
+        body={<p data-stop-body>{tr('Chapters already fetched stay. The rest go back to the scheduled check, or wait for you on a Latest N or Nothing yet series.')}</p>}
         confirmLabel={tr('Stop archiving')}
         danger busy={a.busy}
         onConfirm={async () => { await a.stop(item.seriesId); onClose(); onStopped?.(); }}

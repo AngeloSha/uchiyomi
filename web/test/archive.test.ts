@@ -3,7 +3,7 @@
 // reason it can be waiting, and the words for turning it on.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   archiveAddLine, archiveBulkNotice, archiveItems, archiveOutcomeNotice, archivePaceHelp, archiveProgressText, archiveStateText,
@@ -97,21 +97,50 @@ test('every reason the server can send has a sentence of its own', () => {
     'a failed listing reads as a read in progress');
   assert.equal(waitingText({ why: 'listing' }, null, now), 'Its chapter list could not be read; trying again soon');
   assert.equal(waitingText({ why: 'break', until: '2026-09-27T12:20:00Z' }, null, now), 'Next chapter in 20 minutes');
-  assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T15:00:00Z' }, null, now), 'The site asked us to slow down; trying again in 3 hours');
-  assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T11:00:00Z' }, null, now), 'The site asked us to slow down', 'a time already past is promised');
+  // `backoff` is the archive's own rest after a chapter failed on the site (refused or down), not the 429 `pace` of
+  // ordinary traffic: "asked us to slow down" read as that one (i18n pass 2). A time already past is not promised.
+  assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T15:00:00Z' }, null, now), 'A chapter failed on its site; trying again in 3 hours');
+  assert.equal(waitingText({ why: 'backoff', until: '2026-09-27T11:00:00Z' }, null, now), 'A chapter failed on its site; trying again soon', 'a time already past is promised');
+  assert.notEqual(waitingText({ why: 'backoff' }, null, now), waitingText({ why: 'pace' }, null, now), 'a back-off reads as the site\'s pace');
   assert.equal(waitingText(undefined, null, now), '');
   const whys: ArchiveAttentionWhy[] = ['backoff', 'source_missing', 'disabled', 'stalled', 'disk', 'finished_with_gaps'];
   for (const why of whys) assert.ok(attentionText(entry({ attention: { why, since: '' } }), now), `no sentence for attention "${why}"`);
   const gaps = entry({ state: 'done', note: { capped: 2, held: 0, blocked: 1 }, attention: { why: 'finished_with_gaps', since: '' } });
-  assert.equal(attentionText(gaps, now), 'Finished · 3 chapters could not be fetched');
-  assert.equal(attentionText({ ...gaps, note: { capped: 1, held: 0, blocked: 0 } }, now), 'Finished · 1 chapter could not be fetched', '"1 chapters"');
-  assert.deepEqual(leftBehindLines({ capped: 2, held: 1, blocked: 0 }), ['2 failed too many times', '1 is waiting for a preferred group']);
+  // Chapters skipped by rule (a preferred group's wait, a blocked group) count too: "were not fetched", never "could not be".
+  assert.equal(attentionText(gaps, now), 'Finished · 3 chapters were not fetched');
+  assert.equal(attentionText({ ...gaps, note: { capped: 1, held: 0, blocked: 0 } }, now), 'Finished · 1 chapter was not fetched', '"1 chapters"');
+  // Each line names its noun, one to a count (i18n pass 2: "1 failed" had no noun for a gendered language to agree with).
+  assert.deepEqual(leftBehindLines({ capped: 2, held: 1, blocked: 0 }), ['2 chapters failed too many times', '1 chapter is waiting for a preferred group']);
+  assert.deepEqual(leftBehindLines({ capped: 1, held: 3, blocked: 1 }),
+    ['1 chapter failed too many times', '3 chapters are waiting for a preferred group', '1 chapter is only from a blocked group']);
   // `stalled` is two things (bff lib/archivePlan.ts attentionOf): paused for a week, or queued with its turns had and
   // nothing brought in for three days. Reintroduce the one sentence for both: a queued series reads as paused.
-  assert.equal(attentionText(entry({ state: 'paused', attention: { why: 'stalled', since: '2026-09-19T12:00:00Z' } }), now), 'Paused for over a week');
+  assert.equal(attentionText(entry({ state: 'paused', attention: { why: 'stalled', since: '2026-09-19T12:00:00Z' } }), now), 'Paused for over a week',
+    'a paused row reads as a queued one');
   assert.equal(attentionText(entry({ attention: { why: 'stalled', since: '2026-09-24T08:00:00Z' } }), now), 'Nothing has come in for 3 days 4 hr',
     'a queued series that stalled reads as paused');
   assert.equal(attentionText(entry({ attention: { why: 'stalled', since: '' } }), now), 'Nothing has come in for days');
+});
+
+test('every reason the server\'s archive can send is one the web has a sentence for, read from the server\'s unions', (t) => {
+  // The list above is typed by hand; this reads bff lib/archivePlan.ts's own unions, so a reason the scheduler gains
+  // without words here fails by name. Reintroduce by deleting waitingText's 'renumbering' case: "series wait
+  // 'renumbering' has no sentence" fails.
+  const path = join(__dirname, '..', '..', 'bff', 'src', 'lib', 'archivePlan.ts');
+  if (!existsSync(path)) { t.skip('no bff/ beside web/ in this checkout'); return; }
+  const plan = readFileSync(path, 'utf8');
+  const union = (name: string): string[] => {
+    const m = new RegExp(`export type ${name} =\\s*([^;]+);`).exec(plan);
+    assert.ok(m, `${name} is not in archivePlan.ts -- this scan is broken`);
+    return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+  };
+  const now = Date.parse('2026-09-27T12:00:00Z');
+  const said = (s: string, why: string) => !!s && s !== why && !s.includes('_');
+  for (const why of union('GlobalWaitWhy')) assert.ok(said(waitingText({ why: why as GlobalWaitWhy }, view([]), now), why), `global wait '${why}' has no sentence`);
+  for (const why of union('SeriesWaitWhy')) assert.ok(said(waitingText({ why: why as SeriesWaitWhy }, view([]), now), why), `series wait '${why}' has no sentence`);
+  for (const why of union('AttentionWhy')) {
+    assert.ok(said(attentionText(entry({ attention: { why: why as ArchiveAttentionWhy, since: '' } }), now), why), `attention '${why}' has no sentence`);
+  }
 });
 
 test('an archive under Needs attention still says the chapter it is taking', () => {
@@ -177,7 +206,9 @@ test('what became of queueing: the add dialog, one series, a Library selection',
   // Reintroduce by counting every outcome as queued: "3 series queued" for a selection where one was.
   const r = (outcome: EnqueueOutcome, id: string = outcome) => ({ id, outcome });
   assert.deepEqual(archiveBulkNotice([r('queued'), r('nothing', 'n1'), r('nothing', 'n2'), r('already')]),
-    { msg: '1 series queued for the slow archive · 1 already being archived · 2 had nothing older to fetch', tone: 'success' });
-  assert.deepEqual(archiveBulkNotice([r('nothing')]), { msg: '1 had nothing older to fetch', tone: 'info' });
-  assert.deepEqual(archiveBulkNotice([r('denied'), r('not_found')]), { msg: '2 could not be queued', tone: 'error' });
+    { msg: '1 series queued for the slow archive · 1 series already being archived · 2 series had nothing older to fetch', tone: 'success' });
+  // Nothing queued: the notice still says what it counts (i18n pass 2).
+  assert.deepEqual(archiveBulkNotice([r('nothing')]), { msg: '1 series had nothing older to fetch', tone: 'info' });
+  assert.deepEqual(archiveBulkNotice([r('denied'), r('not_found')]), { msg: '2 series could not be queued', tone: 'error' });
+  assert.deepEqual(archiveBulkNotice([r('denied')]), { msg: '1 series could not be queued', tone: 'error' });
 });

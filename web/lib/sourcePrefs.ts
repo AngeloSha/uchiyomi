@@ -4,6 +4,7 @@
 // (bff lib/sources/suwayomi/prefs.ts). What is left here is pure: which control a setting gets, what its summary
 // says, and what a numbering setting's warning counts. ⚠️ A write names the setting's KEY; no position is ever
 // answered or sent -- the engine's positions move when an extension is updated.
+import { t as tr } from './i18n';
 
 /** The five kinds the engine has: SwitchPreference, CheckBoxPreference, ListPreference, MultiSelectListPreference, EditTextPreference. */
 export type PrefType = 'switch' | 'checkbox' | 'list' | 'multiselect' | 'text';
@@ -102,4 +103,17 @@ export const extensionSettingsHref = (extSourceId: string): string =>
 export function extSourceIdOf(adapterId: string | null | undefined): string | null {
   const m = /^sw:(-?\d{1,20})$/.exec(adapterId ?? '');
   return m ? m[1] : null;
+}
+
+/**
+ * A refused settings read or write, in words. The route's 502 `unreachable` is the ENGINE not answering (bff
+ * routes/numbering.ts engineFailure), said here in the reader's language and by the component's name everywhere
+ * else in the app -- its English message said "the extension server". `extension_error` carries the extension's
+ * own exception, which only the server has, so it and anything else are shown as sent.
+ */
+export function prefErrorText(e: unknown, fallback: string): string {
+  let j: { error?: string; message?: string } = {};
+  try { j = JSON.parse((e as { body?: string } | null)?.body || '{}'); } catch { /* not JSON: the fallback */ }
+  if (j.error === 'unreachable') return tr('The extension engine did not answer. Try again in a moment.');
+  return j.message || fallback;
 }

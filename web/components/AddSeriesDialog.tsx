@@ -26,7 +26,7 @@ import { PreviewReader } from '@/components/PreviewReader';
 import { ARCHIVE_PACE, archiveAddLine, archiveSwitchHelp, type EnqueueOutcome } from '@/lib/archive';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { useAuth } from '@/lib/auth';
-import { addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
+import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
@@ -741,9 +741,9 @@ function AddNumberingNotice({ n, count, view, flipped, sourceName, admin, onFlip
   const big = n.biggest;
   return (
     <div data-add-numbering={strong ? 'strong' : 'hint'} className="mt-2 border-s-2 border-accent/60 bg-accent/5 py-2 pe-2.5 ps-2.5">
-      <p className="text-[12px] font-semibold text-fog-100">
-        {strong ? tr('Numbered by posting order') : tr('Some posts share a chapter number')}
-      </p>
+      {/* The reading the add will use, as the counts are: switched to the source's numbers, it no longer says
+          "Numbered by posting order" above its own switch (the e2e walk's shot). */}
+      <p className="text-[12px] font-semibold text-fog-100" data-add-numbering-heading>{addNoticeHeading(view)}</p>
       <p className="mt-0.5 text-[11px] leading-relaxed text-fog-400">
         {strong
           ? (big && big.posts > 1
@@ -753,8 +753,11 @@ function AddNumberingNotice({ n, count, view, flipped, sourceName, admin, onFlip
       </p>
       {/* The two readings side by side, whichever the switch shows: the count the add lands, and the other. */}
       {strong && (
-        <p className="mt-0.5 text-[11px] tabular-nums text-fog-300" data-add-numbering-counts>
-          {tr('Posting order: {n} · the source’s own numbers: {m}', { n: posts, m: numbers })}
+        // Counted in words ("226 chapters by posting order"): a bare "Posting order: 226" read as a position.
+        <p className="mt-0.5 text-[11px] tabular-nums text-fog-300" data-add-numbering-counts data-posts={posts} data-numbers={numbers}>
+          {posts === 1
+            ? tr('1 chapter by posting order · {m} by the source’s own numbers', { m: numbers })
+            : tr('{n} chapters by posting order · {m} by the source’s own numbers', { n: posts, m: numbers })}
         </p>
       )}
       <div className="mt-1.5 flex items-center justify-between gap-3">

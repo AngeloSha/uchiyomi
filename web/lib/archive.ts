@@ -257,7 +257,10 @@ export function waitingText(
     case 'disk': return tr('Waiting for free disk space');
     case 'turn': return tr('Waiting its turn on its source');
     case 'break': return when ? tr('Next chapter {when}', { when }) : tr('Taking a break between chapters');
-    case 'backoff': return when ? tr('The site asked us to slow down; trying again {when}', { when }) : tr('The site asked us to slow down');
+    // The archive's own back-off after a chapter failed on the site: refused (403, 429) or down (bff lib/archive.ts
+    // backOff). "The site asked us to slow down" read as `pace` below, the 429 of ordinary traffic, and said nothing
+    // of a refusal or an outage.
+    case 'backoff': return when ? tr('A chapter failed on its site; trying again {when}', { when }) : tr('A chapter failed on its site; trying again soon');
     case 'source_busy': return tr('Waiting for another download from the same site');
     case 'pace': return tr('The site asked for a slower pace; waiting');
     case 'cooldown': return when ? tr('The site is cooling down; trying again {when}', { when }) : tr('The site is cooling down');
@@ -289,9 +292,10 @@ export function globalWaitOf(view: Pick<ArchiveView, 'paused' | 'waiting'> | nul
 export function leftBehindLines(note: ArchiveNote | null | undefined): string[] {
   if (!note) return [];
   const out: string[] = [];
-  if (note.capped) out.push(note.capped === 1 ? tr('1 failed too many times') : tr('{n} failed too many times', { n: note.capped }));
-  if (note.held) out.push(note.held === 1 ? tr('1 is waiting for a preferred group') : tr('{n} are waiting for a preferred group', { n: note.held }));
-  if (note.blocked) out.push(note.blocked === 1 ? tr('1 is only from a blocked group') : tr('{n} are only from a blocked group', { n: note.blocked }));
+  // Each its own line in the sheet, so each names what it counts: a bare "1 failed" left gendered languages guessing.
+  if (note.capped) out.push(note.capped === 1 ? tr('1 chapter failed too many times') : tr('{n} chapters failed too many times', { n: note.capped }));
+  if (note.held) out.push(note.held === 1 ? tr('1 chapter is waiting for a preferred group') : tr('{n} chapters are waiting for a preferred group', { n: note.held }));
+  if (note.blocked) out.push(note.blocked === 1 ? tr('1 chapter is only from a blocked group') : tr('{n} chapters are only from a blocked group', { n: note.blocked }));
   return out;
 }
 
@@ -301,7 +305,9 @@ export function attentionText(e: ArchiveEntry, now: number = Date.now()): string
     case 'finished_with_gaps': {
       const n = e.note ? e.note.capped + e.note.held + e.note.blocked : 0;
       const gaps = n || e.failed;
-      return gaps === 1 ? tr('Finished · 1 chapter could not be fetched') : tr('Finished · {n} chapters could not be fetched', { n: gaps });
+      // "Were not fetched", not "could not be": the count holds chapters skipped by rule -- waiting for a preferred
+      // group, only from a blocked one -- as well as the ones that failed.
+      return gaps === 1 ? tr('Finished · 1 chapter was not fetched') : tr('Finished · {n} chapters were not fetched', { n: gaps });
     }
     case 'backoff': {
       const left = msUntil(e.nextAt ?? e.waiting?.until, now);
@@ -402,8 +408,8 @@ export function archiveOutcomeNotice(outcome: EnqueueOutcome | undefined, title:
 }
 
 /**
- * A Library selection queued: one notice for all of it, "12 series queued for the slow archive · 3 had nothing
- * older to fetch". Error tone only when nothing at all was queued or already being archived.
+ * A Library selection queued: one notice for all of it, "12 series queued for the slow archive · 3 series had
+ * nothing older to fetch". Error tone only when nothing at all was queued or already being archived.
  */
 export function archiveBulkNotice(results: readonly EnqueueResult[]): { msg: string; tone: Tone } {
   const n = (o: EnqueueOutcome[]) => results.filter((r) => o.includes(r.outcome)).length;
@@ -413,9 +419,10 @@ export function archiveBulkNotice(results: readonly EnqueueResult[]): { msg: str
   const failed = n(['unrouted', 'denied', 'not_found']);
   const parts: string[] = [];
   if (queued) parts.push(queued === 1 ? tr('1 series queued for the slow archive') : tr('{n} series queued for the slow archive', { n: queued }));
-  if (already) parts.push(already === 1 ? tr('1 already being archived') : tr('{n} already being archived', { n: already }));
-  if (nothing) parts.push(nothing === 1 ? tr('1 had nothing older to fetch') : tr('{n} had nothing older to fetch', { n: nothing }));
-  if (failed) parts.push(failed === 1 ? tr('1 could not be queued') : tr('{n} could not be queued', { n: failed }));
+  // Each part names its noun: when nothing was queued, the notice had no "series" in it at all.
+  if (already) parts.push(already === 1 ? tr('1 series already being archived') : tr('{n} series already being archived', { n: already }));
+  if (nothing) parts.push(nothing === 1 ? tr('1 series had nothing older to fetch') : tr('{n} series had nothing older to fetch', { n: nothing }));
+  if (failed) parts.push(failed === 1 ? tr('1 series could not be queued') : tr('{n} series could not be queued', { n: failed }));
   return { msg: parts.join(' · ') || tr('Nothing older to fetch'), tone: queued || already ? 'success' : nothing && !failed ? 'info' : 'error' };
 }
 

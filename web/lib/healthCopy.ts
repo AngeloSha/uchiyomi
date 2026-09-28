@@ -200,9 +200,12 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     how: () => tr('Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.'),
     eta: () => etaLine({ maxMs: RENUMBER_MAX_MS }),
   },
+  // POST {mode: 'source'} (bff lib/numbering.ts requestNumbering): on a proposal it records the admin's choice and
+  // drops the proposal; on a series numbered by posting order it answers the plan back, which HealthRow opens.
   keep_numbers: {
     label: () => tr('Keep the source’s numbers'),
     what: () => tr('Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.'),
+    how: () => tr('For a proposal nothing is renamed: Uchiyomi records the source’s numbers as your choice and stops proposing a renumbering for this series. On a series it has already renumbered, it first shows the plan back to the source’s numbers, and renames the files only once you confirm.'),
     eta: moment,
   },
   ignore: {
