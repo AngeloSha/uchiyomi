@@ -426,7 +426,7 @@ components:
         bytes: { type: integer, description: Bytes the archive has written. }
         mine: { type: boolean, description: This account queued it, and so may pause, resume or stop it (as may an admin). }
         current: { type: object, properties: { number: { type: number }, startedAt: { type: string, format: date-time } } }
-        nextAt: { type: string, format: date-time, description: "When it may next go: its source's break or backoff, or its own listing retry." }
+        nextAt: { type: string, format: date-time, description: "When it may next go: its source's break or backoff, or its own listing retry when that is what it waits for. Absent while a chapter of it is in flight." }
         etaMs: { type: integer, description: "About how long until the rest is in: left x the series sharing its source x the running average time per chapter, in calendar time -- with a time window set, stretched by the share of the day the window is open." }
         waiting:
           type: object
@@ -601,7 +601,8 @@ components:
         publishedAt: { type: [string, "null"], format: date-time }
         chosen: { type: boolean, description: The copy the release rules chose at the last check. }
         blocked: { type: boolean, description: Every group on the copy is blocked by the effective preferences. A copy with no groups is never blocked. }
-        onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy)." }
+        onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy). Since v0.49.0 a chapter that landed with the post it came from stamped (lib_books.source_chapter_id) matches that copy alone." }
+        title: { type: [string, "null"], description: "Since v0.49.0 (#116): the copy's own title as the source lists it. Copies from one source and one group under different titles are different posts that share a number, not versions." }
     NotifyTarget:
       type: object
       description: >-
@@ -1443,6 +1444,13 @@ paths:
                     description: >-
                       Since v0.49.0 (#117): the series' slow archive, or null -- `{state, done, left, failed, mine,
                       etaMs?, nextAt?, waiting?, attention?}`, as in ArchiveSeries.
+                  numbering:
+                    type: [object, "null"]
+                    description: >-
+                      Since v0.49.0 (#116), to every viewer of the series: `{mode, by, pending, note, changedAt,
+                      sourceName, extSourceId?}` as described above. While `pending` is set the series downloads
+                      nothing until an admin confirms or declines the change (POST
+                      /api/admin/series/{id}/numbering).
         "401":
           description: Not authenticated
         "404":
@@ -1970,7 +1978,10 @@ paths:
         too_few_chapters early answer as well.
         This route deliberately does NOT honour the 18+ reveal (v0.42.0): it is an explicit act on a series
         already in the library, and a series whose own source is adult has to stay fillable whatever the
-        chip says. The age cap still applies — a source above it is never a candidate.
+        chip says. The age cap still applies — a source above it is never a candidate. Since v0.49.0 (#116) a
+        series numbered by posting order is scanned on its own source alone, in the numbers the series keeps;
+        every other source it follows is listed with `why: posting_order` and never asked, and no other source
+        is searched.
       requestBody:
         required: false
         content:
@@ -2065,6 +2076,11 @@ paths:
         - sources
       summary: Fetch specific missing chapter numbers from a source quoted in a plan.
       operationId: postApiSourcesFill
+      description: >-
+        The plan (POST /api/sources/fill/scan) is the authorisation: only numbers it quoted for that source can be
+        asked for, at most 300 at once. Since v0.49.0 (#116) a series waiting for its renumbering answers 409
+        `renumber_pending`, and one numbered by posting order refuses a fill from any source but its own with 409
+        `posting_order` -- another site's chapter numbers do not line up with its posts.
       requestBody:
         required: false
         content:
@@ -2096,7 +2112,9 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: "`plan_stale` (scan again), `disabled` (the source is switched off), `busy` (a download for the series is running), or since v0.49.0 `renumber_pending` / `posting_order` (above)"
+        "429":
+          description: "`blocked`: the source is in a cooldown"
   /api/sources/fetch:
     post:
       tags:
@@ -2177,7 +2195,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why), `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it) or `renumber_pending` (since v0.49.0: the series waits for a numbering review, #116 -- asked again after the listing refresh, which is where the detector first marks one)"
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why), `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it, and since v0.49.0 a slow-archive chapter in flight, which the message names) or, since v0.49.0 (#116), `renumber_pending` (the series waits for an admin to review its renumbering and nothing downloads until then; asked again after the listing refresh, which is where the detector first marks one)"
   /api/sources/search-all:
     get:
       tags:
@@ -2396,7 +2414,7 @@ paths:
         `current` is.
         Since v0.48.1 the response also carries `activity: {active, recent}` -- every chapter the server is
         downloading or finished in the last day, whatever started it: `{id, seriesId, folder, title, number, source,
-        origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server, status: queued|downloading|done|partial|failed,
+        origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server|archive, status: queued|downloading|done|partial|failed,
         startedAt, finishedAt?, pages?, reason?, mine}`, limited to the series this viewer can browse (a folder that
         is not a series yet: its starter and admins). Since v0.49.0 `recent` survives a restart: every finished
         chapter is also written down, kept a week, and the last day of it (at most 500 entries) is read back when
@@ -2511,6 +2529,11 @@ paths:
                         cancelRequested: { type: boolean }
                         reason: { type: string }
                         mine: { type: boolean }
+                        repairKind: { type: string, description: "Since v0.49.0, a repair: which run it is -- fix_short, fill, retry, or steps:<a+b...>[:now]." }
+                        label: { type: string, description: "Since v0.49.0, a repair: the series title or source name a one-row Health fix is about. Left out, with number and seriesId, for a viewer who may not list that series, and whenever current is." }
+                        number: { type: number, description: Since v0.49.0, a repair about one chapter -- its number. }
+                        seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
+                        downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
         "403":
@@ -2862,9 +2885,10 @@ paths:
         here, capped, held or blocked); `unrouted` (no source is installed for it); `denied` (a source it follows
         is outside this account's age limit); `not_found` (no such series, or one this account may not see --
         with no title). The archive owns the listed numbers below a boundary -- the series' floor, else a hair
-        above the newest listed number -- and the nightly sweep keeps the new releases above it; chapter_floor
-        itself is never changed while it runs. Nothing is followed or searched for. A finished archive queued
-        again starts over. Audited as `download.archive`.
+        above the newest listed number; a series with no listing yet is queued, and its first turn reads one --
+        and the nightly sweep keeps the new releases above it; chapter_floor itself is never changed while it runs.
+        Nothing is followed or searched for. A finished archive queued again starts over. Audited as
+        `download.archive`.
       requestBody:
         required: true
         content:
@@ -2966,8 +2990,9 @@ paths:
       operationId: deleteApiSourcesArchiveSeriesId
       description: >-
         Since v0.49.0. The account that queued it, or an admin (403 otherwise; 404 to one who cannot see the
-        series). A chapter in flight finishes. The rest goes back to the nightly sweep, which fetches below the
-        floor again as it did before. Audited as `download.archive_stop`.
+        series). A chapter in flight finishes. The rest goes back to where it was before the archive: under a
+        Latest-N or Nothing-yet floor it waits for someone to fetch it, otherwise the nightly sweep fetches it at its
+        own pace. Audited as `download.archive_stop`.
       parameters:
         - name: seriesId
           in: path
@@ -3043,7 +3068,9 @@ paths:
                     How to number the series (v0.49.0, #116). `auto` (the default) numbers by posting order when
                     the source gives many different posts one number; `source` keeps the source's numbers;
                     `posting_order` numbers the posts 1..K whatever the detector says. `alsoFollow` is ignored
-                    under posting order.
+                    under posting order. A folder that already holds chapters is never renumbered by an add: it
+                    is added in the source's numbers with a renumbering pending, for an admin to review (unless
+                    the series kept an assignment for this source, when it was removed and is added back).
                 alsoFollow:
                   type: array
                   maxItems: 6
@@ -5719,7 +5746,7 @@ paths:
         schedule. Audit: `task.run` {task: 'verify'} at the press and `library.verify` {checked, missing,
         readLibraryMissing, unmounted, ms} when the walk ends.
         `repair` (since v0.41.0) is the only task that takes a body, and it is also detached. With no body it
-        runs all five steps over the whole library; `only` narrows it to named steps, and the three targets
+        runs all eight steps over the whole library; `only` narrows it to named steps, and the three targets
         each belong to exactly one step -- `seriesId` to `gaps` ("Fill now" on one series), `bookId` to
         `short` ("Fix" on one chapter), `sourceId` to `failures` ("Retry now" on one source) -- so a target
         sent without `only: ["<its step>"]` is refused with 400 rather than quietly widened into a full run.
@@ -5789,6 +5816,14 @@ paths:
                   description: >-
                     One source whose failed chapters to reset and re-check regardless of their age. Only
                     with only: ["failures"].
+                now:
+                  type: boolean
+                  description: >-
+                    Since v0.48.3: the whole library, now. Only with no target, and only where the `failures` step
+                    runs (400 otherwise). That step then resets EVERY source's failed chapters whatever their age
+                    and re-checks up to 10 series from the sources that can be asked now (never one cooling down or
+                    switched off, and never with a search). Health's Fix all issues sends it, and since v0.49.0 so
+                    does the Fix all on its "Chapters that would not download" card.
       security:
         - bearer: []
       responses:
@@ -6269,7 +6304,8 @@ paths:
         "409":
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
-            own source); source_unavailable (the adapter is not loaded or is disabled).
+            own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
+            posting_order (the series is numbered by posting order, so a follower would never be merged).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -7543,12 +7579,13 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The server
         reads the preference screen again, finds the key's current position, checks the value against the
         setting's type and choices, and only then writes it: the engine addresses a write by position, which an
-        extension update can move. A change to a numbering setting that the engine took (`applied`) marks every
-        series from this source that uses the source's numbers for a remap (`numbering_pending = 'remap'`): each
-        waits for an admin to confirm its renaming (POST /api/admin/series/{id}/numbering, mode remap) before it
-        updates again, unless its next check finds that every chapter keeps its number, which settles the remap
-        by itself; series numbered by posting order are unaffected. A text setting's value is audited by its
-        length only.
+        extension update can move. A value that really changed drops the source's cached chapter lists (what the
+        add dialog shows). A change to a numbering setting that the engine took (`applied`) marks every series
+        from this source that uses the source's numbers for a remap (`numbering_pending = 'remap'`): each waits
+        for an admin to confirm its renaming (POST /api/admin/series/{id}/numbering, mode remap) before it updates
+        again, unless its next check finds that every chapter keeps its number, which settles the remap by itself;
+        series numbered by posting order are unaffected. Audited as `source.extension_pref`, a text setting's value
+        by its length only.
       parameters:
         - name: id
           in: path

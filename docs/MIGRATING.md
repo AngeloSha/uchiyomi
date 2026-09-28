@@ -216,12 +216,15 @@ only accepts `0` or `1` here: the value is the engine's replica count, and any o
 for the whole stack. Uchiyomi reads the same line, so it knows extensions are off instead of reporting an engine
 that isn't answering.
 
-**Compose files from before v0.49.0** have no switch; they keep working as they are. To get it, download the
-current file (`curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml`) or
+**Compose files from before v0.49.0** have no switch; they keep working as they are. To get it, download the file
+for your layout again — `deploy/docker-compose.yml`, `docker-compose.external-db.yml` or `docker-compose.split.yml`
+(`curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/<that file>`); each has the switch — or
 add its two lines to yours: `deploy:` / `replicas: ${EXTENSION_ENGINE:-1}` under `uchiyomi-suwayomi`, and
-`EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}` in the app's `environment`. ⚠️ With the new file an empty
-`SUWAYOMI_URL=` line in `.env` really turns extensions off (the old files put the default back, which is why that
-never worked); delete such a line if you want to keep them.
+`EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}` in the app's `environment`. An install made before v0.18.0 may run the
+external-database layout under the name `docker-compose.yml` (it has a `uchiyomi-db` container): replace that with
+`docker-compose.external-db.yml`, never with the one-container file, which would start on a new, empty database.
+⚠️ With the new file an empty `SUWAYOMI_URL=` line in `.env` really turns extensions off (the old files put the
+default back, which is why that never worked); delete such a line if you want to keep them.
 
 **Unraid and CasaOS.** Add the engine with the `uchiyomi-suwayomi` template (Unraid, from Apps) or the add-on
 [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) (CasaOS, imported as a custom
@@ -233,7 +236,14 @@ step-by-step for each, with the folder to create first, is under **Admin → Ext
 
 Compose ↔ Unraid ↔ CasaOS, or to a machine of its own: copy the engine's data, not just its settings.
 
-1. Stop the engine on the old setup, and copy its data (the `uchiyomi_suwayomi` volume, or its appdata folder).
+1. Stop the engine on the old setup, and copy its data: its appdata folder on Unraid and CasaOS; on Compose its
+   volume, `<project>_uchiyomi_suwayomi` in `docker volume ls`, most simply through the stopped container's own
+   mount (never through a bare `uchiyomi_suwayomi`, which Docker would create empty):
+
+   ```bash
+   docker run --rm --volumes-from uchiyomi-suwayomi -v "$PWD":/b alpine tar czf /b/engine.tgz -C /home/suwayomi/.local/share/Tachidesk .
+   ```
+
 2. Put it where the new setup mounts it (`/mnt/user/appdata/uchiyomi-suwayomi` for the Unraid template,
    `/DATA/AppData/uchiyomi-suwayomi` for the CasaOS add-on), owned by uid **1000**: the official engine image runs
    as that user and cannot write to a folder that belongs to root (`chown -R 1000:1000 <folder>`).
