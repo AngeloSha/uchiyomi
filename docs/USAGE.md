@@ -209,7 +209,8 @@ says how many are in hand. The chips:
   phone. It queues every selected series for the slow archive, which fetches what each is missing a chapter at a
   time over nights or days (section 4, *Fetching a whole series slowly*), and one message sums it up — *12 series
   queued for the slow archive · 3 series had nothing older to fetch*.
-- **Move to library** and **Remove from library** — admins only; on a phone they sit behind **More**.
+- **Move to library** and **Remove from library** — admins only, behind **More** at every width (since v0.49.1;
+  before, they were keys on a laptop).
   *Remove from library* asks *Remove {n} series from the library?* and says what it does not do: **no files
   are deleted**, the chapters stay exactly where they are on disk, and everyone's reading progress, history,
   favourites and ratings are kept, so any of them can be put back at any time from **Admin → Library**. It
@@ -217,6 +218,9 @@ says how many are in hand. The chips:
   already hidden, is skipped and counted (*Removed 11 series · 1 skipped*). A selection that hid nothing
   says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
   separate, per-title step on **Content → Library** — see section 8.
+- **Find other sources** (since v0.49.1) — admins only, behind **More**. It searches the other sources for every
+  selected series and follows the ones whose title and chapter numbers match (section 4, *Find other sources*); the
+  message says where to watch it, *Library → Downloads*.
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
@@ -428,6 +432,67 @@ the main one, the line's *{n} not here yet* counts the chapters missing across a
 and the scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
 
+### Other names
+
+A series often goes by more than one name: its English title, a romanisation, the name another site files it
+under. A search under one of them misses the site that uses another. Since v0.49.1 a series keeps its **other
+names**, and every search for another source uses them (the idea, and the way they are read from a source's
+description, are from @TIGamingTV's pull request [#119](https://github.com/AngeloSha/uchiyomi/pull/119)).
+
+- **Where they come from.** From the main source's description, when it has an *Alternative Titles:* line or one
+  like it: read when the series is added and whenever that source's details are read again, in Latin letters only,
+  at most twenty. From a tracker import's synonyms, when the import adds the series. And from an admin, under
+  **Other names** in the *Sources & translations* sheet (below *Translated by*): type a name and press **Add**. Each
+  name says where it came from (*from a source's description*, *added by an admin*, *from an import*).
+- **Removing one.** The × beside a name removes it, and it stays removed: reading the description again does not
+  bring it back, whichever way it came in. Typing it again brings it back, as yours.
+- **What a name must be.** At least five letters or digits, in Latin letters (English or romanised). The sheet
+  says why under the field (*Too short: a name needs at least 5 letters or digits.*, *Only names in Latin letters
+  can be matched: English or romanised.*, *This series already has that name.*).
+- **Where they are used.** *Find missing chapters* searches under the title, up to three other names and then what
+  you typed; the add dialog's check of the other sources, the nightly search for failed chapters, borrowed chapter
+  names and *Find other sources* (below) use them too. An other name must match a candidate's title **exactly**,
+  never by one containing the other (a sequel's page can list its parent's name), and the chapter numbers must
+  still line up.
+
+### Find other sources
+
+When a source goes away for good — it closed, or it has served only its own *temporarily offline* page for days —
+every series that came from it stops getting new chapters, and following a second source one series at a time is
+an afternoon's work in a large library. **Find other sources** (admins, since v0.49.1) does it for many series at
+once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uchiyomi/pull/119)).
+
+- **Where to start it.** On **Admin → Health**, the row of a failing or switched-off source under *Source health*,
+  and a row under *Series that can no longer update* whose reason is its source, carry **Find other sources (189
+  series)**: every series whose main source it is. In the **Library**, select series and choose **Find other
+  sources** under **More**. On a series page, **Find more sources** in the *Sources & translations* sheet (under
+  *Other names*) does it for that one series. Health's key says beforehand what it does, how, and how long it can
+  take, at most about a minute and a half per series (*Up to 5 hours* for 189).
+- **What a run does.** One run at a time on the server, in the background: one series at a time, 1.5 seconds
+  apart, waiting while a chapter sweep, a library repair or the daily source check runs. For each series it
+  searches under the title and up to three other names, in your source order, and never asks the series' main
+  source (the one that is down), a source it already follows, or one that is switched off or cooling down; a
+  series that is not 18+ never asks an 18+ source. A candidate must pass the same check as any second source
+  (*Following a second source*): its title, then its chapter numbers. A series follows at most two other sources,
+  the run stops looking once three sources carry the series, and it gives each series at most 90 seconds. A series
+  numbered by posting order is skipped: it follows no other source.
+- **Afterwards**, each series that gained a source has its chapter list read again, 1.5 seconds apart, so the next
+  scheduled check fetches its new chapters without a burst, and Health checks itself again.
+- **Watching it.** **Library → Downloads** lists the run under *Server tasks* as *Other-source search*: how many
+  series of how many, how many sources it has followed, the series it is on or what it is waiting for (*Waiting for
+  the scheduled check to finish*), and **Stop**, which stops it at once. Health's row, and a card under the checks,
+  show the same. It never turns the Library ring: it downloads nothing itself.
+- **The results.** **Show results** opens them in four sections. *New sources*: each series and the sources it now
+  follows, with how many chapters each lists. *Nothing found*, and why: no other source lists it under its title or
+  other names; one did, but its title or chapter numbers did not match; no other source answered; or no other
+  source lists it besides the one it already follows. *Skipped*: numbered by posting order, already following as
+  many sources as a series may, fewer than 3 chapters to compare, or no other source that could be asked. *Not
+  tried*: the search was stopped, ran out of time or was interrupted by a restart before it got there — never
+  *not found* — with **Search the {n} series not tried**. *Earlier searches* lists the runs before it; the server
+  keeps the last 20.
+- **A restart** stops a run the way **Stop** does: what it followed stays followed, and the series it never reached
+  are listed as not tried.
+
 ### Preferring one source
 
 When two followed sources both have a chapter and your scanlator preferences do not decide between the
@@ -488,8 +553,9 @@ The view shows each series as its cover with a ring, like an app being installed
   not land), **Dismiss** and **Open**; chapters that could not be saved and did not arrive later from another
   source; a slow archive that is stuck, or finished with chapters it could not fetch; a server task that stopped
   with an error. Chapters that keep failing are Health's to track (Admin → Health).
-- **Server tasks** — the scheduled check, the library repair (with the step it is on) and a bulk *Fetch newest*:
-  how far each has got, how many chapters it saved, which series it is on and when it started.
+- **Server tasks** — the scheduled check, the library repair (with the step it is on), a bulk *Fetch newest* and,
+  for an admin, a *Find other sources* run (*Other-source search*, with **Show results**): how far each has got, how
+  many chapters it saved (or sources it followed), which series it is on and when it started.
 - **Came in today** — what arrived, one cover per series, with the chapters, what started it and when; the slow
   archive's chapters are summed up in one line per series (*Slow archive: 12 chapters today*). It survives a
   restart of the server.
@@ -1279,7 +1345,8 @@ button, a bookmark or a language change keeps you on the tab you were on. The fi
 **Content → Health** audits your library and tells you what is wrong before you run into it: series with missing
 chapters, chapters that downloaded as one or two images, the same title sitting in the library twice, chapter
 numbers that can't be real, series waiting for a renumbering review, any source that is failing or blocked, and the
-extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again.
+extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
+v0.49.1 the page says the server's findings in your language, with dates and times in your own time zone.
 
 Since v0.41.0 every finding also carries the key that fixes it, and most of them fix themselves overnight
 without you pressing anything. Since v0.48.3:
@@ -1462,6 +1529,16 @@ sources responding normally* over any of these. The diagnosis tells the engine f
 server did not answer* means only that the engine could not be reached, timed out or refused Uchiyomi's login,
 while an extension that failed on its site, with the engine answering, reads *This source's extension reported an
 error*.
+
+**A site that says it is offline** (since v0.49.1). A site that answers with its own maintenance page — a small page
+whose title says *temporarily offline*, *maintenance* or *be back soon*, with none of the site's own markup — reads
+*The site says it is offline (its own page)*, with the fix *Wait for the site to come back, or find other sources
+for its series.*, and its step's line says *the site says it is offline*. Before, such a page parsed as an empty
+list and the row blamed the site's markup; the built-in Madara and Manganato engines now recognise it, the series
+keep their chapter lists, and no empty streak builds up. The row of a failing or switched-off source that is some
+series' main source carries **Find other sources ({n} series)** (section 4, *Find other sources*), and so does a row
+of *Series that can no longer update* whose reason is its source; the run and its results are in a card under the
+checks.
 
 **Extension engine** (since v0.49.0) is one row about the engine itself, when there is one or series depend on
 one: *Turned off* or *Not set up* (a greyed line saying how many series from extensions keep their chapters and get

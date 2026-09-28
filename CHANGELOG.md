@@ -1,5 +1,144 @@
 # Changelog
 
+## v0.49.1 — (date to be set)
+
+**When a site goes away, its series can find other sources in one press: Find other sources searches the other
+sites for every series of that source, or any you pick, calmly, one series at a time, and follows the ones that
+really carry them.** A series can go by other names, Health recognises a site that says it is offline, and Health
+and Library → Downloads now read in your language. Plus a round of fixes to things v0.49.0 said wrong. The idea for
+Find other sources, the list of other names and the way they are read from a source's description are
+**@TIGamingTV**'s, from pull request [#119](https://github.com/AngeloSha/uchiyomi/pull/119), rebuilt here on the
+server's own search and follow rules.
+
+### Find other sources, for every series of a site that went away
+
+A site that goes away takes its series' new chapters with it. One Madara site has served only its own *temporarily
+offline* page since 23 September; on the server this was built for, 189 of its 195 series had no second source, so
+none of them has had a new chapter since. Following a second source was one series at a time, from *Find missing
+chapters*.
+
+- **Where to start it.** On **Admin → Health**, the row of a failing or switched-off source under *Source health*,
+  and a row under *Series that can no longer update* whose reason is its source, carry **Find other sources (189
+  series)**: every series whose main source it is. In the **Library**, select series and choose **Find other
+  sources** under **More**. On a series page, **Find more sources** in *Sources & translations* does it for that one
+  series. Admins only.
+- **How it runs.** One run at a time on the server, in the background: one series at a time, 1.5 seconds apart,
+  waiting while a chapter sweep, a library repair or the daily source check runs. For each series it searches under
+  the title and up to three other names, in your source order, and never asks the series' main source, a source it
+  already follows, or one that is switched off or cooling down; a series that is not 18+ never asks an 18+ source. A
+  candidate passes the same check as any second source, its title and then its chapter numbers, and is followed as
+  you would follow it. A series follows at most two other sources, the search stops once three sources carry it,
+  and each series gets at most 90 seconds. A series numbered by posting order is skipped: it follows no other source.
+- **Afterwards** each series that gained a source has its chapter list read again, 1.5 seconds apart, so the next
+  scheduled check fetches its chapters without a burst, and Health checks itself again.
+- **Watching and stopping.** *Server tasks* in Library → Downloads shows an *Other-source search* card: how many
+  series of how many, how many sources it has followed, the series it is on or what it is waiting for, and **Stop**,
+  which stops it at once. Health's row and a card under the checks show the same. It never turns the Library ring:
+  it downloads nothing itself.
+- **The results**, from **Show results**: *New sources* (which series got which source, and how many chapters it
+  lists), *Nothing found* and why (no other source lists it under its title or other names; one did, but its title
+  or chapter numbers did not match; no other source answered; no other source lists it besides the one it already
+  follows), *Skipped* (numbered by posting order, already following as many sources as a series may, fewer than 3
+  chapters to compare, no other source that could be asked), and *Not tried*: a stop, the 90-second limit or a
+  restart cut it short, never "not found", with **Search the {n} series not tried**. A restart stops a run the way
+  Stop does, and what it followed stays followed.
+
+### Other names
+
+- **A series keeps the other names it goes by**: its English title, a romanisation, the name another site files it
+  under. They are read from its main source's description (an *Alternative Titles:* line, in Latin letters, at most
+  twenty) when it is added and whenever that source's details are read, kept from a tracker import's synonyms when
+  an import adds the series, and typed by an admin under **Other names** in *Sources & translations*, which says
+  where each came from. A name you remove stays removed: reading the description again does not bring it back, and
+  typing it again does.
+- **Every search for another source uses them**: Find other sources, *Find missing chapters* (the title, up to three
+  other names, then what you typed), the add dialog's check of the other sources, the nightly search for failed
+  chapters and borrowed chapter names. An other name must match a candidate's title exactly, never by one
+  containing the other, since a sequel's page can list its parent's name; the chapter numbers must still line up.
+
+### "The site says it is offline"
+
+- A site that answers with its own maintenance page (small, its title or first heading saying *temporarily
+  offline*, *maintenance* or *be back soon*, with none of the site's own markup) used to parse as an empty list: the
+  sweep took it for a listing with nothing new, and Health guessed *markup may not match this engine*. The built-in
+  Madara and Manganato engines now recognise such a page and report it as a failure of its own. The series keep
+  their chapter lists, no empty streak builds up, the step reads *the site says it is offline* on Test and in the
+  source's step lines, and Health says *The site says it is offline (its own page)*, with *Wait for the site to come
+  back, or find other sources for its series.* and the row's **Find other sources**.
+- Discover and search put such a site in the usual cooldown (5 to 30 minutes), so the first check after it comes
+  back can wait that long.
+
+### Health and Library → Downloads in your language
+
+- **The server's sentences are translated.** Health's summaries, notes and rows, the header's warning, a source's
+  diagnosis and its fix, why a download stopped or a run ended, and a refused renumbering or extension setting were
+  English in every language. The server now sends each with a code beside its English, which is unchanged, and the
+  page says it in your language: counts with their singulars, and dates and times in your own time zone, where the
+  English prints UTC with no zone. A code the page does not know, from a newer server, leaves that whole line in
+  English, never half of it. That is about 400 new sentences in each of the eight languages, machine-translated:
+  corrections are welcome.
+- The pointer to removed series said *Admin → Removed*, a tab that does not exist. It says *Admin → Library*.
+
+### Fixes
+
+- **Last tried** on the extension engine's card is the last attempt of any kind, with how it went (*· no answer*);
+  it named the last registration, which could be hours old.
+- **The engine and solver rows agree.** Health's *Extension engine* row said *it can get past Cloudflare* beside the
+  solver's own *Not answering*. Both read one ping now, and an engine connected to a solver that does not answer
+  says so.
+- **Healed chapters.** *Came in today* kept *1 chapter saved with pages missing* after the repair had filled the
+  missing pages. The entry now reads as landed, after a restart too.
+- **The slow archive's first chapter** of a series with nothing in the library yet is scanned in at once, and
+  listed in Library → Downloads once the library holds it; such a series read *0 chapters* under a band saying *1
+  of 14*.
+- **A renumbering being applied** read *interrupted* under Health's *Chapter numbering* until it finished. It says
+  it is being applied now.
+- **A paused archive.** The series page no longer says a paused archive's chapters are *being archived slowly*,
+  whoever is looking.
+- **No lingering "running" downloads.** The 10-minute *running* line v0.49.0 removed from ordinary downloads was
+  still left by a switch to your preferred group's copy, by the completion pass and by the repair's short-chapter
+  step.
+- Health's solver row named a newer FlareSolverr *vv3.5.2*. It has one *v* now.
+
+### The English that was left, translated
+
+- Admin → Extensions → Languages, the Offline page, the Library's series count, the series page's saved pages and
+  notes, Discover's source count and the names the server gives devices were English in every language. They are
+  translated, with their singulars, and three English sentences that read badly are reworded.
+
+### The Library's select bar
+
+- **Move to library**, **Remove from library** and the new **Find other sources** are rows under **More** at every
+  width. As keys they took the bar to two rows at 1024 and 1280 px; it is one row from a laptop up again, in German
+  too.
+
+### CodeQL and dependencies
+
+- The code-scanning alerts that were open are closed: six in test code, the desktop solver's debug routes answering
+  only their own names, and the folder browser trimming a path's trailing slashes in one pass instead of a pattern
+  that slowed down on a long run of slashes.
+- framer-motion 13.4.4, Next.js 16.3.6 and Puppeteer 25.12 ([#122](https://github.com/AngeloSha/uchiyomi/pull/122)).
+
+### Upgrading
+
+- **The database** gets one migration on first start, and it only adds two tables: `series_alt_titles` (the other
+  names) and `source_find_runs` (the newest 20 runs). v0.49.0 still starts on a migrated database and never reads
+  them, so going back is safe.
+- Nothing to change in compose files or settings, and no new environment variables.
+- **For scripts** ([api.md](docs/api.md)):
+  - Every English field that Health, the downloads and the refusals send is unchanged. Beside each, a `…Said` field
+    carries its code: `summarySaid`, `noteSaid`, `detailSaid`, `titleSaid`, `fixSaid`, `reasonSaid`, `messageSaid`
+    and `errorSaid` (the `Said` schema in openapi.yaml), and `noteCode` on the public source list.
+  - New routes: `GET` and `POST /api/admin/series/{id}/alt-titles`, `DELETE /api/admin/series/{id}/alt-titles/{norm}`,
+    `GET` and `POST /api/admin/sources/find` and `POST /api/admin/sources/find/stop`. A run's `results[].why` is one
+    of `posting_order`, `full`, `too_few`, `no_source`, `refused`, `no_answer`, `followed_already`, `no_match` and
+    `not_tried`.
+  - `GET /api/sources/jobs` carries admins a `find_sources` run card, with `followed` and `waiting`. Health's
+    `sources` and `frozen-series` rows can carry the action `find_sources` with `findSeries`. A stage's `kind`, a
+    Test check's `kind` and a diagnosis `code` can be `site_offline`, whose fix has the code `fix.siteOffline`.
+  - `GET /api/admin/extensions/status` adds `lastTry` and `lastTryOk`, and the `archive` of
+    `GET /api/series/{id}/listing` adds `pausedForAll`.
+
 ## v0.49.0 — 2026-09-28
 
 **Server downloads get a home of their own, Health says what every fix does and whether it worked, a failing
