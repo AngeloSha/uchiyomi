@@ -234,18 +234,27 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
   // import: healthCopy imports it.
   if (o.status !== false && run.status === 'stopped') bits.push(tr('Stopped before it finished'));
   if (o.status !== false && run.status === 'interrupted') bits.push(tr('Interrupted by a restart'));
-  if (run.status !== 'done' && run.total > 0) bits.push(tr('{done} of {total} series', { done: Math.min(run.done, run.total), total: run.total }));
-  bits.push(followedText(run.followed));
-  if (run.results) {
-    const g = groupResults(run.results);
+  const g = run.results ? groupResults(run.results) : null;
+  // How far it got, in series it settled with an outcome. The server's `done` counts every series it settled, the one a
+  // Stop caught in flight among them, which it lists as not tried; the rest, listed after them, it does not count. So
+  // a run over 4 stopped during its first read "1 of 4 series · 4 series not tried", as if one had been searched.
+  // Reintroduce `run.done` as it is: "a series a stop caught in flight counts as searched" in findSources.test.ts.
+  const untriedSettled = g ? Math.max(0, g.notTried.length - Math.max(0, run.results!.length - run.done)) : 0;
+  const through = Math.max(0, run.done - untriedSettled);
+  if (run.status !== 'done' && run.total > 0 && through > 0) bits.push(tr('{done} of {total} series', { done: Math.min(through, run.total), total: run.total }));
+  // A follow is news; "0 sources followed" beside the groups that say why was not.
+  if (run.followed > 0) bits.push(followedText(run.followed));
+  if (g) {
     const n = g.nothing.length;
     const s = g.skipped.length;
     // Counted from the results rather than `total - done`: a series the server never reached may carry no row.
-    const t = g.notTried.length + (cutShort(run.status) ? Math.max(0, run.total - run.results.length) : 0);
+    const t = g.notTried.length + (cutShort(run.status) ? Math.max(0, run.total - run.results!.length) : 0);
     if (n) bits.push(n === 1 ? tr('Nothing found for 1 series') : tr('Nothing found for {n} series', { n }));
     if (s) bits.push(s === 1 ? tr('1 series skipped') : tr('{n} series skipped', { n: s }));
     if (t) bits.push(t === 1 ? tr('1 series not tried') : tr('{n} series not tried', { n: t }));
   }
+  // Nothing else to say -- a kept run without its results, say, that followed nothing -- and that is what it did.
+  if (!bits.length) bits.push(tr('No source followed'));
   return bits.join(' · ');
 }
 

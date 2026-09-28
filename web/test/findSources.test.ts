@@ -106,9 +106,31 @@ test('a run says how far it got, what it followed, and every group that is not e
   assert.equal(findSummary(done), '2 sources followed · Nothing found for 2 series · 2 series skipped · 1 series not tried');
   // Stopped: said first, with how far it got; a series the server never reached counts as not tried even with no row.
   const stopped = run({ status: 'stopped', total: 10, done: 3, followed: 1, results: [res('a', { followed: [followed('A')] }), res('b', { why: 'no_match' }), res('c', { why: 'not_tried' })] });
-  assert.equal(findSummary(stopped), 'Stopped before it finished · 3 of 10 series · 1 source followed · Nothing found for 1 series · 8 series not tried');
+  // Its `done` counts c, the series a stop caught in flight and listed as not tried: 2 of the 10 were searched.
+  assert.equal(findSummary(stopped), 'Stopped before it finished · 2 of 10 series · 1 source followed · Nothing found for 1 series · 8 series not tried');
   // A kept run without its results says the counts it carries.
-  assert.equal(findSummary({ ...run({ status: 'done', total: 4, done: 4, followed: 0 }), results: undefined }), '0 sources followed');
+  assert.equal(findSummary({ ...run({ status: 'done', total: 4, done: 4, followed: 0 }), results: undefined }), 'No source followed');
+});
+
+test('a stopped run counts only the series it searched, and a follow only when there is one', () => {
+  // The walk stopped a run over 4 series while its first was in flight: the server settles that one as not tried and
+  // counts it in `done`, and the results read "1 of 4 series · 0 sources followed · 4 series not tried". Reintroduce
+  // `run.done` as the count: "a series a stop caught in flight counts as searched"; `followedText` for 0: "a run that
+  // followed nothing says 0 sources followed".
+  const caught = run({ status: 'stopped', total: 4, done: 1, followed: 0, results: ['a', 'b', 'c', 'd'].map((id) => res(id, { why: 'not_tried' })) });
+  const line = findSummary(caught);
+  assert.doesNotMatch(line, /1 of 4 series/, 'a series a stop caught in flight counts as searched');
+  assert.doesNotMatch(line, /0 sources followed/, 'a run that followed nothing says 0 sources followed');
+  assert.equal(line, 'Stopped before it finished · 4 series not tried');
+  // One searched before the stop, one caught in flight, two never reached.
+  const later = run({ status: 'stopped', total: 4, done: 2, followed: 1, results: [res('a', { followed: [followed('A')] }), res('b', { why: 'not_tried' }), res('c', { why: 'not_tried' }), res('d', { why: 'not_tried' })] });
+  assert.equal(findSummary(later), 'Stopped before it finished · 1 of 4 series · 1 source followed · 3 series not tried');
+  // A follow caught by the stop stands: that series was searched (its row has no reason).
+  const held = run({ status: 'stopped', total: 2, done: 1, followed: 1, results: [res('a', { followed: [followed('A')] }), res('b', { why: 'not_tried' })] });
+  assert.equal(findSummary(held), 'Stopped before it finished · 1 of 2 series · 1 source followed · 1 series not tried');
+  // Without its results, and nothing followed: that much is said, never an empty line.
+  assert.equal(findSummary({ ...run({ status: 'done', total: 3, done: 3, followed: 0 }), results: undefined }, { status: false }), 'No source followed',
+    'a run with nothing else to say leaves an empty line');
 });
 
 test('a run as a status line: working with its Stop, then what it did -- amber when it stopped or left one untried', () => {
@@ -537,7 +559,7 @@ test('m2/m3: every reason in its own words -- too few chapters, no source to ask
     "the Not tried section's note leaves the restart out");
   // Decided without a search is skipped; asked, with no answer, was searched.
   const r = run({ status: 'done', done: 3, total: 3, followed: 0, results: [res('a', { why: 'too_few' }), res('b', { why: 'no_source' }), res('c', { why: 'no_answer' })] });
-  assert.equal(findSummary(r), '0 sources followed · Nothing found for 1 series · 2 series skipped', 'a series decided without a search counts as nothing found');
+  assert.equal(findSummary(r), 'Nothing found for 1 series · 2 series skipped', 'a series decided without a search counts as nothing found');
 });
 
 test('m5: no status is said twice -- an earlier search, and the head of a run a restart cut short', () => {
@@ -552,7 +574,7 @@ test('m5: no status is said twice -- an earlier search, and the head of a run a 
   const cut = run({ status: 'interrupted', total: 7, done: 1, followed: 0, finishedAt: '2026-09-28T11:00:00Z', results: [res('a', { why: 'no_match' })] });
   const head = seen(renderToStaticMarkup(createElement(FindRunRow, { run: cut, label: runStatusWord('interrupted') })));
   assert.equal(head.split('Interrupted by a restart').length - 1, 1, "the interrupted head says 'Interrupted by a restart' twice");
-  assert.match(head, /1 of 7 series · 0 sources followed · Nothing found for 1 series · 6 series not tried/, 'the interrupted head does not say what the run did');
+  assert.match(head, /1 of 7 series · Nothing found for 1 series · 6 series not tried/, 'the interrupted head does not say what the run did');
   // Health's card, named as a run: the restart leads its line, once.
   const card = seen(renderToStaticMarkup(createElement(FindRunRow, { run: cut })));
   assert.equal(card.split('Interrupted by a restart').length - 1, 1, 'the card says the restart twice, or not at all');
