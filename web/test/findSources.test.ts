@@ -254,6 +254,18 @@ test('the Sources sheet: Find more sources for this one series, and the other na
 
 /* ================================================================ Health */
 
+test('Other names: the refusal under the field goes once the name it answered is removed, or another is added', () => {
+  // The walk refused a name the series already had, removed that name, and read "No other names yet." above "This
+  // series already has that name.". Reintroduce by dropping setRefusal(null) from remove: "a removed name leaves the
+  // refusal it answered" fails.
+  const names = slice(code(read('components/SourcesSheet.tsx')), 'function OtherNames(', 'const emptyStat');
+  const remove = slice(names, 'const remove = async', 'return (');
+  assert.match(remove, /qc\.setQueryData\(key, await api<[^\n]+\{ method: 'DELETE' \}\)\);\s*setRefusal\(null\);\s*\} catch/, 'a removed name leaves the refusal it answered');
+  const add = slice(names, 'const add = async', 'const remove = async');
+  assert.match(add, /setBusy\(true\);\s*setRefusal\(null\);/, 'a name added keeps the refusal of the one before it');
+  assert.equal((add.match(/setRefusal\(why\)/g) ?? []).length, 1, 'an add sets a refusal other than its own');
+});
+
 test("Health's key: what it does for how many series, how, and how long before the press", () => {
   // Reintroduce the count into a plural sentence for one series ("the 1 series that come"): "one series" fails.
   const c = ACTION_COPY.find_sources;

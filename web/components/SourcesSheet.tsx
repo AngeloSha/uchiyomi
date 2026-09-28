@@ -212,6 +212,10 @@ function OtherNames({ id }: { id: string }) {
     setBusy(true);
     try {
       qc.setQueryData(key, await api<{ titles: AltTitle[] }>(`/api/admin/series/${encodeURIComponent(id)}/alt-titles/${encodeURIComponent(altKey(a))}`, { method: 'DELETE' }));
+      // What the line under the field answered goes with the list it was about: "This series already has that
+      // name." stayed under "No other names yet." once the name was removed (the v0.49.1 walk). A removal that
+      // failed changes nothing, and leaves it. (A name added clears it at the press, above.)
+      setRefusal(null);
     } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
     setBusy(false);
   };
