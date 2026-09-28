@@ -267,7 +267,10 @@ function LibraryInner() {
     if (picked.size > 500) { toast(tr('Connect sources takes up to 500 series at a time.'), 'error'); return; }
     setActing(true);
     try {
-      const r = await api<{ batchId: string; total: number }>('/api/admin/link/batches', { json: { seriesIds: [...picked] } });
+      const r = await api<{ batchId: string; total: number; skipped?: { id: string; why: string }[] }>('/api/admin/link/batches', { json: { seriesIds: [...picked] } });
+      // Left out by the server, never searched: numbered by posting order, already following two, or gone.
+      const left = r.skipped?.length ?? 0;
+      if (left) toast(left === 1 ? tr('1 series left out: it cannot take another source') : tr('{n} series left out: they cannot take another source', { n: left }), 'info');
       setSelecting(false);
       setPicked(new Set());
       router.push(`/admin/link/?batch=${r.batchId}`);

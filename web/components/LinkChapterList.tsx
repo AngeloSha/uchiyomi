@@ -30,7 +30,9 @@ export function LinkChapterList({ itemId, source, sourceSeriesId }: { itemId: st
     <div data-link-chapters>
       {data.title && <p className="mb-1 line-clamp-2 break-words text-sm text-fog-100">{data.title} <span className="text-fog-500">· {data.name}</span></p>}
       <p className="text-[11px] text-fog-400">
-        {tr('{n} chapters here · {shared} of this series’ {ours} · {fresh} new', { n: data.count, shared: data.shared, ours: data.ourCount, fresh })}
+        {data.count === 1
+          ? tr('1 chapter here · {shared} of this series’ {ours} · {fresh} new', { shared: data.shared, ours: data.ourCount, fresh })
+          : tr('{n} chapters here · {shared} of this series’ {ours} · {fresh} new', { n: data.count, shared: data.shared, ours: data.ourCount, fresh })}
       </p>
       {data.missing.length > 0 && (
         <p className="mt-1 text-[11px] text-amber-400" data-missing>

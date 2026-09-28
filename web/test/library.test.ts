@@ -359,7 +359,7 @@ test('the select bar fits two rows on a phone: admin actions fold behind More', 
   const phoneOnly = chips.filter((c) => /\blg:hidden\b/.test(c));
   const wideOnly = chips.filter((c) => /\bhidden\b.*\blg:inline-flex\b/.test(c));
   assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More chip');
-  // Three since v0.49.0: Move to library, Connect sources, Remove from library.
+  // Three: Move to library, Connect sources, Remove from library.
   assert.equal(wideOnly.length, 3, 'expected the three admin chips to be wide-screen only');
   const phoneChips = chips.length - wideOnly.length;
   assert.ok(phoneChips <= 6, `${phoneChips} chips reach the phone bar; more than six wraps to a third row at 390 px`);

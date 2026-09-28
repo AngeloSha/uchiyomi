@@ -6,16 +6,18 @@
 // The shape is the import review's (app/admin/import/page.tsx) because the job is the same one: a machine
 // proposes, a person confirms, and nothing happens until the one accent button. What differs is what a
 // person must be able to see before ticking: WHICH name matched ("matched via Only I Level Up"), and whether
-// the chapter numbers line up both ways. A candidate whose numbers do not line up is shown in amber and never
-// preselected; connecting one asks first, and the server records the override.
+// the chapter numbers line up both ways. Only a green candidate can be ticked. One whose name matches but whose
+// numbers do not is shown in amber, and can be connected only on its own, from its chapter list, after a
+// confirmation -- never in bulk.
 //
 // `/admin/link/` -- the trailing slash is load-bearing, see next.config.mjs (`trailingSlash: true`).
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useLayer } from '@/lib/layers';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar, Sheet } from '@/components/ui';
@@ -27,8 +29,8 @@ import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import {
-  isOpen, needsOverride, mayRun, preselect, pickedFor, verdictLabel, verdictColor, coverageLine, linkStatusLabel, linkStatusColor,
-  linkBatchStateLabel, type LinkBatch, type LinkCandidate, type LinkItem,
+  isOpen, mayRun, preselect, pickedFor, verdictLabel, verdictColor, coverageLine, linkStatusLabel, linkStatusColor,
+  linkBatchStateLabel, linkNoteLabel, type LinkBatch, type LinkCandidate, type LinkItem,
 } from '@/lib/linkBatch';
 
 type Filter = 'all' | 'found' | 'none';
@@ -42,10 +44,12 @@ function CandidateRow({ c, full, selected, onToggle, onChapters }: {
   onChapters: (c: LinkCandidate) => void;
 }) {
   const open = isOpen(c);
+  // Only a green candidate is ticked for the run; an amber one is connected on its own from its chapters.
+  const tickable = open && mayRun(c);
   const cov = coverageLine(c);
   return (
     <div className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/40 p-2.5" data-link-candidate>
-      {open ? (
+      {tickable ? (
         <input type="checkbox" checked={selected} disabled={full && !selected} onChange={() => onToggle(c.id)}
           className="size-4 shrink-0 rounded border-ink-600 bg-ink-800 accent-accent disabled:opacity-40" aria-label={tr('Connect this source')} />
       ) : <span className="size-4 shrink-0" aria-hidden />}
@@ -65,6 +69,7 @@ function CandidateRow({ c, full, selected, onToggle, onChapters }: {
           <p className="text-[11px] text-fog-500" data-matched-via>{tr('matched via “{name}”', { name: c.their_name })}</p>
         )}
         {cov && <p className={`text-[11px] ${c.verdict === 'ok' ? 'text-fog-500' : 'text-amber-400/80'}`}>{cov}</p>}
+        {open && !tickable && <p className="text-[11px] text-fog-500">{tr('Check its chapters to connect it on its own.')}</p>}
         {c.status && <p className={`text-[11px] ${linkStatusColor(c.status)}`}>{linkStatusLabel(c.status)}</p>}
       </div>
       <button type="button" onClick={() => onChapters(c)} className="chip shrink-0 text-xs" data-view-chapters>{tr('Chapters')}</button>
@@ -90,7 +95,7 @@ function ItemCard({ it, selected, onToggle, onSearch, onChapters, reviewing }: {
             <p className="line-clamp-2 text-[11px] text-fog-600">{tr('Also searched as: {names}', { names: others.join(' · ') })}</p>
           )}
         </div>
-        {reviewing && it.freeSlots > 0 && (
+        {reviewing && it.freeSlots > 0 && it.state !== 'skipped' && (
           <button onClick={() => onSearch(it)} className="chip shrink-0 text-xs">{tr('Search by hand')}</button>
         )}
       </div>
@@ -98,11 +103,15 @@ function ItemCard({ it, selected, onToggle, onSearch, onChapters, reviewing }: {
         <p className="text-[11px] text-fog-500">{tr('Waiting to be searched…')}</p>
       ) : it.state === 'error' ? (
         <p className="text-[11px] text-amber-400">{tr('This series could not be read — it may have been removed.')}</p>
+      ) : it.state === 'skipped' ? (
+        <p className="text-[11px] text-fog-500" data-link-note>{linkNoteLabel(it.note)}</p>
       ) : it.candidates.length === 0 ? (
         <p className="text-[11px] text-fog-500">
           {it.unreachable
-            ? tr('Not found on {n} sources asked ({m} did not answer).', { n: it.asked, m: it.unreachable })
-            : tr('Not found on {n} sources asked.', { n: it.asked })}
+            ? (it.asked === 1
+              ? tr('Not found on 1 source asked ({m} did not answer).', { m: it.unreachable })
+              : tr('Not found on {n} sources asked ({m} did not answer).', { n: it.asked, m: it.unreachable }))
+            : it.asked === 1 ? tr('Not found on 1 source asked.') : tr('Not found on {n} sources asked.', { n: it.asked })}
         </p>
       ) : (
         <div className="space-y-1.5">
@@ -157,7 +166,9 @@ function LinkWizardInner() {
   // What THIS tab last sent to /run, for the linking card's count; null when the run started elsewhere.
   const [runIds, setRunIds] = useState<Set<string> | null>(null);
   const [running, setRunning] = useState(false);
-  const [confirmOverride, setConfirmOverride] = useState(false);
+  // The amber candidate being connected on its own, from its chapter list, once confirmed.
+  const [confirmSingle, setConfirmSingle] = useState<string | null>(null);
+  const [singleBusy, setSingleBusy] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [discardBusy, setDiscardBusy] = useState(false);
 
@@ -181,29 +192,37 @@ function LinkWizardInner() {
 
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const all = items.flatMap((it) => it.candidates);
-  const chosen = all.filter((c) => selected.has(c.id));
-  const warnings = chosen.filter(needsOverride).length;
+  const chosen = all.filter((c) => selected.has(c.id) && mayRun(c));
   const foundCount = items.filter((it) => it.candidates.length > 0).length;
   const shown = items.filter((it) => filter === 'all' || (filter === 'found' ? it.candidates.length > 0 : it.state === 'done' && it.candidates.length === 0));
 
-  const run = async (override: boolean) => {
+  const run = async () => {
     if (!batchId || !chosen.length) return;
     setRunning(true);
     try {
-      const ids = chosen.map((c) => c.id);
-      const r = await api<{ ok: true; total: number; held?: number }>(`/api/admin/link/batches/${batchId}/run`, { json: { candidateIds: ids, override } });
-      // Held back by the server (a warning sent without the override): they stay open to tick again.
-      if (r.held) toast(tr('{n} left open — their chapters do not line up', { n: r.held }), 'info');
-      // Only what the server will run: a held candidate never gets a status, and waiting on it would keep
-      // this page from ever noticing the run had finished.
-      setRunIds(new Set(chosen.filter((c) => mayRun(c, override)).map((c) => c.id)));
+      const r = await api<{ ok: true; total: number; held?: number; ids?: string[] }>(`/api/admin/link/batches/${batchId}/run`, { json: { candidateIds: chosen.map((c) => c.id) } });
+      // Only what the server said it runs: a candidate it left open never gets a status, and waiting on it
+      // would keep this page from ever noticing the run had finished.
+      setRunIds(new Set(r.ids ?? chosen.filter((c) => mayRun(c)).map((c) => c.id)));
       setSelected(new Set());
-      setConfirmOverride(false);
       refetch();
     } catch (e) { toast(msgOf(e, tr('Could not connect those')), 'error'); }
     setRunning(false);
   };
-  const onRun = () => (warnings > 0 ? setConfirmOverride(true) : run(false));
+
+  /** One amber candidate, confirmed from its chapter list: the only way one is ever followed. */
+  const connectSingle = async (id: string) => {
+    setSingleBusy(true);
+    try {
+      await api(`/api/admin/link/candidates/${id}/follow`, { json: { confirm: true } });
+      toast(tr('Connected 1 source'), 'success');
+      setConfirmSingle(null);
+      setViewing(null);
+      for (const k of [['library'], ['series']]) qc.invalidateQueries({ queryKey: k });
+      refetch();
+    } catch (e) { toast(msgOf(e, tr('Could not connect that source')), 'error'); }
+    setSingleBusy(false);
+  };
 
   // The run this tab started has finished once every candidate it sent carries a status. Then: say what
   // happened, refresh what the new links change (the grid, its source filter counts, the series pages),
@@ -246,9 +265,14 @@ function LinkWizardInner() {
     setDiscardBusy(false);
   };
 
+  const reviewing = batch?.state === 'review';
+  // The sticky "Connect selected" footer is a toolbar to the notices (lib/layers.ts), as the import page's is:
+  // on a phone it rests on the bottom nav, where a notice would otherwise sit on it. Measured with its padding.
+  const footerRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', isAdmin && reviewing, { ref: footerRef });
+
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
-  const reviewing = batch?.state === 'review';
   return (
     <div className="min-h-screen-d px-4 pb-10 pt-4 lg:px-0">
       <div className="mb-4 flex items-center gap-2">
@@ -282,11 +306,16 @@ function LinkWizardInner() {
         <div className="card grad-border wide p-4">
           {batch.state === 'searching' ? (
             <>
-              <p className="mb-1 text-sm font-semibold text-fog-100">{batch.stale ? tr('The search was interrupted') : tr('Searching your sources…')}</p>
+              <p className="mb-1 text-sm font-semibold text-fog-100">
+                {batch.stale ? tr('The search was interrupted')
+                  : batch.waiting === 'sweep' ? tr('Waiting for the chapter check to finish…')
+                  : batch.waiting === 'repair' ? tr('Waiting for the library repair to finish…')
+                  : tr('Searching your sources…')}
+              </p>
               <p className="mb-3 text-[11px] text-fog-500">
                 {batch.stale
                   ? tr('The server restarted before this finished. Resume to pick up where it left off.')
-                  : tr('Every source is asked under every name, so this takes a while for many series. You can leave this page; the results are kept.')}
+                  : tr('One series at a time, a few sources each, paced so no site is rushed — this takes a while for many series. You can leave this page; the results are kept.')}
               </p>
               <ProgressBar value={batch.total ? batch.searched / batch.total : 0} />
               <p className="mt-1.5 text-[11px] tabular-nums text-fog-500">{tr('{done}/{total}', { done: batch.searched, total: batch.total })}</p>
@@ -303,10 +332,12 @@ function LinkWizardInner() {
               <p className="mb-1 text-sm font-semibold text-fog-100">
                 {batch.state === 'done'
                   ? tr('Done — {linked} connected · {failed} not connected', { linked: batch.linked, failed: batch.failed })
-                  : tr('Found on other sources for {n} of {m} series', { n: foundCount, m: items.length })}
+                  : items.length === 1
+                    ? tr('Found on other sources for {n} of 1 series', { n: foundCount })
+                    : tr('Found on other sources for {n} of {m} series', { n: foundCount, m: items.length })}
               </p>
               <p className="mb-3 max-w-prose text-[11px] leading-relaxed text-fog-500">
-                {tr('Green means a name matches exactly and the chapter numbers line up both ways. Amber means a name matches but the numbers do not — check before connecting. Nothing is downloaded; new chapters come from the connected sources on the next update.')}
+                {tr('Green means the same series: a name matches and the chapter numbers line up. Amber means a name matches exactly but the numbers do not — open its chapters, and connect it on its own if it is the same series. Nothing is downloaded; new chapters come from the connected sources on the next update.')}
               </p>
               {reviewing && (
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -331,9 +362,9 @@ function LinkWizardInner() {
           </div>
 
           {reviewing && (
-            <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-4">
-              <button onClick={onRun} disabled={running || selected.size === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
-                {running ? tr('Starting…') : tr('Connect selected — {n}', { n: selected.size })}
+            <div ref={footerRef} className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-0 lg:pb-4">
+              <button onClick={run} disabled={running || chosen.length === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
+                {running ? tr('Starting…') : tr('Connect selected — {n}', { n: chosen.length })}
               </button>
             </div>
           )}
@@ -347,15 +378,22 @@ function LinkWizardInner() {
         const it = c ? items.find((x) => x.id === c.item_id) : null;
         if (!c || !it) return null;
         const sel = selected.has(c.id);
-        const canTick = reviewing && isOpen(c) && (sel || pickedFor(it, selected) < it.freeSlots);
+        const canTick = reviewing && isOpen(c) && mayRun(c) && (sel || pickedFor(it, selected) < it.freeSlots);
+        // An amber one: connected here, on its own, after a confirmation -- never ticked for the run.
+        const alone = reviewing && isOpen(c) && !mayRun(c) && it.freeSlots > 0;
         return (
           <Sheet title={it.title} onClose={() => setViewing(null)} overBottomNav footer={
             <div className="flex gap-2">
               <button onClick={() => setViewing(null)} className="chip flex-1 py-1.5 text-xs">{tr('Close')}</button>
-              {reviewing && isOpen(c) && (
+              {reviewing && isOpen(c) && mayRun(c) && (
                 <button onClick={() => toggle(c.id)} disabled={!canTick}
                   className={`flex-1 py-1.5 text-xs disabled:opacity-50 ${sel ? 'chip' : 'btn-accent'}`}>
                   {sel ? tr('Unselect') : tr('Select this source')}
+                </button>
+              )}
+              {alone && (
+                <button onClick={() => setConfirmSingle(c.id)} className="chip flex-1 py-1.5 text-xs text-amber-300" data-connect-alone>
+                  {tr('Connect this one anyway')}
                 </button>
               )}
             </div>
@@ -366,15 +404,15 @@ function LinkWizardInner() {
         );
       })()}
 
-      {confirmOverride && (
+      {confirmSingle && (
         <ConfirmDialog
-          title={warnings === 1 ? tr('Connect 1 source whose chapters do not line up?') : tr('Connect {n} sources whose chapters do not line up?', { n: warnings })}
-          body={tr('Their name matches, but their chapter numbers do not match this series both ways. If it is a sequel, a spin-off or a different edition, its chapters would be filed under this series. You can stop following a source from the series page at any time.')}
+          title={tr('Connect this source even though its chapters do not line up?')}
+          body={tr('Its name matches, but its chapter numbers do not match this series both ways. If it is a sequel, a spin-off or a different edition, its chapters would be filed under this series. You can stop following a source from the series page at any time.')}
           confirmLabel={tr('Connect anyway')}
           danger
-          busy={running}
-          onConfirm={() => run(true)}
-          onClose={() => setConfirmOverride(false)}
+          busy={singleBusy}
+          onConfirm={() => connectSingle(confirmSingle)}
+          onClose={() => setConfirmSingle(null)}
         />
       )}
       {discarding && (

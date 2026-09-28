@@ -4,7 +4,14 @@
 import { t as tr } from './i18n';
 
 export type LinkBatchState = 'searching' | 'review' | 'linking' | 'done';
+/**
+ * `ok`: what the server's auto-follow judge would follow itself. `numbering_differs`: a name matches exactly,
+ * the chapter numbers do not -- never followed by a run, only one at a time from its chapter list. A batch
+ * from an older server may still hold `too_few` or `title_differs`; both read like `numbering_differs`.
+ */
 export type LinkVerdict = 'ok' | 'numbering_differs' | 'too_few' | 'title_differs';
+/** Why a series was not searched: numbered by posting order, already following two, or listing too few. */
+export type LinkNote = 'posting_order' | 'full' | 'too_few';
 
 export interface LinkBatch {
   id: string;
@@ -17,6 +24,8 @@ export interface LinkBatch {
   updated_at: string;
   /** `searching` with nobody searching it (a restart): offer Resume. */
   stale?: boolean;
+  /** The search is waiting for the chapter check (`sweep`) or the library repair to finish. */
+  waiting?: 'sweep' | 'repair' | null;
   /** How many sources a series may follow besides its primary. */
   maxFollowers?: number;
 }
@@ -45,7 +54,9 @@ export interface LinkItem {
   series_id: string;
   title: string;
   names: string[];
-  state: 'pending' | 'done' | 'error';
+  state: 'pending' | 'done' | 'skipped' | 'error';
+  /** Why a `skipped` series was not searched. */
+  note?: LinkNote | null;
   asked: number;
   unreachable: number;
   primary: { source: string; name: string } | null;
@@ -88,15 +99,10 @@ export function ranges(nums: number[], max = 12): string {
 export const isOpen = (c: LinkCandidate): boolean => !c.status;
 
 /**
- * Whether /run will actually run this candidate -- bff lib/linkBatch.ts `mayFollow`, word for word. The
- * server silently leaves the rest open, so a "has the run finished?" check that waited on them too would
- * wait for ever.
+ * Whether /run will actually run this candidate -- bff lib/linkBatch.ts `mayFollow`, word for word: only
+ * `ok`. There is no bulk override; anything else is connected one at a time from its chapter list.
  */
-export const mayRun = (c: Pick<LinkCandidate, 'verdict' | 'manual'>, override: boolean): boolean =>
-  c.verdict === 'ok' || (override && (c.verdict !== 'title_differs' || c.manual));
-
-/** Whether ticking this candidate needs the admin's "follow anyway" (the server's `override`). */
-export const needsOverride = (c: Pick<LinkCandidate, 'verdict'>): boolean => c.verdict !== 'ok';
+export const mayRun = (c: Pick<LinkCandidate, 'verdict'>): boolean => c.verdict === 'ok';
 
 /**
  * What "Select exact matches" picks: per series, the `ok` candidates, best-covered first, as many as the
@@ -119,8 +125,7 @@ export function verdictLabel(v: LinkVerdict): string {
   switch (v) {
     case 'ok': return tr('same series');
     case 'numbering_differs': return tr('chapter numbers differ');
-    case 'too_few': return tr('too few chapters to compare');
-    case 'title_differs': return tr('no name matches');
+    default: return tr('chapter numbers differ');
   }
 }
 export const verdictColor = (v: LinkVerdict): string => (v === 'ok' ? 'text-emerald-400' : 'text-amber-400');
@@ -138,12 +143,24 @@ export function linkStatusLabel(status: string): string {
     case 'cap': return tr('Not connected — this series already follows two other sources');
     case 'primary': return tr('Not connected — that is its main source');
     case 'gone': return tr('Not connected — the series is no longer in the library');
-    case 'unavailable': return tr('Not connected — that source is not installed');
-    case 'not_confirmed': return tr('Not connected — confirm the warning to connect it');
+    case 'unavailable': return tr('Not connected — that source is not installed or is switched off');
+    case 'already_followed': return tr('Already connected');
+    case 'posting_order': return tr('Not connected — this series is numbered by posting order');
     default: return tr('Failed — {reason}', { reason: status });
   }
 }
-export const linkStatusColor = (status: string): string => (status === 'linked' ? 'text-emerald-400' : 'text-red-400');
+export const linkStatusColor = (status: string): string =>
+  (status === 'linked' || status === 'already_followed' ? 'text-emerald-400' : 'text-red-400');
+
+/** Why a series was not searched, as a sentence. */
+export function linkNoteLabel(note: LinkNote | null | undefined): string {
+  switch (note) {
+    case 'posting_order': return tr('Not searched — this series is numbered by posting order, so another source’s chapter numbers do not line up with it.');
+    case 'full': return tr('Not searched — this series already follows two other sources.');
+    case 'too_few': return tr('Not searched — this series lists too few chapters to compare with another source.');
+    default: return tr('Not searched.');
+  }
+}
 
 export function linkBatchStateLabel(s: LinkBatchState): string {
   switch (s) {

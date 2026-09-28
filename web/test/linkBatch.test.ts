@@ -1,10 +1,10 @@
-// Connect sources on the web (v0.49.0): the pure helpers in lib/linkBatch.ts, called; and the wiring that
+// Connect sources on the web: the pure helpers in lib/linkBatch.ts, called; and the wiring that
 // shipped wrong or missing once, read from source like library.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { ranges, preselect, needsOverride, type LinkItem, type LinkCandidate } from '../lib/linkBatch';
+import { ranges, preselect, mayRun, type LinkItem, type LinkCandidate } from '../lib/linkBatch';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -41,8 +41,9 @@ test('"Select exact matches" picks only green candidates, best first, up to the 
   });
   assert.deepEqual([...preselect([it])], ['b']);
   assert.deepEqual([...preselect([{ ...it, freeSlots: 0 }])], [], 'a full series gets nothing');
-  assert.equal(needsOverride({ verdict: 'ok' }), false);
-  assert.equal(needsOverride({ verdict: 'too_few' }), true);
+  assert.equal(mayRun({ verdict: 'ok' }), true);
+  assert.equal(mayRun({ verdict: 'numbering_differs' }), false);
+  assert.equal(mayRun({ verdict: 'too_few' }), false, 'an older server\'s warning is never run either');
 });
 
 test('the review shows a candidate\'s chapters before it is ticked, and the manual pick can too', () => {
@@ -54,40 +55,35 @@ test('the review shows a candidate\'s chapters before it is ticked, and the manu
   assert.match(code(read('components/LinkChapterList.tsx')), /\/api\/admin\/link\/items\/\$\{itemId\}\/chapters\?source=/);
 });
 
-test('the library filters by main source and by any source, through the one URL writer', () => {
-  const page = code(read('app/library/page.tsx'));
-  assert.match(page, /if \(src\) all\.push\(\{ mainSource: \{ operator: 'is', value: src \} \}\);/);
-  assert.match(page, /if \(anysrc\) all\.push\(\{ anySource: \{ operator: 'is', value: anysrc \} \}\);/);
-  assert.match(page, /queryKey: \['library', active\.key, read, status, genres\.join\(','\), lib, src, anysrc\]/, 'a source change does not refetch');
-  assert.match(page, /\+ \(src \? 1 : 0\) \+ \(anysrc \? 1 : 0\)/, 'the source filters are not counted as active');
-  const panel = code(read('components/LibraryFilters.tsx'));
-  assert.match(panel, /onPick=\{\(id\) => onSet\('src', id\)\}/);
-  assert.match(panel, /onPick=\{\(id\) => onSet\('anysrc', id\)\}/);
-  assert.match(panel, /'\/api\/library\/sources'/);
+test('the source list lives in the Sources sheet only; Edit series does not repeat it', () => {
+  // Review of #119: the list in Edit series duplicated the Sources & translations sheet. Connect sources for
+  // one series is a chip in that sheet instead, and not offered to a series numbered by posting order.
+  const series = code(read('app/series/page.tsx'));
+  const modal = series.slice(series.indexOf('function SeriesEditModal('), series.indexOf('interface CollectionRow'));
+  assert.doesNotMatch(modal, /data-link-status|\/api\/admin\/link\/batches/, 'Edit series lists sources again');
+  assert.match(series, /postingOrder=\{listing\?\.numbering\?\.mode === 'posting_order'\}/);
+  const sheet = code(read('components/SourcesSheet.tsx'));
+  assert.match(sheet, /const mayConnect = !postingOrder && sources\.filter\(\(s\) => !s\.primary\)\.length < 2;/);
+  assert.match(sheet, /'\/api\/admin\/link\/batches', \{ json: \{ seriesIds: \[id\] \} \}/);
 });
 
-test('the edit dialog shows every linked source, its state, and unlinks a follower but never the main one', () => {
-  const src = code(read('app/series/page.tsx'));
-  const modal = src.slice(src.indexOf('function SeriesEditModal('), src.indexOf('interface CollectionRow'));
-  assert.match(modal, /data-link-status/);
-  assert.match(modal, /\{!x\.primary && \(\s*<button type="button" onClick=\{\(\) => unlink\(x\.sourceId, x\.name\)\}/, 'the main source can be unlinked, or no follower can');
-  assert.match(modal, /\/api\/admin\/series\/\$\{id\}\/sources\/\$\{encodeURIComponent\(sourceId\)\}`, \{ method: 'DELETE' \}/);
-  assert.match(modal, /x\.health === 'cooldown'/, 'the source state is not shown');
-  assert.match(modal, /'\/api\/admin\/link\/batches', \{ json: \{ seriesIds: \[id\] \} \}/, 'no way to connect more sources from here');
+test('an amber candidate is never ticked for the run: it is connected on its own, confirmed, from its chapters', () => {
+  // Review of #119: one confirmation used to cover every selected warning across every series -- the
+  // wrong-book case in bulk. Reintroduce by sending `override` again, or by giving an amber row a checkbox.
+  const page = code(read('app/admin/link/page.tsx'));
+  assert.doesNotMatch(page, /override/, 'the bulk override is back');
+  assert.match(page, /const tickable = open && mayRun\(c\);/);
+  assert.match(page, /const chosen = all\.filter\(\(c\) => selected\.has\(c\.id\) && mayRun\(c\)\);/);
+  assert.match(page, /`\/api\/admin\/link\/candidates\/\$\{id\}\/follow`, \{ json: \{ confirm: true \} \}/);
+  assert.match(page, /setConfirmSingle\(c\.id\)/, 'the single connect is not behind a confirmation');
 });
 
 test('a finished run goes back where it started, and waits only on what the server runs', async () => {
   // Reported: after "Connect selected" the page stayed on the review -- the server puts the batch back to
   // `review` while any candidate is unticked, so it looked like nothing happened. Reintroduce by deleting
   // the effect that pushes the router: "a finished run does not leave the review" fails.
-  const { mayRun } = await import('../lib/linkBatch');
-  assert.equal(mayRun({ verdict: 'ok', manual: false }, false), true);
-  assert.equal(mayRun({ verdict: 'numbering_differs', manual: false }, false), false, 'held without the override');
-  assert.equal(mayRun({ verdict: 'numbering_differs', manual: false }, true), true);
-  assert.equal(mayRun({ verdict: 'title_differs', manual: false }, true), false, 'the server never runs this one');
-  assert.equal(mayRun({ verdict: 'title_differs', manual: true }, true), true);
   const page = code(read('app/admin/link/page.tsx'));
-  assert.match(page, /setRunIds\(new Set\(chosen\.filter\(\(c\) => mayRun\(c, override\)\)\.map\(\(c\) => c\.id\)\)\)/, 'runIds waits on candidates the server holds back');
+  assert.match(page, /setRunIds\(new Set\(r\.ids \?\? chosen\.filter\(\(c\) => mayRun\(c\)\)\.map\(\(c\) => c\.id\)\)\)/, 'runIds waits on candidates the server holds back');
   assert.match(page, /if \(sent\.length < runIds\.size \|\| sent\.some\(\(c\) => !c\.status\)\) return;/);
   assert.match(page, /router\.push\(items\.length === 1 \? `\/series\/\?id=\$\{items\[0\]\.series_id\}` : '\/library\/'\)/, 'a finished run does not leave the review');
 });

@@ -1081,6 +1081,7 @@ GET    /api/admin/link/batches/:id DELETE /api/admin/link/batches/:id
 POST   /api/admin/link/batches/:id/resume
 POST   /api/admin/link/batches/:id/run
 POST   /api/admin/link/items/:id/candidates
+POST   /api/admin/link/candidates/:id/follow
 GET    /api/admin/link/items/:id/chapters
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
 DELETE /api/admin/series/:id/alt-titles/:norm
@@ -1141,22 +1142,34 @@ never on another 4xx; after 10 consecutive failures the target is switched off a
 The audit rows `notify.target.create` / `.update` / `.delete` / `.test` carry ids, names, the host and the
 names of the fields changed — never an address or a token.
 
-**Connect sources** (`/api/admin/link/*`, since v0.49.0) follows other sources for many series at once,
-with a review in between — the library's select bar starts it. `POST /api/admin/link/batches {seriesIds}`
-(1–500) searches, in the background and one batch at a time server-wide, every source a series does not
-already read from, under its title and up to three of its other names. A hit is kept only when one of our
-names EQUALS (normalised to a-z0-9) its title or — with `alt_title_matching` on — one of the names its own
-description lists; containment never counts, and an other name needs five characters. Its numbering is then
-measured both ways (90 % each; one way only for a main-title-to-main-title match on ten or more numbers):
-`ok`, or `numbering_differs` / `too_few` as a warning. `GET .../batches/:id` returns each series with its
-candidates, what it follows now and `freeSlots`; `POST .../items/:id/candidates {source, sourceSeriesId}`
-adds a hand-picked candidate, judged the same way; `POST .../batches/:id/run {candidateIds, override?}`
-follows the chosen ones — a warning only with `override: true`, otherwise it stays open (`held`) — under the
-two-follower cap, with the admin as `added_by`, and keeps the source's title as a `confirmed` other name;
-unlinking the source forgets that name again. `GET .../items/:id/chapters?source=&sourceSeriesId=` lists what
-a candidate has beside what the series has, for checking by hand. Nothing is downloaded. The other
-names themselves are `GET`/`POST /api/admin/series/:id/alt-titles` and `DELETE .../alt-titles/:norm`; with the
-switch on they are also read from the source's description when a series is added.
+**Connect sources** (`/api/admin/link/*`) follows other sources for many series at once, with a review in
+between — the library's select bar, or a series' Sources & translations sheet, starts it.
+`POST /api/admin/link/batches {seriesIds}` (1–500) leaves out, in `skipped`, every series that cannot take a
+follower (`gone`, `posting_order`, `full`) and searches the rest as a **paced background job**: one batch at a
+time server-wide, one series at a time 1.5 s apart, waiting while the chapter sweep or the library repair runs,
+and stopping at a series boundary on shutdown (the batch then reads `stale`; `POST .../resume` goes on). Per
+series, health is read again and the sources it does not already read from are asked in scan order, skipping
+any switched off or in a cooldown — at most 8 sources and 12 searches — until its free follower slots are
+filled. The searches go straight to the adapter and report nothing to source health: they never cause a
+cooldown and never take Discover's search slots. Names searched are the title and up to three other names.
+Hits are judged by the add-time auto-follow's rule (`judgeCandidate`): `ok` when it would be followed, or
+`numbering_differs` when a name matches EXACTLY but the chapter numbers do not; with `alt_title_matching` on, a
+name in the candidate's own description that equals one of ours counts too, always measured both ways.
+`GET .../batches/:id` returns each series with its candidates, what it follows now and `freeSlots`, and first
+closes the candidates whose source has been followed since (`already_followed`).
+`POST .../items/:id/candidates {source, sourceSeriesId, cover?}` adds a hand-picked candidate, judged the same
+way (409 `posting_order`, `full`, `already_followed`, `title_differs`, … before or instead).
+`POST .../batches/:id/run {candidateIds}` follows the chosen `ok` candidates only — there is no bulk override —
+INSERT-only under the series row's lock (a source already followed reads `already_followed` and is never
+re-pointed; a series numbered by posting order since reads `posting_order`), under the two-follower cap, with
+the admin as `added_by`, and keeps the source's title as a `confirmed` other name; unlinking the source forgets
+that name again. The connected series' listings are then refreshed one at a time, paced, and not at all while
+a sweep or repair runs. A `numbering_differs` candidate is followed only on its own, after looking at
+`GET .../items/:id/chapters?source=&sourceSeriesId=` (what it lists beside what the series has):
+`POST /api/admin/link/candidates/:id/follow {confirm: true}` judges it again and follows it, audited as an
+override. Nothing is downloaded. The other names themselves are `GET`/`POST /api/admin/series/:id/alt-titles`
+and `DELETE .../alt-titles/:norm`; with the switch on they are also read from the source's description when a
+series is added.
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the

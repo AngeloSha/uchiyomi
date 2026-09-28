@@ -215,8 +215,12 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
   assert.ok(imp.includes("useLayer('toolbar', true, { ref: footerRef });"), "the import page's sticky footer is not on the stack");
   assert.match(imp, /<div ref=\{footerRef\} className="sticky bottom-\[calc\(5\.5rem\+env\(safe-area-inset-bottom\)\)\] [^"]*lg:bottom-0 lg:pb-4"/,
     "the measured element is not the import page's footer, or on a laptop its 1rem off the edge is not measured with it");
+  // Connect sources' review has the same footer ("Connect selected"), registered while the review shows.
+  const link = code(read('app/admin/link/page.tsx'));
+  assert.ok(link.includes("useLayer('toolbar', isAdmin && reviewing, { ref: footerRef });"), "the link review's sticky footer is not on the stack");
+  assert.match(link, /<div ref=\{footerRef\} className="sticky bottom-\[calc\(5\.5rem\+env\(safe-area-inset-bottom\)\)\] [^"]*lg:bottom-0 lg:pb-4"/);
   // Every sticky footer in the app is one of these: a new one must say so here.
   const stickies = walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')))
     .filter((f) => /className="[^"]*\bsticky bottom-/.test(code(readFileSync(f, 'utf8')))).map((f) => f.slice(ROOT.length + 1));
-  assert.deepEqual(stickies, ['app/admin/import/page.tsx'], 'a sticky footer the notices do not know about');
+  assert.deepEqual(stickies.sort(), ['app/admin/import/page.tsx', 'app/admin/link/page.tsx'], 'a sticky footer the notices do not know about');
 });

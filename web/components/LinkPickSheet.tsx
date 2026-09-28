@@ -2,8 +2,8 @@
 // Connect sources' manual search: find the series on a source by hand when the search did not, or found the
 // wrong one. One rail per source, as the import's match sheet (components/ImportMatchSheet.tsx) -- this asks
 // "what does THIS source call it". A tap only marks a pick; "Check this one" sends it to the server, which
-// judges it by the same exact-name and numbering rule as the search's own finds and adds it to the review.
-// Nothing is followed from here.
+// judges it by the same rule as the search's own finds and adds it to the review -- or says why not (not a
+// name of this series, numbered by posting order, already followed). Nothing is followed from here.
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -89,7 +89,7 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
     setBusy(true);
     try {
       const r = await api<{ ok: true; candidate: LinkCandidate | null }>(`/api/admin/link/items/${item.id}/candidates`, {
-        json: { source: pending.source, sourceSeriesId: pending.sourceId },
+        json: { source: pending.source, sourceSeriesId: pending.sourceId, cover: pending.coverUrl ?? null },
       });
       const v = r.candidate?.verdict;
       toast(v ? tr('Added to the review: {verdict}', { verdict: verdictLabel(v) }) : tr('Added to the review'), v === 'ok' ? 'success' : 'info');

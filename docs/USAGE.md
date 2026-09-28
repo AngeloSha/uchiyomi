@@ -217,6 +217,23 @@ says how many are in hand. The chips:
   already hidden, is skipped and counted (*Removed 11 series · 1 skipped*). A selection that hid nothing
   says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
   separate, per-title step on **Content → Library** — see section 8.
+- **Connect sources** — admins only; under **More** on a phone. It looks for the selected series on the other
+  sources you have installed, so each can keep updating from a second or third source when its own is down or
+  lacks a chapter. It never follows anything by itself: it opens a review page, *Connect sources*, that fills
+  in while the server works through the selection in the background — one series at a time, a few sources each,
+  paced so no site is rushed. It waits while the chapter check or the library repair runs, and a restart leaves
+  it *interrupted*, with **Resume search**. Series that cannot take another source are left out up front and the
+  toast says how many: one numbered by posting order (section 4, *Chapter numbering*), and one that already
+  follows two other sources. In the review, **green** means the same series — a name matches and the chapter
+  numbers line up — and **Select exact matches** ticks them, up to the two a series may follow; **Connect
+  selected** follows them. **Amber** means a name matches exactly but the chapter numbers do not (a different
+  edition, a site numbering by volume, or another book of the same name): it is never ticked. Open its
+  **Chapters** to compare, and **Connect this one anyway** follows that one source on its own, after a
+  confirmation. **Search by hand** finds a series under a name the search did not try. With **Admin → Settings →
+  Match sources by other names** on, the names a source lists in its description (*Alternative titles: …*) are
+  used too; a name must match exactly. Nothing is downloaded: new chapters come from the connected sources on the
+  next check. A series' own **Sources & translations** sheet has the same **Connect other sources** for that
+  one series, and its list of other names.
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
