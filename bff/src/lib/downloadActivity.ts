@@ -235,7 +235,10 @@ export function healFinished(folder: string, number: number): number {
     for (const e of list) {
       if (e.status !== 'partial' || e.folder !== folder || numKey(e.number) !== numKey(number)) continue;
       e.status = 'done';
+      // The codes go with the English (lib/said.ts): kept, they went on saying "saved with 1 page missing" to the
+      // web beside an entry that says nothing.
       delete e.reason;
+      delete e.reasonSaid;
       n++;
     }
   }

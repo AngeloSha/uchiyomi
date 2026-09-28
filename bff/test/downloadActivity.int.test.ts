@@ -120,6 +120,24 @@ test('a chapter that lands whole after landing with holes is no longer partial, 
   act.clearActivity();
 });
 
+test('a healed chapter loses the codes of its reason with the English', async () => {
+  // A reason goes out twice since v0.49.1, as English and as codes (reasonSaid). The heal deleted only the English,
+  // so a healed entry still sent the codes of "saved with 1 page missing". Reintroduce by keeping reasonSaid in
+  // healFinished: "a healed entry sends no codes" fails.
+  const act = await import('../src/lib/downloadActivity');
+  act.clearActivity();
+  const id = act.beginDownload({ folder: 'H', title: 'T', number: 3, source: 's' });
+  const hold = { missing: [2], write: async () => ({ pages: 10, missing: [2] }) };
+  act.holdPartial(id, hold);
+  await hold.write();
+  const entry = () => act.listActivity().recent.find((e) => e.folder === 'H' && e.number === 3);
+  assert.deepEqual(entry()?.reasonSaid, [{ code: 'activity.saved', params: { n: 1 } }], 'PREMISE: a partial entry carries its codes');
+  assert.equal(act.healFinished('H', 3), 1);
+  assert.equal(entry()?.reason, undefined);
+  assert.equal(entry()?.reasonSaid, undefined, 'a healed entry sends no codes');
+  act.clearActivity();
+});
+
 // ---------------------------------------------------------------------------------------------- the route
 const SRC = 'act-src';
 const LIB_A = 'lib_act_a';
