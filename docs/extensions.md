@@ -39,13 +39,13 @@ the tab is a **setup screen** instead (since v0.49.0). It says which of three th
 - *The extension engine isn't answering* — set up, and not there right now (still starting, stopped, or at the
   wrong address), with *Tried 3 times since 14:05 · next try in 4 minutes* under it.
 
-Under that come the steps for your platform — **Docker Compose**, **Unraid**, **CasaOS**, **Umbrel** or
-**Somewhere else**, opened on the one Uchiyomi detects (the CasaOS listing and the Unraid template say which they
-are; a v0.49.0 compose file gives itself away) — each command in a box with **Copy** where the browser allows
+Under that come the steps for your platform — **Docker Compose**, **Unraid**, **CasaOS**, **Umbrel** or **Somewhere
+else**, opened on the one Uchiyomi detects (the CasaOS listing, the Unraid template and the Umbrel package say which
+they are; a v0.49.0 compose file gives itself away) — each command in a box with **Copy** where the browser allows
 it. **Check again** asks at once: when the engine answers, the card turns into the extension catalogue by itself,
 and its sources are registered in the same moment; when it does not, *Still no answer: <reason>* stays under the
-button. The card also asks by itself every 15 seconds while you look at it. It ends with where the engine's data
-is and why not to delete it ([Your engine's data](#your-engines-data)).
+button. The card also asks by itself every 15 seconds while you look at it. It ends with where the engine's data is
+and why not to delete it ([Your engine's data](#your-engines-data)).
 
 Uchiyomi keeps trying on its own too: 5 s, 15 s, 30 s, 1 min and 2 min after a failed start, then every
 5 minutes for as long as it takes, quietly (one line in the log says so). Before v0.49.0 it gave up after about
@@ -166,8 +166,9 @@ Since v0.49.0. Many extensions have settings of their own — the screen Mihon o
 **Admin → Extensions** has them too: **Settings**, beside an installed extension, opens that screen.
 
 - **One source at a time.** An extension that provides one source per language keeps settings per language, and the
-  sheet's *Source* choice says which (it opens on the first one switched on). The add dialog and the series page
-  link straight to a series' own source (**Source settings**).
+  sheet's *Source* choice says which (it opens on the first one switched on). The numbering notice in the add
+  dialog and on the series page links an admin straight to a series' own source (**Source settings**), and so does
+  its row under Health's *Chapter numbering*.
 - **As the extension offers them**: switches and checkboxes, a list to pick one from, a list to tick several, and
   text. A change is saved as you make it — text when you press **Save** or Enter — and the sheet then shows what the
   engine holds; *The extension did not take the change.* when it did not. A setting the extension has switched off

@@ -332,8 +332,9 @@ provable on their own, and two more only when you switch them on, in this order:
    source already lists is left to the chapter sweep, and only a hole nobody lists starts a search. A
    source is followed only under the same 90%-numbering rule as every other automatic follow, and at most
    20 chapters are fetched per series. A series the run has no searches left for is not marked as checked:
-   it keeps its place and is looked at on the next run rather than skipped for a day. Since v0.49.0 a gap the slow
-   archive is working through is the archive's, and is left to it (*Fill now* on Health still fetches it at once).
+   it keeps its place and is looked at on the next run rather than skipped for a day. Since v0.49.0 a series whose
+   every gap its slow archive is going to fetch is left to the archive, and is not marked as checked, so it comes
+   back once the archive is done; *Fill now* on Health still fetches those chapters at once.
 6. **Group upgrades** (since v0.47.0), **off** until **Admin → Settings → Scanlators → Upgrade chapters to a
    preferred group** is switched on. `REPAIR_GROUPS_MAX` chapters Uchiyomi downloaded itself whose group
    ranks below one your release preferences name, when that group's copy is on a source the series follows:

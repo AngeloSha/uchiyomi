@@ -2,13 +2,24 @@
 //
 //   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 E2E_NET=uchiyomi-e2e-49 E2E_PORT=18149 \
 //     E2E_SUBNET=10.222.9.0/24 bash web/test/e2e/up.sh
-//   cd web && BASE=http://127.0.0.1:18149 PHASES=notices,archive,numbering,sources,engine \
+//   cd web && E2E_ARCHIVE_FAST=1 BASE=http://127.0.0.1:18149 PHASES=notices,archive,numbering,sources,engine \
 //     ENGINE=http://127.0.0.1:20300 npm run test:e2e:v049                  # every phase
 //   cd web && BASE=http://127.0.0.1:18149 PHASES=notices npm run test:e2e:v049
 //
+// ⚠️ E2E_ARCHIVE_FAST=1 goes on BOTH commands of the every-phase run. On up.sh it starts the app with the slow
+// archive's test timing; the walk reads the same flag from its own environment, and only with it runs the archive
+// checks that need that timing: the Needs attention row and its two dialogs, the first chapter landing and the count
+// after it, and Came in today. Without it the walk skips those and prints one line saying so; with it on a stack
+// started without it they fail. On a host with less than 10 GiB free, add E2E_MIN_FREE_GB=0 to up.sh as well: the
+// downloader's own floor (MIN_FREE_GB, 10 GiB) refuses every download under it, and the walks read that as a broken
+// feature.
+//
 // The default PHASES are the ones a plain up.sh stack can serve: notices, archive, sources. numbering and engine
 // need the fake extension engine (E2E_ENGINE=fake); its control port is the second fake source's plus one
-// (20300 above), which numbering derives by itself and engine takes as ENGINE.
+// (20300 above), which numbering derives by itself and engine takes as ENGINE. PHASES may name only the five
+// phases below: any other name is a failed check, so a typo cannot pass as a green run. The release plan's other
+// phases live elsewhere: its downloads checks are run.mjs's (the walk up.sh runs by itself), and Health clarity is
+// walk41's.
 //
 // Phases:
 //
@@ -28,27 +39,42 @@
 //   To hold a notice on screen while the walk opens a dialog under it, the mouse rests on the card: a notice
 //   pauses while hovered, which is behaviour the walk relies on and so also checks.
 //
-//   archive -- the slow archive (#117): where it is turned on and where it is watched. At 390: Discover -> the
-//   add dialog's "Archive the rest slowly" (offered for Nothing yet, never for All), the done step's line, the
-//   still amber cover in Library -> Downloads' Queued with the Library tab's calm mark, its sheet with Pause,
-//   Resume and a confirmed Stop. At 1280: the series page's "Archive slowly" and its band, whose Details and Stop
-//   cover the whole screen, the admin's Pause all and Resume all, the sheet, Admin -> Settings -> Downloads with
-//   its window rows, and the add dialog for a Latest-N pick; then a member who did not queue it sees the cover,
-//   its sheet and the band with no key to press. No ring in any of it turns. With E2E_ARCHIVE_FAST=1 (a stack
-//   started with the archive's test knobs -- ARCHIVE_FIRST_RUN_MS, ARCHIVE_MIN_BREAK_MS, ARCHIVE_PAGE_GAP_MS,
-//   ARCHIVE_TICK_MS) it also holds the archive on a disk floor no host meets, to find it under Needs attention
-//   with a Details and a Stop that cover the screen, then waits for the first chapter to land and be counted,
-//   and for Came in today to sum it up. The free-space floor it lowers is put back at the end.
+//   archive -- the slow archive (#117): where it is turned on and where it is watched. At 390: Discover -> the add
+//   dialog's "Archive the rest slowly" (offered for Nothing yet, never for All), the done step's line, the still
+//   amber cover in Library -> Downloads' Queued with the Library tab's calm mark, its sheet with Pause, Resume and
+//   a confirmed Stop, and the Library selection's More -> Archive slowly. At 1280: the series page's "Archive
+//   slowly" and its band, which counts the archive as the run of chapters folded under it does and whose Details
+//   and Stop cover the whole screen; the admin's Pause all and Resume all, the sheet, Admin -> Settings ->
+//   Downloads with its window rows, and the add dialog for a Latest-N pick; then a member who did not queue it sees
+//   the cover, its sheet and the band with no key to press, and a member capped below 18 is shown nothing of Walk
+//   Gap rated 18 -- no job card, archive cover or Came in today entry -- where the admin, and the same member once
+//   the rating is lifted, are shown all three. No ring in any of it turns. With E2E_ARCHIVE_FAST=1 on the walk and
+//   on the stack (the archive's test knobs -- ARCHIVE_FIRST_RUN_MS, ARCHIVE_MIN_BREAK_MS, ARCHIVE_PAGE_GAP_MS,
+//   ARCHIVE_TICK_MS) it also holds the archive on a disk floor no host meets, to find it under Needs attention with
+//   a Details and a Stop that cover the screen, then waits for the first chapter to land and be counted -- what
+//   came in and what is left add up to Walk Gap's 14 chapters, on the server and on the cover and its sheet ("1 of
+//   14") -- and for Came in today to sum it up. The free-space floor it lowers is put back at the end.
 //
 //   numbering -- posting-order numbering (#116), on the fake engine's Webtoons.com and its Istrevelia: 226 posts
 //   the extension numbers 1 to 8 by the episode in their titles, 13 numbers in all. At 390: the add dialog reads
-//   226 chapters with its notice and the switch to the source's 13 numbers, and the add keeps those; the versions
-//   sheet tells the posts on one number apart by title; then the series is handed to the detector the way a
-//   v0.48.4 library holds it, which holds it for review -- the notice, the plan that says which file becomes
-//   which chapter, Rename the files, and a read mark that moved with its chapter. At 1280: a clean webtoon adds
-//   with no notice; the series goes back to the source's numbers from its own notice, through the plan; then
-//   Admin -> Extensions -> Webtoons.com's Settings: its sequential-numbering switch warns that it renumbers the
-//   series and asks again, and the series waits on its page for the review of the remap it queued.
+//   226 chapters with its notice, both counts (226 posts, 13 numbers) and the switch to the source's 13 numbers,
+//   under which the notice's heading says they are kept, and the add keeps those; the versions sheet tells the
+//   posts on one number apart by title; then the series is handed to the detector the way a v0.48.4 library holds
+//   it, which holds it for review -- the notice; Health's Chapter numbering card naming it with the same two keys,
+//   its Open and Source settings links, and a Review renumbering that opens the plan over the whole screen; the
+//   plan that says which file becomes which chapter, Rename the files, a read mark that moved with its chapter, and
+//   every file on its post's place (13 chapters on 13 numbers, the other 213 posts listed as not on the server).
+//   The notice's Source settings opens the extension's own settings, whose numbering switch says no series uses the
+//   source's numbers; switched there and back, it queues nothing for the series numbered by posting order. At 1280:
+//   a clean webtoon's add dialog reads its own 6 chapters and shows no numbering notice (it is not added: a second
+//   series on the source's numbers would change every count after it); the series goes back to the source's numbers
+//   from its own notice, through the plan, with every file back on the number the source gives it (the 13, nothing
+//   listed as missing); then Admin -> Extensions -> Webtoons.com's Settings: its sequential-numbering switch warns
+//   that it renumbers the series and asks again, and the series waits on its page for the review of the remap it
+//   queued, whose rename is checked on every file the same way (13 on 13 numbers, 213 not on the server). What the
+//   final wording round reworded (i18n-source-issues-2) is read on the data the components carry (the add dialog's
+//   data-posts and data-numbers, the plan's data-plan-renamed) or in the English they hold when the walk runs
+//   (codeEnglish), never in a copy of it.
 //
 //   sources -- #115, a failing source shows its failing stage on Providers and on Health. fake-a's search is
 //   scripted to fail (fakeSource `error`, HTTP 500), then at 390 x 844 and 1280 x 800:
@@ -69,7 +95,7 @@
 // Screenshots go to $OUT (default shots49). LOOK at them: every check here is geometry, and geometry passes on
 // a card that is transparent, clipped or unreadable.
 import puppeteer from 'puppeteer';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 // The fake extension engine's own seed, so the numbering phase expects what the engine serves rather than a copy
 // of it (the same file up.sh starts the engine from).
 import { SOURCE_IDS, SEQUENTIAL_KEY, defaultSeed, istreveliaPosts, webtoonsNumbers } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
@@ -103,6 +129,34 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
     await sleep(step);
   }
 };
+
+// Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
+// lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'engine'];
+const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
+check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
+  `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
+
+/**
+ * The English a component renders for a line the walk has no data attribute to read, taken from the component's
+ * source when the walk runs. The final wording round rewords sentences this walk reads (i18n-source-issues-2.md),
+ * and a check holding a copy of the old words would fail a correct page -- or, kept in step by hand, drift. `pick`
+ * finds the tr() key by the code around it (the value it is called with), never by its words. A pick that finds
+ * nothing is a failed check of its own, and every check that reads the key fails with it: an anchor that moved must
+ * never stop checking quietly.
+ */
+const WEB_DIR = new URL('../../', import.meta.url);
+const codeEnglish = (file, pick) => {
+  const m = pick.exec(readFileSync(new URL(file, WEB_DIR), 'utf8'));
+  if (!m) check(`web/${file} still has the tr() key the walk reads at ${pick}`, false, 'its anchor moved: update the pick');
+  return m?.[1] ?? null;
+};
+/** A tr() key as the page renders it: each {name} filled from `vars`, or any text where `vars` has none. */
+const rendered = (key, vars = {}, from = '') => (key == null ? /(?!)/ : new RegExp(from + key.split(/(\{\w+\})/).map((part) => {
+  const name = /^\{(\w+)\}$/.exec(part)?.[1];
+  const text = name ? (name in vars ? String(vars[name]) : null) : part;
+  return text === null ? '.+?' : text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}).join('')));
 
 // ---- an API session (one login: the route allows 10 per five minutes) ----
 const login = await (await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: USER, password: PASS }) })).json();
@@ -492,6 +546,9 @@ async function sources(width) {
   await shot(`${tag}-sources-4-health-cleared`);
 }
 
+/** Walk Gap's chapters, 1 to 14, as fakeSource.mjs lists them. */
+const GAP_CHAPTERS = 14;
+
 /**
  * The slow archive (#117) at one width. Walk Gap is added through the dialog at 390 and archived from its page at
  * 1280, so each width drives one of the two ways in on a fresh instance. The caller puts the free-space floor back.
@@ -501,6 +558,10 @@ async function archive(width) {
   await page.setViewport({ width, height: wide ? 900 : 844 });
   const tag = `archive-${width}`;
   const FAST = process.env.E2E_ARCHIVE_FAST === '1';
+  if (!FAST && !wide) {
+    console.log(`  (${tag}: E2E_ARCHIVE_FAST=1 is not set on the walk, so the checks that need the archive's test timing are`
+      + ' skipped: Needs attention and its dialogs, the first chapter and its count, Came in today. See the header.)');
+  }
   const text = () => page.evaluate(() => document.body.innerText || '');
   const turning = () => page.evaluate(() => document.querySelectorAll('.animate-ring').length);
   const tileState = () => page.evaluate(() => document.querySelector('[data-downloads-section="queued"] [data-archive]')?.getAttribute('data-archive') ?? null);
@@ -543,7 +604,7 @@ async function archive(width) {
     const offered = await waitFor(() => page.$('[data-archive-rest]'), 3000);
     check(`${tag}: "Archive the rest slowly" is offered for Nothing yet`, !!offered);
     const help = await page.$eval('[data-archive-rest] p', (el) => el.textContent).catch(() => '');
-    check(`${tag}: its line counts the rest, says the order and the time`, /^14 chapters come in slowly in the background\. Oldest first\. .+ at the current pace\.$/.test(help ?? ''), help);
+    check(`${tag}: its line counts the rest, says the order and the time`, new RegExp(`^${GAP_CHAPTERS} chapters come in slowly in the background\\. Oldest first\\. .+ at the current pace\\.$`).test(help ?? ''), help);
     await page.click('[role="switch"][aria-label="Archive the rest slowly"]');
     await sleep(300);
     await shot(`${tag}-1-add-dialog`);
@@ -580,6 +641,14 @@ async function archive(width) {
     const run = await page.$('[data-run="archive"]');
     check(`${tag}: the older chapters read as a run the archive is fetching, with no Fetch all`, !!run
       && !/Fetch all/.test(await run.evaluate((el) => el.textContent ?? '')));
+    // The band and the run row count the archive alike ("0 of 13" in both), and what is left is the run the page
+    // folds under it: the band once counted a landed chapter as still to come (the #117 review's "0 of 14").
+    const pair = (t) => /(?<!\d)(\d+) of (\d+)(?!\d)/.exec(t ?? '')?.slice(1).map(Number) ?? null;
+    const bandPair = pair(await band?.evaluate((el) => el.textContent));
+    const runPair = pair(await run?.evaluate((el) => el.textContent));
+    const folded = ((await api(`/api/series/${encodeURIComponent(gap.id)}/listing`)).content ?? []).filter((g) => g.why === 'archive').length;
+    check(`${tag}: the band and the run row count it alike, what is left being the ${folded} chapters the run folds`,
+      !!bandPair && JSON.stringify(bandPair) === JSON.stringify(runPair) && bandPair[1] - bandPair[0] === folded, JSON.stringify({ band: bandPair, run: runPair, folded }));
     await shot(`${tag}-1-series-band`);
     // The band is a `.card` too: its Details and Stop must not open inside it.
     if (band) await dialogsCoverScreen('[data-band-state="archive"]', 'the series band', '1');
@@ -588,6 +657,11 @@ async function archive(width) {
   if (FAST && !wide) {
     const landed = await waitFor(async () => ((await archived('Walk Gap'))?.done ?? 0) >= 1, 90_000, 1000);
     check(`${tag}: the archive fetched its first chapter`, !!landed);
+    // What came in and what is left add up to Walk Gap's 14 -- not 15: a chapter that landed and has not been
+    // scanned yet is not also still to come (bff lib/archive.ts compose(); the #117 review saw "1 of 15").
+    const counted = await waitFor(async () => { const a = await archived('Walk Gap'); return a?.done >= 1 && a.left != null ? a : null; }, 15_000, 500);
+    check(`${tag}: ...and what came in and what is left add up to its ${GAP_CHAPTERS} chapters`,
+      !!counted && counted.done + counted.left === GAP_CHAPTERS, JSON.stringify(counted && { done: counted.done, left: counted.left }));
   }
 
   // 2. Library -> Downloads: one still amber cover in Queued, and the Library ring's calm mark.
@@ -599,7 +673,13 @@ async function archive(width) {
   const mark = await page.evaluate((w) => document.querySelector(w ? 'a[data-downloads-ring]' : 'nav [data-downloads-ring]')?.getAttribute('data-downloads-ring') ?? null, wide);
   check(`${tag}: the Library ring wears the calm slow mark`, mark === 'slow', String(mark));
   check(`${tag}: the Queued line gives the pace`, /Slow archive: 4 chapters an hour per source/.test(await text()));
-  if (FAST && !wide) check(`${tag}: the cover counts what came in`, /\b[1-9]\d* of \d+\b/.test(await text()));
+  /** What Walk Gap's cover in Queued says, and its sheet. */
+  const coverSays = () => page.$eval('[data-downloads-section="queued"] [data-archive]', (el) => el.textContent || '').catch(() => '');
+  const sheetSays = () => page.$eval('[data-archive-sheet]', (el) => el.textContent || '').catch(() => '');
+  // "1 of 14": whatever came in, over all 14, never over the 15 the stale count gave. Digits, not word boundaries:
+  // textContent runs the cover's lines together ("Walk Gap1 of 14About 2 hours").
+  const ofAll = new RegExp(`(?<!\\d)[1-9]\\d* of ${GAP_CHAPTERS}(?!\\d)`);
+  if (FAST && !wide) check(`${tag}: the cover counts what came in, of its ${GAP_CHAPTERS}`, ofAll.test(await coverSays()), await coverSays());
   await shot(`${tag}-3-queued`);
   if (wide) {
     // The admin's Pause all is the server-wide switch: every archive says so, and Resume all puts it back.
@@ -615,6 +695,7 @@ async function archive(width) {
   const sheet = await waitFor(() => page.$('[data-archive-sheet]'), 5000);
   check(`${tag}: the cover opens its sheet`, !!sheet);
   await sleep(400);
+  if (FAST && !wide) check(`${tag}: ...and its sheet counts the same, of ${GAP_CHAPTERS} chapters`, ofAll.test(await sheetSays()), (await sheetSays()).slice(0, 200));
   await shot(`${tag}-5-sheet`);
   await press('Pause', '[data-archive-sheet]');
   check(`${tag}: Pause pauses it`, (await waitFor(async () => (await tileState()) === 'paused', 10_000)) === true);
@@ -685,6 +766,7 @@ async function archive(width) {
     const queued = await api('/api/sources/archive', { method: 'POST', body: JSON.stringify({ seriesIds: [gap.id] }) });
     check(`${tag}: the admin queues Walk Gap again, for the member to see`, queued.results?.[0]?.outcome === 'queued', JSON.stringify(queued));
     await memberSeesNoKeys(tag, gap);
+    await cappedSeesNothing(tag, gap);
     await api(`/api/sources/archive/${encodeURIComponent(gap.id)}`, { method: 'DELETE', body: '{}' });
   }
 }
@@ -741,6 +823,81 @@ async function memberSeesNoKeys(tag, gap) {
   }
 }
 
+/** A member whose age cap is under 18, who may add series and so reaches Library -> Downloads. */
+const CAPPED = { username: 'e2e-capped49', password: 'e2e-capped-passw0rd-49' };
+
+/**
+ * The critic's gap 13: a member capped below 18 is shown no job card, no archive cover and no Came in today entry
+ * for an 18+ series -- the age cap, the rule every series read follows (bff lib/visibility.ts visible()). Each
+ * "not shown" is paired with "is there": the admin, on the same state, is shown all three, and so is the same
+ * member once the rating is taken off again, so the nothing is the cap's and not an empty page's. Walk Gap is rated
+ * 18 for the pass (a series override, as Edit details writes it) and put back after. Its archive is queued already
+ * (the member pass before this); one more chapter fetched now gives it a job card and a Came in today entry.
+ */
+async function cappedSeesNothing(tag, gap) {
+  const held = new Set(((await api(`/api/series/${encodeURIComponent(gap.id)}/books?size=500`)).content ?? []).map((b) => b.number));
+  const missing = Array.from({ length: GAP_CHAPTERS }, (_, i) => GAP_CHAPTERS - i).find((n) => !held.has(n));
+  const fetched = await fetch(`${BASE}/api/sources/fetch`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ seriesId: gap.id, numbers: [missing] }),
+  });
+  check(`${tag}: the admin fetches Walk Gap's Ch. ${missing}, for a job card and a Came in today entry`, fetched.ok, `${fetched.status} ${(await fetched.text()).slice(0, 160)}`);
+  /** Where Walk Gap is in a GET /api/sources/jobs answer: its job card, its archive, a chapter of it that came in. */
+  const seen = (j) => ({
+    card: !!j?.content?.some((c) => c.title === 'Walk Gap'),
+    archive: !!j?.archive?.series?.some((a) => a.seriesId === gap.id),
+    cameIn: !!j?.activity?.recent?.some((a) => a.seriesId === gap.id && a.status === 'done'),
+  });
+  const everywhere = (s) => s.card && s.archive && s.cameIn;
+  const admin = await waitFor(async () => { const s = seen(await api('/api/sources/jobs')); return everywhere(s) ? s : null; }, 60_000, 1000);
+  check(`${tag}: the admin is shown Walk Gap's job card, its archive and what came in today`, !!admin, JSON.stringify(seen(await api('/api/sources/jobs'))));
+
+  const made = await fetch(`${BASE}/api/admin/users`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ ...CAPPED, role: 'user', perms: { canDownload: true } }),
+  });
+  const id = made.ok ? (await made.json()).id : (await api('/api/admin/users')).content?.find((u) => u.username === CAPPED.username)?.id;
+  await api(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ maxAgeRating: 16 }) });
+  const rate = (ageRating) => api(`/api/admin/series/${encodeURIComponent(gap.id)}/meta`, { method: 'PUT', body: JSON.stringify({ ageRating }) });
+  const ctx = await browser.createBrowserContext();
+  try {
+    await rate(18);
+    const login = await (await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(CAPPED) })).json();
+    const theirs = async () => {
+      const r = await fetch(`${BASE}/api/sources/jobs`, { headers: { authorization: `Bearer ${login.accessToken}` } });
+      return r.ok ? r.json() : null;
+    };
+    const hidden = seen(await theirs());
+    check(`${tag}: a member capped under 18 is sent no job card, archive or Came in today entry of Walk Gap rated 18`,
+      !!login.accessToken && !hidden.card && !hidden.archive && !hidden.cameIn, JSON.stringify({ signedIn: !!login.accessToken, ...hidden }));
+    const m = watch(await ctx.newPage(), 'capped: ');
+    await m.setViewport(page.viewport());
+    const signed = await signIn(m, CAPPED.username, CAPPED.password);
+    check(`${tag}: signed in as the capped member`, signed);
+    if (!signed) return;
+    /** Library -> Downloads as the member gets it: its sections, or the empty state ("Nothing is being fetched"). */
+    const view = async () => {
+      await m.goto(`${BASE}/library/?view=downloads`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      return waitFor(() => m.evaluate(() => {
+        const el = document.querySelector('[data-downloads-view], [data-downloads-empty]');
+        return el && { empty: el.hasAttribute('data-downloads-empty'), text: el.textContent || '' };
+      }), 15_000);
+    };
+    const shown = await view();
+    check(`${tag}: ...and Library -> Downloads shows them nothing of it`, !!shown && !shown.text.includes('Walk Gap'), JSON.stringify(shown).slice(0, 200));
+    await shot(`${tag}-13-capped-member`, m);
+    // The same member, the rating off again: all three are theirs to see, so the page above was not simply empty.
+    await rate(null);
+    const back = await waitFor(async () => { const s = seen(await theirs()); return everywhere(s) ? s : null; }, 20_000, 1000);
+    check(`${tag}: ...which, rated for everyone again, shows them all three`, !!back, JSON.stringify(seen(await theirs())));
+    const again = await view();
+    check(`${tag}: ...on the page too`, !!again && !again.empty && again.text.includes('Walk Gap'), JSON.stringify(again).slice(0, 200));
+  } finally {
+    await rate(null).catch(() => {});
+    await ctx.close();
+  }
+}
+
 /**
  * What the fake engine serves for Webtoons.com's Istrevelia, worked out from the engine's own seed: how many posts,
  * the numbers the extension gives them and how many posts share each, the number most of them share, and the posts
@@ -754,7 +911,7 @@ const IST = (() => {
   for (const n of numbers) shared.set(n, (shared.get(n) ?? 0) + 1);
   const [bigNumber, bigPosts] = [...shared].sort((a, b) => b[1] - a[1])[0];
   return {
-    posts: posts.length, numbers: shared.size, first: Math.min(...numbers), last: Math.max(...numbers), onFirst: shared.get(Math.min(...numbers)),
+    posts: posts.length, numbers: shared.size, set: [...shared.keys()], first: Math.min(...numbers), last: Math.max(...numbers), onFirst: shared.get(Math.min(...numbers)),
     big: { number: bigNumber, posts: bigPosts },
     lone: posts.map((p, i) => ({ place: i + 1, number: numbers[i], title: p.name.trim() })).filter((x) => !Number.isInteger(x.number)),
   };
@@ -792,6 +949,8 @@ async function numbering(width) {
       open: !!plan,
       title: await page.$eval('[data-numbering-plan]', (e) => e.closest('[role="dialog"]')?.getAttribute('aria-label') ?? null).catch(() => null),
       says: await page.$eval('[data-numbering-plan] > p', (e) => e.textContent.trim()).catch(() => ''),
+      // The count line's own count ("12 chapters will be renamed"), as data: the words are the translators'.
+      renamed: await page.$eval('[data-numbering-plan] [data-plan-renamed]', (e) => Number(e.getAttribute('data-plan-renamed'))).catch(() => null),
       lines: plan ? await planLines() : [],
     };
   };
@@ -799,12 +958,27 @@ async function numbering(width) {
   const confirmPlan = async () => {
     const key = await page.$('[data-plan-confirm]');
     if (!key) return false;
+    // Confirm waits while the plan on screen is being listed again (NumberingSheet: no press on a stale plan).
+    await waitFor(() => key.evaluate((b) => !b.disabled), 25_000, 200);
     await key.click();
     return waitFor(async () => !(await page.$('[data-numbering-plan]')), 60_000, 500);
   };
   const books = async (id) => (await api(`/api/series/${encodeURIComponent(id)}/books?size=500`)).content ?? [];
   const followed = async () => (await books(numbered.seriesId)).find((b) => b.id === numbered.bookId) ?? null;
   const q = IST.lone[0];
+  /**
+   * Every file after a rename, not only the one followed: the series has its 13 chapters on 13 numbers -- `on` when
+   * the numbers are known -- and the listing counts as not on the server exactly the posts the other numbers leave.
+   */
+  const everyFile = async (what, missing, on = null) => {
+    const got = (await books(numbered.seriesId)).map((b) => b.number);
+    const listed = await api(`/api/series/${numbered.seriesId}/listing`);
+    const distinct = new Set(got);
+    const right = on ? on.every((x) => distinct.has(x)) : got.every((x) => Number.isInteger(x) && x >= 1 && x <= IST.posts);
+    check(`${tag}: ${what}: ${IST.numbers} chapters on ${IST.numbers} numbers, ${missing} listed as not on the server`,
+      got.length === IST.numbers && distinct.size === IST.numbers && right && listed.content?.length === missing,
+      JSON.stringify({ books: got.length, distinct: distinct.size, numbers: [...distinct].sort((a, b) => a - b), notOnServer: listed.content?.length }));
+  };
 
   if (!wide) {
     // The engine answering, and its Webtoons.com switched on: a fresh engine's sources start off (Admin -> Extensions),
@@ -822,7 +996,12 @@ async function numbering(width) {
     const n = await page.$eval('[data-add-numbering]', (e) => ({ kind: e.getAttribute('data-add-numbering'), text: e.textContent || '', href: e.querySelector('a')?.getAttribute('href') ?? null })).catch(() => null);
     check(`${tag}: its notice says numbered by posting order, and why`, n?.kind === 'strong' && n.text.includes('Numbered by posting order')
       && n.text.includes(`(${IST.big.posts} posts are all numbered ${IST.big.number})`), n?.text);
-    check(`${tag}: ...with both readings side by side`, !!n?.text.includes(`Posting order: ${IST.posts} · the source’s own numbers: ${IST.numbers}`), n?.text);
+    // Both readings side by side, read on the line's own data: the words around them are the translators'.
+    const both = await page.$eval('[data-add-numbering] [data-add-numbering-counts]', (e) => ({
+      posts: Number(e.getAttribute('data-posts')), numbers: Number(e.getAttribute('data-numbers')), text: e.textContent.replace(/\s+/g, ' ').trim(),
+    })).catch(() => null);
+    check(`${tag}: ...with both readings side by side: ${IST.posts} chapters by posting order, ${IST.numbers} by the source's numbers`,
+      both?.posts === IST.posts && both.numbers === IST.numbers && both.text.includes(String(IST.posts)) && both.text.includes(String(IST.numbers)), JSON.stringify(both));
     check(`${tag}: ...and an admin's way to the source's own settings`, n?.href === `/admin/?tab=Extensions&settings=${WT}`, String(n?.href));
     const all = () => page.$eval('[role="dialog"] select option[value="all"]', (o) => o.textContent).catch(() => null);
     check(`${tag}: All fetches every post`, (await all()) === `All (${IST.posts})`, String(await all()));
@@ -836,6 +1015,11 @@ async function numbering(width) {
     const kept = await waitFor(async () => { const t = await detailCount(); return t.startsWith(`${IST.numbers} `) ? t : null; }, 5000);
     check(`${tag}: Keep the source’s numbers reads its ${IST.numbers} numbers`, kept === `${IST.numbers} chapters · ${IST.first}–${IST.last}`, String(kept ?? await detailCount()));
     check(`${tag}: ...and All is those ${IST.numbers}`, (await all()) === `All (${IST.numbers})`, String(await all()));
+    // The notice's heading follows the switch: not "Numbered by posting order" above a switched-on "Keep the source's
+    // numbers". In the words lib/numbering.ts addNoticeHeading has now.
+    const keeping = codeEnglish('lib/numbering.ts', /view\.offer === 'keep' \? tr\('([^']+)'\)/);
+    const heading = await page.$eval('[data-add-numbering] [data-add-numbering-heading]', (e) => e.textContent.trim()).catch(() => '');
+    check(`${tag}: ...and the notice's heading says the source's numbers are kept`, !!keeping && heading === keeping, `${heading} (the dialog says "${keeping}")`);
     await sleep(400); // the switch's knob slides; a picture taken at once shows it half-way
     await shot(`${tag}-2-keep-source-numbers`);
     // Every number fetched now, and no scheduled check: the first sweep comes ten minutes after the boot, and one
@@ -903,10 +1087,47 @@ async function numbering(width) {
     await page.$eval('[data-numbering-notice]', (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
     await shot(`${tag}-4-review`);
 
+    // 5b. Health's Chapter numbering card names the held series with the same two keys; Open leads to the series'
+    // plan and Source settings to the extension's own settings; and Review renumbering there opens the plan over the
+    // whole screen -- a Health card is a `.card`, whose backdrop blur would otherwise hold the sheet inside it.
+    await go('/admin/?tab=Health', 4000);
+    const hc = '[data-health-check="numbering"]';
+    const card = await waitFor(() => page.$(hc), 30_000);
+    check(`${tag}: Health has a Chapter numbering card`, !!card);
+    if (card) {
+      await page.$eval(`${hc} button`, (b) => b.click()); // the first button opens a card (app/admin/page.tsx)
+      const row = await waitFor(() => page.evaluate((hc, id) => {
+        const r = [...document.querySelectorAll(`${hc} [data-health-item]`)]
+          .find((x) => [...x.querySelectorAll('a')].some((a) => a.getAttribute('href')?.includes(`id=${id}`)));
+        return r ? {
+          text: r.textContent || '',
+          keys: [...r.querySelectorAll('[data-health-action]')].map((b) => b.getAttribute('data-health-action')),
+          links: [...r.querySelectorAll('a')].map((a) => a.getAttribute('href')),
+        } : null;
+      }, hc, s.id), 20_000, 300);
+      check(`${tag}: ...naming Istrevelia, with Review renumbering and Keep the source’s numbers`,
+        !!row && row.text.includes('Istrevelia') && row.keys.includes('renumber') && row.keys.includes('keep_numbers'), JSON.stringify(row));
+      check(`${tag}: ...its Open leads to the series' plan, and Source settings to the extension's own`,
+        !!row?.links.some((h) => h.includes(`id=${s.id}`) && h.includes('numbering=review')) && row.links.includes(`/admin/?tab=Extensions&settings=${WT}`),
+        JSON.stringify(row?.links));
+      await page.evaluate((hc) => document.querySelector(`${hc} [data-health-action="renumber"]`)?.click(), hc);
+      const over = await waitFor(() => overlayBox('[data-numbering-plan]'), 20_000);
+      check(`${tag}: ...and its Review renumbering opens the plan over the whole screen, not its card`, coversScreen(over), JSON.stringify(over));
+      await sleep(300);
+      await shot(`${tag}-4b-health-plan`);
+      await press('Cancel', '[role="dialog"]');
+      await sleep(500);
+      check(`${tag}: ...which Cancel closes, renaming nothing`, !(await page.$('[data-numbering-plan]'))
+        && (await api(`/api/series/${s.id}/listing`)).numbering?.pending === 'posting_order');
+    }
+    await go(`/series/?id=${s.id}`, 3000);
+    await noticeIs('review');
+
     // 6. The plan says which file becomes which chapter before anything moves; Rename the files moves them, and the
     // read mark moves with its chapter (the book is renamed in place: same id, same progress).
     const plan = await openPlan('Review renumbering');
-    check(`${tag}: Review renumbering opens the plan, counted`, plan.open && plan.says.startsWith(`${plan.lines.length} chapters renamed`), plan.says);
+    check(`${tag}: Review renumbering opens the plan, counting the ${plan.lines.length} files it renames`,
+      plan.open && plan.renamed === plan.lines.length && plan.says.includes(String(plan.lines.length)), JSON.stringify({ renamed: plan.renamed, says: plan.says }));
     check(`${tag}: ...naming each file's new chapter: ${moves()}`, lonesMove(plan.lines), JSON.stringify(plan.lines).slice(0, 400));
     check(`${tag}: ...and saying reading progress stays with its chapter`, (await text()).includes('Reading progress, bookmarks and notes stay with their chapters.'));
     await shot(`${tag}-5-plan`);
@@ -917,21 +1138,41 @@ async function numbering(width) {
     const moved = await followed();
     check(`${tag}: the read mark moved with its chapter: Ch. ${q.number} is Ch. ${q.place} now, and still read`,
       moved?.number === q.place && moved?.readProgress?.completed === true, JSON.stringify(moved && { number: moved.number, read: moved.readProgress?.completed }));
-    const after = await api(`/api/series/${s.id}/listing`);
-    check(`${tag}: the list runs 1–${IST.posts}: ${IST.posts - IST.numbers} chapters not on the server`, after.content?.length === IST.posts - IST.numbers, String(after.content?.length));
+    await everyFile('every file is on its post\'s place in 1–' + IST.posts, IST.posts - IST.numbers);
     await page.$eval('[data-numbering-notice]', (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
     await shot(`${tag}-6-renumbered`);
 
     // 7. The notice's Source settings: the extension's own settings, where a numbering switch no longer touches a series
-    // numbered by posting order.
+    // numbered by posting order -- said in its row, and then done for real.
     await press('Source settings', '[data-numbering-notice]');
     const sheet = await waitFor(() => page.$eval('[data-ext-settings]', (e) => e.textContent || ''), 15_000);
     check(`${tag}: Source settings opens the extension's own settings`, !!sheet && sheet.includes('Use sequential chapter numbering'), sheet?.slice(0, 200));
-    const warn = await page.$eval(`[data-pref="${SEQUENTIAL_KEY}"] [data-renumber-warning]`, (e) => e.textContent || '').catch(() => '');
-    check(`${tag}: ...its numbering switch warns, and leaves a series numbered by posting order alone`,
-      warn.includes('No series in your library use them yet.') && warn.includes('Series numbered by posting order are not affected.'), warn);
-    await page.$eval(`[data-pref="${SEQUENTIAL_KEY}"]`, (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
+    const row = `[data-pref="${SEQUENTIAL_KEY}"]`;
+    const warn = await page.$eval(`${row} [data-renumber-warning]`, (e) => e.textContent || '').catch(() => '');
+    // The no-series sentence in the words ExtensionSettings.tsx has now: the branch after `renumbers > 0 ? (...) :`.
+    const none = codeEnglish('components/ExtensionSettings.tsx', /\) : \(\s*<>\{tr\('([^']+)'/);
+    check(`${tag}: ...its numbering switch says no series uses the source's numbers, and one numbered by posting order is not affected`,
+      rendered(none).test(warn) && warn.includes('Series numbered by posting order are not affected.'), `${warn} (the sheet says "${none}")`);
+    await page.$eval(row, (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
     await shot(`${tag}-7-source-settings`);
+    // Switched, with nothing using the source's numbers: no second word, the extension takes it, and the series
+    // numbered by posting order is left as it is -- no remap waits for it. Switched back, the extension is as it was,
+    // which the 1280 half needs: its own switch is what queues the remap there.
+    const prefWrites = async () => (await (await fetch(`${ENGINE}/__state`)).json()).prefWrites ?? [];
+    const flip = async (to) => {
+      const was = (await prefWrites()).length;
+      await page.click(`${row} [role="switch"]`);
+      const wrote = await waitFor(async () => { const w = await prefWrites(); return w.length > was ? w.slice(was) : null; }, 10_000, 300);
+      await waitFor(() => page.$eval(`${row} [role="switch"]`, (b, to) => b.getAttribute('aria-checked') === String(to), to), 10_000, 200);
+      return wrote;
+    };
+    const on = await flip(true);
+    check(`${tag}: ...switched, it asks nothing and the extension takes it`, on?.length === 1 && on[0].value === true && !(await page.$('[data-renumber-confirm]')), JSON.stringify(on));
+    const left = await api(`/api/series/${s.id}/listing`);
+    check(`${tag}: ...and nothing waits for the series numbered by posting order`, left.numbering?.mode === 'posting_order' && !left.numbering?.pending,
+      JSON.stringify(left.numbering && { mode: left.numbering.mode, pending: left.numbering.pending }));
+    const off = await flip(false);
+    check(`${tag}: ...switched back, the extension is as it was`, off?.length === 1 && off[0].value === false, JSON.stringify(off));
     await page.keyboard.press('Escape');
     await sleep(600);
     check(`${tag}: closing it takes ?settings= off the address`, !/settings=/.test(page.url()), page.url());
@@ -957,6 +1198,7 @@ async function numbering(width) {
   const home = await followed();
   check(`${tag}: Ch. ${q.place} is Ch. ${q.number} again, and still read`, home?.number === q.number && home?.readProgress?.completed === true,
     JSON.stringify(home && { number: home.number, read: home.readProgress?.completed }));
+  await everyFile('every file is back on the number the source gives it', 0, IST.set);
   check(`${tag}: a series an admin put on the source's numbers carries no notice`, !!(await waitFor(async () => !(await page.$('[data-numbering-notice]')), 10_000)));
 
   // 10. Admin -> Extensions -> Webtoons.com -> Settings. Its sequential-numbering switch moves the source's numbers
@@ -971,9 +1213,13 @@ async function numbering(width) {
   check(`${tag}: Webtoons.com's row in Admin -> Extensions has a Settings key`, !!opened);
   const row = `[data-pref="${SEQUENTIAL_KEY}"]`;
   const warn = await waitFor(() => page.$eval(`${row} [data-renumber-warning]`, (e) => e.textContent || ''), 15_000);
+  // The warning's first sentence in the words ExtensionSettings.tsx has now (the final wording round rewords it),
+  // with the count it is given for one series.
+  const renumbers = codeEnglish('components/ExtensionSettings.tsx', /tr\('([^']+)', \{\s*(?:source: sourceName,\s*)?count: data!\.renumbers === 1/);
+  const oneSeries = codeEnglish('components/ExtensionSettings.tsx', /count: data!\.renumbers === 1 \? tr\('([^']+)'\)/);
   check(`${tag}: its numbering switch warns that it renumbers the series using the source's numbers`,
-    /Changing this renumbers every series from .+ that uses its numbers \(1 series in your library\)\./.test(warn ?? '')
-    && !!warn?.includes('Each waits on its series page until you review its renumbering: files are renamed, reading progress stays.'), String(warn));
+    rendered(renumbers, { count: oneSeries }).test(warn ?? '')
+    && !!warn?.includes('Each waits on its series page until you review its renumbering: files are renamed, reading progress stays.'), `${warn} (the sheet says "${renumbers}")`);
   await page.$eval(row, (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
   await shot(`${tag}-3-extension-settings`);
   const writes = async () => (await (await fetch(`${ENGINE}/__state`)).json()).prefWrites ?? [];
@@ -1007,6 +1253,7 @@ async function numbering(width) {
   const last = await followed();
   check(`${tag}: Ch. ${q.number} is Ch. ${q.place} in the source's new numbers, and still read`, last?.number === q.place && last?.readProgress?.completed === true,
     JSON.stringify(last && { number: last.number, read: last.readProgress?.completed }));
+  await everyFile('every file is on its post\'s new number in 1–' + IST.posts, IST.posts - IST.numbers);
   check(`${tag}: nothing waits any more`, !!(await waitFor(async () => !(await page.$('[data-numbering-notice]')), 10_000)));
   await shot(`${tag}-7-remapped`);
 }

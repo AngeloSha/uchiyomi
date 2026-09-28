@@ -263,6 +263,12 @@ test('the Umbrel package is the one under review: proxy block, PUID, digest pin,
   assert.match(String(s.stop_grace_period), /40s/);
   assert.ok(s.image.includes(`:v${m.version}@`), `manifest version ${m.version} does not match the pinned image ${s.image}`);
   assert.match(String(s.environment.JWT_SECRET), /APP_UCHIYOMI_JWT_SECRET/, 'the session secret should come from exports.sh');
+  // v0.49.0 (#72): Admin → Extensions opens its engine setup steps on the platform this hint names (bff
+  // lib/platform.ts), and Umbrel's say that an Umbrel app cannot add the optional engine. Nothing else gives an
+  // Umbrel install away -- no HOST_OS, no EXTENSION_ENGINE -- so without the line it reads as 'unknown' and opens on
+  // steps it cannot follow. Carried into the store package with its next version bump (the store PR holds v0.40.0).
+  // Reintroduce by deleting the line from the compose file: this assertion names it.
+  assert.equal(s.environment.UCHIYOMI_PLATFORM, 'umbrel', 'the Umbrel compose does not tell the app it runs on Umbrel (UCHIYOMI_PLATFORM: umbrel)');
   assert.match(read('deploy/umbrel/uchiyomi/exports.sh'), /derive_entropy/, 'exports.sh does not derive the secret');
   for (const d of ['db', 'config', 'cache', 'downloads', 'backups']) assert.ok(existsSync(join(REPO, `deploy/umbrel/uchiyomi/data/${d}/.gitkeep`)), `data/${d} is not committed; Umbrel would mount an empty root-owned path`);
   const f = c.services.flaresolverr;

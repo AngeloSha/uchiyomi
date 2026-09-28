@@ -2407,8 +2407,9 @@ paths:
         `cancelRequested` until the chapter in flight is done and then ends `done` with `cancelled: true`
         and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
         the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
-        account that started it as well. Since v0.49.0 a repair's card also carries `repairKind` (fix_short,
-        fill, retry, steps:...), `label` (the series title or source name a one-row Health press is about),
+        account that started it as well. Since v0.49.0 a repair's card also carries `repairKind` (full for a run of
+        every step -- the nightly, Tasks -> Run now, Health's Fix all issues -- else fix_short, fill, retry or
+        steps:...), `label` (the series title or source name a one-row Health press is about),
         `number` (the chapter's, for a one-chapter run) and `seriesId` (the series `label` names); `label`,
         `number` and `seriesId` are left out for a viewer who may not list that series (the 18+ hide), as
         `current` is.
@@ -2529,11 +2530,11 @@ paths:
                         cancelRequested: { type: boolean }
                         reason: { type: string }
                         mine: { type: boolean }
-                        repairKind: { type: string, description: "Since v0.49.0, a repair: which run it is -- fix_short, fill, retry, or steps:<a+b...>[:now]." }
+                        repairKind: { type: string, description: "Since v0.49.0, a repair: which run it is -- full (every step: the nightly, Tasks -> Run now, Health's Fix all issues), fix_short, fill, retry, or steps:<a+b...>[:now]." }
                         label: { type: string, description: "Since v0.49.0, a repair: the series title or source name a one-row Health fix is about. Left out, with number and seriesId, for a viewer who may not list that series, and whenever current is." }
                         number: { type: number, description: Since v0.49.0, a repair about one chapter -- its number. }
                         seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
-                        downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions). It stays a server task but does not turn the Library ring. Absent: it may download." }
+                        downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
         "403":
@@ -5688,8 +5689,8 @@ paths:
         origin: 'nightly' | 'manual', username (who pressed it; null for the nightly or a deleted account),
         mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
         {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
-        dropped when this viewer may not list that series. `notes` names series by title alone, so it is null
-        for a viewer who hides 18+ titles.
+        dropped when this viewer may not list that series. `notes` names series by title alone, with no id to
+        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1.
       parameters:
         - name: limit
           in: query
