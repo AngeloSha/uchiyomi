@@ -10,7 +10,7 @@ import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
-import { toStoredRel } from '../lib/relPath';
+import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
@@ -2139,7 +2139,7 @@ export default async function adminRoutes(app: FastifyInstance) {
    */
   app.get('/api/admin/libraries/folders', async (req, reply) => {
     const raw = await diskSpelling([LIBRARY_ROOT, DL_ROOT],
-      toStoredRel(String((req.query as { path?: string }).path ?? '')).replace(/^\/+/, '').replace(/\/+$/, '').trim());
+      trimTrailingSlashes(toStoredRel(String((req.query as { path?: string }).path ?? '')).replace(/^\/+/, '')).trim());
     const { readdir } = await import('node:fs/promises');
 
     const names = new Set<string>();

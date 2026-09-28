@@ -342,6 +342,12 @@ test('library management', { skip }, async (t) => {
       assert.equal((await get('../../etc')).statusCode, 400, 'a traversal must not be answered');
       assert.equal((await get('definitely/not/a/real/folder')).statusCode, 404,
         'a typo must be told apart from a real but empty folder');
+      // CodeQL #34: the query's trailing slashes were trimmed with /\/+$/, which starts again from every slash of a
+      // run that does not end the string -- one request held the server for half a minute. Reintroduce it in the route:
+      // "a long run of slashes holds the request" fails.
+      const t0 = Date.now();
+      assert.equal((await get(`x${'/'.repeat(200_000)}y`)).statusCode, 404);
+      assert.ok(Date.now() - t0 < 5000, 'a long run of slashes holds the request');
 
       const root = (await app.inject({ method: 'GET', url: '/api/admin/libraries/folders', headers: auth })).json();
       assert.equal(root.path, '');

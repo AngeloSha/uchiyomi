@@ -29,3 +29,13 @@ export function relFromAbs(root: string, abs: string, impl: PathImpl = path): st
 
 /** The folder part of a stored path. posix, because the stored path is. */
 export const dirnameRel = (p: string): string => path.posix.dirname(p);
+
+/**
+ * `p` without the slashes it ends with. A loop, not `/\/+$/`: on a long run of slashes that does not end the string
+ * that regex starts again from every one of them, which is quadratic in a request's own query string (CodeQL #34).
+ */
+export function trimTrailingSlashes(p: string): string {
+  let end = p.length;
+  while (end > 0 && p.charCodeAt(end - 1) === 0x2f) end--;
+  return p.slice(0, end);
+}

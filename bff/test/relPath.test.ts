@@ -19,7 +19,7 @@ process.env.DATABASE_URL ||= 'postgres://unused/unused';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
 process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 
-import { toStoredRel, relFromAbs, joinRel, dirnameRel } from '../src/lib/relPath';
+import { toStoredRel, relFromAbs, joinRel, dirnameRel, trimTrailingSlashes } from '../src/lib/relPath';
 import { renameRetry } from '../src/lib/fsAtomic';
 
 const W = path.win32;
@@ -178,4 +178,18 @@ test('the loop guard on Windows still finds a real symlink loop (real filesystem
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('trimTrailingSlashes: what /\\/+$/ answered, in one pass', () => {
+  // CodeQL #34: the folder browser trimmed its query with that regex, which starts again from every slash of a run
+  // that does not end the string. Reintroduce it here (`p.replace(/\/+$/, '')`): "a long run of slashes takes one
+  // pass" fails -- 200,000 of them take the regex about half a minute.
+  for (const p of ['', '/', '///', 'a', 'a/', 'a///', '/a/b/', 'a/ ', ' / ', 'a/b', 'a\\', 'Manga/Seinen//']) {
+    assert.equal(trimTrailingSlashes(p), p.replace(/\/+$/, ''), JSON.stringify(p));
+  }
+  const long = `x${'/'.repeat(200_000)}y`;
+  const t0 = Date.now();
+  assert.equal(trimTrailingSlashes(long), long);
+  assert.equal(trimTrailingSlashes(`${long}///`), long);
+  assert.ok(Date.now() - t0 < 1000, 'a long run of slashes takes one pass');
 });
