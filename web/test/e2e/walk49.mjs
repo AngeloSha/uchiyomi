@@ -1149,8 +1149,9 @@ async function numbering(width) {
     check(`${tag}: Source settings opens the extension's own settings`, !!sheet && sheet.includes('Use sequential chapter numbering'), sheet?.slice(0, 200));
     const row = `[data-pref="${SEQUENTIAL_KEY}"]`;
     const warn = await page.$eval(`${row} [data-renumber-warning]`, (e) => e.textContent || '').catch(() => '');
-    // The no-series sentence in the words ExtensionSettings.tsx has now: the branch after `renumbers > 0 ? (...) :`.
-    const none = codeEnglish('components/ExtensionSettings.tsx', /\) : \(\s*<>\{tr\('([^']+)'/);
+    // The no-series sentence in the words ExtensionSettings.tsx has now: the warning's `: tr(...)` branch, just
+    // before the `return <>{warn}` that renders it.
+    const none = codeEnglish('components/ExtensionSettings.tsx', /:\s*tr\('([^']+)'\);\s*return <>\{warn\}/);
     check(`${tag}: ...its numbering switch says no series uses the source's numbers, and one numbered by posting order is not affected`,
       rendered(none).test(warn) && warn.includes('Series numbered by posting order are not affected.'), `${warn} (the sheet says "${none}")`);
     await page.$eval(row, (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
