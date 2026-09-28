@@ -255,7 +255,8 @@ export function ArchiveAttentionRow({ item, view, admin }: { item: ArchiveItem; 
     <li data-attention="archive" className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <Img src={img.seriesThumb(item.seriesId)} alt="" className="h-[60px] w-10 shrink-0 rounded-md" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-fog-100">{item.title}</p>
+        {/* Its own direction: in an Arabic page the line's ellipsis cut an English title at its start. */}
+        <p dir="auto" className="truncate text-sm font-medium text-fog-100">{item.title}</p>
         <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{attentionText(item.entry)}</p>
         {/* Still taking a chapter (the retry after a backoff): said here, not only inside the sheet. */}
         {item.entry.current && <p className="mt-0.5 text-[12px] text-fog-200" data-archive-current>{tr('Fetching Ch. {n} now', { n: item.entry.current.number })}</p>}

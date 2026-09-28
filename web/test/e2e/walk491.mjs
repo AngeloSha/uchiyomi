@@ -269,12 +269,15 @@ const cardOnPage = () => page.evaluate(() => {
   if (!li) return null;
   const now = [...li.querySelectorAll('p')].find((p) => p.querySelector('bdi'));
   const bdi = now?.querySelector('bdi');
+  // What cuts the title: its own box when it truncates itself -- which it must, to be cut at its own end inside a
+  // right-to-left line -- else the line.
+  const cut = bdi && getComputedStyle(bdi).textOverflow === 'ellipsis' ? bdi : now;
   const r = li.getBoundingClientRect();
   return {
     state: li.getAttribute('data-state'), text: li.innerText.replace(/\s+/g, ' ').trim(), name: li.querySelector('[data-task-name]')?.textContent ?? '',
     now: now ? {
-      text: now.textContent, title: bdi.textContent, dir: getComputedStyle(bdi).direction, truncated: now.scrollWidth > now.clientWidth + 1,
-      ellipsis: getComputedStyle(now).textOverflow, startShown: window.__firstShown(bdi, now),
+      text: now.textContent, title: bdi.textContent, dir: getComputedStyle(bdi).direction, truncated: cut.scrollWidth > cut.clientWidth + 1,
+      ellipsis: getComputedStyle(cut).textOverflow, startShown: window.__firstShown(bdi, now),
     } : null,
     stop: [...li.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/›$/.test(t)),
     results: !!li.querySelector('[data-find-results-open]'),

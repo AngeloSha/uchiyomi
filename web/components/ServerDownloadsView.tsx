@@ -214,7 +214,7 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
               {s.stopped.map((j) => (
                 <li key={j.folder} className="card flex min-w-0 items-start gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-fog-100">{j.title}</p>
+                    <p dir="auto" className="truncate text-sm text-fog-100">{j.title}</p>
                     <p dir="auto" className="mt-0.5 text-[12px] text-fog-400">{reasonText(j) || tr('Cancelled; what landed is kept.')}</p>
                   </div>
                   {(isAdmin || j.mine) && (
@@ -319,7 +319,8 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
       className={`card flex min-w-0 items-start gap-3 px-4 py-3 ${focusRef ? 'border-accent/60 ring-2 ring-accent/40' : ''}`}>
       <Img src={thumb.src} fallbackSrc={thumb.fallback} alt="" className="h-[60px] w-10 shrink-0 rounded-md" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-fog-100">{a.title}</p>
+        {/* `dir="auto"`, as every series title here: the page's direction cut an English title at its start in Arabic. */}
+        <p dir="auto" className="truncate text-sm font-medium text-fog-100">{a.title}</p>
         {a.kind === 'job' ? (
           <>
             {/* The reason has always been recorded; the strip used to say only "Download stopped." for every cause.
@@ -380,10 +381,19 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         <p className="truncate text-sm font-medium text-fog-100" data-task-name>{name}</p>
         {step && <p className="mt-0.5 truncate text-[12px] text-fog-300">{step}</p>}
         {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
-        {/* A find run waiting for a sweep, a repair or the daily check says so, rather than name the series it did last. */}
+        {/* A find run waiting for a sweep, a repair or the daily check says so, rather than name the series it did last.
+            The series' title is cut in its own box and direction: cut as part of the line, which takes the page's, an
+            Arabic page's ellipsis took the START of an English title ("الآن: …e until the line runs out of screen").
+            The words around it keep their own spaces, which a flex item would drop at its end. */}
         {wait
           ? <p className="mt-0.5 truncate text-[11px] text-fog-400" data-task-waiting>{wait}</p>
-          : running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{nowBefore}<bdi>{r.current.title}</bdi>{nowAfter}</p>}
+          : running && r.current?.title && (
+            <p className="mt-0.5 flex min-w-0 text-[11px] text-fog-400" data-task-now>
+              <span className="shrink-0 whitespace-pre">{nowBefore}</span>
+              <bdi dir="auto" className="block min-w-0 truncate">{r.current.title}</bdi>
+              {nowAfter && <span className="shrink-0 whitespace-pre">{nowAfter}</span>}
+            </p>
+          )}
         <p className="mt-0.5 text-[11px] text-fog-500">
           {running
             ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })

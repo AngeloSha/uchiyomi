@@ -408,8 +408,25 @@ test('Server tasks: a find run waiting for a sweep, a repair or the daily check 
   assert.equal(runWaitLine({ ...card, status: 'done', waiting: 'check' }), '', 'a run that ended still waits');
   const task = slice(code(read('components/ServerDownloadsView.tsx')), 'function TaskRow(', 'function CameInTile(');
   assert.match(task, /const wait = runWaitLine\(r\);/);
-  assert.match(task, /\{wait\s*\?\s*<p [^>]*data-task-waiting>\{wait\}<\/p>\s*:\s*running && r\.current\?\.title && <p /,
+  assert.match(task, /\{wait\s*\?\s*<p [^>]*data-task-waiting>\{wait\}<\/p>\s*:\s*running && r\.current\?\.title && \(?\s*<p /,
     'the card names a series while the run waits');
+});
+
+test("Server tasks: a series title is cut at its own end, whatever the page's direction", () => {
+  // Arabic walk: "الآن: …e until the line runs out of screen". The title sat in a <bdi> inside a truncating line,
+  // which takes the page's direction, so the line's ellipsis took the English title's START. The title now truncates
+  // in its own box, with its own direction, beside the words of the line; a series title alone in a truncating line
+  // has its own direction. Reintroduce the old line: "the title is cut by the line"; drop a dir="auto": its line is named.
+  const view = code(read('components/ServerDownloadsView.tsx'));
+  const task = slice(view, 'function TaskRow(', 'function CameInTile(');
+  assert.match(task, /<p className="mt-0\.5 flex min-w-0 text-\[11px\] text-fog-400" data-task-now>\s*<span className="shrink-0 whitespace-pre">\{nowBefore\}<\/span>\s*<bdi dir="auto" className="block min-w-0 truncate">\{r\.current\.title\}<\/bdi>/,
+    'the title is cut by the line');
+  assert.doesNotMatch(task, /truncate[^"]*">\{nowBefore\}/, 'the title is cut by the line');
+  for (const [file, src] of [['ServerDownloadsView.tsx', view], ['ArchiveQueue.tsx', code(read('components/ArchiveQueue.tsx'))]] as const) {
+    const lines = src.split('\n').filter((l) => /<p [^>]*\btruncate\b[^>]*>\{\w+\.title\}<\/p>/.test(l));
+    assert.ok(lines.length > 0, `${file}: no series title in a truncating line -- this scan is broken`);
+    for (const l of lines) assert.match(l, /<p dir="auto" /, `${file}: a series title takes the page's direction: ${l.trim()}`);
+  }
 });
 
 test('a find run never turns the Library ring: it follows sources, it fetches nothing', () => {
@@ -601,7 +618,8 @@ test('m11: a typed or source name takes its own direction', () => {
   // The run card's series name is a run of its own inside the translated sentence.
   const task = slice(code(read('components/ServerDownloadsView.tsx')), 'function TaskRow(', 'function CameInTile(');
   assert.match(task, /const \[nowBefore, nowAfter\] = tr\('Now: \{title\}'\)\.split\('\{title\}'\);/);
-  assert.match(task, /\{nowBefore\}<bdi>\{r\.current\.title\}<\/bdi>\{nowAfter\}/, "the run card's series name is not isolated");
+  assert.match(task, /\{nowBefore\}<\/span>\s*<bdi dir="auto"[^>]*>\{r\.current\.title\}<\/bdi>\s*\{nowAfter && <span[^>]*>\{nowAfter\}<\/span>\}/,
+    "the run card's series name is not isolated");
   // The results: a title in its own direction, a followed source's name isolated.
   const row = renderToStaticMarkup(createElement(FindResultRow, { r: res('a', { followed: [followed('Asura Scans!')] }), onOpen: () => {} }));
   assert.match(row, /<a [^>]*dir="auto"[^>]*>A<\/a>/);
