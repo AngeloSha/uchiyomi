@@ -204,3 +204,24 @@ test('buildProbe carries the failure, and only when there is one', async () => {
     { adapterOk: false, needsSolver: false, failure: { stage: 'search', kind: 'error', error: 'x' } });
   assert.equal('failure' in buildProbe(undefined, { ok: true }, {}), false);
 });
+
+test('a site that says it is offline fails the stage with that kind, and stops the term loop (v0.49.1)', async () => {
+  // The Madara and Manganato engines throw the classified error for a site's own offline notice
+  // (lib/sources/offline.ts). Reintroduce by recording every thrown error as kind 'error': the kind reads 'error' and
+  // Health says an unknown fault where the site said, in words, that it is offline.
+  const { smokeTest } = await load();
+  const { siteOffline } = await import('../src/lib/sources/offline');
+  const a = adapter({ search: async function (this: any, t: string) { this.calls.push(`search:${t}`); throw siteOffline('Aqua Manga is temporarily offline'); } });
+  const r = await smokeTest(a, { timeoutMs: 5000 });
+  assert.equal(a.calls.filter((c) => c.startsWith('search:')).length, 1, 'a site saying it is offline says it for every term');
+  assert.equal(r.state, 'fail');
+  assert.equal(r.failure?.stage, 'search');
+  assert.equal(r.failure?.kind, 'site_offline');
+  assert.equal(r.checks[0].kind, 'site_offline');
+  // At the series page and the page list too.
+  const b = adapter({ getSeries: async () => { throw siteOffline('Aqua Manga is temporarily offline'); } });
+  assert.equal((await smokeTest(b, { timeoutMs: 5000 })).failure?.kind, 'site_offline');
+  const c = adapter({ getPageUrls: async () => { throw siteOffline('Aqua Manga is temporarily offline'); } });
+  const rc = await smokeTest(c, { timeoutMs: 5000 });
+  assert.deepEqual([rc.failure?.stage, rc.failure?.kind], ['pages', 'site_offline']);
+});

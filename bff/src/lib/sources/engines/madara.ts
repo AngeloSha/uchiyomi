@@ -7,6 +7,14 @@ import { parseWhen } from '../dates';
 import { plainText } from '../../htmlText';
 import { seriesSlug, isOwnChapterUrl, rebase } from '../slug';
 import { pickImgUrl, pickImgUrlIn, pickAllImgUrls, dropRepeatedCovers } from '../imgAttr';
+import { throwIfOffline } from '../offline';
+
+/**
+ * Anything of the theme's own (v0.49.1, lib/sources/offline.ts): result cards, a series page's parts, a chapter
+ * list, a reader. A page carrying any of it is the site working, however little it parsed to; only a small page
+ * with none of it whose title says the site is offline is the site saying so.
+ */
+export const MADARA_MARKUP = /post-title|wp-manga|manga-item|page-item-detail|c-tabs-item|tab-thumb|item-thumb|summary_content|summary__content|reading-content|\/manga\//i;
 
 const strip = plainText;
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -91,6 +99,13 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}/`);
   // Parsing lives at module scope so it can be tested against real markup; see madaraListing.test.ts.
+  // A listing that parsed to nothing is either an empty answer or the site's offline notice (lib/sources/offline.ts):
+  // the second throws, so nothing downstream mistakes a site that is down for one with nothing on it.
+  const listing = (h: string): SourceSeries[] => {
+    const out = parseResults(h, cfg.id);
+    if (!out.length) throwIfOffline(h, MADARA_MARKUP);
+    return out;
+  };
 
   return {
     id: cfg.id,
@@ -103,14 +118,14 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
     preferredOrder: cfg.order,
 
     async search(query) {
-      return parseResults(await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`), cfg.id);
+      return listing(await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`));
     },
 
     // Browse the site's most recently updated series (Madara's `m_orderby=latest` listing).
     async latest(page = 1) {
       const p = Math.max(1, page);
       const path = p > 1 ? `/page/${p}/?s=&post_type=wp-manga&m_orderby=latest` : `/?s=&post_type=wp-manga&m_orderby=latest`;
-      return parseResults(await cfGet(`${base}${path}`), cfg.id);
+      return listing(await cfGet(`${base}${path}`));
     },
 
     // Identical query with a different sort key. Madara's listing takes `m_orderby=views` for the site's own
@@ -119,12 +134,14 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
     async popular(page = 1) {
       const p = Math.max(1, page);
       const path = p > 1 ? `/page/${p}/?s=&post_type=wp-manga&m_orderby=views` : `/?s=&post_type=wp-manga&m_orderby=views`;
-      return parseResults(await cfGet(`${base}${path}`), cfg.id);
+      return listing(await cfGet(`${base}${path}`));
     },
 
     async getSeries(id) {
       const url = mangaUrl(id);
       const h = await cfGet(url);
+      // Before anything is read off it: an offline notice's own <h1> would otherwise become the series' title.
+      throwIfOffline(h, MADARA_MARKUP);
       const title = strip(
         (h.match(/<div class="post-title">[\s\S]*?<h1[^>]*>([\s\S]*?)<\/h1>/i) || h.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '',
       );
@@ -179,7 +196,11 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
       // When the ajax path yields no chapters, fall back to the main manga page, which carries the real chapter list.
       let out: SourceChapter[] = [];
       try { out = parse(await cfPost(`${url.replace(/\/$/, '')}/ajax/chapters/`, '')); } catch {}
-      if (!out.length) out = parse(await cfGet(url));
+      if (!out.length) {
+        const h = await cfGet(url);
+        out = parse(h);
+        if (!out.length) throwIfOffline(h, MADARA_MARKUP);
+      }
       return out;
     },
 
@@ -196,7 +217,9 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
         for (const u of pickAllImgUrls(h)) {
           if (/\.(?:jpg|jpeg|png|webp)(?:[?#]|$)/i.test(u)) urls.push(norm(u));
         }
-      return urls.filter((u) => /^https?:/.test(u));
+      const pages = urls.filter((u) => /^https?:/.test(u));
+      if (!pages.length) throwIfOffline(h, MADARA_MARKUP);
+      return pages;
     },
   };
 }

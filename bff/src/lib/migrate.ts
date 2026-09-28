@@ -1275,6 +1275,39 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_min_free_gb int    
 
 -- (#72 needs no schema. Everything above is additive: v0.48.4 starts on it and ignores it. No DATA_MIGRATIONS
 -- entry: existing series are renumbered lazily by their next check, and first_at is read through COALESCE.)
+
+-- v0.49.1: the other names a series goes by (lib/altTitles.ts; the idea and the parsing are @TIGamingTV's, PR
+-- #119). One row per name, keyed on its normalised form, so the same name spelt twice is one row. origin says
+-- where it came from: description (read out of the series' main source's own description), admin (typed by
+-- hand) or import (a tracker's synonyms, import_candidates.alt_titles, when the import added the series).
+-- added_by is the admin's account id as text, with no reference: a name outlives the account that typed it.
+CREATE TABLE IF NOT EXISTS series_alt_titles (
+  series_id  text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  norm       text NOT NULL,
+  title      text NOT NULL,
+  origin     text NOT NULL CHECK (origin IN ('description', 'admin', 'import')),
+  added_by   text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, norm)
+);
+-- v0.49.1: Find other sources runs (lib/findSources.ts), newest 20 kept. scope is {seriesIds} or {sourceId};
+-- results holds one entry per series settled, {seriesId, title, followed: [{sourceId, name, chapters}], why?}.
+-- status is running, done, stopped (an admin's stop), failed or interrupted (the server went away under it: a row
+-- still running after a restart is closed so at boot). started_by is the admin's account id as text.
+CREATE TABLE IF NOT EXISTS source_find_runs (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  started_by  text,
+  started_at  timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  status      text NOT NULL DEFAULT 'running',
+  scope       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  total       int NOT NULL DEFAULT 0,
+  done        int NOT NULL DEFAULT 0,
+  followed    int NOT NULL DEFAULT 0,
+  results     jsonb NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE INDEX IF NOT EXISTS source_find_runs_started ON source_find_runs (started_at DESC);
+-- (Both tables are new and nothing older writes to them: v0.49.0 starts on this schema and ignores them.)
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

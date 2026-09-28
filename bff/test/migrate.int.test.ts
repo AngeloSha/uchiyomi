@@ -137,6 +137,8 @@ test('migrate: is still idempotent, and the shipped data migrations are applied'
 // are not -- one of them declared NOT NULL without a default and every old INSERT into that table fails, which
 // a fresh test database never shows, because ADD COLUMN on an empty table succeeds either way.
 const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'archive_queue', 'archive_pace'];
+// v0.49.1's block (after v0.49.0's): two new tables and nothing else, so v0.49.0 boots on it and never meets them.
+const V0491_TABLES = ['series_alt_titles', 'source_find_runs'];
 const V049_COLUMNS: Record<string, string[]> = {
   lib_books: ['short_result', 'source_chapter_id'],
   chapter_failures: ['first_at'],
@@ -207,6 +209,40 @@ test('migrate: v0.49.0 only adds, and every added column lets v0.48.4 keep writi
     archive_paused: ['false', 'NO'], archive_per_hour: ['4', 'NO'], archive_min_free_gb: ['20', 'NO'],
     archive_window_from: [null, 'YES'], archive_window_to: [null, 'YES'],
   }, 'server_settings.archive_per_hour (or another archive column) is not declared as the design set it');
+});
+
+test('migrate: v0.49.1 adds its two tables and nothing a v0.49.0 image would have to write', { skip }, async () => {
+  // A rollback to v0.49.0 boots on this schema: the block is two CREATE TABLEs and an index, no column on any
+  // older table (the whole-schema rule above still holds against v0.48.4's own list). Reintroduce by dropping
+  // either CREATE TABLE: "a v0.49.1 table is missing".
+  const tables = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0491_TABLES],
+  );
+  assert.deepEqual(tables.map((t) => t.table_name).sort(), [...V0491_TABLES].sort(), 'a v0.49.1 table is missing');
+  // What a v0.49.1 writer must supply: only the key columns, everything else has a default or may be NULL.
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0491_TABLES],
+  );
+  assert.deepEqual(required.map((r) => `${r.table_name}.${r.column_name}`).sort(),
+    ['series_alt_titles.norm', 'series_alt_titles.origin', 'series_alt_titles.series_id', 'series_alt_titles.title']);
+  // The origin is the database's rule too, not only the writers': a name from nowhere is refused. Reintroduce by
+  // dropping the CHECK: the insert below succeeds.
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-alt-origin', 'test', 'T', '/t-alt')`);
+      await c.query(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ('t-alt-origin', 'another', 'Another', 'admin')`);
+      await assert.rejects(
+        c.query(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ('t-alt-origin', 'bogusname', 'Bogus Name', 'guessed')`),
+        /check constraint/i,
+      );
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
 });
 
 test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {

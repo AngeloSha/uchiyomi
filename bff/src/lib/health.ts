@@ -33,6 +33,7 @@ import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
 import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
 import type { NumberingNote } from './numbering';
+import { mainSourceCounts } from './findScope';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -55,7 +56,10 @@ export type HealthAction =
   // numbering change and applies it on a confirmation (GET, then POST {mode, confirm: true}, to
   // /api/admin/series/{id}/numbering); `keep_numbers` records the admin's choice of the source's own numbers
   // (POST {mode: 'source'}) -- nothing renamed for a proposal, the undo's plan for a series already renumbered.
-  | 'renumber' | 'keep_numbers';
+  | 'renumber' | 'keep_numbers'
+  // v0.49.1: Find other sources for every series whose MAIN source is the row's `sourceId` (POST
+  // /api/admin/sources/find {sourceId}); `findSeries` is how many series that run would search for.
+  | 'find_sources';
 
 export interface HealthItem {
   seriesId?: string;
@@ -81,6 +85,11 @@ export interface HealthItem {
   numbers?: number[];
   /** The source this item is about, so Test / Clear block / Turn off / Retry need no parsing of `title`. */
   sourceId?: string;
+  /**
+   * v0.49.1, beside a `find_sources` action: how many series a Find other sources run over `sourceId` would search
+   * for -- every series whose main source it is (lib/findScope.ts), the run's own `total`.
+   */
+  findSeries?: number;
   /** Of `seriesIds`, the one the merge should keep: more live chapters, then more readers, then older. */
   keep?: string;
   /** What an admin can do about this item, in the order the chips are shown. */
@@ -790,6 +799,10 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
   const engineWhy = (r: typeof rows[number]): string | null =>
     !r.source_id?.startsWith('sw:') || engine === 'up' ? null
       : engine === 'unreachable' ? 'the extension engine isn’t answering' : 'the extension engine is off';
+  // v0.49.1: when the reason is the source itself (uninstalled, switched off, over the limit) -- not the engine, whose
+  // fix is the engine -- the row offers Find other sources for every series of that source, with the count.
+  const bySource = await mainSourceCounts(frozen.filter((r) => r.source_id && !engineWhy(r)).map((r) => r.source_id!))
+    .catch(() => new Map<string, number>());
   const found: HealthItem[] = frozen.map((r) => ({
     seriesId: r.id,
     title: r.title,
@@ -799,6 +812,9 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
       : engineWhy(r)
         ? `${r.books_count} chapters; its source ${r.source_id} can’t be reached because ${engineWhy(r)}`
         : `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`,
+    ...(r.source_id && !engineWhy(r) && bySource.get(r.source_id)
+      ? { sourceId: r.source_id, actions: ['find_sources' as const], findSeries: bySource.get(r.source_id) }
+      : {}),
   }));
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
@@ -889,6 +905,8 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       ORDER BY 4 DESC, sh.consecutive DESC`,
   );
   const now = Date.now();
+  // v0.49.1: how many series each source is the MAIN source of -- what Find other sources on its row would search for.
+  const mainCounts = await mainSourceCounts(rows.map((r) => r.source_id)).catch(() => new Map<string, number>());
   // A source the operator switched off themselves is not a fault, and reading it as one is how a health
   // page trains people to ignore it. Contributor PR #39 spotted this while adding language hiding: turning
   // off thirty Russian sources made the page amber with thirty "problems" that were the operator's own
@@ -979,6 +997,7 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       const days = Math.floor((now - new Date(open[0].at).getTime()) / DAY_MS);
       detail = `${STAGE_LABEL[open[0].stage]} failed ${days} days ago and nothing has checked it since — test it again; ${uses}`;
     }
+    const findHere = (r.disabled || !info) && (mainCounts.get(r.source_id) ?? 0) > 0;
     items.push({
       title: sourceLabel(r.source_id, r.engine_name),
       sourceId: r.source_id,
@@ -991,7 +1010,11 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
         'test',
         ...(r.blocked_until ? ['unblock' as const] : []),
         ...(r.disabled ? [] : ['disable' as const]),
+        // v0.49.1: its series need another source while it fails -- or while it is off, which is the same for them.
+        // Not on a quiet row (untested, inconclusive, used by nothing): nothing there is failing its series.
+        ...(findHere ? ['find_sources' as const] : []),
       ] as HealthAction[],
+      ...(findHere ? { findSeries: mainCounts.get(r.source_id) } : {}),
       // Only a real finding can be ignored: a source switched off, used by nothing, or merely untested is quiet.
       ...(info ? { info: true } : { key: `source:${r.source_id}`, members }),
       evidence: stageLines(r.stages),

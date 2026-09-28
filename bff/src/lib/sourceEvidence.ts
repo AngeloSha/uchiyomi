@@ -18,8 +18,11 @@ export const STAGES: readonly Stage[] = ['search', 'chapters', 'pages', 'images'
 
 /** Who saw it: an admin's Test, the daily check (or "Check all now"), or ordinary use. */
 export type EvidenceBy = 'test' | 'sweep' | 'traffic';
-/** How a stage failed. A live run that hit OUR deadline is not a failure at all and is never stored as one. */
-export type FailKind = 'error' | 'empty' | 'unnumbered';
+/**
+ * How a stage failed. A live run that hit OUR deadline is not a failure at all and is never stored as one.
+ * `site_offline` (v0.49.1): the site answered with its own offline or maintenance notice (lib/sources/offline.ts).
+ */
+export type FailKind = 'error' | 'empty' | 'unnumbered' | 'site_offline';
 
 export interface StageRecord {
   okAt?: string | null;
@@ -91,7 +94,7 @@ export function openFailures(stages: Stages | null | undefined, now = Date.now()
       since: r.since || at,
       at,
       error: r.error ?? null,
-      kind: r.kind === 'empty' || r.kind === 'unnumbered' ? r.kind : 'error',
+      kind: r.kind === 'empty' || r.kind === 'unnumbered' || r.kind === 'site_offline' ? r.kind : 'error',
       by,
       streak,
       confirmed: by !== 'traffic' || streak >= TRAFFIC_CONFIRM,

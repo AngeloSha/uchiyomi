@@ -4,6 +4,7 @@
 import { q, one } from './db';
 import { visibleToAll } from './visibility';
 import type { EvidenceBy, FailKind, Stage, Stages } from './sourceEvidence';
+import { isSiteOffline } from './sources/offline';
 
 export type SourceStatus = 'ok' | 'rate_limited' | 'blocked' | 'down';
 
@@ -278,7 +279,9 @@ export async function noteStage(
   const by = opts.by ?? 'traffic';
   const rec = outcome === 'ok'
     ? { okAt: at, okBy: by, streak: 0 }
-    : { failAt: at, failBy: by, error: String(opts.error || 'failed').slice(0, 300), kind: opts.kind ?? 'error' };
+    // A site's own offline notice is a kind of its own (v0.49.1), read off the classified error's message: every
+    // caller hands its error over as a string, and none of them need learn to tell it apart.
+    : { failAt: at, failBy: by, error: String(opts.error || 'failed').slice(0, 300), kind: opts.kind ?? (isSiteOffline(opts.error) ? 'site_offline' : 'error') };
   await mergeStages(sourceId, { [stage]: rec }, undefined, outcome === 'fail').catch(() => {});
 }
 

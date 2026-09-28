@@ -28,7 +28,7 @@
 // step wants "brackets this hole"), and `followHunted` writes the follow and its audit row with the
 // caller's `reason`. `huntSource` is the two of them composed the way the sweep always used them.
 import { q, one } from './db';
-import { getSource, listSources, type SourceChapter } from './sources';
+import { getSource, listSources, type SourceAdapter, type SourceChapter, type SourceSeries } from './sources';
 import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { healthAll } from './sourceHealth';
@@ -40,6 +40,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { logAudit } from './audit';
 import { ADULT_RATING, adultFilter } from './visibility';
+import { altTitlesFor, exactHit, SEARCH_NAMES } from './altTitles';
 
 /** How long after one hunt a series may be hunted for again, whatever became of the first. */
 export const HUNT_COOLDOWN_MS = 24 * 3600_000;
@@ -58,16 +59,48 @@ const HUNT_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLV
 // together; a limiter allocated inside huntSource lets every one of them run HUNT_CONCURRENCY searches,
 // defeating the cap precisely when a source is already struggling. A released slot is handed directly to
 // the oldest waiter so a newcomer cannot slip in and take the pool over width.
+// Exported (v0.49.1) for the Find other sources run (lib/findSources.ts), which searches on the server's own
+// initiative too and must share this pool rather than add a second one beside it.
 let huntInFlight = 0;
 const huntWaiting: Array<() => void> = [];
-async function takeHuntSlot(): Promise<void> {
+export async function takeHuntSlot(): Promise<void> {
   if (huntInFlight < HUNT_CONCURRENCY) { huntInFlight++; return; }
   await new Promise<void>((go) => huntWaiting.push(go));
 }
-function releaseHuntSlot(): void {
+export function releaseHuntSlot(): void {
   const next = huntWaiting.shift();
   if (next) next();
   else huntInFlight--;
+}
+
+/**
+ * The hit on one source that may be this series, by the title and then by each of its other names (v0.49.1, lib/
+ * altTitles.ts): the title by the fill scan's rule (pickBest), an other name only EXACTLY, so a search for one
+ * never picks what merely contains it. One search per name, in order, stopping at the first hit, each bounded by
+ * what is left of `left()`. Nothing reports: a search that throws or outruns its budget is a source that did not
+ * answer -- never a health event, so a bulk search cannot put a source into a cooldown or mark it failing (#115
+ * confirms a failure after three in a row, and a run over many series would be three in a row by itself).
+ * `answered` is false when no search on this source answered at all.
+ */
+export async function searchByNames(
+  src: Pick<SourceAdapter, 'search' | 'requiresCloudflare'>,
+  title: string,
+  names: readonly string[],
+  left: () => number,
+  searchMs = HUNT_SEARCH_MS,
+): Promise<{ hit: SourceSeries | null; answered: boolean }> {
+  let answered = false;
+  for (const [i, term] of [title, ...names].entries()) {
+    const ms = left();
+    if (ms < MIN_TRY_MS) break;
+    const results = await bounded(src.search(term), Math.min(budgetFor(src, searchMs), ms)).catch(() => null);
+    // A throw on one name is a throw on the next: the site, the solver or the extension is down for all of them.
+    if (!results) break;
+    answered = true;
+    const hit = i === 0 ? pickBest(results, term) : exactHit(results, term);
+    if (hit?.sourceId) return { hit, answered };
+  }
+  return { hit: null, answered };
 }
 
 export interface HuntResult {
@@ -227,21 +260,24 @@ export async function huntCandidates(
   // source and not the queue; the wall is checked once the slot is held, so a source that waited its turn
   // out is simply not tried rather than charged for the wait.
   const hits: Array<{ source: string; sourceId: string } | null> = new Array(candidates.length).fill(null);
+  // The other names the series goes by (v0.49.1): a source that files it under one of them is searched under it
+  // too, and matched exactly (searchByNames). Reintroduce by searching the title alone: "the hunt searches under
+  // the other names" in altTitles.int.test.ts finds no candidate.
+  const names = await altTitlesFor(seriesId, SEARCH_NAMES);
   await Promise.all(candidates.map(async (id, i) => {
     await takeHuntSlot();
     try {
       const src = getSource(id);
-      const left = remaining();
-      if (!src || left < MIN_TRY_MS) return;
+      if (!src || remaining() < MIN_TRY_MS) return;
       // A search that throws or outruns its budget is a source that did not answer -- not a health event:
       // a hunt must never be what puts a source into a cooldown, so nothing here reports.
-      const hit = pickBest(await bounded(src.search(s.title), Math.min(budgetFor(src, HUNT_SEARCH_MS), left)), s.title);
+      const { hit } = await searchByNames(src, s.title, names, remaining);
       if (hit?.sourceId) hits[i] = { source: id, sourceId: hit.sourceId };
     } catch { /* not this series' problem */ } finally { releaseHuntSlot(); }
   }));
 
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);
-  const primary: PrimaryFacts = { title: s.title, altTitles: [], numbers };
+  const primary: PrimaryFacts = { title: s.title, altTitles: names, numbers };
   // Judged in scan order, one at a time: the first that is this series and that the caller wants wins,
   // and nothing past it is asked. One that is this series but not wanted is kept as the fallback.
   let fallback: Judgement | null = null;

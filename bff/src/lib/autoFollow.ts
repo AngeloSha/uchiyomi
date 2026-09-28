@@ -38,6 +38,7 @@ import { assess, verdict, followable, MIN_HAVE, MIN_COVERAGE } from './fill';
 import { logAudit } from './audit';
 import type { SourceChapter } from './sources/types';
 import { normTitle } from './titleMatch';
+import { altTitlesFor, MIN_ALT_KEY } from './altTitles';
 
 /** How many sources a series may FOLLOW, on top of its primary. */
 export const MAX_FOLLOWERS = 2;
@@ -97,7 +98,10 @@ export interface FollowCandidate { source: string; sourceId: string }
 /** What the series being added is known by, and what its own source lists. */
 export interface PrimaryFacts {
   title: string;
-  /** Other spellings the primary is known under (a tracker's synonyms, say); any of them may match. */
+  /**
+   * The other names the series goes by (v0.49.1, lib/altTitles.ts: its main source's description, an admin, a
+   * tracker import). A candidate EQUAL to one of them matches; containment counts against the main title only.
+   */
   altTitles: string[];
   /** The distinct chapter numbers the primary lists: the listing the add just wrote. */
   numbers: number[];
@@ -174,18 +178,23 @@ export type TitleMatch = 'exact' | 'contains';
  * because its term is a real title, but a primary named "X" would otherwise match every title with an x
  * in it. An exact match on ANY of our titles wins over a containment on another: a tracker's synonyms
  * often include the bare parent title, and a candidate equal to one of them is not a sequel of it.
+ *
+ * ⚠️ An OTHER name matches exactly or not at all (v0.49.1, lib/altTitles.ts; @TIGamingTV's rule from PR #119):
+ * containment is tried against the main title only, and a name whose key is under MIN_ALT_KEY never matches.
+ * Other-name lists are where the sequel, the novel and the spin-off sit beside the work, so "contains one of its
+ * other names" is the wrong-book hazard at its widest. Reintroduce by testing containment over every name:
+ * "the judgement matches an other name exactly or not at all" in altTitles.test.ts reads contains for the sequel.
  */
 export function titleMatch(theirs: string, primary: { title: string; altTitles?: string[] }): TitleMatch | null {
   const t = normTitle(theirs);
   if (!t) return null;
-  let contains = false;
-  for (const ours of [primary.title, ...(primary.altTitles ?? [])]) {
-    const n = normTitle(ours);
-    if (!n) continue;
-    if (n === t) return 'exact';
-    if (t.length > 2 && n.length > 2 && (t.includes(n) || n.includes(t))) contains = true;
+  const main = normTitle(primary.title);
+  if (main && main === t) return 'exact';
+  for (const alt of primary.altTitles ?? []) {
+    const n = normTitle(alt);
+    if (n.length >= MIN_ALT_KEY && n === t) return 'exact';
   }
-  return contains ? 'contains' : null;
+  return main && t.length > 2 && main.length > 2 && (t.includes(main) || main.includes(t)) ? 'contains' : null;
 }
 
 /** `titleMatch` as a yes/no, for callers that only ask whether the title is ours at all. */
@@ -269,7 +278,11 @@ export async function judgeCandidate(
   // trusted on the primary's numbers alone. Everything else must also be mostly INSIDE the primary --
   // `assess` the other way round is the share of the candidate's numbers that we list -- and the lower
   // of the two shares is what is reported, because it is the one that decided.
-  const oneWay = match === 'exact' && primary.numbers.length >= ONE_WAY_MIN_LISTED;
+  // v0.49.1: "exact" means the MAIN title here. A candidate equal to one of our other names is measured both
+  // ways (PR #119's rule): a sequel whose own description lists its parent's name among its other names would
+  // otherwise follow the parent -- which lists every number the sequel does, and more. Reintroduce by trusting any
+  // exact match one way: "a match through an other name is measured both ways" in altTitles.int.test.ts follows it.
+  const oneWay = match === 'exact' && normTitle(theirTitle) === normTitle(primary.title) && primary.numbers.length >= ONE_WAY_MIN_LISTED;
   const back = oneWay ? 1 : assess(nums, primary.numbers).coverage;
   const decided = Math.min(a.coverage, back);
   const coverage = Math.round(decided * 100) / 100;
@@ -354,7 +367,9 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
   // Decided once for the whole add rather than per candidate: no source is asked when nothing can be
   // measured, and the dialog sees one reason rather than six.
   if (numbers.length < MIN_HAVE) return refuseAll('too_few_listed');
-  const primary: PrimaryFacts = { title: row.title, altTitles: opts.altTitles ?? [], numbers };
+  // The names the series goes by (v0.49.1): the add stores its main source's description names before this runs
+  // (routes/sources.ts), so a candidate that lists the work under another name is judged under it.
+  const primary: PrimaryFacts = { title: row.title, altTitles: opts.altTitles ?? await altTitlesFor(seriesId), numbers };
   // The series' own release preferences over the global ones, with patience off, as the fill scan reads
   // them: the question is what each source LISTS, and a copy held for a group is still listed.
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);
@@ -414,28 +429,32 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
  * same `judgeCandidate` and must write the row under the same cap and the same lock.
  *
  * The count excludes the candidate's own source so a re-follow is an update and not a `cap`; `added_by`
- * is NULL -- the automatic path's signature (seriesSources.ts `auto`) -- and the COALESCE keeps a human's
- * choice where one already stands. Reintroduce by dropping the `WHERE (SELECT count(*) …)` clause: "the
+ * is NULL -- the automatic path's signature (seriesSources.ts `auto`) -- unless `addedBy` names the admin who
+ * asked for it (v0.49.1, Find other sources: a person started that run, so the sheet reads it as their follow),
+ * and the COALESCE keeps a human's choice where one already stands. Reintroduce by dropping the
+ * `WHERE (SELECT count(*) …)` clause: "the
  * third good candidate reads cap" in autoFollow.int.test.ts counts three rows, and the racing test six
  * follows. The `FOR UPDATE` is belt to that brace: without it two adds whose INSERTs evaluate the count
  * in the same instant could both pass it (READ COMMITTED sees neither's row yet). That window is
  * microseconds wide -- the racing test does not open it, and passes with the lock removed -- so the lock
  * is here for the day the window is hit, not because a test says so.
  */
-export async function followJudged(seriesId: string, j: Omit<Judgement, 'why' | 'chapters'>): Promise<'inserted' | 'cap' | 'gone'> {
+export async function followJudged(
+  seriesId: string, j: Omit<Judgement, 'why' | 'chapters'>, opts: { addedBy?: string | null } = {},
+): Promise<'inserted' | 'cap' | 'gone'> {
   return tx(async (qq) => {
     const row = (await qq<{ deleted_at: string | null; merged_into: string | null }>(
       'SELECT deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]))[0];
     if (!row || row.deleted_at || row.merged_into) return 'gone';
     const r = await qq<{ source_id: string }>(
       `INSERT INTO series_sources (series_id, source_id, source_series_id, title, coverage, added_by)
-       SELECT $1::text, $2::text, $3::text, $4::text, $5::real, NULL::uuid
+       SELECT $1::text, $2::text, $3::text, $4::text, $5::real, $7::uuid
         WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $6::int
        ON CONFLICT (series_id, source_id) DO UPDATE SET source_series_id = EXCLUDED.source_series_id,
          title = EXCLUDED.title, coverage = EXCLUDED.coverage,
          added_by = COALESCE(EXCLUDED.added_by, series_sources.added_by)
        RETURNING source_id`,
-      [seriesId, j.source, j.sourceSeriesId, j.theirTitle, j.coverage, MAX_FOLLOWERS]);
+      [seriesId, j.source, j.sourceSeriesId, j.theirTitle, j.coverage, MAX_FOLLOWERS, opts.addedBy ?? null]);
     return r.length ? 'inserted' : 'cap';
   });
 }

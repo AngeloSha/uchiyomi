@@ -26,6 +26,7 @@ import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { startArchive } from './lib/archive';
+import { closeInterruptedFindRuns } from './lib/findSources';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -55,6 +56,8 @@ import { ensureDesktopUser } from './lib/desktopUser';
 
 async function main() {
   await migrate();
+  // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
+  await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
   // What finished downloading in the last day, back into the Downloads view, and every chapter from here on
