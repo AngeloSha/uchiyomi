@@ -138,6 +138,7 @@ test('migrate: is still idempotent, and the shipped data migrations are applied'
 // a fresh test database never shows, because ADD COLUMN on an empty table succeeds either way.
 const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'archive_queue', 'archive_pace'];
 // v0.49.1's block (after v0.49.0's): two new tables and nothing else, so v0.49.0 boots on it and never meets them.
+// (Its whole-schema rule against v0.49.0's own list is the test after v0.49.0's.)
 const V0491_TABLES = ['series_alt_titles', 'source_find_runs'];
 const V049_COLUMNS: Record<string, string[]> = {
   lib_books: ['short_result', 'source_chapter_id'],
@@ -153,6 +154,11 @@ const V049_COLUMNS: Record<string, string[]> = {
 };
 /** v0.48.4's own schema, captured from its migrate() (see the file's _provenance). */
 const V0484 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.48.4-required-columns.json'), 'utf8')) as {
+  tables: string[];
+  columns: Record<string, string[]>;
+};
+/** v0.49.0's own schema, captured the same way (see the file's _provenance): what a rollback from v0.49.1 boots. */
+const V0490 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.49.0-required-columns.json'), 'utf8')) as {
   tables: string[];
   columns: Record<string, string[]>;
 };
@@ -209,6 +215,34 @@ test('migrate: v0.49.0 only adds, and every added column lets v0.48.4 keep writi
     archive_paused: ['false', 'NO'], archive_per_hour: ['4', 'NO'], archive_min_free_gb: ['20', 'NO'],
     archive_window_from: [null, 'YES'], archive_window_to: [null, 'YES'],
   }, 'server_settings.archive_per_hour (or another archive column) is not declared as the design set it');
+});
+
+test('migrate: v0.49.1 only adds, and every column lets v0.49.0 keep writing its rows', { skip }, async () => {
+  // The same rule as v0.49.0's above, held against v0.49.0's own schema: a rollback from v0.49.1 boots v0.49.0 on
+  // this one. v0.48.4's list cannot hold it for the tables v0.49.0 added -- download_log, repair_runs,
+  // series_post_numbers, archive_queue, archive_pace are not in it -- so a column declared NOT NULL without a
+  // default on one of them in the v0.49.1 block would fail every v0.49.0 INSERT into it after a rollback, and no
+  // test would say so. Reintroduce by adding `ALTER TABLE download_log ADD COLUMN IF NOT EXISTS find_run text NOT
+  // NULL;` to the v0.49.1 block: the assertion names download_log.find_run.
+  assert.ok(V049_TABLES.every((t) => V0490.tables.includes(t)), 'the fixture is not v0.49.0: a v0.49.0 table is missing from it');
+  const current = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0490.tables],
+  );
+  assert.deepEqual(current.map((t) => t.table_name).sort(), [...V0490.tables].sort(), 'a v0.49.0 table is gone: v0.49.1 only adds');
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0490.tables],
+  );
+  for (const r of required) {
+    assert.ok(
+      (V0490.columns[r.table_name] ?? []).includes(r.column_name),
+      `${r.table_name}.${r.column_name} is NOT NULL with no default: after a rollback, v0.49.0's INSERTs into ${r.table_name} fail`,
+    );
+  }
+  // And the new ones are new: a v0.49.1 table that v0.49.0 already had would be one it writes in its own shape.
+  assert.deepEqual(V0491_TABLES.filter((t) => V0490.tables.includes(t)), [], 'a v0.49.1 table is one v0.49.0 already has');
 });
 
 test('migrate: v0.49.1 adds its two tables and nothing a v0.49.0 image would have to write', { skip }, async () => {

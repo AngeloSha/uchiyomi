@@ -2,10 +2,12 @@
 // the real routes: where they come from, what an admin may do with them, and every search that now asks under them.
 //
 //   - kept: from the main source's description at add time and whenever that source's details are read, from a
-//     tracker import's synonyms when the import adds the series, and typed by an admin (the routes);
+//     tracker import's synonyms when the import adds the series, and typed by an admin (the routes); a name an
+//     admin removed stays removed however often the description lists it, until an admin types it again;
 //   - carried by a merge, erased by a forget (forgetSeries.int.test.ts's coverage test holds the table list);
 //   - asked under, EXACTLY: the add-time auto-follow, the nightly hunt, borrowed chapter names and the fill scan --
-//     and a match through an other name is measured both ways, because a sequel's page can list its parent's name.
+//     and a match through an other name is measured both ways, because a sequel's page can list its parent's name;
+//     a source that fails one search is not asked under the next name.
 //
 // The work here is "Northern Sword", which one site files as "Northern Blade Chronicle"; another carries "Northern
 // Blade Chronicle Part Two", which CONTAINS that name and must never be taken for it.
@@ -29,7 +31,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_an';
 const ADMIN = 'an-admin', MEMBER = 'an-member';
-const OWN = 'an-own', ALT = 'an-alt', SEQUEL = 'an-sequel', LONG = 'an-long';
+const OWN = 'an-own', ALT = 'an-alt', SEQUEL = 'an-sequel', LONG = 'an-long', DOWN = 'an-down';
 const TITLE = 'Northern Sword', OTHER = 'Northern Blade Chronicle', PART2 = 'Northern Blade Chronicle Part Two';
 const DESCRIPTION = `A swordsman from the north.\n\nAlternative Titles: ${OTHER}; 북검전기; Hero`;
 const R = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
@@ -51,8 +53,10 @@ const SITES: Record<string, Array<{ title: string; nums: number[]; page?: string
     // A donor for borrowed names: found by the title in its search, but its own page calls the work the other name.
     { title: TITLE, nums: R(1, 12), page: OTHER },
   ],
+  // Every search fails: the site is down.
+  [DOWN]: [],
 };
-const ORDER: Record<string, number> = { [OWN]: 0, [SEQUEL]: 1, [LONG]: 2, [ALT]: 3 };
+const ORDER: Record<string, number> = { [OWN]: 0, [SEQUEL]: 1, [LONG]: 2, [ALT]: 3, [DOWN]: 4 };
 const searches: string[] = [];
 /** Which of an-alt's two entries its search answers with: the other name (hunt, fill, add) or the donor. */
 let altServesDonor = false;
@@ -63,6 +67,7 @@ function site(id: string) {
     id, name: `Site ${id}`, lang: 'en', preferredOrder: ORDER[id],
     async search(term: string) {
       searches.push(`${id}:${term}`);
+      if (id === DOWN) throw new Error(`${DOWN}: the site did not answer`);
       const k = norm(term);
       return entries().filter((e) => norm(e.title).includes(k) || k.includes(norm(e.title)))
         .map((e) => ({ sourceId: `${id}|${e.title}`, source: id, title: e.title }));
@@ -95,8 +100,9 @@ async function series(key: string, title: string) {
       [S(key), n, OWN, JSON.stringify({ sourceId: `c${n}`, number: n, source: OWN })]);
   }
 }
+/** The names a series goes by: its rows, less the ones an admin removed (kept as tombstones). */
 const names = async (id: string) =>
-  (await q('SELECT title, origin, added_by FROM series_alt_titles WHERE series_id = $1 ORDER BY title', [id])) as Array<{ title: string; origin: string; added_by: string | null }>;
+  (await q('SELECT title, origin, added_by FROM series_alt_titles WHERE series_id = $1 AND removed_at IS NULL ORDER BY title', [id])) as Array<{ title: string; origin: string; added_by: string | null }>;
 const until = async (cond: () => Promise<boolean>, what: string, ms = 8000) => {
   const end = Date.now() + ms;
   while (!(await cond())) {
@@ -237,11 +243,18 @@ test('a merge carries the other names to the survivor', { skip }, async () => {
   await recordAltTitles(S('gone'), ['Gone Other Name', 'Keep Other Name'], 'description');
   // A name that is the survivor's own title is not an OTHER name of it (written straight in: the writer refuses it).
   await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1, 'mergekeep', 'Merge Keep', 'import')`, [S('gone')]);
+  // A name an admin removed from the absorbed row.
+  await recordAltTitles(S('gone'), ['Gone Removed Name'], 'description');
+  await (await import('../src/lib/altTitles')).removeAltTitle(S('gone'), 'goneremovedname');
   await mergeSeries(S('gone'), S('keep'));
   // Reintroduce by dropping carryAltTitles from mergeSeries: the survivor has only its own name.
   assert.deepEqual((await names(S('keep'))).map((n) => [n.title, n.origin]), [['Gone Other Name', 'description'], ['Keep Other Name', 'admin']],
-    "the survivor keeps its own row where both had a name, and its own title is not carried");
-  assert.deepEqual(await names(S('gone')), [], 'the names left the absorbed row');
+    "the survivor keeps its own row where both had a name, its own title is not carried, and a removed name is not live");
+  // Carried as removed, so the survivor's own description cannot bring it back either. Reintroduce by leaving
+  // removed_at out of carryAltTitles: it is a live name of the survivor.
+  const [tomb] = await q(`SELECT removed_at FROM series_alt_titles WHERE series_id = $1 AND norm = 'goneremovedname'`, [S('keep')]);
+  assert.ok(tomb?.removed_at, 'the removed name is carried as removed');
+  assert.deepEqual(await q('SELECT norm FROM series_alt_titles WHERE series_id = $1', [S('gone')]), [], 'the names left the absorbed row');
 });
 
 test('a match through an other name is measured both ways', { skip }, async () => {
@@ -304,4 +317,76 @@ test('the fill scan searches under the other names, exactly', { skip }, async ()
   assert.deepEqual(found, [ALT, LONG].sort());
   assert.ok(searches.includes(`${ALT}:${OTHER}`));
   assert.ok(searches.includes(`${SEQUEL}:${OTHER}`), 'the sequel was asked, and its containing title refused');
+});
+
+test('the fill scan asks a source that failed a search nothing more', { skip }, async () => {
+  const { recordAltTitles } = await import('../src/lib/altTitles');
+  await series('g', TITLE);
+  await recordAltTitles(S('g'), [OTHER], 'admin', { userId: adminId });
+  const r = await app.inject({
+    method: 'POST', url: '/api/sources/fill/scan', headers: adminAuth, payload: { seriesId: S('g'), altTitle: 'Northern Sword Typed' },
+  });
+  assert.equal(r.statusCode, 200, r.body);
+  const plan = r.json();
+  assert.equal(plan.done, true);
+  // The down site is asked under the title once, and not again under the other name or the typed one: each would
+  // cost it another whole search budget. Reintroduce by carrying on after the failure (dropping the `break`): three.
+  assert.deepEqual(searches.filter((x) => x.startsWith(`${DOWN}:`)), [`${DOWN}:${TITLE}`], 'asked once');
+  assert.equal(plan.candidates.find((c: any) => c.source === DOWN)?.why, 'unreachable', 'and said to have not answered');
+  // The sources that answered were still asked under every name, the typed one last.
+  assert.ok(searches.includes(`${ALT}:${OTHER}`));
+  assert.ok(searches.includes(`${SEQUEL}:Northern Sword Typed`));
+});
+
+test('a name an admin removed does not come back when the source is read again; typed again, it is theirs', { skip }, async () => {
+  // A series of its own, whose main source's description the test rewrites between two reads.
+  const entry = { title: 'Tombstone Tale', nums: R(1, 12), summary: 'Plot.\n\nOther Names: Tombstone Other Name' };
+  SITES[OWN].push(entry);
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+             VALUES ($1,'T!an','Tombstone Tale',$1,0,$2,$3,$4)`, [S('t'), LIB, OWN, `${OWN}|Tombstone Tale`]);
+    const url = `/api/admin/series/${S('t')}/alt-titles`;
+    const listed = async () => (await app.inject({ method: 'GET', url, headers: adminAuth })).json().titles.map((t: any) => [t.title, t.origin]);
+    /** A details read of the main source, as the fill scan or the add dialog does it; its names are kept detached. */
+    const read = async (then: string) => {
+      (await import('../src/routes/sources')).clearDetailCache();
+      const r = await app.inject({ method: 'GET', url: `/api/sources/detail?source=${OWN}&sourceId=${encodeURIComponent(`${OWN}|Tombstone Tale`)}`, headers: adminAuth });
+      assert.equal(r.statusCode, 200, r.body);
+      // Each read lists one name the series has never had: once it is kept, the read's names are all written.
+      await until(async () => (await listed()).some(([t]: string[]) => t === then), `the names of the read that lists ${then}`);
+    };
+    await read('Tombstone Other Name');
+    assert.deepEqual(await listed(), [['Tombstone Other Name', 'description']]);
+    // Removed, it leaves the list at once, though its row stays. Reintroduce by dropping `removed_at IS NULL` from
+    // altTitleRows: it is still listed.
+    assert.deepEqual((await app.inject({ method: 'DELETE', url: `${url}/tombstoneothername`, headers: adminAuth })).json(), { titles: [] },
+      'a removed name is no longer listed');
+
+    // Read again, the description still listing it. Reintroduce by deleting the row in removeAltTitle: it is back.
+    entry.summary = 'Plot.\n\nOther Names: Tombstone Other Name; Tombstone Second Name';
+    await read('Tombstone Second Name');
+    assert.deepEqual(await listed(), [['Tombstone Second Name', 'description']], 'the removed name stays removed');
+    // Nor is it searched under (altTitlesFor reads altTitleRows too).
+    assert.deepEqual(await (await import('../src/lib/altTitles')).altTitlesFor(S('t')), ['Tombstone Second Name'], 'nor searched under');
+
+    // A name an admin typed and then removed stays removed too, when the description happens to list the same name
+    // (a tracker's romaji often is a site's "Alternative Titles" line). Reintroduce by deleting admin names
+    // outright: the description brings it back.
+    assert.equal((await app.inject({ method: 'POST', url, headers: adminAuth, payload: { title: 'Tombstone Typed Name' } })).statusCode, 200);
+    await app.inject({ method: 'DELETE', url: `${url}/tombstonetypedname`, headers: adminAuth });
+    entry.summary = 'Plot.\n\nOther Names: Tombstone Typed Name; Tombstone Third Name';
+    await read('Tombstone Third Name');
+    assert.deepEqual((await listed()).map(([t]: string[]) => t), ['Tombstone Second Name', 'Tombstone Third Name'], 'a typed name removed stays removed');
+
+    // Typed again by hand, a removed name comes back as the admin's own. Reintroduce by answering `exists` for a
+    // removed row (DO NOTHING for an admin too): 409.
+    const back = await app.inject({ method: 'POST', url, headers: adminAuth, payload: { title: 'Tombstone Other Name' } });
+    assert.equal(back.statusCode, 200, `typed again, the removed name was refused: ${back.body}`);
+    const again = back.json().titles.find((t: any) => t.norm === 'tombstoneothername');
+    assert.deepEqual([again?.title, again?.origin, again?.addedBy], ['Tombstone Other Name', 'admin', ADMIN]);
+    assert.equal((await app.inject({ method: 'POST', url, headers: adminAuth, payload: { title: 'Tombstone Other Name' } })).json().error, 'exists',
+      'and is a live name again');
+  } finally {
+    SITES[OWN].splice(SITES[OWN].indexOf(entry), 1);
+  }
 });

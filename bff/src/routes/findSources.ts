@@ -63,7 +63,8 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
   /**
    * Add a name by hand. Refused before anything is written: `non_latin` (a name in another script normalises to
    * nothing and can never be compared), `too_short` (a key under five characters is a word, not an identity), and
-   * `exists` (the series already goes by it -- stored, or its own title).
+   * `exists` (the series already goes by it -- stored, or its own title). A name removed earlier is the admin's to
+   * bring back: typed again, it returns as their own.
    */
   app.post('/api/admin/series/:id/alt-titles', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -73,14 +74,19 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
     const title = b.data.title;
     const refusal = refuseName(title);
     if (refusal) return reply.code(400).send({ error: refusal, message: REFUSED[refusal] });
-    // recordAltTitles writes nothing for a key the series already has, or for its own title: both are `exists`.
+    // recordAltTitles writes nothing for a key the series already has (unless it was removed), or for its own title:
+    // both are `exists`.
     const written = await recordAltTitles(id, [title], 'admin', { userId: userIdOf(req) });
     if (!written.length) return reply.code(409).send({ error: 'exists', message: 'The series already goes by that name.' });
     await logAudit('series.alt_title.add', { userId: userIdOf(req), detail: { id, title, norm: normTitle(title) }, req });
     return { titles: await titlesOf(id) };
   });
 
-  /** Forget one name, by its key. Idempotent: a key the series does not have answers the list as it is. */
+  /**
+   * Forget one name, by its key. It stays removed when the source's details are read again, whatever its origin (kept
+   * as a tombstone, lib/altTitles.ts removeAltTitle); typed again by hand, it returns as the admin's own. Idempotent:
+   * a key the series does not have answers the list as it is.
+   */
   app.delete('/api/admin/series/:id/alt-titles/:norm', async (req, reply) => {
     const { id, norm } = req.params as { id: string; norm: string };
     if (!(await seriesVisible(id, await viewCtxFor(userIdOf(req), roleOf(req))))) return reply.code(404).send({ error: 'not_found' });

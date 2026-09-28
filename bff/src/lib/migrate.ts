@@ -1281,6 +1281,8 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_min_free_gb int    
 -- where it came from: description (read out of the series' main source's own description), admin (typed by
 -- hand) or import (a tracker's synonyms, import_candidates.alt_titles, when the import added the series).
 -- added_by is the admin's account id as text, with no reference: a name outlives the account that typed it.
+-- removed_at marks a name an admin removed: the row stays as a tombstone, so reading the main source's
+-- description again does not bring the name back. Every read and every search skips it.
 CREATE TABLE IF NOT EXISTS series_alt_titles (
   series_id  text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
   norm       text NOT NULL,
@@ -1288,10 +1290,13 @@ CREATE TABLE IF NOT EXISTS series_alt_titles (
   origin     text NOT NULL CHECK (origin IN ('description', 'admin', 'import')),
   added_by   text,
   created_at timestamptz NOT NULL DEFAULT now(),
+  removed_at timestamptz,
   PRIMARY KEY (series_id, norm)
 );
--- v0.49.1: Find other sources runs (lib/findSources.ts), newest 20 kept. scope is {seriesIds} or {sourceId};
--- results holds one entry per series settled, {seriesId, title, followed: [{sourceId, name, chapters}], why?}.
+-- v0.49.1: Find other sources runs (lib/findSources.ts), newest 20 kept. scope is {seriesIds} or {sourceId,
+-- seriesIds}: the series ids it resolved to, in its order, for either kind, so a run closed after a restart can
+-- list the ones it never reached. results holds one entry per series settled, {seriesId, title, followed:
+-- [{sourceId, name, chapters}], why?}.
 -- status is running, done, stopped (an admin's stop), failed or interrupted (the server went away under it: a row
 -- still running after a restart is closed so at boot). started_by is the admin's account id as text.
 CREATE TABLE IF NOT EXISTS source_find_runs (
