@@ -1183,7 +1183,7 @@ paths:
     get:
       tags:
         - library
-      summary: The sources the viewer's library comes from, with series counts -- the library's source filters.
+      summary: The sources the viewer's library comes from, with series counts -- the library's source filters (since v0.49.2).
       operationId: getApiLibrarySources
       description: >-
         `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
@@ -1337,8 +1337,8 @@ paths:
       description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
         read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
         (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
-        `genre`, `author`, and -- owned library only -- `mainSource` (the source a series was added from, by id)
-        and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
+        `genre`, `author`, and -- owned library only, since v0.49.2 -- `mainSource` (the source a series was added
+        from, by id) and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
         `unsupported_filter`."
       operationId: postApiSeriesSearch
       parameters:

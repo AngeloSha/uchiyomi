@@ -732,9 +732,10 @@ POST   /api/series/:id/listing-progress
 DELETE /api/series/:id/listing-progress
 ```
 
-**Filtering the library by source.** On the owned backend, `POST /api/series/search` accepts two more
-conditions: `mainSource` (the source a series was added from, by id) and `anySource` (that, or a source it
-follows as a fallback). Both take `is` / `isNot`, and a source whose extension is gone still filters.
+**Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
+backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
+by id) and `anySource` (that, or a source it follows as a fallback). Both take `is` / `isNot`, and a source whose
+extension is gone still filters.
 `GET /api/library/sources` lists `{id, name, main, any, installed}` for every source the viewer's library
 comes from, busiest first: `main` counts the series added from it, `any` the series that read from it at all.
 It is counted over what the viewer may list, so the numbers match the filtered grid, and it is empty on a
