@@ -77,7 +77,9 @@ the left of the grid; on a phone it opens from **Filters** at the top. Genres ar
 how many series each holds, and formats (Manhwa, Manhua, Webtoon…) are kept separate from moods like Horror
 and Romance. Picking two genres shows series that are in **both**. With more than one source in the
 library, two more sections appear: **Main source** shows the series added from a source, and **Any source**
-the series that read from it at all, as their main source or a followed one. Each cover shows a **NEW** ribbon when
+the series that read from it at all, as their main source or a followed one. For a source that went away, an admin
+can filter by it under **Main source**, then **Select** → **Select all** → **More** → **Find other sources**
+(section 4); *Select all* takes what the grid has loaded, so scroll to the end first. Each cover shows a **NEW** ribbon when
 there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
 filters currently show.
 

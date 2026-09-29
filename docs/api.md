@@ -717,9 +717,9 @@ GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
-GET    /api/library/sources
-GET    /api/updates               GET    /api/adult-filter
-POST   /api/updates/seen          POST   /api/refresh
+GET    /api/library/sources       GET    /api/adult-filter
+GET    /api/updates               POST   /api/updates/seen
+POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
 POST   /api/series/search         GET    /api/leaderboard

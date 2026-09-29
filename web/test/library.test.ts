@@ -504,3 +504,22 @@ test('in Japanese and Chinese the source filters use those files\' full-width br
   const ja = JSON.parse(read('public/locales/ja.json'));
   assert.ok(ja['Any source'].startsWith(ja['Any: {name}'].split('：')[0]), 'ja: Any source and its active chip say any in two different words');
 });
+
+test('a chosen source chip is drawn chosen, even for a source that is not loaded', () => {
+  // `.chip-active` is in @layer components and `text-fog-500` is a utility, so where a chip carried both the
+  // utility won: the chosen chip of a source that is not loaded (its extension gone, the engine down) kept the
+  // grey of an unchosen one and lost its accent. The class list is evaluated here for all four cases. Reintroduce
+  // `${value === s.id ? 'chip-active' : ''} ${s.installed ? '' : 'text-fog-500'}`: "a chosen chip for a source
+  // that is not loaded is drawn unchosen" fails.
+  const panel = code(read('components/LibraryFilters.tsx'));
+  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function Eyebrow('));
+  const tpl = /<button key=\{s\.id\}[\s\S]*?className=\{`([^`]*)`\}/.exec(section)?.[1];
+  assert.ok(tpl, 'could not find the source chip');
+  const classes = (value: string, installed: boolean): string[] =>
+    (new Function('value', 's', `return \`${tpl}\`;`)(value, { id: 'x', installed }) as string).split(/\s+/).filter(Boolean);
+  assert.ok(classes('x', false).includes('chip-active') && !classes('x', false).includes('text-fog-500'),
+    'a chosen chip for a source that is not loaded is drawn unchosen');
+  assert.ok(classes('', false).includes('text-fog-500'), 'a source that is not loaded no longer looks it');
+  assert.ok(classes('x', true).includes('chip-active'));
+  assert.deepEqual(classes('', true), ['chip', 'text-xs']);
+});

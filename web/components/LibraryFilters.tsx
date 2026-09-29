@@ -103,7 +103,7 @@ function SourceSection({ title, help, rows, count, value, onPick }: {
         {shown.map((s) => (
           <button key={s.id} type="button" onClick={() => onPick(value === s.id ? '' : s.id)} aria-pressed={value === s.id}
             title={s.installed ? undefined : tr('not installed')}
-            className={`chip text-xs ${value === s.id ? 'chip-active' : ''} ${s.installed ? '' : 'text-fog-500'}`}>
+            className={`chip text-xs ${value === s.id ? 'chip-active' : s.installed ? '' : 'text-fog-500'}`}>
             {s.name}<span className="ms-1 tabular-nums text-fog-600">{count(s)}</span>
           </button>
         ))}
