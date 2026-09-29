@@ -62,10 +62,18 @@ export const STATUSES = [
  */
 export interface LibrarySource { id: string; name: string; main: number; any: number; installed: boolean }
 
-/** The sources, one query for the panel and the page's active-filter chips (react-query shares it). */
+/**
+ * The sources, one query for the panel and the page's active-filter chips (react-query shares it).
+ *
+ * ⚠️ Keyed UNDER ['library'], because that is the key everything that changes the shelf invalidates: the select
+ * bar's settle() after a bulk action, pull to refresh, the header's refresh, an add, a series edit. Keyed
+ * ['library-sources'], the counts sat out a Remove from library for their five-minute staleTime, still counting
+ * the series that had just gone. Nothing writes into the prefix with setQueriesData, which would hand this list a
+ * page of the grid (library.test.ts).
+ */
 export function useLibrarySources() {
   return useQuery({
-    queryKey: ['library-sources'],
+    queryKey: ['library', 'sources'],
     queryFn: () => api<{ content: LibrarySource[] }>('/api/library/sources').then((r) => r.content ?? []),
     staleTime: 5 * 60 * 1000,
   });

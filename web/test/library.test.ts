@@ -411,3 +411,30 @@ test('Archive slowly: a key from lg up, a row of More on a phone, for anyone who
   assert.match(q, /for \(let i = 0; i < ids\.length; i \+= ARCHIVE_MAX_SERIES\)/, 'a big selection is one request past the route cap');
   assert.match(q, /ids\.length === 1 \? archiveOutcomeNotice\([^)]*\) : archiveBulkNotice\(results\)/, 'a selection is not summed up in one notice');
 });
+
+// ---- The source filters (v0.49.2): Main source and Any source, @TIGamingTV's PR #124 ----
+
+test('the source counts refresh with the grid: they are keyed under the prefix every bulk action invalidates', async () => {
+  // PR #124 keyed the counts ['library-sources'], outside ['library'], with a five-minute staleTime. After Remove
+  // from library, settle() refetched the grid and the series left it, while the panel beside it went on counting
+  // that series until a reload. Everything that changes the shelf refreshes it with
+  // `invalidateQueries({ queryKey: ['library'] })`: settle() after every bulk action, pull to refresh, the header's
+  // refresh, an add, a series edit. So the counts live under that prefix. Reintroduce by keying them
+  // ['library-sources'] again: "a bulk action leaves the source counts stale" fails.
+  const { partialMatchKey } = await import('@tanstack/react-query');
+  const panel = code(read('components/LibraryFilters.tsx'));
+  const key = /export function useLibrarySources\(\) \{\s*return useQuery\(\{\s*queryKey: (\[[^\]]*\]),/.exec(panel)?.[1];
+  assert.ok(key, 'could not find the source counts query');
+  assert.ok(partialMatchKey(JSON.parse(key!.replace(/'/g, '"')), ['library']), `a bulk action leaves the source counts stale: they are keyed ${key}`);
+  // The matcher is react-query's own, and it does tell the old key apart, so the check above can fail.
+  assert.equal(partialMatchKey(['library-sources'], ['library']), false);
+  // What refreshes them after a bulk action.
+  const settle = /const settle = \(\) => \{([\s\S]*?)\n {2}\};/.exec(code(read('app/library/page.tsx')))?.[1] ?? '';
+  assert.match(settle, /qc\.invalidateQueries\(\{ queryKey: \['library'\] \}\);/, 'a bulk action no longer refreshes the library');
+  // ⚠️ And nothing writes into the prefix: a setQueriesData over ['library'] shaped for the grid's pages would now
+  // hand the counts a page, or the grid a list of sources.
+  const writers = [...walk(join(ROOT, 'app')), ...walk(join(ROOT, 'components')), ...walk(join(ROOT, 'lib'))]
+    .filter((f) => /set(?:Queries|Query)Data\(\s*(?:\{\s*queryKey:\s*)?\['library'/.test(readFileSync(f, 'utf8')))
+    .map((f) => f.slice(ROOT.length + 1));
+  assert.deepEqual(writers, [], `these write into the ['library'] prefix: ${writers.join(', ')}`);
+});
