@@ -489,3 +489,18 @@ test('src is the main source and anysrc any source, from the URL to the search, 
   assert.match(page, /\{src && \(\s*<button onClick=\{\(\) => setParam\('src', ''\)\}[^>]*>\s*\{tr\('Main: \{name\}', \{ name: sourceName\(src\) \}\)\} ×/, "the Main chip clears something else");
   assert.match(page, /\{anysrc && \(\s*<button onClick=\{\(\) => setParam\('anysrc', ''\)\}[^>]*>\s*\{tr\('Any: \{name\}', \{ name: sourceName\(anysrc\) \}\)\} ×/, "the Any chip clears something else");
 });
+
+test('in Japanese and Chinese the source filters use those files\' full-width brackets and colon, and ja says any once', () => {
+  // Both files write （） and ： (Library: {fs} is ライブラリ：{fs} and 书库：{fs}); PR #124's strings had ( ) and :.
+  // And the Japanese section title said すべてのソース, "all sources", over chips whose active form says いずれか：,
+  // "any". Reintroduce a half-width bracket or colon in either file: that string fails, by its key; put
+  // すべてのソース back: "ja: Any source and its active chip say any in two different words" fails.
+  const KEYS = ['Main source', 'Any source', 'Series added from this source.',
+    'Series that read from this source, as their main source or a followed one.', 'Main: {name}', 'Any: {name}'];
+  for (const lang of ['ja', 'zh']) {
+    const d = JSON.parse(read(`public/locales/${lang}.json`));
+    for (const k of KEYS) assert.doesNotMatch(d[k], /[():]/, `${lang}: "${k}" has a half-width bracket or colon: ${d[k]}`);
+  }
+  const ja = JSON.parse(read('public/locales/ja.json'));
+  assert.ok(ja['Any source'].startsWith(ja['Any: {name}'].split('：')[0]), 'ja: Any source and its active chip say any in two different words');
+});

@@ -2496,7 +2496,7 @@
   "Main source": "主来源",
   "Any source": "任意来源",
   "Series added from this source.": "从此来源添加的系列。",
-  "Series that read from this source, as their main source or a followed one.": "从此来源读取的系列(作为主来源或已关注来源)。",
-  "Main: {name}": "主:{name}",
-  "Any: {name}": "任意:{name}"
+  "Series that read from this source, as their main source or a followed one.": "从此来源读取的系列（作为主来源或已关注来源）。",
+  "Main: {name}": "主：{name}",
+  "Any: {name}": "任意：{name}"
 }

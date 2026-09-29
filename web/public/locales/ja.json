@@ -2494,9 +2494,9 @@
   "every chapter file in the downloads folder is in the library (1 checked)": "ダウンロードフォルダー内の話のファイルはすべてライブラリにあります（1 件を確認）",
   "Rate this": "評価する",
   "Main source": "メインソース",
-  "Any source": "すべてのソース",
+  "Any source": "いずれかのソース",
   "Series added from this source.": "このソースから追加したシリーズ。",
-  "Series that read from this source, as their main source or a followed one.": "このソースから読み込むシリーズ(メインまたはフォロー中)。",
-  "Main: {name}": "メイン: {name}",
-  "Any: {name}": "いずれか: {name}"
+  "Series that read from this source, as their main source or a followed one.": "このソースから読み込むシリーズ（メインまたはフォロー中）。",
+  "Main: {name}": "メイン：{name}",
+  "Any: {name}": "いずれか：{name}"
 }
