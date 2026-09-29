@@ -1168,7 +1168,6 @@
   "Sources to treat as adult, on top of the ones their extension already declares.": "拡張機能が自ら宣言しているものに加えて、18禁として扱うソースです。",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "作品ごとに、その作品のページから例外にできます — 詳細を編集 ▸「常に表示」。",
   "Always show": "常に表示",
-  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "ジャンルのどれかが18禁フィルターに入っていても、「18禁を表示」がオフの間もこの作品を本棚に残します。",
   "Type anywhere to search": "どこでも入力して検索",
   "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "どのページでもタイトルを入力し始めると、その内容で検索が開きます。/ ショートカットもここで切り替わります（この端末のみ）。",
   "This source": "このソース",
@@ -2498,5 +2497,6 @@
   "Series added from this source.": "このソースから追加したシリーズ。",
   "Series that read from this source, as their main source or a followed one.": "このソースから読み込むシリーズ（メインまたはフォロー中）。",
   "Main: {name}": "メイン：{name}",
-  "Any: {name}": "いずれか：{name}"
+  "Any: {name}": "いずれか：{name}",
+  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "「18+を表示」がオフの間もこのシリーズを本棚に残し、年齢制限のあるアカウントでも読めるようにします（シリーズ自体やジャンルが18+でも同様です）。"
 }

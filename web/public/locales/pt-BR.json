@@ -1168,7 +1168,6 @@
   "Sources to treat as adult, on top of the ones their extension already declares.": "Fontes a tratar como adultas, além das que a própria extensão já declara.",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "Uma série específica pode ser liberada na própria página — Editar detalhes ▸ “Sempre mostrar”.",
   "Always show": "Sempre mostrar",
-  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Mantém esta série na estante enquanto “Mostrar +18” estiver desligado, mesmo que um dos gêneros dela esteja no filtro +18.",
   "Type anywhere to search": "Digite em qualquer lugar para pesquisar",
   "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Comece a digitar um título em qualquer página para abrir a pesquisa com ele. Também liga ou desliga o atalho /, somente neste dispositivo.",
   "This source": "Esta fonte",
@@ -2498,5 +2497,6 @@
   "Series added from this source.": "Séries adicionadas desta fonte.",
   "Series that read from this source, as their main source or a followed one.": "Séries que leem desta fonte, como principal ou seguida.",
   "Main: {name}": "Principal: {name}",
-  "Any: {name}": "Qualquer: {name}"
+  "Any: {name}": "Qualquer: {name}",
+  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "Mantém esta série na estante enquanto “Mostrar +18” estiver desligado e permite que contas com limite de idade a leiam, mesmo que ela ou um de seus gêneros seja +18."
 }

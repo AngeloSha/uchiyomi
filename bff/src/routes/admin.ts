@@ -1499,7 +1499,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // A minimum age, or null to fall back to whatever ComicInfo said. See lib/ageRating.ts.
       ageRating: z.number().int().min(0).max(18).nullish(),
       /**
-       * Keep this series visible even when the 18+ switch would hide it for one of its genres.
+       * "Always show": keep this series visible when the 18+ switch would hide it (its genres, its rating, its
+       * library), and readable by accounts whose age limit is below its rating.
        *
        * Absent leaves the flag as it is, which matters because this route writes every other column
        * unconditionally: the edit modal does not send this field, and without the COALESCE below an

@@ -78,7 +78,7 @@ test('every new string is in all eight locale files', () => {
     '18+ filter', 'No genres yet.', 'Always show',
     'Sources to treat as adult, on top of the ones their extension already declares.',
     'One series can be let through on its own page — Edit details ▸ “Always show”.',
-    'Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.',
+    'Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.',
   ];
   for (const k of keys) {
     assert.ok(read('components/AdminSettings.tsx').includes(`tr('${k}')`) || read('app/series/page.tsx').includes(`tr('${k}')`),

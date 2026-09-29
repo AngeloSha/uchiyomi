@@ -1168,7 +1168,6 @@
   "Sources to treat as adult, on top of the ones their extension already declares.": "Источники, которые считаются взрослыми, в дополнение к тем, что уже отмечены таковыми в своём расширении.",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "Отдельную серию можно пропустить на её собственной странице — Изменить сведения ▸ «Показывать всегда».",
   "Always show": "Показывать всегда",
-  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Оставлять эту серию на полке, пока «Показать 18+» выключено, даже если один из её жанров есть в фильтре 18+.",
   "Type anywhere to search": "Поиск при наборе на любой странице",
   "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Начните вводить название на любой странице, чтобы открыть с ним поиск. Также включает или выключает сочетание /, только на этом устройстве.",
   "This source": "Этот источник",
@@ -2498,5 +2497,6 @@
   "Series added from this source.": "Серии, добавленные из этого источника.",
   "Series that read from this source, as their main source or a followed one.": "Серии, которые читаются из этого источника — как основного или отслеживаемого.",
   "Main: {name}": "Основной: {name}",
-  "Any: {name}": "Любой: {name}"
+  "Any: {name}": "Любой: {name}",
+  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "Оставлять эту серию на полке, пока «Показывать 18+» выключено, и разрешить её чтение аккаунтам с возрастным ограничением, даже если она или один из её жанров 18+."
 }
