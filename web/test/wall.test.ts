@@ -26,7 +26,7 @@ test('the same title on two sources is one card that knows both', () => {
     row({ source: 'a', sourceId: '1', title: 'Solo Leveling', inLibrary: false }),
     row({ source: 'b', sourceId: '7', title: 'Tower of God' }),
     // A different spelling -- punctuation and case -- is the same title, which is what normTitle is for.
-    row({ source: 'b', sourceId: '2', title: 'SOLO LEVELING!', coverUrl: 'https://b/solo.jpg', inLibrary: true }),
+    row({ source: 'b', sourceId: '2', title: 'SOLO LEVELING!', coverUrl: 'https://b/solo.jpg', inLibrary: true, librarySeriesId: 'ser-9' }),
   ], nameOf);
 
   assert.deepEqual(items.map((it) => it.title), ['Solo Leveling', 'Tower of God'], 'two cards for one title, or the first arrival lost its place');
@@ -35,6 +35,7 @@ test('the same title on two sources is one card that knows both', () => {
   assert.deepEqual([card.source, card.sourceId], ['a', '1'], 'the card did not keep the ids it arrived with');
   assert.equal(card.coverUrl, 'https://b/solo.jpg', 'the cover was not taken from the first row that had one');
   assert.equal(card.inLibrary, true, 'owned on one source did not read as owned');
+  assert.equal(card.librarySeriesId, 'ser-9', 'the owned card lost the library entry it should open');
 
   const key = normTitle('Solo Leveling');
   assert.deepEqual(groups[key]?.map((p) => `${p.source}:${p.sourceId}`), ['a:1', 'b:2'], 'groups[key] does not hold both providers');

@@ -251,6 +251,8 @@ export interface SourceItem {
   coverUrl?: string;
   updatedAt?: string;
   inLibrary?: boolean;
+  /** The library entry that title is, when the server knows it: an owned card opens it. */
+  librarySeriesId?: string;
   /** >1 when the same title was found on several sources. */
   providerCount?: number;
 }
@@ -278,14 +280,10 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
   eager?: boolean;
 }) {
   const owned = !!item.inLibrary;
-  return (
-    <button
-      type="button"
-      onClick={onAdd}
-      disabled={owned}
-      aria-label={owned ? item.title : tr('Add to library')}
-      className="group block w-full text-start disabled:cursor-default"
-    >
+  // An owned title opens its entry in the library; adding it again would only say "already there".
+  const rootCls = 'group block w-full text-start disabled:cursor-default';
+  const body = (
+    <>
       <div className={`grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300
                        ${owned ? 'opacity-55' : 'group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]'}`}>
         <Img src={sourceCover(item.source, item.coverUrl)} alt={item.title} eager={eager}
@@ -321,6 +319,9 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
       <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
         {item.title}
       </p>
-    </button>
+    </>
   );
+  return owned && item.librarySeriesId
+    ? <Link href={`/series/?id=${encodeURIComponent(item.librarySeriesId)}`} aria-label={item.title} className={rootCls}>{body}</Link>
+    : <button type="button" onClick={onAdd} disabled={owned} aria-label={owned ? item.title : tr('Add to library')} className={rootCls}>{body}</button>;
 }
