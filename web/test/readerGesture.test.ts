@@ -81,3 +81,11 @@ test('a turn is held from progress for exactly as long as it can still be undone
   assert.equal(undoLeft(null, 1000), 0, 'nothing acted, nothing held');
   assert.equal(undoLeft(1000, 1000 + 200), UNDO_WINDOW_MS + 1 - 200);
 });
+
+test('a press right behind a double is the tail of that flurry, not a fresh single', () => {
+  // Reintroduce by dropping the lastDoubleAt check: a triple-click zoomed, then turned a page 300 ms later.
+  const behind = readTap({ ...tap(2000), lastDoubleAt: 1900 });
+  assert.equal(behind.kind, 'none');
+  const later = readTap({ ...tap(2000), lastDoubleAt: 1000 });
+  assert.equal(later.kind, 'single', 'a press after the window is an ordinary tap again');
+});

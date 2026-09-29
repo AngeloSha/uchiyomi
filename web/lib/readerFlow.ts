@@ -125,6 +125,10 @@ export function startIndex(flow: FlowItem[], ci: number, pageNumber: number): nu
   // The page was removed (`hide`), so land on the nearest one that survived rather than nowhere.
   const after = flow.findIndex((f) => f.ci === ci && f.number > pageNumber);
   if (after >= 0) return after;
+  // Nothing survived after it (the chapter ends on removed pages, a credit page being the usual one), so the
+  // nearest is the last page that did. Falling through to the first page threw a reader who asked for the END
+  // of a chapter back to its start.
+  for (let i = flow.length - 1; i >= 0; i--) if (flow[i].ci === ci) return i;
   const firstOfChapter = flow.findIndex((f) => f.ci === ci);
   return firstOfChapter >= 0 ? firstOfChapter : 0;
 }

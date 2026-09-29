@@ -131,3 +131,15 @@ test('a missing page passes through the flow untouched, in every mode', () => {
   // And the hole keeps its place: page 2 is index 1 with nothing before it removed.
   assert.equal(startIndex(buildFlow([ch], 'show'), 0, 2), 1);
 });
+
+test('asking for the end of a chapter whose last pages were removed lands on its last surviving page', () => {
+  // Reintroduce by removing the last-of-chapter fallback in startIndex: stepping back a chapter whose credit
+  // page is hidden opened it on page 1.
+  const chapters: FlowChapter[] = [
+    { id: 'a', pages: [1, 2, 3, 4].map((n) => ({ number: n, width: 1, height: 1, junk: n === 4 })) },
+    { id: 'b', pages: [1, 2].map((n) => ({ number: n, width: 1, height: 1 })) },
+  ];
+  const hide = buildFlow(chapters, 'hide');
+  assert.equal(hide[startIndex(hide, 0, 4)].number, 3);
+  assert.equal(hide[startIndex(hide, 0, 99)].ci, 0, 'and it stays in the chapter that was asked for');
+});

@@ -11,6 +11,7 @@ import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
+import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
 import { chapterLabel } from '@/lib/format';
@@ -102,6 +103,8 @@ function ReaderInner() {
    * Moment openable with no network, since the resume call is the thing that throws offline.
    */
   const wantPage = Math.max(0, Math.floor(Number(sp.get('page')) || 0));
+  /** `?page=last`: opened by stepping BACK a chapter, so land where that chapter ends. Same authority as `?page=`. */
+  const wantLast = sp.get('page') === 'last';
   const router = useRouter();
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -173,6 +176,10 @@ function ReaderInner() {
   /** When the pointer path handled a double-tap itself. A touch double-tap also raises `dblclick`, and
    *  zooming for both halves of the same gesture would put the zoom straight back where it started. */
   const handledDouble = useRef(0);
+  /** When any double (touch or mouse) was last recognised, so the press right behind it is not a fresh tap. */
+  const lastDoubleAt = useRef(0);
+  /** When "next chapter" was last pressed without being confirmed (null = not armed). See readerNav.ts. */
+  const [armedNext, setArmedNext] = useState<number | null>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
 
@@ -221,7 +228,9 @@ function ReaderInner() {
       if (outcome !== 'ok' || !first) { setFailed(outcome === 'ok' ? 'unavailable' : outcome); setReady(true); return; }
       // Where to open, in order of authority: an explicit deep link, then the server, then this device.
       const clamp = (n: number) => Math.max(1, Math.min(n, first.pages.length || 1));
-      if (wantPage > 0) {
+      if (wantLast) {
+        setStartPage(clamp(first.pages.length || 1));
+      } else if (wantPage > 0) {
         // Deep link. Deliberately does NOT read progress -- see wantPage above.
         setStartPage(clamp(wantPage));
       } else {
@@ -746,7 +755,25 @@ function ReaderInner() {
   const seriesHref = activeSeriesId ? `/series/?id=${activeSeriesId}` : null;
 
   const back = () => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push(seriesId ? `/series/?id=${seriesId}` : '/'));
-  const goChapter = (cid?: string) => { if (cid) router.replace(`/reader/?book=${cid}`); };
+  const goChapter = (cid?: string, atEnd = false) => { if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };
+  /**
+   * Leave for the next chapter. From anywhere but the end of this one it takes two presses: the button sits
+   * at the edge of the footer beside the slider and the page counter, where a thumb aiming for either lands on
+   * it, and one press used to drop the chapter with no way to tell it had happened until the new one drew.
+   */
+  const goNext = () => {
+    if (!nextId) return;
+    const remaining = pagesAfter(flat, current);
+    if (!skipNeedsConfirm(remaining) || stillArmed(armedNext, Date.now())) { setArmedNext(null); goChapter(nextId); return; }
+    setArmedNext(Date.now());
+  };
+  useEffect(() => {
+    if (armedNext == null) return;
+    const t = setTimeout(() => setArmedNext(null), ARM_MS + 20);
+    return () => clearTimeout(t);
+  }, [armedNext]);
+  // Turning the page or changing chapter is a change of mind: the arm belongs to the page it was pressed on.
+  useEffect(() => { setArmedNext(null); }, [current, bookId]);
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else document.documentElement.requestFullscreen?.().catch(() => {});
@@ -824,7 +851,10 @@ function ReaderInner() {
       const t = e.target as HTMLElement | null;
       const owned = !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
         || !!t.closest('button, a, [role="button"], [role="dialog"]'));
-      if (e.key === '[') goChapter(prevId);
+      // ⚠️ A held key repeats. `]` repeating walked the reader through chapter after chapter, and Escape
+      // repeating called history.back() until it left the reader for wherever came before. A press, once.
+      if (e.repeat && (e.key === '[' || e.key === ']' || e.key === 'f' || e.key === 'Escape')) return;
+      if (e.key === '[') goChapter(prevId, true);
       else if (e.key === ']') goChapter(nextId);
       else if (e.key === 'f') toggleFullscreen();
       else if (e.key === 'Escape') back();
@@ -885,12 +915,14 @@ function ReaderInner() {
       width: scrollRef.current?.clientWidth || window.innerWidth,
       lastTapAt: lastTapAt.current,
       doubleDetect: e.pointerType !== 'mouse',
+      lastDoubleAt: lastDoubleAt.current,
     });
     if (act.kind === 'none') return; // a scroll, or a press held long enough to be something else
     if (act.kind === 'double') {
       cancelPendingTap();
       lastTapAt.current = 0;
       handledDouble.current = now;
+      lastDoubleAt.current = now;
       applyZoom(zoom > 1 ? 1 : 2);
       return;
     }
@@ -919,9 +951,15 @@ function ReaderInner() {
       const w = el.clientWidth || window.innerWidth;
       // Physical, as the arrow keys are: an RTL track turns the other way round, but the left edge of the
       // screen is still the left edge of the screen.
-      acted.current = { kind: 'turn', slide: slideNow(), at: Date.now() };
+      // ⚠️ An absolute target, one slide from the one on screen -- the way the arrow keys do it. A relative
+      // scrollBy stacks on a smooth scroll still in flight, so a second tap landing mid-animation went two
+      // pages on.
+      const from = slideNow();
+      const last = Math.max(0, el.children.length - 1);
+      const to = Math.max(0, Math.min(last, from + (zone === 'back' ? -1 : 1) * trackSign));
+      acted.current = { kind: 'turn', slide: from, at: Date.now() };
       lastMoved.current = Date.now();
-      el.scrollBy({ left: zone === 'back' ? -w : w, behavior: 'smooth' });
+      el.scrollTo({ left: trackSign * to * w, behavior: 'smooth' });
       return;
     }
     acted.current = { kind: 'chrome', at: Date.now() };
@@ -942,6 +980,7 @@ function ReaderInner() {
     if ((e.target as HTMLElement).closest?.('button, a')) return;
     cancelPendingTap();
     lastTapAt.current = 0;
+    lastDoubleAt.current = Date.now();
     const a = acted.current;
     acted.current = null;
     if (a && undoWindow(a.at, Date.now())) {
@@ -1173,7 +1212,7 @@ function ReaderInner() {
             // is ONE drawing, and it only reassembles with its first page on the right.
             const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
             return (
-              <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center items-center justify-center gap-1">
+              <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center gap-1">
                 {shown.map((i) => {
                   const p = flat[i];
                   if (!(activeSet.has(i) && srcFor(i))) return <span key={p.key} className="text-ink-600">{p.number}</span>;
@@ -1282,7 +1321,7 @@ function ReaderInner() {
                     </div>
                   );
                 })()}
-                <button onClick={() => goChapter(prevId)} disabled={!prevId}
+                <button onClick={() => goChapter(prevId, true)} disabled={!prevId} aria-label={tr('Previous chapter')}
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
                   {pagedRtl ? <IcChevronRight width={18} height={18} /> : <IcChevronLeft width={18} height={18} />}
                 </button>
@@ -1300,8 +1339,8 @@ function ReaderInner() {
                   onPointerCancel={() => setScrubbing(false)}
                   onChange={(e) => jumpTo(Number(e.target.value))}
                   className="h-1 flex-1 accent-[rgb(var(--accent))]" />
-                <button onClick={() => goChapter(nextId)} disabled={!nextId}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
+                <button onClick={goNext} disabled={!nextId} aria-label={armedNext != null ? tr('Tap again to skip to the next chapter') : tr('Next chapter')}
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-white backdrop-blur disabled:opacity-30 ${armedNext != null ? 'bg-accent' : 'bg-black/45'}`}>
                   {pagedRtl ? <IcChevronLeft width={18} height={18} /> : <IcChevronRight width={18} height={18} />}
                 </button>
               </div>
@@ -1318,6 +1357,15 @@ function ReaderInner() {
           caught what that means: the reader auto-hides its chrome a few seconds in, so the one thing
           telling you a page had been removed disappeared along with it. A notice you have to go looking
           for is not a notice. */}
+      <AnimatePresence>
+        {armedNext != null && (
+          <motion.div role="status" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+            className="pointer-events-none fixed inset-x-0 bottom-28 z-50 mx-auto w-fit rounded-full bg-black/80 px-3 py-1.5 text-[11px] text-fog-200 backdrop-blur">
+            {tr('Tap again to skip to the next chapter')}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {hiddenHere > 0 && (
           <motion.button

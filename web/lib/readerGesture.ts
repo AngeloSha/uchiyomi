@@ -92,9 +92,15 @@ export function readTap(args: {
   width: number;
   lastTapAt: number;
   doubleDetect: boolean;
+  /** When the last double (touch or mouse) was recognised; 0 when there is none. */
+  lastDoubleAt?: number;
 }): TapAction {
-  const { from, to, width, lastTapAt, doubleDetect } = args;
+  const { from, to, width, lastTapAt, doubleDetect, lastDoubleAt = 0 } = args;
   if (!isTap(from, to)) return { kind: 'none' };
+  // ⚠️ A third press right behind a double is the tail of the same flurry, not a new single. Without this a
+  // triple-click (or a triple-tap) zoomed and then, 300 ms later, turned a page: the double reset the pairing
+  // state, so the third press looked like the first of a fresh gesture.
+  if (lastDoubleAt > 0 && to.t - lastDoubleAt < TAP_WINDOW_MS) return { kind: 'none' };
   if (doubleDetect && lastTapAt > 0 && to.t - lastTapAt < TAP_WINDOW_MS) return { kind: 'double' };
   return { kind: 'single', zone: tapZone(to.x, width), after: singleTapDelay() };
 }
