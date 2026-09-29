@@ -58,7 +58,7 @@ export const STATUSES = [
 
 /**
  * A source the viewer's library comes from (GET /api/library/sources): how many series were added from it
- * (`main`) and how many read from it at all, as their main source or a linked one (`any`).
+ * (`main`) and how many read from it at all, as their main source or a followed one (`any`).
  */
 export interface LibrarySource { id: string; name: string; main: number; any: number; installed: boolean }
 
@@ -172,7 +172,7 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
   libs: LibraryRow[];
   /** The `src` URL param: only series ADDED from this source. */
   mainSrc: string;
-  /** The `anysrc` URL param: series that read from this source at all, main or linked. */
+  /** The `anysrc` URL param: series that read from this source at all, main or followed. */
   anySrc: string;
   onSet: (k: string, v: string) => void;
 }) {
@@ -276,7 +276,7 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
         <>
           <SourceSection title={tr('Main source')} help={tr('Series added from this source.')}
             rows={sources!} count={(s) => s.main} value={mainSrc} onPick={(id) => onSet('src', id)} />
-          <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a linked one.')}
+          <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a followed one.')}
             rows={sources!} count={(s) => s.any} value={anySrc} onPick={(id) => onSet('anysrc', id)} />
         </>
       )}

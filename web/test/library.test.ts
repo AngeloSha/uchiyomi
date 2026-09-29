@@ -438,3 +438,20 @@ test('the source counts refresh with the grid: they are keyed under the prefix e
     .map((f) => f.slice(ROOT.length + 1));
   assert.deepEqual(writers, [], `these write into the ['library'] prefix: ${writers.join(', ')}`);
 });
+
+test('Any source says followed, the app\'s word for a second source, never linked, which is the trackers\'', () => {
+  // A series FOLLOWS a second source: Sources & translations, Find other sources and Health all say so, and
+  // "linked" is what the app says of a tracker ("linked for progress sync"). PR #124's help line said "a linked
+  // one", in English and in each language's word for connected. Reintroduce "linked" in the line: "Any source's
+  // line says linked" fails; put one language back to its word for linked: that language fails, by name.
+  const panel = code(read('components/LibraryFilters.tsx'));
+  assert.match(panel, /help=\{tr\('Series that read from this source, as their main source or a followed one\.'\)\}/, "Any source's line says linked");
+  // Each file in its own word for a followed source, as in "A followed source lists them" and "No source followed".
+  const FOLLOWED: Record<string, string> = { ar: 'متابَع', de: 'verfolgte', es: 'seguida', fr: 'suivie', ja: 'フォロー中', 'pt-BR': 'seguida', ru: 'отслеживаемого', zh: '已关注' };
+  for (const [lang, word] of Object.entries(FOLLOWED)) {
+    const d = JSON.parse(read(`public/locales/${lang}.json`));
+    assert.ok(!('Series that read from this source, as their main source or a linked one.' in d), `${lang}.json kept the old key`);
+    assert.ok(d['Series that read from this source, as their main source or a followed one.']?.includes(word),
+      `${lang}: Any source's line does not use the file's word for followed (${word})`);
+  }
+});

@@ -33,7 +33,7 @@ function conditionFrom(read: string, status: string, genres: string[], lib: stri
   const all: any[] = [];
   if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
   // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
-  // it reads from -- added from it, or linked to it as a fallback.
+  // it reads from -- added from it, or following it as a fallback.
   if (src) all.push({ mainSource: { operator: 'is', value: src } });
   if (anysrc) all.push({ anySource: { operator: 'is', value: anysrc } });
   if (read) all.push({ readStatus: { operator: 'is', value: read } });

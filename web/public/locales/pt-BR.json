@@ -2496,7 +2496,7 @@
   "Main source": "Fonte principal",
   "Any source": "Qualquer fonte",
   "Series added from this source.": "Séries adicionadas desta fonte.",
-  "Series that read from this source, as their main source or a linked one.": "Séries que leem desta fonte, como principal ou vinculada.",
+  "Series that read from this source, as their main source or a followed one.": "Séries que leem desta fonte, como principal ou seguida.",
   "Main: {name}": "Principal: {name}",
   "Any: {name}": "Qualquer: {name}"
 }

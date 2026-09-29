@@ -2496,7 +2496,7 @@
   "Main source": "Основной источник",
   "Any source": "Любой источник",
   "Series added from this source.": "Серии, добавленные из этого источника.",
-  "Series that read from this source, as their main source or a linked one.": "Серии, которые читаются из этого источника — как основного или подключённого.",
+  "Series that read from this source, as their main source or a followed one.": "Серии, которые читаются из этого источника — как основного или отслеживаемого.",
   "Main: {name}": "Основной: {name}",
   "Any: {name}": "Любой: {name}"
 }
