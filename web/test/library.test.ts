@@ -455,3 +455,37 @@ test('Any source says followed, the app\'s word for a second source, never linke
       `${lang}: Any source's line does not use the file's word for followed (${word})`);
   }
 });
+
+test('src is the main source and anysrc any source, from the URL to the search, the grid key and the badge', () => {
+  // Two URL params three letters apart that mean two different searches, so a swap is easy to make and hard to
+  // see: both filters still work, each returning the other's series. PR #124's review swapped them in
+  // conditionFrom, then dropped them from the grid's key, and the suite passed both times. Reintroduce the swap
+  // (`if (src) all.push({ anySource: … })`): "src is not the main source" fails; drop `src, anysrc` from the
+  // queryKey: "the grid's key does not carry the source filters" fails, and a change of source filter would append
+  // its pages to the list the old filter fetched.
+  const page = code(read('app/library/page.tsx'));
+  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(page);
+  assert.ok(fn, 'could not find conditionFrom');
+  const params = fn![1].split(',').map((p) => p.trim().split(/[\s:=]/)[0]);
+  assert.deepEqual(params.slice(4), ['src', 'anysrc'], 'conditionFrom takes the source filters in another order');
+  // Which parameter guards each condition, and which one it carries.
+  const pushed = Object.fromEntries([...fn![2].matchAll(/if \((\w+)\) all\.push\(\{ (\w+): \{ operator: 'is', value: (\w+) \} \}\);/g)]
+    .map((m) => [m[2], `${m[1]} -> ${m[3]}`]));
+  assert.equal(pushed.mainSource, 'src -> src', 'src is not the main source');
+  assert.equal(pushed.anySource, 'anysrc -> anysrc', 'anysrc is not any source');
+  assert.match(page, /const src = params\.get\('src'\) \|\| '';\s*const anysrc = params\.get\('anysrc'\) \|\| '';/, 'the URL params are read into the wrong names');
+  assert.match(page, /useMemo\(\(\) => conditionFrom\(read, status, genres, lib, src, anysrc\), \[read, status, genres\.join\(','\), lib, src, anysrc\]\)/,
+    'the condition memo does not carry both source filters, in order');
+  assert.match(page, /queryKey: \['library', active\.key, read, status, genres\.join\(','\), lib, src, anysrc\],/, "the grid's key does not carry the source filters");
+  assert.match(page, /const activeCount = [^;]*\+ \(src \? 1 : 0\) \+ \(anysrc \? 1 : 0\);/, 'the badge does not count the source filters');
+  // The writing side: Main source's chips set `src` and count `main`, Any source's set `anysrc` and count `any`, and
+  // both placements of the panel are handed both values; each active chip clears its own param.
+  const panel = code(read('components/LibraryFilters.tsx'));
+  assert.match(panel, /<SourceSection title=\{tr\('Main source'\)\}[\s\S]{0,200}?count=\{\(s\) => s\.main\} value=\{mainSrc\} onPick=\{\(id\) => onSet\('src', id\)\} \/>/,
+    'Main source does not write src, or counts the wrong number');
+  assert.match(panel, /<SourceSection title=\{tr\('Any source'\)\}[\s\S]{0,200}?count=\{\(s\) => s\.any\} value=\{anySrc\} onPick=\{\(id\) => onSet\('anysrc', id\)\} \/>/,
+    'Any source does not write anysrc, or counts the wrong number');
+  assert.equal((page.match(/mainSrc=\{src\} anySrc=\{anysrc\}/g) ?? []).length, 2, 'the sidebar and the sheet are not both handed the source filters');
+  assert.match(page, /\{src && \(\s*<button onClick=\{\(\) => setParam\('src', ''\)\}[^>]*>\s*\{tr\('Main: \{name\}', \{ name: sourceName\(src\) \}\)\} ×/, "the Main chip clears something else");
+  assert.match(page, /\{anysrc && \(\s*<button onClick=\{\(\) => setParam\('anysrc', ''\)\}[^>]*>\s*\{tr\('Any: \{name\}', \{ name: sourceName\(anysrc\) \}\)\} ×/, "the Any chip clears something else");
+});
