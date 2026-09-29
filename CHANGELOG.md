@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.49.2 — (date to be set)
+## v0.49.2 — 2026-09-29
 
 **The Library can be filtered by where a series comes from: Main source shows the series added from a source, and
 Any source every series that reads from it, as its main source or a followed one.** Both are **@TIGamingTV**'s, from
