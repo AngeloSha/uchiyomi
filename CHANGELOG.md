@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.49.2 — (date to be set)
+
+**The Library can be filtered by where a series comes from: Main source shows the series added from a source, and
+Any source every series that reads from it, as its main source or a followed one.** Both are **@TIGamingTV**'s, from
+pull request [#124](https://github.com/AngeloSha/uchiyomi/pull/124), split out of
+[#119](https://github.com/AngeloSha/uchiyomi/pull/119) as its review asked, with a few fixes on top. Plus two
+security updates to the server's dependencies.
+
+### Main source and Any source, the Library filtered by where a series comes from
+
+- **Two more sections in the filter panel**, in the sidebar on a laptop and in *Filters* on a phone, once the library
+  has more than one source. **Main source** lists the series added from a source; **Any source** the series that read
+  from it at all, as their main source or one they follow as a second source. Each source carries its count, busiest
+  first, ten of them before *Show all*. A tap filters and a second tap clears; both combine with every other filter,
+  live in the address like the rest, and show under the header as *Main: …* and *Any: …* chips, each cleared by its
+  ×. A source whose extension is gone still filters, dimmed.
+- **The counts are the grid's.** They are counted over what you may see (your libraries, the age cap, the 18+
+  switch), so the number beside a source is what tapping it shows, and a source only a library closed to you uses is
+  not listed at all.
+- **With Find other sources**, for a source that went away: filter by it under **Main source**, then **Select** →
+  **Select all** → **More** → **Find other sources** (admins). *Select all* takes what the grid has loaded, so scroll
+  to the end first.
+
+On top of the pull request:
+
+- **The counts refresh with the grid.** After *Remove from library* or another bulk action, a pull to refresh or the
+  header's refresh, the grid changed and the counts did not: they went on counting a series that had just left, until
+  a reload. They refresh together now.
+- **A source is named as Health names it.** A source that series only follow read as a raw id (*sw:4709…*) whenever
+  the extension engine was down or the source was switched off, and a source that is not loaded could be named after
+  the folder its series sit in. It now reads the name the engine gave it, as on Health and Providers.
+- **Wording.** *Any source* said "a linked one"; the app says a series *follows* a second source, and keeps *linked*
+  for trackers. In Japanese, *Any source* said "all sources", and the new Japanese and Chinese strings use those
+  files' full-width brackets and colon. A chosen chip for a source that is not loaded keeps its highlight.
+
+### Security updates
+
+- `fast-uri` 4.2.1 and 3.1.8 ([#126](https://github.com/AngeloSha/uchiyomi/pull/126)), for two high-severity
+  advisories: authority injection and host confusion when parsing a URI. Fastify and the API reference's schema
+  resolver depend on it.
+- `ip-address` 10.7.2 ([#127](https://github.com/AngeloSha/uchiyomi/pull/127)), for a medium-severity advisory. The
+  rate limiter groups IPv6 clients with it.
+
+### Upgrading
+
+- No database change, and nothing to change in compose files or settings.
+- **For scripts** ([api.md](docs/api.md)): a new route, `GET /api/library/sources` (`{id, name, main, any,
+  installed}` for every source the viewer's library comes from), and two more conditions for
+  `POST /api/series/search` on the owned backend, `mainSource` and `anySource` (`is` / `isNot` a source id).
+
 ## v0.49.1 — 2026-09-28
 
 **When a site goes away, its series can find other sources in one press: Find other sources searches the other
