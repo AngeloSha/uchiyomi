@@ -13,6 +13,7 @@ const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
+import { sourceLabel } from '../lib/health';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
@@ -152,11 +153,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // The sources the viewer's library comes from, with how many series each is the main source of and how
   // many read from it at all: the library's "Main source" and "Any source" filters. Empty on a Komga
   // backend, which has no notion of a source -- the filters then do not render, and never send a condition
-  // Komga would refuse.
+  // Komga would refuse. Each source is named as Health and Providers name it (#115): the registered adapter, then
+  // the name the engine gave an extension source that is not loaded now, then the id. A source that is only ever
+  // followed, never a main source, read as a raw `sw:4709…` while the engine was down or the source was off.
   app.get('/api/library/sources', async (req) => {
     if (!OWNED) return { content: [] };
     const rows = await owned.librarySources(vc(req));
-    return { content: rows.map((r) => ({ id: r.id, name: getSource(r.id)?.name ?? r.label ?? r.id, main: r.main, any: r.any, installed: !!getSource(r.id) })) };
+    return { content: rows.map((r) => ({ id: r.id, name: sourceLabel(r.id, r.engine_name), main: r.main, any: r.any, installed: !!getSource(r.id) })) };
   });
 
   // What everyone in the household is reading (cross-user, last 14 days).

@@ -738,7 +738,9 @@ follows as a fallback). Both take `is` / `isNot`, and a source whose extension i
 `GET /api/library/sources` lists `{id, name, main, any, installed}` for every source the viewer's library
 comes from, busiest first: `main` counts the series added from it, `any` the series that read from it at all.
 It is counted over what the viewer may list, so the numbers match the filtered grid, and it is empty on a
-Komga backend.
+Komga backend. `name` is the one Health uses: the loaded source's, else the name the extension engine gave it,
+else the id; `installed` is false while a source is not loaded (its extension gone or switched off, or the
+engine down).
 
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
 any source the series has been followed on (`POST /api/admin/series/:id/sources`, below); each entry is

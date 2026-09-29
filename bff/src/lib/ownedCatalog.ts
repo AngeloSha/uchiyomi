@@ -455,24 +455,30 @@ export const owned = {
    * series added from it, `any` the series that read from it at all -- added from it, or following it as a
    * fallback. Counted over browseSrc, so the numbers are the ones the filtered grid will show (the same
    * disclosure rule as genreOverview: a source only this viewer's hidden libraries use is not named).
-   * `name` is null here; the route names it from the registry.
+   * The route names each one by the #115 rule (lib/health.ts sourceLabel), so this carries the engine's stored
+   * name for an extension source. Not the series' folder label (`lib_series.source`): that is the folder a
+   * series sits in, which only a main source has, and which a series at the library's root or in a folder of
+   * your own reads as a source name that is not one.
    */
   librarySources: async (ctx: ViewCtx) => {
     const p = new Params();
     const src = browseSrc(ctx, p);
-    return q<{ id: string; label: string | null; main: number; any: number }>(
+    return q<{ id: string; engine_name: string | null; main: number; any: number }>(
       `WITH vs AS (SELECT sv.id FROM ${src}),
        used AS (
-         SELECT s.id AS series_id, s.source_id, s.source AS label, true AS main
+         SELECT s.id AS series_id, s.source_id, true AS main
            FROM lib_series s JOIN vs ON vs.id = s.id WHERE s.source_id IS NOT NULL
          UNION ALL
-         SELECT ss.series_id, ss.source_id, NULL AS label, false AS main
+         SELECT ss.series_id, ss.source_id, false AS main
            FROM series_sources ss JOIN vs ON vs.id = ss.series_id
        )
-       SELECT source_id AS id, max(label) AS label,
-              count(DISTINCT series_id) FILTER (WHERE main)::int AS main,
-              count(DISTINCT series_id)::int AS any
-         FROM used GROUP BY source_id ORDER BY count(DISTINCT series_id) DESC, source_id`,
+       SELECT u.source_id AS id,
+              -- The engine's name for an extension source that is not registered right now (the engine is down,
+              -- or the source is switched off), as Health reads it.
+              (SELECT sn.name FROM suwayomi_sources sn WHERE 'sw:' || sn.source_id = u.source_id LIMIT 1) AS engine_name,
+              count(DISTINCT u.series_id) FILTER (WHERE u.main)::int AS main,
+              count(DISTINCT u.series_id)::int AS any
+         FROM used u GROUP BY u.source_id ORDER BY count(DISTINCT u.series_id) DESC, u.source_id`,
       p.values as any[],
     );
   },

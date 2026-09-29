@@ -7,7 +7,8 @@
 // and the counts are a VIEW, hiding what the viewer may not list (a source only a hidden library reads from
 // is not named at all).
 //
-// sourceFilter.test.ts pins the SQL's shape without a database; this pins the rows it selects.
+// sourceFilter.test.ts pins the SQL's shape without a database; this pins the rows it selects, and (through the
+// real route) the name each source is shown by.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test from 'node:test';
@@ -24,13 +25,21 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_sf_x';
 const SERIES = ['s_sf_a', 's_sf_b', 's_sf_c', 's_sf_d', 's_sf_e'] as const;
-const SOURCES = ['sf-x', 'sf-y', 'sf-z', 'sf-w'] as const;
+// Two extension sources the engine has named (suwayomi_sources), each only ever followed, never a main source.
+const SW_OFF = 'sw:8800000000000000001';    // not registered: switched off, or the engine is down
+const SW_LOADED = 'sw:8800000000000000002'; // registered, under a newer name than the one the engine row kept
+const SOURCES = ['sf-x', 'sf-y', 'sf-z', 'sf-w', SW_OFF, SW_LOADED] as const;
+const ADMIN = 'sf-admin';
 
 async function setup() {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
   const { owned } = await import('../src/lib/ownedCatalog');
   const { viewCtxFor, SYSTEM_CTX } = await import('../src/lib/visibility');
+  const { registerAdapter } = await import('../src/lib/sources');
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const catalogRoutes = (await import('../src/routes/catalog')).default;
   await migrate();
 
   await cleanup(q);
@@ -39,6 +48,7 @@ async function setup() {
   //   a: added from x, follows y        b: added from y
   //   c: added from x                   d: added from z, soft-deleted, follows x
   //   e: added from w, in LIB (a library the bound member cannot open), follows y
+  //   b also follows SW_OFF, c also follows SW_LOADED
   const rows: Array<[string, string, string]> = [
     ['s_sf_a', 'sf-x', 'lib'],
     ['s_sf_b', 'sf-y', 'lib'],
@@ -58,14 +68,31 @@ async function setup() {
   await follow('s_sf_a', 'sf-y');
   await follow('s_sf_d', 'sf-x');
   await follow('s_sf_e', 'sf-y');
+  await follow('s_sf_b', SW_OFF);
+  await follow('s_sf_c', SW_LOADED);
   await q(`UPDATE lib_series SET deleted_at = now() WHERE id = 's_sf_d'`);
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,'SF Engine Source (EN)','en',false), ($2,'SF Stored Name (EN)','en',true)`,
+    [SW_OFF.slice(3), SW_LOADED.slice(3)]);
+  registerAdapter({
+    id: SW_LOADED, name: 'SF Loaded Name (EN)',
+    async search() { return []; }, async getSeries() { return null; }, async listChapters() { return []; }, async getPageUrls() { return []; },
+  } as any);
 
   const bound = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind)
      VALUES ('sf-bound','sf-bound','x','user','password') RETURNING id`))[0].id;
   await q('INSERT INTO user_libraries (user_id, library_id) VALUES ($1,$2)', [bound, 'lib']);
+  const admin = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind)
+     VALUES ($1,$1,'x','admin','password') RETURNING id`, [ADMIN]))[0].id;
 
-  return { q, owned, viewCtxFor, SYSTEM_CTX, bound };
+  const app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register(catalogRoutes);
+  await app.ready();
+  const auth = { authorization: `Bearer ${app.jwt.sign({ sub: admin, role: 'admin' })}` };
+
+  return { q, owned, viewCtxFor, SYSTEM_CTX, bound, app, auth };
 }
 
 async function cleanup(q: (sql: string, params?: any[]) => Promise<any>) {
@@ -73,6 +100,8 @@ async function cleanup(q: (sql: string, params?: any[]) => Promise<any>) {
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q(`DELETE FROM users WHERE username = 'sf-bound'`).catch(() => {});
+  await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
+  await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [[SW_OFF.slice(3), SW_LOADED.slice(3)]]).catch(() => {});
 }
 
 const ours = (r: any): string[] => r.content.map((s: any) => s.id).filter((i: string) => (SERIES as readonly string[]).includes(i)).sort();
@@ -80,7 +109,7 @@ const bySource = (rows: any[]) =>
   Object.fromEntries(rows.filter((r) => (SOURCES as readonly string[]).includes(r.id)).map((r) => [r.id, r]));
 
 test('library source filters', { skip }, async (t) => {
-  const { q, owned, viewCtxFor, SYSTEM_CTX, bound } = await setup();
+  const { q, owned, viewCtxFor, SYSTEM_CTX, bound, app, auth } = await setup();
   const search = (condition: any, ctx: any = SYSTEM_CTX) => owned.searchSeries(ctx, { condition }, 0, 200);
 
   try {
@@ -141,7 +170,26 @@ test('library source filters', { skip }, async (t) => {
       assert.equal(s['sf-y'].any, 2, "e's follow of y is in a library this member cannot open");
       assert.deepEqual(ours(await search({ anySource: { operator: 'is', value: 'sf-y' } }, await viewCtxFor(bound))), ['s_sf_a', 's_sf_b']);
     });
+
+    await t.test("GET /api/library/sources names each source as Health does: its adapter, the engine's name, its id", async () => {
+      // The #115 rule (lib/health.ts sourceLabel). PR #124 named a source from the registry, then its series'
+      // folder label, then the id. A folder label exists only for a main source, so an extension source that is
+      // only ever followed (AllManga, on the library this was written against) read as a raw `sw:4709…` whenever
+      // the engine was down or the source switched off; and a main source that is not registered was named after
+      // the folder its series sit in ('T!sf' here). Reintroduce `getSource(r.id)?.name ?? r.label ?? r.id`:
+      // "a followed extension source reads as its raw id" fails.
+      const r = await app.inject({ method: 'GET', url: '/api/library/sources', headers: auth });
+      assert.equal(r.statusCode, 200, r.body);
+      const s = bySource(r.json().content);
+      assert.deepEqual(s[SW_OFF], { id: SW_OFF, name: 'SF Engine Source (EN)', main: 0, any: 1, installed: false },
+        'a followed extension source reads as its raw id');
+      assert.deepEqual({ name: s[SW_LOADED].name, installed: s[SW_LOADED].installed }, { name: 'SF Loaded Name (EN)', installed: true },
+        "a loaded source is not named by its adapter first");
+      assert.equal(s['sf-x'].name, 'sf-x', 'a source is named after the folder its series sit in');
+      assert.deepEqual({ main: s['sf-x'].main, any: s['sf-x'].any, installed: s['sf-x'].installed }, { main: 2, any: 2, installed: false });
+    });
   } finally {
+    await app.close();
     await cleanup(q);
   }
 });

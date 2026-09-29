@@ -1189,9 +1189,10 @@ paths:
         `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
         the source, `any` the series that read from it at all (added from it, or following it as a fallback).
         Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
-        the ones the filtered grid shows. `installed` is false for a source whose extension is gone; its series
-        still filter. Empty on a Komga backend. Use the ids as `mainSource` / `anySource` in POST
-        /api/series/search.
+        the ones the filtered grid shows. `name` is the one Health uses: the loaded source's, else the name the
+        extension engine gave it, else the id. `installed` is false for a source that is not loaded now (its
+        extension is gone or switched off, or the engine is down); its series still filter. Empty on a Komga
+        backend. Use the ids as `mainSource` / `anySource` in POST /api/series/search.
       parameters:
         - name: adult
           in: query
