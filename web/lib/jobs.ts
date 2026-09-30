@@ -10,7 +10,7 @@
  */
 import { keys, t as tr } from './i18n';
 import type { Said } from './said';
-import { followedText } from './findSources';
+import { followedText, foundText } from './findSources';
 
 export interface JobCard {
   folder: string;
@@ -61,6 +61,9 @@ export interface RunCard {
   current?: { id: string; title: string };
   /** A `find_sources` run's follows so far: one per (series, source). */
   followed?: number;
+  /** A `find_sources` search: its id, whose review is /admin/find/?run=, and the series it has found sources for. */
+  runId?: string;
+  found?: number;
   /**
    * A `find_sources` run that waits for a sweep, a repair or the daily source check before its next series (its
    * `current` still names the series it did last). Absent while it is not waiting.
@@ -135,7 +138,8 @@ export function runProgress(r: RunCard): string {
   }
   if (r.fetched) bits.push(tr('{n} chapters saved', { n: r.fetched }));
   if (r.failed) bits.push(tr('{n} could not be saved', { n: r.failed }));
-  // A find run saves nothing; what it has done is follow sources.
+  // A find search saves nothing; what it has done is find sources to review.
+  if (r.found) bits.push(foundText(r.found));
   if (r.followed) bits.push(followedText(r.followed));
   return bits.join(' · ');
 }

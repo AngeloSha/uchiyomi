@@ -43,8 +43,8 @@ import {
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
 import { diagnosisReason, type Said } from '@/lib/said';
-import { useFindRun } from '@/lib/useFindRun';
-import { findGate, findSlotState } from '@/lib/findSources';
+import { useFindStatus, useStartFind } from '@/lib/useFindRun';
+import { findGate } from '@/lib/findSources';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
 import type { HealthAction, HealthCheck, HealthItem } from '@/lib/types';
 
@@ -109,7 +109,8 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const toast = useToast();
   const qc = useQueryClient();
   const rr = useRepairRun();
-  const fr = useFindRun();
+  const { data: findStatus } = useFindStatus();
+  const { start: startFind, starting: findStarting } = useStartFind();
   const { status, slots } = rr;
   const slotKey = `item:${check.id}:${rowKey}`;
   const slot = slots[slotKey];
@@ -143,11 +144,10 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     slot, run: live, record, action: repairAction ?? 'fix_short',
     onStop: live && touch === 'target' ? () => { void rr.stop(slotKey); } : undefined,
   });
-  // v0.49.1: a "Find other sources" run started from this row. It is a background run of minutes or hours, so it keeps
-  // a key group and a status line of its own (below): the row's Test, Clear block and Turn off stay usable meanwhile,
-  // where one busy key would disable every key of its group for the whole run.
-  const findSlot = fr?.slots[slotKey];
-  const findNow = findSlotState(findSlot, fr?.runOf(slotKey), () => { void fr?.stop(slotKey); });
+  // A "Find other sources" search started from this row opens its review, where it fills in and where the admin
+  // chooses what to follow. Its key keeps a status line of its own while it starts: the row's Test, Clear block and
+  // Turn off stay usable meanwhile.
+  const findNow: ActionState = findStarting ? { kind: 'starting' } : { kind: 'idle' };
   // The newest of the two is the row's line.
   const useSync = !!sync && sync.state.kind !== 'idle' && (repairState.kind === 'idle' || sync.at >= (slot?.startedAt ?? live?.startedAt ?? record?.finishedAt ?? 0));
   const rowNow: ActionState = useSync ? sync!.state : repairState;
@@ -308,14 +308,14 @@ export function HealthRow({ check, item, rowKey, links, children }: {
           }),
         };
       // v0.49.1: every visible series whose main source is this row's source (a failing source, or a series that can no
-      // longer update because of its source), in ONE background run. The key carries the run's own state -- working with
-      // its Stop, then what it did -- and waits, saying why, while another run goes (one at a time, server-wide). Its
-      // label says how many series that is, "Find other sources (189 series)": the count was in its title alone.
+      // longer update because of its source), in ONE background search whose review opens at once. The key waits,
+      // saying why, while another search goes (one at a time, server-wide). Its label says how many series that is,
+      // "Find other sources (189 series)": the count was in its title alone.
       case 'find_sources':
         return {
-          ...base, ...findGate(fr?.status, findNow.kind === 'working' || findNow.kind === 'starting'),
+          ...base, ...findGate(findStatus),
           state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: copy.label({ ...ctx, n: item.findSeries }),
-          onRun: () => { if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId }); },
+          onRun: () => { if (item.sourceId) void startFind({ sourceId: item.sourceId }); },
         };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
       // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen

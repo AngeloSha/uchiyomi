@@ -26,7 +26,7 @@ import {
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { archiveProgressText } from '@/lib/archive';
 import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
-import { FindResultsSheet } from '@/components/FindSources';
+import { reviewHref } from '@/lib/findSources';
 
 // lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
 // notes pin (partialSurfaces.test.ts) reads.
@@ -365,10 +365,9 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   // A Health press is about one series -- the way to it (the server drops it for a viewer who may not list that
   // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
   const history = admin && r.kind === 'repair';
-  // v0.49.1: a "Find other sources" run steps series by series, stops at once when asked, and keeps what it did per
-  // series -- which series got which sources -- a press away, while it runs and after.
+  // A "Find other sources" search steps series by series, stops at once when asked, and keeps what it found on its
+  // review -- where the admin chooses what to follow -- a press away, while it runs and after.
   const find = r.kind === 'find_sources';
-  const [results, setResults] = useState(false);
   // ONE sentence split around its placeholder, so the series name is its own bidi run (<bdi>): inside the Arabic
   // sentence a title ending in "!" printed the "!" at the wrong end of the name.
   const [nowBefore, nowAfter] = tr('Now: {title}').split('{title}');
@@ -399,22 +398,21 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
             ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })
             : relativeTime(new Date(r.finishedAt ?? r.startedAt).toISOString())}
         </p>
-        {/* A find run stops at once -- the series in flight is not tried unless it already followed a source -- so it
-            says the plain word, never "after this series". */}
+        {/* A find search stops at once -- the series in flight stays unsearched -- so it says the plain word, never
+            "after this series". */}
         {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{find ? tr('Stopping…') : tr('Stopping after this chapter…')}</p>}
-        {/* A stopped find run downloaded nothing to keep: what it followed stays followed, and its results say which. */}
+        {/* A stopped find search downloaded nothing: what it found stays on its review, and it can search on. */}
         {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{find ? tr('Stopped before it finished') : tr('Cancelled; what landed is kept.')}</p>}
         {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{reasonText(r)}</p>}
-        {(r.seriesId || history || (find && admin)) && (
+        {(r.seriesId || history || (find && admin && r.runId)) && (
           <p className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
             {r.seriesId && <Link href={seriesHref(r.seriesId, r.number)} className="text-accent hover:underline">{tr('Open')} ›</Link>}
             {history && <Link href="/admin/?tab=Health#repairs" className="text-accent hover:underline">{tr('Recent repairs')} ›</Link>}
-            {find && admin && (
-              <button type="button" onClick={() => setResults(true)} data-find-results-open className="text-accent hover:underline">{tr('Show results')} ›</button>
+            {find && admin && r.runId && (
+              <Link href={reviewHref(r.runId)} data-find-review className="text-accent hover:underline">{tr('Review')} ›</Link>
             )}
           </p>
         )}
-        {results && <FindResultsSheet onClose={() => setResults(false)} />}
       </div>
       {mine && running && !r.cancelRequested && (
         <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{find ? tr('Stop') : tr('Cancel')}</button>

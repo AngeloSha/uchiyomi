@@ -1,20 +1,16 @@
 /**
- * Find other sources, and the other names a series goes by (v0.49.1): the part with no React in it, so a test can
- * hold the words and the rules.
+ * Find other sources, and the other names a series goes by: the part with no React in it, so a test can hold the
+ * words and the rules.
  *
- * Why: aqua, the owner's main source, has served only its own "temporarily offline" page since 2026-09-23, and 189
- * of its 195 series had no second source to take new chapters from. An admin can now ask the server to look for
- * other sources for every series of a source (Health), for a selection (Library), or for one series (Sources &
- * translations): ONE calm run at a time on the server, 1.5 s between series, pausing for a chapter sweep, a repair
- * or the daily check, and following a source only where autoFollow's judgement (title and chapter numbers) says it
- * is the same series. The other names are what that search asks under besides the title.
+ * An admin asks the server to look for other sources for every series of a source (Health), for a selection
+ * (Library), or for one series (Sources & translations). ONE calm search at a time on the server -- 1.5 s between
+ * series, pausing for a chapter sweep, a repair or the daily check -- that PROPOSES: nothing is followed until the
+ * admin confirms it on the search's review page (app/admin/find/page.tsx). A green match is one autoFollow's
+ * judgement would follow (a name matches and the chapter numbers line up both ways); an amber one has exactly the
+ * same name and chapter numbers that do not line up, and is only ever followed on its own, from its chapter list.
  *
- * The idea, the other-names list and the name parsing are @TIGamingTV's (PR #119), rebuilt server-side on the
- * existing follow machinery (bff lib/autoFollow.ts, lib/sourceHunt.ts).
- *
- * ⚠️ 'not tried' is not 'not found'. A series the run never reached -- stopped, out of time, or cut short by a
- * restart -- says so in its own words and its own section, and is offered again; reading it as "no source has it"
- * would send the admin away from a series nobody searched for.
+ * The idea, the review and the other-names list are @TIGamingTV's (PR #119), on the server's own follow rules (bff
+ * lib/findSources.ts, lib/autoFollow.ts).
  */
 import { keys, t as tr } from './i18n';
 import { etaLine } from './format';
@@ -22,7 +18,7 @@ import { normTitle } from './normTitle';
 import { waitingText } from './archive';
 import type { ActionState } from './actionState';
 
-// ---- the server's shapes (bff routes: /api/admin/series/:id/alt-titles, /api/admin/sources/find) ------------
+// ---- the other names (bff routes: /api/admin/series/:id/alt-titles) ------------------------------------------
 
 /** Where a name came from: a source's own description, an admin's hand, or the tracker list an import read. */
 export type AltOrigin = 'description' | 'admin' | 'import';
@@ -36,72 +32,6 @@ export interface AltTitle {
   /** The stored key, when the server sends it; otherwise it is the title's key (`altKey`). */
   norm?: string;
 }
-
-/**
- * Why a series gained no source (bff source_find_runs.results[].why):
- * - `posting_order`: numbered by posting order, which refuses followers (bff lib/numbering.ts);
- * - `full`: it already follows as many other sources as a series may;
- * - `too_few`: it lists fewer than 3 chapter numbers, too few to compare a candidate's with -- decided without a
- *   search;
- * - `no_source`: no other source could be asked (switched off, cooling down, or left out);
- * - `no_answer`: other sources were asked, and none of them answered;
- * - `no_match`: searched, and no source that answered lists it under its title or other names;
- * - `followed_already`: searched, and no source that answered lists it -- but the one it already follows does, so it is
- *   not "no other source lists it" (the server's own reason since its review, in the same group as `no_match`);
- * - `refused`: a candidate was found and failed the title and chapter-number check;
- * - `not_tried`: never reached -- a stop, the run's time limit or a restart cut the run short. NOT searched.
- */
-export type FindWhy =
-  | 'posting_order' | 'no_match' | 'followed_already' | 'full' | 'refused' | 'too_few' | 'no_source' | 'no_answer' | 'not_tried';
-
-export interface FindFollowed { sourceId: string; name: string; chapters: number | null }
-
-export interface FindResult {
-  seriesId: string;
-  /** Left out for a series the viewer may not list (the 18+ hide): the row says why rather than name it. */
-  title?: string;
-  followed: FindFollowed[];
-  why?: FindWhy;
-}
-
-export type FindRunStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupted';
-
-/** A kept run without its results (`recent`). Times are the server's: an ISO string, or epoch ms. */
-export interface FindRunSummary {
-  id: string;
-  status: FindRunStatus;
-  total: number;
-  done: number;
-  /** Follows it added: one per (series, source). */
-  followed: number;
-  startedBy: string | null;
-  startedAt: string | number;
-  finishedAt?: string | number | null;
-}
-
-/** The running run, or the newest finished one, with what it did per series. */
-export interface FindRun extends FindRunSummary {
-  /** The series it is on; left out for one the viewer may not list. */
-  current?: { seriesId: string; title: string } | null;
-  /**
-   * What a running run waits on before its next series: a chapter sweep, a repair or the daily source check, which
-   * own the sources while they go. `current` still names the series it asked about last.
-   */
-  waiting?: 'sweep' | 'repair' | 'check' | null;
-  results: FindResult[];
-}
-
-/** GET /api/admin/sources/find. */
-export interface FindStatus {
-  running: boolean;
-  run: FindRun | null;
-  recent: FindRunSummary[];
-}
-
-/** What POST /api/admin/sources/find takes: some series, or every visible series whose MAIN source is this one. */
-export type FindScope = { seriesIds: string[] } | { sourceId: string };
-
-// ---- the other names -----------------------------------------------------------------------------------
 
 /**
  * A name's key, as DELETE /api/admin/series/:id/alt-titles/:norm takes it: the server's own when it sent one, else
@@ -128,143 +58,175 @@ export function altRefusal(code: string | null | undefined): string | null {
   return null;
 }
 
+// ---- the server's shapes (bff routes/findSources.ts) ----------------------------------------------------------
+
+/**
+ * `running`: searching. `stopped` and `interrupted`: cut short by a stop or a restart, what it found kept, resumable.
+ * `review`: candidates wait. `linking`: following what was confirmed. `done`: nothing left open.
+ */
+export type FindRunStatus = 'running' | 'stopped' | 'interrupted' | 'review' | 'linking' | 'done' | 'failed';
+
+/** A kept run. Times are the server's: an ISO string, or epoch ms. */
+export interface FindRunSummary {
+  id: string;
+  status: FindRunStatus;
+  total: number;
+  /** Series settled: searched, or skipped before any search. */
+  done: number;
+  /** Series it found at least one match for. */
+  found: number;
+  /** Matches waiting for a decision. */
+  open: number;
+  followed: number;
+  failed: number;
+  startedBy: string | null;
+  startedAt: string | number;
+  finishedAt?: string | number | null;
+  sourceId?: string;
+  sourceName?: string;
+}
+
+/** A run with what it is doing while it searches. */
+export interface FindRun extends FindRunSummary {
+  /** The series it is on; left out for one the viewer may not list. */
+  current?: { seriesId: string; title: string } | null;
+  /** What a searching run waits on before its next series: a chapter sweep, a repair or the daily source check. */
+  waiting?: 'sweep' | 'repair' | 'check' | null;
+}
+
+/** GET /api/admin/sources/find. */
+export interface FindStatus {
+  running: boolean;
+  run: FindRun | null;
+  recent: FindRun[];
+}
+
+/** What POST /api/admin/sources/find takes: some series, or every visible series whose MAIN source is this one. */
+export type FindScope = { seriesIds: string[] } | { sourceId: string };
+
+/** `ok`: green, followed in bulk. `numbering_differs`: amber, the same name, followed only on its own. */
+export type FindVerdict = 'ok' | 'numbering_differs';
+/** Why a series was not searched. */
+export type FindNote = 'posting_order' | 'full' | 'too_few' | 'no_source';
+
+export interface FindCandidate {
+  id: string;
+  itemId: string;
+  source: string;
+  name: string;
+  sourceSeriesId: string;
+  theirTitle: string | null;
+  cover: string | null;
+  ourName: string | null;
+  theirName: string | null;
+  coverageFwd: number | null;
+  coverageBack: number | null;
+  verdict: FindVerdict;
+  manual: boolean;
+  /** Null while it is open; else what became of it. */
+  status: string | null;
+}
+
+export interface FindItem {
+  id: string;
+  seriesId: string;
+  title: string;
+  names: string[];
+  state: 'pending' | 'done' | 'skipped' | 'error';
+  note?: FindNote | null;
+  asked: number;
+  unreachable: number;
+  primary: { source: string; name: string } | null;
+  following: { source: string; name: string }[];
+  freeSlots: number;
+  candidates: FindCandidate[];
+}
+
+/** GET /api/admin/sources/find/:id. */
+export interface FindReview {
+  run: FindRun & { maxFollowers?: number };
+  hidden: number;
+  items: FindItem[];
+}
+
+/** GET /api/admin/sources/find/items/:id/chapters: what a candidate lists, beside what the series has. */
+export interface FindChapters {
+  source: string;
+  name: string;
+  title: string | null;
+  count: number;
+  ourCount: number;
+  shared: number;
+  /** Numbers the series has that this source does not list. */
+  missing: number[];
+  chapters: { number: number; title: string | null; scanlator: string | null; publishedAt: string | null; ours: boolean }[];
+}
+
+/** Where a run's review is. The trailing slash is load-bearing (next.config.mjs `trailingSlash: true`). */
+export const reviewHref = (runId: string): string => `/admin/find/?run=${encodeURIComponent(runId)}`;
+
 // ---- how long ------------------------------------------------------------------------------------------
 
 /**
- * The most one series takes: the run's 1.5 s pace, plus the run's own wall per series (bff lib/findSources.ts
- * FIND_SERIES_WALL_MS, 90 s: what has not answered by then is not tried). The hunt's 60 s wall made aqua's 189
- * series "up to 4 hours" for a run that may take nearly five. Waiting for a sweep, a repair or the daily check is on
- * top, and unbounded; the words say the run pauses for them rather than fold them into a number.
+ * The most one series takes: the search's 1.5 s pace, plus its wall per series (bff lib/findSources.ts
+ * FIND_SERIES_WALL_MS, 120 s). Waiting for a sweep, a repair or the daily check is on top, and unbounded; the words
+ * say the search pauses for them rather than fold them into a number.
  */
-export const FIND_SERIES_MAX_MS = 1_500 + 90_000;
+export const FIND_SERIES_MAX_MS = 1_500 + 120_000;
 
-/** How long before the press: "Up to 5 hours" for 189 series; per series when the count is not known. */
+/** How long before the press: "Up to 7 hours" for 189 series; per series when the count is not known. */
 export function findEta(n: number | null | undefined): string {
-  return n && n > 0 ? etaLine({ maxMs: n * FIND_SERIES_MAX_MS }) : tr('Up to about a minute and a half per series');
+  return n && n > 0 ? etaLine({ maxMs: n * FIND_SERIES_MAX_MS }) : tr('Up to about two minutes per series');
 }
 
 // ---- what a run did ------------------------------------------------------------------------------------
-
-/**
- * One series' reason, in words. `posting_order` is Health's sentence for the same fact (healthCopy GAP_WHY).
- * ⚠️ Each reason says only what happened: a series with too few chapters was never searched, and one no source could
- * be asked about, or none answered for, is neither "not found" nor "stopped" -- the server sent `refused` and
- * `not_tried` for them until the v0.49.1 review.
- */
-export function findWhyLine(why: string | null | undefined): string {
-  switch (why) {
-    case 'no_match': return tr('No other source lists it under its title or other names');
-    case 'followed_already': return tr('No other source lists it besides the one it already follows');
-    case 'refused': return tr('Found a possible match, but it did not pass the title and chapter-number check');
-    case 'full': return tr('Already follows as many other sources as a series may');
-    case 'posting_order': return tr('Numbered by posting order: no other source’s numbers line up with it');
-    case 'too_few': return tr('Too few chapters to compare (fewer than 3)');
-    case 'no_source': return tr('No other source could be asked');
-    case 'no_answer': return tr('No other source answered');
-    case 'not_tried': return tr('Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there');
-  }
-  return tr('Nothing found');
-}
-
-export interface FindGroups {
-  /** Gained at least one source. */
-  found: FindResult[];
-  /** Searched, and nothing followed: no match, a match that did not line up, or no source that answered. */
-  nothing: FindResult[];
-  /**
-   * Not searched, decided from what the server already knew: numbered by posting order, no free follower slot, too
-   * few chapters to compare, or no other source it could ask.
-   */
-  skipped: FindResult[];
-  /** Never reached: a stop, the run's time or a restart. ⚠️ Its own group, never "nothing found". */
-  notTried: FindResult[];
-}
-
-const SKIPPED: ReadonlySet<string> = new Set<FindWhy>(['full', 'posting_order', 'too_few', 'no_source']);
-
-/** A run's results in the four groups the results sheet shows, each in the order the run took them. */
-export function groupResults(results: readonly FindResult[] | null | undefined): FindGroups {
-  const g: FindGroups = { found: [], nothing: [], skipped: [], notTried: [] };
-  for (const r of results ?? []) {
-    if (r.followed?.length) g.found.push(r);
-    else if (r.why === 'not_tried') g.notTried.push(r);
-    else if (r.why && SKIPPED.has(r.why)) g.skipped.push(r);
-    else g.nothing.push(r);
-  }
-  return g;
-}
 
 /** Epoch ms of a server time, ISO or number; NaN when there is none. */
 export const toMs = (t: string | number | null | undefined): number =>
   typeof t === 'number' ? t : t ? Date.parse(t) : NaN;
 
-/** "1 source followed", "{n} sources followed": what the run card and the row say about follows. */
+/** "1 source followed", "{n} sources followed". */
 export const followedText = (n: number): string =>
   (n === 1 ? tr('1 source followed') : tr('{n} sources followed', { n }));
 
-/**
- * How far a running run has got: "12 of 189 series · 3 sources followed". A run for one series (the Sources sheet's)
- * counts nothing -- "0 of 1 series" says less than the step itself.
- */
-export function progressLine(run: Pick<FindRunSummary, 'done' | 'total' | 'followed'>): string {
+/** "Sources found for 1 series", "Sources found for {n} series": what a search turned up, before anything is followed. */
+export const foundText = (n: number): string =>
+  (n === 1 ? tr('Sources found for 1 series') : tr('Sources found for {n} series', { n }));
+
+/** "1 match to review", "{n} matches to review". */
+export const openText = (n: number): string =>
+  (n === 1 ? tr('1 match to review') : tr('{n} matches to review', { n }));
+
+/** How far a searching run has got: "12 of 189 series · Sources found for 3 series". A run of one series counts nothing. */
+export function progressLine(run: Pick<FindRunSummary, 'done' | 'total' | 'found'>): string {
   const bits: string[] = [];
   if (run.total > 1) bits.push(tr('{done} of {total} series', { done: Math.min(run.done, run.total), total: run.total }));
-  if (run.followed > 0) bits.push(followedText(run.followed));
+  if (run.found > 0) bits.push(foundText(run.found));
   return bits.join(' · ');
 }
 
-/**
- * A run stopped by hand and one a restart cut short are the same to their reader: neither got to the end, what each
- * did stands, and the series it never reached are not tried -- counted, listed and offered again. The server lists
- * those as `not_tried` rows for both (since the v0.49.1 review); before, an interrupted run read as a red failure
- * that counted none of them.
- */
-const cutShort = (status: FindRunStatus): boolean => status === 'stopped' || status === 'interrupted';
+/** A search that did not get to its end: what it found stands, and it can go on. */
+export const cutShort = (status: FindRunStatus): boolean => status === 'stopped' || status === 'interrupted';
 
 /**
- * What a run did, as one line: "40 sources followed · Nothing found for 140 series · 3 series skipped · 6 series not
- * tried", with how far it got first when it did not get to the end ("Stopped before it finished · 50 of 189 series",
- * "Interrupted by a restart · …"). `status: false` leaves that first word out, where a label beside the line already
- * says it (the results sheet's head, an earlier search's line). Without results (a `recent` summary) it is the counts
- * the summary carries.
+ * What a run did, as one line: "Stopped before it finished · 50 of 189 series · Sources found for 40 series · 52
+ * matches to review · 3 sources followed". `status: false` leaves the first words out where a label beside the line
+ * already says them.
  */
-export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o: { status?: boolean } = {}): string {
+export function findSummary(run: FindRunSummary, o: { status?: boolean } = {}): string {
   const bits: string[] = [];
-  // The same words as a stopped or interrupted repair's (healthCopy.ts runStatusWord), which this file does not
-  // import: healthCopy imports it.
   if (o.status !== false && run.status === 'stopped') bits.push(tr('Stopped before it finished'));
   if (o.status !== false && run.status === 'interrupted') bits.push(tr('Interrupted by a restart'));
-  const g = run.results ? groupResults(run.results) : null;
-  // How far it got, in series it settled with an outcome. The server's `done` counts every series it settled, the one a
-  // Stop caught in flight among them, which it lists as not tried; the rest, listed after them, it does not count. So
-  // a run over 4 stopped during its first read "1 of 4 series · 4 series not tried", as if one had been searched.
-  // Reintroduce `run.done` as it is: "a series a stop caught in flight counts as searched" in findSources.test.ts.
-  const untriedSettled = g ? Math.max(0, g.notTried.length - Math.max(0, run.results!.length - run.done)) : 0;
-  const through = Math.max(0, run.done - untriedSettled);
-  if (run.status !== 'done' && run.total > 0 && through > 0) bits.push(tr('{done} of {total} series', { done: Math.min(through, run.total), total: run.total }));
-  // A follow is news; "0 sources followed" beside the groups that say why was not.
+  if (run.done < run.total) bits.push(tr('{done} of {total} series', { done: run.done, total: run.total }));
+  bits.push(run.found > 0 ? foundText(run.found) : tr('Nothing found'));
+  if (run.open > 0) bits.push(openText(run.open));
   if (run.followed > 0) bits.push(followedText(run.followed));
-  if (g) {
-    const n = g.nothing.length;
-    const s = g.skipped.length;
-    // Counted from the results rather than `total - done`: a series the server never reached may carry no row.
-    const t = g.notTried.length + (cutShort(run.status) ? Math.max(0, run.total - run.results!.length) : 0);
-    if (n) bits.push(n === 1 ? tr('Nothing found for 1 series') : tr('Nothing found for {n} series', { n }));
-    if (s) bits.push(s === 1 ? tr('1 series skipped') : tr('{n} series skipped', { n: s }));
-    if (t) bits.push(t === 1 ? tr('1 series not tried') : tr('{n} series not tried', { n: t }));
-  }
-  // Nothing else to say -- a kept run without its results, say, that followed nothing -- and that is what it did.
-  if (!bits.length) bits.push(tr('No source followed'));
   return bits.join(' · ');
 }
 
-/** The series the run never reached, to search again: its `not_tried` rows. */
-export const notTriedIds = (run: FindRun | null | undefined): string[] => groupResults(run?.results).notTried.map((r) => r.seriesId);
-
 /**
- * A run as an action's status line (Health's row and card, the results sheet): working with how far it has got and
- * what it is on -- or what it waits for -- then what it did, amber when it stopped, was cut short by a restart or
- * left a series untried; or that it failed.
+ * A run as an action's status line (Health's row and card, Server tasks): working with how far it has got and what it
+ * is on -- or what it waits for -- then what it found, amber when it was cut short or waits for a review.
  */
 export function findRunState(run: FindRun | null | undefined, o: { onStop?: () => void; stopping?: boolean; status?: boolean } = {}): ActionState {
   if (!run) return { kind: 'idle' };
@@ -272,9 +234,6 @@ export function findRunState(run: FindRun | null | undefined, o: { onStop?: () =
   const finished = toMs(run.finishedAt);
   if (run.status === 'running') {
     const counts = progressLine(run);
-    // A sweep, a repair or the daily check owns the sources while it goes, and the run waits for it -- for as long as
-    // it takes, with nothing moving: said in the words the slow archive uses for the same three waits. Meanwhile
-    // `current` still names the series it asked about last, which is not what it is doing.
     const wait = run.waiting ? waitingText({ why: run.waiting }, null) : '';
     return {
       kind: 'working',
@@ -288,100 +247,170 @@ export function findRunState(run: FindRun | null | undefined, o: { onStop?: () =
   }
   const at = Number.isFinite(finished) ? finished : Date.now();
   if (run.status === 'failed') return { kind: 'failed', finishedAt: at, reason: tr('The search failed; the server log says why') };
-  const g = groupResults(run.results);
-  // An interrupted run has no honest "Took": the server closes it when it comes back up, not when it went down.
   const timed = run.status !== 'interrupted' && Number.isFinite(started) && Number.isFinite(finished);
   return {
     kind: 'done',
     finishedAt: at,
     ...(timed ? { tookMs: finished - started } : {}),
     outcome: findSummary(run, { status: o.status }),
-    partial: cutShort(run.status) || g.notTried.length > 0 || undefined,
+    partial: cutShort(run.status) || run.open > 0 || undefined,
   };
 }
 
-/** One series' outcome in a run: what it followed, or why nothing. Null while the run has not answered for it. */
-export function seriesOutcome(run: FindRun | null | undefined, seriesId: string): { text: string; partial?: boolean } | null {
-  if (!run) return null;
-  const r = run.results?.find((x) => x.seriesId === seriesId);
-  if (r?.followed?.length) return { text: tr('Followed {source}', { source: r.followed.map((f) => f.name).join(', ') }) };
-  if (r) return { text: findWhyLine(r.why), partial: true };
-  // Never reached: a run that stopped, failed or was cut short by a restart before this series, whose results hold no
-  // row for it.
-  if (run.status === 'running') return null;
-  return { text: findWhyLine('not_tried'), partial: true };
-}
-
-// ---- following one run ---------------------------------------------------------------------------------
-
-/** What a press did, until its run has been read back (lib/useFindRun.tsx keeps one per key). */
-export interface FindSlot {
-  phase: 'starting' | 'awaiting' | 'settling' | 'ended' | 'refused' | 'failed';
-  runId?: string;
-  startedAt: number;
-  finishedAt?: number;
-  reason?: string;
-  stopping?: boolean;
-}
-
-/**
- * The status line of the key that started a run: starting, then the run working (with its Stop), then "Checking the
- * result…" while the page is asked again, then what the run did -- or the refusal, or the failure. `run` is the run
- * this slot started, once the status names it.
- */
-export function findSlotState(slot: FindSlot | null | undefined, run: FindRun | null | undefined, onStop?: () => void): ActionState {
-  if (!slot) return { kind: 'idle' };
-  switch (slot.phase) {
-    case 'starting': return { kind: 'starting' };
-    case 'refused': return { kind: 'refused', reason: slot.reason ?? '' };
-    case 'failed': return { kind: 'failed', finishedAt: slot.finishedAt, reason: slot.reason ?? '' };
-    case 'settling': return { kind: 'working', startedAt: slot.startedAt, step: tr('Checking the result…') };
-    case 'awaiting':
-      // Pressed, and the status has not shown the run yet: working, from the press.
-      return run?.status === 'running' ? findRunState(run, { onStop, stopping: slot.stopping }) : { kind: 'working', startedAt: slot.startedAt, step: tr('Working…') };
-  }
-  return run ? findRunState(run) : { kind: 'done', finishedAt: slot.finishedAt ?? Date.now(), outcome: tr('Done') };
-}
-
-/**
- * The runs that ended between two answers of GET /api/admin/sources/find:
- * - the one that was running at the last answer and is not now;
- * - one THIS page started (`awaiting`, the ids its POSTs answered) that the answer shows finished -- as the newest
- *   run or among the recent ones. ⚠️ Never merely because it is not the running one: an answer from before the
- *   press does not show it yet, and reading that as "over" put the PREVIOUS run's outcome on the row.
- */
-export function findEndedRunIds(prev: FindStatus | null | undefined, next: FindStatus, awaiting: Iterable<string>): string[] {
-  const out = new Set<string>();
-  const live = next.running && next.run ? next.run.id : null;
-  if (prev?.running && prev.run && prev.run.id !== live) out.add(prev.run.id);
-  for (const id of awaiting) {
-    if (!id || id === live) continue;
-    const over = (next.run?.id === id && next.run.status !== 'running') || (next.recent ?? []).some((r) => r.id === id && r.status !== 'running');
-    if (over) out.add(id);
-  }
-  return [...out];
-}
-
-/** Whether a find key may start now: never while another run goes -- the server answers `busy` -- and why. */
-export function findGate(status: FindStatus | null | undefined, own: boolean): { disabled?: true; disabledWhy?: string } {
+/** Whether a find key may start now: never while another search runs -- the server answers `busy` -- and why. */
+export function findGate(status: FindStatus | null | undefined, own = false): { disabled?: true; disabledWhy?: string } {
   return status?.running && !own ? { disabled: true, disabledWhy: busyLine() } : {};
 }
 
-/** The one-run-at-a-time refusal (409 `busy`), as a key's title and a refusal's words. */
+/** The one-search-at-a-time refusal (409 `busy`), as a key's title and a refusal's words. */
 export const busyLine = (): string => tr('Another search for other sources is running; this can start when it ends');
 
 /**
- * A refused start in words, by the server's code:
- * - 409 `busy`: another run;
- * - 400 `empty_scope`: no series here the server may search for (none visible, or none whose main source this is);
- * - 400 `bad_request`: a scope the route will not take, which from this page means more than 500 series (bff
- *   routes/findSources.ts: a Library selection, or "Search the {n} series not tried" after a big source's run).
- * ⚠️ The code, never the status: every 400 read "No series to search for", over a selection of 600 too.
- * Anything else is the caller's fallback.
+ * A refused start in words, by the server's code: 409 `busy` (another search), 400 `empty_scope` (nothing here the
+ * server may search for), `too_many` (more than 500 series). Anything else is the caller's fallback.
  */
 export function startRefusal(status: number | null | undefined, code: string | null | undefined): string | null {
-  if (status === 409 || code === 'busy') return busyLine();
+  if (code === 'busy' || (status === 409 && !code)) return busyLine();
   if (code === 'empty_scope') return tr('No series to search for');
-  if (code === 'bad_request') return tr('Too many series for one search: 500 at most');
+  if (code === 'too_many') return tr('Too many series for one search: 500 at most');
+  return null;
+}
+
+// ---- the review ----------------------------------------------------------------------------------------
+
+/**
+ * Chapter numbers as runs: [1,2,3,5,7,8] -> "1–3, 5, 7–8". Whole numbers join a run; a decimal (12.5) stands alone.
+ * At most `max` parts, then "+ {n} more", so a source missing 300 scattered numbers stays one line.
+ */
+export function ranges(nums: number[], max = 12): string {
+  const sorted = [...new Set(nums)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && Number.isInteger(sorted[j]) && sorted[j + 1] === sorted[j] + 1) j++;
+    parts.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]));
+    i = j + 1;
+  }
+  return parts.length > max ? `${parts.slice(0, max).join(', ')} ${tr('+ {n} more', { n: parts.length - max })}` : parts.join(', ');
+}
+
+/** A match that is still waiting for a decision. */
+export const isOpen = (c: Pick<FindCandidate, 'status'>): boolean => !c.status;
+
+/**
+ * Whether a bulk follow takes this match -- bff lib/findSources.ts `mayFollow`, word for word: only green. There is
+ * no bulk override; an amber one is followed on its own from its chapter list.
+ */
+export const mayFollow = (c: Pick<FindCandidate, 'verdict'>): boolean => c.verdict === 'ok';
+
+/**
+ * What "Select exact matches" ticks: per series, its open green matches, best-covered first, as many as it has free
+ * places. An amber one is never ticked for anyone: following one is a decision, not a default.
+ */
+export function preselect(items: readonly FindItem[]): Set<string> {
+  const out = new Set<string>();
+  for (const it of items) {
+    const ok = it.candidates.filter((c) => isOpen(c) && mayFollow(c))
+      .sort((a, b) => Math.min(b.coverageFwd ?? 0, b.coverageBack ?? 0) - Math.min(a.coverageFwd ?? 0, a.coverageBack ?? 0));
+    for (const c of ok.slice(0, it.freeSlots)) out.add(c.id);
+  }
+  return out;
+}
+
+/** How many of a series' matches are ticked; an unticked box locks once they fill its free places. */
+export const pickedFor = (it: Pick<FindItem, 'candidates'>, selected: ReadonlySet<string>): number =>
+  it.candidates.filter((c) => selected.has(c.id)).length;
+
+/** A match's verdict, beside its source. */
+export const verdictLabel = (v: FindVerdict | string): string =>
+  (v === 'ok' ? tr('Same series') : tr('Chapter numbers differ'));
+export const verdictColor = (v: FindVerdict | string): string => (v === 'ok' ? 'text-emerald-400' : 'text-amber-400');
+
+/** Both shares as the row prints them: "Has 98% of this series' chapters · this series has 95% of its". */
+export function coverageLine(c: Pick<FindCandidate, 'coverageFwd' | 'coverageBack'>): string | null {
+  if (c.coverageFwd == null || c.coverageBack == null) return null;
+  return tr('Has {a}% of this series’ chapters · this series has {b}% of its', { a: Math.round(c.coverageFwd * 100), b: Math.round(c.coverageBack * 100) });
+}
+
+/** What became of a match. Every branch a literal, so the locale files see each. */
+export function candidateStatusLabel(status: string): string {
+  switch (status) {
+    case 'linked': return tr('Followed');
+    case 'already_followed': return tr('Already followed');
+    case 'cap': return tr('Not followed: already follows as many other sources as a series may');
+    case 'primary': return tr('Not followed: it is this series’ main source');
+    case 'posting_order': return tr('Not followed: this series is numbered by posting order');
+    case 'gone': return tr('Not followed: the series is no longer in the library');
+    case 'unavailable': return tr('Not followed: that source is switched off or not installed');
+  }
+  return tr('Could not follow it');
+}
+export const candidateStatusColor = (status: string): string =>
+  (status === 'linked' || status === 'already_followed' ? 'text-emerald-400' : 'text-rose-300');
+
+/** Why a series was not searched, or what its search found when it found nothing. */
+export function itemLine(it: Pick<FindItem, 'state' | 'note' | 'asked' | 'unreachable' | 'candidates'>): string | null {
+  if (it.state === 'pending') return tr('Not searched yet');
+  if (it.state === 'error') return tr('This series could not be read: it may have been removed or merged');
+  if (it.state === 'skipped') {
+    switch (it.note) {
+      case 'posting_order': return tr('Numbered by posting order: no other source’s numbers line up with it');
+      case 'full': return tr('Already follows as many other sources as a series may');
+      case 'too_few': return tr('Too few chapters to compare (fewer than 3)');
+      case 'no_source': return tr('No other source could be asked');
+    }
+    return tr('Not searched');
+  }
+  if (it.candidates.length) return null;
+  if (it.asked > 0 && it.unreachable >= it.asked) return tr('No other source answered');
+  return tr('No other source lists it under its title or other names');
+}
+
+/** "1 source did not answer", "{n} sources did not answer": beside a series nothing was found for. */
+export const unreachableText = (n: number): string =>
+  (n === 1 ? tr('1 source did not answer') : tr('{n} sources did not answer', { n }));
+
+/** A run's status as its review's head says it. */
+export function runStatusLine(s: FindRunStatus): string {
+  switch (s) {
+    case 'running': return tr('Searching other sources');
+    case 'stopped': return tr('Stopped before it finished');
+    case 'interrupted': return tr('Interrupted by a restart');
+    case 'review': return tr('Ready to review');
+    case 'linking': return tr('Following…');
+    case 'done': return tr('Done');
+    case 'failed': return tr('The search failed; the server log says why');
+  }
+}
+
+/**
+ * A refused follow, pick, resume or discard in words, by the server's code. Null for a code it does not know, which
+ * the caller says with the server's own message.
+ */
+export function findRefusalLine(code: string | null | undefined, theirTitle?: string | null): string | null {
+  switch (code) {
+    case 'gone': return tr('That series is no longer in the library.');
+    case 'posting_order': return tr('Numbered by posting order: no other source’s numbers line up with it');
+    case 'full': case 'cap': return tr('Already follows as many other sources as a series may');
+    case 'too_few': return tr('Too few chapters to compare (fewer than 3)');
+    case 'already_followed': return tr('This series already reads from that source.');
+    case 'primary': return tr('Not followed: it is this series’ main source');
+    case 'unknown_source': return tr('That source is not installed.');
+    case 'unavailable': return tr('That source is switched off or cooling down right now.');
+    case 'unreachable': return tr('That source did not answer. Try again in a moment.');
+    case 'title_differs': return theirTitle
+      ? tr('None of its names is one of this series’ names: it is called “{title}”.', { title: theirTitle })
+      : tr('None of its names is one of this series’ names.');
+    case 'not_this_series': return tr('Its title only contains this series’ title, and its chapters do not line up: most likely a sequel or a spin-off.');
+    case 'changed': return tr('That source no longer lists it under a name of this series.');
+    case 'closed': return tr('That match was already dealt with.');
+    case 'busy': return tr('This search is busy right now. Try again in a moment.');
+    case 'still_searching': return tr('Stop the search, or wait for it to finish, first.');
+    case 'not_followable': return tr('The chapters of what you selected do not line up. Open its chapters to follow one on its own.');
+    case 'nothing_to_follow': return tr('Nothing selected is waiting to be followed.');
+    case 'not_resumable': return tr('Every series of this search has been searched.');
+    case 'not_found': return tr('That search is gone.');
+  }
   return null;
 }

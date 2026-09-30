@@ -57,6 +57,8 @@ const SURFACES = [
   // v0.49.1, Find other sources: the run's row, its results and Health's card.
   'components/FindSources.tsx',
   'lib/findSources.ts',
+  // Find other sources' review: a candidate's chapter list.
+  'components/FindChapterList.tsx',
 ];
 
 /**
@@ -102,6 +104,13 @@ const SLICES: [string, string, string, string][] = [
   // v0.49.1: the Sources sheet's Find more sources and Other names -- keys and a plain list, beside the sheet's
   // Prefer/Block chips, which stay.
   ['components/SourcesSheet.tsx', 'Sources sheet: Find more sources and Other names', 'function FindMore(', 'const emptyStat'],
+  // Find other sources' review: its matches, series and earlier searches are keys, and so are its footer and its
+  // sheets' keys -- beside the All / Found / Nothing found filter, whose chips stay. The search by hand's names are
+  // choices of what to search, and stay chips; its pick's keys do not.
+  ['app/admin/find/page.tsx', 'Find review: matches, series and earlier searches', 'function CandidateRow(', 'function FindReviewInner('],
+  ['app/admin/find/page.tsx', 'Find review: the head, the footer and the sheets', "<h1 className=", '<div className="mb-3 mt-1 flex flex-wrap gap-2">'],
+  ['app/admin/find/page.tsx', 'Find review: Follow selected and the chapter sheet', '<div ref={footerRef}', ''],
+  ['components/FindPickSheet.tsx', 'Search by hand: the pick and its keys', 'const footer = pending ? (', 'return ('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

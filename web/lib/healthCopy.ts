@@ -209,10 +209,10 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     how: () => tr('For a proposal nothing is renamed: Uchiyomi records the source’s numbers as your choice and stops proposing a renumbering for this series. On a series it has already renumbered, it first shows the plan back to the source’s numbers, and renames the files only once you confirm.'),
     eta: moment,
   },
-  // v0.49.1: a failing source's row, and a series that can no longer update because of its source. ONE background run
-  // for every visible series whose MAIN source this is (POST /api/admin/sources/find {sourceId}); its row follows the
-  // run (lib/useFindRun.tsx), and Library -> Downloads shows it under Server tasks. `n` is how many series it would
-  // search for, when the row says (HealthItem.findSeries). The idea is @TIGamingTV's (PR #119).
+  // v0.49.1: a failing source's row, and a series that can no longer update because of its source. ONE background search
+  // for every visible series whose MAIN source this is (POST /api/admin/sources/find {sourceId}), whose review opens
+  // at once: nothing is followed until the admin confirms it there. `n` is how many series it would search for, when
+  // the row says (HealthItem.findSeries). The idea and the review are @TIGamingTV's (PR #119).
   find_sources: {
     // A row's key says how many series it searches for: on a row of "Series that can no longer update" it is every
     // series of that source, not the one row, and the count was only in the key's tooltip. The card's legend, with
@@ -221,11 +221,11 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
       : c.n && c.n > 1 ? tr('Find other sources ({n} series)', { n: c.n })
         : tr('Find other sources')),
     what: (c) => (c.n === 1
-      ? tr('Searches the other sources for the 1 series that comes from this source, and follows the ones whose title and chapter numbers match.')
+      ? tr('Searches the other sources for the 1 series that comes from this source, and shows what it finds: you choose what to follow.')
       : c.n && c.n > 1
-        ? tr('Searches the other sources for the {n} series that come from this source, and follows the ones whose title and chapter numbers match.', { n: c.n })
-        : tr('Searches the other sources for every series that comes from this source, and follows the ones whose title and chapter numbers match.')),
-    how: () => tr('One series at a time, 1.5 seconds apart, pausing while a chapter sweep, a repair or the daily check runs. It searches under the title and up to 3 other names, in your source order, and never asks this source or one that is cooling down or switched off. A series numbered by posting order is skipped. Series that gain a source are then checked for new chapters, one at a time.'),
+        ? tr('Searches the other sources for the {n} series that come from this source, and shows what it finds: you choose what to follow.', { n: c.n })
+        : tr('Searches the other sources for every series that comes from this source, and shows what it finds: you choose what to follow.')),
+    how: () => tr('One series at a time, 1.5 seconds apart, pausing while a chapter sweep, a repair or the daily check runs. It searches under the title and up to 3 other names, in your source order, and never asks this source or one that is cooling down or switched off. A series numbered by posting order is skipped. What it finds waits on its review: a match whose name and chapter numbers line up can be followed in bulk, one whose numbers differ only on its own.'),
     eta: (c) => findEta(c.n),
   },
   ignore: {

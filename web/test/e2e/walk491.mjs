@@ -1,9 +1,11 @@
-// Browser acceptance walk for v0.49.1: Find other sources, a series' Other names, and "the site says it is offline".
+// Browser acceptance walk for v0.49.1: Find other sources (with its review), a series' Other names, and "the site says it
+// is offline".
 //
 // Why this release: aqua, the owner's main source, has answered every request since 2026-09-23 with one small HTML
 // page, "Aqua Manga is temporarily offline" -- HTTP 200 -- and Health blamed its markup. 189 of its series had no
-// second source. v0.49.1 reads the notice for what it is and offers a calm background run that follows other
-// sources for every series of a source, a selection, or one series. The idea is @TIGamingTV's (PR #119).
+// second source. v0.49.1 reads the notice for what it is and offers a calm background search for other sources for
+// every series of a source, a selection, or one series, whose review is where the admin chooses what to follow. The
+// idea and the review are @TIGamingTV's (PR #119).
 //
 // Here fake-a plays aqua: its stub's `offline` behaviour (fakeSource.mjs, scripted on "site") answers every route
 // with such a page, and the adapter (bff lib/sources/fake.ts) hands it to the product's own offlineNotice, so every
@@ -22,25 +24,26 @@
 //     Sources sheet), and fake-a goes offline. Providers -> Test fake-a says "The site says it is offline (its own
 //     page)", and "the site says it is offline" at the search step; Health -> Source health's fake-a row says the same
 //     with the fix sentence, and offers "Find other sources (2 series)". The API row carries the same code and count.
-//   run -- that key, pressed. The run starts (two series); Library -> Downloads' Server tasks shows its card with
-//     "1 of 2 series", the series it is on and Stop, then it finishes. Its results: Walk Tale under New sources with
-//     fake-b and its 12 chapters, Walk Gap under Skipped with its reason in words. Walk Tale's Sources sheet then
-//     lists fake-b, and its "12 chapters listed" appears within a bounded wait: the run's paced listing refresh.
-//   stop -- a run over four series, stopped from its card at once. It ends `stopped` (never `interrupted`), and
-//     every series it never reached is "not tried": the Not tried group, never Nothing found.
+//   run -- that key, pressed. It opens the search's review, which fills in while it goes; Library -> Downloads' Server
+//     tasks shows its card with "1 of 2 series", the series it is on, Stop and Review. It ends waiting for a review,
+//     having followed NOTHING: Walk Tale shows fake-b as a green match (the same series), Walk Gap says it was not
+//     searched and why. Select exact matches and Follow 1 selected source follow fake-b; Walk Tale's Sources sheet
+//     then lists it, and its "12 chapters listed" appears within a bounded wait: the follow's paced listing refresh.
+//   stop -- a search over four series, stopped from its card at once. It ends `stopped` (never `interrupted`), every
+//     series it never reached reads "Not searched yet" -- never nothing found -- and the review offers to search on.
 //   names -- Walk Tale's Other names: a Latin name of 5+ letters is listed; a short one, a non-Latin one and the same
 //     one again are each refused in their own words; removing it clears it, and the refusal that no longer holds;
 //     typed again by hand, the removed name comes back. With fake-b unfollowed through the sheet, Find more sources
-//     runs over that one series and follows fake-b again.
-//   select -- Library: two series selected, More -> Find other sources is a run of 2. Move to library, Remove from
-//     library and Find other sources are rows of More at every width, never keys of the bar.
+//     opens a search of that one series whose review offers fake-b again, and following it lists it again.
+//   select -- Library: two series selected, More -> Find other sources opens the review of a search of 2. Move to
+//     library, Remove from library and Find other sources are rows of More at every width, never keys of the bar.
 //   arabic -- the one pass in Arabic (needs offline before it): the Health row -- its detail too, worded by its codes
-//     -- the running card and the results view read right to left, what is still the server's or the source's English
+//     -- the running card and the review read right to left, what is still the server's or the source's English
 //     (the source's own error line, the series title, the source name) keeps its own direction, and the numbers are
 //     intact. Its words come from web/public/locales/ar.json, never a copy.
 //
 // At every width: no sideways scroll on any page or sheet the walk opens; at 390 the card's series line and the
-// results' long title truncate. Timing is read off the API (GET /api/admin/sources/find, /api/sources/jobs), not
+// review's long title wraps inside the page. Timing is read off the API (GET /api/admin/sources/find, /api/sources/jobs), not
 // slept: a run that must be seen running is held by fake-b's own `slow:` search, never by a sleep here.
 //
 // ⚠️ One API login and one browser login per run: the route allows ten per five minutes.
@@ -125,8 +128,11 @@ const healthRow = async (sourceId) => ((await api('/api/admin/health')).checks ?
  */
 const runEnded = (id, ms = 150_000) => waitFor(async () => {
   const s = await findState();
-  return !s.running && s.run?.id === id && s.run.status !== 'running' ? s.run : null;
+  const run = (s.recent ?? []).find((r) => r.id === id);
+  return run && run.status !== 'running' ? run : null;
 }, ms, 1000);
+/** A run's review, from the API. */
+const reviewOf = (id) => api(`/api/admin/sources/find/${encodeURIComponent(id)}?adult=1`);
 
 // ---- the browser, signed in once ------------------------------------------------------------------------------
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'], defaultViewport: { width: WIDTH, height: PHONE ? 844 : 900 } });
@@ -285,48 +291,50 @@ const cardOnPage = () => page.evaluate(() => {
       ellipsis: getComputedStyle(cut).textOverflow, startShown: window.__firstShown(bdi, now),
     } : null,
     stop: [...li.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/›$/.test(t)),
-    results: !!li.querySelector('[data-find-results-open]'),
+    review: !!li.querySelector('[data-find-review]'),
     inside: r.left >= -0.5 && r.right <= innerWidth + 0.5, overflow: li.scrollWidth > li.clientWidth + 1,
   };
 });
-/** The results sheet (FindResultsSheet), its groups and rows, measured. */
-const resultsOnPage = () => page.evaluate(() => {
-  const root = document.querySelector('[data-find-results]');
-  if (!root) return null;
-  const panel = root.closest('[role="dialog"]')?.firstElementChild;
-  const groups = {};
-  for (const g of root.querySelectorAll('[data-find-group]')) {
-    groups[g.getAttribute('data-find-group')] = {
-      head: g.querySelector('h3')?.textContent ?? '',
-      note: g.querySelector('h3 + p')?.textContent ?? '',
-      rows: [...g.querySelectorAll('[data-find-result]')].map((li) => {
-        const a = li.querySelector('a');
-        return {
-          id: li.getAttribute('data-find-result'), title: (a ?? li.querySelector('p'))?.textContent ?? '', text: li.innerText.replace(/\s+/g, ' ').trim(),
-          titleDir: a ? getComputedStyle(a).direction : null, titleAuto: a?.getAttribute('dir') === 'auto',
-          truncated: a ? a.scrollWidth > a.clientWidth + 1 : false, ellipsis: a ? getComputedStyle(a).textOverflow : null,
-          startShown: a ? window.__firstShown(a, a) : null,
-          sources: [...li.querySelectorAll('bdi')].map((b) => ({ name: b.textContent, dir: getComputedStyle(b).direction })),
-        };
+/** The review page (app/admin/find/page.tsx), its series and their matches, measured. */
+const reviewOnPage = () => page.evaluate(() => {
+  const row = document.querySelector('[data-action-row="find-run"]');
+  if (!row) return null;
+  const items = [...document.querySelectorAll('[data-find-item]')].map((el) => {
+    const a = el.querySelector('a');
+    return {
+      state: el.getAttribute('data-find-item'), title: a?.textContent ?? '',
+      titleDir: a ? getComputedStyle(a).direction : null, titleAuto: a?.getAttribute('dir') === 'auto',
+      note: el.querySelector('[data-find-note]')?.textContent ?? '', text: el.innerText.replace(/\s+/g, ' ').trim(),
+      candidates: [...el.querySelectorAll('[data-find-candidate]')].map((c) => {
+        const b = c.querySelector('bdi');
+        return { verdict: c.getAttribute('data-find-candidate'), source: b?.textContent ?? '', sourceDir: b ? getComputedStyle(b).direction : null, text: c.innerText.replace(/\s+/g, ' ').trim() };
       }),
     };
-  }
-  const row = root.querySelector('[data-action-row="find-run"]');
-  const pr = panel?.getBoundingClientRect();
+  });
   return {
-    groups, text: root.innerText.replace(/\s+/g, ' ').trim(),
-    // The current run's words alone: "Earlier searches" lists older runs' summaries.
-    runText: [...root.children].filter((c) => c.getAttribute('data-find-group') !== 'earlier').map((c) => c.innerText).join(' ').replace(/\s+/g, ' ').trim(),
-    head: row?.querySelector('p')?.textContent ?? '', line: row?.querySelector('[data-action-status]')?.textContent ?? '',
-    retry: [...root.querySelectorAll('button.btn-key')].map((b) => b.textContent.trim()),
-    inside: pr ? pr.left >= -0.5 && pr.right <= innerWidth + 0.5 : false, overflow: root.scrollWidth > root.clientWidth + 1,
+    items, head: row.querySelector('p')?.textContent ?? '', line: row.querySelector('[data-action-status]')?.textContent ?? '',
+    stop: !!document.querySelector('[data-find-stop]'), preselect: !!document.querySelector('[data-find-preselect]'),
+    follow: document.querySelector('[data-find-follow]')?.textContent?.trim() ?? null,
+    resume: document.querySelector('[data-find-resume]')?.textContent?.trim() ?? null,
   };
 });
+/** The review's series whose link names `title`. */
+const itemOf = (view, title) => view?.items?.find((i) => i.title === title) ?? null;
 /** The card in the middle of the screen: scrolled to the top, a phone's sticky Library header covers it. */
 const cardIntoView = () => page.$eval('[data-downloads-section="tasks"] li[data-task="find_sources"]', (el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
-const openResultsFromCard = async () => {
-  await page.$eval('[data-downloads-section="tasks"] li[data-task="find_sources"] [data-find-results-open]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
-  return waitFor(async () => { const r = await resultsOnPage(); return r && !/^\s*$/.test(r.text) && r.head ? r : null; }, 15_000);
+/** The review opened from the Server tasks card's Review. */
+const openReviewFromCard = async () => {
+  await page.$eval('[data-downloads-section="tasks"] li[data-task="find_sources"] [data-find-review]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+  return waitFor(async () => (/\/admin\/find\/\?run=/.test(page.url()) ? reviewOnPage() : null), 15_000);
+};
+/** The page a start navigated to: the review of run `id`. */
+const onReviewOf = (id) => waitFor(async () => (page.url().includes(`/admin/find/?run=${id}`) ? reviewOnPage() : null), 15_000);
+/** Select exact matches, then Follow selected; answers once the footer has said it. */
+const followExact = async () => {
+  await page.$eval('[data-find-preselect]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+  const ready = await waitFor(() => page.$eval('[data-find-follow]', (b) => (!b.disabled ? b.textContent.trim() : null)).catch(() => null), 5000);
+  if (ready) await page.$eval('[data-find-follow]', (b) => b.click());
+  return ready;
 };
 const closeSheet = async () => { await page.keyboard.press('Escape'); await waitFor(async () => !(await page.$('[role="dialog"]')), 5000); };
 
@@ -412,63 +420,66 @@ async function run() {
   }), 30_000);
   check(`${tag}: Health's Find other sources is pressed`, !!pressed);
   const started = await waitFor(async () => { const s = await findState(); return s.running && s.run && s.run.id !== before ? s.run : null; }, 15_000);
-  check(`${tag}: a run starts, over fake-a's 2 series`, started?.total === 2, JSON.stringify(started));
-  const working = await waitFor(async () => { const r = await healthRowOnPage('fake-a'); return r?.key === 'Stop' && r.status.some((s) => s.startsWith('working')) ? r : null; }, 10_000);
-  check(`${tag}: the Health row follows it, and its key is Stop now`, !!working && working.key === 'Stop', JSON.stringify(working ?? await healthRowOnPage('fake-a')));
-  await shot('run-1-health-running');
+  check(`${tag}: a search starts, over fake-a's 2 series`, started?.total === 2, JSON.stringify(started));
+  const opened = started ? await onReviewOf(started.id) : null;
+  check(`${tag}: the key opens the search's review, searching, with Stop`, !!opened?.stop, JSON.stringify(opened));
+  check(`${tag}: the review has no sideways scroll`, await noSideScroll());
+  await shot('run-1-review-searching');
 
   await go('/library/?view=downloads', 1500);
   const running = await waitFor(async () => { const c = await cardOnPage(); return c?.state === 'running' && /1 of 2 series/.test(c.text) && c.now ? c : null; }, 20_000, 300);
-  check(`${tag}: Library -> Downloads -> Server tasks shows the run: Other-source search, 1 of 2 series`,
+  check(`${tag}: Library -> Downloads -> Server tasks shows the search: Other-source search, 1 of 2 series`,
     running?.name === 'Other-source search' && /1 of 2 series/.test(running?.text ?? ''), JSON.stringify(running ?? await cardOnPage()));
   check(`${tag}: ...the series it is on`, running?.now?.title === LONG && /^Now: /.test(running?.now?.text ?? ''), JSON.stringify(running?.now));
-  check(`${tag}: ...and Stop`, !!running?.stop?.includes('Stop'), JSON.stringify(running?.stop));
+  check(`${tag}: ...Stop, and the way to its review`, !!running?.stop?.includes('Stop') && !!running?.review, JSON.stringify(running));
   check(`${tag}: the card has no sideways overflow`, !!running?.inside && !running?.overflow && (await noSideScroll()), JSON.stringify(running));
   if (PHONE) check(`${tag}: ...and the long title is cut, not wrapped or spilled`, !!running?.now?.truncated && running?.now?.ellipsis === 'ellipsis', JSON.stringify(running?.now));
   check(`${tag}: ...at its end: the title's beginning shows`, running?.now?.startShown === true, JSON.stringify(running?.now));
   const apiCard = await jobCard();
-  check(`${tag}: the jobs route carries the card: find_sources, done/total, the current series`,
-    apiCard?.status === 'running' && apiCard?.total === 2 && apiCard?.current?.title === LONG, JSON.stringify(apiCard));
+  check(`${tag}: the jobs route carries the card: find_sources, its run, done/total, the current series`,
+    apiCard?.status === 'running' && apiCard?.total === 2 && apiCard?.runId === started?.id && apiCard?.current?.title === LONG, JSON.stringify(apiCard));
   await cardIntoView();
   await shot('run-2-card-running');
 
   const done = started ? await runEnded(started.id) : null;
-  check(`${tag}: the run finishes`, done?.status === 'done', JSON.stringify(done ?? (await findState()).run));
+  check(`${tag}: the search ends waiting for a review, one match open`, done?.status === 'review' && done?.found === 1 && done?.open === 1, JSON.stringify(done ?? (await findState()).run));
   await script(FAKE_B, 'search', 'ok');
-  const tale = done?.results?.find((r) => r.seriesId === S.tale);
-  const gap = done?.results?.find((r) => r.seriesId === S.gap);
-  check(`${tag}: Walk Tale followed fake-b, with its 12 chapters`,
-    tale?.followed?.length === 1 && tale.followed[0].sourceId === 'fake-b' && tale.followed[0].chapters === 12, JSON.stringify(tale));
-  check(`${tag}: Walk Gap was skipped: too few numbers to compare, never searched`, gap?.why === 'too_few' && !gap?.followed?.length, JSON.stringify(gap));
+  check(`${tag}: ...and it followed nothing by itself`, !(await sourcesOf(S.tale)).some((x) => x.sourceId === 'fake-b'), JSON.stringify(await sourcesOf(S.tale)));
+  const rv = done ? await reviewOf(done.id) : null;
+  const tale = rv?.items?.find((i) => i.seriesId === S.tale);
+  const gap = rv?.items?.find((i) => i.seriesId === S.gap);
+  check(`${tag}: Walk Tale has fake-b as a green match`, tale?.candidates?.length === 1 && tale.candidates[0].source === 'fake-b' && tale.candidates[0].verdict === 'ok', JSON.stringify(tale));
+  check(`${tag}: Walk Gap was not searched: too few numbers to compare`, gap?.state === 'skipped' && gap?.note === 'too_few', JSON.stringify(gap));
   const finished = await waitFor(async () => { const c = await cardOnPage(); return c?.state === 'done' ? c : null; }, 20_000, 500);
-  check(`${tag}: the card says it is done: 2 of 2 series, 1 source followed`, /2 of 2 series/.test(finished?.text ?? '') && /1 source followed/.test(finished?.text ?? ''), JSON.stringify(finished));
+  check(`${tag}: the card says it is done: 2 of 2 series, sources found for 1 series`, /2 of 2 series/.test(finished?.text ?? '') && /Sources found for 1 series/.test(finished?.text ?? ''), JSON.stringify(finished));
   await cardIntoView();
   await shot('run-3-card-done');
 
-  const view = await openResultsFromCard();
-  const found = view?.groups?.found?.rows ?? [];
-  const skipped = view?.groups?.skipped?.rows ?? [];
-  check(`${tag}: the results list Walk Tale under New sources, with fake-b and its chapters`,
-    found.length === 1 && found[0].id === S.tale && found[0].title === LONG && found[0].sources[0]?.name === 'fake-b' && /12 chapters/.test(found[0].text),
-    JSON.stringify(view?.groups));
-  check(`${tag}: ...and Walk Gap under Skipped, with its reason in words`,
-    skipped.length === 1 && skipped[0].id === S.gap && /Too few chapters to compare \(fewer than 3\)/.test(skipped[0].text), JSON.stringify(view?.groups));
-  check(`${tag}: ...nothing under Nothing found or Not tried`, !view?.groups?.nothing && !view?.groups?.['not-tried'], JSON.stringify(Object.keys(view?.groups ?? {})));
-  check(`${tag}: the results have no sideways overflow`, !!view?.inside && !view?.overflow && (await noSideScroll()), JSON.stringify(view && { inside: view.inside, overflow: view.overflow }));
-  if (PHONE) check(`${tag}: ...and the long title is cut`, !!found[0]?.truncated && found[0]?.ellipsis === 'ellipsis', JSON.stringify(found[0]));
-  check(`${tag}: ...at its end: the title's beginning shows`, found[0]?.startShown === true, JSON.stringify(found[0]));
-  await shot('run-4-results');
-  await closeSheet();
+  const view = await openReviewFromCard();
+  const t = itemOf(view, LONG);
+  const g = view?.items?.find((i) => i.state === 'skipped');
+  check(`${tag}: the review shows Walk Tale with fake-b, the same series`, t?.candidates?.[0]?.source === 'fake-b' && /Same series/.test(t?.candidates?.[0]?.text ?? ''), JSON.stringify(t));
+  check(`${tag}: ...and Walk Gap with its reason in words`, /Too few chapters to compare \(fewer than 3\)/.test(g?.note ?? ''), JSON.stringify(g));
+  check(`${tag}: ...Select exact matches, and nothing selected yet`, !!view?.preselect && view?.follow === 'Follow 0 selected sources', JSON.stringify(view && { preselect: view.preselect, follow: view.follow }));
+  check(`${tag}: the review has no sideways overflow`, await noSideScroll());
+  await shot('run-4-review');
+  const pressedFollow = await followExact();
+  check(`${tag}: Select exact matches ticks fake-b: Follow 1 selected source`, pressedFollow === 'Follow 1 selected source', pressedFollow);
+  const followed = await waitFor(async () => (await sourcesOf(S.tale)).some((x) => x.sourceId === 'fake-b'), 20_000, 500);
+  check(`${tag}: ...and following it follows fake-b`, !!followed, JSON.stringify(await sourcesOf(S.tale)));
+  const after = await waitFor(async () => { const v = await reviewOnPage(); return /Followed/.test(itemOf(v, LONG)?.candidates?.[0]?.text ?? '') ? v : null; }, 15_000);
+  check(`${tag}: the review says Followed`, !!after, JSON.stringify(await reviewOnPage()));
+  await shot('run-5-followed');
 
-  // Walk Tale's Sources sheet: fake-b followed, and its chapters listed once the run's paced refresh has asked it.
-  const refreshed = await waitFor(async () => (await sourcesOf(S.tale)).find((s) => s.sourceId === 'fake-b' && s.chapters === 12), 60_000, 1000);
+  // Walk Tale's Sources sheet: fake-b followed, and its chapters listed once the follow's paced refresh has asked it.
+  const refreshed = await waitFor(async () => (await sourcesOf(S.tale)).find((x) => x.sourceId === 'fake-b' && x.chapters === 12), 60_000, 1000);
   check(`${tag}: the paced listing refresh read fake-b's 12 chapters for Walk Tale`, !!refreshed, JSON.stringify(await sourcesOf(S.tale)));
   check(`${tag}: Walk Tale's Sources sheet opens`, await openSourcesSheet(S.tale));
   const b = await waitFor(async () => { const r = await sheetSource('fake-b'); return r && /12 chapters listed/.test(r.text) ? r : null; }, 15_000);
   check(`${tag}: ...and lists fake-b as followed, with 12 chapters listed`, !!b && /also checked/.test(b.text) && b.unfollow, JSON.stringify(b ?? await sheetSource('fake-b')));
   check(`${tag}: the Sources sheet has no sideways scroll`, await noSideScroll());
-  await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] span.truncate')].find((s) => s.textContent?.trim() === 'fake-b')?.scrollIntoView({ block: 'center' }));
-  await shot('run-5-sources-sheet');
+  await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] span.truncate')].find((x) => x.textContent?.trim() === 'fake-b')?.scrollIntoView({ block: 'center' }));
+  await shot('run-6-sources-sheet');
   await closeSheet();
 }
 
@@ -479,7 +490,7 @@ async function stop() {
   await script(FAKE_B, 'search', 'slow:15000');
   const ids = [S.mixed, S.repeated, S.gap, S.tale];
   const started = await post('/api/admin/sources/find', { seriesIds: ids });
-  check(`${tag}: a run over 4 series starts`, started?.total === 4, JSON.stringify(started));
+  check(`${tag}: a search over 4 series starts`, started?.total === 4, JSON.stringify(started));
   await go('/library/?view=downloads', 1000);
   const running = await waitFor(async () => { const c = await cardOnPage(); return c?.state === 'running' && c.stop.includes('Stop') ? c : null; }, 15_000, 250);
   check(`${tag}: its card is running, with Stop`, !!running, JSON.stringify(await cardOnPage()));
@@ -491,27 +502,23 @@ async function stop() {
   check(`${tag}: Stop is pressed at once`, clicked);
   const ended = started?.runId ? await runEnded(started.runId, 30_000) : null;
   await script(FAKE_B, 'search', 'ok');
-  check(`${tag}: the run ends stopped, not interrupted`, ended?.status === 'stopped', JSON.stringify(ended && { status: ended.status, done: ended.done, total: ended.total }));
-  const rows = ended?.results ?? [];
-  check(`${tag}: every series it never reached is not_tried, and it followed nothing`,
-    rows.length === 4 && rows.every((r) => r.why === 'not_tried' && !r.followed?.length) && ended?.followed === 0, JSON.stringify(rows));
+  check(`${tag}: the search ends stopped, not interrupted`, ended?.status === 'stopped', JSON.stringify(ended && { status: ended.status, done: ended.done, total: ended.total }));
+  const rv = started?.runId ? await reviewOf(started.runId) : null;
+  check(`${tag}: every series it never reached is still to search, and nothing was followed`,
+    rv?.items?.length === 4 && rv.items.every((i) => i.state === 'pending' && !i.candidates.length) && rv?.run?.followed === 0, JSON.stringify(rv?.items));
   const card = await waitFor(async () => { const c = await cardOnPage(); return c && c.state !== 'running' ? c : null; }, 20_000, 500);
   check(`${tag}: the card says it stopped before it finished`, card?.state === 'cancelled' && /Stopped before it finished/.test(card?.text ?? ''), JSON.stringify(card));
   check(`${tag}: the card has no sideways overflow`, !!card?.inside && !card?.overflow && (await noSideScroll()), JSON.stringify(card));
   await shot('stop-1-card-stopped');
 
-  const view = await openResultsFromCard();
-  const notTried = view?.groups?.['not-tried'];
-  check(`${tag}: the results head says Stopped before it finished`, view?.head === 'Stopped before it finished', JSON.stringify(view && { head: view.head, line: view.line }));
-  check(`${tag}: all 4 are under Not tried, with the note that says why`,
-    notTried?.rows?.length === 4 && ids.every((id) => notTried.rows.some((r) => r.id === id))
-    && /stopped, ran out of time or was interrupted by a restart before it got to these/.test(notTried.note), JSON.stringify(notTried));
-  check(`${tag}: ...never "Nothing found" or "not found" for them`, !view?.groups?.nothing && !/nothing found|not found/i.test(view?.runText ?? ''), view?.runText);
-  check(`${tag}: ...and the line counts them as not tried`, /4 series not tried/.test(view?.line ?? ''), view?.line);
-  check(`${tag}: ...and offers to search them now`, !!view?.retry?.includes('Search the 4 series not tried'), JSON.stringify(view?.retry));
-  check(`${tag}: the results have no sideways overflow`, !!view?.inside && !view?.overflow && (await noSideScroll()));
-  await shot('stop-2-results');
-  await closeSheet();
+  const view = await openReviewFromCard();
+  check(`${tag}: the review head says Stopped before it finished`, view?.head === 'Stopped before it finished', JSON.stringify(view && { head: view.head, line: view.line }));
+  check(`${tag}: all 4 read Not searched yet -- never nothing found`,
+    view?.items?.length === 4 && view.items.every((i) => i.note === 'Not searched yet') && !/nothing found|not found/i.test(view.items.map((i) => i.text).join(' ')),
+    JSON.stringify(view?.items));
+  check(`${tag}: ...and it offers to search them now`, view?.resume === 'Search the 4 series not searched yet', JSON.stringify(view?.resume));
+  check(`${tag}: the review has no sideways overflow`, await noSideScroll());
+  await shot('stop-2-review');
 }
 
 // ---- 4. names --------------------------------------------------------------------------------------------------
@@ -574,20 +581,24 @@ async function names() {
   await page.$eval('[role="dialog"] button[aria-label="Stop following fake-b"]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); }).catch(() => {});
   const gone = await waitFor(async () => !(await sourcesOf(S.tale)).some((s) => s.sourceId === 'fake-b') && !(await sheetSource('fake-b')), 15_000);
   check(`${tag}: fake-b is unfollowed through the Sources sheet`, !!gone, JSON.stringify(await sourcesOf(S.tale)));
+  await page.$eval('[role="dialog"] [data-find-more-block]', (el) => el.scrollIntoView({ block: 'center' }));
+  await shot('names-6-find-more');
   const before = (await findState()).run?.id ?? null;
   await page.$eval(`[role="dialog"] button[data-find-more="${S.tale}"]`, (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
   const started = await waitFor(async () => { const s = await findState(); return s.run && s.run.id !== before ? s.run : null; }, 15_000);
-  check(`${tag}: Find more sources starts a run over this one series`,
-    started?.total === 1 && (started.results.length === 0 || started.results[0].seriesId === S.tale), JSON.stringify(started));
+  check(`${tag}: Find more sources starts a search of this one series`, started?.total === 1, JSON.stringify(started));
+  const opened = started ? await onReviewOf(started.id) : null;
+  check(`${tag}: ...and opens its review`, !!opened, page.url());
   const done = started ? await runEnded(started.id, 90_000) : null;
-  check(`${tag}: ...which follows fake-b again`, done?.results?.[0]?.seriesId === S.tale && done.results[0].followed?.[0]?.sourceId === 'fake-b', JSON.stringify(done?.results));
-  const line = await waitFor(() => page.$eval('[role="dialog"] [data-find-more-block] [data-action-status]', (el) => (/Followed fake-b/.test(el.textContent) ? el.textContent : null)), 20_000);
-  check(`${tag}: the sheet says what it did for this series: Followed fake-b`, !!line, await page.$eval('[role="dialog"] [data-find-more-block]', (el) => el.innerText).catch(() => 'no block'));
+  const rv = done ? await reviewOf(done.id) : null;
+  check(`${tag}: ...which offers fake-b again, green`, rv?.items?.[0]?.seriesId === S.tale && rv.items[0].candidates?.[0]?.source === 'fake-b' && rv.items[0].candidates[0].verdict === 'ok', JSON.stringify(rv?.items));
+  const ready = await waitFor(async () => { const v = await reviewOnPage(); return v?.preselect ? v : null; }, 15_000);
+  check(`${tag}: the review offers Select exact matches`, !!ready, JSON.stringify(await reviewOnPage()));
+  check(`${tag}: ...and following it follows fake-b`, (await followExact()) === 'Follow 1 selected source' && !!(await waitFor(async () => (await sourcesOf(S.tale)).some((x) => x.sourceId === 'fake-b'), 20_000, 500)));
+  check(`${tag}: Walk Tale's Sources sheet opens again`, await openSourcesSheet(S.tale));
   const listed = await waitFor(() => sheetSource('fake-b'), 15_000);
   check(`${tag}: ...and lists fake-b again`, !!listed, JSON.stringify(listed));
   check(`${tag}: the Sources sheet has no sideways scroll`, await noSideScroll());
-  await page.$eval('[role="dialog"] [data-find-more-block]', (el) => el.scrollIntoView({ block: 'center' }));
-  await shot('names-6-find-more');
   await closeSheet();
 }
 
@@ -623,15 +634,18 @@ async function select() {
   await shot('select-2-more');
   const before = (await findState()).run?.id ?? null;
   check(`${tag}: More -> Find other sources`, await press('Find other sources', '[role="dialog"][aria-label="2 selected"]'));
-  const notice = await waitFor(async () => /Looking for other sources for 2 series… Library → Downloads shows how it goes\./.test(await bodyText()), 10_000);
-  check(`${tag}: the notice says a search for 2 series began, and where it shows`, !!notice);
-  await shot('select-3-started');
   const started = await waitFor(async () => { const s = await findState(); return s.run && s.run.id !== before ? s.run : null; }, 15_000);
-  check(`${tag}: it is a run of 2`, started?.total === 2, JSON.stringify(started));
+  check(`${tag}: it is a search of 2`, started?.total === 2, JSON.stringify(started));
+  const opened = started ? await onReviewOf(started.id) : null;
+  check(`${tag}: ...whose review opens`, !!opened, page.url());
+  await shot('select-3-review');
   const done = started ? await runEnded(started.id, 90_000) : null;
-  const ids = (done?.results ?? []).map((r) => r.seriesId).sort();
-  check(`${tag}: ...over exactly the two selected`, JSON.stringify(ids) === JSON.stringify([S.mixed, S.repeated].sort()), JSON.stringify(done?.results));
-  check(`${tag}: ...neither of which any other source lists`, (done?.results ?? []).every((r) => r.why === 'no_match'), JSON.stringify(done?.results));
+  const rv = done ? await reviewOf(done.id) : null;
+  const ids = (rv?.items ?? []).map((i) => i.seriesId).sort();
+  check(`${tag}: ...over exactly the two selected`, JSON.stringify(ids) === JSON.stringify([S.mixed, S.repeated].sort()), JSON.stringify(rv?.items));
+  check(`${tag}: ...neither of which any other source lists`, done?.status === 'done' && (rv?.items ?? []).every((i) => i.state === 'done' && !i.candidates.length), JSON.stringify(rv?.items));
+  const view = await waitFor(async () => { const v = await reviewOnPage(); return v?.items?.length === 2 && v.items.every((i) => i.note) ? v : null; }, 15_000);
+  check(`${tag}: ...and the review says so for each`, !!view && view.items.every((i) => /No other source lists it under its title or other names|No other source answered/.test(i.note)), JSON.stringify(view?.items));
 }
 
 // ---- 6. arabic -------------------------------------------------------------------------------------------------
@@ -691,22 +705,19 @@ async function arabic() {
     await shot('ar-2-card');
 
     const done = started ? await runEnded(started.id) : null;
-    check('ar: the run finishes', done?.status === 'done', JSON.stringify(done && { status: done.status, results: done.results }));
+    check('ar: the search ends waiting for a review', done?.status === 'review', JSON.stringify(done));
     await waitFor(async () => (await cardOnPage())?.state === 'done', 20_000, 500);
-    const view = await openResultsFromCard();
-    const found = view?.groups?.found;
-    const skipped = view?.groups?.skipped;
-    check('ar: the results\' groups are Arabic', (found?.head ?? '').startsWith(ar('New sources')) && (skipped?.head ?? '').startsWith(ar('Skipped')), JSON.stringify(view?.groups));
-    const f = found?.rows?.[0];
+    const view = await openReviewFromCard();
+    const t = itemOf(view, LONG);
+    const g = view?.items?.find((i) => i.state === 'skipped');
+    check('ar: the review\'s head is Arabic', view?.head === ar('Ready to review'), JSON.stringify(view && { head: view.head, line: view.line }));
     check('ar: ...the series title and the source name keep their own direction',
-      f?.title === LONG && f?.titleAuto && f?.titleDir === 'ltr' && f?.sources?.[0]?.name === 'fake-b' && f?.sources?.[0]?.dir === 'ltr', JSON.stringify(f));
-    check('ar: ...the title cut at its own end, so its beginning shows', f?.startShown === true, JSON.stringify(f));
-    check('ar: ...the chapter count is intact', (f?.text ?? '').includes(ar('{n} chapters', { n: 12 })) && /(^|\D)12(\D|$)/.test(f?.text ?? ''), JSON.stringify(f));
+      !!t?.titleAuto && t?.titleDir === 'ltr' && t?.candidates?.[0]?.source === 'fake-b' && t?.candidates?.[0]?.sourceDir === 'ltr', JSON.stringify(t));
+    check('ar: ...the match is worded in Arabic', (t?.candidates?.[0]?.text ?? '').includes(ar('Same series')), JSON.stringify(t));
     check('ar: ...and the skipped series\' reason is Arabic, its number intact',
-      (skipped?.rows?.[0]?.text ?? '').includes(ar('Too few chapters to compare (fewer than 3)')) && /(^|\D)3(\D|$)/.test(skipped?.rows?.[0]?.text ?? ''), JSON.stringify(skipped));
-    check('ar: the results have no sideways overflow', !!view?.inside && !view?.overflow && (await noSideScroll()));
-    await shot('ar-3-results');
-    await closeSheet();
+      (g?.note ?? '').includes(ar('Too few chapters to compare (fewer than 3)')) && /(^|\D)3(\D|$)/.test(g?.note ?? ''), JSON.stringify(g));
+    check('ar: the review has no sideways overflow', await noSideScroll());
+    await shot('ar-3-review');
   } finally {
     await script(FAKE_B, 'search', 'ok').catch(() => {});
     await api('/api/settings', { method: 'PUT', body: JSON.stringify({ lang: 'en' }) }).catch(() => {});

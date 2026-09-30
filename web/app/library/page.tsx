@@ -24,7 +24,7 @@ import { useLayer } from '@/lib/layers';
 import { useReduceEffects } from '@/lib/effects';
 import { readView, type LibraryView } from '@/lib/libraryView';
 import { kickDownloads, useDownloadsRing } from '@/lib/useServerDownloads';
-import { findRefusal } from '@/lib/useFindRun';
+import { useStartFind } from '@/lib/useFindRun';
 import { ProgressRing } from '@/components/ProgressRing';
 import { ServerDownloadsView } from '@/components/ServerDownloadsView';
 
@@ -76,6 +76,7 @@ function LibraryInner() {
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
+  const { start: startFind } = useStartFind();
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState(false);
   // The phone's overflow for the two admin actions (see the bar below).
@@ -267,23 +268,15 @@ function LibraryInner() {
   };
 
   /**
-   * Look for other sources for the selection (v0.49.1): ONE background run on the server -- 1.5 s between series,
-   * pausing for a chapter sweep, a repair or the daily check -- that follows a source only where the title and the
-   * chapter numbers match. Minutes or hours for a big selection, so nothing here follows it: the notice says where it
-   * shows (Library -> Downloads, Server tasks, with its results), and select mode ends as for any bulk action. Another
-   * run going (409, one at a time server-wide), nothing the server may search for (400 `empty_scope`) or more than 500
-   * series (400 `bad_request`) is said, and the selection stays. The idea is @TIGamingTV's (PR #119).
+   * Look for other sources for the selection: ONE background search on the server -- 1.5 s between series, pausing
+   * for a chapter sweep, a repair or the daily check -- whose review opens at once and fills in as it goes; the admin
+   * chooses there what to follow, and nothing is followed before that. Another search going (409, one at a time
+   * server-wide), nothing the server may search for or more than 500 series is said in a notice, and the selection
+   * stays. The idea and the review are @TIGamingTV's (PR #119).
    */
   const findSelected = async () => {
     setActing(true);
-    try {
-      const r = await api<{ runId: string; total: number }>('/api/admin/sources/find', { method: 'POST', json: { seriesIds: [...picked] } });
-      const n = r?.total ?? picked.size;
-      toast(n === 1 ? tr('Looking for other sources for 1 series… Library → Downloads shows how it goes.')
-        : tr('Looking for other sources for {n} series… Library → Downloads shows how it goes.', { n }), 'info', { busy: true });
-      void kickDownloads(qc);
-      settle();
-    } catch (e) { toast(findRefusal(e), 'error'); }
+    if (await startFind({ seriesIds: [...picked] })) settle();
     setActing(false);
   };
 

@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import type { GroupStat, Series, SeriesGroups, SeriesSource, StoredPrefs } from '@/lib/types';
+import type { GroupStat, Listing, Series, SeriesGroups, SeriesSource, StoredPrefs } from '@/lib/types';
 import { t as tr } from '@/lib/i18n';
 import { chapterLabel, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
@@ -27,10 +27,12 @@ import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
 import { preferFirst } from '@/lib/sourceOrder';
-import { ActionKeys, ActionStatus, type ActionSpec } from '@/components/ActionList';
-import type { ActionState } from '@/lib/actionState';
-import { altKey, altOriginLabel, altRefusal, findGate, findSlotState, seriesOutcome, type AltTitle } from '@/lib/findSources';
-import { useFindRuns } from '@/lib/useFindRun';
+import { ActionKeys, type ActionSpec } from '@/components/ActionList';
+import { altKey, altOriginLabel, altRefusal, findGate, type AltTitle } from '@/lib/findSources';
+import { useFindStatus, useStartFind } from '@/lib/useFindRun';
+
+/** How many sources a series may follow besides its main one (bff lib/autoFollow.ts MAX_FOLLOWERS). */
+const MAX_FOLLOWERS = 2;
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -138,36 +140,31 @@ const codeOf = (e: unknown): string | null => {
 };
 
 /**
- * "Find more sources" (v0.49.1): a run of the server's "Find other sources" for this one series -- the title and its
- * other names searched on the other sources, a source followed only where the title and the chapter numbers match
- * -- followed here until it ends, and then what it did for this series: the sources it followed, or why none. The
- * sheet may be closed meanwhile; the run goes on, and what it followed is in the list above next time. One run at a
- * time server-wide: while another goes, the key waits and says why. The idea is @TIGamingTV's (PR #119).
+ * "Find more sources": a search of the other sources for this one series -- under its title and its other names --
+ * that opens its review, where the admin sees what was found (green: the same series; amber: the same name, chapter
+ * numbers that do not line up) and chooses what to follow. Nothing is followed before that. One search at a time
+ * server-wide: while another goes, the key waits and says why. Not offered for a series numbered by posting order,
+ * whose followers are never merged, nor for one that already follows as many sources as a series may. The idea and
+ * the review are @TIGamingTV's (PR #119).
  */
-function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
-  const fr = useFindRuns({ onEnded: onFound });
-  const slot = fr.slots.series;
-  const run = fr.runOf('series');
-  const live = findSlotState(slot, run, () => { void fr.stop('series'); });
-  // Ended: what it did for THIS series, not the run's counts (a run of one says "1 series · 1 source followed").
-  const mine = slot?.phase === 'ended' ? seriesOutcome(run, id) : null;
-  const state: ActionState = mine
-    ? { kind: 'done', finishedAt: slot?.finishedAt ?? Date.now(), outcome: mine.text, ...(mine.partial ? { partial: true } : {}) }
-    : live;
-  const busy = state.kind === 'starting' || state.kind === 'working';
+function FindMore({ id, followers, postingOrder }: { id: string; followers: number; postingOrder: boolean }) {
+  const { data: status } = useFindStatus();
+  const { start, starting } = useStartFind();
+  const why = postingOrder ? tr('Numbered by posting order: no other source’s numbers line up with it')
+    : followers >= MAX_FOLLOWERS ? tr('Already follows as many other sources as a series may') : null;
   const spec: ActionSpec = {
-    id: 'find-more', label: tr('Find more sources'), state,
-    // "the ones": a run follows every source that matches, up to the free follower slots -- two, often.
-    what: tr('Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.'),
-    ...findGate(fr.status, busy),
-    onRun: () => { void fr.start('series', { seriesIds: [id] }); },
+    id: 'find-more', label: tr('Find more sources'),
+    state: starting ? { kind: 'starting' } : { kind: 'idle' },
+    what: tr('Searches the other sources under this title and its other names, and shows what it finds: you choose what to follow.'),
+    ...(why ? { disabled: true, disabledWhy: why } : findGate(status)),
+    onRun: () => { void start({ seriesIds: [id] }); },
     buttonProps: { 'data-find-more': id } as ActionSpec['buttonProps'],
   };
   return (
     <div data-find-more-block className="mt-4 pb-1">
       <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">{spec.what}</p>
       <ActionKeys actions={[spec]} />
-      <ActionStatus state={state} />
+      {why && <p className="mt-1 text-[11px] text-fog-500">{why}</p>}
     </div>
   );
 }
@@ -700,7 +697,8 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
           disk may gain its first one this way, and the server says so when there is nothing it may search for. */}
       {adminAccount && <OtherNames id={id} />}
       {adminAccount && (
-        <FindMore id={id} onFound={() => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions', 'series-alt-titles']) qc.invalidateQueries({ queryKey: [k, id] }); }} />
+        <FindMore id={id} followers={sources.filter((x) => !x.primary).length}
+          postingOrder={qc.getQueryData<Listing>(['series-listing', id])?.numbering?.mode === 'posting_order'} />
       )}
     </Sheet>
   );

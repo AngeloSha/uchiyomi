@@ -20,7 +20,6 @@ import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardAction
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
-import { FindRunProvider } from '@/lib/useFindRun';
 import { FindRunCard } from '@/components/FindSources';
 import { checkTitle } from '@/lib/healthCopy';
 import { checkNote, checkSummary, diagnosisFix, diagnosisReason, itemDetail, itemTitle } from '@/lib/said';
@@ -1978,11 +1977,10 @@ function Health() {
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
   // overview uses, so the shape of the panel is the verdict. The repair provider holds the live run and its
-  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx); the find provider
-  // (v0.49.1) follows a "Find other sources" run for the rows that offer it and for its card under the checks.
+  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx). A "Find other sources"
+  // search is followed by its card under the checks (components/FindSources.tsx), and reviewed on its own page.
   return (
     <RepairRunProvider onEnded={recheck}>
-    <FindRunProvider onEnded={recheck}>
       <div className="board">
         {/* Wraps: at phone width the sentence and the key do not fit on one line (v0.48.3). */}
         <div className="full flex flex-wrap items-center justify-between gap-3">
@@ -2080,7 +2078,6 @@ function Health() {
         <FindRunCard />
         <RepairHistory />
       </div>
-    </FindRunProvider>
     </RepairRunProvider>
   );
 }
