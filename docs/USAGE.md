@@ -477,7 +477,7 @@ once, calmly, and shows you what it found: **nothing is followed until you confi
   seconds apart, waiting while a chapter sweep, a library repair or the daily source check runs. For each series it
   searches under the title and up to three other names, in your source order, at most 8 sources, and never asks the
   series' main source (the one that is down), a source it already follows, or one that is switched off or cooling
-  down; a series that is not 18+ never asks an 18+ source. It stops once it has found as many good matches as the
+  down; extensions that flag themselves 18+ are asked too, since you confirm every match. It stops once it has found as many good matches as the
   series has free places (a series follows at most two other sources). A series numbered by posting order, already
   following two sources, or with fewer than 3 chapters to compare is skipped, and the review says why. A failed
   search never puts a source in a cooldown.

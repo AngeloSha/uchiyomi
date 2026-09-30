@@ -10,7 +10,10 @@
 //      - which series: lib/findScope.ts (the selection, or every series whose MAIN source is the one named);
 //      - never searched: a series numbered by posting order (#116, whose followers are never merged), one already
 //        following MAX_FOLLOWERS sources, one listing under MIN_HAVE numbers -- each said so in the review;
-//      - where to look: scanOrder over the sources the series may reach (the hunt's adult rule, sweepAllowedFor),
+//      - where to look: scanOrder over the sources the admin who started it may reach (their own age cap, as Discover
+//        and the manual follow route read it -- NOT the hunt's sweepAllowedFor, which drops every extension that
+//        flags itself adult for a series not rated 18+: most manhwa extensions do, and a search on a clean library
+//        then had no source at all to ask; here a person confirms every follow, so the admin's reach is the rule),
 //        without its main source, the ones it follows and the ones disabled or cooling down -- health read again for
 //        every series -- at most FIND_MAX_SOURCES of them and FIND_MAX_SEARCHES searches in all, stopping once the
 //        free follower slots are filled by candidates autoFollow would follow;
@@ -45,7 +48,7 @@ import { assess, MIN_HAVE } from './fill';
 import { bounded, judgeCandidate, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement } from './autoFollow';
 import { normTitle } from './titleMatch';
 import { altTitlesFor, exactNameMatch, learnAltTitles, parseAltTitles, SEARCH_NAMES } from './altTitles';
-import { seriesIsAdult, sweepAllowedFor, takeHuntSlot, releaseHuntSlot } from './sourceHunt';
+import { takeHuntSlot, releaseHuntSlot } from './sourceHunt';
 import { seriesByIds, seriesOfMainSource } from './findScope';
 import { runtime } from './runtime';
 import { checkRunning } from './sourceWatchdog';
@@ -55,7 +58,7 @@ import { updateSeries } from './updater';
 import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
-import { visibleToAll, type ViewCtx } from './visibility';
+import { sourceAllowedFor, viewCtxFor, visibleToAll, type ViewCtx } from './visibility';
 
 const knob = (name: string, def: number, min = 1) => Math.max(min, Number(process.env[name] || def));
 /** Names searched per source: the title and up to SEARCH_NAMES others, the hunt's and the fill scan's cap. */
@@ -268,6 +271,7 @@ export function sourcesToAsk(
  */
 export async function findCandidates(facts: SeriesFacts, opts: {
   wallMs?: number; health?: Map<string, SourceHealth>; sources?: SourceAdapter[]; stop?: () => boolean;
+  /** Which sources may be asked: the starting admin's reach. Default: every source (an admin's, uncapped). */
   allowed?: (sourceId: string) => boolean;
 } = {}): Promise<{ found: FoundCandidate[]; asked: number; unreachable: number; order: number }> {
   const free = freeSlots(facts);
@@ -275,9 +279,19 @@ export async function findCandidates(facts: SeriesFacts, opts: {
   if (free <= 0 || facts.numbering === 'posting_order' || facts.numbers.length < MIN_HAVE) return none;
   const deadline = Date.now() + (opts.wallMs ?? wallMs);
   const health = opts.health ?? await healthMap();
-  const allowed = opts.allowed ?? await sweepAllowedFor(await seriesIsAdult(facts.seriesId));
+  const allowed = opts.allowed ?? (() => true);
   const order = sourcesToAsk(facts, health, allowed, opts.sources);
-  if (!order.length) return none;
+  if (!order.length) {
+    // Said in the server log, by count: "no other source could be asked" on every series is a setup to fix (every
+    // source switched off, cooling down, beyond the admin's age cap, or none loaded), and the review cannot say which.
+    const all = opts.sources ?? listSources();
+    const taken = new Set([...(facts.primary ? [facts.primary] : []), ...facts.followers]);
+    const now = Date.now();
+    console.warn(`[find] ${facts.seriesId}: no source to ask -- ${all.length} loaded, ${all.filter((x) => taken.has(x.id)).length} its own, `
+      + `${all.filter((x) => !taken.has(x.id) && resting(health.get(x.id), now)).length} switched off or cooling down, `
+      + `${all.filter((x) => !taken.has(x.id) && !allowed(x.id)).length} beyond the age cap`);
+    return none;
+  }
   const prefs = await effectivePrefsFor(await readSeriesPrefs(facts.seriesId), 0);
   const primary = { title: facts.names[0] ?? facts.title, altTitles: facts.names.slice(1), numbers: facts.numbers };
 
@@ -409,6 +423,8 @@ interface ActiveSearch {
   signal: () => void;
   /** Main sources whose description read failed in this run: not asked again for the next series. */
   dead: Set<string>;
+  /** The starting admin's age cap: which sources the search may ask (sourceAllowedFor). Null: every source. */
+  maxAgeRating: number | null;
 }
 
 let active: ActiveSearch | null = null;
@@ -484,7 +500,7 @@ export async function startFind(
     // Finished runs beyond the newest FIND_KEEP go; one still waiting for its review is left to the daily sweep.
     await q(`DELETE FROM source_find_runs WHERE status IN ('done', 'failed') AND id NOT IN
                (SELECT id FROM source_find_runs ORDER BY started_at DESC LIMIT $1)`, [FIND_KEEP]).catch(() => {});
-    launch(id, userId, list.length, skipped, from);
+    launch(id, userId, list.length, skipped, ctx.maxAgeRating, from);
     return { runId: id, total: list.length, skipped };
   } catch (e) {
     claimed = null;
@@ -509,7 +525,8 @@ export async function resumeFind(runId: string, userId: string, from?: FastifyRe
     }
     if (!r.pending) { claimed = null; return 'not_resumable'; }
     await q(`UPDATE source_find_runs SET status = 'running', finished_at = NULL, updated_at = now() WHERE id = $1`, [runId]);
-    launch(runId, userId, Number(r.total), Number(r.total) - Number(r.pending), from);
+    const ctx = await viewCtxFor(userId, 'admin');
+    launch(runId, userId, Number(r.total), Number(r.total) - Number(r.pending), ctx.maxAgeRating, from);
     return 'ok';
   } catch (e) {
     claimed = null;
@@ -517,7 +534,7 @@ export async function resumeFind(runId: string, userId: string, from?: FastifyRe
   }
 }
 
-function launch(id: string, userId: string, total: number, done: number, from?: FastifyRequest): void {
+function launch(id: string, userId: string, total: number, done: number, maxAgeRating: number | null, from?: FastifyRequest): void {
   const card = beginRun('find_sources', userId, total);
   // It searches; it follows nothing and downloads nothing, so it is a Server task that does not turn the Library ring.
   card.downloads = false;
@@ -526,7 +543,7 @@ function launch(id: string, userId: string, total: number, done: number, from?: 
   card.found = 0;
   let signal!: () => void;
   const stopped = new Promise<void>((r) => { signal = r; });
-  const a: ActiveSearch = { id, userId, card, stop: false, current: null, waiting: null, stopped, signal, dead: new Set() };
+  const a: ActiveSearch = { id, userId, card, stop: false, current: null, waiting: null, stopped, signal, dead: new Set(), maxAgeRating };
   active = a;
   claimed = null;
   lastRun = searchRun(a, from).catch((e) => console.warn(`[find] ${(e as Error)?.message || e}`));
@@ -626,7 +643,7 @@ async function searchOne(item: ItemRow, a: ActiveSearch): Promise<{ asked: numbe
   if (facts.numbering === 'posting_order') return skip('posting_order');
   if (freeSlots(facts) <= 0) return skip('full');
   if (facts.numbers.length < MIN_HAVE) return skip('too_few');
-  const r = await findCandidates(facts, { health, stop: () => isStopped(a) });
+  const r = await findCandidates(facts, { health, stop: () => isStopped(a), allowed: (id) => sourceAllowedFor(getSource(id), a.maxAgeRating) });
   if (isStopped(a)) return null;
   if (!r.order) return skip('no_source');
   for (const c of r.found) await saveCandidate(item.id, c, false);

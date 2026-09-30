@@ -5,8 +5,9 @@
 // of its series to follow another source without doing it one by one. Every rule is asserted by what the fake sites
 // were asked and what was written:
 //
-//   - the search follows nothing; the main source is never asked, nor a source the series already follows, a
-//     disabled or cooling one, or an adult one for a clean series; a series numbered by posting order, or already at
+//   - the search follows nothing; the main source is never asked, nor a source the series already follows, or a
+//     disabled or cooling one; an extension that flags itself adult IS asked for a clean series (the admin confirms
+//     every follow, and most manhwa extensions carry the flag); a series numbered by posting order, or already at
 //     the cap, is in the run but never searched;
 //   - sources are asked in scan order under the hunt's slots, a series stops asking once its free slots are filled
 //     by green candidates, an other name matches exactly, and a failed search reports nothing to source health;
@@ -51,10 +52,10 @@ const CATALOGUE: Record<string, Array<{ title: string; nums: number[] }>> = {
   'fs-throws': [],
   'fs-cool': [{ title: 'Alpha Tale', nums: R(1, 12) }],
   'fs-off': [{ title: 'Alpha Tale', nums: R(1, 12) }],
-  'fs-adult': [{ title: 'Eta Adult', nums: R(1, 12) }, { title: 'Alpha Tale', nums: R(1, 12) }, { title: 'Epsilon Nothing', nums: R(1, 12) }],
+  'fs-adult': [{ title: 'Eta Adult', nums: R(1, 12) }, { title: 'Epsilon Nothing', nums: R(1, 12) }],
 };
 const ORDER: Record<string, number> = {
-  'fs-adult': 0, 'fs-a': 1, 'fs-b': 2, 'fs-c': 3, 'fs-d': 4, 'fs-throws': 5, 'fs-cool': 6, 'fs-off': 7,
+  'fs-a': 1, 'fs-b': 2, 'fs-c': 3, 'fs-d': 4, 'fs-throws': 5, 'fs-cool': 6, 'fs-off': 7, 'fs-adult': 8,
 };
 /** Every search asked, as `source:term`. */
 const searches: string[] = [];
@@ -223,7 +224,7 @@ test('a run over a down source proposes candidates for each series, and follows 
   assert.equal(st.run.id, runId);
   assert.equal(st.run.status, 'review', 'candidates wait for a person');
   assert.deepEqual([st.run.total, st.run.done, st.run.followed], [7, 7, 0]);
-  assert.equal(st.run.found, 4);
+  assert.equal(st.run.found, 5);
   assert.equal(st.run.startedBy, ADMIN, 'the account by name, never its id');
   assert.deepEqual([st.run.sourceId, st.run.sourceName], [MAIN, 'Main Down']);
 
@@ -243,18 +244,19 @@ test('a run over a down source proposes candidates for each series, and follows 
   assert.deepEqual(cands('c'), ['fs-b:ok']);
   assert.equal(by[S('c')].candidates[0].theirName, 'Gamma Legend');
   assert.ok(searches.includes('fs-b:Gamma Legend'));
-  // E: nobody that answered carries it (the adult source that does may not be asked for a clean series).
-  assert.deepEqual([by[S('e')].state, by[S('e')].candidates.length], ['done', 0]);
-  assert.ok(by[S('e')].asked > 0);
+  // E: only an extension that flags itself adult carries it, and it is asked for this clean series too: the admin
+  // confirms every follow. Reintroduce the hunt's sweepAllowedFor: E has nothing, and on a library of manhwa
+  // extensions every series reads "no other source could be asked".
+  assert.deepEqual(cands('e'), ['fs-adult:ok']);
   // F: the same name, numbered another way: amber candidates, kept because the name matched exactly.
   assert.deepEqual(cands('f'), ['fs-c:numbering_differs', 'fs-d:numbering_differs']);
   // H: an adult series may reach the adult source.
   assert.deepEqual(cands('h'), ['fs-adult:ok']);
 
-  // Never asked: the main source, a cooling or disabled source, the adult source for a clean series.
+  // Never asked: the main source, a cooling or disabled source.
   assert.equal(searches.filter((x) => x.startsWith(`${MAIN}:`)).length, 0, 'the main source is never searched');
   assert.equal(searches.filter((x) => x.startsWith('fs-cool:') || x.startsWith('fs-off:')).length, 0);
-  assert.deepEqual(searches.filter((x) => x.startsWith('fs-adult:')), ['fs-adult:Eta Adult'], 'the adult source only for the adult series');
+  assert.ok(searches.includes('fs-adult:Epsilon Nothing'), 'an adult-flagged extension is not asked for a clean series');
   // A source whose search failed is not asked the next name: fs-throws is asked once for C, not under Gamma Legend.
   assert.equal(searches.filter((x) => x === 'fs-throws:Gamma Legend').length, 0);
 
@@ -266,10 +268,10 @@ test('a run over a down source proposes candidates for each series, and follows 
   assert.deepEqual(await q(`SELECT source_id FROM source_health WHERE source_id = 'fs-throws'`), []);
 
   const [audit] = await q(`SELECT detail FROM audit_log WHERE event = 'source.find'`);
-  assert.deepEqual({ ...audit.detail, runId: undefined }, { runId: undefined, status: 'review', total: 7, done: 7, found: 4 });
+  assert.deepEqual({ ...audit.detail, runId: undefined }, { runId: undefined, status: 'review', total: 7, done: 7, found: 5 });
   // The run card is its admin's, and says so; it downloads nothing, and names its review.
   const c = await card();
-  assert.deepEqual([c.status, c.done, c.total, c.found, c.downloads, c.runId], ['done', 7, 7, 4, false, runId]);
+  assert.deepEqual([c.status, c.done, c.total, c.found, c.downloads, c.runId], ['done', 7, 7, 5, false, runId]);
 });
 
 test('only green candidates are followed in bulk: insert-only, under the cap, the refresh paced; amber ones one at a time', { skip }, async () => {

@@ -1630,7 +1630,7 @@ total, skipped}`; **409** `{error: 'busy', runId}` while another searches, **400
 is a series this admin may see, `too_many` over 500, `bad_request` otherwise. A series numbered by posting order or
 already following two sources is in the run but never searched (`skipped`, with its `note`), and so is one listing
 fewer than three chapter numbers (`too_few`) or with no other source to ask (`no_source`). The rest are searched on
-the sources they may reach (an adult source only for an adult series) in scan order -- never the main source, never
+the sources the starting admin may reach (their own age cap: an extension that flags itself adult is asked for any series, since an admin confirms every follow) in scan order -- never the main source, never
 one already followed, never one disabled or cooling down, read per series -- at most 8 sources and 12 searches per
 series within 120 s, under the title and up to three other names, under the hunt's shared search slots, stopping
 once the free follower slots are filled by green candidates. A source whose search fails is not asked the next

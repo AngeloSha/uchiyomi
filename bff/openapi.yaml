@@ -8893,8 +8893,8 @@ paths:
         runs, stopping at a series boundary on POST .../find/stop, Cancel on its card, or a shutdown (the run is then
         `stopped` or `interrupted`, keeps what it found and can be resumed). A series numbered by posting order or
         already following two sources is in the run, skipped, and never searched; so is one listing fewer than three
-        chapter numbers. The rest are searched on the sources they may reach (an adult source only for an adult
-        series) in scan order -- never the main source, never one already followed, never one disabled or cooling
+        chapter numbers. The rest are searched on the sources this admin may reach (their own age cap: an
+        extension that flags itself adult is asked for any series, since an admin confirms every follow) in scan order -- never the main source, never one already followed, never one disabled or cooling
         down (read per series) -- at most 8 sources and 12 searches per series, within 120 s, under the title and up
         to three other names (an other name matched exactly), under the hunt's shared search slots, stopping once the
         free follower slots are filled by green candidates. The searches report nothing to source health. Each hit is
