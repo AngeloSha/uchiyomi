@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+**Find other sources shows what it found before anything is followed.** A search now proposes and an admin
+confirms: each series' matches on the review page, green when a name matches and the chapter numbers line up, amber
+when only the name does, with the chapter list of each beside the series' own and a search by hand where nothing was
+found. From **@TIGamingTV**'s [#119](https://github.com/AngeloSha/uchiyomi/pull/119), rebuilt on v0.49.1's search
+and follow rules.
+
+### Find other sources, with a review
+
+- **Nothing is followed by the search.** Health's button, the Library's *More → Find other sources* and a series'
+  *Find more sources* open the search's review page, which fills in series by series. **Select exact matches** ticks
+  the green ones, as many per series as it has free places, and **Follow selected** follows them. An amber match
+  (the same name, chapter numbers that do not line up) is never followed in bulk: only one at a time from its chapter
+  list, after a confirmation, judged again, and audited as an override.
+- **Every match says why.** Which of the series' names matched (*matched via "Only I Level Up"*), how much of the
+  series' chapters it lists and how much of its own the series lists, and **Chapters**: its list beside the series',
+  with what the series does not have marked *new* and what it lacks listed on top. A name the candidate's own
+  description lists may match one of the series' names exactly, and such a match is always measured both ways.
+- **Search by hand**, where the search found nothing or the wrong book: every source, under any name, searched on
+  **Search** rather than per keystroke, and the pick checked by the same rule.
+- **Same manners as before.** One search at a time, 1.5 s between series, waiting while a sweep, a repair or the
+  daily check runs, at most 8 sources and 12 searches per series, under the hunt's search slots, reporting nothing
+  to source health, and never a series numbered by posting order. **Stop** keeps what it found and **Search the
+  rest** goes on where it stopped, as after a restart. Follows are insert-only under the series row's lock: a source
+  followed another way since is *Already followed*, never re-pointed. Listings are refreshed after a follow 1.5 s
+  apart, and not while a sweep or a repair runs.
+- **Other names for a series added before v0.49.1**: the search reads them from the description already on disk
+  before it asks the main source, which is often the one that is down.
+
+### Upgrading
+
+- Additive schema: two tables (`source_find_items`, `source_find_candidates`) and two columns on `source_find_runs`.
+  An install that ran the fork build of #119 has its `series_alt_titles` brought to v0.49.1's shape (the other names
+  could not be read there).
+
 ## v0.49.2 — 2026-09-29
 
 **The Library can be filtered by where a series comes from: Main source shows the series added from a source, and

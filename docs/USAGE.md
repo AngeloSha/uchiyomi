@@ -224,8 +224,8 @@ says how many are in hand. The chips:
   says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
   separate, per-title step on **Content → Library** — see section 8.
 - **Find other sources** (since v0.49.1) — admins only, behind **More**. It searches the other sources for every
-  selected series and follows the ones whose title and chapter numbers match (section 4, *Find other sources*); the
-  message says where to watch it, *Library → Downloads*.
+  selected series and opens the search's review, where you choose what to follow (section 4, *Find other
+  sources*).
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
@@ -464,39 +464,42 @@ description, are from @TIGamingTV's pull request [#119](https://github.com/Angel
 
 When a source goes away for good — it closed, or it has served only its own *temporarily offline* page for days —
 every series that came from it stops getting new chapters, and following a second source one series at a time is
-an afternoon's work in a large library. **Find other sources** (admins, since v0.49.1) does it for many series at
-once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uchiyomi/pull/119)).
+an afternoon's work in a large library. **Find other sources** (admins, since v0.49.1) searches for many series at
+once, calmly, and shows you what it found: **nothing is followed until you confirm it**. The idea and the review are
+@TIGamingTV's ([#119](https://github.com/AngeloSha/uchiyomi/pull/119)).
 
 - **Where to start it.** On **Admin → Health**, the row of a failing or switched-off source under *Source health*,
   and a row under *Series that can no longer update* whose reason is its source, carry **Find other sources (189
   series)**: every series whose main source it is. In the **Library**, select series and choose **Find other
   sources** under **More**. On a series page, **Find more sources** in the *Sources & translations* sheet (under
-  *Other names*) does it for that one series. Health's key says beforehand what it does, how, and how long it can
-  take, at most about a minute and a half per series (*Up to 5 hours* for 189).
-- **What a run does.** One run at a time on the server, in the background: one series at a time, 1.5 seconds
-  apart, waiting while a chapter sweep, a library repair or the daily source check runs. For each series it
-  searches under the title and up to three other names, in your source order, and never asks the series' main
-  source (the one that is down), a source it already follows, or one that is switched off or cooling down; a
-  series that is not 18+ never asks an 18+ source. A candidate must pass the same check as any second source
-  (*Following a second source*): its title, then its chapter numbers. A series follows at most two other sources,
-  the run stops looking once three sources carry the series, and it gives each series at most 90 seconds. A series
-  numbered by posting order is skipped: it follows no other source.
+  *Other names*) does it for that one series. Each opens the search's review page, which fills in as it goes.
+- **What the search does.** One search at a time on the server, in the background: one series at a time, 1.5
+  seconds apart, waiting while a chapter sweep, a library repair or the daily source check runs. For each series it
+  searches under the title and up to three other names, in your source order, at most 8 sources, and never asks the
+  series' main source (the one that is down), a source it already follows, or one that is switched off or cooling
+  down; a series that is not 18+ never asks an 18+ source. It stops once it has found as many good matches as the
+  series has free places (a series follows at most two other sources). A series numbered by posting order, already
+  following two sources, or with fewer than 3 chapters to compare is skipped, and the review says why. A failed
+  search never puts a source in a cooldown.
+- **The review.** Each series shows its main source, the sources it follows, the names it was searched under, and
+  what was found. A **green** match is the same series: a name matches and the chapter numbers line up both ways.
+  An **amber** match has exactly the same name but chapter numbers that do not line up — a different edition, a
+  sequel or a source that numbers differently. Each match says which name matched (*matched via "Only I Level
+  Up"*), how many of your chapters it has and how many of its chapters you have, and **Chapters** shows its whole
+  list beside yours, with the chapters you do not have marked *new* and the ones it is missing listed on top.
+  **Select exact matches** ticks the green ones, as many per series as it has free places; **Follow selected**
+  follows them. An amber match is never followed in bulk: open its chapters and choose **Follow this one anyway**,
+  after a confirmation. Where the search found nothing, **Search by hand** searches every source for any name you
+  type (on **Search**, not while you type) and checks the one you pick by the same rule.
 - **Afterwards**, each series that gained a source has its chapter list read again, 1.5 seconds apart, so the next
-  scheduled check fetches its new chapters without a burst, and Health checks itself again.
-- **Watching it.** **Library → Downloads** lists the run under *Server tasks* as *Other-source search*: how many
-  series of how many, how many sources it has followed, the series it is on or what it is waiting for (*Waiting for
-  the scheduled check to finish*), and **Stop**, which stops it at once. Health's row, and a card under the checks,
-  show the same. It never turns the Library ring: it downloads nothing itself.
-- **The results.** **Show results** opens them in four sections. *New sources*: each series and the sources it now
-  follows, with how many chapters each lists. *Nothing found*, and why: no other source lists it under its title or
-  other names; one did, but its title or chapter numbers did not match; no other source answered; or no other
-  source lists it besides the one it already follows. *Skipped*: numbered by posting order, already following as
-  many sources as a series may, fewer than 3 chapters to compare, or no other source that could be asked. *Not
-  tried*: the search was stopped, ran out of time or was interrupted by a restart before it got there (or the series
-  was removed or merged meanwhile) — never *not found* — with **Search the {n} series not tried**. *Earlier searches* lists the runs before it; the server
-  keeps the last 20.
-- **A restart** stops a run the way **Stop** does: what it followed stays followed, and the series it never reached
-  are listed as not tried.
+  scheduled check fetches its new chapters without a burst (skipped while a chapter sweep or repair runs, which read
+  every followed source anyway). A source the series has since followed another way is shown as *Already followed*
+  and never changed.
+- **Watching it.** **Library → Downloads** lists the search under *Server tasks* as *Other-source search*: how many
+  series of how many, for how many it found something, the series it is on or what it is waiting for, **Stop**, and
+  **Review**. It never turns the Library ring: it downloads nothing. **Stop** keeps what it found; **Search the rest**
+  on the review goes on where it stopped, and so does a search a restart interrupted. The server keeps a finished
+  search a week and an unfinished one a month; **Discard** removes one sooner.
 
 ### Preferring one source
 
@@ -559,8 +562,8 @@ The view shows each series as its cover with a ring, like an app being installed
   source; a slow archive that is stuck, or finished with chapters it could not fetch; a server task that stopped
   with an error. Chapters that keep failing are Health's to track (Admin → Health).
 - **Server tasks** — the scheduled check, the library repair (with the step it is on), a bulk *Fetch newest* and,
-  for an admin, a *Find other sources* run (*Other-source search*, with **Show results**): how far each has got, how
-  many chapters it saved (or sources it followed), which series it is on and when it started.
+  for an admin, a *Find other sources* search (*Other-source search*, with **Review**): how far each has got, how
+  many chapters it saved (or series it found sources for), which series it is on and when it started.
 - **Came in today** — what arrived, one cover per series, with the chapters, what started it and when; the slow
   archive's chapters are summed up in one line per series (*Slow archive: 12 chapters today*). It survives a
   restart of the server.

@@ -673,67 +673,93 @@ components:
                 description: "`admin` typed by hand, `import` a tracker's synonym kept when an import added the series, `description` read from the series' main source's own description."
               addedBy: { type: [string, "null"], description: "The admin's username; null for a name the server read, or for an account since deleted." }
               createdAt: { type: string, format: date-time }
-    FindResult:
+    FindCandidate:
       type: object
-      description: What a Find other sources run did for one series (since v0.49.1).
-      required: [seriesId, followed]
+      description: >-
+        A source Find other sources found for one series, waiting for an admin's decision. `ok` (green) is what
+        autoFollow's judgement would follow itself; `numbering_differs` (amber) is kept only when a name matched
+        EXACTLY while the chapter numbers do not line up, and is only ever followed one at a time.
+      required: [id, itemId, source, name, sourceSeriesId, verdict, manual, status]
       properties:
-        seriesId: { type: string }
-        title: { type: string, description: "Left out for a series the viewer may not list (the 18+ hide, above all), and for one no longer in the library when a restart's run was closed; the entry stays." }
-        followed:
-          type: array
-          description: The sources it now follows, in scan order.
-          items:
-            type: object
-            required: [sourceId, name, chapters]
-            properties:
-              sourceId: { type: string }
-              name: { type: string }
-              chapters: { type: integer, minimum: 0, description: The distinct chapter numbers that source lists. }
-        why:
-          type: string
-          enum: [posting_order, full, too_few, no_source, refused, no_answer, followed_already, no_match, not_tried]
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        source: { type: string }
+        name: { type: string, description: The source's display name, or its id when it is not loaded. }
+        sourceSeriesId: { type: string }
+        theirTitle: { type: [string, "null"] }
+        cover: { type: [string, "null"] }
+        ourName: { type: [string, "null"], description: Which of the series' names matched exactly, when one did. }
+        theirName: { type: [string, "null"], description: "Which of its names matched: its title, or a name its own description lists." }
+        coverageFwd: { type: [number, "null"], description: "The share of the series' chapter numbers it lists, 0..1." }
+        coverageBack: { type: [number, "null"], description: "The share of its chapter numbers the series lists, 0..1." }
+        verdict: { type: string, enum: [ok, numbering_differs] }
+        manual: { type: boolean, description: An admin picked it by hand from the search sheet. }
+        status:
+          type: [string, "null"]
           description: >-
-            Only when nothing was followed, and exactly what happened. `posting_order`: numbered by posting order, so
-            no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
-            or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
-            which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
-            every one turned off, cooling down, adult for a clean series, or one it follows already (not searched).
-            `refused`: a source carried the title and did not pass the title and chapter-number check (another book).
-            `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
-            chapters, so nothing could be judged. `followed_already`: the sources that answered do not carry it, and
-            the series already follows another source -- which does, so it is not "no other source lists it".
-            `no_match`: the sources that answered do not carry it, and it follows no other source. `not_tried`: a
-            stop, the series' 90 s wall or a restart cut it short (rarely also a series deleted or merged away before
-            or during its turn) -- never "not found".
+            Null while it is open; else what became of it -- `linked`, `already_followed` (the series follows that
+            source already: never re-pointed), `primary`, `cap`, `posting_order`, `gone`, `unavailable` or `error`.
+    FindItem:
+      type: object
+      description: One series of a Find other sources run, with what it follows now and what the search found.
+      required: [id, seriesId, title, names, state, asked, unreachable, primary, following, freeSlots, candidates]
+      properties:
+        id: { type: string, format: uuid }
+        seriesId: { type: string }
+        title: { type: string }
+        names: { type: array, items: { type: string }, description: The names it was searched under, its title first. }
+        state: { type: string, enum: [pending, done, skipped, error], description: "`pending`: not searched yet (a stopped or interrupted run's rest). `error`: gone or unreadable." }
+        note:
+          type: [string, "null"]
+          enum: [posting_order, full, too_few, no_source, null]
+          description: >-
+            Why a `skipped` series was not searched: numbered by posting order (no follower is ever merged), already
+            following as many other sources as a series may, listing fewer than three chapter numbers, or no other
+            source it could ask (every one turned off, cooling down, or adult for a clean series).
+        asked: { type: integer, minimum: 0, description: Sources asked. }
+        unreachable: { type: integer, minimum: 0, description: Of those, the ones that did not answer. }
+        primary:
+          type: [object, "null"]
+          properties: { source: { type: string }, name: { type: string } }
+        following:
+          type: array
+          items: { type: object, properties: { source: { type: string }, name: { type: string } } }
+        freeSlots: { type: integer, minimum: 0 }
+        candidates: { type: array, items: { $ref: "#/components/schemas/FindCandidate" } }
     FindRunSummary:
       type: object
-      description: One Find other sources run, without its per-series results (since v0.49.1).
-      required: [id, status, total, done, followed, startedBy, startedAt]
+      description: One Find other sources run.
+      required: [id, status, total, done, found, open, followed, failed, startedBy, startedAt]
       properties:
         id: { type: string, format: uuid }
         status:
           type: string
-          enum: [running, done, stopped, failed, interrupted]
-          description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it -- a shutdown, where the run closes its own row, or a row found still running after a restart, closed at boot. Either way `results` then lists every series it never reached as `not_tried`, as a stopped run does."
-        total: { type: integer, minimum: 0, description: Series in its scope. }
-        done: { type: integer, minimum: 0, description: Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here. }
-        followed: { type: integer, minimum: 0, description: Sources followed, across its series. }
+          enum: [running, stopped, interrupted, review, linking, done, failed]
+          description: >-
+            `running`: searching. `stopped` (an admin's stop, or Cancel on its card) and `interrupted` (a shutdown, or
+            a row found still searching after a restart): what it found is kept, and it can be resumed. `review`: the
+            search is over and candidates wait. `linking`: following what was confirmed. `done`: nothing is left
+            open.
+        total: { type: integer, minimum: 0, description: Series in the run. }
+        done: { type: integer, minimum: 0, description: Series settled -- searched, or skipped before any search. }
+        found: { type: integer, minimum: 0, description: Series it found at least one candidate for. }
+        open: { type: integer, minimum: 0, description: Candidates waiting for a decision. }
+        followed: { type: integer, minimum: 0, description: Follows confirmed and written. }
+        failed: { type: integer, minimum: 0, description: Confirmed follows that did not go through. }
         startedBy: { type: [string, "null"], description: "The admin who started it, by username (never the account id); null for an account since deleted." }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
         sourceId: { type: string, description: The source whose series it was about, when the scope was a source. }
         sourceName: { type: string, description: That source's display name, or its id when it is not loaded. }
     FindRun:
-      description: A Find other sources run in full (since v0.49.1).
+      description: A Find other sources run, with what it is doing while it searches.
       allOf:
         - $ref: "#/components/schemas/FindRunSummary"
         - type: object
-          required: [results]
           properties:
             current:
               type: object
-              description: The series it is on now, while it runs; left out for a series the viewer may not list.
+              description: The series it is searching now; left out for a series the viewer may not list.
               required: [seriesId, title]
               properties:
                 seriesId: { type: string }
@@ -741,12 +767,7 @@ components:
             waiting:
               type: string
               enum: [sweep, repair, check]
-              description: While it runs, what it is waiting on before its next series.
-            results:
-              type: array
-              description: "One entry per series settled, in the order they were asked about; after the run ends -- done, stopped or interrupted -- one for every series in its scope, those it never reached as `not_tried`."
-              items:
-                $ref: "#/components/schemas/FindResult"
+              description: While it searches, what it is waiting on before its next series.
 paths:
   /livez:
     get:
@@ -2697,6 +2718,8 @@ paths:
                         seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
                         followed: { type: integer, minimum: 0, description: "Since v0.49.1, a find_sources run: the sources it has followed so far, across its series." }
                         waiting: { type: string, enum: [sweep, repair, check], description: "Since v0.49.1, a find_sources run: what it waits on before its next series while it waits -- a chapter sweep, a library repair or the daily source check (GET /api/admin/sources/find's run.waiting). Absent otherwise; `current` is then still the series it did last." }
+                        runId: { type: string, format: uuid, description: "A find_sources run: its id, whose review is GET /api/admin/sources/find/{id}." }
+                        found: { type: integer, minimum: 0, description: "A find_sources run: the series it has found a source to review for so far. The search follows nothing by itself." }
                         downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
@@ -8825,15 +8848,13 @@ paths:
     get:
       tags:
         - admin
-      summary: "Find other sources: whether a run is going, the running (or else the newest) run in full, and the kept runs (since v0.49.1)."
+      summary: "Find other sources: whether a run is searching, the searching (or else the newest) run, and the kept runs."
       operationId: getApiAdminSourcesFind
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. {running, run,
-        recent}: `run` is the running run, else the newest one, with every series' result; `recent` the kept runs
-        (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`,
-        with every series it never reached in `results` as `not_tried`.
-        A series the viewer may not list (the 18+ hide, above all) keeps its entry in `results` without its
-        `title`, and is left out of `current`.
+        recent}: `run` is the searching run, else the newest one; `recent` the newest 20, newest first. A run still
+        `running` after a restart reads `interrupted` (resumable). `current` is left out for a series the viewer may
+        not list (the 18+ hide, above all). A run's series and candidates are GET /api/admin/sources/find/{id}.
       security:
         - bearer: []
       responses:
@@ -8853,7 +8874,7 @@ paths:
                   recent:
                     type: array
                     items:
-                      $ref: "#/components/schemas/FindRunSummary"
+                      $ref: "#/components/schemas/FindRun"
         "401":
           description: Not authenticated
         "403":
@@ -8861,28 +8882,27 @@ paths:
     post:
       tags:
         - admin
-      summary: "Find other sources: search other sources for many series at once, and follow the ones that are them, in the background (since v0.49.1)."
+      summary: "Find other sources: search other sources for many series at once and propose what to follow; nothing is followed until an admin confirms it."
       operationId: postApiAdminSourcesFind
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body
         `{seriesIds}` (the series named, up to 500, in the order given; a hidden, merged or unknown id is dropped) or
         `{sourceId}` (every series whose MAIN source is that id -- the "this source is down" case Health's
-        `find_sources` action sends; the series that follow nothing first). One run at a time, in the background:
+        `find_sources` action sends; the series that follow nothing first). One search at a time, in the background:
         1.5 s between the series that searched, waiting while a sweep, a library repair or the daily source check
-        runs, stopping at once on POST .../find/stop, Cancel on its card, or a shutdown. Per series: skipped when
-        numbered by posting order or already following two sources; otherwise searched on the sources the series
-        may reach (an adult source only for an adult series) in scan order -- never its main source, never one it
-        already follows, never one disabled or cooling down (read per series) -- under its title and up to three of
-        its other names (an other name matched exactly), stopping once its free follower slots are filled or three
-        sources carried the title, within a wall of 90 s. Each candidate is judged as the add's auto-follow judges
-        one (title, then the numbering both ways unless an exact main title on ten or more numbers) and followed
-        under the follower cap, with this admin as its author. The searches report nothing to source health: a
-        source that fails one is neither put in a cooldown nor marked failing. When the run ends, every series that
-        gained a source gets a listing refresh, 1.5 s apart, in the background (nothing is downloaded: the sweep
-        takes the new chapters from there), and the Health summary is refreshed. Audited as `source.find` {runId,
-        scope, status, total, done, followed, series} when it ends, and each follow as `series.follow_source` with
-        `via: find_sources`. While it runs, GET /api/sources/jobs carries its card (kind `find_sources`) to admins.
-        The idea is @TIGamingTV's (PR #119).
+        runs, stopping at a series boundary on POST .../find/stop, Cancel on its card, or a shutdown (the run is then
+        `stopped` or `interrupted`, keeps what it found and can be resumed). A series numbered by posting order or
+        already following two sources is in the run, skipped, and never searched; so is one listing fewer than three
+        chapter numbers. The rest are searched on the sources they may reach (an adult source only for an adult
+        series) in scan order -- never the main source, never one already followed, never one disabled or cooling
+        down (read per series) -- at most 8 sources and 12 searches per series, within 120 s, under the title and up
+        to three other names (an other name matched exactly), under the hunt's shared search slots, stopping once the
+        free follower slots are filled by green candidates. The searches report nothing to source health. Each hit is
+        judged as the add's auto-follow judges one, and a name the candidate's own description lists may match one of
+        the series' names exactly (then always measured both ways): `ok` is a green candidate; `numbering_differs` is
+        kept, amber, only when a name matched exactly. Audited as `source.find` {runId, status, total, done, found}
+        when the search ends. While it searches, GET /api/sources/jobs carries its card (kind `find_sources`, with its
+        `runId`) to admins. The idea and the review are @TIGamingTV's (PR #119).
       requestBody:
         required: true
         content:
@@ -8907,28 +8927,29 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [runId, total]
+                required: [runId, total, skipped]
                 properties:
                   runId: { type: string, format: uuid }
-                  total: { type: integer, minimum: 1, description: The series it will ask about. }
+                  total: { type: integer, minimum: 1, description: The series in the run. }
+                  skipped: { type: integer, minimum: 0, description: Of those, the ones it will not search (posting order, or no free follower slot). }
         "400":
-          description: "`bad_request` (a malformed body, or both scopes at once) or `empty_scope` (nothing named is a series this admin may see)"
+          description: "`bad_request` (a malformed body, or both scopes at once), `too_many` (over 500 series) or `empty_scope` (nothing named is a series this admin may see)"
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "409":
-          description: "`busy`: a run is already going; `runId` names it"
+          description: "`busy`: a run is already searching; `runId` names it"
   /api/admin/sources/find/stop:
     post:
       tags:
         - admin
-      summary: "Stop the running Find other sources run at once (since v0.49.1)."
+      summary: "Stop the searching Find other sources run at once; what it found is kept."
       operationId: postApiAdminSourcesFindStop
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The series in
-        flight keeps what it already followed and is otherwise `not_tried`, as is every series not reached; the run
-        ends `stopped`. `stopped` is false when no run was going. Audited as `source.find.stop`.
+        flight stays unsearched, and the run ends `stopped`: resumable, its candidates reviewable. `stopped` is false
+        when no run was searching. Audited as `source.find.stop`.
       security:
         - bearer: []
       responses:
@@ -8945,6 +8966,311 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/find/{id}:
+    get:
+      tags:
+        - admin
+      summary: "One Find other sources run's review: every series, what it follows now, and what the search found for it."
+      operationId: getApiAdminSourcesFindId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Open candidates
+        whose source the series has followed since (anywhere: the Sources sheet, the hunt, another run), or whose
+        series has been numbered by posting order since, are closed first, and the run is settled (`review` or
+        `done`). A series the viewer may not list (the 18+ hide) is left out and counted in `hidden`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run, hidden, items]
+                properties:
+                  run:
+                    allOf:
+                      - $ref: "#/components/schemas/FindRun"
+                      - type: object
+                        properties:
+                          maxFollowers: { type: integer, description: How many sources a series may follow besides its main one. }
+                  hidden: { type: integer, minimum: 0 }
+                  items: { type: array, items: { $ref: "#/components/schemas/FindItem" } }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`"
+    delete:
+      tags:
+        - admin
+      summary: "Discard a Find other sources run (its search stops first). Sources already followed stay followed."
+      operationId: deleteApiAdminSourcesFindId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Idempotent.
+        Audited as `source.find.discard`. Runs are also swept daily: finished ones after a week, open ones after a
+        month.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "`busy`: it is following sources right now"
+  /api/admin/sources/find/{id}/resume:
+    post:
+      tags:
+        - admin
+      summary: "Search on from where a stopped or interrupted Find other sources run left off."
+      operationId: postApiAdminSourcesFindIdResume
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Searching again.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`"
+        "409":
+          description: "`busy` (another run searches, or this one follows) or `not_resumable` (every series was searched)"
+  /api/admin/sources/find/{id}/follow:
+    post:
+      tags:
+        - admin
+      summary: "Follow the green candidates an admin confirmed, in the background."
+      operationId: postApiAdminSourcesFindIdFollow
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body
+        `{candidateIds}` (1..1500). Only `ok` candidates are followed -- what auto-follow would follow itself; there
+        is no bulk override. Anything else sent is left open and counted in `held` (an amber candidate is followed
+        one at a time: POST /api/admin/sources/find/candidates/{id}/follow). Stale candidates are closed first. Each
+        follow is one transaction under the series row's lock that re-reads its posting-order numbering, INSERTs
+        only (a source the series follows already is `already_followed`, never re-pointed) and keeps the follower
+        cap, with this admin as its author. Audited as `source.find.follow` {runId, count, held}, and each follow as
+        `series.follow_source` with `via: find_sources`. The listings of the series that gained a source are then
+        refreshed one at a time, 1.5 s apart, and not at all while a sweep or a repair runs.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateIds]
+              properties:
+                candidateIds: { type: array, minItems: 1, maxItems: 1500, items: { type: string, format: uuid } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Following.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, total, held, ids]
+                properties:
+                  ok: { type: boolean }
+                  total: { type: integer, description: Candidates it follows. }
+                  held: { type: integer, description: Candidates sent that are not green, left open. }
+                  ids: { type: array, items: { type: string, format: uuid } }
+        "400":
+          description: "`bad_request`, or `nothing_to_follow` (nothing sent is open)"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`"
+        "409":
+          description: "`still_searching`, `busy` (already following) or `not_followable` (only amber candidates were sent)"
+  /api/admin/sources/find/candidates/{id}/follow:
+    post:
+      tags:
+        - admin
+      summary: "Follow ONE candidate after looking at its chapters: the only way an amber candidate is ever followed."
+      operationId: postApiAdminSourcesFindCandidatesIdFollow
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body
+        `{confirm: true}`. The pair is judged again first (it may be weeks old); insert-only, under the lock and the
+        cap, like a bulk follow. Audited as `series.follow_source` with `via: find_sources`, `preview: true` and
+        `override: true` when it is not green.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: boolean, enum: [true] }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Followed.
+        "400":
+          description: "`bad_request`: no confirmation"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found` or `gone` (the series)"
+        "409":
+          description: "`closed`, `busy`, `posting_order`, `unavailable`, `changed` (no longer a name of the series), `already_followed`, `primary` or `cap`"
+        "502":
+          description: "`unreachable`: the source did not answer"
+  /api/admin/sources/find/items/{id}/candidates:
+    post:
+      tags:
+        - admin
+      summary: "Add a candidate an admin found by hand to one series of a run, judged by the same rule as the search's."
+      operationId: postApiAdminSourcesFindItemsIdCandidates
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body {source,
+        sourceSeriesId, cover?}. Refused before any lookup whenever a follow would be: `posting_order`, `full`,
+        `already_followed` (its main source, or one it follows), `too_few`, `unknown_source`; then judged:
+        `title_differs` (none of its names is one of the series'; `theirTitle` says what it is called),
+        `not_this_series` (a title that only contains the series' and chapters that do not line up), `unavailable`,
+        `unreachable`. Saved as `manual`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, sourceSeriesId]
+              properties:
+                source: { type: string }
+                sourceSeriesId: { type: string }
+                cover: { type: [string, "null"] }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidate]
+                properties:
+                  candidate: { oneOf: [{ $ref: "#/components/schemas/FindCandidate" }, { type: "null" }] }
+        "400":
+          description: "`bad_request`"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found` or `gone`"
+        "409":
+          description: The refusal's code, above
+        "502":
+          description: "`unreachable`"
+  /api/admin/sources/find/items/{id}/chapters:
+    get:
+      tags:
+        - admin
+      summary: "The chapters a candidate source lists, beside the series' own: what an admin looks at before following it."
+      operationId: getApiAdminSourcesFindItemsIdChapters
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. One copy per
+        number under the series' release preferences, each marked `ours` when the series has that number already
+        (the first 3000; the counts cover all), and `missing`: the numbers the series has that this source does not
+        list. Read through the add dialog's detail cache.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: source
+          in: query
+          required: true
+          schema: { type: string }
+        - name: sourceSeriesId
+          in: query
+          required: true
+          schema: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The chapters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, name, count, ourCount, shared, missing, chapters]
+                properties:
+                  source: { type: string }
+                  name: { type: string }
+                  title: { type: [string, "null"] }
+                  count: { type: integer }
+                  ourCount: { type: integer }
+                  shared: { type: integer }
+                  missing: { type: array, items: { type: number } }
+                  chapters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        number: { type: number }
+                        title: { type: [string, "null"] }
+                        scanlator: { type: [string, "null"] }
+                        publishedAt: { type: [string, "null"] }
+                        ours: { type: boolean }
+        "400":
+          description: "`bad_request`"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`"
+        "409":
+          description: "`unknown_source`"
+        "502":
+          description: "`unreachable`"
   /api/admin/sources/{id}/test:
     post:
       tags:

@@ -1086,7 +1086,12 @@ GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/find    GET    /api/admin/sources/find
-POST   /api/admin/sources/find/stop
+POST   /api/admin/sources/find/stop GET    /api/admin/sources/find/:id
+DELETE /api/admin/sources/find/:id POST   /api/admin/sources/find/:id/resume
+POST   /api/admin/sources/find/:id/follow
+POST   /api/admin/sources/find/candidates/:id/follow
+POST   /api/admin/sources/find/items/:id/candidates
+GET    /api/admin/sources/find/items/:id/chapters
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
@@ -1616,41 +1621,61 @@ missing chapters (`POST /api/sources/fill/scan`, before the typed `altTitle`) --
 **exactly**, never by containment, and is then measured by the numbering both ways: a sequel's page may list its
 parent's name.
 
-**Find other sources** (since v0.49.1). `POST /api/admin/sources/find {seriesIds}` (up to 500, in the order
-given) or `{sourceId}` (every series whose **main** source that is -- the "this site is down" case) starts one
-background run and answers **202** `{runId, total}`; **409** `{error: 'busy', runId}` while another is going,
-**400** `empty_scope` when nothing named is a series this admin may see (or `bad_request`). Per series it skips a
-series numbered by posting order (`why: posting_order`) or already following two sources (`full`); otherwise it
-searches the sources the series may reach (an adult source only for an adult series) in scan order -- never its
-main source, never one it follows, never one disabled or cooling down -- under its title and up to three other
-names, stops once the free follower slots are filled or three sources carried the title, judges each candidate as
-the add's auto-follow does, and follows the ones that qualify with the admin as their author. It waits while a
-sweep, a repair or the daily source check runs, paces 1.5 s between series that searched, gives a series 90 s, and
-its searches report nothing to source health (a site that fails one is neither put in a cooldown nor marked
-failing). `GET /api/admin/sources/find` answers `{running, run, recent}`: `run` is the running run or else the
-newest, `{id, status: running|done|stopped|failed|interrupted, total, done, followed, startedBy (a username),
-startedAt, finishedAt?, sourceId?, sourceName?, current?: {seriesId, title}, waiting?: sweep|repair|check,
-results: [{seriesId, title?, followed: [{sourceId, name, chapters}], why?}]}`, and `recent` the newest 20 runs
-without `results` or `current`. `why` is set when nothing was followed, and says exactly what happened. Decided
-without a search: `posting_order`, `full` (two sources followed already), `too_few` (fewer than three chapter
-numbers, which nothing can be measured against) and `no_source` (no other source to ask: all turned off, cooling
-down or excluded). After one: `refused` (a candidate failed the title and chapter-number check), `no_answer`
-(nothing answered, or the source that carried it did not answer for its chapters), `followed_already` (nothing
-new, for a series that already follows another source -- which lists it) and `no_match` (nothing, and the series
-follows no other source). `not_tried` is what a stop, the series' 90 s wall or a restart cut short -- never "not
-found". A run that ends stopped or `interrupted` lists every series it never reached as `not_tried`: a shutdown
-gives the run a few seconds to close its own row, and a row still running after a restart is closed at boot the
-same way, from the series ids its scope resolved to when it started. A series the viewer may not list keeps its
-entry without `title`.
-`POST /api/admin/sources/find/stop` stops the run at once (`{stopped}`; false when none was going). When a run
-ends, every series that gained a source gets a listing refresh, 1.5 s apart (nothing is downloaded: the sweep
-takes the new chapters from there), the Health summary is refreshed, and `source.find` is audited with the scope
-and the counts (each follow as `series.follow_source` with `via: find_sources`). While it runs, `GET
-/api/sources/jobs` carries its card to admins: `kind: find_sources`, `done`/`total` in series, `followed`,
-`current` (hidden like any run's), `downloads: false`, and `waiting` (`sweep`, `repair` or `check`, as the run's
-own `waiting`) while it waits for one of those. On Health, a failing (or turned-off) source that is some
-series' main source carries the action `find_sources` with `findSeries`, and so does a "Series that can no longer
-update" row whose reason is its source.
+**Find other sources** (since v0.49.1; the idea and the review are @TIGamingTV's, PR #119). A run SEARCHES and
+PROPOSES; nothing is followed until an admin confirms it on the run's review.
+
+`POST /api/admin/sources/find {seriesIds}` (up to 500, in the order given) or `{sourceId}` (every series whose
+**main** source that is -- the "this site is down" case) starts one background search and answers **202** `{runId,
+total, skipped}`; **409** `{error: 'busy', runId}` while another searches, **400** `empty_scope` when nothing named
+is a series this admin may see, `too_many` over 500, `bad_request` otherwise. A series numbered by posting order or
+already following two sources is in the run but never searched (`skipped`, with its `note`), and so is one listing
+fewer than three chapter numbers (`too_few`) or with no other source to ask (`no_source`). The rest are searched on
+the sources they may reach (an adult source only for an adult series) in scan order -- never the main source, never
+one already followed, never one disabled or cooling down, read per series -- at most 8 sources and 12 searches per
+series within 120 s, under the title and up to three other names, under the hunt's shared search slots, stopping
+once the free follower slots are filled by green candidates. A source whose search fails is not asked the next
+name, and nothing is reported to source health. It waits while a sweep, a repair or the daily source check runs,
+paces 1.5 s between series that searched, and on `POST /api/admin/sources/find/stop` (`{stopped}`), Cancel on its
+card or a shutdown it stops at a series boundary: `stopped` or `interrupted`, what it found kept, resumable with
+`POST /api/admin/sources/find/:id/resume` (**202**; **409** `busy` or `not_resumable`). A row still searching after
+a restart reads `interrupted`.
+
+Each hit is judged as the add's auto-follow judges one (title, then the chapter numbers both ways unless an exact
+main title on ten or more numbers), and a name the candidate's own description lists may match one of the series'
+names exactly -- such a match is always measured both ways. `ok` is a **green** candidate; `numbering_differs` is
+kept, **amber**, only when a name matched exactly (a title that merely contains the series' with numbers that do not
+line up is what a sequel looks like, and is not shown).
+
+`GET /api/admin/sources/find` answers `{running, run, recent}`: `run` is the searching run or else the newest,
+`recent` the newest 20: `{id, status: running|stopped|interrupted|review|linking|done|failed, total, done, found,
+open, followed, failed, startedBy (a username), startedAt, finishedAt?, sourceId?, sourceName?, current?: {seriesId,
+title}, waiting?: sweep|repair|check}`. `GET /api/admin/sources/find/:id` is its review: `{run: {…, maxFollowers},
+hidden, items: [{id, seriesId, title, names, state: pending|done|skipped|error, note?, asked, unreachable, primary,
+following, freeSlots, candidates: [{id, itemId, source, name, sourceSeriesId, theirTitle, cover, ourName, theirName,
+coverageFwd, coverageBack, verdict, manual, status}]}]}` -- open candidates whose source the series has followed
+since, anywhere, are closed first (`already_followed`), and a series the viewer may not list is left out and counted
+in `hidden`. `GET /api/admin/sources/find/items/:id/chapters?source&sourceSeriesId` lists what a candidate carries
+beside the series' own (`count`, `ourCount`, `shared`, `missing`, `chapters[].ours`), and `POST
+/api/admin/sources/find/items/:id/candidates {source, sourceSeriesId, cover?}` adds one an admin found by hand,
+judged by the same rule and refused with its code (`posting_order`, `full`, `already_followed`, `too_few`,
+`title_differs`, `not_this_series`, `unavailable`, `unreachable`).
+
+`POST /api/admin/sources/find/:id/follow {candidateIds}` follows the **green** ones in the background (`{ok, total,
+held, ids}`; anything else sent is left open and counted in `held`; **409** `still_searching`, `busy`,
+`not_followable` when only amber ones were sent). There is no bulk override: an amber candidate is followed one at a
+time with `POST /api/admin/sources/find/candidates/:id/follow {confirm: true}`, judged again first and audited as an
+override. Every follow is INSERT-only, under the series row's lock with its posting-order numbering re-read and the
+follower cap kept: a source the series follows already is `already_followed`, never re-pointed. The listings of the
+series that gained a source are refreshed one at a time, 1.5 s apart, and not at all while a sweep or a repair runs.
+`DELETE /api/admin/sources/find/:id` discards a run (sources followed stay followed); runs are swept daily, finished
+ones after a week and open ones after a month. Audited: `source.find` when a search ends, `source.find.stop`,
+`source.find.follow`, `source.find.discard`, and each follow as `series.follow_source` with `via: find_sources`.
+
+While it searches, `GET /api/sources/jobs` carries its card to admins: `kind: find_sources`, `runId`, `done`/`total`
+in series, `found`, `current` (hidden like any run's), `downloads: false`, and `waiting` (`sweep`, `repair` or
+`check`) while it waits for one of those. On Health, a failing (or turned-off) source that is some series' main
+source carries the action `find_sources` with `findSeries`, and so does a "Series that can no longer update" row
+whose reason is its source.
 
 ### Admin — extensions (Mihon / Tachiyomi)
 
