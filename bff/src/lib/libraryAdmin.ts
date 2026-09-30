@@ -254,6 +254,8 @@ const SERIES_KEYED_TABLES = [
   'series_post_numbers', 'archive_queue',
   // v0.49.1: the other names a series goes by (lib/altTitles.ts). Cascades too; named for the same count.
   'series_alt_titles',
+  // Find other sources: a run's row for the series (its candidates cascade with it). Cascades; named for the count.
+  'source_find_items',
 ] as const;
 
 export interface ForgetRefusal {

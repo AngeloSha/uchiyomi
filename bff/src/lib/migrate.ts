@@ -1313,6 +1313,86 @@ CREATE TABLE IF NOT EXISTS source_find_runs (
 );
 CREATE INDEX IF NOT EXISTS source_find_runs_started ON source_find_runs (started_at DESC);
 -- (Both tables are new and nothing older writes to them: v0.49.0 starts on this schema and ignores them.)
+
+-- Find other sources with a review (lib/findSources.ts, @TIGamingTV). A run searches and PROPOSES; nothing is
+-- followed until an admin confirms it. A run is still a source_find_runs row -- status running (searching), stopped
+-- or interrupted (resumable), review (candidates wait), linking (following what was confirmed), done or failed --
+-- with two columns more: failed counts the confirmed follows that did not go through, updated_at is when the
+-- run last changed (what the daily sweep ages it by). One source_find_items row per series of the run, one
+-- source_find_candidates row per (series, source) it found. Everything here is additive: a v0.49.1 image rolled
+-- back onto it ignores the columns and the two tables.
+ALTER TABLE source_find_runs ADD COLUMN IF NOT EXISTS failed     int NOT NULL DEFAULT 0;
+ALTER TABLE source_find_runs ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+-- state: pending, done (searched), skipped (not searched: note says why -- posting_order, full, too_few,
+-- no_source) or error (gone or unreadable). names are the names it was searched under; asked and unreachable
+-- count the sources asked and the ones that did not answer.
+CREATE TABLE IF NOT EXISTS source_find_items (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id      uuid NOT NULL REFERENCES source_find_runs(id) ON DELETE CASCADE,
+  ord         int  NOT NULL,
+  series_id   text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  title       text NOT NULL DEFAULT '',
+  names       text[] NOT NULL DEFAULT '{}',
+  state       text NOT NULL DEFAULT 'pending',
+  note        text,
+  asked       int  NOT NULL DEFAULT 0,
+  unreachable int  NOT NULL DEFAULT 0,
+  UNIQUE (run_id, ord)
+);
+CREATE INDEX IF NOT EXISTS source_find_items_series ON source_find_items (series_id);
+-- verdict: ok (autoFollow's judgeCandidate would follow it) or numbering_differs (a name matches exactly, the
+-- chapter numbers do not: only ever followed one at a time, after a person has looked at its chapters). status
+-- is null while the candidate is open, else what became of it (linked, already_followed, cap, …).
+CREATE TABLE IF NOT EXISTS source_find_candidates (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id          uuid NOT NULL REFERENCES source_find_items(id) ON DELETE CASCADE,
+  source           text NOT NULL,
+  source_series_id text NOT NULL,
+  their_title      text,
+  cover            text,
+  our_name         text,
+  their_name       text,
+  coverage_fwd     real,
+  coverage_back    real,
+  verdict          text NOT NULL,
+  manual           boolean NOT NULL DEFAULT false,
+  status           text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (item_id, source)
+);
+
+-- An install that ran the fork build of PR #119 before v0.49.1 has a series_alt_titles of another shape, which
+-- the CREATE TABLE IF NOT EXISTS above left as it was: no removed_at (every read of the other names failed on
+-- it), added_by a uuid referencing users, a source_id column, and origins 'confirmed' and 'merged'. Brought to
+-- v0.49.1's shape here, each step only when it is needed, so a v0.49.1 table is untouched: the column added, the
+-- reference dropped and the id kept as text, the two origins read as an admin's (a person confirmed both), the
+-- extra column dropped and the origin CHECK added.
+ALTER TABLE series_alt_titles ADD COLUMN IF NOT EXISTS removed_at timestamptz;
+DO $$
+DECLARE c record;
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'series_alt_titles'
+                AND column_name = 'added_by' AND data_type = 'uuid') THEN
+    FOR c IN SELECT conname FROM pg_constraint
+              WHERE conrelid = 'series_alt_titles'::regclass AND contype = 'f'
+                AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                                     WHERE attrelid = 'series_alt_titles'::regclass AND attname = 'added_by')]::smallint[]
+    LOOP
+      EXECUTE format('ALTER TABLE series_alt_titles DROP CONSTRAINT %I', c.conname);
+    END LOOP;
+    ALTER TABLE series_alt_titles ALTER COLUMN added_by TYPE text USING added_by::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'series_alt_titles' AND column_name = 'source_id') THEN
+    ALTER TABLE series_alt_titles DROP COLUMN source_id;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'series_alt_titles'::regclass AND contype = 'c') THEN
+    UPDATE series_alt_titles SET origin = 'admin' WHERE origin NOT IN ('description', 'admin', 'import');
+    ALTER TABLE series_alt_titles ADD CONSTRAINT series_alt_titles_origin_check
+      CHECK (origin IN ('description', 'admin', 'import'));
+  END IF;
+END $$;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

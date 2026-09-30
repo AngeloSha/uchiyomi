@@ -152,6 +152,28 @@ export function exactHit<T extends { title: string }>(list: T[], name: string): 
   return list.find((r) => normTitle(r.title) === k) ?? null;
 }
 
+export interface NameMatch { ours: string; theirs: string; main: boolean }
+
+/**
+ * Which of our names equals which of theirs, by this file's rule. `ours[0]` and `theirs[0]` are the two MAIN titles;
+ * everything after them is an other name. A pair in which either side is an other name needs a key of MIN_ALT_KEY
+ * or more; the main-to-main pair is preferred when there is one, so the caller knows whether the match rests on the
+ * titles themselves or on a list of names. Null when no pair is equal. (Find other sources' review, lib/
+ * findSources.ts: it keeps a candidate whose numbering differs only when a name matched EXACTLY, and says which.)
+ */
+export function exactNameMatch(ours: readonly string[], theirs: readonly string[]): NameMatch | null {
+  const ourKeys = ours.map((t) => normTitle(t));
+  const theirKeys = theirs.map((t) => normTitle(t));
+  if (ourKeys[0] && ourKeys[0] === theirKeys[0]) return { ours: ours[0], theirs: theirs[0], main: true };
+  for (let i = 0; i < ourKeys.length; i++) {
+    const k = ourKeys[i];
+    if (!k || k.length < MIN_ALT_KEY) continue;
+    const j = theirKeys.findIndex((t, jj) => !(i === 0 && jj === 0) && t === k);
+    if (j >= 0) return { ours: ours[i], theirs: theirs[j], main: false };
+  }
+  return null;
+}
+
 // ---- storage ------------------------------------------------------------------------------------------
 
 export interface AltTitleRow { title: string; norm: string; origin: AltOrigin; added_by: string | null; created_at: Date | string }

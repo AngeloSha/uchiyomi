@@ -279,6 +279,47 @@ test('migrate: v0.49.1 adds its two tables and nothing a v0.49.0 image would hav
   });
 });
 
+test('migrate: Find other sources\' review only adds, and a fork-shaped series_alt_titles is brought to shape', { skip }, async () => {
+  // The review's two tables and the run's two columns: nothing a v0.49.1 image rolled back onto them must write.
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name IN ('source_find_runs', 'source_find_items', 'source_find_candidates')
+        AND is_nullable = 'NO' AND column_default IS NULL`);
+  assert.deepEqual(required.map((r) => `${r.table_name}.${r.column_name}`).sort(), [
+    'source_find_candidates.item_id', 'source_find_candidates.source', 'source_find_candidates.source_series_id',
+    'source_find_candidates.verdict', 'source_find_items.ord', 'source_find_items.run_id', 'source_find_items.series_id',
+  ]);
+
+  // An install that ran the fork build of PR #119 before v0.49.1: no removed_at (every read of the names failed on
+  // it), added_by a uuid referencing users, a source_id column, origins 'confirmed' and 'merged', no CHECK.
+  // Reintroduce by dropping the repair block: removed_at is missing and the read below throws.
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-fork', 'test', 'Fork Tale', '/t-fork') ON CONFLICT (id) DO NOTHING`);
+  try {
+    await q(`ALTER TABLE series_alt_titles DROP CONSTRAINT IF EXISTS series_alt_titles_origin_check`);
+    await q(`ALTER TABLE series_alt_titles DROP COLUMN removed_at`);
+    await q(`ALTER TABLE series_alt_titles ADD COLUMN source_id text`);
+    await q(`ALTER TABLE series_alt_titles ALTER COLUMN added_by TYPE uuid
+               USING CASE WHEN added_by ~ '^[0-9a-f-]{36}$' THEN added_by::uuid END`);
+    await q(`ALTER TABLE series_alt_titles ADD CONSTRAINT series_alt_titles_added_by_fkey FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL`);
+    await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin, source_id) VALUES
+               ('t-fork', 'otherforkname', 'Other Fork Name', 'confirmed', 'x'), ('t-fork', 'mergedfork', 'Merged Fork', 'merged', null)`);
+    await migrate();
+    const cols = Object.fromEntries((await q<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'series_alt_titles'`))
+      .map((c) => [c.column_name, c.data_type]));
+    assert.equal(cols.removed_at, 'timestamp with time zone');
+    assert.equal(cols.added_by, 'text');
+    assert.equal('source_id' in cols, false);
+    const rows = await q(`SELECT norm, origin FROM series_alt_titles WHERE series_id = 't-fork' AND removed_at IS NULL ORDER BY norm`);
+    assert.deepEqual(rows.map((r: any) => [r.norm, r.origin]), [['mergedfork', 'admin'], ['otherforkname', 'admin']]);
+    await assert.rejects(q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ('t-fork', 'bogusname', 'Bogus', 'guessed')`), /check constraint/i);
+    // And a table already in shape is left as it is.
+    await migrate();
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = 't-fork'`).catch(() => {});
+  }
+});
+
 test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {
   // #117 picks `series_listing.number < boundary`. With boundary numeric, Postgres compares the real as float8,
   // and 45.3::real reads as 45.29999923706055 -- below a numeric 45.3 -- so the boundary chapter counted as

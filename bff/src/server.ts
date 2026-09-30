@@ -26,7 +26,7 @@ import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { startArchive } from './lib/archive';
-import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
+import { closeInterruptedFindRuns, findSettledWithin, sweepFindRuns } from './lib/findSources';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -56,7 +56,8 @@ import { ensureDesktopUser } from './lib/desktopUser';
 
 async function main() {
   await migrate();
-  // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
+  // A Find other sources run still searching or following belonged to the process that just went away: say so. Its
+  // search is `interrupted` (resumable, what it found kept), a follow it was doing is settled.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
@@ -469,6 +470,9 @@ async function main() {
       try {
         const r = await sweepImportBatches();
         if (r.removed) app.log.info(`import batches: swept ${r.removed}`);
+        // Find other sources runs (lib/findSources.ts) keep the same rule on the same tick.
+        const f = await sweepFindRuns();
+        if (f.removed) app.log.info(`find runs: swept ${f.removed}`);
       } catch (e) {
         app.log.error(e as any);
       }
@@ -667,9 +671,8 @@ async function main() {
       runtime.stopping = true;
       app.log.info(`${sig}: finishing the current chapter, then stopping`);
       // The download log's last lines first: a chapter that finished a moment ago is written down, not lost. A Find
-      // other sources run (v0.49.1) closes its own row meanwhile -- `interrupted`, with every series it never reached
-      // listed as not tried, and its audit line -- given FIND_SHUTDOWN_MS at most; what it does not finish,
-      // closeInterruptedFindRuns does at the next boot, the same way.
+      // other sources search closes its own row meanwhile -- `interrupted`, resumable, and its audit line -- given
+      // FIND_SHUTDOWN_MS at most; what it does not finish, closeInterruptedFindRuns does at the next boot.
       void Promise.all([app.close(), findSettledWithin()]).then(flushActivityLog).finally(() => process.exit(0));
       setTimeout(() => process.exit(0), 20_000).unref(); // never hang a shutdown on a slow site
     });

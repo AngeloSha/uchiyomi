@@ -64,6 +64,12 @@ export interface RunCard {
   /** v0.49.1, a Find other sources run: how many sources it has followed so far, across its series. */
   followed?: number;
   /**
+   * A Find other sources run (lib/findSources.ts): its id, which its review page is at, and how many of its series
+   * it has found a source to review for so far. The search follows nothing by itself.
+   */
+  runId?: string;
+  found?: number;
+  /**
    * v0.49.1, a Find other sources run: what it waits on before its next series, while it waits (a sweep, a repair,
    * the daily source check) -- so Server tasks says why it is paused rather than naming the series it last did.
    */
