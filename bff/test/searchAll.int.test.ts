@@ -253,7 +253,9 @@ test('both shapes are what they always were, with the progress fields beside the
   const card = j.content.find((g: any) => g.title === 'Shared Title');
   assert.ok(card, 'the shared title was not folded into one card');
   assert.deepEqual(Object.keys(card).sort(), ['inLibrary', 'providers', 'title', 'updatedAt'], 'the card shape changed');
-  assert.deepEqual(Object.keys(card.providers[0]).sort(), ['name', 'source', 'sourceId', 'title'], 'the provider shape changed');
+  // v0.52.0: each provider says its language (lib/lang.ts canonLang) and whether that language is held, which the
+  // edition offer reads (a card is owned only when every provider's language is in the library).
+  assert.deepEqual(Object.keys(card.providers[0]).sort(), ['inLibrary', 'lang', 'name', 'source', 'sourceId', 'title'], 'the provider shape changed');
   assert.equal(j.content[0], card, 'the card with the most providers is not first');
   assert.equal(card.inLibrary, false);
   assert.deepEqual(Object.keys(j.sources[0]).sort(), ['id', 'ms', 'name', 'state'], 'the source line shape changed');
@@ -266,7 +268,7 @@ test('both shapes are what they always were, with the progress fields beside the
   const rail = sj.content.find((g: any) => g.source === FAST);
   assert.ok(rail, 'the fast source has no rail');
   assert.deepEqual(Object.keys(rail).sort(), ['lang', 'name', 'results', 'source'], 'the rail shape changed');
-  assert.deepEqual(Object.keys(rail.results[0]).sort(), ['coverUrl', 'inLibrary', 'name', 'source', 'sourceId', 'title'], 'the result shape changed');
+  assert.deepEqual(Object.keys(rail.results[0]).sort(), ['coverUrl', 'inLibrary', 'lang', 'name', 'source', 'sourceId', 'title'], 'the result shape changed');
   assert.equal(rail.results[0].name, 'Fast Source', 'a result no longer carries its source\'s display name');
   assert.equal(sj.content.some((g: any) => g.source === EMPTY), false, 'a source with nothing must not get an empty rail');
   // wait=0 read the entry: nothing was asked again for either shape.

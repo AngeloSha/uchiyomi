@@ -221,7 +221,8 @@ test('a provider in a language the library does not hold the title in is added a
   assert.match(src, /onAlone=\{\(\) => \{ setEditionFor\(\{ key: pickKey, on: false \}\); void add\(true\); \}\}/, '"It is a different series" does not add it on its own');
   // The server's own offer on a duplicate opens the block too, and the duplicate prompt's "It is in another language"
   // is the way out for a site that does not say its language.
-  assert.match(src, /if \(body\.error === 'duplicate' && body\.edition\?\.of\) \{\s*(\/\/[^\n]*\s*)*setOffer\(body\.edition\);/, "the server's offer is not taken");
+  const offerAt = src.indexOf("if (body.error === 'duplicate' && body.edition?.of) {");
+  assert.ok(offerAt >= 0 && src.slice(offerAt, offerAt + 400).includes('setOffer(body.edition);'), "the server's offer is not taken");
   assert.match(src, /tr\('It is in another language'\)/, 'the duplicate prompt has no way to say it is another language');
   // The series page's "Add a language" starts from the languages, and one with nothing to offer says so.
   assert.match(src, /\| \{ kind: 'edition'; of: string; title: string; lang\?: string; source\?: string \};/, 'there is no edition seed');
