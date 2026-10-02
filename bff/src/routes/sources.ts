@@ -622,7 +622,7 @@ function findOrder(): string[] {
 // v0.40.0 so the source hunt -- a lib -- can apply it without importing this route. Re-exported so the
 // type keeps its old address for anyone who imported it from here.
 import { pickBest, pickBestScored, type MatchConfidence } from '../lib/titleMatch';
-import { withOrigin, listActivity, type Origin, type ActivityEntry } from '../lib/downloadActivity';
+import { withOrigin, listActivity, dismissFailed, type Origin, type ActivityEntry } from '../lib/downloadActivity';
 export type { MatchConfidence };
 
 /**
@@ -2729,13 +2729,30 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.delete('/api/sources/jobs/:folder', async (req, reply) => {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
+    const admin = roleOf(req) === 'admin';
+    const me = userIdOf(req);
+    if (!j) {
+      // v0.50.0: a Needs attention card can be only chapters that could not be saved -- the scheduled check's, a
+      // Check now's -- with no job behind it, and this answered 404 for it: Dismiss was offered only after Try again
+      // had made a job. The same two rules as a job card: the viewer must see the failures (`downloadsAudience`,
+      // as the feed does), and they are their starter's or an admin's; the scheduled check's have no starter.
+      // Reintroduce by answering 404 here: "Dismiss from the start" in downloadsView.int.test.ts reads 404 where it
+      // owes a member a 403 and the admin a 200, and the failure stays in the feed.
+      const failed = listActivity().recent.filter((e) => e.folder === folder && e.status === 'failed' && e.origin !== 'archive');
+      const seen = failed.length ? await downloadsAudience(vc(req), me, admin, { folders: [folder] }) : null;
+      const shown = seen ? failed.filter((e) => seen.folder(folder, e.by)) : [];
+      if (!shown.length) return reply.code(404).send({ error: 'not_found' });
+      if (!admin && shown.some((e) => !(e.by && e.by === me))) return reply.code(403).send({ error: 'forbidden' });
+      dismissFailed(folder, admin ? null : me);
+      return { ok: true };
+    }
     // A card this viewer is not handed reads as no card at all, as for Cancel (`receivedBy`).
-    if (!j || !(await receivedBy(req, folder, j))) return reply.code(404).send({ error: 'not_found' });
+    if (!(await receivedBy(req, folder, j))) return reply.code(404).send({ error: 'not_found' });
     // Its starter's to dismiss, or an admin's, as Cancel is (v0.49.0). Any member who could download used to
     // be able to clear anyone's failed card -- the only record that someone's download did not work.
     // Reintroduce by dropping this: "another member may not dismiss a card they did not start" in
     // downloadsView.int.test.ts reads 200.
-    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (!admin && !(j.by && j.by === me)) return reply.code(403).send({ error: 'forbidden' });
     // Only something that has stopped. Dropping a running job would orphan a download that is still going
     // and leave no way to see it again. A judgement still running counts the same way: a nothing-yet
     // carrier card is `done` from birth, and dropping it mid-judgement would let the follows land (the
@@ -2743,6 +2760,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // polls this card until it reads `autoFollow.done`, would show "Checking…" until closed.
     if (j.status === 'downloading' || (j.autoFollow && !j.autoFollow.done)) return reply.code(409).send({ error: 'running' });
     jobs.delete(folder);
+    // Its chapters that could not be saved go with it: left in the feed, they came straight back as a card of their
+    // own (v0.50.0). A member's dismissal takes their own only, as above.
+    dismissFailed(folder, admin ? null : me);
     return { ok: true };
   });
 

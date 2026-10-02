@@ -16,7 +16,7 @@
  */
 import { q } from './db';
 import {
-  onFinished, onHealed, reasonSaidOf, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
+  onDismissed, onFinished, onHealed, reasonSaidOf, restoreFinished, ACTIVITY_TTL_MS, FINISHED_CAP,
   type ActivityEntry, type ActivityStatus, type Origin,
 } from './downloadActivity';
 
@@ -61,6 +61,17 @@ function heal(folder: string, number: number): void {
   )).then(() => {}, warn(`could not write down that ${folder} ch ${number} is whole now`));
 }
 
+/**
+ * A folder's failed chapters were dismissed (downloadActivity.ts dismissFailed): their rows go too, or a restart reads
+ * the card back. In the same line as the writes: a row it deletes may be one of them.
+ */
+function dismiss(folder: string, by: string | null): void {
+  tail = tail.then(() => q(
+    `DELETE FROM download_log WHERE folder = $1 AND status = 'failed' AND origin <> 'archive' AND ($2::text IS NULL OR by_user = $2)`,
+    [folder, by],
+  )).then(() => {}, warn(`could not forget the failed chapters of ${folder}`));
+}
+
 /** Wait for every write (and prune) started so far. */
 export async function flushActivityLog(): Promise<void> {
   for (let t = tail; ; t = tail) { await t; if (t === tail) return; }
@@ -89,6 +100,7 @@ export async function startActivityLog(now = Date.now()): Promise<number> {
     listening = true;
     onFinished(write);
     onHealed(heal);
+    onDismissed(dismiss);
   }
   await pruneActivityLog(now);
   const since = new Date(now - ACTIVITY_TTL_MS);

@@ -432,6 +432,29 @@ test('Cancel and Dismiss: 404 for a card the viewer is not handed, 403 for one t
   assert.equal((await del('s_dv_a', w.admin)).statusCode, 200, 'an admin may dismiss anyone\'s');
 });
 
+test('Dismiss from the start: a card that is only failed chapters has no job, and its admin still clears it', { skip }, async () => {
+  // v0.50.0. The scheduled check's failed chapters are a Needs attention card with no job behind it, and DELETE
+  // answered 404 for it: Dismiss was offered only once Try again had made a job. Reintroduce by answering 404 for a
+  // folder with no job: "a member who sees it dismissed a failure nobody of theirs started" reads 404 where the
+  // route owes that member a 403, and the admin's dismiss after it would read 404 too.
+  const { beginDownload, endDownload, withOrigin } = await import('../src/lib/downloadActivity');
+  const w = who();
+  const del = (folder: string, h: Record<string, string>) =>
+    app.inject({ method: 'DELETE', url: `/api/sources/jobs/${encodeURIComponent(folder)}`, headers: h });
+  const failedIn = async (h: Record<string, string>) =>
+    (await jobsFor(h)).activity.recent.filter((e: any) => e.folder === 's_dv_b' && e.status === 'failed');
+  // The scheduled check's failure in library B: no job, and nobody's to dismiss but an admin's.
+  const id = withOrigin('sweep', null, () => beginDownload({ folder: 's_dv_b', title: 's_dv_b', number: 7, source: SRC }));
+  endDownload(id, { status: 'failed', reason: 'site refused' });
+  assert.equal((await failedIn(w.admin)).length, 1, 'PREMISE: the failure is in the feed');
+  assert.equal((await del('s_dv_b', w.member)).statusCode, 404, 'a member walled off from library B is told of it');
+  assert.equal((await del('s_dv_b', w.capped)).statusCode, 403, 'a member who sees it dismissed a failure nobody of theirs started');
+  assert.equal((await failedIn(w.admin)).length, 1, 'a refused dismiss cleared it');
+  assert.equal((await del('s_dv_b', w.admin)).statusCode, 200, 'an admin dismisses the scheduled check\'s failure');
+  assert.deepEqual(await failedIn(w.admin), [], 'and it leaves the feed');
+  assert.equal((await del('s_dv_b', w.admin)).statusCode, 404, 'nothing left to dismiss');
+});
+
 test("an add's card carries its source's cover, and a failed add names what it did not land", { skip }, async () => {
   const w = who();
   const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: w.other, payload: { source: ADDING, sourceId: 'dv-added' } });

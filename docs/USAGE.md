@@ -556,8 +556,10 @@ The view shows each series as its cover with a ring, like an app being installed
   archive is working through, as a cover under a still amber ring (see the next section).
 - **Needs attention** — a download that failed, with why, **Try again** (fetches exactly the chapters it did
   not land), **Dismiss** and **Open**; chapters that could not be saved and did not arrive later from another
-  source; a slow archive that is stuck, or finished with chapters it could not fetch; a server task that stopped
-  with an error. Chapters that keep failing are Health's to track (Admin → Health).
+  source, with the same three keys from the start (since v0.50.0 — before, *Dismiss* came only with a *Try
+  again*); a slow archive that is stuck, or finished with chapters it could not fetch; a server task that stopped
+  with an error. *Dismiss* is for whoever started the download and for admins, so the scheduled check's failures
+  are an admin's to dismiss. Chapters that keep failing are Health's to track (Admin → Health).
 - **Server tasks** — the scheduled check, the library repair (with the step it is on), a bulk *Fetch newest* and,
   for an admin, a *Find other sources* run (*Other-source search*, with **Show results**): how far each has got, how
   many chapters it saved (or sources it followed), which series it is on and when it started.

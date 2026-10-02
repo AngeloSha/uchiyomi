@@ -347,8 +347,11 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
           {a.seriesId && a.retry.length > 0 && (
             <button type="button" onClick={() => onRetry(a.seriesId!, a.retry)} className="btn-key">{tr('Try again')}</button>
           )}
-          {a.kind === 'job' && a.dismiss && (
-            <button type="button" onClick={() => onDismissJob(a.job.folder)} className="btn-key">{tr('Dismiss')}</button>
+          {/* A card that is only chapters that failed has no job, and is dismissed by its folder all the same (v0.50.0):
+              the route clears the folder's failures from the day's feed. */}
+          {a.dismiss && (
+            <button type="button" onClick={() => (a.kind === 'job' ? [a.job.folder] : [...new Set(a.failed.map((f) => f.folder))]).forEach(onDismissJob)}
+              className="btn-key">{tr('Dismiss')}</button>
           )}
           {a.seriesId && <Link href={`/series/?id=${encodeURIComponent(a.seriesId)}`} className="btn-key">{tr('Open')}</Link>}
         </div>

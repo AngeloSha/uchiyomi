@@ -196,7 +196,7 @@ export interface Tile<J extends DownloadJob = DownloadJob> {
 /** A row in Needs attention: something that failed and what can be done about it. */
 export type Attention<J extends DownloadJob = DownloadJob> =
   | { kind: 'job'; key: string; seriesId: string | null; title: string; job: J; retry: number[]; dismiss: boolean }
-  | { kind: 'chapters'; key: string; seriesId: string | null; title: string; failed: ActivityEntry[]; retry: number[] }
+  | { kind: 'chapters'; key: string; seriesId: string | null; title: string; failed: ActivityEntry[]; retry: number[]; dismiss: boolean }
   | { kind: 'run'; key: string; run: RunCard; dismiss: boolean }
   /** A slow archive whose source keeps refusing or is gone, a full disk, a week paused, or one finished with gaps. */
   | { kind: 'archive'; key: string; seriesId: string; title: string; item: ArchiveItem };
@@ -303,6 +303,10 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
     attention.push({
       kind: 'chapters', key: `ch:${g.key}`, seriesId: g.seriesId, title: g.title, failed: g.failed,
       retry: g.seriesId ? uniqueSorted(g.failed.map((f) => f.number)) : [],
+      // v0.50.0: Dismiss from the start, by a job card's rule -- an admin's, or the viewer's when every failure on it
+      // is theirs. The scheduled check's have no starter. Dismiss used to come only with the job a Try again made.
+      // Reintroduce by dropping it: "Dismiss from the start" in serverDownloads.test.ts finds none.
+      dismiss: admin || g.failed.every((f) => !!f.mine),
     });
   }
   for (const a of archive) {

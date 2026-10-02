@@ -215,6 +215,21 @@ test('Needs attention: failed downloads with Try again by what they did not land
   assert.deepEqual(runs.tasks.map((r) => r.kind), ['sweep']);
 });
 
+test('Dismiss from the start: a card of chapters that failed offers it at once, by a job card\'s rule', () => {
+  // v0.50.0. A card that is only failed chapters (the scheduled check's) offered Try again and Open, and Dismiss only
+  // once a Try again had made a job of it. Reintroduce by dropping `dismiss` from the 'chapters' card: none of these
+  // is offered.
+  const sweep = data({ recent: [e({ number: 9, status: 'failed', seriesId: 's5', folder: 'S5', title: 'Five', origin: 'sweep' })] });
+  const ch = (d: typeof sweep, admin: boolean) => downloadSections(d, { admin }).attention.find((a) => a.key === 'ch:s5');
+  const asAdmin = ch(sweep, true);
+  assert.ok(asAdmin?.kind === 'chapters' && asAdmin.dismiss, 'an admin is not offered Dismiss on a card nobody retried');
+  const asMember = ch(sweep, false);
+  assert.ok(asMember?.kind === 'chapters' && !asMember.dismiss, 'a member was offered Dismiss on the scheduled check\'s failure');
+  const own = data({ recent: [e({ number: 9, status: 'failed', seriesId: 's5', folder: 'S5', title: 'Five', origin: 'check', mine: true })] });
+  const mine = ch(own, false);
+  assert.ok(mine?.kind === 'chapters' && mine.dismiss, 'a member is not offered Dismiss on their own failure');
+});
+
 test('Server tasks put the running run first; Came in today is what landed, the archive included; a Cancel is kept', () => {
   // A download that simply finished is not "stopped": listed there, with no reason set, it would read "Cancelled;
   // what landed is kept." Reintroduce by listing every finished card: 'Y' is there too.

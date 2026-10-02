@@ -286,7 +286,11 @@ and `cover` when it lands in a library they cannot browse or above their age cap
 (**403** for anyone else, answered first; **404**, as for no job at all, for a card the caller is not shown --
 Cancel answers the same way), and **409** `running`
 for one still downloading — or one whose auto-follow judgement is still running (`autoFollow.done ===
-false`), since the follows would still land while the report they belong to was gone. A card whose add named
+false`), since the follows would still land while the report they belong to was gone. Since v0.50.0 the same route
+dismisses a folder's chapters that could not be saved when it has no job card (the scheduled check's, a Check
+now's: a Needs attention card of failed chapters alone), on the same terms — **404** when the caller is not shown
+any, **403** unless each is theirs or the caller is an admin — and dismissing a job card clears its folder's failed
+chapters with it; either way they leave the day's activity feed and the download log. A card whose add named
 `alsoFollow` candidates carries `autoFollow: {done, results}` —
 `done: false` with no results while the other sources are asked, then one entry per candidate in the order
 given, `{source, name, theirTitle, followed, coverage, why}`, with `why` one of `followed`,

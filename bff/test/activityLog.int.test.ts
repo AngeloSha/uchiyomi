@@ -126,6 +126,31 @@ test('a chapter made whole later is landed in the log too, so a restart does not
   await q('DELETE FROM download_log');
 });
 
+test('a dismissed failure leaves the log too, so a restart does not bring the card back', { skip }, async () => {
+  // v0.50.0: Dismiss on a Needs attention card of failed chapters clears them from the feed (dismissFailed); their
+  // rows must follow, or the next restart reads the card back. A member's dismissal takes only their own. Reintroduce
+  // by not registering onDismissed in startActivityLog: "a restart brought the dismissed failure back" fails.
+  const act = await import('../src/lib/downloadActivity');
+  const log = await import('../src/lib/activityLog');
+  await q('DELETE FROM download_log');
+  act.clearActivity();
+  await log.startActivityLog();
+  const fail = (by: string | null, n: number) => {
+    const id = act.withOrigin('sweep', by, () => act.beginDownload({ folder: 'log/gone', title: 'Log gone', number: n, source: 'log-src' }));
+    act.endDownload(id, { status: 'failed', reason: 'site refused' });
+  };
+  fail(null, 1);
+  fail('u-other', 2);
+  assert.equal(act.dismissFailed('log/gone', 'u-other'), 1, 'a member takes their own only');
+  assert.equal(act.dismissFailed('log/gone', null), 1, 'an admin takes the rest');
+  await log.flushActivityLog();
+  act.clearActivity();
+  await log.startActivityLog();
+  assert.deepEqual((await recent()).filter((e) => e.folder === 'log/gone'), [], 'a restart brought the dismissed failure back');
+  act.clearActivity();
+  await q('DELETE FROM download_log');
+});
+
 test('rows older than a week are pruned, and only the last day comes back', { skip }, async () => {
   const act = await import('../src/lib/downloadActivity');
   const log = await import('../src/lib/activityLog');

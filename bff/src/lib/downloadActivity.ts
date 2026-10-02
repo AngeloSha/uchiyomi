@@ -250,6 +250,41 @@ export function healFinished(folder: string, number: number): number {
   return n;
 }
 
+/** Told when a folder's failed chapters were dismissed (`dismissFailed`): the folder, and whose (null: everyone's). */
+type DismissedListener = (folder: string, by: string | null) => void;
+const dismissedListeners: DismissedListener[] = [];
+/** Hear about each dismissal (lib/activityLog.ts deletes its rows). The same rules as onFinished. */
+export function onDismissed(fn: DismissedListener): () => void {
+  dismissedListeners.push(fn);
+  return () => { const i = dismissedListeners.indexOf(fn); if (i >= 0) dismissedListeners.splice(i, 1); };
+}
+
+/**
+ * Dismiss a folder's chapters that could not be saved, from the day's feed (v0.50.0): what Dismiss on a Needs
+ * attention card clears. Such a card is often only these entries -- the scheduled check's, a Check now's -- with no
+ * job behind it, and a job's own failures are these entries too, which came back as a card of their own once the
+ * job's card was dismissed. `by` keeps to one person's own downloads (a member's dismissal); null takes everyone's
+ * (an admin's). The slow archive's are left alone: it retries its own, and they are never on that card. Their rows
+ * in download_log follow (lib/activityLog.ts), so a restart does not bring the card back. Returns how many went.
+ */
+export function dismissFailed(folder: string, by: string | null): number {
+  let n = 0;
+  for (const list of Object.values(finished)) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (e.folder !== folder || e.status !== 'failed' || e.origin === 'archive' || (by !== null && e.by !== by)) continue;
+      list.splice(i, 1);
+      n++;
+    }
+  }
+  if (n) {
+    for (const fn of dismissedListeners) {
+      try { fn(folder, by); } catch (err) { console.warn(`[activity] a dismissal listener threw: ${(err as Error)?.message || err}`); }
+    }
+  }
+  return n;
+}
+
 /**
  * A series was renumbered (lib/numbering.ts, #116): what finished for its folder today now carries the number
  * the same post has in the new numbering, so "Came in today" does not name chapter 2 for the file that is

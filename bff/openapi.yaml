@@ -2888,6 +2888,10 @@ paths:
         `downloading`, and likewise while the card's `autoFollow.done` is false -- a nothing-yet carrier card
         is `done` from birth, and dropping it mid-judgement would let the follows land with the report they
         belong to gone, while the dialog polled for a card that no longer existed.
+        Since v0.50.0 a folder with no job dismisses its chapters that could not be saved instead (the
+        activity feed's `failed` entries, the slow archive's aside), on the same terms: 404 when the caller is
+        shown none, 403 unless every one is theirs or the caller is an admin. Dismissing a job also clears
+        its folder's failed chapters (a member's, their own). Either way they leave the feed and the log.
       parameters:
         - name: folder
           in: path
@@ -2904,7 +2908,7 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: No such job, or one this account is not shown
+          description: No such job and no failed chapters for the folder, or none this account is shown
         "409":
           description: "Conflict: `running` -- the download is still going, or the auto-follow judgement has not finished"
   /api/discover/trending:
