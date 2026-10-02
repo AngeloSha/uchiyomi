@@ -117,7 +117,7 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
 
 // Declared through `keys()` because they reach `tr()` through whyLabel's return value, which the string
 // extractor cannot see (lib/i18n.ts says why that has shipped untranslated labels three times).
-const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it', 'another split of a chapter you have', 'another site’s split of this chapter');
+const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it', 'another split of a chapter you have', 'another site’s split of this chapter', 'another split', 'another site’s split');
 
 /**
  * The ghost row's caption: the string key and its arguments, for `tr(key, args)`. Null for `floor` and
@@ -134,10 +134,14 @@ const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'wai
  * chapter whose first-ranked source is fetched instead (bff lib/partAlias.ts R3), and "a chapter you have" would be
  * untrue: it says another site's split of this chapter. Reintroduce by wording both the same: "a covered part of a
  * chapter nothing of is here" in chapterRows.test.ts reads "a chapter you have".
+ * The caption is the short form, "another split" or "another site's split", and the sentence goes in `full`: the row
+ * shows the caption, then the copy's group and "via {source}", and at 390 px and in the desktop grid the sentence
+ * cut itself off at "another split of a cha…" with the source never shown (the v0.50.0 browser check). The row's
+ * title and its screen-reader text say the sentence (RowCaption `lead.full`).
  */
 export function whyLabel(
   g: Pick<Ghost, 'why'> & Partial<Pick<Ghost, 'attempts' | 'waitingFor' | 'waitDaysLeft'>>, o: { wholeHere?: boolean } = {},
-): { key: string; args: Record<string, string | number> } | null {
+): { key: string; args: Record<string, string | number>; full?: { key: string; args: Record<string, string | number> } } | null {
   switch (g.why) {
     case 'missing': return { key: WHY_LABELS[0], args: {} };
     case 'held': return g.waitingFor && g.waitDaysLeft != null
@@ -145,7 +149,9 @@ export function whyLabel(
       : { key: WHY_LABELS[2], args: {} };
     case 'failed': return { key: WHY_LABELS[3], args: { n: g.attempts ?? 0 } };
     case 'blocked': return { key: WHY_LABELS[4], args: {} };
-    case 'covered': return { key: o.wholeHere === false ? WHY_LABELS[6] : WHY_LABELS[5], args: {} };
+    case 'covered': return o.wholeHere === false
+      ? { key: WHY_LABELS[8], args: {}, full: { key: WHY_LABELS[6], args: {} } }
+      : { key: WHY_LABELS[7], args: {}, full: { key: WHY_LABELS[5], args: {} } };
     default: return null;
   }
 }

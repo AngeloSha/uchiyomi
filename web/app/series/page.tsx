@@ -498,8 +498,12 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   versions?: number;
   tone?: string;
   pruned?: boolean;
-  /** A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). */
-  lead?: { text: string; amber?: boolean } | null;
+  /**
+   * A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). `full`
+   * is the sentence a short reason stands for ("another split" for "another split of a chapter you have"): the title
+   * and what a screen reader says, where the short form is what fits beside the group and the source.
+   */
+  lead?: { text: string; amber?: boolean; full?: string } | null;
   /**
    * How many pages the saved file holds a placeholder for (`Book.missingPages`, v0.40.0). A chip like the
    * tombstone's, amber because it is news that clears itself: the sweep refills the holes and the server
@@ -513,7 +517,14 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   // caption beside the thumb, the date and the two buttons gets ≈90, so "Reaper Scans · 2 versions" is an
   // ellipsis there and a hover is how the rest is read.
   const plain: string[] = [];
-  if (lead) { parts.push(<span key="lead" className={lead.amber ? 'text-amber-300' : ''}>{lead.text}</span>); plain.push(lead.text); }
+  if (lead) {
+    parts.push(
+      <span key="lead" className={lead.amber ? 'text-amber-300' : ''}>
+        {lead.full ? <><span aria-hidden="true">{lead.text}</span><span className="sr-only">{lead.full}</span></> : lead.text}
+      </span>,
+    );
+    plain.push(lead.full ?? lead.text);
+  }
   // The avatar is an atomic inline BESIDE the name, not a flex box AROUND it: Chrome does not put an
   // ellipsis inside an inline-flex it has to cut, so a name wrapped with its avatar was clipped mid-letter
   // in the 250 px desktop grid cells ("Asura Sc") while a plain-text part ended in "…".
@@ -781,7 +792,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           </p>
           {/* "waiting for Asura Scans · 2 days left" already names the group; the group part is for the
               other reasons, where the caption would otherwise not say who has it. */}
-          <RowCaption lead={label ? { text: tr(label.key, label.args), amber: ghost.why === 'failed' } : null}
+          <RowCaption lead={label ? { text: tr(label.key, label.args), amber: ghost.why === 'failed', ...(label.full ? { full: tr(label.full.key, label.full.args) } : {}) } : null}
             group={ghost.why === 'held' && label?.args.g ? null : ghost.scanlator} via={altSource} />
         </div>
       </button>
