@@ -203,7 +203,8 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
   // nothing is using.
   assert.match(code(read('components/CommandPalette.tsx')), /useLayer\('dialog', open\);/, 'the closed command palette counts as an open dialog');
   assert.match(code(read('components/BottomNav.tsx')), /useLayer\('nav', true, \{ ref: barRef \}\);/, 'the bottom nav is not on the stack');
-  for (const [f, cond] of [['app/library/page.tsx', 'selecting && picked.size > 0'], ['app/series/page.tsx', 'selecting && pickedCount > 0']] as const) {
+  // The series page's bar is up from the moment Select is (v0.52.0): it says what it acts on before anything is ticked.
+  for (const [f, cond] of [['app/library/page.tsx', 'selecting && picked.size > 0'], ['app/series/page.tsx', 'selecting']] as const) {
     const src = code(read(f));
     assert.ok(src.includes(`useLayer('toolbar', ${cond}, { ref: toolbarRef });`), `${f}: the select bar is not on the stack while it shows`);
     assert.match(src, /<div ref=\{toolbarRef\} className="fixed inset-x-0 bottom-\[calc\(5\.75rem/, `${f}: the measured element is not the select bar`);

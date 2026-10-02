@@ -30,6 +30,7 @@ import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './imag
 import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
 import { readProgressV2, readProgressDetail, markReadUpTo } from '../lib/komgaProgress';
 import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
+import { editionLabels } from '../lib/editions';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -203,6 +204,15 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     return payload;
   });
 
+  /**
+   * A language edition's title as Mihon lists it (v0.52.0, #72): "Blue Lock (ES-419)" beside "Blue Lock (EN)". Each
+   * edition stays a series of its own here -- nothing is collapsed, so a Mihon user chooses which to read -- and the
+   * suffix is the only way two series of one name can be told apart in a client that shows nothing else. Only while
+   * a sibling this token may open exists (lib/editions.ts editionLabels); `metadata.language` says the code always.
+   */
+  const labelled = (dto: any, label: string | undefined) =>
+    (label ? { ...dto, name: `${dto.name}${label}`, metadata: { ...dto.metadata, title: `${dto.metadata?.title ?? dto.name}${label}` } } : dto);
+
   const seriesOr404 = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
     try {
       return await owned.series(vc(req), id);
@@ -226,7 +236,8 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
       if (e instanceof UnsupportedFilter) return reply.code(400).send({ error: 'unsupported_filter', message: `This filter is not supported: ${e.predicate}.` });
       throw e;
     }
-    return springPage(res.content.map((s: any) => komgaSeries(s)), res.totalElements, parsed.page, size);
+    const labels = await editionLabels(res.content.map((s: any) => s.id), vc(req));
+    return springPage(res.content.map((s: any) => komgaSeries(labelled(s, labels.get(s.id)))), res.totalElements, parsed.page, size);
   };
 
   // ---- libraries ---------------------------------------------------------------------------------------
@@ -266,7 +277,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
           ...(detail.engaged ? { total: prog.booksCount } : {}),
         }
       : undefined;
-    return komgaSeries(dto, counts);
+    return komgaSeries(labelled(dto, (await editionLabels([id], vc(req))).get(id)), counts);
   });
 
   // The chapter list. `unpaged=true` answers everything on one page (size = the count, never 0: a follow-only

@@ -65,6 +65,10 @@ export function solverVersionLabel(version?: string | null): string {
 }
 /** The engine's version as its Health row says it: " (v2.3.2243)". */
 const engineVersion = (v?: string | null) => (v ? ` (v${v.replace(/^v/i, '')})` : '');
+/** A language code as English names it ("es-419" is "Latin American Spanish"); the code itself where Intl cannot. */
+const langName = (code: string) => {
+  try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; }
+};
 /** Up to five names, then how many more: "Manga Ball, MangaDex and 3 more". */
 const names = (list: string[], more: number) => list.join(', ') + (more > 0 ? ` and ${more} more` : '');
 /** Where a census reason found the walk's trouble: this folder, or one above it ('' is the downloads folder). */
@@ -223,6 +227,9 @@ const EN = {
     'never automatic: the nightly repair leaves these alone and you confirm each one.',
   'dupes.same': () => 'Same AniList entry',
   'dupes.copies': ({ n }: { n: number }) => `${n} copies — merge them one pair at a time`,
+  // v0.52.0 (#72): a pair in two languages. `a` and `b` are language codes; the web names them in the reader's language.
+  'dupes.languages': ({ a, b }: { a: string; b: string }) =>
+    `The same work in ${langName(a)} and ${langName(b)}: link them as editions rather than merging.`,
 
   // ---- Impossible chapter numbers
   'outliers.live': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} chapters numbered far beyond the rest`,

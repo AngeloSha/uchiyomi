@@ -272,3 +272,62 @@ test('an unrated series says "Rate this" in the reader\'s words', () => {
   assert.match(page, /\{rating \? `\$\{rating\}\/5` : tr\('Rate this'\)\}/, 'Rate this is bare English again');
   assert.doesNotMatch(page, /: 'Rate this'\}/, 'Rate this is bare English again');
 });
+
+test('the chapter select bar says it removes chapters, and where the series\' own Remove is (v0.52.0)', () => {
+  // p3t3t3 (discussion #72): the bar's greyed "Delete from server" was read as the way to remove the SERIES. The bar
+  // is up from the moment Select is, its Remove counts what it acts on, and with nothing ticked it says how to use it
+  // and offers the series' own Remove. Reintroduce by showing the bar only once something is ticked
+  // (`selecting && pickedCount > 0`): "the bar is not up from Select" fails; by dropping the hint line: "nothing
+  // says how to remove chapters, or where the series' Remove is" fails.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /const Toolbar = selecting && \(/, 'the bar is not up from Select');
+  assert.match(page, /deletable\.length === 1 \? tr\('Remove 1 chapter'\) : deletable\.length \? tr\('Remove \{n\} chapters', \{ n: deletable\.length \}\) : tr\('Remove chapters'\)/,
+    'the Remove does not say how many chapters it removes');
+  const hint = page.slice(page.indexOf('data-remove-hint'));
+  assert.match(page, /\{isAdmin && !deletable\.length && \(\s*<p [^>]*data-remove-hint>/, 'nothing says how to remove chapters, or where the series\' Remove is');
+  assert.match(hint, /tr\('Tick chapters to remove them'\)/);
+  assert.match(hint, /onClick=\{\(\) => \{ leaveSelect\(\); setDeleting\(true\); \}\}[^>]*>\s*\{tr\('Remove the whole series'\)\}/, 'the link is not the series\' Remove');
+});
+
+test('Mark caught up floors the series where Auto-update is, and its Undo puts the old floor back (v0.52.0)', () => {
+  // Discussion #72. Reintroduce by undoing with `null` instead of the answer's `previous`: "Undo does not put back
+  // the floor the answer reported" fails, and a series added as Latest 25 loses its floor to an Undo.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /onClick=\{\(\) => void floorTo\('caught_up'\)\}/, 'the confirmation does not mark it caught up');
+  assert.match(page, /json: \{ chapterFloor \}/, 'the floor is not what is sent');
+  assert.match(page, /onClick=\{\(\) => void floorTo\(caught\.previous\)\}/, 'Undo does not put back the floor the answer reported');
+  // Asked first, in place, saying what it does.
+  assert.match(page, /caught === 'asking' && \(/);
+  assert.match(page, /tr\('Chapters already out are not fetched; only new ones are, from the next check\./);
+});
+
+test('an admin copies a chapter\'s file path and the series\' folder with one tap (#136)', () => {
+  // Reintroduce by dropping the menu entry: "a chapter's menu cannot copy its file path" fails.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /\.\.\.\(onCopyPath \? \[\{ label: tr\('Copy file path'\), divider: !onEdit, onSelect: onCopyPath \}\] : \[\]\)/, 'a chapter\'s menu cannot copy its file path');
+  assert.match(page, /onCopyPath=\{isAdmin && b\.path \? \(\) => void copyPath\(b\.path!, toast\) : undefined\}/, 'the copy is offered to someone other than an admin');
+  assert.match(page, /\{series\.paths\.map\(\(path\) => \(/, 'Edit details does not show the folder');
+  assert.match(page, /onClick=\{\(\) => void copyPath\(path, toast\)\}/, 'the folder is not copied with one tap');
+  assert.match(page, /toast\(tr\('Copied: \{path\}', \{ path: shown \}\), 'success'\)/, 'a copy is not said');
+});
+
+test('the favourite button and the save notices are in the reader\'s words (v0.52.0)', () => {
+  // The button's two states have their own keys: the toast key "Saved" reads as a past action in ja and ar, where
+  // the button needs a state. Reintroduce `{fav ? 'Saved' : 'Favorite'}`: the button is English in every language.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /\{fav \? tr\('In favourites'\) : tr\('Favourite'\)\}/, 'the favourite button is not translated');
+  assert.match(page, /tr\('Saved\. \{n\} readers had finished this chapter\.', \{ n: r\.affectedUsers \}\)/, 'the chapter save notice is not a counted pair');
+  assert.doesNotMatch(page, /reader\(s\)/, 'a "(s)" plural is back');
+  assert.match(code(read('app/admin/page.tsx')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
+    'Delete files says "file(s)" again');
+});
+
+test('a work in two languages switches edition under the title, on the phone and over the banner (v0.52.0)', () => {
+  // #72. Reintroduce by dropping the desktop chips' `pointer-events-auto`: they sit in the title block over the
+  // banner, which takes no taps, and nothing happens when one is pressed.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /<div role="group" aria-label=\{tr\('Editions'\)\}/, 'the editions are not one labelled group');
+  assert.match(page, /\{editions && <EditionChips editions=\{editions\} onAdd=\{addLanguage\} className="pointer-events-auto mt-3" \/>\}/, 'the chips over the banner take no taps');
+  assert.match(page, /\{editions && <EditionChips editions=\{editions\} onAdd=\{addLanguage\} className="mt-3 lg:hidden" \/>\}/, 'the phone has no switcher');
+  assert.match(page, /seed=\{\{ kind: 'edition', of: id, title \}\}/, '"+ Language" does not open the add dialog for this series');
+});

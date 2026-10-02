@@ -5,8 +5,8 @@ import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { Book, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
-import { bookCountText, chapterLabel, chapterName, isVolumeName, relativeTime, relativeTimeShort } from '@/lib/format';
+import { Book, EditionRow, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
+import { bookCountText, chapterLabel, chapterName, isVolumeName, languageName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -45,6 +45,24 @@ import { listingArchiveLine } from '@/lib/archive';
 import { NumberingNotice } from '@/components/NumberingNotice';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import type { PlanMode } from '@/lib/numbering';
+import { numLabel } from '@/lib/numbering';
+import { AddSeriesDialog } from '@/components/AddSeriesDialog';
+import { editionChipLabels, languageChoices } from '@/lib/editions';
+
+/**
+ * Put a path on the clipboard, and say so with the path in the notice (#136): copying is one tap, and the notice is
+ * where the path can be read too. Isolated (FSI…PDI) so a path reads left to right inside an Arabic sentence. Where
+ * the browser has no clipboard (plain http on a LAN) or refuses, the notice says where the file is instead.
+ */
+async function copyPath(path: string, toast: ReturnType<typeof useToast>): Promise<void> {
+  const shown = `\u2068${path}\u2069`;
+  try {
+    await navigator.clipboard.writeText(path);
+    toast(tr('Copied: {path}', { path: shown }), 'success');
+  } catch {
+    toast(tr('Could not copy it. The path is {path}', { path: shown }), 'info');
+  }
+}
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -144,11 +162,48 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
     setBusy(true);
     try {
       await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating), adultExempt, readingDirection: direction || null } });
-      toast('Saved', 'success');
+      toast(tr('Saved'), 'success');
       onSaved();
-    } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
     setBusy(false);
   };
+
+  // The language the series is in (v0.52.0): what decides which sources may be followed for it automatically, and
+  // which edition of a work it is. '' is automatic -- what its source declares, else the server's unstated language --
+  // which an edition does not have: every edition of a work states its language. Saved as it is chosen, as the
+  // library is above.
+  const qc = useQueryClient();
+  const edition = (series.edition?.editions?.length ?? 0) > 1;
+  const [lang, setLang] = useState<string>(series.langStated ? series.lang ?? '' : '');
+  const langs = useMemo(() => languageChoices([series.lang, series.langAuto], languageName), [series.lang, series.langAuto]);
+  const saveLang = async (next: string) => {
+    const prev = lang;
+    setLang(next);
+    try { await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { lang: next || null } }); onSaved(); }
+    catch (e) { setLang(prev); toast(msgOf(e, tr('Could not change that')), 'error'); }
+  };
+
+  // "Mark caught up" (discussion #72): the floor of a "Nothing yet" add, set on a series already here -- what is out
+  // now is never fetched, what comes out next is. Asked first, in place, with what it does; then said, with Undo,
+  // which puts the floor the answer reported back.
+  const [caught, setCaught] = useState<null | 'asking' | { floor: number | null; previous: number | null }>(null);
+  const [caughtBusy, setCaughtBusy] = useState(false);
+  const floorTo = async (chapterFloor: 'caught_up' | number | null) => {
+    setCaughtBusy(true);
+    try {
+      const r = await api<{ chapterFloor: { floor: number | null; previous: number | null } }>(`/api/admin/series/${id}`, { method: 'PATCH', json: { chapterFloor } });
+      // The ghost rows read the floor ("older chapters"), so the list under the dialog follows at once.
+      for (const k of [['series-listing', id], ['series', id]]) qc.invalidateQueries({ queryKey: k });
+      setCaught(chapterFloor === 'caught_up' ? r.chapterFloor : null);
+      toast(chapterFloor === 'caught_up' ? tr('Marked caught up') : tr('Undone'), 'success');
+    } catch (e) {
+      toast(msgOf(e, tr('Could not change that')), 'error');
+      if (chapterFloor === 'caught_up') setCaught(null);
+    }
+    setCaughtBusy(false);
+  };
+  // The floor sits a hair above the newest chapter (bff: max + 0.001); the sentence names that chapter.
+  const caughtNewest = caught && typeof caught === 'object' && caught.floor != null ? numLabel(caught.floor - 0.001) : null;
 
   // Which library this series is filed under. `''` means the folder rule decides, which is the default and
   // what almost every series should stay on -- picking one explicitly is a decision that then survives
@@ -193,6 +248,27 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           {lib ? tr('Filed here by hand. Rescans and new libraries will leave it alone.')
                : tr('Whichever library covers this folder, most specific first.')}
         </p>
+        {/* Where it is on disk (#136): the folder as full paths, one per root its chapters are under, each copied with
+            one tap. LTR whatever the page's direction: a path is not a sentence. */}
+        {!!series.paths?.length && (
+          <div className="mb-3" data-series-paths>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folder on the server')}</p>
+            {series.paths.map((path) => (
+              <div key={path} className="mt-1 flex min-w-0 items-start gap-2">
+                <code dir="ltr" className="min-w-0 flex-1 select-all break-all rounded-md bg-ink-900/60 px-2 py-1 font-mono text-[11px] text-fog-200">{path}</code>
+                <button type="button" onClick={() => void copyPath(path, toast)} className="btn-key shrink-0">{tr('Copy')}</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Language')}</label>
+        <select value={lang} onChange={(e) => saveLang(e.target.value)} className={fld}>
+          {!edition && (
+            <option value="">{series.langAuto ? tr('Automatic ({language})', { language: languageName(series.langAuto) }) : tr('Automatic')}</option>
+          )}
+          {langs.map((l) => <option key={l} value={l}>{languageName(l)}</option>)}
+        </select>
+        <p className="mb-3 mt-1 text-[11px] text-fog-600">{tr('The language this series is in. Sources in another language are never followed for it automatically.')}</p>
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Description')}</label>
@@ -263,6 +339,31 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           <button onClick={checkNow} disabled={checking} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
             {checking ? tr('Checking…') : 'Check for new chapters now'}
           </button>
+          {/* Mark caught up (v0.52.0): only for a series with a source to fetch from. */}
+          {!!series.sources?.length && (
+            <div className="mt-3 border-t border-ink-800 pt-3" data-caught-up={caught === null ? 'idle' : caught === 'asking' ? 'asking' : 'done'}>
+              {caught === null && (
+                <button type="button" onClick={() => setCaught('asking')} className="btn-key">{tr('Mark caught up')}</button>
+              )}
+              {caught === 'asking' && (
+                <>
+                  <p className="text-[11px] leading-relaxed text-fog-300">
+                    {tr('Chapters already out are not fetched; only new ones are, from the next check. Chapters already here stay, and older ones can still be fetched from the chapter list.')}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => void floorTo('caught_up')} disabled={caughtBusy} className="btn-key btn-key-primary">{tr('Mark caught up')}</button>
+                    <button type="button" onClick={() => setCaught(null)} disabled={caughtBusy} className="btn-key">{tr('Cancel')}</button>
+                  </div>
+                </>
+              )}
+              {caught !== null && caught !== 'asking' && (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed text-fog-300">
+                  <span>{caughtNewest ? tr('Caught up: only chapters after {number} are fetched.', { number: caughtNewest }) : tr('Marked caught up')}</span>
+                  <button type="button" onClick={() => void floorTo(caught.previous)} disabled={caughtBusy} className="btn-key">{tr('Undo')}</button>
+                </p>
+              )}
+            </div>
+          )}
           {/* The sources (with their × to stop following one) and the Prefer / Block / patience controls live
               in the Sources & translations sheet on the series page now, beside the statistics they are
               decided from. One line here so an admin who learned them in this dialog is told where they
@@ -446,10 +547,11 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
         method: 'PUT',
         json: reset ? { number: null, title: null } : { number: n, title },
       });
-      toast(r.affectedUsers > 0 ? `Saved. ${r.affectedUsers} reader(s) had finished this chapter.` : 'Saved', 'success');
+      toast(r.affectedUsers > 1 ? tr('Saved. {n} readers had finished this chapter.', { n: r.affectedUsers })
+        : r.affectedUsers === 1 ? tr('Saved. 1 reader had finished this chapter.') : tr('Saved'), 'success');
       onSaved();
       onClose();
-    } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
     setBusy(false);
   };
 
@@ -587,8 +689,10 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, selectable, selected, onToggle, compact, lit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, selectable, selected, onToggle, compact, lit }: {
   book: Book;
+  /** Admins only (#136): copy the chapter file's full path. Absent for everyone else and for a row with no path. */
+  onCopyPath?: () => void;
   /** Lit for a moment: the chapter a `?ch=` link (Health's Open) came to see. */
   lit?: boolean;
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
@@ -620,6 +724,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     { label: tr('Mark previous as read'), onSelect: () => onMark('previous') },
     ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
+    ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
   ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
@@ -856,6 +961,26 @@ function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number;
       <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40">{tr('Next')}</button>
       <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('Last page')}>»</button>
     </nav>
+  );
+}
+
+/**
+ * The work's language editions, under the title (v0.52.0, #72): one chip per edition this viewer may open -- the one
+ * on screen active, the others saying how far the viewer has read there -- and a tap opens that edition. A person who
+ * may add series gets "+ Language" after them, the add dialog's "Add a language". Only with two editions or more: a
+ * series on its own has nothing to switch to, and its second language starts from Sources & translations.
+ */
+function EditionChips({ editions, onAdd, className = '' }: { editions: EditionRow[]; onAdd?: () => void; className?: string }) {
+  const labels = editionChipLabels(editions, { name: languageName, chapter: (n) => chapterLabel({ number: n }) });
+  return (
+    <div role="group" aria-label={tr('Editions')} data-editions className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      {editions.map((e, i) => (e.current
+        ? <span key={e.seriesId} aria-current="page" className="chip chip-active text-xs">{labels[i]}</span>
+        : <Link key={e.seriesId} href={`/series/?id=${encodeURIComponent(e.seriesId)}`} className="chip text-xs">{labels[i]}</Link>))}
+      {onAdd && (
+        <button type="button" onClick={onAdd} aria-label={tr('Add a language')} className="btn-key h-7 text-[11px]">{tr('+ Language')}</button>
+      )}
+    </div>
   );
 }
 
@@ -1342,7 +1467,7 @@ function SeriesInner() {
   // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
   // and a notice has to rise above whichever height it has.
   const toolbarRef = useRef<HTMLDivElement>(null);
-  useLayer('toolbar', selecting && pickedCount > 0, { ref: toolbarRef });
+  useLayer('toolbar', selecting, { ref: toolbarRef });
 
   const invalidateChapters = () => {
     for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
@@ -1548,6 +1673,22 @@ function SeriesInner() {
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
+  // A language edition (v0.52.0): the add dialog's "Add a language", and the unlink an admin confirms.
+  const [addingLang, setAddingLang] = useState(false);
+  const [unlinking, setUnlinking] = useState<EditionRow | null>(null);
+  const editions = (series?.edition?.editions?.length ?? 0) > 1 ? series!.edition!.editions! : null;
+  const addLanguage = canDownload(user) ? () => setAddingLang(true) : undefined;
+  const unlink = async () => {
+    if (!unlinking) return;
+    setBusyAdmin(true);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(unlinking.seriesId)}/edition`, { method: 'DELETE' });
+      toast(tr('Unlinked: it is a series of its own now'), 'success');
+      for (const k of [['series', id], ['series', unlinking.seriesId], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k });
+      setUnlinking(null);
+    } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
+    setBusyAdmin(false);
+  };
 
   // A new automatic banner (v0.51.0): other chapters, other pages. The server makes it before switching, so a failure
   // leaves the banner as it was; the payload's new seed is what changes the hero's URL.
@@ -1614,7 +1755,7 @@ function SeriesInner() {
       )}
       <div className="flex gap-2">
         <button onClick={toggleFav} className={`flex flex-1 items-center justify-center gap-2 rounded-full border py-3 text-sm ${fav ? 'border-accent/50 bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
-          <IcHeart width={18} height={18} fill={fav ? 'currentColor' : 'none'} stroke={fav ? 'none' : 'currentColor'} /> {fav ? 'Saved' : 'Favorite'}
+          <IcHeart width={18} height={18} fill={fav ? 'currentColor' : 'none'} stroke={fav ? 'none' : 'currentColor'} /> {fav ? tr('In favourites') : tr('Favourite')}
         </button>
         {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁).
             Never on Uchiyomi Desktop, where this device IS the server (lib/desktop.ts). */}
@@ -1753,6 +1894,7 @@ function SeriesInner() {
                 onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
+                onCopyPath={isAdmin && b.path ? () => void copyPath(b.path!, toast) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
                 versions={versionsOf.get(b.number)?.length}
                 onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined} />
@@ -1834,7 +1976,11 @@ function SeriesInner() {
   // here). From lg up the nav is hidden and the bar goes back to the bottom. Reintroduce by changing the
   // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
   // tappable.
-  const Toolbar = selecting && pickedCount > 0 && (
+  //
+  // v0.52.0 (discussion #72): the bar is up from the moment Select is, saying what it acts on -- chapters. Its Remove
+  // was a greyed "Delete from server" until something was ticked, and was read as the way to remove the SERIES (p3t3t3):
+  // it reads "Remove 3 chapters" now, and with nothing ticked says how to use it and where the series' own Remove is.
+  const Toolbar = selecting && (
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
@@ -1844,9 +1990,23 @@ function SeriesInner() {
         {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
         {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming('refetch')} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
-        {isAdmin && <button disabled={acting || !deletable.length} onClick={() => setConfirming('delete')} className="chip text-xs text-rose-300 disabled:opacity-50">{tr('Delete from server')}</button>}
+        {isAdmin && (
+          <button disabled={acting || !deletable.length} onClick={() => setConfirming('delete')} data-remove-chapters className="chip text-xs text-rose-300 disabled:opacity-50">
+            {deletable.length === 1 ? tr('Remove 1 chapter') : deletable.length ? tr('Remove {n} chapters', { n: deletable.length }) : tr('Remove chapters')}
+          </button>
+        )}
         <button disabled={acting} onClick={leaveSelect} className="chip text-xs text-fog-500 disabled:opacity-50">{tr('Cancel')}</button>
       </div>
+      {/* Nothing to remove ticked: how to, and the whole series' Remove, which this bar is not. Reintroduce by dropping
+          this line: "the bar says how to remove chapters, and where the series' own Remove is" in seriesPage.test.ts. */}
+      {isAdmin && !deletable.length && (
+        <p className="mx-auto mt-2 flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fog-500" data-remove-hint>
+          <span>{tr('Tick chapters to remove them')}</span>
+          <button type="button" onClick={() => { leaveSelect(); setDeleting(true); }} className="text-rose-300 underline underline-offset-2">
+            {tr('Remove the whole series')}
+          </button>
+        </p>
+      )}
     </div>
   );
 
@@ -1877,8 +2037,10 @@ function SeriesInner() {
               {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
             </div>
           )}
-          <h1 className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
+          <h1 dir="auto" className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
           <div className="mt-2">{Meta}</div>
+          {/* The block is pointer-events-none over the banner; the chips take their taps back. */}
+          {editions && <EditionChips editions={editions} onAdd={addLanguage} className="pointer-events-auto mt-3" />}
         </motion.div>
       </div>
 
@@ -1893,10 +2055,12 @@ function SeriesInner() {
             </motion.div>
             {/* title beside cover on mobile */}
             <div className="min-w-0 pb-1 lg:hidden">
-              <h1 className="font-display text-2xl font-bold leading-tight text-white">{title}</h1>
+              <h1 dir="auto" className="font-display text-2xl font-bold leading-tight text-white">{title}</h1>
               {Meta}
             </div>
           </div>
+          {/* Under the cover and the title, full width: beside the cover a 390-px screen leaves the chips ~210 px. */}
+          {editions && <EditionChips editions={editions} onAdd={addLanguage} className="mt-3 lg:hidden" />}
           {/* The supply line, phone form: under the title block, full width, before the actions. The desktop
               form is the first row of the right column (the title block over the banner is
               `pointer-events-none`, so a button cannot live there). */}
@@ -1921,6 +2085,10 @@ function SeriesInner() {
           onClose={() => setSourcesOpen(false)}
           onExplain={() => { setSourcesOpen(false); setExplaining(true); }}
           onFindMissing={() => { setSourcesOpen(false); setFindingMissing(true); }}
+          // v0.52.0, the Languages section. Each closes the sheet first: a dialog opened under a Sheet cannot be tapped.
+          onAddLanguage={addLanguage ? () => { setSourcesOpen(false); setAddingLang(true); } : undefined}
+          onChangeLanguage={isAdmin ? () => { setSourcesOpen(false); setEditing(true); } : undefined}
+          onUnlink={isAdmin ? (e) => { setSourcesOpen(false); setUnlinking(e); } : undefined}
           onShowChapter={showChapter} />
       )}
       {explaining && <SourcesExplainer onClose={() => { setExplaining(false); setSourcesOpen(true); }} />}
@@ -1959,6 +2127,10 @@ function SeriesInner() {
           confirmText={series.name}
           body={
             <>
+              {/* An edition goes on its own: the work's other languages stay, and the Library's card shows them. */}
+              {editions && series.lang && (
+                <p className="mb-2">{tr('This removes the {language} edition. The other editions stay.', { language: languageName(series.lang) })}</p>
+              )}
               <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
               <p className="mt-2">Everyone&rsquo;s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin &rarr; Library, or just add it again.</p>
             </>
@@ -1982,6 +2154,22 @@ function SeriesInner() {
           onSaved={() => { for (const k of [['series-books', id], ['series', id], ['home']]) qc.invalidateQueries({ queryKey: k }); }} />
       )}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
+      {addingLang && series && (
+        <AddSeriesDialog seed={{ kind: 'edition', of: id, title }} sources={[]} mayFollow={isAdmin}
+          onClose={() => setAddingLang(false)}
+          // The new edition is in the work at once on a "Nothing yet" add, and once its first chapter lands otherwise.
+          onAdded={() => { for (const k of [['series', id], ['library'], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k }); }} />
+      )}
+      {unlinking && (
+        <ConfirmDialog
+          title={tr('Unlink the {language} edition?', { language: languageName(unlinking.lang) })}
+          busy={busyAdmin}
+          confirmLabel={tr('Unlink')}
+          body={<p>{tr('It stays in your library as a series of its own, with its chapters and reading progress.')}</p>}
+          onConfirm={unlink}
+          onClose={() => setUnlinking(null)}
+        />
+      )}
       {findingMissing && <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)} />}
       {Toolbar}
       {confirming === 'delete' && (

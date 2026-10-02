@@ -21,6 +21,7 @@ import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
 import { classify, noteStage, reportFail, reportSlow, type SourceHealth } from './sourceHealth';
+import { canonLang } from './lang';
 
 /** An env knob: a finite number at or above `min`, else the default. An empty string is unset. */
 const knob = (name: string, def: number, min = 0): number => {
@@ -312,7 +313,8 @@ export async function searchAll(
 // (by declared preference), which is what "the first provider is the default pick" rests on -- NOT the
 // ask order above, which puts language-less sources first and would change every card's default source.
 
-export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string }
+/** `lang` (v0.52.0): the language the source declares, as an app code; null when it says nothing or serves every one. */
+export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string; lang: string | null }
 export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[] }
 export interface SourceRail { source: string; name: string; lang: string | null; results: Array<SourceSeries & { name: string }> }
 
@@ -329,7 +331,7 @@ export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], m
       if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
       if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
       if (!g.providers.some((p) => p.source === r.source)) {
-        g.providers.push({ source: r.source, name: src.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
+        g.providers.push({ source: r.source, name: src.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title, lang: canonLang(src.lang) });
       }
     }
   }

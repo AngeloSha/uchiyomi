@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { img } from '@/lib/api';
 import { Book, Series } from '@/lib/types';
-import { chapterLabel, progressOf, relativeTime } from '@/lib/format';
+import { chapterLabel, languageName, progressOf, relativeTime } from '@/lib/format';
+import { codeLabel, libraryCaption } from '@/lib/editions';
 import { deviceId, shownDeviceName } from '@/lib/device';
 import { coverTriplet } from '@/lib/theme';
 import { Img, ProgressBar } from './ui';
@@ -215,9 +216,23 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
           <span className="absolute bottom-1.5 left-1.5 z-10 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold text-black">NEW</span>
         )}
       </div>
-      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
+      <p dir="auto" className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
         {series.metadata?.title || series.name}
       </p>
+      {/* The work's languages (v0.52.0, #72): the Library shows one card for every language edition the viewer may
+          browse, and this line says so -- `EN · ES-419`, the edition this card opens brighter. The names are its
+          title, for a hover and a screen reader. */}
+      {!!series.edition?.langs && series.edition.langs.length > 1 && (
+        <p data-edition-langs className="mt-0.5 truncate text-[10px] font-semibold tracking-wide text-fog-600"
+          title={series.edition.langs.map(languageName).join(' · ')}>
+          {libraryCaption(series.edition.langs, series.lang).map((c, i) => (
+            <span key={c.lang}>
+              {i > 0 && <span aria-hidden> · </span>}
+              <span className={c.current ? 'text-fog-300' : ''}>{c.label}</span>
+            </span>
+          ))}
+        </p>
+      )}
     </Wrap>
     {!selectable && menu.element}
     </>
@@ -250,9 +265,14 @@ export interface SourceItem {
   title: string;
   coverUrl?: string;
   updatedAt?: string;
+  /** Held in this source's language (v0.52.0): owned. A title held only in another language is still addable. */
   inLibrary?: boolean;
   /** The library entry that title is, when the server knows it: an owned card opens it. */
   librarySeriesId?: string;
+  /** The languages the library holds the title in (v0.52.0), when it holds it at all: the `EN in library` mark. */
+  libraryLangs?: string[];
+  /** The language the source declares, null when it says nothing (v0.52.0): the add dialog's language chip. */
+  lang?: string | null;
   /** >1 when the same title was found on several sources. */
   providerCount?: number;
 }
@@ -303,6 +323,14 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
           </span>
         )}
 
+        {/* Held in another language (v0.52.0): the card stays addable -- a new edition -- and says which language is
+            here, in the bottom-start corner the provider count's box mirrors. Codes, never names: "EN · ES" fits a
+            110-px tile. */}
+        {!owned && !!item.libraryLangs?.length && (
+          <span data-library-langs className="absolute bottom-1.5 start-1.5 z-10 max-w-[70%] truncate rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-fog-200 backdrop-blur">
+            {tr('{langs} in library', { langs: item.libraryLangs.map(codeLabel).join(' · ') })}
+          </span>
+        )}
         {owned ? (
           // Accent, not emerald: emerald is a health colour everywhere else in this app, and a large solid
           // fill of it over artwork reads as a system status chip pasted onto a cover.

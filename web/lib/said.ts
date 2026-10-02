@@ -16,7 +16,7 @@
  * the server's wherever the two are meant to read alike.
  */
 import { t as tr } from './i18n';
-import { activeLocale, cached, durationText, relativeTime } from './format';
+import { activeLocale, cached, durationText, languageName, relativeTime } from './format';
 import { isDesktop } from './desktop';
 import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
@@ -376,6 +376,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'dupes.note': () => tr('Detected by two series matching the same AniList entry, so it catches copies added from different sources under different names. Progress tracking works best with one copy of each. Merging is one-way and never automatic: the nightly repair leaves these alone and you confirm each one.'),
   'dupes.same': () => tr('Same AniList entry'),
   'dupes.copies': (p) => tr('{n} copies — merge them one pair at a time', { n: num(p, 'n') }),
+  // v0.52.0 (#72): a pair in two languages; the codes named in the reader's language.
+  'dupes.languages': (p) => tr('The same work in {a} and {b}: link them as editions rather than merging.', { a: languageName(str(p, 'a')), b: languageName(str(p, 'b')) }),
 
   // ---- Impossible chapter numbers
   'outliers.live': (p) => (num(p, 'n') === 1 ? tr('1 series has chapters numbered far beyond the rest') : tr('{n} series have chapters numbered far beyond the rest', { n: num(p, 'n') })),

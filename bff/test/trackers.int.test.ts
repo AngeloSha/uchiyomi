@@ -482,3 +482,56 @@ test('read marks reach a tracker only as a contiguous run', { skip: DSN ? false 
     await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[S, F]]);
   }
 });
+
+// ---- the language editions of one work share their entry (v0.52.0, #72) ----------------------------------------
+//
+// An English and a Spanish edition are one AniList or MyAnimeList entry (lib/editions.ts copies the link), and
+// each keeps its own reading progress. Reading the edition that is behind must not walk the entry back, nor mark a
+// shorter edition read to its end COMPLETED below what the other sent -- and must not leave an error either: the
+// entry is simply ahead. The resync clears the whole entry's floor, or a sibling's would still stand in the way.
+test('the editions of one work share their tracker entry\'s floor', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q, one } = await import('../src/lib/db');
+  const trackers = await import('../src/lib/trackers');
+  await migrate();
+  const EN_ED = 's_trk_ed_en', ES_ED = 's_trk_ed_es';
+  await q(`DELETE FROM users WHERE username = $1`, ['tracker-editions']);
+  await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[EN_ED, ES_ED]]);
+  for (const [id, title] of [[EN_ED, 'Edition Floor'], [ES_ED, 'Edición Floor']]) {
+    await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test',$2,$1)`, [id, title]);
+  }
+  const userId = (await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$1,'x','user') RETURNING id`, ['tracker-editions']))[0].id as string;
+  const read = async (series: string, n: number) => {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'test',$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+      [`b_${series}_${n}`, series, `/test/${series}/${n}.cbz`, `Chapter ${n}`, n]);
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true) ON CONFLICT (user_id, book_id) DO NOTHING`,
+      [userId, `b_${series}_${n}`, series]);
+    await trackers.pushSeriesProgress(userId, series);
+  };
+  const lastError = async () => (await one<{ last_error: string | null }>(
+    `SELECT last_error FROM user_trackers WHERE user_id = $1 AND provider = 'myanimelist'`, [userId]))?.last_error ?? null;
+  try {
+    await trackers.saveConnection(userId, 'myanimelist', 'tok-mal', 'me-on-mal', new Date(Date.now() + 86_400_000));
+    await trackers.linkSeries(EN_ED, '888', 'Edition Floor', userId, 'myanimelist');
+    await trackers.linkSeries(ES_ED, '888', 'Edition Floor', userId, 'myanimelist');
+    pushes.length = 0;
+    await read(EN_ED, 50);
+    assert.equal(pushes.length, 1, 'chapter 50 of the English edition is pushed');
+    // Reintroduce by dropping the entry's floor in lib/trackers.ts pushOne: chapter 10 is sent over the 50.
+    await read(ES_ED, 10);
+    assert.equal(pushes.length, 1, 'an edition behind the other pushes nothing');
+    assert.equal(await lastError(), null, 'and nothing is recorded as an error: the entry is simply ahead');
+    await read(ES_ED, 51);
+    assert.equal(pushes.length, 2, 'past the entry\'s floor, the Spanish edition pushes');
+    assert.match(pushes[1].body, /num_chapters_read=51/);
+    // The resync clears the entry, not one row of it: the English edition's 50 would otherwise still hold 10 back.
+    await q(`DELETE FROM read_progress WHERE series_id = $1 AND book_id <> $2`, [ES_ED, `b_${ES_ED}_10`]);
+    await trackers.clearTrackerFloor(userId, ES_ED, 'myanimelist');
+    await trackers.pushSeriesProgress(userId, ES_ED);
+    assert.equal(pushes.length, 3, 'a resync lets the lower number go out');
+    assert.match(pushes[2].body, /num_chapters_read=10/);
+  } finally {
+    await q(`DELETE FROM users WHERE username = $1`, ['tracker-editions']);
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[EN_ED, ES_ED]]);
+  }
+});
