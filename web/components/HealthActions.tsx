@@ -42,7 +42,7 @@ import {
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
-import { diagnosisReason, type Said } from '@/lib/said';
+import { diagnosisReason, itemDetail, type Said } from '@/lib/said';
 import { useFindRun } from '@/lib/useFindRun';
 import { findGate, findSlotState } from '@/lib/findSources';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
@@ -451,8 +451,16 @@ const SCAN_CHECKS = ['library-scan', 'downloads-missing'];
 export function hasCardActions(check: HealthCheck): boolean {
   const step = CARD_STEP[check.id];
   return (!!step && stepFindings(check, step).length > 0) || SCAN_CHECKS.includes(check.id) || solverDown(check)
-    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2));
+    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2))
+    || laterCopies(check).length > 0;
 }
+
+/**
+ * v0.50.0, The same chapter saved twice: the rows whose later files the card's Fix all deletes. Every one of them
+ * is `info` (the check never warns), so the rule is "names later files", not "is a finding".
+ */
+const laterCopies = (check: HealthCheck): HealthItem[] =>
+  check.id === 'saved-twice' ? check.items.filter((it) => !it.ignored && !!it.seriesId && (it.bookIds?.length ?? 0) > 0) : [];
 
 /**
  * A card's body opens with this: one legend row per kind of action its findings carry (what, how, usually how
@@ -466,9 +474,12 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
   const [asking, setAsking] = useState(false);
   const [merge, setMerge] = useState<ActionState>(IDLE);
   const [scan, setScan] = useState<ActionState>(IDLE);
+  const [purge, setPurge] = useState<ActionState>(IDLE);
+  const [askingPurge, setAskingPurge] = useState(false);
   const ctx: CopyCtx = { limits: status?.limits, check };
   const findings = check.items.filter((it) => !it.info);
   const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2) : [];
+  const later = laterCopies(check);
 
   const rows: ActionSpec[] = [];
   // The legend: every kind of action a finding here offers, once, with no button of its own (the keys are on
@@ -513,6 +524,14 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
       onRun: () => setAsking(true), buttonProps: { 'data-health-merge-all': check.id } as ActionSpec['buttonProps'],
     });
   }
+  if (later.length) {
+    // Never part of Fix all issues: that one press runs the repair's steps, and nothing deletes without its own yes.
+    const copy = ACTION_COPY.delete_all;
+    rows.push({
+      id: 'delete_all', label: copy.label(ctx), what: copy.what(ctx), eta: copy.eta(ctx), state: purge, runLabel: tr('Fix all'), danger: true,
+      onRun: () => setAskingPurge(true), buttonProps: { 'data-health-delete-all': check.id } as ActionSpec['buttonProps'],
+    });
+  }
   if (SCAN_CHECKS.includes(check.id)) {
     const copy = ACTION_COPY.scan;
     rows.push({
@@ -532,6 +551,32 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
     });
   }
   if (!rows.length) return null;
+
+  // Each row through its own series' Delete chapters, one after another: the route keeps the rows as tombstones,
+  // skips a bookmarked chapter, and says what it skipped. A row whose request failed counts as not deleted.
+  const deleteAll = async () => {
+    const at = Date.now();
+    setAskingPurge(false);
+    setPurge({ kind: 'working', startedAt: at, step: tr('Working…') });
+    let deleted = 0;
+    let kept = 0;
+    for (const it of later) {
+      try {
+        const r = await api<{ applied: number; skipped: unknown[] }>(
+          `/api/admin/series/${encodeURIComponent(it.seriesId!)}/chapters/delete`, { method: 'POST', json: { bookIds: it.bookIds } });
+        deleted += r.applied || 0;
+        kept += r.skipped?.length || 0;
+      } catch { kept += it.bookIds?.length ?? 0; }
+    }
+    const line = [tr('{n} deleted', { n: deleted }),
+      ...(kept ? [kept === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: kept })] : [])].join(' · ');
+    if (deleted) toast(tr('{n} deleted', { n: deleted }), 'success');
+    setPurge({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
+    await rr.recheck().catch(() => {});
+    setPurge(deleted === 0 && kept
+      ? { kind: 'failed', finishedAt: Date.now(), reason: line }
+      : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: line, partial: kept > 0 });
+  };
 
   const mergeAll = async () => {
     const at = Date.now();
@@ -589,6 +634,31 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
             }
             onConfirm={() => { void mergeAll(); }}
             onClose={() => setAsking(false)}
+          />
+        </OnBody>
+      )}
+      {askingPurge && (
+        <OnBody>
+          <ConfirmDialog
+            title={later.length === 1 ? tr('Delete the later copies in this series?') : tr('Delete the later copies in these {n} series?', { n: later.length })}
+            confirmLabel={tr('Delete chapters')}
+            danger
+            body={
+              <>
+                <p>{tr('Deleting removes the file. The chapter stays listed and everyone keeps their reading history.')}</p>
+                <p className="mt-2">{tr('A chapter somebody has bookmarked is skipped, and so is anything in a library you built by hand. There is no undo and no recycle bin.')}</p>
+                <ul className="mt-3 space-y-2">
+                  {later.map((it) => (
+                    <li key={it.seriesId} className="min-w-0 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <p className="truncate text-fog-100">{it.title}</p>
+                      <p dir="auto" className="mt-0.5 text-xs text-fog-400">{itemDetail(it)}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+            onConfirm={() => { void deleteAll(); }}
+            onClose={() => setAskingPurge(false)}
           />
         </OnBody>
       )}

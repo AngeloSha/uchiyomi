@@ -635,6 +635,64 @@ test('an impossible chapter number is offered for deletion, unless it was renumb
   }
 });
 
+const S_TWICE = 's_health_twice';
+
+/**
+ * v0.50.0: a chapter downloaded again in another site's split, before the sweep compared parts (lib/partAlias.ts).
+ * The seeded pair is Tales of Demons and Gods' 335: mangapill's 335 and 335.5 first, mangaread's 335.1 and 335.6
+ * days later. Beside it, 336.5 came from mangaread too -- but under mangapill's own numbering, as the fallback takes a
+ * part the main source failed (lib/chapterFallback.ts), and mangapill lists 336.5: that is not a second copy.
+ * Reintroduce by dropping the listing test in savedTwice: "the chip names the later files, and only them" fails, with
+ * 336.5 offered for deletion.
+ */
+test('the same chapter saved twice names the later split, offers Delete only for it, and never deletes', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_TWICE]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Saved Twice Fixture',$1)`, [S_TWICE]);
+  const DAY = 86_400_000, t0 = Date.UTC(2026, 8, 1);
+  const files: Array<[number, string, number]> = [
+    [335, 'tw-pill', t0], [335.5, 'tw-pill', t0 + 1000], [336, 'tw-pill', t0 + 2000], [334, 'tw-pill', t0 - DAY],
+    [336.5, 'tw-read', t0 + 3000], [335.1, 'tw-read', t0 + 30 * DAY], [335.6, 'tw-read', t0 + 30 * DAY + 1000],
+  ];
+  for (const [n, src, mtime] of files) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages, source_id, mtime)
+             VALUES ($1,$2,'test',$3,$4,$5,20,$6,$7)`, [`b_${S_TWICE}_${n}`, S_TWICE, `/test/${S_TWICE}/${n}.cbz`, `Chapter ${n}`, n, src, mtime]);
+  }
+  await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies)
+           VALUES ($1, 336.5, 'Chapter 336.5', 'tw-pill', '{}'::jsonb, 'available', $2::jsonb)`,
+    [S_TWICE, JSON.stringify([{ sourceId: 'p336.5', source: 'tw-pill', groups: [] }, { sourceId: 'r336.5', source: 'tw-read', groups: [] }])]);
+  const check = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'saved-twice');
+    await assertSaid([c]);
+    return c;
+  };
+  try {
+    const c = await check();
+    assert.ok(c, 'the check is on the page');
+    const item = c.items.find((i: any) => i.title === 'Saved Twice Fixture');
+    assert.ok(item, 'the later split of 335 is reported');
+    assert.deepEqual(item.bookIds, [`b_${S_TWICE}_335.1`, `b_${S_TWICE}_335.6`], 'the chip names the later files, and only them');
+    assert.deepEqual(item.numbers, [335.1, 335.6]);
+    assert.ok(!item.bookIds.includes(`b_${S_TWICE}_336.5`), 'the fallback\'s part under mangapill\'s own numbering is not a second copy');
+    assert.equal(item.detail, '2 files from tw-read saved again in another split: 335.1, 335.6');
+    assert.deepEqual(item.actions, ['delete'], 'Delete is offered, and nothing else does anything on its own');
+    assert.equal(item.info, true, 'information, never a warning');
+    assert.equal(c.status, 'ok');
+    assert.equal(c.summary, '1 series has chapters saved twice, split two ways');
+    assert.equal((await q('SELECT count(*)::int AS n FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [S_TWICE]))[0].n, files.length,
+      'running the check deleted nothing');
+
+    // The existing delete path keeps the rows as tombstones; the finding goes with the files.
+    await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = ANY($1)`, [item.bookIds]);
+    assert.equal((await check()).items.find((i: any) => i.title === 'Saved Twice Fixture'), undefined, 'deleting the later files clears it');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_TWICE]);
+  }
+});
+
 const S_SHORT = 's_health_short';
 
 /**

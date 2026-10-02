@@ -1492,6 +1492,13 @@ leave the gaps with nothing.
 marks the copy that is kept (most chapters, then most readers, then the older row); merging is one way.
 **Impossible chapter numbers** offer **Delete chapters**, also behind a confirmation, and a chapter anyone
 has bookmarked is skipped. There is deliberately no *Fix all* for either.
+**The same chapter saved twice** (since v0.50.0) lists series where two sites' splits of one chapter are both on
+disk — 335 and 335.5 from one site, 335.1 and 335.6 from another that arrived later — which updates before
+v0.50.0 could download (see *Parts that sites number differently*). It is information, never a warning. Each row
+names the files that arrived later and offers **Delete chapters** for exactly those; its **Fix all** does the same
+for every row, after a confirmation that lists them. A part another site supplied under the first site's own
+numbers, which that site lists too, is not a second copy and is not listed. Deleted files stay listed as deleted
+chapters, everyone keeps their reading history, and updates do not fetch them back.
 
 **What the nightly never does.** It never deletes a chapter, never marks one as gone, never merges two
 series and never renumbers anything. It also never runs beside a chapter sweep: whichever starts second

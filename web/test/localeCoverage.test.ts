@@ -223,6 +223,8 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     '{n} series that came from extensions keep their chapters and get no new ones until it is back',
   'the library still marks it deleted, and no scan has read the file since':
     'the library still marks these {n} deleted, and no scan has read the files since',
+  // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
+  'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {

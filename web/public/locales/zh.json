@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2497
+    "strings": 2508
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2500,5 +2500,16 @@
   "Any: {name}": "任意：{name}",
   "Tap again to skip to the next chapter": "再点一次以跳到下一章",
   "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "即使它本身或它的某个类型属于 18+，“显示 18+”关闭时也让这部作品留在书架上。",
-  "another split of a chapter you have": "已有章节的另一种拆分"
+  "another split of a chapter you have": "已有章节的另一种拆分",
+  "The same chapter saved twice": "同一章节保存了两次",
+  "1 series has chapters saved twice, split two ways": "1 部作品有章节以两种拆分方式保存了两次",
+  "{n} series have chapters saved twice, split two ways": "{n} 部作品有章节以两种拆分方式保存了两次",
+  "No chapter saved twice": "没有保存了两次的章节",
+  "Sites split and number a chapter's parts differently, and before v0.50.0 an update could download a chapter you had again under another site's numbers. Each row names the files that arrived later. Deleting is never automatic: \"Delete chapters\" removes those files (a bookmarked chapter is skipped), everyone keeps their reading history, and updates do not fetch them back.": "各网站对章节分段的拆分和编号方式不同，在 v0.50.0 之前，更新可能会按另一个网站的编号再次下载你已有的章节。每一行列出后到的文件。删除从不自动进行：“删除多个章节”会删除这些文件（有书签的章节会被跳过），所有人的阅读记录都会保留，更新也不会再取回它们。",
+  "1 file from {source} saved again in another split: {numbers}": "来自 {source} 的 1 个文件以另一种拆分再次保存：{numbers}",
+  "{n} files from {source} saved again in another split: {numbers}": "来自 {source} 的 {n} 个文件以另一种拆分再次保存：{numbers}",
+  "Delete the later copies": "删除后到的副本",
+  "Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.": "像“删除多个章节”一样，删除这张卡片上每一行列出的文件，也就是后到的副本：有书签的章节会被跳过，所有人的阅读记录都会保留。开始前会先显示列表；无法撤销。",
+  "Delete the later copies in this series?": "删除这部作品中后到的副本？",
+  "Delete the later copies in these {n} series?": "删除这 {n} 部作品中后到的副本？"
 }

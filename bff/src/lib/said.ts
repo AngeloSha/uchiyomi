@@ -235,6 +235,17 @@ const EN = {
   'outliers.detail': ({ n, top, median }: { n: number; top: number; median: number }) =>
     `${n} chapter(s) up to ${top}, but the series sits around ${median}`,
 
+  // ---- The same chapter saved twice (v0.50.0). `numbers` the first five later files, `more` how many besides.
+  'twice.live': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} chapters saved twice, split two ways`,
+  'twice.none': () => 'No chapter saved twice',
+  'twice.note': () =>
+    'Sites split and number a chapter\'s parts differently, and before v0.50.0 an update could download a chapter ' +
+    'you had again under another site\'s numbers. Each row names the files that arrived later. Deleting is never ' +
+    'automatic: "Delete chapters" removes those files (a bookmarked chapter is skipped), everyone keeps their ' +
+    'reading history, and updates do not fetch them back.',
+  'twice.detail': ({ n, numbers, more, source }: { n: number; numbers: number[]; more: number; source: string }) =>
+    `${n} file${s(n, '', 's')} from ${source} saved again in another split: ${numbers.join(', ')}${more > 0 ? ` and ${more} more` : ''}`,
+
   // ---- Cloudflare solver. ⚠️ On desktop the helper's address carries its access token: no `url` is sent there.
   'solver.down': ({ url, error }: { url?: string; error: string | null }) =>
     forDesktop(`Not answering at ${url}`, 'Not answering') + (error ? ` (${error})` : ''),

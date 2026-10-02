@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2497
+    "strings": 2508
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2500,5 +2500,16 @@
   "Any: {name}": "أي: {name}",
   "Tap again to skip to the next chapter": "اضغط مرة أخرى للانتقال إلى الفصل التالي",
   "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "إبقاء هذه السلسلة على الرف ما دام «إظهار +18» مطفأً، حتى لو كانت هي أو أحد تصنيفاتها +18.",
-  "another split of a chapter you have": "تقسيم آخر لفصل لديك"
+  "another split of a chapter you have": "تقسيم آخر لفصل لديك",
+  "The same chapter saved twice": "الفصل نفسه محفوظ مرتين",
+  "1 series has chapters saved twice, split two ways": "سلسلة واحدة فيها فصول محفوظة مرتين بتقسيمين مختلفين",
+  "{n} series have chapters saved twice, split two ways": "سلاسل فيها فصول محفوظة مرتين بتقسيمين مختلفين: {n}",
+  "No chapter saved twice": "لا فصول محفوظة مرتين",
+  "Sites split and number a chapter's parts differently, and before v0.50.0 an update could download a chapter you had again under another site's numbers. Each row names the files that arrived later. Deleting is never automatic: \"Delete chapters\" removes those files (a bookmarked chapter is skipped), everyone keeps their reading history, and updates do not fetch them back.": "تقسّم المواقع أجزاء الفصل وترقّمها بطرق مختلفة، وقبل الإصدار v0.50.0 كان التحديث قد ينزّل فصلًا لديك مرة أخرى بأرقام موقع آخر. يذكر كل صف الملفات التي وصلت لاحقًا. الحذف ليس تلقائيًا أبدًا: «حذف الفصول» يزيل تلك الملفات (ويُتخطّى الفصل الذي عليه إشارة مرجعية)، ويحتفظ الجميع بسجل قراءتهم، ولا تعيد التحديثات جلبها.",
+  "1 file from {source} saved again in another split: {numbers}": "ملف واحد من {source} محفوظ مرة أخرى بتقسيم آخر: {numbers}",
+  "{n} files from {source} saved again in another split: {numbers}": "ملفات من {source} محفوظة مرة أخرى بتقسيم آخر ({n}): {numbers}",
+  "Delete the later copies": "حذف النسخ اللاحقة",
+  "Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.": "يحذف الملفات التي يذكرها كل صف في هذه البطاقة، أي النسخ التي وصلت لاحقًا، كما يفعل «حذف الفصول»: يُتخطّى الفصل الذي عليه إشارة مرجعية ويحتفظ الجميع بسجل قراءتهم. ترى القائمة أولًا؛ ولا يمكن التراجع.",
+  "Delete the later copies in this series?": "هل تريد حذف النسخ اللاحقة في هذه السلسلة؟",
+  "Delete the later copies in these {n} series?": "هل تريد حذف النسخ اللاحقة في هذه السلاسل الـ {n}؟"
 }

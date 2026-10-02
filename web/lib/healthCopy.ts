@@ -32,6 +32,7 @@ const CHECK_TITLE_KEYS = keys(
   'Chapter gaps', 'Suspiciously short chapters', 'Chapters that would not download', 'Series that can no longer update',
   'Source health', 'Duplicate series', 'Impossible chapter numbers', 'Cloudflare solver', 'Version',
   'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine', 'Chapter numbering',
+  'The same chapter saved twice',
 );
 export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[number]>> = {
   'chapter-gaps': CHECK_TITLE_KEYS[0],
@@ -50,6 +51,8 @@ export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[num
   'extension-engine': CHECK_TITLE_KEYS[12],
   // #116: series whose chapter numbers wait for an admin, or were numbered by posting order by themselves.
   numbering: CHECK_TITLE_KEYS[13],
+  // v0.50.0: chapters downloaded again in another site's split of their parts (bff lib/health.ts savedTwice).
+  'saved-twice': CHECK_TITLE_KEYS[14],
 };
 
 export function checkTitle(c: Pick<HealthCheck, 'id' | 'title'>): string {
@@ -260,6 +263,12 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: (c) => tr('Every failed chapter of every source goes back to zero tries, and up to {max} series from sources that can be asked now are re-checked straight away. Nothing is searched.', { max: lim(c, 'retrySeries', 10) }),
     eta: repairEta,
     lasting: (rec) => recordOutcome(rec),
+  },
+  // v0.50.0, The same chapter saved twice: every row's later files, each through its row's own Delete chapters.
+  delete_all: {
+    label: () => tr('Delete the later copies'),
+    what: () => tr('Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.'),
+    eta: moment,
   },
   merge_all: {
     label: () => tr('Merge all'),

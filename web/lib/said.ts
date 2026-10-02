@@ -385,6 +385,18 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('1 chapter up to {top}, but the series sits around {median}', { top: num(p, 'top'), median: num(p, 'median') })
     : tr('{n} chapters up to {top}, but the series sits around {median}', { n: num(p, 'n'), top: num(p, 'top'), median: num(p, 'median') })),
 
+  // ---- The same chapter saved twice (v0.50.0)
+  'twice.live': (p) => (num(p, 'n') === 1 ? tr('1 series has chapters saved twice, split two ways') : tr('{n} series have chapters saved twice, split two ways', { n: num(p, 'n') })),
+  'twice.none': () => tr('No chapter saved twice'),
+  'twice.note': () => tr('Sites split and number a chapter\'s parts differently, and before v0.50.0 an update could download a chapter you had again under another site\'s numbers. Each row names the files that arrived later. Deleting is never automatic: "Delete chapters" removes those files (a bookmarked chapter is skipped), everyone keeps their reading history, and updates do not fetch them back.'),
+  'twice.detail': (p) => {
+    const more = num(p, 'more');
+    const numbers = strs(p, 'numbers').join(listSep()) + (more > 0 ? ` ${tr('and {n} more', { n: more })}` : '');
+    return num(p, 'n') === 1
+      ? tr('1 file from {source} saved again in another split: {numbers}', { source: str(p, 'source'), numbers })
+      : tr('{n} files from {source} saved again in another split: {numbers}', { n: num(p, 'n'), source: str(p, 'source'), numbers });
+  },
+
   // ---- Cloudflare solver. On desktop no address is sent: it carries the helper's token.
   'solver.down': (p) => {
     const head = isDesktop() || !p.url ? tr('Not answering') : tr('Not answering at {url}', { url: str(p, 'url') });

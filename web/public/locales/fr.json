@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2497
+    "strings": 2508
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -2500,5 +2500,16 @@
   "Any: {name}": "Toute : {name}",
   "Tap again to skip to the next chapter": "Touchez à nouveau pour passer au chapitre suivant",
   "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "Garde cette série sur les étagères tant que « Afficher 18+ » est désactivé, même si elle ou l’un de ses genres est 18+.",
-  "another split of a chapter you have": "un autre découpage d’un chapitre que vous avez"
+  "another split of a chapter you have": "un autre découpage d’un chapitre que vous avez",
+  "The same chapter saved twice": "Le même chapitre enregistré deux fois",
+  "1 series has chapters saved twice, split two ways": "1 série a des chapitres enregistrés deux fois, découpés de deux façons",
+  "{n} series have chapters saved twice, split two ways": "{n} séries ont des chapitres enregistrés deux fois, découpés de deux façons",
+  "No chapter saved twice": "Aucun chapitre enregistré deux fois",
+  "Sites split and number a chapter's parts differently, and before v0.50.0 an update could download a chapter you had again under another site's numbers. Each row names the files that arrived later. Deleting is never automatic: \"Delete chapters\" removes those files (a bookmarked chapter is skipped), everyone keeps their reading history, and updates do not fetch them back.": "Les sites découpent et numérotent différemment les parties d’un chapitre, et avant la v0.50.0 une mise à jour pouvait télécharger de nouveau un chapitre que vous aviez déjà, sous les numéros d’un autre site. Chaque ligne nomme les fichiers arrivés plus tard. La suppression n’est jamais automatique : « Supprimer les chapitres » retire ces fichiers (un chapitre marqué d’un signet est ignoré), chacun garde son historique de lecture, et les mises à jour ne les récupèrent pas.",
+  "1 file from {source} saved again in another split: {numbers}": "1 fichier de {source} enregistré à nouveau dans un autre découpage : {numbers}",
+  "{n} files from {source} saved again in another split: {numbers}": "{n} fichiers de {source} enregistrés à nouveau dans un autre découpage : {numbers}",
+  "Delete the later copies": "Supprimer les copies arrivées plus tard",
+  "Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.": "Supprime les fichiers que nomme chaque ligne de cette carte, les copies arrivées plus tard, comme « Supprimer les chapitres » : un chapitre marqué d’un signet est ignoré et chacun garde son historique de lecture. Vous voyez la liste d’abord ; c’est irréversible.",
+  "Delete the later copies in this series?": "Supprimer les copies arrivées plus tard dans cette série ?",
+  "Delete the later copies in these {n} series?": "Supprimer les copies arrivées plus tard dans ces {n} séries ?"
 }

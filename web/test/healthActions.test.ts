@@ -191,7 +191,7 @@ test('every dialog a Health card opens is on <body>, out of the card', () => {
   // its overflow-hidden cuts the dialog off. Reintroduce by rendering a ConfirmDialog in place: this names it.
   const src = code(read(KEYS));
   const opens = [...src.matchAll(/<ConfirmDialog\b/g)].map((m) => m.index!);
-  assert.equal(opens.length, 4, 'the Health confirmations moved -- update this count');
+  assert.equal(opens.length, 5, 'the Health confirmations moved -- update this count');
   for (const at of opens) {
     const before = src.slice(0, at);
     assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `a Health confirmation is rendered inside its card: ${src.slice(at, at + 90)}`);
@@ -360,6 +360,27 @@ test('Merge all lists every pair, marks the copy that survives, and says the mer
   assert.match(block, /for \(const p of pairs\) \{[\s\S]*await api<\{ moved: number \}>/, 'the merges are not run one at a time');
   assert.doesNotMatch(block, /Promise\.all\(/, 'the merges are fired in parallel');
   assert.match(block, /if \(failed\) toast\(failed === 1 \? tr\('One pair could not be merged'\)/, 'pairs that failed to merge are folded into the success line');
+});
+
+test('v0.50.0: Fix all on "The same chapter saved twice" deletes each row\'s later files through Delete chapters, after a list', () => {
+  // The check never deletes by itself (bff lib/health.ts savedTwice); its Fix all is the one press that does, so it
+  // shows what it deletes first, and sends each row's own later files -- the only ids the server put on the row --
+  // through the existing route, which keeps the rows as tombstones and skips a bookmarked chapter. Reintroduce by
+  // deleting from the press (`onRun: () => { void deleteAll(); }`): "deletes without a confirmation" fails; by
+  // sending anything else: "does not send each row's later files" fails.
+  const src = code(read(KEYS));
+  const block = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
+  assert.match(block, /'data-health-delete-all': check\.id/, 'the Fix all row is not tagged for the walk-through');
+  assert.match(block, /onRun: \(\) => setAskingPurge\(true\)/, 'Fix all deletes without a confirmation');
+  assert.match(src, /check\.id === 'saved-twice' \? check\.items\.filter\(\(it\) => !it\.ignored && !!it\.seriesId && \(it\.bookIds\?\.length \?\? 0\) > 0\) : \[\]/,
+    'Fix all reaches rows of another check, or an ignored row');
+  const fn = block.slice(block.indexOf('const deleteAll'), block.indexOf('const mergeAll'));
+  assert.match(fn, /\/api\/admin\/series\/\$\{encodeURIComponent\(it\.seriesId!\)\}\/chapters\/delete`, \{ method: 'POST', json: \{ bookIds: it\.bookIds \} \}/,
+    'does not send each row\'s later files through the existing route');
+  assert.match(fn, /for \(const it of later\) \{[\s\S]*await api</, 'the rows are not deleted one at a time');
+  const dialog = block.slice(block.indexOf('{askingPurge && ('));
+  assert.match(dialog, /danger/, 'the confirmation is not marked destructive');
+  assert.match(dialog, /\{later\.map\(\(it\) => \(/, 'the dialog does not list what it deletes');
 });
 
 test('the survivor of a merge is named in one sentence, not a verb glued to a title', () => {

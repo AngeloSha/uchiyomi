@@ -35,6 +35,8 @@ import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundari
 import { renumberRunning, type NumberingNote } from './numbering';
 import { detailOf, joined, noteOf, own, say, saidOf, summaryOf, type Part, type Said } from './said';
 import { mainSourceCounts } from './findScope';
+import { numKey } from './postingOrder';
+import type { ListingCopy } from './seriesListing';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -1188,6 +1190,98 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
 }
 
 /**
+ * The same chapter saved twice (v0.50.0): files at one whole chapter number from two sources, in two different
+ * splits of it, the later group arriving after the earlier one -- what updates downloaded before the sweep compared
+ * parts (lib/partAlias.ts): mangaread's 335.1 and 335.6 beside mangapill's 335 and 335.5, natomanga's 78.6 ... 78.9
+ * beside a 78 held whole. Each row names the later files and offers Delete chapters, the existing route: it keeps
+ * their rows as tombstones, so reading history stays and the sweep, which holds a tombstone, never fetches them
+ * back. NOTHING here deletes on its own (lib/libraryAdmin.ts): which copy goes is the admin's call. Info only,
+ * never a warning: a second copy costs disk and a doubled chapter in the list, not a chapter.
+ *
+ * Both sources known -- a file scanned in from elsewhere has no origin to tell apart -- and the later group's
+ * first file after the earlier group's last. And it is another split only when the earlier group's source does
+ * not list its numbers: a part the main source failed and a follower supplied under the same numbering
+ * (lib/chapterFallback.ts) is a part of that source's own split, and must not be offered for deletion.
+ * Reintroduce by dropping the listing test: "the chip names the later files, and only them" in health.int.test.ts
+ * finds the fallback's 336.5 among them.
+ */
+async function savedTwice(): Promise<HealthCheck> {
+  const rows = await q<{ series_id: string; title: string; id: string; number: number; source_id: string; mtime: string | number }>(
+    `WITH mixed AS (
+       SELECT series_id FROM lib_books WHERE pruned_at IS NULL AND source_id IS NOT NULL
+        GROUP BY series_id HAVING count(DISTINCT source_id) > 1)
+     SELECT b.series_id, s.title, b.id, COALESCE(o.number, b.number)::float8 AS number, b.source_id, b.mtime
+       FROM lib_books b JOIN mixed m ON m.series_id = b.series_id JOIN lib_series s ON s.id = b.series_id
+       LEFT JOIN book_overrides o ON o.book_id = b.id
+      WHERE b.pruned_at IS NULL AND b.source_id IS NOT NULL AND ${visibleToAll('s')}
+        AND s.numbering IS DISTINCT FROM 'posting_order' AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL
+      ORDER BY s.title, b.series_id, 4`,
+  );
+  type Book = (typeof rows)[number];
+  const bySeries = new Map<string, Book[]>();
+  for (const r of rows) {
+    const list = bySeries.get(r.series_id);
+    if (list) list.push(r);
+    else bySeries.set(r.series_id, [r]);
+  }
+  const items: HealthItem[] = [];
+  for (const [seriesId, books] of bySeries) {
+    // Per whole number, per source: which group came first, and which came after it.
+    const wholes = new Map<number, Map<string, Book[]>>();
+    for (const b of books) {
+      const w = Math.floor(numKey(Number(b.number)));
+      let groups = wholes.get(w);
+      if (!groups) wholes.set(w, (groups = new Map()));
+      const g = groups.get(b.source_id);
+      if (g) g.push(b);
+      else groups.set(b.source_id, [b]);
+    }
+    const later: Array<{ from: string; source: string; books: Book[] }> = [];
+    for (const groups of wholes.values()) {
+      if (groups.size < 2) continue;
+      const spans = [...groups].map(([source, list]) => {
+        const times = list.map((b) => Number(b.mtime));
+        return { source, list, first: Math.min(...times), last: Math.max(...times) };
+      }).sort((a, b) => a.first - b.first);
+      for (const g of spans.slice(1)) if (g.first > spans[0].last) later.push({ from: spans[0].source, source: g.source, books: g.list });
+    }
+    if (!later.length) continue;
+    const listing = await q<{ number: number; source_id: string; copies: ListingCopy[] | null }>(
+      'SELECT number::float8 AS number, source_id, copies FROM series_listing WHERE series_id = $1', [seriesId]).catch(() => []);
+    const listers = new Map<number, Set<string>>();
+    for (const l of listing) {
+      const who = new Set([l.source_id, ...(l.copies ?? []).map((c) => c.source)]);
+      listers.set(numKey(Number(l.number)), who);
+    }
+    const twice = later
+      .filter((g) => !g.books.some((b) => listers.get(numKey(Number(b.number)))?.has(g.from)))
+      .flatMap((g) => g.books.map((b) => ({ ...b, n: numKey(Number(b.number)) })))
+      .sort((a, b) => a.n - b.n);
+    if (!twice.length) continue;
+    const sources = [...new Set(twice.map((b) => b.source_id))].map((id) => getSource(id)?.name ?? id);
+    items.push({
+      seriesId,
+      title: books[0].title,
+      ...detailOf([say('twice.detail', {
+        n: twice.length, numbers: twice.slice(0, 5).map((b) => b.n), more: Math.max(0, twice.length - 5), source: sources.join(', '),
+      })]),
+      bookIds: twice.slice(0, MAX_BOOK_IDS).map((b) => b.id),
+      numbers: twice.slice(0, MAX_BOOK_IDS).map((b) => b.n),
+      actions: ['delete'],
+      info: true,
+    });
+  }
+  return {
+    id: 'saved-twice',
+    title: 'The same chapter saved twice',
+    status: verdict(items),
+    ...summaryOf([items.length ? say('twice.live', { n: items.length }) : say('twice.none')]),
+    ...noteOf([say('twice.note'), hiddenPart(items.length - MAX_ITEMS)]),
+    items: items.slice(0, MAX_ITEMS),
+  };
+}
+
+/**
  * The Cloudflare solver, as its own line.
  *
  * When it dies, every source behind it fails and each records the failure against ITSELF, so the operator
@@ -1536,6 +1630,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     numberingCheck(),
     shortChapters(),
     outlierChapters(held, ctx),
+    savedTwice(),
     duplicateSeries(ctx),
     sourceTrouble(ctx),
     chapterFailures(ctx),
