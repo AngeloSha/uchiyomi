@@ -73,3 +73,25 @@ test('the series page offers New banner to an admin, and only while the hero is 
   assert.match(src, /if \(r\.ok && r\.same\) toast\(tr\('This is the only banner this series’ pages give\.'\), 'info'\);\s*else if \(r\.ok\)/,
     'Shuffle says "Banner changed" when the pages give no other banner');
 });
+
+test('the series page asks for its banner sharp, and leaves a stand-in cover to the server\'s blur', () => {
+  // v0.53.0: the owner asked to see a series' real banner on its page -- AniList's, an admin's -- where it was the same
+  // blurred wash as the cover that stands in when there is none. Only the server knows which the art is, so the page
+  // asks for `style=banner` and the server keeps the wash for a cover (bff lib/heroFrame.ts backdropLook). Reintroduce
+  // by dropping `banner` from the series page's <Backdrop>: "the series page asks for its banner blurred" fails.
+  assert.equal(backdropUrl('s_1', { banner: true }), '/img/series/s_1/backdrop?style=banner');
+  assert.equal(backdropUrl('s_1', { banner: true, version: 4 }), '/img/series/s_1/backdrop?av=4&style=banner');
+  assert.deepEqual(backdropSources('s_1', null, { banner: true }, GENRE), ['/img/series/s_1/backdrop?style=banner', GENRE]);
+  // An automatic banner is still tried first, and a series without one falls back to the banner style's answer.
+  assert.deepEqual(backdropSources('s_1', { seed: 2 }, { banner: true }, GENRE), ['/img/series/s_1/hero?v=2', '/img/series/s_1/backdrop?style=banner', GENRE]);
+  // The home hero keeps its framed style, and no style is the wash (the admin header's).
+  assert.equal(backdropUrl('s_1', { hero: true, banner: true, wide: true }), '/img/series/s_1/backdrop?style=hero&ar=wide');
+  assert.equal(backdropUrl('s_1', {}), '/img/series/s_1/backdrop');
+  const src = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
+  const hero = src.match(/<Backdrop seriesId=\{id\}[^>]*\/>/)?.[0] ?? '';
+  assert.ok(hero, 'the series page has no backdrop where this test looks');
+  assert.match(hero, /\sbanner\s/, 'the series page asks for its banner blurred');
+  // The title stays readable over a sharp banner: the gradient right after it is still there.
+  assert.match(src.slice(src.indexOf(hero)), /^[^\n]*\n\s*<div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950\/65 to-ink-950\/30" \/>/,
+    'the gradient under the series title is gone');
+});

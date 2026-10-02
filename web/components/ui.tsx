@@ -27,10 +27,11 @@ export function useWideViewport(): boolean {
 /**
  * `autoHero`: the series payload's field. When set, the banner made from the series' own pages is tried first and the
  * backdrop becomes its fallback, as the genre art is the backdrop's (lib/art.ts backdropSources).
+ * `banner` (v0.53.0): a real banner sharp and a stand-in cover still blurred -- the series page's ask.
  */
-export function Backdrop({ seriesId, genres, className = '', version, hero, autoHero }: { seriesId?: string; genres?: string[]; className?: string; version?: number; hero?: boolean; autoHero?: { seed: number } | null }) {
+export function Backdrop({ seriesId, genres, className = '', version, hero, banner, autoHero }: { seriesId?: string; genres?: string[]; className?: string; version?: number; hero?: boolean; banner?: boolean; autoHero?: { seed: number } | null }) {
   const wide = useWideViewport();
-  const sources = backdropSources(seriesId, autoHero, { hero, wide, version }, genreBackdrop(genres));
+  const sources = backdropSources(seriesId, autoHero, { hero, banner, wide, version }, genreBackdrop(genres));
   const chain = sources.join(' ');
   const [at, setAt] = useState(0);
   useEffect(() => { setAt(0); }, [chain]);

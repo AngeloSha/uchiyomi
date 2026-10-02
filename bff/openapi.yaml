@@ -5155,22 +5155,37 @@ paths:
     get:
       tags:
         - images
-      summary: Blurred ambient or sharp hero backdrop for a series.
+      summary: Blurred ambient, sharp hero, or sharp banner backdrop for a series.
       operationId: getImgSeriesIdBackdrop
+      description: >-
+        With no `style`, the blurred, darkened ambient wash of the series' art. `style=hero` is the real art sharp in a
+        frame (`ar=wide` 1920x720 or `ar=tall` 1080x1200): a banner, or a cover shown whole over a blurred copy of itself.
+        `style=banner` (v0.53.0, the series page) is a real banner -- AniList's or an admin's -- sharp and uncropped, at
+        most 1920 wide; a series with no banner gets the ambient wash of its cover, as does one whose banner could not be
+        fetched. Gated as the series' cover is.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-        - name: hero
+        - name: style
           in: query
           required: false
           schema:
             type: string
+            enum: [hero, banner]
         - name: ar
           in: query
           required: false
+          description: The hero's frame, with style=hero.
+          schema:
+            type: string
+            enum: [wide, tall]
+        - name: av
+          in: query
+          required: false
+          description: The series' art version, a cache-buster.
           schema:
             type: string
       security:

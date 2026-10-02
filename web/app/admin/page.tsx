@@ -1035,7 +1035,8 @@ function ArtReview() {
           <button key={r.id} onClick={() => setOpen(r)} className="card overflow-hidden p-0 text-start transition hover:border-accent/40">
             <div className="relative h-16 w-full overflow-hidden bg-ink-900">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
+              {/* As the series page shows it (v0.53.0): a banner sharp, a stand-in cover blurred -- the art being judged. */}
+              <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?style=banner&rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
               {!r.has_banner && !r.override_banner && <span className="absolute end-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white">NO BANNER</span>}
             </div>
             <div className="flex items-center gap-2 p-2">

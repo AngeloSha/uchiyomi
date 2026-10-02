@@ -1973,6 +1973,12 @@ series that may not have one. Banners are made one at a time server-wide: by a p
 background pass (twenty minutes after start, then daily), for a series soon after its backdrop is asked for, by
 Shuffle, and by this route when its cache misses; the background ones stand aside for a sweep, a repair or the daily
 source check.
+
+**A series' backdrop.** `GET /img/series/:id/backdrop` is the blurred, darkened ambient wash of the series' art; with
+`style=hero&ar=wide|tall` the real art sharp in the home hero's frame (a banner, or a cover shown whole over a blurred
+copy of itself); and since v0.53.0, with `style=banner`, what the series page shows: a real banner -- AniList's or an
+admin's -- sharp and uncropped (at most 1920 wide), and for a series without one the same ambient wash of its cover,
+which looks bad stretched sharp. `av=<n>` is the art version, a cache-buster.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

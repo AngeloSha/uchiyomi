@@ -2033,9 +2033,10 @@ function SeriesInner() {
       </div>
 
       {/* banner — real art pulled from the internet (AniList), else the one the server made from the series' own pages
-          (v0.51.0), genre-banner fallback */}
+          (v0.51.0), genre-banner fallback. A real banner is shown sharp (v0.53.0: it was blurred like the stand-in
+          cover); a series without one keeps the blurred wash of its cover. The gradients below keep the title readable. */}
       <div className="relative -mt-[58px] h-64 overflow-hidden lg:mt-0 lg:h-[22rem] lg:rounded-3xl">
-        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} autoHero={series.autoHero} className="absolute inset-0" />}
+        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} autoHero={series.autoHero} banner className="absolute inset-0" />}
         <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}

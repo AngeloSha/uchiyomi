@@ -18,9 +18,15 @@ export const ART = {
   emptyUpdates: '/art/empty-updates.webp',
 };
 
-/** Backdrop URL builder — shared by <Backdrop> and preloaders (e.g. the hero preloading its next slide). */
-export const backdropUrl = (seriesId: string, opts: { hero?: boolean; wide?: boolean; version?: number } = {}) => {
-  const params = [opts.version ? `av=${opts.version}` : '', opts.hero ? `style=hero&ar=${opts.wide ? 'wide' : 'tall'}` : ''].filter(Boolean).join('&');
+/**
+ * Backdrop URL builder — shared by <Backdrop> and preloaders (e.g. the hero preloading its next slide).
+ * `hero`: the real art sharp in the frame the hero has (`ar`). `banner` (v0.53.0, the series page): a real banner
+ * sharp, as it is; a series without one keeps the blurred wash, its cover blown up to stand in -- the server decides
+ * which, since only it knows whether the art is a banner (bff lib/heroFrame.ts backdropLook).
+ */
+export const backdropUrl = (seriesId: string, opts: { hero?: boolean; banner?: boolean; wide?: boolean; version?: number } = {}) => {
+  const style = opts.hero ? `style=hero&ar=${opts.wide ? 'wide' : 'tall'}` : opts.banner ? 'style=banner' : '';
+  const params = [opts.version ? `av=${opts.version}` : '', style].filter(Boolean).join('&');
   return `/img/series/${encodeURIComponent(seriesId)}/backdrop${params ? `?${params}` : ''}`;
 };
 
@@ -40,7 +46,7 @@ export const autoHeroUrl = (seriesId: string, seed: number, tall = false) =>
 export function backdropSources(
   seriesId: string | undefined,
   autoHero: { seed: number } | null | undefined,
-  opts: { hero?: boolean; wide?: boolean; version?: number },
+  opts: { hero?: boolean; banner?: boolean; wide?: boolean; version?: number },
   fallback: string,
 ): string[] {
   if (!seriesId) return [fallback];

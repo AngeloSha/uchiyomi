@@ -22,7 +22,7 @@ import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile } from '../lib/seriesArt';
-import { HERO_FRAMES, heroFit, type HeroAr } from '../lib/heroFrame';
+import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
 
 async function fetchUpstream(path: string): Promise<Buffer> {
@@ -309,18 +309,33 @@ const heroSharp = async (input: Buffer, ar: HeroAr) => {
     .toBuffer();
 };
 
-/** Resolve a backdrop's cache variant + producer for (series, style, frame) — shared by the route and warmer. */
-async function backdropRecipe(id: string, hero: boolean, ar: HeroAr, ctx: ViewCtx): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
+/**
+ * A real banner on the series page (v0.53.0), sharp: never cropped here -- the page's frame is a strip on a desktop and
+ * a shorter one on a phone, and it crops to whichever it is -- never enlarged, at most as wide as the widest hero, with
+ * the light brightness step the hero frames take. The page's own gradient keeps the title readable over it.
+ */
+const bannerSharp = (input: Buffer) =>
+  sharp(input).resize({ width: HERO_FRAMES.wide.w, withoutEnlargement: true }).modulate({ brightness: 0.95 }).webp({ quality: 82 }).toBuffer();
+
+/**
+ * Resolve a backdrop's cache variant + producer for (series, style, frame) — shared by the route and warmer. `style` is
+ * the page's ask (lib/heroFrame.ts backdropLook): `hero` the framed sharp art, `banner` a real banner as it is, else the
+ * ambient wash.
+ */
+async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: HeroAr, ctx: ViewCtx): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
+  const hero = style === 'hero';
   // admin override wins (uploaded banner/cover or pasted URL)
   const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
   if (ovr?.banner) {
     return {
-      variant: `artw7${hero ? `h${ar}` : ''}:${id}:ov:${Math.floor(Number(ovr.v))}`,
+      variant: `artw7${hero ? `h${ar}` : style === 'banner' ? 'b' : ''}:${id}:ov:${Math.floor(Number(ovr.v))}`,
       producer: async () => {
         let input: Buffer;
+        let fromBanner = true;
         if (ovr.banner === 'upload') input = await readFile(artFile(id, 'banner'));
-        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id, ctx); } }
-        const buffer = hero ? await heroSharp(input, ar) : await ambientComposite(input);
+        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id, ctx); fromBanner = false; } }
+        const look = backdropLook(style, { hasUrl: true, fromBanner });
+        const buffer = look === 'hero' ? await heroSharp(input, ar) : look === 'banner' ? await bannerSharp(input) : await ambientComposite(input);
         return { buffer, contentType: 'image/webp' };
       },
     };
@@ -357,21 +372,29 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr, ctx: ViewCt
   // eligible). Nothing here waits on it: the payload offers it once it is made.
   if (!art.banner) queueHero(id);
   const url = art.banner || art.cover;
-  const sharpHero = hero && !!url; // banner OR cover: show the real art sharp; only the no-art first-page fallback stays ambient
-  const variant = url ? `artw${sharpHero ? `7h${ar}` : '6'}:${id}:${art.banner ? 'b' : 'c'}` : `artw6:${id}:p`;
+  // The look the art in hand would get: the hero shows a banner OR a cover sharp (only the no-art first page stays
+  // ambient), the series page only a real banner -- a cover blown up to a banner's frame stays the blurred wash.
+  const planned = backdropLook(style, { hasUrl: !!url, fromBanner: !!art.banner });
+  const variant = url
+    ? `artw${planned === 'hero' ? `7h${ar}` : planned === 'banner' ? '8b' : '6'}:${id}:${art.banner ? 'b' : 'c'}`
+    : `artw6:${id}:p`;
   const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
   return {
     variant,
     producer: async () => {
       // remote art (AniList banner / source cover) first; fall back to the first downloaded page so the hero is never empty
       let input: Buffer;
+      let fetched = false;
       try {
         if (!url) throw new Error('no remote art');
         input = await fetchCoverImage(url, srcRow?.source_id || undefined);
+        fetched = true;
       } catch {
         input = await firstPageInput(id, ctx);
       }
-      const buffer = sharpHero ? await heroSharp(input, ar) : await ambientComposite(input);
+      // A banner that could not be fetched is the first page now: the wash, never a page drawn sharp across the frame.
+      const look = backdropLook(style, { hasUrl: !!url, fromBanner: fetched && !!art.banner });
+      const buffer = look === 'hero' ? await heroSharp(input, ar) : look === 'banner' ? await bannerSharp(input) : await ambientComposite(input);
       return { buffer, contentType: 'image/webp' };
     },
   };
@@ -407,7 +430,7 @@ export async function warmHeroBackdrops(ids: string[]): Promise<void> {
     while (next < jobs.length) {
       const job = jobs[next++];
       try {
-        const r = await backdropRecipe(job.id, true, job.ar, SYSTEM_CTX);
+        const r = await backdropRecipe(job.id, 'hero', job.ar, SYSTEM_CTX);
         await getOrFetch(r.variant, r.producer);
       } catch {
         warmed.delete(job.tag); // best-effort, but let a later pass retry it
@@ -735,9 +758,11 @@ export default async function imageRoutes(app: FastifyInstance) {
     // URL with no series join at all, and an age-capped account could render key art for a series it is
     // otherwise correctly walled off from.
     if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
-    const hero = (req.query as Record<string, string>)?.style === 'hero';
+    const asked = (req.query as Record<string, string>)?.style;
+    // `banner` (v0.53.0): the series page, which shows a real banner sharp and keeps a stand-in cover blurred.
+    const style = asked === 'hero' || asked === 'banner' ? asked : null;
     const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
-    const r = await backdropRecipe(id, hero, ar, vc(req));
+    const r = await backdropRecipe(id, style, ar, vc(req));
     return serveImage(req, reply, r.variant, r.producer);
   });
 
