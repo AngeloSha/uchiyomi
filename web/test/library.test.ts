@@ -373,7 +373,7 @@ test('the select bar fits two rows on a phone and one at 1024 px: the admin acti
   // And the sheet closes before either dialog opens: a Sheet (z-60) paints over a Modal (z-50).
   assert.match(code(src), /setMore\(false\); setMoving\(true\)/, 'Move to library opens its modal under the sheet');
   assert.match(code(src), /setMore\(false\); setRemoving\(true\)/, 'Remove opens its dialog under the sheet');
-  assert.match(code(src), /setMore\(false\); void findSelected\(\);/, 'Find other sources is not a row of More, or keeps the sheet open under the notice');
+  assert.match(code(src), /setMore\(false\); setFinding\(true\);/, 'Find other sources is not a row of More, or opens its dialog under the sheet');
 });
 
 test('every string the select bar renders is in the locale files, singulars included', () => {

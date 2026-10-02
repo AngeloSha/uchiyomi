@@ -29,8 +29,11 @@ import { namesGroups } from '@/lib/supplyLine';
 import { preferFirst } from '@/lib/sourceOrder';
 import { ActionKeys, ActionStatus, type ActionSpec } from '@/components/ActionList';
 import type { ActionState } from '@/lib/actionState';
-import { altKey, altOriginLabel, altRefusal, findGate, findSlotState, seriesOutcome, type AltTitle } from '@/lib/findSources';
+import {
+  altKey, altOriginLabel, altRefusal, findGate, findReviewFirst, findSlotState, seriesOutcome, setFindReviewFirst, type AltTitle,
+} from '@/lib/findSources';
 import { useFindRuns } from '@/lib/useFindRun';
+import { FindModeChoice, SeriesReview } from '@/components/FindSources';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -143,9 +146,14 @@ const codeOf = (e: unknown): string | null => {
  * -- followed here until it ends, and then what it did for this series: the sources it followed, or why none. The
  * sheet may be closed meanwhile; the run goes on, and what it followed is in the list above next time. One run at a
  * time server-wide: while another goes, the key waits and says why. The idea is @TIGamingTV's (PR #119).
+ *
+ * v0.51.0: the sheet is already a dialog, so the choice between following automatically and reviewing first is
+ * inline above the key (a dialog opened from a Sheet would sit under it), on the admin's last choice; a review's
+ * matches for this series then show under the key, each with Follow and Skip.
  */
 function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
   const fr = useFindRuns({ onEnded: onFound });
+  const [review, setReview] = useState(findReviewFirst);
   const slot = fr.slots.series;
   const run = fr.runOf('series');
   const live = findSlotState(slot, run, () => { void fr.stop('series'); });
@@ -160,14 +168,17 @@ function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
     // "the ones": a run follows every source that matches, up to the free follower slots -- two, often.
     what: tr('Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match.'),
     ...findGate(fr.status, busy),
-    onRun: () => { void fr.start('series', { seriesIds: [id] }); },
+    onRun: () => { setFindReviewFirst(review); void fr.start('series', { seriesIds: [id], ...(review ? { review } : {}) }); },
     buttonProps: { 'data-find-more': id } as ActionSpec['buttonProps'],
   };
+  const mineRow = slot?.phase === 'ended' && run?.review ? run.results.find((r) => r.seriesId === id && r.proposals?.length) : undefined;
   return (
     <div data-find-more-block className="mt-4 pb-1">
       <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">{spec.what}</p>
+      <div className="mb-2"><FindModeChoice review={review} onChange={setReview} /></div>
       <ActionKeys actions={[spec]} />
       <ActionStatus state={state} />
+      {mineRow && run && <SeriesReview runId={run.id} r={mineRow} onFollowed={onFound} />}
     </div>
   );
 }

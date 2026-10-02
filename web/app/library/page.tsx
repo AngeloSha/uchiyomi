@@ -25,6 +25,7 @@ import { useReduceEffects } from '@/lib/effects';
 import { readView, type LibraryView } from '@/lib/libraryView';
 import { kickDownloads, useDownloadsRing } from '@/lib/useServerDownloads';
 import { findRefusal } from '@/lib/useFindRun';
+import { FindStartDialog } from '@/components/FindSources';
 import { ProgressRing } from '@/components/ProgressRing';
 import { ServerDownloadsView } from '@/components/ServerDownloadsView';
 
@@ -80,6 +81,8 @@ function LibraryInner() {
   const [removing, setRemoving] = useState(false);
   // The phone's overflow for the two admin actions (see the bar below).
   const [more, setMore] = useState(false);
+  // v0.51.0: Find other sources asks first whether to follow automatically or review first.
+  const [finding, setFinding] = useState(false);
   // The Fetch newest job as last polled, while it runs: what the bar's label counts up with.
   const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
   // Set while a Fetch newest run is being followed: calling it stops the polling (the bar's Cancel chip).
@@ -272,12 +275,13 @@ function LibraryInner() {
    * chapter numbers match. Minutes or hours for a big selection, so nothing here follows it: the notice says where it
    * shows (Library -> Downloads, Server tasks, with its results), and select mode ends as for any bulk action. Another
    * run going (409, one at a time server-wide), nothing the server may search for (400 `empty_scope`) or more than 500
-   * series (400 `bad_request`) is said, and the selection stays. The idea is @TIGamingTV's (PR #119).
+   * series (400 `bad_request`) is said, and the selection stays. The idea is @TIGamingTV's (PR #119). `review`: review
+   * first (v0.51.0) -- the same run, which follows nothing and keeps its matches for the admin to confirm.
    */
-  const findSelected = async () => {
+  const findSelected = async (review: boolean) => {
     setActing(true);
     try {
-      const r = await api<{ runId: string; total: number }>('/api/admin/sources/find', { method: 'POST', json: { seriesIds: [...picked] } });
+      const r = await api<{ runId: string; total: number }>('/api/admin/sources/find', { method: 'POST', json: { seriesIds: [...picked], ...(review ? { review } : {}) } });
       const n = r?.total ?? picked.size;
       toast(n === 1 ? tr('Looking for other sources for 1 series… Library → Downloads shows how it goes.')
         : tr('Looking for other sources for {n} series… Library → Downloads shows how it goes.', { n }), 'info', { busy: true });
@@ -505,7 +509,7 @@ function LibraryInner() {
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
                   {tr('Move to library')}
                 </button>
-                <button onClick={() => { setMore(false); void findSelected(); }} data-find-selected
+                <button onClick={() => { setMore(false); setFinding(true); }} data-find-selected
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
                   {tr('Find other sources')}
                 </button>
@@ -518,6 +522,7 @@ function LibraryInner() {
           </div>
         </Sheet>
       )}
+      {finding && <FindStartDialog onClose={() => setFinding(false)} onStart={(review) => { setFinding(false); void findSelected(review); }} />}
       {removing && (
         <ConfirmDialog
           title={picked.size === 1 ? tr('Remove 1 series from the library?') : tr('Remove {n} series from the library?', { n: picked.size })}

@@ -76,7 +76,8 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   { action: 'keep_numbers', labels: ["tr('Keep the source’s numbers')"], wants: /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/numbering`, \{ json: \{ mode: 'source' \} \}\)/ },
   // v0.49.1: every series whose main source is the row's, in ONE background run (POST /api/admin/sources/find). Its
   // label is the counted one in healthCopy.ts ("Find other sources (189 series)"), whose tr() findSources.test.ts holds.
-  { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => \{ if \(item\.sourceId\) void fr\?\.start\(slotKey, \{ sourceId: item\.sourceId \}\); \}/ },
+  // v0.51.0: the press opens the start dialog (follow automatically, or review first); its Start posts the source.
+  { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => setAsking\('find'\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {

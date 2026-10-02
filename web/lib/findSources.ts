@@ -12,6 +12,10 @@
  * The idea, the other-names list and the name parsing are @TIGamingTV's (PR #119), rebuilt server-side on the
  * existing follow machinery (bff lib/autoFollow.ts, lib/sourceHunt.ts).
  *
+ * Review first (v0.51.0, #132; @TIGamingTV's idea from PR #133): the same run, which follows nothing and keeps each
+ * series' matches -- with their covers -- for an admin to follow or skip one by one. Automatic stays the default; the
+ * start dialog offers both and remembers the admin's last choice on this device.
+ *
  * ⚠️ 'not tried' is not 'not found'. A series the run never reached -- stopped, out of time, or cut short by a
  * restart -- says so in its own words and its own section, and is offered again; reading it as "no source has it"
  * would send the admin away from a series nobody searched for.
@@ -56,12 +60,37 @@ export type FindWhy =
 
 export interface FindFollowed { sourceId: string; name: string; chapters: number | null }
 
+/**
+ * A match a review-first run kept (bff FindProposal, v0.51.0): green is what an automatic run would have followed,
+ * amber is for a person to look at -- the chapter numbers do not line up though a name matches exactly (`numbering`),
+ * or it lines up only under another name of the series (`other_name`). `ours` is how many of the series' chapter
+ * numbers it lists, `theirs` how many of its numbers the series lists. `title`, `coverUrl` and `url` are left out for
+ * a series the viewer may not list.
+ */
+export interface FindProposal {
+  sourceId: string;
+  sourceName: string;
+  sourceSeriesId: string;
+  url?: string;
+  title?: string;
+  coverUrl?: string;
+  chapters: number;
+  ours: { lined: number; of: number };
+  theirs: { lined: number; of: number };
+  coverage: number | null;
+  verdict: 'green' | 'amber';
+  amber?: 'numbering' | 'other_name';
+  state?: 'followed' | 'dismissed';
+}
+
 export interface FindResult {
   seriesId: string;
   /** Left out for a series the viewer may not list (the 18+ hide): the row says why rather than name it. */
   title?: string;
   followed: FindFollowed[];
   why?: FindWhy;
+  /** A review-first run's matches for this series, in scan order (v0.51.0). */
+  proposals?: FindProposal[];
 }
 
 export type FindRunStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupted';
@@ -77,6 +106,8 @@ export interface FindRunSummary {
   startedBy: string | null;
   startedAt: string | number;
   finishedAt?: string | number | null;
+  /** Review first (v0.51.0): it followed nothing itself; its results carry `proposals`. */
+  review?: boolean;
 }
 
 /** The running run, or the newest finished one, with what it did per series. */
@@ -98,8 +129,11 @@ export interface FindStatus {
   recent: FindRunSummary[];
 }
 
-/** What POST /api/admin/sources/find takes: some series, or every visible series whose MAIN source is this one. */
-export type FindScope = { seriesIds: string[] } | { sourceId: string };
+/**
+ * What POST /api/admin/sources/find takes: some series, or every visible series whose MAIN source is this one -- and,
+ * for review first (v0.51.0), `review: true`.
+ */
+export type FindScope = ({ seriesIds: string[] } | { sourceId: string }) & { review?: boolean };
 
 // ---- the other names -----------------------------------------------------------------------------------
 
@@ -167,6 +201,8 @@ export function findWhyLine(why: string | null | undefined): string {
 }
 
 export interface FindGroups {
+  /** A review-first run's series with matches (v0.51.0), decided or not: each is shown with its matches. */
+  review: FindResult[];
   /** Gained at least one source. */
   found: FindResult[];
   /** Searched, and nothing followed: no match, a match that did not line up, or no source that answered. */
@@ -182,11 +218,12 @@ export interface FindGroups {
 
 const SKIPPED: ReadonlySet<string> = new Set<FindWhy>(['full', 'posting_order', 'too_few', 'no_source']);
 
-/** A run's results in the four groups the results sheet shows, each in the order the run took them. */
+/** A run's results in the groups the results sheet shows, each in the order the run took them. */
 export function groupResults(results: readonly FindResult[] | null | undefined): FindGroups {
-  const g: FindGroups = { found: [], nothing: [], skipped: [], notTried: [] };
+  const g: FindGroups = { review: [], found: [], nothing: [], skipped: [], notTried: [] };
   for (const r of results ?? []) {
-    if (r.followed?.length) g.found.push(r);
+    if (r.proposals?.length) g.review.push(r);
+    else if (r.followed?.length) g.found.push(r);
     else if (r.why === 'not_tried') g.notTried.push(r);
     else if (r.why && SKIPPED.has(r.why)) g.skipped.push(r);
     else g.nothing.push(r);
@@ -245,6 +282,9 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
   // A follow is news; "0 sources followed" beside the groups that say why was not.
   if (run.followed > 0) bits.push(followedText(run.followed));
   if (g) {
+    // A review's series whose matches still wait for a decision (v0.51.0); a decided one is counted by its follows.
+    const open = g.review.filter((r) => r.proposals!.some((p) => !p.state)).length;
+    if (open) bits.push(open === 1 ? tr('1 series to review') : tr('{n} series to review', { n: open }));
     const n = g.nothing.length;
     const s = g.skipped.length;
     // Counted from the results rather than `total - done`: a series the server never reached may carry no row.
@@ -305,6 +345,11 @@ export function seriesOutcome(run: FindRun | null | undefined, seriesId: string)
   if (!run) return null;
   const r = run.results?.find((x) => x.seriesId === seriesId);
   if (r?.followed?.length) return { text: tr('Followed {source}', { source: r.followed.map((f) => f.name).join(', ') }) };
+  // Review first: its matches wait below the key, or were all skipped.
+  if (r?.proposals?.length) {
+    const open = r.proposals.filter((p) => !p.state).length;
+    return open ? { text: open === 1 ? tr('1 match to review') : tr('{n} matches to review', { n: open }) } : { text: tr('No source followed'), partial: true };
+  }
   if (r) return { text: findWhyLine(r.why), partial: true };
   // Never reached: a run that stopped, failed or was cut short by a restart before this series, whose results hold no
   // row for it.
@@ -384,4 +429,71 @@ export function startRefusal(status: number | null | undefined, code: string | n
   if (code === 'empty_scope') return tr('No series to search for');
   if (code === 'bad_request') return tr('Too many series for one search: 500 at most');
   return null;
+}
+
+// ---- review first (v0.51.0) ----------------------------------------------------------------------------
+
+const MODE_KEY = 'uchiyomi.findReview';
+
+/**
+ * Whether the start dialog opens on "Review first": the admin's last choice, on this device. Automatic is the
+ * default, and storage that throws (a private window) reads as it. Reintroduce the read without its try/catch: "the
+ * start dialog remembers the last choice" in findSources.test.ts throws.
+ */
+export function findReviewFirst(): boolean {
+  try { return localStorage.getItem(MODE_KEY) === 'on'; } catch { return false; }
+}
+export function setFindReviewFirst(on: boolean): void {
+  try { if (on) localStorage.setItem(MODE_KEY, 'on'); else localStorage.removeItem(MODE_KEY); } catch { /* a private window */ }
+}
+
+/** "13 of our 14 chapters line up · We list 13 of its 15": the line-up both ways, in words. */
+export function lineUpText(p: Pick<FindProposal, 'ours' | 'theirs'>): string {
+  return [
+    tr('{lined} of our {of} chapters line up', { lined: p.ours.lined, of: p.ours.of }),
+    tr('We list {lined} of its {of}', { lined: p.theirs.lined, of: p.theirs.of }),
+  ].join(' · ');
+}
+
+/** Why a match is amber, under it; null for a green one. */
+export function amberNote(p: Pick<FindProposal, 'verdict' | 'amber'>): string | null {
+  if (p.verdict !== 'amber') return null;
+  return p.amber === 'other_name'
+    ? tr('Amber: it matched only under another name of this series, not its title. Check the covers before you follow it.')
+    : tr('Amber: a name matches, but the chapter numbers do not line up. Follow it only if the covers show the same series.');
+}
+
+/**
+ * What "Follow all green" follows, in the run's order: every green match not decided yet, of a series the page names.
+ * ⚠️ Never an amber one -- each of those is followed on its own, after a look at its covers -- and never one of a
+ * series hidden by the 18+ filter, whose covers nobody saw. Reintroduce by dropping the verdict test: "review first:
+ * green and amber in words" in findSources.test.ts finds the amber ones followed.
+ */
+export function greenToFollow(run: Pick<FindRun, 'results'> | null | undefined): Array<{ seriesId: string; sourceId: string }> {
+  const out: Array<{ seriesId: string; sourceId: string }> = [];
+  for (const r of groupResults(run?.results).review) {
+    if (!r.title) continue;
+    for (const p of r.proposals!) if (p.verdict === 'green' && !p.state) out.push({ seriesId: r.seriesId, sourceId: p.sourceId });
+  }
+  return out;
+}
+
+/** A follow or a skip the server refused, by its code (bff routes/findSources.ts); null for anything else. */
+export function decideRefusal(code: string | null | undefined): string | null {
+  switch (code) {
+    case 'decided': return tr('Followed or skipped already');
+    case 'posting_order': return findWhyLine('posting_order');
+    case 'full': return findWhyLine('full');
+    case 'already_followed': return tr('The series follows that source already');
+    case 'source_unavailable': return tr('That source is not available for this series right now');
+    case 'not_found': return tr('That match is no longer in the search');
+  }
+  return null;
+}
+
+/** What Follow all green did, as its status line: the follows, and how many the server refused (amber). */
+export function bulkOutcome(followed: number, refused: number): { outcome: string; partial?: true } {
+  const bits = [followed ? followedText(followed) : tr('No source followed')];
+  if (refused) bits.push(refused === 1 ? tr('1 could not be followed') : tr('{n} could not be followed', { n: refused }));
+  return { outcome: bits.join(' · '), ...(refused ? { partial: true as const } : {}) };
 }
