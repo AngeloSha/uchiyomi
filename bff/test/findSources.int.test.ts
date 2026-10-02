@@ -343,13 +343,16 @@ test('one run at a time; the scope must name something; a stop ends it at once, 
   const st = await state();
   assert.equal(st.running, false);
   assert.equal(st.run.status, 'stopped');
-  assert.equal(st.run.done, 1, 'the series in flight is settled; the one never reached is not');
+  // v0.52.0: the series the stop caught was not searched through, so it is not counted either -- the card read "1 of 4
+  // series" with none searched. Reintroduce by counting every series settled in runAll: this reads 1.
+  assert.equal(st.run.done, 0, 'the series a stop caught in flight counts as searched');
   // "Not tried", never "not found": the series the stop cut short, and the one it never reached.
   assert.deepEqual(st.run.results.map((x: any) => [x.seriesId, x.why]), [[S('a'), 'not_tried'], [S('e'), 'not_tried']]);
   assert.equal((await q(`SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1`, [S('a')]))[0].n, 0, 'nothing followed after the stop');
   assert.deepEqual((await app.inject({ method: 'POST', url: '/api/admin/sources/find/stop', headers: adminAuth })).json(), { stopped: false });
   const card2 = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: adminAuth })).json().runs.find((x: any) => x.kind === 'find_sources');
   assert.equal(card2.status, 'cancelled');
+  assert.equal(card2.done, 0, 'the card counts the series a stop caught in flight as searched');
 });
 
 test('it waits while a sweep runs, and says so', { skip }, async () => {
@@ -671,6 +674,27 @@ test('a dismissed proposal stays dismissed', { skip }, async () => {
   assert.deepEqual([again.statusCode, again.json().error, again.json().state], [409, 'decided', 'dismissed'], 'a dismissed proposal is followed');
   assert.deepEqual(await followers([S('a')]), [], 'nothing followed');
   assert.equal((await state()).run.results[0].proposals[0].state, 'dismissed');
+});
+
+test('an earlier search opens by its id, and its matches can still be decided there', { skip }, async () => {
+  // v0.52.0: only the newest run was read in full, so a review-first run with matches still to decide could not be
+  // reopened once another search had run after it.
+  await series('a', 'Alpha Tale');
+  await series('e', 'Epsilon Nothing');
+  const older = await reviewRun([S('a')]);
+  const newer = (await post({ seriesIds: [S('e')] })).json().runId;
+  await fsLib.findSettled();
+  assert.equal((await state()).run.id, newer, 'the newest run is the default');
+  // Reintroduce by reading the newest whatever is asked (findState ignoring runId): this reads the newer run.
+  const opened = await state(`?runId=${older}`);
+  assert.equal(opened.run.id, older, 'an earlier search does not open');
+  assert.deepEqual([opened.run.review, opened.run.results[0].proposals.map((p: any) => p.sourceId)], [true, ['fs-a', 'fs-b']]);
+  assert.deepEqual(opened.recent.map((r: any) => r.id), [newer, older], 'the kept runs, as for the newest');
+  const d = await decide(older, 'follow', S('a'), 'fs-a');
+  assert.equal(d.statusCode, 200, d.body);
+  assert.equal((await state(`?runId=${older}`)).run.results[0].proposals[0].state, 'followed', 'the decision reads back on the earlier run');
+  const gone = await app.inject({ method: 'GET', url: '/api/admin/sources/find?runId=00000000-0000-0000-0000-000000000000', headers: adminAuth });
+  assert.deepEqual([gone.statusCode, gone.json().error], [404, 'not_found']);
 });
 
 test("Health offers Find other sources on a failing source's row and on the series that can no longer update", { skip }, async () => {

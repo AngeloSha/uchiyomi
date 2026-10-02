@@ -16,10 +16,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { setActiveDict } from '../lib/i18n';
 import {
-  altKey, altOriginLabel, altRefusal, amberNote, bulkOutcome, decideRefusal, findEndedRunIds, findEta, findGate, findReviewFirst,
+  altKey, altOriginLabel, altRefusal, amberNote, bulkOutcome, decideRefusal, earlierRuns, findEndedRunIds, findEta, findGate, findReviewFirst,
   findRunState, findSlotState, findSummary, findWhyLine, greenToFollow, groupResults, lineUpText, notTriedIds, progressLine,
   seriesOutcome, setFindReviewFirst, startRefusal, FIND_SERIES_MAX_MS,
-  type FindProposal, type FindResult, type FindRun, type FindStatus,
+  type FindProposal, type FindResult, type FindRun, type FindRunSummary, type FindStatus,
 } from '../lib/findSources';
 import { ACTION_COPY, runStatusWord } from '../lib/healthCopy';
 import { answerView, evidenceView, healthRowEvidence, type StageLine } from '../lib/sourceEvidence';
@@ -473,7 +473,9 @@ test('the results open on <body>, whatever card opened them, and each group is i
   const src = code(read('components/FindSources.tsx'));
   const sheet = slice(src, 'export function FindResultsSheet(', 'export function FindRunCard(');
   assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
-  for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped'], ['not-tried', 'Not tried']]) {
+  // The skipped group has a key of its own (v0.52.0): the shared "Skipped" is also a match's state and an import row's,
+  // and the heading is about series, which es, fr and pt agree it with. Reintroduce the shared key: this fails.
+  for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped series'], ['not-tried', 'Not tried']]) {
     assert.match(sheet, new RegExp(`<Group id="${id}" title=\\{tr\\('${title}'\\)\\}`), `the ${title} group is gone`);
   }
   // What the run never reached can be searched now, through the same one-run rule.
@@ -748,6 +750,25 @@ test("review first: each match beside the series' own cover, its title in its ow
   assert.ok(html.includes('data-review-state="dismissed"'), 'a skipped match does not say so');
   assert.ok(html.includes('data-amber-note'), 'an amber match does not say why');
   assert.doesNotMatch(html, /rounded-full/, 'a capsule in the review');
+});
+
+test('an earlier search opens in the sheet by its id, and the latest is a key away', () => {
+  // v0.52.0: only the newest run was read in full, so a review-first run with matches still waiting could not be
+  // reopened once another search had run. Reintroduce the earlier lines as plain text (no key): "an earlier search
+  // cannot be opened" fails.
+  const sum = (id: string): FindRunSummary => ({ id, status: 'done', total: 1, done: 1, followed: 0, startedBy: null, startedAt: '2026-10-01T10:00:00Z' });
+  const recent = ['r6', 'r5', 'r4', 'r3', 'r2', 'r1', 'r0'].map(sum);
+  // The newest is the sheet's own view, and the one open now is not listed under itself; five at most.
+  assert.deepEqual(earlierRuns(recent, null).map((r) => r.id), ['r5', 'r4', 'r3', 'r2', 'r1']);
+  assert.deepEqual(earlierRuns(recent, 'r4').map((r) => r.id), ['r5', 'r3', 'r2', 'r1', 'r0']);
+  assert.deepEqual(earlierRuns(undefined, null), []);
+  const sheet = slice(code(read('components/FindSources.tsx')), 'export function FindResultsSheet(', 'export function FindRunCard(');
+  assert.match(sheet, /<button type="button" onClick=\{\(\) => setOpenId\(r\.id\)\} data-find-earlier=\{r\.id\}/, 'an earlier search cannot be opened');
+  assert.match(sheet, /queryFn: \(\) => fetchFindRun\(openId!\)/, 'the opened search is not read by its id');
+  assert.match(read('lib/useFindRun.tsx'), /api<FindStatus>\(`\/api\/admin\/sources\/find\?runId=\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.match(sheet, /onClick=\{\(\) => setOpenId\(null\)\} data-find-latest/, 'there is no way back to the latest search');
+  // A match's state has a key of its own too: one match, beside "Followed", in the number and gender it agrees with.
+  assert.match(code(read('components/FindSources.tsx')), /p\.state === 'followed' \? tr\('Followed'\) : tr\('Skipped for good'\)/);
 });
 
 test('the start dialog remembers the last choice on this device; storage that throws reads as automatic', () => {

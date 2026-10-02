@@ -763,7 +763,7 @@ components:
           enum: [running, done, stopped, failed, interrupted]
           description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it -- a shutdown, where the run closes its own row, or a row found still running after a restart, closed at boot. Either way `results` then lists every series it never reached as `not_tried`, as a stopped run does."
         total: { type: integer, minimum: 0, description: Series in its scope. }
-        done: { type: integer, minimum: 0, description: Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here. }
+        done: { type: integer, minimum: 0, description: "Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here, and since v0.52.0 neither is the series a stop cut short with nothing to show (runs kept from before count it)." }
         followed: { type: integer, minimum: 0, description: Sources followed, across its series. }
         startedBy: { type: [string, "null"], description: "The admin who started it, by username (never the account id); null for an account since deleted." }
         startedAt: { type: string, format: date-time }
@@ -8999,7 +8999,16 @@ paths:
         (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`,
         with every series it never reached in `results` as `not_tried`.
         A series the viewer may not list (the 18+ hide, above all) keeps its entry in `results` without its
-        `title`, and is left out of `current`.
+        `title`, and is left out of `current`. Since v0.52.0 `?runId=` reads that kept run in full as `run` instead
+        (an earlier search reopened -- a review-first run's matches can still be decided), and answers 404
+        `not_found` when no kept run has that id.
+      parameters:
+        - name: runId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
       security:
         - bearer: []
       responses:
@@ -9020,10 +9029,14 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/FindRunSummary"
+        "400":
+          description: "`bad_request`: `runId` is empty or longer than 64 characters."
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found` (since v0.52.0): no kept run has the `runId` asked for."
     post:
       tags:
         - admin

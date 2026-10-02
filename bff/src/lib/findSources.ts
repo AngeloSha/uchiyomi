@@ -306,7 +306,11 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       const result: FindResult = outcome?.result ?? { seriesId: s.id, title: s.title, followed: [...progress], ...(progress.length ? {} : { why: 'not_tried' as const }) };
       settled.add(s.id);
       a.results.push(result);
-      a.done++;
+      // A series a stop cut short with nothing to show was not searched through: it is listed as not tried, and not
+      // counted in `done`, which the run's card shows as "{done} of {total} series" -- it read "1 of 4 series" after a
+      // stop during the first (v0.52.0). Reintroduce by counting every series settled: "one run at a time; ... a stop
+      // ends it at once" in findSources.int.test.ts reads done 1.
+      if (!(isStopped(a) && result.why === 'not_tried')) a.done++;
       a.followed += result.followed.length;
       a.card.done = a.done;
       a.card.followed = a.followed;
@@ -711,8 +715,13 @@ const summaryOf = (r: Row): FindRunSummary => ({
 /**
  * GET /api/admin/sources/find: whether a run is going, the running run or else the newest one in full, and the
  * kept runs as summaries, newest first. The running run is read from memory, which is ahead of its row.
+ *
+ * `runId` (v0.52.0): that kept run in full instead -- an earlier search reopened from the results sheet, above all a
+ * review-first run whose matches still wait for a decision, which only the newest run could be read for. `run` is
+ * null when no kept run has that id. Reintroduce by reading the newest whatever is asked: "an earlier search opens by
+ * its id" in findSources.int.test.ts reads the newer run.
  */
-export async function findState(): Promise<{ running: boolean; run: FindRun | null; recent: FindRunSummary[] }> {
+export async function findState(o: { runId?: string } = {}): Promise<{ running: boolean; run: FindRun | null; recent: FindRunSummary[] }> {
   await closeInterruptedFindRuns().catch(() => {});
   const rows = await q<Row>(
     `SELECT r.id, r.status, r.total, r.done, r.followed, u.username, r.started_at, r.finished_at, r.scope
@@ -721,7 +730,7 @@ export async function findState(): Promise<{ running: boolean; run: FindRun | nu
   const a = active;
   const recent = rows.map(summaryOf).map((r) => (a && r.id === a.id ? { ...r, done: a.done, followed: a.followed } : r));
   let run: FindRun | null = null;
-  const lead = recent[0];
+  const lead = o.runId !== undefined ? recent.find((r) => r.id === o.runId) : recent[0];
   if (a && lead?.id === a.id) {
     run = {
       ...lead, results: [...a.results],

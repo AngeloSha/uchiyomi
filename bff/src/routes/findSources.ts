@@ -153,11 +153,17 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
 
   /**
    * Whether a run is going, the running run (or else the newest) in full, and the kept runs, newest first. Titles
-   * of series this admin may not list are left out of `results`, and `current` with them.
+   * of series this admin may not list are left out of `results`, and `current` with them. `?runId=` (v0.52.0): that
+   * kept run in full instead, an earlier search reopened; 404 `not_found` when no kept run has that id.
    */
-  app.get('/api/admin/sources/find', async (req) => {
-    const st = await findState();
+  app.get('/api/admin/sources/find', async (req, reply) => {
+    const runId = (req.query as { runId?: unknown }).runId;
+    if (runId !== undefined && (typeof runId !== 'string' || !runId || runId.length > 64)) {
+      return reply.code(400).send({ error: 'bad_request', message: 'runId names one kept run.' });
+    }
+    const st = await findState({ runId });
     const run = st.run;
+    if (!run && runId !== undefined) return reply.code(404).send({ error: 'not_found', message: 'That search is no longer kept.' });
     if (!run) return st;
     const ok = await listable(req, [run.current?.seriesId, ...run.results.map((r) => r.seriesId)]);
     const { current, ...rest } = run;

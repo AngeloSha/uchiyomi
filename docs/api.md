@@ -1657,7 +1657,10 @@ failing). `GET /api/admin/sources/find` answers `{running, run, recent}`: `run` 
 newest, `{id, status: running|done|stopped|failed|interrupted, total, done, followed, startedBy (a username),
 startedAt, finishedAt?, sourceId?, sourceName?, current?: {seriesId, title}, waiting?: sweep|repair|check,
 results: [{seriesId, title?, followed: [{sourceId, name, chapters}], why?}]}`, and `recent` the newest 20 runs
-without `results` or `current`. `why` is set when nothing was followed, and says exactly what happened. Decided
+without `results` or `current`. Since v0.52.0 `?runId=` reads that kept run in full as `run` instead, an earlier
+search reopened (a review-first run's matches can still be decided there), or **404** `not_found` when no kept run
+has that id. `done` counts the series searched through: a series a stop cut short with nothing to show is listed
+as `not_tried` and, since v0.52.0, not counted (runs kept from before count it). `why` is set when nothing was followed, and says exactly what happened. Decided
 without a search: `posting_order`, `full` (two sources followed already), `too_few` (fewer than three chapter
 numbers, which nothing can be measured against) and `no_source` (no other source to ask: all turned off, cooling
 down or excluded). After one: `refused` (a candidate failed the title and chapter-number check), `no_answer`
