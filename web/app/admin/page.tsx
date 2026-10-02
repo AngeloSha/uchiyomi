@@ -2055,7 +2055,9 @@ function Health() {
                         // arrow is held to the last word by a no-break space).
                         links={healthLinks(c.id, it).map((l) => (
                           <Link key={l.href} href={l.href} className="line-clamp-2 max-w-[11rem] break-words text-end text-xs text-accent hover:underline"
-                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}
+                            // A page off the app (the install guide, v0.52.0) opens beside it, never in place of it.
+                            {...(/^https?:\/\//.test(l.href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
                             {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
                           </Link>
                         ))}>

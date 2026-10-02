@@ -24,13 +24,14 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-char
 let findSeriesDirs: typeof import('../src/lib/library').findSeriesDirs;
 let dirKey: typeof import('../src/lib/library').dirKey;
 let listDir: typeof import('../src/lib/library').listDir;
+let rootMark: typeof import('../src/lib/library').rootMark;
 let nodeFs: WalkFs;
 
 let root = '';
 const at = (...p: string[]) => join(root, ...p);
 
 before(async () => {
-  ({ findSeriesDirs, dirKey, listDir, nodeFs } = await import('../src/lib/library'));
+  ({ findSeriesDirs, dirKey, listDir, rootMark, nodeFs } = await import('../src/lib/library'));
   root = mkdtempSync(join(tmpdir(), 'uchiyomi-walk-'));
   for (const s of ['Src/A', 'Src/B', 'Other/C']) {
     mkdirSync(at(s), { recursive: true });
@@ -54,6 +55,26 @@ const series = async (fsx: WalkFs) => {
   const r = await findSeriesDirs(root, fsx, 'linux');
   return { ...r, folders: r.found.map((f) => f.folderRel).sort() };
 };
+
+test('the other root, met inside this one: by its key and its entries, never its key alone (#134)', async () => {
+  // v0.52.0: @Kedryn mounted his downloads at /library-dl and their parent folder at /library, so the library walk
+  // reached the downloads' own folder a second time -- Other here -- and every downloaded chapter was scanned twice.
+  // Reintroduce by dropping the watch in findSeriesDirs: "the other root met inside this one is not said".
+  const other = await rootMark(at('Other'), nodeFs, 'linux');
+  assert.equal(other?.names, 'C');
+  const r = await findSeriesDirs(root, nodeFs, 'linux', other);
+  assert.equal(r.met, 'Other', 'the other root met inside this one is not said');
+  assert.deepEqual(r.found.map((f) => f.folderRel).sort(), ['Other/C', 'Src/A', 'Src/B'], 'and it is scanned as it always was');
+  // An Unraid share reports one key for unrelated folders: Src has the watched key and entries of its own. Reintroduce
+  // by matching the key alone: Src reads as the other root.
+  const shared = fsWith({ stat: (p) => (p === at('Src') ? Promise.resolve({ dev: 5n, ino: 77n }) : undefined) });
+  assert.equal((await findSeriesDirs(root, shared, 'linux', { key: '5:77', names: 'C' })).met, undefined, 'a folder with the key alone was taken for the other root');
+  // An empty root has nothing to be scanned twice, and is never watched for: two empty folders look alike anywhere.
+  mkdirSync(at('Empty'));
+  try {
+    assert.equal(await rootMark(at('Empty'), nodeFs, 'linux'), null);
+  } finally { rmSync(at('Empty'), { recursive: true, force: true }); }
+});
 
 test('the walk reads disk ids exactly: bigints, not numbers', async () => {
   // Reintroduce by going back to a plain `stat()`: ids above 2^53 round onto their neighbours.

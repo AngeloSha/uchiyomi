@@ -489,7 +489,10 @@ and since v0.48.2 folders it could not look into at all), and since v0.48.2 `dow
 file in the downloads folder that is not in the library, per folder, with the reason when the scan knows it, and
 since v0.50.0 `saved-twice`: series where two sources' splits of one chapter are both on disk, each item with
 `bookIds` and `numbers` for the files that arrived later and the `delete` action (nothing is deleted by the check
-itself). Each check reports `status` (`ok`, `warn`, `problem`), a
+itself), and since v0.52.0 `folders-twice`, only while the downloads folder sits inside the library or the library
+inside it (by path, or met by the last scan's walk however it was mounted): `warn`, one item naming where, and the
+fix in its note -- every chapter in the inner folder is otherwise scanned twice. Each check reports `status` (`ok`,
+`warn`, `problem`), a
 one-line `summary`, and the individual `items`. A check is `ok` exactly when none of its items is a finding:
 an item flagged `info` is listed for reference (a source you turned off, a source no series uses, a chapter
 already confirmed short, a gap the nightly repair has already searched for) and never decides the verdict.

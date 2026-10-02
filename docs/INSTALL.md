@@ -51,6 +51,30 @@ echo "LIBRARY_PATH=/path/to/your/manga" > .env
 docker compose up -d
 ```
 
+## Volumes
+
+Uchiyomi reads manga from two folders, and scans both:
+
+| In the container | What it holds | In the shipped compose file |
+|---|---|---|
+| `/library` | the manga you already have | `${LIBRARY_PATH:-./library}:/library` |
+| `/library-dl` | the chapters Uchiyomi downloads | the `uchiyomi_downloads` volume |
+
+Keep them **side by side**, each in a folder of its own: never the downloads folder inside the folder you mount
+at `/library`, nor the other way round. With `LIBRARY_PATH=/data/manga` and the downloads mounted from
+`/data/manga/uchiyomi`, every downloaded chapter is scanned twice, once in a series with its source and once in a
+series with none, and **Admin → Health** says so under *Folders scanned twice*. Mount the downloads from a folder
+beside your manga instead:
+
+```yaml
+    volumes:
+      - /data/manga:/library                 # the manga you already have
+      - /data/uchiyomi-downloads:/library-dl # what Uchiyomi downloads: NOT inside /data/manga
+```
+
+Move the downloaded chapters across, restart (`docker compose up -d`), and remove the copies that have no source.
+The desktop app chooses its two folders itself, and will not start with one inside the other.
+
 ## One-click installs
 
 **On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) instead — import

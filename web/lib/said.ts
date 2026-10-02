@@ -539,6 +539,16 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'census.stat': (p) => tr('the scan could not check {where}: {error}', { where: whereText(p), error: str(p, 'error') }),
   'census.loop': (p) => tr('the scan took {where} for a loop: {what}', { where: whereText(p), what: loopedTo(p) }),
 
+  // ---- Folders scanned twice (v0.52.0, #134)
+  'nested.same': () => tr('The downloads folder and the library are one folder, so every downloaded chapter is scanned twice'),
+  'nested.downloadsInside': (p) => tr('The downloads folder is inside the library, at {folder}, so every downloaded chapter is scanned twice', { folder: str(p, 'folder') }),
+  'nested.libraryInside': (p) => tr('The library is inside the downloads folder, at {folder}, so every chapter in it is scanned twice', { folder: str(p, 'folder') }),
+  'nested.byPath': () => tr('Their paths put one inside the other.'),
+  'nested.byScan': () => tr('The last library scan read the same files here a second time.'),
+  'nested.note': (p) => (isDesktop()
+    ? tr('Uchiyomi scans its library folder and the manga folder you added both, so neither may be inside the other: each downloaded chapter then shows up twice. Keep the two side by side; then remove the copies with no source.')
+    : tr('Uchiyomi scans the library ({lib}) and its downloads folder ({dl}) both, so neither may be inside the other: each downloaded chapter then shows up twice, once in a series with its source and once in a series with none. Mount them side by side, each in a folder of its own, and restart Uchiyomi; then remove the copies with no source. The Volumes section of the install guide shows how.', { lib: str(p, 'lib'), dl: str(p, 'dl') })),
+
   // ---- The extension engine (#72)
   'engine.waiting': (p) => (num(p, 'n') === 1
     ? tr('1 series that came from extensions keeps its chapters and gets no new ones until it is back')

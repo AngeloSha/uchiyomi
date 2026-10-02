@@ -362,6 +362,26 @@ const EN = {
   'census.loop': ({ above, ancestor, detail }: { above?: string | null; ancestor?: string; detail?: string }) =>
     `the scan took ${where(above)} for a loop: ${loopedTo(ancestor, detail)}`,
 
+  // ---- Folders scanned twice (v0.52.0, #134: lib/health.ts foldersScannedTwice). `folder` is where one root sits in
+  // the other; `lib` and `dl` the two roots as configured.
+  'nested.same': () => 'The downloads folder and the library are one folder, so every downloaded chapter is scanned twice',
+  'nested.downloadsInside': ({ folder }: { folder: string }) =>
+    `The downloads folder is inside the library, at ${folder}, so every downloaded chapter is scanned twice`,
+  'nested.libraryInside': ({ folder }: { folder: string }) =>
+    `The library is inside the downloads folder, at ${folder}, so every chapter in it is scanned twice`,
+  'nested.byPath': () => 'Their paths put one inside the other.',
+  'nested.byScan': () => 'The last library scan read the same files here a second time.',
+  'nested.note': ({ lib, dl }: { lib: string; dl: string }) => forDesktop(
+    `Uchiyomi scans the library (${lib}) and its downloads folder (${dl}) both, so neither may be inside the other: `
+      + 'each downloaded chapter then shows up twice, once in a series with its source and once in a series with none. '
+      + 'Mount them side by side, each in a folder of its own, and restart Uchiyomi; then remove the copies with no '
+      + 'source. The Volumes section of the install guide shows how.',
+    // The desktop app's own words (docs/DESKTOP.md): its "library folder" is the downloads, the reader's is the manga
+    // folder they added.
+    'Uchiyomi scans its library folder and the manga folder you added both, so neither may be inside the other: each '
+      + 'downloaded chapter then shows up twice. Keep the two side by side; then remove the copies with no source.',
+  ),
+
   // ---- The extension engine (#72, lib/engineHealth.ts)
   'engine.waiting': ({ n }: { n: number }) =>
     `${n} series that came from extensions ${s(n, 'keeps its', 'keep their')} chapters and ${s(n, 'gets', 'get')} no new ones until it is back`,

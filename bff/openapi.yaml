@@ -8329,6 +8329,9 @@ paths:
         disk, the later group arriving after the earlier one (`warn` while it finds any); each item carries
         `bookIds` and `numbers` for the later files only (at most 20) and the `delete` action. Nothing is deleted
         by the check.
+        Since v0.52.0 (#134) the `folders-twice` check is there only while the downloads folder sits inside the
+        library, or the library inside it -- by path, or met by the last scan's walk however it was mounted --
+        and every chapter in the inner one is scanned twice: `warn`, one item naming where, the fix in its note.
         Since v0.49.0 an item may carry `outcome`, what the last attempt at it found, from stored rows:
         {kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable[], scanned} (the
         gap `detail` is now '<n> missing — <ranges>' alone; the conclusion it used to end with is here), {kind:
