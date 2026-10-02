@@ -2703,7 +2703,7 @@
   "{n} series from it will stop updating but stay readable.": "{n} series de ella dejarán de actualizarse, pero seguirán siendo legibles.",
   "Across all extensions: {n} of {max} sources on.": "En todas las extensiones: {n} de {max} fuentes activadas.",
   "{n} of {max} sources on": "{n} de {max} fuentes activadas",
-  "{n} of {total} on": "{n} de {total} activadas",
+  "{n} of {total} on": "{n} de {total} activados",
   "Add an extension repository": "Añade un repositorio de extensiones",
   "Already installed": "Ya instalada",
   "Browse": "Explorar",

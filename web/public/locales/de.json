@@ -2725,7 +2725,7 @@
   "Hidden: new extensions leave it off": "Ausgeblendet: neue Erweiterungen lassen sie aus",
   "Install": "Installieren",
   "Installed": "Installiert",
-  "{n} of your extensions have no source on yet": "{n} deiner Erweiterungen haben noch keine Quelle an",
+  "{n} of your extensions have no source on yet": "Bei {n} deiner Erweiterungen ist noch keine Quelle an",
   "Installing…": "Wird installiert…",
   "Languages hidden in every extension": "In allen Erweiterungen ausgeblendete Sprachen",
   "Multiple languages": "Mehrere Sprachen",
@@ -2753,5 +2753,5 @@
   "Turned on {name} — 1 source ready to search": "{name} eingeschaltet — 1 Quelle bereit zum Suchen",
   "Turned on {name} — {n} sources ready to search": "{name} eingeschaltet — {n} Quellen bereit zum Suchen",
   "Turning on…": "Wird eingeschaltet…",
-  "Could not reach the repositories to check for updates.": "Die Repositorys waren nicht erreichbar, um nach Updates zu suchen."
+  "Could not reach the repositories to check for updates.": "Die Repositorys waren für die Suche nach Updates nicht erreichbar."
 }

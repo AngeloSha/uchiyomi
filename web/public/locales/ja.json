@@ -2741,7 +2741,7 @@
   "Remove {name}?": "{name} を削除しますか？",
   "Removing…": "削除中…",
   "Repositories": "リポジトリ",
-  "Settings for": "設定する言語",
+  "Settings for": "設定の対象",
   "Show 18+ extensions": "18禁の拡張機能を表示",
   "Show {n} more": "さらに {n} 件表示",
   "Showing {shown} of {matched}": "{matched} 件中 {shown} 件を表示",
