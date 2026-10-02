@@ -33,7 +33,7 @@ import { isDesktop } from '@/lib/desktop';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
-  ACTION_COPY, caveatLine, caveatTone, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
+  ACTION_COPY, actionCopy, caveatLine, caveatTone, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
   type CopyCtx,
 } from '@/lib/healthCopy';
 import {
@@ -243,7 +243,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const busyHere = rowNow.kind === 'starting' || rowNow.kind === 'working';
 
   const spec = (a: HealthAction): ActionSpec | null => {
-    const copy = ACTION_COPY[a];
+    const copy = actionCopy(a, check);
     if (!copy) return null;
     const mine = rowAction === a ? rowNow : IDLE;
     const base = { id: a, what: copy.what(ctx), state: mine, buttonProps: { 'data-health-action': a } as ActionSpec['buttonProps'] };
@@ -486,7 +486,7 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
   // the findings). The solver reset is card-wide, below.
   const kinds = [...new Set(check.items.flatMap((it) => it.actions ?? []))].filter((a) => a !== 'solver_reset');
   for (const a of kinds) {
-    const copy = ACTION_COPY[a];
+    const copy = actionCopy(a, check);
     if (!copy) continue;
     const est = isRepairAction(a) ? estOf(status, a) : null;
     rows.push({ id: `legend:${a}`, label: a === 'delete' ? tr('Delete chapters') : copy.label(ctx), what: copy.what({ ...ctx, est }), how: copy.how?.({ ...ctx, est }), eta: copy.eta({ ...ctx, est }) });

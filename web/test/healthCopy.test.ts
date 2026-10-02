@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ACTION_COPY, CHECK_TITLES, caveatLine, caveatTone, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
+  ACTION_COPY, CHECK_TITLES, actionCopy, caveatLine, caveatTone, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
   runStatusWord, skipLine, solverDownLine, timeLine,
 } from '../lib/healthCopy';
 import type { RepairLiveRun, RepairRunRecord } from '../lib/repairRun';
@@ -38,6 +38,22 @@ test('every HealthAction, every card action and the page action has what, and wh
   for (const a of ['fix_short', 'fill', 'retry', 'solver_reset', 'fixall:short', 'fixall:gaps', 'fixall:failures', 'fix_all_issues']) {
     assert.ok(ACTION_COPY[a].lasting, `${a} leaves nothing on its row when its run ends`);
   }
+});
+
+test('the saved-twice card\'s Delete row says why it deletes, not the impossible-number sentence', () => {
+  // v0.50.0. Delete chapters is offered by two checks for two reasons: an impossible chapter number, and the later of
+  // two sites' splits of one chapter. The browser check found the impossible-number sentence on the second card.
+  // Reintroduce by reading ACTION_COPY[a] alone in actionCopy, or in either lookup on the card: this fails.
+  const impossible = ACTION_COPY.delete.what({});
+  const twice = actionCopy('delete', { id: 'saved-twice' })!;
+  assert.notEqual(twice.what({}), impossible, 'the saved-twice card\'s Delete row says why it deletes');
+  assert.match(twice.what({}), /arrived later; the one you had first stays/);
+  assert.ok(twice.how?.({}), 'and how it chooses what goes');
+  assert.equal(twice.eta({}), ACTION_COPY.delete.eta({}), 'and how long');
+  assert.equal(actionCopy('delete', { id: 'outliers' })?.what({}), impossible, 'the impossible-number card keeps its own');
+  assert.equal(actionCopy('fill', { id: 'saved-twice' }), ACTION_COPY.fill, 'an action with no entry of its own for the check');
+  const card = read('components/HealthActions.tsx');
+  assert.equal((card.match(/const copy = actionCopy\(a, check\);/g) ?? []).length, 2, 'a lookup on the card reads ACTION_COPY[a] alone');
 });
 
 test('the words match what the press does', () => {

@@ -144,6 +144,15 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: () => tr('Deletes the file of a chapter whose number cannot be right. The chapter stays listed and reading history is kept; a bookmarked chapter is skipped.'),
     eta: moment,
   },
+  // v0.50.0, The same chapter saved twice: the same key and route, for another reason -- the later of two sites'
+  // splits of one chapter goes, the one you had first stays. The sentence above, written for impossible chapter
+  // numbers, was on this card too (actionCopy below picks this one there).
+  'delete:saved-twice': {
+    label: () => tr('Delete chapters'),
+    what: () => tr('Deletes the copy that arrived later; the one you had first stays. The chapter stays listed and reading history is kept; a bookmarked chapter is skipped.'),
+    how: () => tr('Only the files the row names go: another site’s split of a chapter you already had, which arrived after it. Each stays listed as a deleted chapter, so updates do not fetch it back.'),
+    eta: moment,
+  },
   fill: {
     label: () => tr('Fill now'),
     what: () => tr('Fetches the missing chapters of this series: from a source it already follows when one lists them, otherwise by searching the other sources and following one that has them.'),
@@ -288,6 +297,15 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     lasting: (rec) => recordOutcome(rec),
   },
 };
+
+/**
+ * The words of an action as one check offers it: the check's own entry (`<action>:<check id>`) when it has one, else
+ * the action's. Reintroduce by reading ACTION_COPY[a] alone: "the saved-twice card's Delete row says why it deletes"
+ * in healthCopy.test.ts reads the impossible-number sentence.
+ */
+export function actionCopy(a: string, check?: Pick<HealthCheck, 'id'> | null): ActionCopy | undefined {
+  return (check ? ACTION_COPY[`${a}:${check.id}`] : undefined) ?? ACTION_COPY[a];
+}
 
 /**
  * What Fix all issues does, counted: ONE sentence per count, never a translated sentence with a count glued on --
