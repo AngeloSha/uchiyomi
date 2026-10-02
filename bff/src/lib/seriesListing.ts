@@ -314,13 +314,16 @@ export interface Ghost {
  * Reintroduce by testing the boundary after the cap: "the series page's reason for a number an active archive
  * will fetch" in archivePlan.test.ts reads archive for a capped number.
  *
- * Covered (v0.50.0) after the floor and before everything else: another split of a chapter on disk is not missing,
- * and a failure count from before the sweep knew that says nothing about it now.
+ * Covered (v0.50.0) before the floor and everything after it: another split of a chapter on disk is neither an older
+ * chapter not here yet -- folded into the floor's run, its row lost its words and the run's "Fetch all" took it --
+ * nor missing, and a failure count from before the sweep knew that says nothing about it now. The archive never
+ * takes a covered number (it fetches `available` only), so it cannot come first. Reintroduce by testing the floor
+ * first: "another split below the floor" in seriesListing.test.ts reads floor.
  */
 export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null): GhostWhy {
   if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < CHAPTER_RETRY_CAP) return 'archive';
-  if (floor != null && number < floor) return 'floor';
   if (status === 'covered') return 'covered';
+  if (floor != null && number < floor) return 'floor';
   if (status === 'blocked') return 'blocked';
   if (attempts >= CHAPTER_RETRY_CAP) return 'failed';
   if (status === 'held') return 'held';

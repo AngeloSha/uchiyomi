@@ -163,3 +163,12 @@ test('whyOf: floor beats blocked beats failed beats held beats missing', () => {
   assert.equal(whyOf('available', 10, 10, 0), 'missing', 'the floor itself is not below the floor');
   assert.equal(whyOf('held', 9.5, 10, 0), 'floor', 'a half chapter below the floor is below the floor');
 });
+
+test('another split of a chapter on disk says so, below the floor and failed or not', () => {
+  // v0.50.0 (lib/partAlias.ts R2). Reintroduce by testing the floor before `covered` in whyOf: "another split below
+  // the floor" reads floor -- folded into the older-chapters run, whose Fetch all would take it.
+  assert.equal(whyOf('covered', 78.3, null, 0), 'covered');
+  assert.equal(whyOf('covered', 78.3, 100, 0), 'covered', 'another split below the floor');
+  assert.equal(whyOf('covered', 78.3, null, CHAPTER_RETRY_CAP), 'covered', 'a failure count from before outranks it');
+  assert.equal(whyOf('covered', 78.3, null, 0, 90), 'covered', 'the slow archive never takes it');
+});
