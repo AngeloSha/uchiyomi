@@ -156,6 +156,16 @@ const numberPair = (one: string, many: string) =>
  */
 const AGREES_ABROAD = /^(\p{Ll}+ed|not)$/u;
 /**
+ * So does a count before a state word that ends its phrase: "2 languages · 1 on" on Admin → Providers' cards read
+ * "1 activadas", "1 activées", "1 ativas" (the v0.52.0 check pass). "{n} on server" is a place and agrees with nothing,
+ * so the word must end the key or come before a separator.
+ */
+const STATE_WORD = /^(on|off)$/u;
+const endsPhrase = (k: string, at: number): boolean => /^(?:1|\{[nm]\}) \p{L}+(?:$|\s*[·.,;:)!?—])/u.test(k.slice(at));
+/** Whether a count asks for its other half: a plural noun, a participle or "not", or a state word ending the phrase. */
+const asksPair = (k: string, c: { at: number; one: boolean; word: string }): boolean =>
+  c.one || /^\p{Ll}+s$/u.test(c.word) || AGREES_ABROAD.test(c.word) || (STATE_WORD.test(c.word) && endsPhrase(k, c.at));
+/**
  * Keys with such a count that shipped before that rule, each reading wrong at 1 in some language. ⚠️ Frozen like
  * SHIPPED_UNPAIRED: fix one by adding its singular and deleting it here, never by adding to it. Empty since v0.52.0,
  * which gave the last nine their singulars (web/lib/counted.ts), and kept so: a new one is a failure, not an entry.
@@ -281,11 +291,18 @@ test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", a
     if (Object.values(IRREGULAR_PAIRS).includes(k)) continue;
     for (const c of counts(k)) {
       // A plural half is `{n}` before a plural noun; `{n} failed` pairs with "1 failed" but is not asked to.
-      if (!c.one && !/^\p{Ll}+s$/u.test(c.word) && !AGREES_ABROAD.test(c.word)) continue;
+      if (!asksPair(k, c)) continue;
       if (!otherHalf(all, k, c.at, c.one)) lonely.push(`${k} has no ${c.one ? 'plural' : 'singular'}`);
     }
   }
   assert.deepEqual(lonely, [], `counted strings without their other half: ${lonely.join(' | ')}`);
+  // A state word asks for its pair only where it ends the phrase. Reintroduce the old rule (no STATE_WORD): "{n} on
+  // is not asked for its 1-form" fails here, and without onText's '1 on' the loop above fails as "{n} on has no singular".
+  const ask = (k: string) => counts(k).some((c) => !c.one && asksPair(k, c));
+  assert.equal(ask('{n} on'), true, '{n} on is not asked for its 1-form');
+  assert.equal(ask('2 languages · {n} on'), true);
+  assert.equal(ask('{n} off · 2 sources'), true);
+  assert.equal(ask('{n} on server'), false, 'a place ("on server") is asked to agree');
   // The matcher itself: the whole key, not its first noun.
   const probe = ['1 chapter behind', '{n} chapters saved', '{n} chapters behind', '1 older chapter not here', '{n} older chapters not here',
     '1 source needs a look', '{n} sources need a look', '1 chapter saved.', '{n} chapters saved,'];

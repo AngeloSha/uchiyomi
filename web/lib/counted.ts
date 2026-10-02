@@ -20,3 +20,9 @@ export const skippedNotOursText = (n: number): string =>
 /** Chapters a Delete left alone because a reader's bookmark is in them. */
 export const skippedBookmarkedText = (n: number): string =>
   (n === 1 ? tr('1 skipped: bookmarked by a reader') : tr('{n} skipped: bookmarked by a reader', { n }));
+
+/**
+ * "1 on", "{n} on": how many of a provider's sources are switched on (Admin → Providers' cards, the MangaDex card, a
+ * language's line). One key shipped for both, and Spanish, French and Portuguese read "1 activadas" at 1.
+ */
+export const onText = (n: number): string => (n === 1 ? tr('1 on') : tr('{n} on', { n }));

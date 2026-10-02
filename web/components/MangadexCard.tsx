@@ -17,6 +17,7 @@ import { useReducedMotion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
+import { onText } from '@/lib/counted';
 import { activeLocale, languageName } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OnBody } from '@/components/ui';
@@ -118,7 +119,7 @@ export function MangadexCard({ group, row, mark, onSaved }: {
           MangaDex
           <span className="ms-2 text-[11px] text-fog-500">
             {rows.length === 1 ? tr('1 language') : tr('{n} languages', { n: rows.length })}
-            {disabled > 0 && <> · {tr('{n} on', { n: group.on })}</>}
+            {disabled > 0 && <> · {onText(group.on)}</>}
           </span>
         </span>
         {mark(group.worst)}

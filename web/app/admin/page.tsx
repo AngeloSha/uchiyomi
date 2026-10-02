@@ -31,6 +31,7 @@ import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
+import { onText } from '@/lib/counted';
 import type { HealthCheck, Series } from '@/lib/types';
 import { groupProviders, providerStatus, MANGADEX_GROUP, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 import { MangadexCard, UnstatedLanguageCard } from '@/components/MangadexCard';
@@ -789,7 +790,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
           <span className="min-w-0 flex-1 text-sm text-fog-100">
             {g.name}
             <span className="ms-2 text-[11px] text-fog-500">
-              {g.languages.length === 1 ? tr('1 language') : tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}
+              {g.languages.length === 1 ? tr('1 language') : tr('{n} languages', { n: g.languages.length })} · {onText(g.on)}
             </span>
           </span>
           {statusMark(g.worst)}
@@ -2472,7 +2473,7 @@ function Extensions({ span = '' }: { span?: string }) {
                   const working = busy === `__lang:${name}`;
                   const counts = [
                     l.sources === 1 ? tr('1 source') : tr('{n} sources', { n: l.sources }),
-                    tr('{n} on', { n: l.enabled }),
+                    onText(l.enabled),
                     l.used === 1 ? tr('1 series') : tr('{n} series', { n: l.used }),
                   ].join(' · ');
                   return (
