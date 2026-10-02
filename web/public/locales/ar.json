@@ -1571,6 +1571,8 @@
   "{n} chapters; its source {source} is over the source limit (SUWAYOMI_MAX_SOURCES)": "الفصول: {n}؛ مصدرها {source} يتجاوز حدّ المصادر (SUWAYOMI_MAX_SOURCES)",
   "1 chapter; its source {source} is no longer installed": "فصل واحد؛ مصدرها {source} لم يعد مثبّتًا",
   "{n} chapters; its source {source} is no longer installed": "الفصول: {n}؛ مصدرها {source} لم يعد مثبّتًا",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Providers": "فصل واحد؛ MangaDex باللغة {language} معطَّل في الإدارة ← المزوّدون",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Providers": "الفصول: {n}؛ MangaDex باللغة {language} معطَّل في الإدارة ← المزوّدون",
   "primary {source} gone; still following {names}": "المصدر الرئيسي {source} لم يعد موجودًا؛ وما زالت تتابع {names}",
   "(none)": "(لا يوجد)",
   "1 source is failing or blocked": "مصدر واحد متعثّر أو محظور",

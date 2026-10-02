@@ -12,9 +12,12 @@
 //
 // The second half pins what the feed carries per row now that the adapter no longer collapses a number to
 // one copy: the scanlation groups, expanded by `includes[]=scanlation_group`, and every release of a number.
-import test from 'node:test';
+//
+// v0.52.0 (#123): the fallback is English's alone. MangaDex in another language is an adapter of its own that asks
+// for its language and nothing else, and a row's language is the app's code ("es-419", never MangaDex's "es-la").
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mangadex } from '../src/lib/sources/mangadex';
+import { mangadex, makeMangadex, _setMangadexPacing, _resetMangadexLimiter } from '../src/lib/sources/mangadex';
 
 const realFetch = globalThis.fetch;
 
@@ -48,7 +51,10 @@ function stubFeed(byLang: Record<string, Row[]>, urls: string[] = []) {
   return asked;
 }
 
-test.afterEach(() => { globalThis.fetch = realFetch; });
+// The shared limiter's spacing is not what these pin: no gap, so a fallback through seven languages costs no time.
+before(() => _setMangadexPacing({ apiGapMs: 0, atHomeGapMs: 0 }));
+after(() => _setMangadexPacing(null));
+test.afterEach(() => { globalThis.fetch = realFetch; _resetMangadexLimiter(); });
 
 test('English is preferred, and nothing else is even asked for when it answers', async () => {
   const asked = stubFeed({ en: [{ n: 1 }, { n: 2 }], 'es-la': [{ n: 1 }] });
@@ -64,7 +70,8 @@ test('THE BUG: a title with no English chapters is no longer empty', async () =>
   const asked = stubFeed({ 'es-la': [{ n: 1 }, { n: 2 }, { n: 3 }] });
   const out = await mangadex.listChapters!('series-2');
   assert.deepEqual(out.map((c) => c.number), [1, 2, 3]);
-  assert.ok(out.every((c) => c.lang === 'es-la'), 'the Spanish chapters should be the ones returned');
+  // The app's code for MangaDex's "es-la", as on the source's name, MangaDex (ES-419).
+  assert.ok(out.every((c) => c.lang === 'es-419'), 'the Spanish chapters should be the ones returned');
   assert.equal(asked[0], 'en', 'English must still be tried first');
   assert.ok(asked.includes('es-la'));
 });
@@ -79,7 +86,7 @@ test('the result is single-language, never a mixture', async () => {
   const out = await mangadex.listChapters!('series-3');
   const langs = new Set(out.map((c) => c.lang));
   assert.equal(langs.size, 1, `expected one language, got ${[...langs].join(', ')}`);
-  assert.equal([...langs][0], 'es-la', 'the first language that answered wins outright');
+  assert.equal([...langs][0], 'es-419', 'the first language that answered wins outright');
   assert.ok(!asked.includes('fr'), 'once a language answers, later ones must not be requested');
 });
 
@@ -96,6 +103,20 @@ test('a title with nothing anywhere answers empty rather than looping', async ()
   assert.deepEqual(out, []);
   // Bounded: a genuinely empty title must not become an unbounded fan-out on every updater sweep.
   assert.ok(asked.length <= 8, `tried ${asked.length} languages; the list should stay short`);
+});
+
+test('MangaDex in another language asks for that language alone, and never falls back to English', async () => {
+  // Reintroduce by giving every adapter the English fallback chain (listChapters without the `!english` return):
+  // MangaDex (ES-419) answers with the English chapters, and "asks es-la and nothing else" fails.
+  const asked = stubFeed({ en: [{ n: 1 }, { n: 2 }], 'es-la': [] });
+  const es = makeMangadex('es-419');
+  assert.deepEqual(await es.listChapters('series-es'), [], 'a title with no Spanish chapters has none in Spanish');
+  assert.deepEqual(asked, ['es-la'], 'asks es-la and nothing else');
+  // And when it has them, they are its own, in the app's code.
+  const asked2 = stubFeed({ en: [{ n: 1 }], 'es-la': [{ n: 1 }, { n: 2 }] });
+  const out = await es.listChapters('series-es');
+  assert.deepEqual(out.map((c) => [c.number, c.lang]), [[1, 'es-419'], [2, 'es-419']]);
+  assert.deepEqual(asked2, ['es-la']);
 });
 
 test('a chapter with a non-numeric number is skipped, not NaN-sorted', async () => {

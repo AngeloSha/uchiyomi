@@ -1571,6 +1571,8 @@
   "{n} chapters; its source {source} is over the source limit (SUWAYOMI_MAX_SOURCES)": "Глав: {n}; источник {source} не вошёл в лимит источников (SUWAYOMI_MAX_SOURCES)",
   "1 chapter; its source {source} is no longer installed": "1 глава; источник {source} больше не установлен",
   "{n} chapters; its source {source} is no longer installed": "Глав: {n}; источник {source} больше не установлен",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Providers": "1 глава; MangaDex ({language}) отключён в разделе «Администрирование → Источники данных»",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Providers": "Глав: {n}; MangaDex ({language}) отключён в разделе «Администрирование → Источники данных»",
   "primary {source} gone; still following {names}": "основной источник {source} больше недоступен; по-прежнему отслеживаются: {names}",
   "(none)": "(не указан)",
   "1 source is failing or blocked": "1 источник сбоит или заблокирован",

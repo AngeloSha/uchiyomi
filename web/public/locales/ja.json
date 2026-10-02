@@ -1571,6 +1571,8 @@
   "{n} chapters; its source {source} is over the source limit (SUWAYOMI_MAX_SOURCES)": "{n} 話；ソース {source} はソース上限（SUWAYOMI_MAX_SOURCES）を超えています",
   "1 chapter; its source {source} is no longer installed": "1 話；ソース {source} はもうインストールされていません",
   "{n} chapters; its source {source} is no longer installed": "{n} 話；ソース {source} はもうインストールされていません",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Providers": "1 話；MangaDex（{language}）は「管理 → プロバイダー」で無効になっています",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Providers": "{n} 話；MangaDex（{language}）は「管理 → プロバイダー」で無効になっています",
   "primary {source} gone; still following {names}": "メインのソース {source} は消失；引き続き {names} をフォロー中",
   "(none)": "（なし）",
   "1 source is failing or blocked": "1 件のソースが失敗中またはブロック中です",

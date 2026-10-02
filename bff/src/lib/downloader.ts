@@ -14,7 +14,7 @@ import { classify, noteStage, reportOk, reportFail, SourceStatus } from './sourc
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
-import { pagePace, paceLevel, noteRateLimited, resumePace } from './pace';
+import { pagePace, paceLevel, noteRateLimited, rateKeyOf, resumePace } from './pace';
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
@@ -259,9 +259,12 @@ export const chapterFileRel = (seriesFolder: string, number: number): string => 
  * The per-source chapter gate every download path runs under: at most DL_CONCURRENCY chapters at once and
  * a gap between their starts that doubles per pace level (1200 → 2400 → 4800 ms), so a source that has
  * answered 429 sees fewer chapters as well as slower pages until it has been quiet for a while.
+ *
+ * One gate per RATE GROUP (lib/pace.ts rateKeyOf, v0.52.0): MangaDex in three languages is one site downloading
+ * three chapters, so it gets one gate, not three.
  */
 export const underGate = <T>(sourceId: string, fn: () => Promise<T>): Promise<T> =>
-  withGate(sourceId, fn, { concurrency: DL_CONCURRENCY, minGapMs: DL_MIN_GAP_MS * 2 ** paceLevel(sourceId) });
+  withGate(rateKeyOf(sourceId), fn, { concurrency: DL_CONCURRENCY, minGapMs: DL_MIN_GAP_MS * 2 ** paceLevel(sourceId) });
 
 /**
  * Download one chapter into <DL_ROOT>/<seriesFolder>/Chapter <n>.cbz.

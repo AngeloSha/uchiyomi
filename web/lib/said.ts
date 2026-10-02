@@ -16,7 +16,7 @@
  * the server's wherever the two are meant to read alike.
  */
 import { t as tr } from './i18n';
-import { activeLocale, cached, durationText, relativeTime } from './format';
+import { activeLocale, cached, durationText, languageName, relativeTime } from './format';
 import { isDesktop } from './desktop';
 import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
@@ -322,6 +322,12 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'frozen.uninstalled': (p) => (num(p, 'n') === 1
     ? tr('1 chapter; its source {source} is no longer installed', { source: str(p, 'source') })
     : tr('{n} chapters; its source {source} is no longer installed', { n: num(p, 'n'), source: str(p, 'source') })),
+  // v0.52.0 (#123): a MangaDex language switched off. The language in the reader's own words, never its code.
+  'frozen.mangadexOff': (p) => {
+    const v = { n: num(p, 'n'), language: languageName(str(p, 'lang')) };
+    return v.n === 1 ? tr('1 chapter; MangaDex in {language} is switched off in Admin → Providers', v)
+      : tr('{n} chapters; MangaDex in {language} is switched off in Admin → Providers', v);
+  },
   'frozen.following': (p) => tr('primary {source} gone; still following {names}', { source: p.source == null ? tr('(none)') : str(p, 'source'), names: strs(p, 'names').join(listSep()) }),
 
   // ---- Source health (#115)

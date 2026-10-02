@@ -34,7 +34,7 @@ import { q, one } from './db';
 import { runtime } from './runtime';
 import { getSource } from './sources';
 import { gateDepth } from './gate';
-import { paceLevel, withSlowPace } from './pace';
+import { paceLevel, rateKeyOf, withSlowPace } from './pace';
 import { classify } from './sourceHealth';
 import { checkRunning } from './sourceWatchdog';
 import { freeBytes, chapterFileRel } from './downloader';
@@ -595,7 +595,8 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
     const h = health.get(src);
     return {
       loaded: !!getSource(src), disabled: h?.disabled === true, blockedUntil: ms(h?.blocked_until),
-      gate: gateDepth(src), paceLevel: paceLevel(src),
+      // The gate is the rate group's (pace.ts rateKeyOf): a Spanish MangaDex download keeps English waiting too.
+      gate: gateDepth(rateKeyOf(src)), paceLevel: paceLevel(src),
       nextAt: ms(pace?.next_at), backoffUntil: ms(pace?.backoff_until), inFlight: flights.has(src),
     };
   };
@@ -1096,7 +1097,7 @@ async function alternatesOf(seriesId: string, n: number, chosen: ListingCopy, fo
     [new Date(now), followed]).catch(() => [])).map((r) => r.source_id));
   return (row?.copies ?? [])
     .filter((c) => c.source !== chosen.source && followed.includes(c.source) && !resting.has(c.source)
-      && !flights.has(c.source) && gateDepth(c.source).active + gateDepth(c.source).queued === 0 && paceLevel(c.source) === 0)
+      && !flights.has(c.source) && gateDepth(rateKeyOf(c.source)).active + gateDepth(rateKeyOf(c.source)).queued === 0 && paceLevel(c.source) === 0)
     .map((c) => copyToChapter(c, { number: n, title: row!.title }));
 }
 

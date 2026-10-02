@@ -29,6 +29,7 @@ import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
 import { loadUnstatedLang } from './lib/seriesLang';
+import { loadMangadexLangs } from './lib/sources/mangadexLangs';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -72,7 +73,10 @@ async function main() {
     (n) => { if (n) console.log(`[activity] ${n} finished download(s) from the last day restored`); },
     (e) => console.warn(`[activity] could not read the download log: ${(e as Error)?.message || e}`),
   );
-  const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
+  // The MangaDex languages besides English an admin turned on (v0.52.0, #123), which loadBuiltins registers. A
+  // database that cannot be read here leaves English alone, and never stops the boot.
+  await loadMangadexLangs().catch((e) => console.warn(`[sources] could not read the MangaDex languages: ${(e as Error)?.message || e}`));
+  const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex, one adapter per language)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
   // Extension sources from an optional Suwayomi server. Fails soft: unset or unreachable just means none.

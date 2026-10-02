@@ -1571,6 +1571,8 @@
   "{n} chapters; its source {source} is over the source limit (SUWAYOMI_MAX_SOURCES)": "{n} 章；其来源 {source} 超出了来源上限（SUWAYOMI_MAX_SOURCES）",
   "1 chapter; its source {source} is no longer installed": "1 章；其来源 {source} 已卸载",
   "{n} chapters; its source {source} is no longer installed": "{n} 章；其来源 {source} 已卸载",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Providers": "1 章；{language}版 MangaDex 已在“管理 → 提供方”中关闭",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Providers": "{n} 章；{language}版 MangaDex 已在“管理 → 提供方”中关闭",
   "primary {source} gone; still following {names}": "主来源 {source} 已失效；仍在关注 {names}",
   "(none)": "（无）",
   "1 source is failing or blocked": "1 个来源出现故障或被屏蔽",

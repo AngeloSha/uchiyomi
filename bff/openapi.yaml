@@ -2117,8 +2117,10 @@ paths:
                             out of, so one multi-language extension's variants can be shown as one
                             provider. `pkgName` is the APK package name as the engine reports it; when the
                             engine did not say, `pkgName` is null and `name` is the display name with its
-                            trailing language tag (` (EN)`, ` (PT-BR)`, ` (ALL)`) stripped. Null for
-                            built-in, pack and custom-site sources.
+                            trailing language tag (` (EN)`, ` (PT-BR)`, ` (ALL)`) stripped. Since v0.52.0
+                            every MangaDex language (`mangadex`, `mangadex-es-419`, ...) carries
+                            `{pkgName: "mangadex", name: "MangaDex"}`, so the family is one provider too.
+                            Null for the other built-in, pack and custom-site sources.
                           oneOf:
                             - type: object
                               required: [pkgName, name]
@@ -5594,7 +5596,7 @@ paths:
     get:
       tags:
         - admin
-      summary: Server settings, plus extensions_configured (whether an extension engine exists).
+      summary: Server settings, plus extensions_configured (whether an extension engine exists) and mangadex_available.
       operationId: getApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The row
@@ -5673,6 +5675,26 @@ paths:
                   archive_free_gb:
                     type: [number, "null"]
                     description: GiB free under the download root now, one decimal, what archive_min_free_gb is set against; null when it cannot be measured.
+                  mangadex_langs:
+                    type: array
+                    items:
+                      type: string
+                    description: >-
+                      Since v0.52.0 (#123): the MangaDex languages besides English that are on, as app codes in
+                      mangadex_available's order. Each is a source of its own, `mangadex-<code>` named
+                      "MangaDex (ES-419)". See mangadexLangs on PATCH. Empty by default.
+                  mangadex_available:
+                    type: array
+                    items:
+                      type: string
+                    description: >-
+                      Computed: every language MangaDex is offered in, as app codes (BCP-47: es-419, pt-BR,
+                      zh-Hans, zh-Hant, fil, ...), English first. English is always on.
+                  unstated_lang:
+                    type: string
+                    description: >-
+                      Since v0.52.0: the language of sources and series that do not say which they are in
+                      (most added sites). English by default. See unstatedLang on PATCH.
         "401":
           description: Not authenticated
         "403":
@@ -5850,13 +5872,38 @@ paths:
                   minimum: 1
                   maximum: 2000
                   description: The slow archive waits while less than this many GB are free under the download root. Default 20.
+                mangadexLangs:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+                  description: >-
+                    Since v0.52.0 (#123): the MangaDex languages besides English to switch on, replaced whole, as
+                    app codes from mangadex_available (MangaDex's own es-la, pt-br, zh and zh-hk are read as es-419,
+                    pt-BR, zh-Hans and zh-Hant). Applied at once, with no restart: each language turned on is
+                    registered as a source of its own (`mangadex-es-419`, "MangaDex (ES-419)") whose search, Popular,
+                    Newest and chapters are in that language only; each turned off is unregistered, and its series
+                    keep their chapters and read as frozen in Health until it is back. Every MangaDex source shares
+                    one rate limit. English is always on and is refused here (400 english_always_on), as is a code
+                    MangaDex is not offered in (400 unknown_language); either refusal writes nothing. A change is
+                    audited as `settings.mangadex_langs` {from, to}.
+                unstatedLang:
+                  type: string
+                  description: >-
+                    Since v0.52.0: the language of sources and series that do not say which they are in -- most
+                    added sites declare none. A source is followed for a series automatically only when both are
+                    in the same language, so a server whose sites are in Spanish sets es here. Any one language
+                    (BCP-47, normalised: pt-br is pt-BR); "all", "other" or an empty string is refused (400
+                    unknown_language). Applied at once.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: >-
+            Malformed body or parameter; or, with `error`, a language refused: unknown_language (mangadexLangs
+            or unstatedLang), english_always_on (mangadexLangs). Nothing is written.
         "401":
           description: Not authenticated
         "403":

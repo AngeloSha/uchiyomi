@@ -1571,6 +1571,8 @@
   "{n} chapters; its source {source} is over the source limit (SUWAYOMI_MAX_SOURCES)": "{n} capítulos; a fonte dela, {source}, passou do limite de fontes (SUWAYOMI_MAX_SOURCES)",
   "1 chapter; its source {source} is no longer installed": "1 capítulo; a fonte dela, {source}, não está mais instalada",
   "{n} chapters; its source {source} is no longer installed": "{n} capítulos; a fonte dela, {source}, não está mais instalada",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Providers": "1 capítulo; o MangaDex em {language} está desativado em Administração → Provedores",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Providers": "{n} capítulos; o MangaDex em {language} está desativado em Administração → Provedores",
   "primary {source} gone; still following {names}": "fonte principal {source} indisponível; ainda segue {names}",
   "(none)": "(nenhuma)",
   "1 source is failing or blocked": "1 fonte está falhando ou bloqueada",

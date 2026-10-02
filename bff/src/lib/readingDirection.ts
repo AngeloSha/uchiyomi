@@ -103,17 +103,20 @@ export async function detectDirections(opts: { max: number; log?: Log }): Promis
   const max = Math.max(1, Math.floor(opts.max));
 
   if (!(await isDisabled('mangadex').catch(() => false))) {
-    // The primary source first, then a followed one: either is "the followed source's metadata".
+    // The primary source first, then a followed one: either is "the followed source's metadata". Any MangaDex
+    // language counts (v0.52.0): a series from MangaDex (ES-419) carries the same title id. `mangadex-%` matches the
+    // family only -- a custom site's id is letters and digits, never a hyphen.
     const rows = await q<{ id: string; md: string }>(
       `SELECT s.id,
-              COALESCE(CASE WHEN s.source_id = 'mangadex' THEN s.source_series_id END,
+              COALESCE(CASE WHEN s.source_id = 'mangadex' OR s.source_id LIKE 'mangadex-%' THEN s.source_series_id END,
                        (SELECT ss.source_series_id FROM series_sources ss
-                         WHERE ss.series_id = s.id AND ss.source_id = 'mangadex' LIMIT 1)) AS md
+                         WHERE ss.series_id = s.id AND (ss.source_id = 'mangadex' OR ss.source_id LIKE 'mangadex-%') LIMIT 1)) AS md
          FROM lib_series s
         WHERE ${visibleToAll('s')}
           AND (s.reading_direction_from IS NULL OR s.reading_direction_from = 'anilist')
-          AND (s.source_id = 'mangadex'
-               OR EXISTS (SELECT 1 FROM series_sources ss WHERE ss.series_id = s.id AND ss.source_id = 'mangadex'))
+          AND (s.source_id = 'mangadex' OR s.source_id LIKE 'mangadex-%'
+               OR EXISTS (SELECT 1 FROM series_sources ss
+                           WHERE ss.series_id = s.id AND (ss.source_id = 'mangadex' OR ss.source_id LIKE 'mangadex-%')))
         ORDER BY random()
         LIMIT $1`,
       [max],
