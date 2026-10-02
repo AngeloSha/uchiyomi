@@ -2498,7 +2498,7 @@
   "Series that read from this source, as their main source or a followed one.": "このソースから読み込むシリーズ（メインまたはフォロー中）。",
   "Main: {name}": "メイン：{name}",
   "Any: {name}": "いずれか：{name}",
-  "Tap again to skip to the next chapter": "もう一度タップすると次の章へ移動します",
+  "Tap again to skip to the next chapter": "もう一度タップすると次の話へ移動します",
   "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "作品自体やジャンルのどれかが18禁でも、「18禁を表示」がオフの間もこの作品を本棚に残します。",
   "another split of a chapter you have": "手元にある話の別の分割",
   "The same chapter saved twice": "二重に保存された話",
