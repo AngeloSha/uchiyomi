@@ -715,8 +715,10 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, compact }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, compact, wholeHere }: {
   ghost: Ghost;
+  /** The series holds a chapter at this ghost's whole number: what a covered row's caption says (lib/chapterRows.ts whyLabel). */
+  wholeHere?: boolean;
   /** ChapterRow's compact list, so the two kinds of row still line up where they interleave. */
   compact?: boolean;
   sourceNames?: Record<string, string>;
@@ -743,7 +745,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
     { label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) },
   ] : []), { label: tr('Chapter actions') });
   const menuBind = onMark && !selectable ? menu.bind : {};
-  const label = whyLabel(ghost);
+  const label = whyLabel(ghost, { wholeHere });
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
   // ⚠️ unless that "name" IS the id: the server falls back to `getSource(id)?.name ?? id`, so a source that
@@ -1010,6 +1012,8 @@ function SeriesInner() {
   // honest too).
   const allBooks = useMemo(() => books?.content ?? [], [books]);
   const haveNumbers = useMemo(() => new Set(allBooks.map((b) => b.number)), [allBooks]);
+  // The whole numbers the series holds something at, for a covered row's caption (GhostRow `wholeHere`).
+  const haveWholes = useMemo(() => new Set([...haveNumbers].map((n) => Math.floor(n))), [haveNumbers]);
   // The sheet's solid chips are the LIVE rows only: a tombstone keeps its row (the ghost dedupe above is
   // right to count it -- the number is not "missing", it was deleted on purpose) but has no pages, and a
   // solid chip promises pages. Reintroduce by passing `haveNumbers` to the sheet: the chip for a pruned
@@ -1726,6 +1730,7 @@ function SeriesInner() {
           if (r.kind === 'ghost') {
             return (
               <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} compact={compact} sourceNames={sourceNames} primarySource={primarySource}
+                wholeHere={haveWholes.has(Math.floor(r.ghost.number))}
                 selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)}
                 onOpen={() => setChapterSheet({ number: r.ghost.number, ghost: r.ghost })}
                 // Same audience and same exclusion as the bar's Fetch (`fetchable`): a row only blocked

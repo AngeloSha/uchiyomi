@@ -85,6 +85,19 @@ test('R2: a file with no recorded origin counts as another source\'s', () => {
   assert.deepEqual(r.covered, [9.5]);
 });
 
+test('R3: with nothing on disk, a new chapter is split one way, the first-ranked source\'s', () => {
+  // {540, 540.5} on the primary, {540, 540.1, 540.2} on a follower, nothing of 540 here: R1 needs equal counts and R2
+  // a file, so both splits were downloaded in the same sweep. Reintroduce by dropping R3 in aliasParts: "a second
+  // split of a chapter nothing of is here" finds nothing covered.
+  const tagged = [ch('aqua', 540), ch('aqua', 540.5), ch('mangaread', 540), ch('mangaread', 540.1), ch('mangaread', 540.2), ch('mangaread', 541)];
+  const r = run(tagged, [held(539)]);
+  assert.deepEqual(r.copies, tagged.map((c) => `${c.source} ${c.number}`), 'different counts: nothing renumbered');
+  assert.deepEqual(r.covered, [540.1, 540.2], 'a second split of a chapter nothing of is here');
+  // The owner is the chooser's first: ranked the other way round, the follower's split is the one taken. And 541,
+  // which only the follower lists, is its own and fetched either way.
+  assert.deepEqual(run(tagged, [held(539)], 'aqua', (s) => (s === 'mangaread' ? 0 : 1)).covered, [540.5]);
+});
+
 test('three parts on disk against two listed: no renumbering, and the extra part is covered', () => {
   const r = run([ch('mangaread', 50), ch('mangaread', 50.5)], [held(50), held(50.3), held(50.6)]);
   assert.deepEqual(r.copies, ['mangaread 50', 'mangaread 50.5']);

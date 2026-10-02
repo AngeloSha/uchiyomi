@@ -393,8 +393,10 @@ components:
             cap, below the archive's boundary. It comes before `floor`; a capped, held or blocked number keeps
             its own reason, since the archive does not fetch those either. `covered` (since v0.50.0): another
             site's split of a chapter this server holds -- not on disk, at a whole number the disk holds a file
-            at, from a source none of those files came from. Never fetched by the sweep or the slow archive and
-            not counted as missing; a fetch by hand still takes it. It comes before `floor`.
+            at, from a source none of those files came from -- or, with nothing of that chapter on disk yet, a
+            part only sources other than the first-ranked one that lists the chapter list. Never fetched by the
+            sweep or the slow archive and not counted as missing; a fetch by hand still takes it. It comes before
+            `floor`.
         attempts: { type: integer, description: Only when the chapter has failed at least once. }
         reason: { type: string, description: The downloader's last error text. Admins only. }
         waitingFor: { type: string, description: "Only when why is held, and only when a priority group survives the blocklist: the effective first-choice group (the series' own priority over the global one) the chapter is being held for, spelt as the preference names it." }

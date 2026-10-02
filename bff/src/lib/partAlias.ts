@@ -7,7 +7,7 @@
 // sites like these, the sweep took their numbers for new chapters: on 1 October it downloaded about a hundred
 // chapters this server already had, under other numbers.
 //
-// Two rules, per series and per whole number N, over every followed source's list -- the primary's included --
+// Three rules, per series and per whole number N, over every followed source's list -- the primary's included --
 // in the updater's listing layer, BEFORE the chooser, so the chooser, the floor, the have-set, `source_missing`
 // and the stored listing all see the same numbers:
 //
@@ -21,6 +21,11 @@
 //       not counted as missing, kept in the listing so the series page can show it and a person can still
 //       fetch it. The SAME source listing N.5 beside the N it gave us is a part of its own numbering -- that is
 //       a genuine extra, and it is fetched. A file with no recorded origin counts as another source's.
+//   R3  One split per new chapter. With nothing on disk at N, R1 matches only equal counts and R2 has no file to go
+//       by, so two sources splitting N into different counts -- {540, 540.5} on one, {540, 540.1, 540.2} on the
+//       other -- were both downloaded in the same sweep. N's owner is then the first source in rank order that
+//       lists N, and a number at N that only other sources list is `covered`, as in R2. Once the owner's parts are
+//       on disk, R2 takes over at the next sweep.
 //
 // The reference parts at N: the files on disk at N; else the primary's list at N; else the series' own
 // convention for that many parts -- the pattern most of its chapters with that many parts on disk follow, so
@@ -53,7 +58,10 @@ export interface PartAliasInput<T extends SourceChapter> {
 export interface PartAliasResult<T extends SourceChapter> {
   /** `tagged` after R1: a renumbered copy is a new object, every other copy the very one handed in. */
   tagged: T[];
-  /** R2: the numbers, exactly as they appear in `tagged`, that are another split of a chapter on disk. */
+  /**
+   * R2 and R3: the numbers, exactly as they appear in `tagged`, that are another split of a chapter on disk, or of
+   * a chapter nothing of is on disk yet whose owner splits it another way.
+   */
   covered: Set<number>;
 }
 
@@ -156,7 +164,7 @@ export function aliasParts<T extends SourceChapter>(input: PartAliasInput<T>): P
     })
     : [...tagged];
 
-  // R2: who lists each number now, and where the files at each whole number came from.
+  // R2 and R3: who lists each number now, and where the files at each whole number came from.
   const listers = new Map<number, Set<string>>();
   for (const c of out) {
     if (!Number.isFinite(c.number)) continue;
@@ -177,9 +185,18 @@ export function aliasParts<T extends SourceChapter>(input: PartAliasInput<T>): P
   const coveredKeys = new Set<number>();
   for (const [k, who] of listers) {
     if (onDisk.has(k)) continue;
-    const from = origins.get(Math.floor(k));
-    if (!from?.size || [...who].some((src) => from.has(src))) continue;
-    coveredKeys.add(k);
+    const w = Math.floor(k);
+    const from = origins.get(w);
+    if (from?.size) {
+      // R2: a file is here at N, and none of N's files came from a source that lists this number.
+      if (![...who].some((src) => from.has(src))) coveredKeys.add(k);
+      continue;
+    }
+    // R3: nothing is here at N, and N's owner -- the first source in rank order listing it, as R1's last step
+    // picks -- does not list this number. Reintroduce by dropping this: "a second split of a chapter nothing of
+    // is here" in partAlias.test.ts finds 540.1 and 540.2 to download.
+    const owner = ranked.find((src) => bySource.get(src)!.has(w));
+    if (owner !== undefined && !who.has(owner)) coveredKeys.add(k);
   }
   const covered = new Set(out.filter((c) => Number.isFinite(c.number) && coveredKeys.has(numKey(c.number))).map((c) => c.number));
   return { tagged: out, covered };

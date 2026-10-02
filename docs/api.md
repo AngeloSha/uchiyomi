@@ -804,8 +804,9 @@ waitingFor?, waitDaysLeft?, read?}`, `why` one of `missing` (not fetched yet), `
 group under the release preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how
 many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor),
 `covered` (since v0.50.0: another site's split of a chapter this server holds — a number not on disk, at a whole
-number the disk holds a file at, from a source none of those files came from; the sweep never fetches it and it is
-not counted in `source_missing`, but `POST /api/sources/fetch` still takes it).
+number the disk holds a file at, from a source none of those files came from — or, with nothing of that chapter on
+disk yet, a part listed only by sources other than the first-ranked one that lists the chapter; the sweep never
+fetches it and it is not counted in `source_missing`, but `POST /api/sources/fetch` still takes it).
 A `held` ghost also carries `waitingFor` (since v0.34.0) — the effective first-choice group it is being
 held for, the series' own priority over the global one, minus anything blocked — and `waitDaysLeft`, the
 whole days until the patience window closes, counted as the sweep counts it: from the oldest hosted copy

@@ -61,6 +61,10 @@ test('another site\'s split of a chapter here says so, and is not a chapter behi
   // Reintroduce by dropping the `covered` case in whyLabel: the row has no caption; or the `covered` test in
   // countsAsBehind: the supply line counts nine chapters "not here" that are.
   assert.deepEqual(whyLabel({ why: 'covered' }), { key: 'another split of a chapter you have', args: {} });
+  assert.deepEqual(whyLabel({ why: 'covered' }, { wholeHere: true }), { key: 'another split of a chapter you have', args: {} });
+  // R3: nothing of the chapter is here yet, and the other split is a new chapter's first-ranked source's to fetch.
+  assert.equal(whyLabel({ why: 'covered' }, { wholeHere: false })?.key, 'another site’s split of this chapter',
+    'a covered part of a chapter nothing of is here');
   assert.equal(countsAsBehind({ why: 'covered' }), false, 'a covered ghost counted as behind');
   assert.deepEqual(['missing', 'held', 'failed', 'blocked', 'floor', 'archive'].map((why) => countsAsBehind({ why: why as any })),
     [true, true, true, true, false, false]);

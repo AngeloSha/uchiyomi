@@ -704,7 +704,9 @@ hold. Each grey row's caption says why it is not here:
 - **another split of a chapter you have · {group}** (since v0.50.0) — a followed site splits or numbers this
   chapter's parts differently, and the chapter is already here the other way: its 78.1 … 78.9 beside the 78
   you have as one file. The updater leaves it alone and it is not counted in *{n} not here yet*; the cloud icon
-  still fetches it if you want that site's copy too. See *Parts that sites number differently* below.
+  still fetches it if you want that site's copy too. With nothing of the chapter here yet it reads **another
+  site’s split of this chapter**: the parts of the site that comes first are fetched instead. See *Parts that
+  sites number differently* below.
 - Chapters **below the "Latest N" floor** of a series added as *Latest N* (or as *Nothing yet*) fold into
   one line, `Ch. 1–40 · 40 older chapters not here yet`. **Show** expands it into real grey rows, each with
   the cloud icon and its own sheet, folded past fifty into *Show all*; **Fetch all {n}** on the line takes
@@ -754,6 +756,10 @@ numbers:
   from a different site than that file came from, is shown as *another split of a chapter you have* and is not
   downloaded by itself. A part the same site lists beside the chapter it already gave you is a part of its own
   numbering, and is downloaded as before.
+- **One split per new chapter.** When nothing of a chapter is here yet and two sites split it into different
+  numbers of parts — 540 and 540.5 on one, 540, 540.1 and 540.2 on the other — only the parts of the site that
+  comes first in the series' source order (the main source, unless you ranked another first) are downloaded; the
+  other site's are shown as *another site’s split of this chapter*.
 
 Neither rule applies to a series numbered by posting order, or while a numbering change is waiting for you.
 Chapters downloaded twice before v0.50.0 are listed by Health's *The same chapter saved twice* check.

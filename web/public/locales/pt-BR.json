@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2508
+    "strings": 2509
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -2511,5 +2511,6 @@
   "Delete the later copies": "Excluir as cópias posteriores",
   "Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.": "Exclui os arquivos que cada linha deste cartão nomeia, as cópias que chegaram depois, como “Excluir capítulos” faz: um capítulo com marcador é ignorado e todos mantêm o histórico de leitura. Você vê a lista primeiro; não dá para desfazer.",
   "Delete the later copies in this series?": "Excluir as cópias posteriores desta série?",
-  "Delete the later copies in these {n} series?": "Excluir as cópias posteriores destas {n} séries?"
+  "Delete the later copies in these {n} series?": "Excluir as cópias posteriores destas {n} séries?",
+  "another site’s split of this chapter": "divisão deste capítulo de outro site"
 }

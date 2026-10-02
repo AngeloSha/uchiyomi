@@ -1058,8 +1058,8 @@ after(async () => {
   await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PQ, SRC_PA, SRC_PB]]).catch(() => {});
 });
 /** A series on the dead primary that follows `followers` in that order, holding `disk` (number, origin). */
-async function partsSeries(key: string, followers: string[], disk: Array<[number, string | null]>) {
-  await mkSeries(key, SRC_PQ);
+async function partsSeries(key: string, followers: string[], disk: Array<[number, string | null]>, primary = SRC_PQ) {
+  await mkSeries(key, primary);
   await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
   await q('DELETE FROM series_sources WHERE series_id = $1', [S(key)]);
   // One statement per row, so created_at -- the follow order -- is the order given.
@@ -1096,9 +1096,30 @@ test('a follower\'s other numbering of the parts on disk, or its own split of a 
   const { listingFor } = await import('../src/lib/seriesListing');
   const ghosts = (await listingFor(S('parts'), { floor: null, admin: true })).content;
   assert.deepEqual(ghosts.map((g: any) => [g.number, g.why]), tens.slice(1).map((n) => [n, 'covered']), 'the series page says why');
-  // "Fetch newest": the newest listed number is 78.9, another split of the 78 on disk -- the chapter is here.
+  // "Fetch newest": the newest listed number is 78.9, another split of the 78 on disk -- the newest chapter is 78,
+  // and it is here.
   const newest = await updateSeries(S('parts'), 1, { newestOnly: true });
-  assert.deepEqual([newest.newest?.number, newest.newest?.state, newest.added], [78.9, 'up_to_date', 0], JSON.stringify(newest.newest));
+  assert.deepEqual([newest.newest?.number, newest.newest?.state, newest.added], [78, 'up_to_date', 0],
+    `Fetch newest takes the newest chapter, not another site's part of one: ${JSON.stringify(newest.newest)}`);
+});
+
+test('one split per new chapter: nothing of 540 here, the primary splits it in two and a follower in three', { skip }, async () => {
+  // R3 (lib/partAlias.ts). R1 matches equal counts only and R2 needs a file at 540, so the same sweep took both splits.
+  // Now the source that ranks first owns 540, and the parts only the follower lists are covered. Reintroduce by
+  // dropping R3 in aliasParts: "only the primary's split of 540 is downloaded" finds 540.1 and 540.2 among them.
+  partLists[SRC_PA] = [540, 540.5];
+  partLists[SRC_PB] = [540, 540.1, 540.2];
+  await partsSeries('r3', [SRC_PB], [], SRC_PA);
+
+  const r = await updateSeries(S('r3'), 10);
+  assert.equal(r.outcome, 'ok', JSON.stringify(r));
+  assert.deepEqual([...partAsked].sort(), [`${SRC_PA}:540`, `${SRC_PA}:540.5`], `only the primary's split of 540 is downloaded; asked: ${partAsked}`);
+  assert.ok(onDisk('r3', 540) && onDisk('r3', 540.5), 'the primary\'s two parts landed');
+  assert.ok(!onDisk('r3', 540.1) && !onDisk('r3', 540.2), 'and not the follower\'s');
+  assert.equal((await stamp('r3')).m, 2, 'missing counts the primary\'s two parts, not the follower\'s');
+  const rows = await q('SELECT number, status FROM series_listing WHERE series_id = $1 ORDER BY number', [S('r3')]);
+  assert.deepEqual(rows.map((x: any) => [Number(x.number), x.status]),
+    [[540, 'available'], [540.1, 'covered'], [540.2, 'covered'], [540.5, 'available']], 'the follower\'s split is stored as covered');
 });
 
 test('two followers disagreeing about chapter 531 with nothing on disk: one download per part, in the series\' convention', { skip }, async () => {

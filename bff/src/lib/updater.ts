@@ -360,7 +360,8 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
   const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)) };
   // Chapter parts that sources number or split differently (lib/partAlias.ts): another site's N.1 / N.6 for the N /
-  // N.5 on disk is renumbered onto them (R1), and another site's split of a chapter already here is `covered` (R2) --
+  // N.5 on disk is renumbered onto them (R1), and another site's split of a chapter already here (R2), or of a new one
+  // whose first-ranked source splits it another way (R3), is `covered` --
   // listed and shown on the series page, fetchable by hand, never fetched by the sweep nor counted as missing. Here,
   // before the chooser, so the chooser, the floor, the have-set and the stored listing all see one numbering. Not
   // under posting order, nor while the numbering is in question. The disk is what the have-set below calls held,
@@ -413,7 +414,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
   // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
   const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
-  // A covered number is another split of a chapter on disk: not this sweep's to fetch, and not "behind" either.
+  // A covered number is another site's split of a chapter (R2, R3): not this sweep's to fetch, and not "behind" either.
   const missing = wanted.filter((c) => !have.has(c.number) && !covered.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, releases.length, missing.length);
   // The ledger for this series, read once: which chapters have already failed CHAPTER_RETRY_CAP times and
@@ -467,12 +468,15 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   let queue = eligible;
   let newest: NewestVerdict | undefined;
   if (opts.newestOnly) {
-    const top = releases.reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
+    // A covered number is never the newest chapter: it is another site's split of one, here already (R2) or owned by
+    // the source that ranks first (R3, whose own parts are the ones to fetch). Reintroduce by taking the top of every
+    // release: "Fetch newest takes the newest chapter, not another site's part of one" in updater.int.test.ts finds
+    // 78.9 queued for download.
+    const top = releases.filter((c) => !covered.has(c.number))
+      .reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
     const via = top ? (top.source ?? (s.source_id as string)) : '';
     if (!top) newest = { number: null, state: 'unlisted' };
     else if (have.has(top.number)) newest = { number: top.number, state: live.has(top.number) ? 'up_to_date' : 'deleted' };
-    // The newest listed number is another site's split of a chapter we hold: the chapter is here.
-    else if (covered.has(top.number)) newest = { number: top.number, state: 'up_to_date' };
     else if (heldNums.has(top.number)) newest = { number: top.number, state: 'held' };
     else if (await isDisabled(via).catch(() => false)) newest = { number: top.number, state: 'disabled' };
     else if (opts.sourceAllowed && !opts.sourceAllowed(via)) newest = { number: top.number, state: 'denied' };
