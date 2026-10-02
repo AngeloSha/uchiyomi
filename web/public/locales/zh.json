@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2684
+    "strings": 2686
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -101,6 +101,7 @@
   "Chapters": "章节",
   "Chapter {number} is not on the server in {language} yet.": "第 {number} 章的{language}版还不在服务器上。",
   "Check for new chapters": "检查新章节",
+  "Check for new chapters now": "立即检查新章节",
   "Checking your library…": "正在检查你的书库…",
   "Clear all": "全部清除",
   "Clear block": "解除封锁",
@@ -628,6 +629,7 @@
   "Delete from server": "从服务器删除",
   "Delete read chapters": "删除已读章节",
   "Delete {n} chapters from the server?": "要从服务器删除 {n} 章吗？",
+  "Delete 1 chapter from the server?": "要从服务器删除 1 章吗？",
   "Deleted from the server": "已从服务器删除",
   "Fetch": "获取",
   "Fetch again": "重新获取",

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2684
+    "strings": 2686
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -101,6 +101,7 @@
   "Chapters": "Capítulos",
   "Chapter {number} is not on the server in {language} yet.": "O capítulo {number} ainda não está no servidor em {language}.",
   "Check for new chapters": "Procurar novos capítulos",
+  "Check for new chapters now": "Procurar novos capítulos agora",
   "Checking your library…": "Verificando sua biblioteca…",
   "Clear all": "Limpar tudo",
   "Clear block": "Remover bloqueio",
@@ -628,6 +629,7 @@
   "Delete from server": "Excluir do servidor",
   "Delete read chapters": "Excluir capítulos lidos",
   "Delete {n} chapters from the server?": "Excluir {n} capítulos do servidor?",
+  "Delete 1 chapter from the server?": "Excluir 1 capítulo do servidor?",
   "Deleted from the server": "Excluído do servidor",
   "Fetch": "Buscar",
   "Fetch again": "Buscar de novo",

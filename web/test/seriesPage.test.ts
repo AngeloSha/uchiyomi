@@ -324,6 +324,9 @@ test('the favourite button and the save notices are in the reader\'s words (v0.5
   assert.match(page, /\{fav \? tr\('In favourites'\) : tr\('Favourite'\)\}/, 'the favourite button is not translated');
   assert.match(page, /tr\('Saved\. \{n\} readers had finished this chapter\.', \{ n: r\.affectedUsers \}\)/, 'the chapter save notice is not a counted pair');
   assert.doesNotMatch(page, /reader\(s\)/, 'a "(s)" plural is back');
+  // Edit details' check key was the last bare English on the page (v0.52.0). Reintroduce `'Check for new chapters
+  // now'` without tr(): "the check key is English in every language" fails.
+  assert.match(page, /\{checking \? tr\('Checking…'\) : tr\('Check for new chapters now'\)\}/, 'the check key is English in every language');
   assert.match(code(read('app/admin/page.tsx')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
     'Delete files says "file(s)" again');
 });

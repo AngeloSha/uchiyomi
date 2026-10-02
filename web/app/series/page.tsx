@@ -338,7 +338,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
             <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} className="size-4 shrink-0 accent-accent" />
           </label>
           <button onClick={checkNow} disabled={checking} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
-            {checking ? tr('Checking…') : 'Check for new chapters now'}
+            {checking ? tr('Checking…') : tr('Check for new chapters now')}
           </button>
           {/* Mark caught up (v0.52.0): only for a series with a source to fetch from. */}
           {!!series.sources?.length && (
@@ -2184,7 +2184,7 @@ function SeriesInner() {
       {Toolbar}
       {confirming === 'delete' && (
         <ConfirmDialog
-          title={tr('Delete {n} chapters from the server?', { n: deletable.length })}
+          title={deletable.length === 1 ? tr('Delete 1 chapter from the server?') : tr('Delete {n} chapters from the server?', { n: deletable.length })}
           danger
           busy={acting}
           confirmLabel={tr('Delete from server')}
