@@ -30,10 +30,11 @@ On the server this was built for, 84 of 283 series had one; the other 199 showed
   series whose other pages make nothing keeps the one it had.
 - **The tall frame on phones.** On a phone, Home's carousel is taller than it is wide, and a strip of four would show
   the gap between the middle two panels and half of each. A phone gets the same four panels, two by two.
-- **When they are made.** In the background: 20 minutes after the server starts (10 in the desktop app), then daily,
-  up to 60 series a run, ten seconds apart and one at a time, standing aside for the sweep, a repair or the daily
-  source check. A series someone opens before then makes its own, waiting up to 15 seconds for its turn. Until a
-  banner is there, and for a series whose pages make none (not tried again for a week), the page looks as it did.
+- **When they are made.** In the background, one at a time: 20 minutes after the server starts (10 in the desktop
+  app), then daily, up to 60 series a run, ten seconds apart, standing aside for the sweep, a repair or the daily
+  source check. A series you open with no banner of its own, a new one say, gets its own soon after, the same way. A
+  page shows the banner once it is made and never waits for one; until then, and for a series whose pages make none
+  (not tried again for a week), it looks as it did.
 
 ### Review first, for Find other sources
 
@@ -85,7 +86,8 @@ library over.
 - Nothing to change in compose files or settings, and no new environment variables.
 - **For scripts** ([api.md](docs/api.md)):
   - `GET /img/series/:id/hero` is the automatic banner (`?ar=tall` for the two-by-two frame), gated as the series'
-    cover is, and **404** where there is none. Every series payload carries `autoHero`: `{seed}`, or `null`.
+    cover is, and **404** where there is none. Every series payload carries `autoHero`: `{seed}` once the banner is
+    made, or `null`.
     `POST /api/admin/series/:id/hero/shuffle` (admin) makes a new one: `{ok: true, seed}`, or `{ok: false, error:
     'not_made'}` with the old one kept, and **409** `not_automatic` for a series that may not have one.
   - `POST /api/admin/sources/find` takes `review: true`; such a run reads `review: true`, and its series carry
