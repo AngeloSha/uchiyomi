@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.50.0 — (date to be set)
+## v0.50.0 — 2026-10-02
 
 **Following a second site no longer downloads chapters you already have: Uchiyomi compares a chapter's parts, not
 just its numbers, when sites split or number them differently.** Health lists the copies that came in twice before
