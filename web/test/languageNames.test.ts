@@ -52,4 +52,8 @@ test('two sentences never get a plain space after a CJK full stop', () => {
   const prefs = src('components/ExtensionSettings.tsx');
   assert.doesNotMatch(prefs, /reading progress stays\.'\)\}\{' '\}/, 'the renumber warning joins its sentences with a plain space');
   assert.match(prefs, /\{warn\}\{sentenceGap\(warn\)\}/);
+  // v0.53.0's extension sheet: the source count, then what is over the limit (a stray space after 。 in ja and zh).
+  const ext = src('components/ExtensionSheet.tsx');
+  assert.doesNotMatch(ext, /<span className="text-amber-300"> \{over\}<\/span>/, 'the sheet\'s limit line joins its sentences with a plain space');
+  assert.match(ext, /\{over && <>\{sentenceGap\(across\)\}<span className="text-amber-300">\{over\}<\/span><\/>\}/);
 });

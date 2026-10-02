@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
+import { sentenceGap } from '@/lib/jobs';
 import { adultShown } from '@/lib/adult';
 import {
   extLanguageName, langTag, languagesOnText, needsTurningOn, overLimitText, sourceHealth, sourcesOnText,
@@ -72,6 +73,7 @@ export function ExtensionSheet({ ext, status, hiddenLangs, actions, onClose, onL
   const busy = actions.busy[ext.pkgName];
   const off = needsTurningOn(ext);
   const over = overLimitText(status.skipped, status.cap);
+  const across = tr('Across all extensions: {n} of {max} sources on.', { n: status.enabled ?? 0, max: status.cap ?? 0 });
   const name = `⁨${ext.name}⁩`;
 
   /** One language on or off: that source alone, by id. The switch is the list's, so it waits for the list. */
@@ -158,8 +160,8 @@ export function ExtensionSheet({ ext, status, hiddenLangs, actions, onClose, onL
           )}
           {/* The limit where it bites: a switch turned on past it is a source search cannot reach. */}
           <p className="mt-2 text-[12px] leading-relaxed text-fog-500" data-ext-sheet-cap>
-            {tr('Across all extensions: {n} of {max} sources on.', { n: status.enabled ?? 0, max: status.cap ?? 0 })}
-            {over && <span className="text-amber-300"> {over}</span>}
+            {across}
+            {over && <>{sentenceGap(across)}<span className="text-amber-300">{over}</span></>}
           </p>
           <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
             <button type="button" onClick={onLanguages} className="text-accent hover:underline">{tr('Languages hidden in every extension')}&nbsp;›</button>

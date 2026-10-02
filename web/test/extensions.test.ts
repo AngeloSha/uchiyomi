@@ -202,7 +202,8 @@ test('an extension\'s languages are switches, one source each, said to be just t
   assert.match(sheet, /\{tr\('Each language is its own source; turn on the ones you read\.'\)\}/, 'the sheet does not say what a language switch is');
   assert.match(sheet, /<Switch on=\{s\.enabled\} disabled=\{switching === s\.id \|\| !!busy\} label=\{extLanguageName\(s\.lang\)\}/, 'a language has no switch, or one without its name');
   // The limit is said where a switch can cross it.
-  assert.match(sheet, /\{tr\('Across all extensions: \{n\} of \{max\} sources on\.', \{ n: status\.enabled \?\? 0, max: status\.cap \?\? 0 \}\)\}/, 'the source limit is not said beside the switches');
+  assert.match(sheet, /const across = tr\('Across all extensions: \{n\} of \{max\} sources on\.', \{ n: status\.enabled \?\? 0, max: status\.cap \?\? 0 \}\);/);
+  assert.match(sheet, /data-ext-sheet-cap>\s*\{across\}/, 'the source limit is not said beside the switches');
   // Remove asks first, inside the sheet, counting what stops updating.
   assert.match(sheet, /\{!removing \? \(\s*<button type="button" onClick=\{\(\) => setRemoving\(true\)\}/, 'Remove does not ask first');
   assert.match(sheet, /role="alertdialog" aria-label=\{tr\('Remove \{name\}\?', \{ name \}\)\}/);
