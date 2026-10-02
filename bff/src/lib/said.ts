@@ -51,15 +51,6 @@ const day = (iso: string) => new Date(iso).toISOString().slice(0, 10);
 /** "2026-09-23 14:20", UTC, as the English always printed a moment. */
 const minute = (iso: string) => new Date(iso).toISOString().slice(0, 16).replace('T', ' ');
 
-/** A language code as English names it ("Latin American Spanish" for es-419); the web says it in the reader's language. */
-const languageEnglish = (code: string): string => {
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
-  } catch {
-    return code;
-  }
-};
-
 /** A stage of a source (lib/sourceEvidence.ts Stage), as the English names it. */
 type StageName = 'search' | 'chapters' | 'pages' | 'images';
 const STAGE_LABEL: Record<StageName, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
@@ -74,7 +65,10 @@ export function solverVersionLabel(version?: string | null): string {
 }
 /** The engine's version as its Health row says it: " (v2.3.2243)". */
 const engineVersion = (v?: string | null) => (v ? ` (v${v.replace(/^v/i, '')})` : '');
-/** A language code as English names it ("es-419" is "Latin American Spanish"); the code itself where Intl cannot. */
+/**
+ * A language code as English names it ("es-419" is "Latin American Spanish"), the name the web's languageName gives in
+ * English; the code itself where Intl cannot. The web says it in the reader's language.
+ */
 const langName = (code: string) => {
   try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; }
 };
@@ -86,14 +80,6 @@ const where = (above: string | null | undefined) => (above == null ? 'the folder
 const loopedTo = (ancestor: string | undefined, detail: string | undefined) =>
   ancestor !== undefined ? `the same folder as ${ancestor ? `"${ancestor}"` : 'the root'}, reached again through a mount` : detail ?? '';
 const statusWord = (status: string) => (status === 'rate_limited' ? 'rate-limiting' : status === 'blocked' ? 'blocking' : 'unreachable for');
-/** A language code by its English name, "es-419" as "Latin American Spanish": the name the web's languageName gives in English. */
-const languageWord = (code: string): string => {
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
-  } catch {
-    return code;
-  }
-};
 
 /**
  * Every sentence, by code. Each takes its parameters as ONE destructured object (the web's test reads their names
@@ -200,7 +186,7 @@ const EN = {
   'frozen.uninstalled': ({ n, source }: { n: number; source: string }) => `${n} chapters; its source ${source} is no longer installed`,
   // v0.52.0 (#123): its source is MangaDex in a language an admin switched off. `lang` is the app code (es-419).
   'frozen.mangadexOff': ({ n, lang }: { n: number; lang: string }) =>
-    `${n} chapter${s(n, '', 's')}; MangaDex in ${languageEnglish(lang)} is switched off in Admin → Providers`,
+    `${n} chapter${s(n, '', 's')}; MangaDex in ${langName(lang)} is switched off in Admin → Providers`,
   'frozen.following': ({ source, names: followed }: { source: string | null; names: string[] }) =>
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
 
@@ -509,7 +495,7 @@ const EN = {
   // ---- A follow refused for its language (v0.52.0, #123: routes/admin.ts, the manual follow's backstop). `theirs`
   // and `ours` are language codes: the English names them in English, the web in the reader's language.
   'follow.languageDiffers': ({ theirs, ours }: { theirs: string; ours: string }) =>
-    `That source is in ${languageWord(theirs)} and this series is in ${languageWord(ours)}. Add it as an edition in ${languageWord(theirs)} instead: each language keeps its own chapters.`,
+    `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Add it as an edition in ${langName(theirs)} instead: each language keeps its own chapters.`,
 };
 
 export type SaidCode = keyof typeof EN;
