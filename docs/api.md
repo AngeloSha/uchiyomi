@@ -451,7 +451,9 @@ Since v0.40.0 this answers before the slow sources do. `GET /api/sources/search-
 when every source you may reach has answered, when `wait` milliseconds have passed (clamped to
 `SEARCH_FIRST_ANSWER_MS`, default 6000; omitted means that maximum), or `SEARCH_GRACE_MS` (default 1500) after
 the first source that had results — whichever comes first. `content` keeps its shape (title-grouped cards, or
-one rail per source with `groupBy=source`); beside it, `sources` lists each source you may reach with a `state`
+one rail per source with `groupBy=source`; a card for a title already in the library carries `inLibrary: true` and,
+since v0.50.0, `librarySeriesId`, the series it opens — as do the results of `search`, `latest` and `popular`);
+beside it, `sources` lists each source you may reach with a `state`
 (`ok`, `empty`, `timeout`, `failed`, `pending`, or `skipped` with `why: disabled | cooldown` for one that was
 not asked at all), `pending` counts the ones still being asked and `asked` the ones asked at all. While
 `pending` is above 0, repeat the same request with a short `wait` (`wait=0` reads what is there without
@@ -627,7 +629,7 @@ reach every surface the default does: listings, OPDS, the Komga-compatible API, 
 automatic source hunt, which never follows a named source onto a series that is not itself adult. They widen
 what is hidden and never what is allowed: `max_age_rating` stays the only permission.
 Since v0.50.0 a series rated 18+ itself (its own rating, or the admin's override) is hidden like one in an 18+
-library, and *Always show* lets a title through all three rules -- the library's rating, its own and its genres.
+library, and *Always show* lets a title through all three rules — the library's rating, its own and its genres.
 It is a shelf switch, not a permission: an account capped below the series' rating still cannot see it.
 
 **Since v0.42.0 the same default covers Discover's sources.** A source whose extension declares itself
@@ -801,7 +803,7 @@ sweep, or **Check now**) that this server has no row for, each with the reason �
 waitingFor?, waitDaysLeft?, read?}`, `why` one of `missing` (not fetched yet), `held` (waiting for a preferred
 group under the release preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how
 many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor),
-`covered` (since v0.50.0: another site's split of a chapter this server holds -- a number not on disk, at a whole
+`covered` (since v0.50.0: another site's split of a chapter this server holds — a number not on disk, at a whole
 number the disk holds a file at, from a source none of those files came from; the sweep never fetches it and it is
 not counted in `source_missing`, but `POST /api/sources/fetch` still takes it).
 A `held` ghost also carries `waitingFor` (since v0.34.0) — the effective first-choice group it is being
@@ -1996,7 +1998,7 @@ at all. Turned on, `GET /api/v1/series/:id/books` also lists the chapters this s
 **tombstones** it stops filtering out (`media_status=READY` no longer excludes them), and the **ghosts** —
 numbers the sources listed at the last check with no chapter row at all, from `series_listing`, whatever the
 reason they are absent, the chapter floor included. They are merged into the ordinary chapter order by number,
-not appended. Since v0.50.0 a `covered` number -- another site's split of a chapter this server holds -- is not a
+not appended. Since v0.50.0 a `covered` number — another site's split of a chapter this server holds — is not a
 ghost: the reader has the chapter, and Mihon could neither fetch it nor clear it.
 
 A ghost's id is `g_<series id>~<number>`, the decimal point kept as a point (chapter 10.5 is `g_s_…~10.5`).

@@ -1,5 +1,89 @@
 # Changelog
 
+## v0.50.0 — (date to be set)
+
+**Following a second site no longer downloads chapters you already have: Uchiyomi compares a chapter's parts, not
+just its numbers, when sites split or number them differently.** Health lists the copies that came in twice before
+this release and deletes them when you say so, a card under Needs attention can be dismissed from the start, and
+three pull requests from [@Squeaks72](https://github.com/Squeaks72): Previous chapter opens at the last page and
+stray taps no longer skip ahead ([#129](https://github.com/AngeloSha/uchiyomi/pull/129)), the 18+ filter honours a
+series' own rating ([#130](https://github.com/AngeloSha/uchiyomi/pull/130)), and a card in Discover for a series you
+own opens it ([#131](https://github.com/AngeloSha/uchiyomi/pull/131)).
+
+### Chapter parts that sites number or split differently
+
+A long chapter is often posted in parts, and sites do not agree on how to number them. On *Tales of Demons and Gods*
+mangapill posts a chapter as 335 and 335.5, mangaread as 335.1 and 335.6; another site splits chapter 78 of *The
+Great Mage Returns After 4000 Years* into ten parts, 78 and 78.1 to 78.9, where the server had it as one file. The
+updater compared exact numbers, so once the main source of the server this was built for went offline and its series
+followed sites like these, it took their numbers for new chapters: on 1 October it downloaded about a hundred
+chapters that were already there.
+
+- **The same parts under other numbers are the same parts.** When a site lists as many parts of a chapter as you
+  have (two or more) under other numbers, they are matched in order: its 335.1 and 335.6 are your 335 and 335.5, and
+  nothing is downloaded. A part you are missing is saved under your numbering. With nothing of that chapter on disk
+  yet, the main source's numbering decides, then the numbering most of the series' chapters already use, so two
+  sites that disagree still give you one copy of each part.
+- **Another split of a chapter you have is not a new chapter.** A part a site lists at a chapter you already hold a
+  file for, from a different site than that file came from, shows on the series page as *another split of a chapter
+  you have*. The updater leaves it alone, it is not counted in *{n} not here yet*, and *Fetch newest* reads the series
+  as up to date; the cloud icon on the row still fetches it if you want it. A part the same site lists beside the
+  chapter it already gave you is part of that site's own numbering and is downloaded as before, which is how a real
+  extra like 40.5 still arrives.
+- **What you will see.** No more second copies after following another site, and grey rows like *78.1 · another
+  split of a chapter you have* under chapters you hold. Mihon does not list those rows. Neither rule touches a series
+  numbered by posting order, or one whose numbering change is waiting for you.
+
+### Health: the same chapter saved twice
+
+- **A new check, *The same chapter saved twice*,** lists series where two sites' splits of one chapter are both on
+  disk, the second having arrived after the first: 335.1 and 335.6 from mangaread beside 335 and 335.5 from
+  mangapill. Each row names the files that arrived later and offers **Delete chapters** for exactly those; the
+  card's **Fix all** does the same for every row, after a confirmation that lists them. It is information, never a
+  warning, and nothing is deleted until you confirm. A part one site supplied under another's numbers, when that
+  site lists it too, is not a second copy and is not listed. Deleted files stay listed as deleted chapters, everyone
+  keeps their reading history, and updates do not fetch them back.
+
+### Needs attention: Dismiss from the start
+
+- A card of chapters that could not be saved, from the scheduled check or *Check now*, offered **Try again** and
+  **Open**, and **Dismiss** appeared only after a *Try again* had made a download of it: the server refused to
+  dismiss a card with no download behind it. Every such card now has **Dismiss** from the start, for an admin or
+  whoever started the download. Dismissing a failed download no longer brings its chapters back as a card of their
+  own, and a restart does not bring a dismissed card back either.
+
+### From @Squeaks72
+
+- **Previous chapter opens at its last page, and stray taps no longer leave a chapter**
+  ([#129](https://github.com/AngeloSha/uchiyomi/pull/129)). Previous chapter, the footer button and `[`, opens the
+  chapter before at its last page, and a chapter whose last pages are hidden opens at its last remaining page instead
+  of the first. The footer's next-chapter button asks for a second press within three seconds unless you are within
+  two pages of the end; holding `[`, `]`, `f` or Escape does not repeat; a tap right after a double tap is ignored; tap
+  turns can no longer overshoot, and paged mode moves one page per swipe. Merged as it was.
+- **The 18+ filter honours a series' own rating** ([#130](https://github.com/AngeloSha/uchiyomi/pull/130)). With
+  *Show 18+* off, a series rated 18+ on its own page, or by an admin, leaves Home's *Continue reading*, the Library and
+  every rail, as one in an 18+ library always did. **Always show** keeps a series on the shelf against all three: its
+  library's rating, its own and its genres. The pull request also let *Always show* lift an account's age limit for
+  that series, and that part was left out: *Always show* is a shelf switch in the edit dialog, and who may open a
+  series stays each account's age limit. To let an account with a limit read one title, rate that title lower. The
+  switch's help text says what it does, in every language.
+- **A card in Discover for a series you own opens it** ([#131](https://github.com/AngeloSha/uchiyomi/pull/131)). A
+  card marked *In library* was a disabled button; it now opens the series in your library. The pull request's tests
+  failed on something it did not touch: a test deleted a series while a background refresh was writing that series'
+  chapter list, and the two deadlocked. The refresh now locks the series first, so deleting a series (*Forget*) while
+  its list is being refreshed can no longer fail with "deadlock detected" either.
+
+### Upgrading
+
+- No database change: the stored chapter listing gains a status, `covered`, in a column it already has. Nothing to
+  change in compose files or settings.
+- **For scripts** ([api.md](docs/api.md)): `GET /api/series/:id/listing` can answer `why: covered`; `GET
+  /api/admin/health` has a new check, `saved-twice`; `DELETE /api/sources/jobs/:folder` also dismisses a folder's
+  failed chapters when the folder has no job, and dismissing a job clears them too. The search results of
+  `/api/sources/search`, `search-all`, `latest` and `popular` carry `librarySeriesId` beside `inLibrary`. `adultExempt`
+  on `PUT /api/admin/series/:id/meta` now also outranks a series' own 18+ rating and an 18+ library in listings; it
+  does not lift `max_age_rating`.
+
 ## v0.49.2 — 2026-09-29
 
 **The Library can be filtered by where a series comes from: Main source shows the series added from a source, and
