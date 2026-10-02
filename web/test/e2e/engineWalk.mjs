@@ -211,6 +211,9 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
     await go('/admin/?tab=Extensions&view=browse', 3500);
     const count = await waitFor(() => page.$eval('[data-ext-count]', (e) => e.textContent), 15_000);
     check(`${tag}: Browse counts every match: ${MATCHED.toLocaleString('en')}`, (count || '').startsWith(`${MATCHED.toLocaleString('en')} extensions match`), String(count));
+    // The tab said "Browse 1,304" over this list of 1,118: it counted the 18+ extensions the list leaves out.
+    const tabSays = await page.$eval('[data-ext-view="browse"]', (e) => e.textContent || '').catch(() => '');
+    check(`${tag}: the Browse tab says the same number`, tabSays.replace(/\s+/g, ' ').trim().endsWith(MATCHED.toLocaleString('en')), tabSays);
     check(`${tag}: no sideways scroll on Browse`, (await sideways()) <= 0, String(await sideways()));
     await scrollTo('[data-ext-search]');
     await shot(`${tag}-2-browse`);
