@@ -7,7 +7,7 @@
  *
  * Server text stays English; the web words the codes (`too_short`, `non_latin`, `exists`, `busy`, `empty_scope`).
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q } from '../lib/db';
 import { userIdOf, roleOf } from '../lib/auth';
@@ -15,12 +15,37 @@ import { logAudit } from '../lib/audit';
 import { browsableIds, hideAdult, seriesVisible, viewCtxFor } from '../lib/visibility';
 import { altTitleRows, recordAltTitles, refuseName, removeAltTitle, MAX_NAME_LEN } from '../lib/altTitles';
 import { normTitle } from '../lib/titleMatch';
-import { findState, startFind, stopFind, type FindScope } from '../lib/findSources';
+import { POSTING_ORDER_REFUSAL } from '../lib/numbering';
+import {
+  decideProposal, findState, startFind, stopFind, type DecideRefusal, type FindProposal, type FindResult, type FindScope,
+} from '../lib/findSources';
 
 const REFUSED: Record<string, string> = {
   too_short: 'A name needs at least five letters or digits to be matched.',
   non_latin: 'Only names written in Latin letters can be matched.',
 };
+
+/** A review decision that did not happen (lib/findSources.ts decideProposal): its status and its words. */
+const DECLINED: Record<DecideRefusal, [number, string]> = {
+  not_found: [404, 'That run has no such proposal.'],
+  decided: [409, 'That proposal has been decided already.'],
+  posting_order: [409, POSTING_ORDER_REFUSAL],
+  source_unavailable: [409, 'That source is not available for this series right now.'],
+  already_followed: [409, 'The series follows that source already.'],
+  full: [409, 'The series already follows as many other sources as a series may.'],
+};
+
+/**
+ * One series' result as this viewer may read it: a series they may not list keeps its entry without its title, and
+ * its proposals without the candidates' titles, covers and pages, which would name it as plainly (v0.51.0).
+ * Reintroduce by keeping the proposals as stored: "a review-first run follows nothing" in findSources.int.test.ts
+ * reads the adult series' candidate with the 18+ hide on.
+ */
+function shown(r: FindResult, ok: Set<string>): Omit<FindResult, 'proposals'> & { proposals?: Array<Partial<FindProposal>> } {
+  if (ok.has(r.seriesId)) return r;
+  const { title: _t, ...rest } = r;
+  return rest.proposals ? { ...rest, proposals: rest.proposals.map(({ title: _pt, coverUrl: _c, url: _u, ...p }) => p) } : rest;
+}
 
 /** A series' names as the admin reads them: who added one by name, never by account id. */
 async function titlesOf(seriesId: string) {
@@ -101,11 +126,13 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
    * Start a run over the series named, or over every series whose MAIN source is `sourceId` (the "this source is
    * down" case Health's button sends). One at a time: 409 `busy` with the running run's id. 400 `empty_scope` when
    * nothing named is a series this admin may see. 202 with the run's id and how many series it will ask about.
+   * `review: true` (v0.51.0): review first -- the same run, which follows nothing and keeps its candidates.
    */
   app.post('/api/admin/sources/find', async (req, reply) => {
     const b = z.object({
       seriesIds: z.array(z.string().min(1).max(64)).max(500).optional(),
       sourceId: z.string().min(1).max(200).optional(),
+      review: z.boolean().optional(),
     }).strict().safeParse(req.body ?? {});
     if (!b.success || (b.data.seriesIds && b.data.sourceId)) {
       return reply.code(400).send({ error: 'bad_request', message: 'Name the series ({seriesIds}) or one source ({sourceId}).' });
@@ -117,7 +144,7 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
     const h = req.headers;
     const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
     // The admin's own view, without the 18+ hide: that is a tidy screen, and the scope is what they asked for.
-    const r = await startFind(scope, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)), from);
+    const r = await startFind(scope, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)), from, { review: b.data.review });
     if ('busy' in r) return reply.code(409).send({ error: 'busy', runId: r.busy, message: 'A Find other sources run is already going.' });
     if ('empty' in r) return reply.code(400).send({ error: 'empty_scope', message: 'None of those series can be searched for.' });
     return reply.code(202).send(r);
@@ -138,10 +165,30 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
       run: {
         ...rest,
         ...(current && ok.has(current.seriesId) ? { current } : {}),
-        results: run.results.map(({ title, ...r }) => (ok.has(r.seriesId) ? { ...r, title } : r)),
+        results: run.results.map((r) => shown(r, ok)),
       },
     };
   });
+
+  /**
+   * A review-first run's proposal, decided (v0.51.0): follow it -- checked again, then the same write as every follow,
+   * under the follower cap -- or dismiss it. Body `{seriesId, sourceId}`; the rest is the run's own record. 200 with
+   * the series' result as it now reads; 404 `not_found`; 409 `decided` (with `state`), `posting_order`,
+   * `source_unavailable`, `already_followed` or `full` (lib/findSources.ts decideProposal says each).
+   */
+  const decision = (kind: 'follow' | 'dismiss') => async (req: FastifyRequest, reply: FastifyReply) => {
+    const { runId } = req.params as { runId: string };
+    const b = z.object({ seriesId: z.string().min(1).max(64), sourceId: z.string().min(1).max(200) }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Name the series and the source ({seriesId, sourceId}).' });
+    const out = await decideProposal(runId, b.data.seriesId, b.data.sourceId, kind, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)));
+    if ('refused' in out) {
+      const [code, message] = DECLINED[out.refused];
+      return reply.code(code).send({ error: out.refused, message, ...(out.state ? { state: out.state } : {}) });
+    }
+    return { result: shown(out.result, await listable(req, [out.result.seriesId])) };
+  };
+  app.post('/api/admin/sources/find/:runId/follow', decision('follow'));
+  app.post('/api/admin/sources/find/:runId/dismiss', decision('dismiss'));
 
   /** Stop the running run at once. `stopped` is false when none was running. */
   app.post('/api/admin/sources/find/stop', async (req) => {

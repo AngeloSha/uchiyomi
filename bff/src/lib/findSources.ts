@@ -36,15 +36,28 @@
 // result outlives the tab and a restart. A shutdown gives the run a moment to close its own row (server.ts,
 // findSettledWithin); a row still `running` after a restart is closed as `interrupted` all the same, with every
 // series it never reached listed as `not_tried`, exactly as a stopped run lists them.
+//
+// Review first (v0.51.0, #132; the idea is @TIGamingTV's, PR #133): a run started with `review` searches and judges
+// exactly as above and follows nothing. Each series keeps the candidates the judgement would follow (green) or that
+// a person should look at (amber: the chapter numbers do not line up though a name matches exactly, or it matched
+// only under another name) as `proposals` in its result, with the candidate's cover, so an admin confirms each by
+// eye -- TI caught a wrong match by its cover that the automatic judgement would have followed. A proposal is then
+// followed (decideProposal: checked again, then followJudged under the cap) or dismissed, one at a time, and says
+// which it was. The mode is kept in the run's `scope` (`review: true`): no column, so v0.50.0 boots on the same rows.
 import { randomUUID } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
-import { q, one } from './db';
+import { q, one, tx } from './db';
 import { getSource, listSources } from './sources';
+import type { SourceSeries } from './sources/types';
 import { healthAll } from './sourceHealth';
 import { scanOrder } from './scanOrder';
-import { judgeCandidate, followJudged, bounded, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts } from './autoFollow';
+import {
+  judgeCandidate, followJudged, bounded, titleMatch, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts,
+} from './autoFollow';
+import { chooseReleases, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
-import { MIN_HAVE } from './fill';
+import { assess, MIN_HAVE } from './fill';
+import { postingOrderSeries } from './numbering';
 import { haveNumbers } from './libraryNumbers';
 import { altTitlesFor, SEARCH_NAMES } from './altTitles';
 import { searchByNames, seriesIsAdult, sweepAllowedFor, takeHuntSlot, releaseHuntSlot } from './sourceHunt';
@@ -57,7 +70,7 @@ import { updateSeries } from './updater';
 import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
-import { visibleToAll, type ViewCtx } from './visibility';
+import { seriesVisible, visibleToAll, type ViewCtx } from './visibility';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -98,10 +111,34 @@ export type FindWhy =
   | 'refused' | 'no_answer' | 'followed_already' | 'no_match' | 'not_tried';
 export interface FoundSource { sourceId: string; name: string; chapters: number }
 /**
- * `title` is left out for a series the viewer may not list (routes/findSources.ts), and for one a restart's close
- * could no longer find in the library.
+ * A candidate a review-first run kept for an admin to confirm (v0.51.0), the best one per source -- the hunt's search
+ * stops on a source at its first hit. `verdict` is green when the judgement would have followed it, amber when a
+ * person should look first (`amber` says why). `coverUrl` is the source's own, as its search gave it: the web shows
+ * it through the cover proxy (/img/sources/cover), as every source cover is shown. `ours` is how many of our chapter
+ * numbers it lists, `theirs` how many of its numbers we list (whole numbers, as the judgement counts them). `state`
+ * is set once an admin decided.
  */
-export interface FindResult { seriesId: string; title?: string; followed: FoundSource[]; why?: FindWhy }
+export interface FindProposal {
+  sourceId: string;
+  sourceName: string;
+  sourceSeriesId: string;
+  url?: string;
+  title: string;
+  coverUrl?: string;
+  chapters: number;
+  ours: { lined: number; of: number };
+  theirs: { lined: number; of: number };
+  coverage: number | null;
+  verdict: 'green' | 'amber';
+  amber?: 'numbering' | 'other_name';
+  state?: 'followed' | 'dismissed';
+}
+/**
+ * `title` is left out for a series the viewer may not list (routes/findSources.ts), and for one a restart's close
+ * could no longer find in the library. `proposals` only in a review-first run, for a series that has any: it then
+ * carries no `why`, and `followed` gains each proposal an admin follows.
+ */
+export interface FindResult { seriesId: string; title?: string; followed: FoundSource[]; why?: FindWhy; proposals?: FindProposal[] }
 export type FindScope = { seriesIds: string[] } | { sourceId: string };
 
 interface ActiveRun {
@@ -109,6 +146,8 @@ interface ActiveRun {
   userId: string;
   startedAt: number;
   scope: FindScope;
+  /** Review first: judge and keep the candidates, follow nothing. */
+  review: boolean;
   total: number;
   done: number;
   followed: number;
@@ -169,10 +208,12 @@ export async function closeInterruptedFindRuns(): Promise<void> {
  * Start a run. Answers `busy` (with the running run's id) while another is going, `empty` when the scope names no
  * series this viewer may see, else the new run's id and how many series it will ask about -- with the run already
  * going in the background. `from` is the request's IP and user agent for the audit line written when it ends.
+ * `review`: review first (v0.51.0) -- the same run, which keeps its candidates for an admin instead of following.
  */
 export async function startFind(
-  scope: FindScope, userId: string, ctx: ViewCtx, from?: FastifyRequest,
+  scope: FindScope, userId: string, ctx: ViewCtx, from?: FastifyRequest, o: { review?: boolean } = {},
 ): Promise<{ runId: string; total: number } | { busy: string } | { empty: true }> {
+  const review = o.review === true;
   const running = findRunning();
   if (running) return { busy: running };
   const id = randomUUID();
@@ -185,7 +226,7 @@ export async function startFind(
     // away under the run. Reintroduce by storing {sourceId} alone: "a restart lists every series the run never
     // reached as not tried" in findSources.int.test.ts finds no seriesIds in the scope.
     const ids = list.map((s) => s.id);
-    const stored = 'sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids };
+    const stored = { ...('sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids }), ...(review ? { review } : {}) };
     await q(`INSERT INTO source_find_runs (id, started_by, status, scope, total) VALUES ($1, $2, 'running', $3::jsonb, $4)`,
       [id, userId, JSON.stringify(stored), list.length]);
     const card = beginRun('find_sources', userId, list.length);
@@ -196,7 +237,7 @@ export async function startFind(
     let signal!: () => void;
     const stopped = new Promise<void>((r) => { signal = r; });
     const a: ActiveRun = {
-      id, userId, startedAt: Date.now(), scope, total: list.length, done: 0, followed: 0, results: [],
+      id, userId, startedAt: Date.now(), scope, review, total: list.length, done: 0, followed: 0, results: [],
       current: null, waiting: null, stop: false, stopped, signal, card,
     };
     active = a;
@@ -298,6 +339,7 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
         runId: a.id, scope: 'sourceId' in a.scope ? { sourceId: a.scope.sourceId } : { seriesIds: a.total },
         status, total: a.total, done: a.done, followed: a.followed,
         series: a.results.filter((r) => r.followed.length).length,
+        ...(a.review ? { review: true, proposed: a.results.filter((r) => r.proposals?.length).length } : {}),
       },
       req: from,
     });
@@ -314,6 +356,37 @@ async function numbersOf(seriesId: string): Promise<number[]> {
   const listed = await q<{ number: number }>('SELECT DISTINCT number::float8 AS number FROM series_listing WHERE series_id = $1', [seriesId]);
   const held = await haveNumbers(seriesId);
   return [...new Set([...listed.map((r) => Number(r.number)), ...held])].filter((n) => Number.isFinite(n));
+}
+
+/**
+ * A judgement as a review's proposal (v0.51.0), or null when it is not one to show. Green is exactly what an automatic
+ * run follows -- `ok` -- on our own title (equal, or one inside the other, as titleMatch reads it). Amber is for a
+ * person to look at: `ok` only because the candidate is equal to one of the series' OTHER names (`other_name`), or a
+ * name matched EXACTLY and the chapter numbers do not line up (`numbering`). Out: a title that differs, a source that
+ * did not answer, and -- PR #133's rule -- numbers that do not line up under a title that merely contains ours, which
+ * is what a sequel or a spin-off looks like. The line-up is counted as judgeCandidate counts it: one copy per number
+ * under the series' release preferences, whole numbers, both ways.
+ */
+function proposalOf(j: Judgement, hit: SourceSeries | null, primary: PrimaryFacts, prefs: ReleasePrefs): FindProposal | null {
+  if (!j.theirTitle || (j.why !== 'ok' && j.why !== 'numbering_differs')) return null;
+  // Reintroduce by dropping this line: "a review-first run follows nothing" reads Kappa Story's sequel proposed.
+  if (j.why === 'numbering_differs' && titleMatch(j.theirTitle, primary) !== 'exact') return null;
+  const byTitle = titleMatch(j.theirTitle, { title: primary.title }) !== null;
+  const nums = chooseReleases(j.chapters ?? [], prefs).releases.map((c) => c.number);
+  const whole = (xs: number[]) => new Set(xs.map((n) => Math.floor(n))).size;
+  const green = j.why === 'ok' && byTitle;
+  return {
+    sourceId: j.source, sourceName: j.name, sourceSeriesId: j.sourceSeriesId,
+    ...(hit?.url ? { url: hit.url } : {}),
+    title: j.theirTitle,
+    ...(hit?.coverUrl ? { coverUrl: hit.coverUrl } : {}),
+    chapters: new Set((j.chapters ?? []).map((c) => c.number)).size,
+    ours: { lined: assess(primary.numbers, nums).matched, of: whole(primary.numbers) },
+    theirs: { lined: assess(nums, primary.numbers).matched, of: whole(nums) },
+    coverage: j.coverage,
+    verdict: green ? 'green' : 'amber',
+    ...(green ? {} : { amber: j.why === 'ok' ? 'other_name' as const : 'numbering' as const }),
+  };
 }
 
 /**
@@ -366,6 +439,8 @@ async function findFor(
   const deadline = Date.now() + wallMs;
   const left = () => deadline - Date.now();
   const judged: Array<Judgement | null> = new Array(order.length).fill(null);
+  // The search hit behind each judgement: its cover and page, for a review's proposal.
+  const hits: Array<SourceSeries | null> = new Array(order.length).fill(null);
   let carriers = 0, ok = 0, answered = 0, asked = false, refused = false, unjudged = false, cut = false;
   const enough = () => ok >= free || carriers >= FIND_CARRIERS;
   // Scan order, under the hunt's slots (FIFO, so the order is the order sources are asked in). A source whose turn
@@ -388,6 +463,7 @@ async function findFor(
         .catch(() => null);
       if (!j) { cut = true; return; }
       judged[i] = j;
+      hits[i] = found.hit;
       if (j.why === 'ok') ok++;
       // Failed the title or the chapter-number check: the one thing `refused` says. (`too_few_listed` cannot come
       // back: a series listing too few numbers ended `too_few` before any search.)
@@ -398,11 +474,24 @@ async function findFor(
     } finally { releaseHuntSlot(); }
   }));
 
+  // Review first: nothing is followed. What the judgement found is kept for an admin, in scan order, and a series
+  // with any of it ends here; one with none says why exactly as an automatic run would. Cut short by a stop, it is
+  // `not_tried` (below), as automatic mode's series in flight is: what was found so far is not the whole answer.
+  if (a.review) {
+    const proposals = isStopped(a) ? [] : judged.flatMap((j, i) => {
+      const p = j ? proposalOf(j, hits[i], primary, prefs) : null;
+      return p ? [p] : [];
+    });
+    if (proposals.length) return { result: { seriesId: s.id, title: s.title, followed: [], proposals }, asked };
+  }
+
   // The follows, in scan order, so which of several good sources the series takes is the order they were asked
   // in and not whichever answered first. Under followJudged's cap and lock: a hunt that followed one meanwhile
-  // turns the next into `cap`.
+  // turns the next into `cap`. Never in review mode: an admin follows from the proposals (decideProposal).
+  // Reintroduce by dropping the review branch above and this guard: "a review-first run follows nothing" in
+  // findSources.int.test.ts finds its series following the sources it should have proposed.
   let capped = false, gone = false;
-  for (const j of judged) {
+  for (const j of a.review ? [] : judged) {
     if (!j || j.why !== 'ok') continue;
     if (progress.length >= free || isStopped(a)) break;
     const written = await followJudged(s.id, j, { addedBy: a.userId }).catch(() => 'gone' as const);
@@ -465,6 +554,106 @@ function scheduleFindRefresh(ids: readonly string[]): void {
   })();
 }
 
+// ---- deciding a review --------------------------------------------------------------------------------------
+
+/** Why a proposal was not followed or dismissed; the route answers each with its own status and words. */
+export type DecideRefusal = 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'already_followed' | 'full';
+
+/** One decision at a time in this process: the check, the follow and the mark of one never interleave another's. */
+let deciding: Promise<unknown> = Promise.resolve();
+
+/**
+ * Follow one proposal of a review-first run, or dismiss it (v0.51.0; POST /api/admin/sources/find/:runId/follow and
+ * …/dismiss). The client names a series and a source; WHAT is followed -- the source's series id, its title, the
+ * coverage -- is the run's own record, never the client's, as the manual route takes a candidate only from its own
+ * scan plan. A follow is checked again against what may have changed since the run judged it, and refused with the
+ * reason:
+ *   - `not_found`: no such run, proposal or series, or a series this admin may not see;
+ *   - `decided`: followed or dismissed already (with `state`) -- a dismissed proposal stays dismissed;
+ *   - `posting_order`: numbered by posting order since (#116), whose followers are never merged;
+ *   - `source_unavailable`: the source is no longer loaded, is switched off, is the series' main source now, or is
+ *     one the series may not reach (an adult source only for an adult series: the run's own rule);
+ *   - `already_followed`: the series follows that source already. INSERT-only, PR #133's rule: a run is kept for
+ *     weeks, and a source followed another way since may point at another entry, which a stale proposal must not
+ *     re-point;
+ *   - `full`: followJudged's cap -- the same write as every other follow, under the series row's lock.
+ * Followed, it is written with this admin as its author and gets the listing refresh an automatic run's follows get.
+ */
+export function decideProposal(
+  runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
+): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+  const next = deciding.then(() => decide(runId, seriesId, sourceId, decision, userId, ctx));
+  deciding = next.catch(() => {});
+  return next;
+}
+
+async function decide(
+  runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
+): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+  const find = (results: FindResult[] | undefined) => {
+    const r = results?.find((x) => x.seriesId === seriesId);
+    return { r, p: r?.proposals?.find((x) => x.sourceId === sourceId) };
+  };
+  const stored = await one<{ scope: { review?: boolean } | null; results: FindResult[] }>(
+    'SELECT scope, results FROM source_find_runs WHERE id::text = $1', [runId]);
+  const { p } = find(stored?.scope?.review ? stored.results : undefined);
+  if (!p || !(await seriesVisible(seriesId, ctx))) return { refused: 'not_found' };
+  // Final: reintroduce by dropping this line and "a dismissed proposal stays dismissed" follows it.
+  if (p.state) return { refused: 'decided', state: p.state };
+  if (decision === 'follow') {
+    const series = await one<{ title: string; source_id: string | null }>('SELECT title, source_id FROM lib_series WHERE id = $1', [seriesId]);
+    if (!series) return { refused: 'not_found' };
+    // The manual route's refusal, before anything is written. Reintroduce by dropping it, or the already-followed
+    // line, or the `cap` arm below: "following a proposal follows exactly that one" fails by the rule's own name.
+    if (await postingOrderSeries(seriesId)) return { refused: 'posting_order' };
+    const h = await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]).catch(() => null);
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId));
+    if (!getSource(sourceId) || h?.disabled || series.source_id === sourceId || !allowed(sourceId)) return { refused: 'source_unavailable' };
+    if (await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId])) return { refused: 'already_followed' };
+    const written = await followJudged(seriesId,
+      { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },
+      { addedBy: userId }).catch(() => 'gone' as const);
+    if (written === 'cap') return { refused: 'full' };
+    if (written !== 'inserted') return { refused: 'not_found' };
+    await logAudit('series.follow_source', {
+      userId,
+      detail: {
+        id: seriesId, title: series.title, source: sourceId, sourceSeriesId: p.sourceSeriesId, coverage: p.coverage, theirTitle: p.title,
+        via: 'find_review', runId, verdict: p.verdict, ...(p.amber ? { amber: p.amber } : {}),
+      },
+    });
+  }
+  const state = decision === 'follow' ? 'followed' as const : 'dismissed' as const;
+  const mark = (r: FindResult, prop: FindProposal) => {
+    prop.state = state;
+    if (state === 'followed' && !r.followed.some((f) => f.sourceId === prop.sourceId)) {
+      r.followed.push({ sourceId: prop.sourceId, name: prop.sourceName, chapters: prop.chapters });
+    }
+  };
+  // Marked under the run row's lock: the run itself may be appending the next series' result meanwhile.
+  const result = await tx(async (qq) => {
+    const row = (await qq<{ results: FindResult[] }>('SELECT results FROM source_find_runs WHERE id::text = $1 FOR UPDATE', [runId]))[0];
+    const { r, p: prop } = find(row?.results);
+    if (!row || !r || !prop) return null;
+    mark(r, prop);
+    await qq('UPDATE source_find_runs SET results = $2::jsonb, followed = followed + $3 WHERE id::text = $1',
+      [runId, JSON.stringify(row.results), state === 'followed' ? 1 : 0]);
+    return r;
+  });
+  // The run going now is read from memory (findState), which must say the same.
+  const a = active;
+  if (a?.id === runId) {
+    const { r, p: prop } = find(a.results);
+    if (r && prop) mark(r, prop);
+    if (state === 'followed') a.card.followed = ++a.followed;
+  }
+  if (state === 'followed') {
+    scheduleFindRefresh([seriesId]);
+    scheduleHealthSummaryRefresh();
+  }
+  return result ? { result } : { refused: 'not_found' };
+}
+
 // ---- reading it back ----------------------------------------------------------------------------------------
 
 export interface FindRunSummary {
@@ -480,6 +669,8 @@ export interface FindRunSummary {
   /** The source whose series it was about, when the scope was a source: what the Health button asked. */
   sourceId?: string;
   sourceName?: string;
+  /** Review first (v0.51.0): it followed nothing itself, and its results carry `proposals`. */
+  review?: true;
 }
 export interface FindRun extends FindRunSummary {
   current?: { seriesId: string; title: string };
@@ -490,11 +681,13 @@ export interface FindRun extends FindRunSummary {
 
 type Row = {
   id: string; status: FindStatus; total: number; done: number; followed: number; username: string | null;
-  started_at: Date; finished_at: Date | null; scope: { sourceId?: string } | null; results?: FindResult[];
+  started_at: Date; finished_at: Date | null; scope: { sourceId?: string; review?: boolean } | null; results?: FindResult[];
 };
 const iso = (d: Date | string) => new Date(d).toISOString();
-const scopeOf = (scope: { sourceId?: string } | null | undefined) =>
-  (scope?.sourceId ? { sourceId: scope.sourceId, sourceName: getSource(scope.sourceId)?.name ?? scope.sourceId } : {});
+const scopeOf = (scope: { sourceId?: string; review?: boolean } | null | undefined) => ({
+  ...(scope?.sourceId ? { sourceId: scope.sourceId, sourceName: getSource(scope.sourceId)?.name ?? scope.sourceId } : {}),
+  ...(scope?.review === true ? { review: true as const } : {}),
+});
 const summaryOf = (r: Row): FindRunSummary => ({
   id: r.id, status: r.status, total: Number(r.total), done: Number(r.done), followed: Number(r.followed),
   startedBy: r.username, startedAt: iso(r.started_at), ...(r.finished_at ? { finishedAt: iso(r.finished_at) } : {}),

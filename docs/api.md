@@ -1103,6 +1103,8 @@ POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/find    GET    /api/admin/sources/find
 POST   /api/admin/sources/find/stop
+POST   /api/admin/sources/find/:runId/follow
+POST   /api/admin/sources/find/:runId/dismiss
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
@@ -1667,6 +1669,24 @@ and the counts (each follow as `series.follow_source` with `via: find_sources`).
 own `waiting`) while it waits for one of those. On Health, a failing (or turned-off) source that is some
 series' main source carries the action `find_sources` with `findSeries`, and so does a "Series that can no longer
 update" row whose reason is its source.
+
+**Review first** (since v0.51.0, #132; @TIGamingTV's idea from PR #133). `POST /api/admin/sources/find` with
+`review: true` runs the same search and the same judgement, follows nothing, and keeps what it found: the run
+reads `review: true`, and a series with candidates carries `proposals` (and no `why`) -- the best candidate per
+source, in scan order, `{sourceId, sourceName, sourceSeriesId, url?, title, coverUrl?, chapters, ours: {lined, of},
+theirs: {lined, of}, coverage, verdict, amber?, state?}`. `coverUrl` is the source's own (show it through `GET
+/img/sources/cover`); `ours` is how many of the series' chapter numbers it lists, `theirs` how many of its numbers
+the series lists. `verdict: green` is what an automatic run would follow; `amber` is for a person to look at --
+`amber: numbering` (a name matches exactly, the numbers do not line up) or `other_name` (it lines up, but matched
+only under another name of the series). A title that merely contains the series' with numbers that do not line up
+(a sequel's shape) is never proposed. `POST /api/admin/sources/find/:runId/follow {seriesId, sourceId}` follows one:
+checked again (the series visible and not numbered by posting order; the source loaded, switched on, not its main
+source, reachable for the series' rating, and not followed already -- never re-pointed), then written under the
+follower cap with the admin as its author, its listing refreshed, and audited as `series.follow_source` with `via:
+find_review`; it answers `{result}`, the series' result as it now reads, or **404** `not_found`, **409** `decided`
+(with `state`), `posting_order`, `source_unavailable`, `already_followed` or `full`. `POST
+/api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
+`dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
 
 ### Admin — extensions (Mihon / Tachiyomi)
 
