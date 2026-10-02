@@ -2454,7 +2454,7 @@
   "Skip this match for good": "Ignorer définitivement cette correspondance",
   "Followed": "Suivie",
   "To review": "À vérifier",
-  "Nothing is followed until you choose. Green matches are the ones an automatic search would follow; amber ones need a look first.": "Rien n’est suivi tant que vous n’avez pas choisi. Les correspondances vertes sont celles qu’une recherche automatique suivrait ; les ambre demandent d’abord un coup d’œil.",
+  "Nothing is followed until you choose. Green matches are the ones an automatic search would follow; amber ones need a look first.": "Rien n’est suivi tant que vous n’avez pas choisi. Les correspondances vertes sont celles qu’une recherche automatique suivrait ; celles en ambre demandent d’abord un coup d’œil.",
   "Follow all green": "Suivre toutes les vertes",
   "1 series to review": "1 série à vérifier",
   "{n} series to review": "{n} séries à vérifier",
