@@ -400,7 +400,7 @@ test('Library: Find other sources is a row of More for admins, posts the selecti
   assert.match(fn, /'info', \{ busy: true \}\);/, 'the notice of a run that goes on does not turn');
   assert.match(fn, /void kickDownloads\(qc\);\s*settle\(\);/, 'the Server tasks card waits 30 s, or the selection stays after a start');
   assert.match(fn, /catch \(e\) \{ toast\(findRefusal\(e\), 'error'\); \}/, 'a refused start (another run, nothing to search) is not said');
-  const more = slice(src, "<Sheet title={tr('{n} selected'", '</Sheet>');
+  const more = slice(src, '<Sheet title={selectedText(picked.size)}', '</Sheet>');
   // v0.51.0: through the start dialog, which asks how to follow what it finds.
   assert.match(more, /\{isAdmin && \([\s\S]*?setMore\(false\); setFinding\(true\);[\s\S]*?\{tr\('Find other sources'\)\}/, 'More has no Find other sources for admins');
   assert.match(src, /\{finding && <FindStartDialog onClose=\{\(\) => setFinding\(false\)\} onStart=\{\(review\) => \{ setFinding\(false\); void findSelected\(review\); \}\} \/>\}/,

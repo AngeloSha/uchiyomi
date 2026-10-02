@@ -58,12 +58,13 @@ export type SupplyPart =
 export const SUPPLY_LABELS = keys(
   'Translated by {names}', '{n} not here yet', 'checked {ago}', 'not checked yet', 'auto-update off',
   'Source not installed', 'not installed', 'translations unavailable', 'Added from disk', 'no source',
-  '{n} chapters listed · none fetched yet',
+  '{n} chapters listed · none fetched yet', '1 not here yet',
 );
 const L = {
   translatedBy: SUPPLY_LABELS[0], notHere: SUPPLY_LABELS[1], checked: SUPPLY_LABELS[2], notChecked: SUPPLY_LABELS[3],
   autoOff: SUPPLY_LABELS[4], sourceNotInstalled: SUPPLY_LABELS[5], notInstalled: SUPPLY_LABELS[6],
   unavailable: SUPPLY_LABELS[7], fromDisk: SUPPLY_LABELS[8], noSource: SUPPLY_LABELS[9], noneFetched: SUPPLY_LABELS[10],
+  notHereOne: SUPPLY_LABELS[11],
 };
 
 /**
@@ -156,6 +157,7 @@ export function supplyLine(input: SupplyInput, wide: boolean): SupplyPart[] | nu
   }
   if (noneFetched) parts.push({ kind: 'text', key: L.noneFetched, args: { n: input.listedTotal } });
   else if (!input.autoUpdate) parts.push({ kind: 'text', key: L.autoOff });
+  else if (input.notHere === 1) parts.push({ kind: 'text', key: L.notHereOne });
   else if (input.notHere > 0) parts.push({ kind: 'text', key: L.notHere, args: { n: input.notHere } });
   if (wide) parts.push({ kind: 'text', key: L.checked, args: { ago: relativeTime(input.checkedAt) } });
   return parts;

@@ -27,6 +27,7 @@ import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
 import { useLayer } from '@/lib/layers';
 import { t as tr, keys } from '@/lib/i18n';
+import { selectedText } from '@/lib/counted';
 import type { Src } from '@/lib/sourceGroups';
 import type { TrackerStatus } from '@/lib/types';
 import {
@@ -408,7 +409,7 @@ function ReviewCard({
         {selectedIds.size > 0 && (
           <button onClick={onClearSelection} className="chip text-xs">{tr('Clear selection')}</button>
         )}
-        <span className="ms-auto text-[11px] text-fog-500">{tr('{n} selected', { n: selectedIds.size })}</span>
+        <span className="ms-auto text-[11px] text-fog-500">{selectedText(selectedIds.size)}</span>
       </div>
 
       <div className="space-y-1.5">

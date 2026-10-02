@@ -19,6 +19,7 @@ import { sourceCover } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { selectedText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { followable } from '@/lib/scanlators';
 import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
@@ -101,7 +102,7 @@ function ChapterPicker({ numbers, selected, onChange }: {
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fog-500">
-        <span>{tr('{n} selected', { n: count })}</span>
+        <span>{selectedText(count)}</span>
         <button type="button" onClick={() => onChange(new Set(numbers))} className="hover:text-fog-200">{tr('Select all')}</button>
         <button type="button" onClick={() => onChange(new Set())} className="hover:text-fog-200">{tr('Select none')}</button>
       </div>

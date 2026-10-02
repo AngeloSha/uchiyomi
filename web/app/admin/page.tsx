@@ -1627,7 +1627,7 @@ function LibrariesSection() {
               </p>
               <p className="truncate text-[11px] text-fog-600">
                 {l.n} {tr('series')}
-                {l.pinned > 0 && <> · {tr('{n} filed by hand', { n: l.pinned })}</>}
+                {l.pinned > 0 && <> · {l.pinned === 1 ? tr('1 filed by hand') : tr('{n} filed by hand', { n: l.pinned })}</>}
                 {/* Who may open it is per-person access, which desktop does not have (one person, no members). */}
                 {!desktopLibs && <>{' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}</>}
               </p>

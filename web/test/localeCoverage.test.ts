@@ -157,14 +157,11 @@ const numberPair = (one: string, many: string) =>
 const AGREES_ABROAD = /^(\p{Ll}+ed|not)$/u;
 /**
  * Keys with such a count that shipped before that rule, each reading wrong at 1 in some language. ⚠️ Frozen like
- * SHIPPED_UNPAIRED: fix one by adding its singular and deleting it here, never by adding to it.
+ * SHIPPED_UNPAIRED: fix one by adding its singular and deleting it here, never by adding to it. Empty since v0.52.0,
+ * which gave the last nine their singulars (web/lib/counted.ts), and kept so: a new one is a failure, not an entry.
  */
-const AGREEING_UNPAIRED = [
-  '{n} selected', '{n} filed by hand', '{n} saved', '{n} deleted', '{n} not here yet',
-  '{n} skipped: not downloaded by Uchiyomi', '{n} skipped: bookmarked by a reader',
-  'Delete all {n} downloaded chapters of “{title}”?', 'Delete all {n} downloaded chapters on this device?',
-];
-const AGREEING_UNPAIRED_MAX = 9;
+const AGREEING_UNPAIRED: string[] = [];
+const AGREEING_UNPAIRED_MAX = 0;
 /** Verbs and determiners that agree with the count, singular → plural. */
 const AGREE: Record<string, string> = {
   has: 'have', is: 'are', was: 'were', needs: 'need', comes: 'come', does: 'do', keeps: 'keep', fails: 'fail',
@@ -225,6 +222,9 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     'the library still marks these {n} deleted, and no scan has read the files since',
   // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
   'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
+  // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
+  'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
+  'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
