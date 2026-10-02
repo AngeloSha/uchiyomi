@@ -517,7 +517,7 @@ test("Health prints the server's words in their own direction: every finding's t
     ["a finding's title", 'itemTitle(it)'], ["a finding's detail", 'itemDetail(it)'], ["a card's summary", 'checkSummary(c)'], ["a card's note", 'checkNote(c)'],
   ];
   for (const [what, expr] of printed) {
-    const at = [...health.matchAll(new RegExp(`<p\\b([^>]*)>\\{${expr.replace(/[.()]/g, '\\$&')}\\}</p>`, 'g'))];
+    const at = [...health.matchAll(new RegExp(`<p\\b([^>]*)>\\{${expr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}</p>`, 'g'))];
     assert.ok(at.length > 0, `${what} is no longer printed in a <p> of its own -- update this test`);
     for (const m of at) assert.match(m[1], /\bdir="auto"/, `${what} takes the page's direction, its full stop at its start in Arabic`);
   }
