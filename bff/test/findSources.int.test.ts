@@ -4,8 +4,9 @@
 // who wants every one of its series to follow another source without doing it 189 times by hand. Every rule the run
 // keeps is asserted by what the fake sites were asked and what was written:
 //
-//   - the main source is never asked, nor a source the series already follows, a disabled or cooling one, or an
-//     adult one for a clean series; a series numbered by posting order, or already at the cap, is not searched;
+//   - the main source is never asked, nor a source the series already follows, or a disabled or cooling one; a
+//     source that flags itself adult IS asked for a clean series (the admin's reach, #132); a series numbered by
+//     posting order, or already at the cap, is not searched;
 //   - sources are asked in scan order under the hunt's slots, a series stops once its free slots are filled or three
 //     sources carried the title, and an other name matches exactly;
 //   - judgeCandidate decides, followJudged writes with the admin as added_by, and a search that fails reports
@@ -54,7 +55,8 @@ const CATALOGUE: Record<string, Array<{ title: string; nums: number[] }>> = {
   'fs-throws': [],
   'fs-cool': [{ title: 'Alpha Tale', nums: R(1, 12) }],
   'fs-off': [{ title: 'Alpha Tale', nums: R(1, 12) }],
-  'fs-adult': [{ title: 'Eta Adult', nums: R(1, 12) }, { title: 'Alpha Tale', nums: R(1, 12) }, { title: 'Epsilon Nothing', nums: R(1, 12) }],
+  // Flags itself adult, as most manhwa extensions do, and is the only one that carries a clean series' title.
+  'fs-adult': [{ title: 'Eta Adult', nums: R(1, 12) }, { title: 'Omega Manhwa', nums: R(1, 12) }],
   // Carries it in its search, and its chapter list never loads: a candidate that cannot be judged.
   'fs-nolist': [{ title: 'Iota Unlisted', nums: R(1, 12) }],
   // Carries it and lines up, and the series is deleted while this lists its chapters (the judgement's read).
@@ -197,6 +199,7 @@ test('a run over a down source follows other sources for each of its series, by 
   await series('e', 'Epsilon Nothing');
   await series('f', 'Zeta Wrong');
   await series('h', 'Eta Adult', { library: ADULT_LIB });
+  await series('o', 'Omega Manhwa');
   await q(`INSERT INTO source_health (source_id, blocked_until) VALUES ('fs-cool', now() + interval '1 hour')`);
   await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
   const asked = summaryAsks;
@@ -205,7 +208,7 @@ test('a run over a down source follows other sources for each of its series, by 
   assert.equal(r.statusCode, 202, r.body);
   const { runId, total } = r.json();
   assert.match(runId, /^[0-9a-f-]{36}$/);
-  assert.equal(total, 7, 'every series whose main source it is');
+  assert.equal(total, 8, 'every series whose main source it is');
   await fsLib.findSettled();
 
   const st = await state();
@@ -213,7 +216,7 @@ test('a run over a down source follows other sources for each of its series, by 
   const run = st.run;
   assert.equal(run.id, runId);
   assert.equal(run.status, 'done');
-  assert.deepEqual([run.total, run.done, run.followed], [7, 7, 4]);
+  assert.deepEqual([run.total, run.done, run.followed], [8, 8, 5]);
   assert.equal(run.startedBy, ADMIN, 'the account by name, never its id');
   assert.equal(run.sourceId, MAIN);
   assert.equal(run.sourceName, 'Main Down');
@@ -225,7 +228,7 @@ test('a run over a down source follows other sources for each of its series, by 
   const by = Object.fromEntries(run.results.map((x: any) => [x.seriesId, x]));
   // The order: series that follow nothing first, then by title; B already follows two, so it is last.
   assert.deepEqual(run.results.map((x: any) => x.title),
-    ['Alpha Tale', 'Delta Order', 'Epsilon Nothing', 'Eta Adult', 'Gamma Saga', 'Zeta Wrong', 'Beta Story']);
+    ['Alpha Tale', 'Delta Order', 'Epsilon Nothing', 'Eta Adult', 'Gamma Saga', 'Omega Manhwa', 'Zeta Wrong', 'Beta Story']);
 
   // A: the first two sources in scan order carry it and line up; its two free slots are filled, and the third
   // carrier is never asked. Reintroduce by dropping `ok >= free` from enough(): fs-c is searched for it.
@@ -241,26 +244,31 @@ test('a run over a down source follows other sources for each of its series, by 
   // D: posting order -- never searched. Reintroduce by dropping the posting_order return: it is searched.
   assert.equal(by[S('d')].why, 'posting_order');
   assert.equal(searches.some((x) => x.endsWith(':Delta Order')), false);
-  // E: nobody that answered carries it (the adult source that does may not be asked for a clean series).
+  // E: nobody that answered carries it.
   assert.equal(by[S('e')].why, 'no_match');
   // F: three sources carried the title, each numbered another way: refused, and the fourth never asked.
   // Reintroduce by dropping `carriers >= FIND_CARRIERS` from enough(): fs-f is asked, lines up, and is followed.
   assert.equal(by[S('f')].why, 'refused');
   assert.ok(['fs-c', 'fs-d', 'fs-e'].every((id) => searches.includes(`${id}:Zeta Wrong`)));
   assert.equal(searches.includes('fs-f:Zeta Wrong'), false, 'the three-source stop');
-  // H: an adult series may reach the adult source.
+  // H: an adult series reaches the adult source.
   assert.deepEqual(by[S('h')].followed.map((f: any) => f.sourceId), ['fs-adult']);
+  // O: a clean series reaches it too -- the admin's reach, not the hunt's adult rule (#132): most manhwa extensions
+  // flag themselves adult, and a run that skipped them had no source to ask on a typical library. Reintroduce the
+  // hunt's sweepAllowedFor in findFor: O reads no_match.
+  assert.deepEqual(by[S('o')].followed.map((f: any) => f.sourceId), ['fs-adult'], 'an adult-flagged source is asked for a clean series');
 
-  // Never asked: the main source (it is the one that is down), a cooling or disabled source, the adult source for a
-  // clean series. Reintroduce by dropping `id === row.source_id` from the order filter: the main source is searched.
+  // Never asked: the main source (it is the one that is down), a cooling or disabled source. Reintroduce by dropping
+  // `id === row.source_id` from the order filter: the main source is searched.
   assert.equal(searches.filter((x) => x.startsWith(`${MAIN}:`)).length, 0, 'the main source is excluded always');
   assert.equal(searches.filter((x) => x.startsWith('fs-cool:') || x.startsWith('fs-off:')).length, 0);
-  assert.deepEqual(searches.filter((x) => x.startsWith('fs-adult:')), ['fs-adult:Eta Adult'], 'the adult source only for the adult series');
+  assert.ok(searches.includes('fs-adult:Omega Manhwa'));
 
   // Written by followJudged under the admin's name; nothing else followed.
   const rows = await q(`SELECT series_id, source_id, added_by FROM series_sources WHERE series_id = ANY($1) AND source_id NOT LIKE 'fs-x%' ORDER BY series_id, source_id`,
-    [[S('a'), S('c'), S('f'), S('h'), S('e')]]);
-  assert.deepEqual(rows.map((x: any) => `${x.series_id}:${x.source_id}`), [`${S('a')}:fs-a`, `${S('a')}:fs-b`, `${S('c')}:fs-b`, `${S('h')}:fs-adult`]);
+    [[S('a'), S('c'), S('f'), S('h'), S('e'), S('o')]]);
+  assert.deepEqual(rows.map((x: any) => `${x.series_id}:${x.source_id}`),
+    [`${S('a')}:fs-a`, `${S('a')}:fs-b`, `${S('c')}:fs-b`, `${S('h')}:fs-adult`, `${S('o')}:fs-adult`]);
   assert.ok(rows.every((x: any) => x.added_by === adminId), 'added_by is the admin who started the run');
 
   // A search that threw reported nothing: no cooldown, no evidence. Reintroduce by reporting it (reportFail or
@@ -271,24 +279,40 @@ test('a run over a down source follows other sources for each of its series, by 
   const [audit] = await q(`SELECT detail FROM audit_log WHERE event = 'source.find'`);
   assert.deepEqual(
     { ...audit.detail, runId: undefined },
-    { runId: undefined, scope: { sourceId: MAIN }, status: 'done', total: 7, done: 7, followed: 4, series: 3 },
+    { runId: undefined, scope: { sourceId: MAIN }, status: 'done', total: 8, done: 8, followed: 5, series: 4 },
   );
   const follows = await q(`SELECT detail FROM audit_log WHERE event = 'series.follow_source' AND detail->>'via' = 'find_sources'`);
-  assert.equal(follows.length, 4);
+  assert.equal(follows.length, 5);
   assert.ok(follows.every((f: any) => f.detail.runId === runId));
 
   // The paced refresh of every series that gained a follower: its followers were asked for their listing.
   // Reintroduce by dropping scheduleFindRefresh: checked_at stays empty.
   const checked = await q(`SELECT series_id, source_id FROM series_sources WHERE checked_at IS NOT NULL AND series_id = ANY($1) ORDER BY 1, 2`,
-    [[S('a'), S('c'), S('h')]]);
-  assert.deepEqual(checked.map((x: any) => `${x.series_id}:${x.source_id}`), [`${S('a')}:fs-a`, `${S('a')}:fs-b`, `${S('c')}:fs-b`, `${S('h')}:fs-adult`]);
+    [[S('a'), S('c'), S('h'), S('o')]]);
+  assert.deepEqual(checked.map((x: any) => `${x.series_id}:${x.source_id}`),
+    [`${S('a')}:fs-a`, `${S('a')}:fs-b`, `${S('c')}:fs-b`, `${S('h')}:fs-adult`, `${S('o')}:fs-adult`]);
   // And the Health summary is asked to catch up.
   await until(() => summaryAsks > asked, 'a Health summary refresh');
 
   // The run card is its admin's, and says so; it downloads nothing.
   const jobs = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: adminAuth })).json();
   const card = jobs.runs.find((x: any) => x.kind === 'find_sources');
-  assert.deepEqual([card.status, card.done, card.total, card.followed, card.downloads, card.mine], ['done', 7, 7, 4, false, true]);
+  assert.deepEqual([card.status, card.done, card.total, card.followed, card.downloads, card.mine], ['done', 8, 8, 5, false, true]);
+});
+
+test('a series with no other name stored is searched under the ones its description lists', { skip }, async () => {
+  // Names are kept when a series is added or its main source looked up, so one added before v0.49.1 -- or on an
+  // install whose series_alt_titles could not be read -- has none, and was searched under its own title alone.
+  // Reintroduce by dropping learnNames from findFor: P reads no_match, and fs-adult is never asked for Omega Manhwa.
+  await series('p', 'Pi Original Title');
+  await q(`UPDATE lib_series SET summary = $2 WHERE id = $1`, [S('p'), 'A story.\nAlternative Titles: Omega Manhwa; 오메가\nStatus: Ongoing']);
+  await post({ seriesIds: [S('p')] });
+  await fsLib.findSettled();
+  const r = (await state()).run.results[0];
+  assert.deepEqual(r.followed.map((f: any) => f.sourceId), ['fs-adult'], JSON.stringify(r));
+  assert.ok(searches.includes('fs-adult:Omega Manhwa'), 'searched under the name its description lists');
+  const kept = await q(`SELECT title, origin FROM series_alt_titles WHERE series_id = $1 AND removed_at IS NULL`, [S('p')]);
+  assert.deepEqual(kept.map((x: any) => [x.title, x.origin]), [['Omega Manhwa', 'description']], 'kept as a description name');
 });
 
 test('one run at a time; the scope must name something; a stop ends it at once, the rest not tried', { skip }, async () => {
@@ -626,7 +650,8 @@ test('following a proposal follows exactly that one, under the cap, the posting-
   await series('c', 'Gamma Saga');
   await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1,'gammalegend','Gamma Legend','admin')`, [S('c')]);
   await series('f', 'Zeta Wrong');
-  const runId = await reviewRun([S('a'), S('c'), S('f')]);
+  await series('o', 'Omega Manhwa');
+  const runId = await reviewRun([S('a'), S('c'), S('f'), S('o')]);
   assert.equal((await decide(runId, 'follow', S('a'), 'fs-b', memberAuth)).statusCode, 403, 'admins only');
 
   // Exactly the one named, written by the follow path with the admin as its author; its result says so.
@@ -658,6 +683,12 @@ test('following a proposal follows exactly that one, under the cap, the posting-
   assert.deepEqual(await followers([S('c'), S('f')]), [`${S('f')}:fs-c:fs-c|Elsewhere:null`], 'nothing else was written');
   assert.equal((await state()).run.results.find((x: any) => x.seriesId === S('f')).proposals.every((p: any) => !p.state), true,
     'a refused follow decides nothing');
+
+  // An adult-flagged source proposed for a clean series is followed: the deciding admin's reach, the run's own rule.
+  // Reintroduce the hunt's sweepAllowedFor in decide(): it reads source_unavailable.
+  const o = await decide(runId, 'follow', S('o'), 'fs-adult');
+  assert.equal(o.statusCode, 200, o.body);
+  assert.deepEqual(await followers([S('o')]), [`${S('o')}:fs-adult:fs-adult|Omega Manhwa:admin`]);
 });
 
 test('a dismissed proposal stays dismissed', { skip }, async () => {

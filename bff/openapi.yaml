@@ -703,7 +703,8 @@ components:
             no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
             or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
             which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
-            every one turned off, cooling down, adult for a clean series, or one it follows already (not searched).
+            every one turned off, cooling down, beyond the starting admin's age cap, or one it follows already (not
+            searched; the server log says which, by count).
             `refused`: a source carried the title and did not pass the title and chapter-number check (another book).
             `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
             chapters, so nothing could be judged. `followed_already`: the sources that answered do not carry it, and

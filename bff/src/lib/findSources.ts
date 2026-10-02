@@ -8,12 +8,16 @@
 //
 // Everything that decides anything is reused, never copied:
 //   - which series: lib/findScope.ts (the admin's selection, or every series whose main source is the one named);
-//   - where to look: scanOrder over the sources the series may reach -- the adult rule is the hunt's
-//     (sweepAllowedFor: an adult source only for an adult series) -- with the main source excluded ALWAYS (it is
-//     the one that is down) and the sources it already follows, and health read per series, so a source disabled
-//     or cooling down since the run started is not asked;
+//   - where to look: scanOrder over the sources the admin who started the run may reach -- their own age cap, as
+//     Discover and the manual follow route read it (visibility.sourceAllowedFor), NOT the hunt's sweepAllowedFor,
+//     which drops every extension that flags itself adult for a series not rated 18+: most manhwa extensions do,
+//     and on a typical library every series then had no source to ask (#132) -- with the main source excluded
+//     ALWAYS (it is the one that is down) and the sources it already follows, and health read per series, so a
+//     source disabled or cooling down since the run started is not asked;
 //   - how to look: the hunt's non-reporting search (sourceHunt.ts searchByNames) under the hunt's shared slots,
 //     the title and up to three of the series' other names (lib/altTitles.ts), an other name matched exactly. A
+//     series with no other name stored is first given the ones its stored description lists, and failing that the
+//     ones its main source's description lists (learnNames below): a series added before v0.49.1 has none. A
 //     search that fails is a source that did not answer: it never escalates a cooldown and never marks Health
 //     failing, where #115 would confirm a failure after three in a row -- and a run over many series IS many in
 //     a row;
@@ -59,8 +63,9 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { assess, MIN_HAVE } from './fill';
 import { postingOrderSeries } from './numbering';
 import { haveNumbers } from './libraryNumbers';
-import { altTitlesFor, SEARCH_NAMES } from './altTitles';
-import { searchByNames, seriesIsAdult, sweepAllowedFor, takeHuntSlot, releaseHuntSlot } from './sourceHunt';
+import { altTitlesFor, learnAltTitles, parseAltTitles, SEARCH_NAMES } from './altTitles';
+import { searchByNames, takeHuntSlot, releaseHuntSlot } from './sourceHunt';
+import { budgetFor } from './sources/budget';
 import { seriesByIds, seriesOfMainSource } from './findScope';
 import { runtime } from './runtime';
 import { checkRunning } from './sourceWatchdog';
@@ -70,7 +75,7 @@ import { updateSeries } from './updater';
 import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
-import { seriesVisible, visibleToAll, type ViewCtx } from './visibility';
+import { seriesVisible, sourceAllowedFor, visibleToAll, type ViewCtx } from './visibility';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -78,6 +83,8 @@ export const FIND_SERIES_WALL_MS = 90_000;
 export const FIND_CARRIERS = 3;
 /** How often a run waiting on a sweep, a repair or the daily check looks again. */
 export const FIND_QUIET_POLL_MS = 5_000;
+/** How long a series' main source may take to give its description, for the other names it lists. */
+const FIND_LOOKUP_MS = 20_000;
 /** Runs kept in source_find_runs. */
 export const FIND_KEEP = 20;
 /** How long a stop waits for the series in flight to finish writing a follow it has started. */
@@ -94,8 +101,8 @@ export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupte
  * - `posting_order`: numbered by posting order, so no follower is ever merged (not searched);
  * - `full`: it already follows MAX_FOLLOWERS sources (not searched), or a hunt filled the last slot meanwhile;
  * - `too_few`: it lists under MIN_HAVE chapter numbers, which no candidate can be measured against (not searched);
- * - `no_source`: no other source could be asked -- every one disabled, cooling down, adult for a clean series, or
- *   one it already follows (not searched);
+ * - `no_source`: no other source could be asked -- every one disabled, cooling down, beyond the starting admin's
+ *   age cap, or one it already follows (not searched; the server log says which, by count);
  * - `refused`: a source carried the title and judgeCandidate refused it, by the title or by the chapter numbers;
  * - `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
  *   chapters, so nothing could be judged;
@@ -148,6 +155,10 @@ interface ActiveRun {
   scope: FindScope;
   /** Review first: judge and keep the candidates, follow nothing. */
   review: boolean;
+  /** The starting admin's age cap (ViewCtx.maxAgeRating; null for an admin): which sources the run may ask. */
+  maxAgeRating: number | null;
+  /** Main sources whose description read failed in this run: not asked again for the next series. */
+  dead: Set<string>;
   total: number;
   done: number;
   followed: number;
@@ -237,7 +248,8 @@ export async function startFind(
     let signal!: () => void;
     const stopped = new Promise<void>((r) => { signal = r; });
     const a: ActiveRun = {
-      id, userId, startedAt: Date.now(), scope, review, total: list.length, done: 0, followed: 0, results: [],
+      id, userId, startedAt: Date.now(), scope, review, maxAgeRating: ctx.maxAgeRating, dead: new Set(),
+      total: list.length, done: 0, followed: 0, results: [],
       current: null, waiting: null, stop: false, stopped, signal, card,
     };
     active = a;
@@ -359,6 +371,34 @@ async function numbersOf(seriesId: string): Promise<number[]> {
 }
 
 /**
+ * Give a series the other names its own description lists before it is searched for. Names are otherwise kept only
+ * when a series is added or its main source is looked up (lib/altTitles.ts), so a series added before v0.49.1 -- or
+ * on an install whose series_alt_titles could not be read (migrate.ts, the fork-shaped table) -- has none, and was
+ * searched under its own title alone: a manhwa whose sites each use another romanisation then matched nothing.
+ * First its stored summary, which costs no request; only when that gives none and no name is stored is the main
+ * source asked for its description, once, bounded, and never when it is switched off, cooling down or already failed
+ * this run (`a.dead`): the main source being down is often why the run was started. Kept as `description` names, so
+ * a name an admin removed stays removed. Best effort: never throws.
+ */
+async function learnNames(
+  seriesId: string, row: { source_id: string | null; source_series_id: string | null; summary: string | null },
+  a: ActiveRun, resting: (sourceId: string) => boolean,
+): Promise<void> {
+  try {
+    if (parseAltTitles(row.summary).length) await learnAltTitles(seriesId, row.summary);
+    if ((await altTitlesFor(seriesId, 1)).length) return;
+    const main = row.source_id ? getSource(row.source_id) : null;
+    if (!main || !row.source_series_id || a.dead.has(main.id) || resting(main.id) || isStopped(a)) return;
+    try {
+      const own = await bounded(main.getSeries(row.source_series_id), budgetFor(main, FIND_LOOKUP_MS));
+      await learnAltTitles(seriesId, own?.summary);
+    } catch { a.dead.add(main.id); }
+  } catch (e) {
+    console.warn(`[find] ${seriesId}: other names not read: ${(e as Error)?.message || e}`);
+  }
+}
+
+/**
  * A judgement as a review's proposal (v0.51.0), or null when it is not one to show. Green is exactly what an automatic
  * run follows -- `ok` -- on our own title (equal, or one inside the other, as titleMatch reads it). Amber is for a
  * person to look at: `ok` only because the candidate is equal to one of the series' OTHER names (`other_name`), or a
@@ -398,8 +438,8 @@ async function findFor(
 ): Promise<{ result: FindResult; asked: boolean }> {
   const end = (why: FindWhy | undefined, asked: boolean) =>
     ({ result: { seriesId: s.id, title: s.title, followed: [...progress], ...(why && !progress.length ? { why } : {}) }, asked });
-  const row = await one<{ title: string; source_id: string | null; numbering: string | null }>(
-    `SELECT s.title, s.source_id, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [s.id]);
+  const row = await one<{ title: string; source_id: string | null; source_series_id: string | null; summary: string | null; numbering: string | null }>(
+    `SELECT s.title, s.source_id, s.source_series_id, s.summary, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [s.id]);
   // Hidden or merged away since the run started: nothing to follow onto, and nothing asked.
   if (!row) return end('not_tried', false);
   // Before anything else: no follower of a posting-order series is ever merged (lib/updater.ts), so none is sought.
@@ -415,24 +455,41 @@ async function findFor(
   // in findSources.int.test.ts reads refused for the series with two numbers.
   if (numbers.length < MIN_HAVE) return end('too_few', false);
 
-  const names = await altTitlesFor(s.id, SEARCH_NAMES);
-  const allowed = await sweepAllowedFor(await seriesIsAdult(s.id));
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
   const now = Date.now();
+  const resting = (id: string) => {
+    const h = health.get(id);
+    return !!h?.disabled || (!!h?.blocked_until && new Date(h.blocked_until).getTime() > now);
+  };
+  await learnNames(s.id, row, a, resting);
+  const names = await altTitlesFor(s.id, SEARCH_NAMES);
+  // The starting admin's reach, not the hunt's: an admin has no age cap, so every source -- including the many
+  // manhwa extensions that flag themselves adult -- may be asked for a series that is not rated 18+. Reintroduce
+  // the hunt's sweepAllowedFor: "an adult-flagged source is asked for a clean series" in findSources.int.test.ts
+  // reads no_source.
+  const allowed = (id: string) => sourceAllowedFor(getSource(id), a.maxAgeRating);
   const own = row.source_id ? getSource(row.source_id) : null;
-  const order = scanOrder(listSources().filter((src) => allowed(src.id)), own ? { id: own.id, lang: own.lang } : null)
+  const all = listSources();
+  const order = scanOrder(all.filter((src) => allowed(src.id)), own ? { id: own.id, lang: own.lang } : null)
     .filter((id) => {
       // The main source ALWAYS: it is the one this run is working around.
       if (id === row.source_id || followers.has(id)) return false;
-      const h = health.get(id);
-      if (h?.disabled) return false;
-      if (h?.blocked_until && new Date(h.blocked_until).getTime() > now) return false;
+      if (resting(id)) return false;
       return !!getSource(id);
     });
   // Nothing left to ask: `no_source`, never `not_tried`, which is only what a stop, the wall or a restart cut short.
   // Reintroduce by answering not_tried: "each series says why it gained nothing" reads it for the series whose
   // every other source is turned off.
-  if (!order.length) return end('no_source', false);
+  if (!order.length) {
+    // Said in the server log, by count: "no other source could be asked" on every series is a setup to fix (every
+    // source switched off, cooling down, beyond the age cap, or none loaded), and the result cannot say which.
+    const taken = new Set([...(row.source_id ? [row.source_id] : []), ...followers]);
+    const others = all.filter((x) => !taken.has(x.id));
+    console.warn(`[find] ${s.id}: no source to ask -- ${all.length} loaded, ${all.length - others.length} its own, `
+      + `${others.filter((x) => resting(x.id)).length} switched off or cooling down, `
+      + `${others.filter((x) => !allowed(x.id)).length} beyond the age cap`);
+    return end('no_source', false);
+  }
 
   const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers };
   const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id), 0);
@@ -572,7 +629,7 @@ let deciding: Promise<unknown> = Promise.resolve();
  *   - `decided`: followed or dismissed already (with `state`) -- a dismissed proposal stays dismissed;
  *   - `posting_order`: numbered by posting order since (#116), whose followers are never merged;
  *   - `source_unavailable`: the source is no longer loaded, is switched off, is the series' main source now, or is
- *     one the series may not reach (an adult source only for an adult series: the run's own rule);
+ *     beyond the deciding admin's age cap (the run's own rule);
  *   - `already_followed`: the series follows that source already. INSERT-only, PR #133's rule: a run is kept for
  *     weeks, and a source followed another way since may point at another entry, which a stale proposal must not
  *     re-point;
@@ -607,8 +664,9 @@ async function decide(
     // line, or the `cap` arm below: "following a proposal follows exactly that one" fails by the rule's own name.
     if (await postingOrderSeries(seriesId)) return { refused: 'posting_order' };
     const h = await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]).catch(() => null);
-    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId));
-    if (!getSource(sourceId) || h?.disabled || series.source_id === sourceId || !allowed(sourceId)) return { refused: 'source_unavailable' };
+    // The deciding admin's reach, the run's own rule (findFor): a source the run could ask, it can follow.
+    const src = getSource(sourceId);
+    if (!src || h?.disabled || series.source_id === sourceId || !sourceAllowedFor(src, ctx.maxAgeRating)) return { refused: 'source_unavailable' };
     if (await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId])) return { refused: 'already_followed' };
     const written = await followJudged(seriesId,
       { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },
