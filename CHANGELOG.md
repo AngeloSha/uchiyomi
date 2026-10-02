@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.52.0 — (date to be set)
+## v0.52.0 — 2026-10-02
 
 **A series can now be in your library in more than one language, as editions of one work: one card in the Library,
 chips to switch between them on the series page and in the reader, and in each language its own chapters, folder and
