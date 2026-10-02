@@ -254,6 +254,8 @@ const SERIES_KEYED_TABLES = [
   'series_post_numbers', 'archive_queue',
   // v0.49.1: the other names a series goes by (lib/altTitles.ts). Cascades too; named for the same count.
   'series_alt_titles',
+  // v0.51.0: its automatic banner's seed and state (lib/autoHero.ts). Cascades too; named for the same count.
+  'series_hero',
 ] as const;
 
 export interface ForgetRefusal {

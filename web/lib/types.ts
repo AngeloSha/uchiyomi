@@ -127,6 +127,12 @@ export interface Series {
   source?: { missing: number | null; chapters: number | null; checkedAt: string } | null;
   yomi?: UchiyomiFlags;
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
+  /**
+   * v0.51.0: the banner the server makes from the series' own pages, for a series with no banner of its own --
+   * `{seed}` when there is one to show (lib/art.ts autoHeroUrl), null when it has a banner, is 18+ or none could be made.
+   * Absent on older servers.
+   */
+  autoHero?: { seed: number } | null;
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;

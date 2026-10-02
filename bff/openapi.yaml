@@ -1408,6 +1408,17 @@ paths:
                 type: object
                 additionalProperties: true
                 properties:
+                  autoHero:
+                    description: >-
+                      Since v0.51.0, on every series in a payload: `{seed}` when the series shows the banner made from
+                      its own pages -- GET /img/series/{id}/hero?v={seed} -- and null when it has a banner of its own
+                      or may not have one (18+, or a last try made none).
+                    oneOf:
+                      - type: object
+                        required: [seed]
+                        properties:
+                          seed: { type: integer }
+                      - type: "null"
                   sources:
                     type: array
                     description: Where the chapters come from, primary first, then followed sources in the order they were added. Present for every viewer.
@@ -4967,6 +4978,52 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /img/series/{id}/hero:
+    get:
+      tags:
+        - images
+      summary: "The automatic banner made from a series' own pages (since v0.51.0)."
+      operationId: getImgSeriesIdHero
+      description: >-
+        For a series with no banner of its own (AniList's or an admin's): four crops of its pages, taken from
+        different chapters, side by side. Gated as the series' cover is, then 404 for a series that may not have one
+        -- a banner of its own, 18+ by any rule (its rating or an admin's, an 18+ library, one of the admin's 18+
+        genres, an adult source), its AniList lookup not done yet, or a last try that made none (left alone for a
+        week) -- and 404 when a try made now makes none, so a client keeps its usual art. Made on the first request
+        and kept in the image cache; one is made at a time server-wide, under a time limit. The series payload's
+        `autoHero` says when to ask, with the seed for `v`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: ar
+          in: query
+          required: false
+          description: "`wide` (1920x640, four side by side; the default) or `tall` (1080x1440, two by two, for a portrait hero)."
+          schema:
+            type: string
+            enum: [wide, tall]
+        - name: v
+          in: query
+          required: false
+          description: The seed from `autoHero`, as a cache-buster only; the stored seed's banner is served.
+          schema:
+            type: integer
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: The banner.
+          content:
+            image/jpeg: {}
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, not visible to this account, or no automatic banner for it
   /img/lib/series/{id}/thumb:
     get:
       tags:
@@ -7591,6 +7648,45 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/{id}/hero/shuffle:
+    post:
+      tags:
+        - admin
+      summary: "A new automatic banner for a series: other chapters, other pages (since v0.51.0)."
+      operationId: postApiAdminSeriesIdHeroShuffle
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Picks a new seed
+        and makes the banner with it BEFORE switching to it, so a series whose new pages make nothing keeps the one
+        it had (`{ok: false, error: 'not_made'}`). 409 `not_automatic` for a series that may not have an automatic
+        banner (see GET /img/series/{id}/hero).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{ok: true, seed}`, the seed the series' `autoHero` now carries; or `{ok: false, error: 'not_made'}`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  seed: { type: integer, description: Present when ok. }
+                  error: { type: string, enum: [not_made], description: Present when not ok. }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`not_automatic`: the series has a banner of its own, or is 18+."
   /api/admin/series/{id}/art:
     put:
       tags:

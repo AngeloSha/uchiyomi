@@ -5,6 +5,7 @@ import { q, one, tx } from '../lib/db';
 import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
 import numberingRoutes from './numbering';
 import findSourcesRoutes from './findSources';
+import autoHeroRoutes from './autoHero';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -440,6 +441,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   await app.register(numberingRoutes);
   // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
   await app.register(findSourcesRoutes);
+  // v0.51.0: a new automatic banner for a series, the same way (routes/autoHero.ts).
+  await app.register(autoHeroRoutes);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the

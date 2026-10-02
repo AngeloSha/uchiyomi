@@ -18,6 +18,36 @@ export const ART = {
   emptyUpdates: '/art/empty-updates.webp',
 };
 
+/** Backdrop URL builder — shared by <Backdrop> and preloaders (e.g. the hero preloading its next slide). */
+export const backdropUrl = (seriesId: string, opts: { hero?: boolean; wide?: boolean; version?: number } = {}) => {
+  const params = [opts.version ? `av=${opts.version}` : '', opts.hero ? `style=hero&ar=${opts.wide ? 'wide' : 'tall'}` : ''].filter(Boolean).join('&');
+  return `/img/series/${encodeURIComponent(seriesId)}/backdrop${params ? `?${params}` : ''}`;
+};
+
+/**
+ * The automatic banner (v0.51.0): four crops of a series' own pages, which the server makes for a series with no
+ * banner of its own. `seed` is the payload's `autoHero.seed`, so a new banner (Shuffle) is a new URL; `tall` asks for
+ * the 2 x 2 frame a portrait hero needs, where a 3:1 strip would show the gap between its middle two panels.
+ */
+export const autoHeroUrl = (seriesId: string, seed: number, tall = false) =>
+  `/img/series/${encodeURIComponent(seriesId)}/hero?v=${seed}${tall ? '&ar=tall' : ''}`;
+
+/**
+ * What a series' backdrop tries, in order, each the fallback of the one before: the automatic banner when the series
+ * has one, then the server's backdrop (its AniList banner, or its cover over a blur of itself), then the genre art.
+ * The server answers 404 for an automatic banner it cannot make, so a failure lands on today's look, never on nothing.
+ */
+export function backdropSources(
+  seriesId: string | undefined,
+  autoHero: { seed: number } | null | undefined,
+  opts: { hero?: boolean; wide?: boolean; version?: number },
+  fallback: string,
+): string[] {
+  if (!seriesId) return [fallback];
+  const real = backdropUrl(seriesId, opts);
+  return autoHero ? [autoHeroUrl(seriesId, autoHero.seed, !!opts.hero && !opts.wide), real, fallback] : [real, fallback];
+}
+
 // NOTE: `GENRE`, `genreArt()` and `genreGradient()` used to live here, with six generated key-art files
 // mapped from about forty genre names. On a real library that is ninety-nine genres, so the same picture
 // appeared under seven of them at once and fifty-six got a near-black gradient rectangle instead. /browse

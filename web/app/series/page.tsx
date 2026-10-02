@@ -14,7 +14,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass } from '@/components/icons';
+import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
@@ -1549,6 +1549,20 @@ function SeriesInner() {
   const [renaming, setRenaming] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
 
+  // A new automatic banner (v0.51.0): other chapters, other pages. The server makes it before switching, so a failure
+  // leaves the banner as it was; the payload's new seed is what changes the hero's URL.
+  const newBanner = async () => {
+    setBusyAdmin(true);
+    try {
+      const r = await api<{ ok: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
+      if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
+      else toast(tr('Could not make a new banner'), 'error');
+    } catch {
+      toast(tr('Could not make a new banner'), 'error');
+    }
+    setBusyAdmin(false);
+  };
+
   const doDelete = async () => {
     setBusyAdmin(true);
     try {
@@ -1640,6 +1654,12 @@ function SeriesInner() {
         <>
           <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>{tr('Edit details')}</button>
+          {/* Only while the hero is an automatic one: a real banner is changed in Edit details. */}
+          {series?.autoHero && (
+            <button type="button" onClick={newBanner} disabled={busyAdmin} data-new-banner
+              className="btn-key h-auto w-full py-2.5 text-sm font-normal text-fog-300 disabled:opacity-50">
+              <IcRefresh width={16} height={16} />{tr('New banner')}</button>
+          )}
           {series?.folder && (
             <button onClick={() => setRenaming(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></svg>{tr('Rename folder')}</button>
@@ -1842,9 +1862,10 @@ function SeriesInner() {
         <span className="truncate text-sm text-fog-300 lg:text-base">{title}</span>
       </div>
 
-      {/* banner — real art pulled from the internet (AniList), genre-banner fallback */}
+      {/* banner — real art pulled from the internet (AniList), else the one the server made from the series' own pages
+          (v0.51.0), genre-banner fallback */}
       <div className="relative -mt-[58px] h-64 overflow-hidden lg:mt-0 lg:h-[22rem] lg:rounded-3xl">
-        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} className="absolute inset-0" />}
+        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} autoHero={series.autoHero} className="absolute inset-0" />}
         <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}

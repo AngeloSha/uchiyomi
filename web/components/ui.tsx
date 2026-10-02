@@ -1,7 +1,7 @@
 'use client';
 import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { genreBackdrop } from '@/lib/art';
+import { backdropSources, genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
 import { useLayer } from '@/lib/layers';
 import { t as tr } from '@/lib/i18n';
@@ -24,22 +24,21 @@ export function useWideViewport(): boolean {
   return wide;
 }
 
-/** Backdrop URL builder — shared by <Backdrop> and preloaders (e.g. the hero preloading its next slide). */
-export const backdropUrl = (seriesId: string, opts: { hero?: boolean; wide?: boolean; version?: number } = {}) => {
-  const params = [opts.version ? `av=${opts.version}` : '', opts.hero ? `style=hero&ar=${opts.wide ? 'wide' : 'tall'}` : ''].filter(Boolean).join('&');
-  return `/img/series/${encodeURIComponent(seriesId)}/backdrop${params ? `?${params}` : ''}`;
-};
-
-export function Backdrop({ seriesId, genres, className = '', version, hero }: { seriesId?: string; genres?: string[]; className?: string; version?: number; hero?: boolean }) {
-  const fallback = genreBackdrop(genres);
+/**
+ * `autoHero`: the series payload's field. When set, the banner made from the series' own pages is tried first and the
+ * backdrop becomes its fallback, as the genre art is the backdrop's (lib/art.ts backdropSources).
+ */
+export function Backdrop({ seriesId, genres, className = '', version, hero, autoHero }: { seriesId?: string; genres?: string[]; className?: string; version?: number; hero?: boolean; autoHero?: { seed: number } | null }) {
   const wide = useWideViewport();
-  const real = seriesId ? backdropUrl(seriesId, { hero, wide, version }) : fallback;
-  const [src, setSrc] = useState(real);
-  useEffect(() => { setSrc(real); }, [real]);
+  const sources = backdropSources(seriesId, autoHero, { hero, wide, version }, genreBackdrop(genres));
+  const chain = sources.join(' ');
+  const [at, setAt] = useState(0);
+  useEffect(() => { setAt(0); }, [chain]);
   return (
     <div className={className}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="" aria-hidden="true" onError={() => setSrc(fallback)} className="absolute inset-0 h-full w-full object-cover" />
+      <img src={sources[Math.min(at, sources.length - 1)]} alt="" aria-hidden="true"
+        onError={() => setAt((i) => Math.min(i + 1, sources.length - 1))} className="absolute inset-0 h-full w-full object-cover" />
     </div>
   );
 }
