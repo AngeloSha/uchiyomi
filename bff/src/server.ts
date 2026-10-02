@@ -26,6 +26,7 @@ import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { startArchive } from './lib/archive';
+import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
@@ -458,6 +459,14 @@ async function main() {
    * started on the same series. Owned mode only, like the sweep: it writes DL_ROOT and lib_books.
    */
   if (OWNED) startArchive({ busy: jobBusy, log: app.log });
+
+  /**
+   * Automatic hero banners (v0.51.0, lib/autoHero.ts): made from the series' own pages for every series without a
+   * banner of its own, a series at a time and paced, standing aside for a sweep, a repair or the source check. First
+   * run twenty minutes after boot, then daily; a series someone opens makes its own on demand meanwhile. Owned mode
+   * only: it reads lib_books.
+   */
+  if (OWNED) startHeroWarmup(app.log);
 
   // Drop import batches nobody will come back to (`sweepImportBatches` in routes/admin.ts owns the rule:
   // finished ones after a week, unfinished ones after a month). Daily, first run fifteen minutes after

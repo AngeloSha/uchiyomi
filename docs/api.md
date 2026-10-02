@@ -1107,6 +1107,7 @@ POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
+POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/bulk/hide
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
@@ -1845,8 +1846,20 @@ not one origin: the URL on the wire is rebuilt from the configured engine base p
 and it is fetched only if it round-trips to exactly the origin and path the caller named, so no other path
 on the engine (and nothing on any other host) is ever fetched with the engine's credentials, and a redirect
 from it is refused rather than followed.
+**The automatic banner** (since v0.51.0). `GET /img/series/:id/hero[?ar=tall][&v=<seed>]` is a banner made from
+the series' own pages, for a series with no banner of its own: four crops from different chapters, side by side
+(1920x640 JPEG), or two by two with `ar=tall` (1080x1440). It is gated as the series' cover is, then answers **404**
+for a series that may not have one — a banner of its own (AniList's or an admin's), 18+ by any rule (its own or an
+admin's rating, an 18+ library, one of the admin's 18+ genres, an adult source), an AniList lookup not done yet, or a
+last try that made none, which is left alone for a week — and **404** when a try made now makes none, so a client
+keeps its usual art. Every series in a payload carries `autoHero`: `{seed}` when it shows one (`v` is that seed, a
+cache-buster only), `null` otherwise. `POST /api/admin/series/:id/hero/shuffle` (admin) picks a new seed and makes
+the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept;
+**409** `not_automatic` for a series that may not have one. Banners are made one at a time server-wide, on demand and
+by a paced background pass that stands aside for a sweep, a repair or the daily source check.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
+GET    /img/series/:id/hero
 GET    /img/extensions/icon/:pkgName
 GET    /img/books/:id/thumb       GET    /img/books/:id/page/:n
 GET    /img/lib/series/:id/thumb  GET    /img/lib/books/:id/thumb

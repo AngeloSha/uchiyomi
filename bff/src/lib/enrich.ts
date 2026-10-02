@@ -16,6 +16,7 @@ import type { FastifyRequest } from 'fastify';
 import { q } from './db';
 import { NATIVE_PROGRESS } from './backend';
 import { roleOf, userIdOf } from './auth';
+import { autoHeroFor } from './autoHero';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -72,6 +73,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const progress = admin ? null : await seriesProgress(userId, list.map((s) => s.id));
   const colors = await seriesColors(list.map((s) => s.id));
   const seen = await seriesSeen(userId, list.map((s) => s.id));
+  const heroes = await autoHeroFor(list.map((s) => s.id));
   return list.map((s) => {
     const p = progress?.get(s.id);
     const total = s.booksCount ?? 0;
@@ -83,6 +85,9 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
       // ships placeholders, and every one of them was wrong for every reader.
       ...(admin ? {} : { booksReadCount: done, booksUnreadCount: unread, booksInProgressCount: p?.started ?? 0 }),
       color: colors.get(s.id) ?? null,
+      // v0.51.0: the banner made from its own pages (lib/autoHero.ts), for a series with no banner of its own; null
+      // when it has one or may not have one. The web shows /img/series/:id/hero?v=<seed> in its hero.
+      autoHero: heroes.get(s.id) ?? null,
       yomi: {
         favorite: favs.has(s.id),
         rating: ratings.get(s.id) ?? null,

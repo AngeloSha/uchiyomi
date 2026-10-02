@@ -63,6 +63,7 @@ export const DESKTOP_FLOORS = Object.freeze({
   backupCatchUp: 5 * 60 * 1000,
   healthSummary: 5 * 60 * 1000,
   archive: 3 * 60 * 1000,
+  autoHero: 10 * 60 * 1000,
 });
 export type DesktopFloor = keyof typeof DESKTOP_FLOORS;
 

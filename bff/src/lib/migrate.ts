@@ -1313,6 +1313,19 @@ CREATE TABLE IF NOT EXISTS source_find_runs (
 );
 CREATE INDEX IF NOT EXISTS source_find_runs_started ON source_find_runs (started_at DESC);
 -- (Both tables are new and nothing older writes to them: v0.49.0 starts on this schema and ignores them.)
+
+-- v0.51.0: automatic hero banners, made from a series' own pages (lib/autoHero.ts). One row per series that has had
+-- one made or tried. seed picks its chapters and pages (Shuffle sets a new one; 0 until then); made_at is when the
+-- current one was made; failed_at and fail_reason are the last try that made none, which is not repeated for a week.
+-- The images are image-cache entries (CACHE_DIR), keyed by series and seed. A new table and nothing else: v0.50.0
+-- starts on this schema and never meets it.
+CREATE TABLE IF NOT EXISTS series_hero (
+  series_id   text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  seed        integer NOT NULL DEFAULT 0,
+  made_at     timestamptz,
+  failed_at   timestamptz,
+  fail_reason text
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

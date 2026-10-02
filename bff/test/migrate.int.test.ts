@@ -140,6 +140,8 @@ const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'arch
 // v0.49.1's block (after v0.49.0's): two new tables and nothing else, so v0.49.0 boots on it and never meets them.
 // (Its whole-schema rule against v0.49.0's own list is the test after v0.49.0's.)
 const V0491_TABLES = ['series_alt_titles', 'source_find_runs'];
+// v0.51.0's block: one new table (lib/autoHero.ts), so v0.50.0 -- v0.49.1's schema -- boots on it and never meets it.
+const V0510_TABLES = ['series_hero'];
 const V049_COLUMNS: Record<string, string[]> = {
   lib_books: ['short_result', 'source_chapter_id'],
   chapter_failures: ['first_at'],
@@ -277,6 +279,25 @@ test('migrate: v0.49.1 adds its two tables and nothing a v0.49.0 image would hav
       await c.query('ROLLBACK');
     }
   });
+});
+
+test('migrate: v0.51.0 adds its one table and nothing a v0.50.0 image would have to write', { skip }, async () => {
+  // v0.50.0 changed no schema, so a rollback from v0.51.0 boots v0.49.1's: v0.49.0's tables (the fixture) and
+  // v0.49.1's two. The block is one CREATE TABLE. Reintroduce by dropping it: "a v0.51.0 table is missing".
+  const tables = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0510_TABLES],
+  );
+  assert.deepEqual(tables.map((t) => t.table_name).sort(), [...V0510_TABLES].sort(), 'a v0.51.0 table is missing');
+  assert.deepEqual(V0510_TABLES.filter((t) => V0490.tables.includes(t) || V0491_TABLES.includes(t)), [],
+    'a v0.51.0 table is one v0.50.0 already has');
+  // Only the key must be supplied: a seed of 0 is the banner every series starts with, the rest may be NULL.
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0510_TABLES],
+  );
+  assert.deepEqual(required.map((r) => `${r.table_name}.${r.column_name}`), ['series_hero.series_id']);
 });
 
 test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {

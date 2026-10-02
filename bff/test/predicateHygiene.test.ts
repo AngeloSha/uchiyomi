@@ -94,6 +94,9 @@ const GATED: Record<string, string> = {
   // state, since AniList art is fetched lazily for every series -- the image was produced from that URL with
   // no series join at all, and an age-capped account could render key art for a series it cannot open.
   '/img/series/:id/backdrop': 'seriesVisible check at the top of the route, like its thumb sibling',
+  // v0.51.0: the banner made from a series' own pages. The cover's gate first, then the series' own eligibility
+  // (no real banner, not 18+ by any rule, autoHeroFor) -- both before the cache, which would answer a warm key alone.
+  '/img/series/:id/hero': 'seriesVisible check at the top of the route, like its thumb sibling; then autoHeroFor',
   '/img/lib/series/:id/thumb': 'seriesVisible check at the top of serveLibSeriesThumb',
   '/img/lib/books/:id/thumb': 'bookFileAbs -> visibleBookFile',
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',
