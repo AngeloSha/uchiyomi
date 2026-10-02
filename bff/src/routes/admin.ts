@@ -39,8 +39,8 @@ import {
   listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, altRepoUrl,
   parseRepoInput, repoKey, contributedBy, engineReason, REPO_MESSAGES, type ExtensionInfo,
 } from '../lib/sources/suwayomi/extensions';
-import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview } from '../lib/sources/suwayomi/langs';
-import { lastSuwayomiLoad } from '../lib/sources/suwayomi/register';
+import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview, turnOnExtensionSources } from '../lib/sources/suwayomi/langs';
+import { lastSuwayomiLoad, rememberMissing } from '../lib/sources/suwayomi/register';
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
@@ -444,6 +444,9 @@ const scrubResult = <R extends { skips?: RepairSkip[] } | null | undefined>(r: R
 
 /** The run kinds the status route always estimates: the Health page's three chips, its cards and the nightly. */
 const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now'];
+
+/** The most extensions GET /api/admin/extensions/catalog answers at once, and how many it answers when not asked. */
+export const CATALOG_PAGE_MAX = 400;
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -2771,6 +2774,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     const on = new Set(
       (await q<{ source_id: string }>('SELECT source_id FROM suwayomi_sources WHERE enabled = true')).map((r) => r.source_id),
     );
+    // How many series came from each source (v0.53.0), switched on or not: Admin → Extensions says it beside each of an
+    // extension's languages, and what removing the extension leaves without updates. By the same rule the Languages
+    // overview counts by, keyed on the engine's id (`lib_series.source_id` holds 'sw:' + it).
+    const used = new Map(
+      (await q<{ source_id: string; n: number }>(
+        `SELECT s.source_id, count(*)::int AS n FROM lib_series s
+          WHERE s.source_id LIKE 'sw:%' AND ${visibleToAll('s')} GROUP BY s.source_id`,
+      )).map((r) => [r.source_id.slice('sw:'.length), r.n]),
+    );
     const needle = (term || '').trim().toLowerCase();
     const content = remote
       .map((s) => ({
@@ -2781,6 +2793,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         supportsLatest: !!s.supportsLatest,
         enabled: on.has(String(s.id)),
         pkgName: s.extension?.pkgName ?? null,
+        used: used.get(String(s.id)) ?? 0,
       }))
       .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang) && (!pkg || s.pkgName === pkg))
       .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
@@ -2806,6 +2819,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (needExt(reply)) return;
     const { ids = [], langs = [] } = b.data;
+    // A source of an extension installed in the engine's own page since the last registration has no row yet, and
+    // the switch below only flips rows: recorded first, or switching it on was a quiet no-op (v0.53.0).
+    await rememberMissing(ids);
     const r = await setSourcesEnabled({ ids, langs, enabled: b.data.enabled });
     const load = await reloadAll();
     await logAudit(b.data.enabled ? 'source.extension_enable' : 'source.extension_disable', {
@@ -2854,7 +2870,15 @@ export default async function adminRoutes(app: FastifyInstance) {
   // in this codebase and nothing is fetched until one is added.
   app.get('/api/admin/extensions/catalog', async (req, reply) => {
     if (needExt(reply)) return;
-    const { q: term, lang, installed, nsfw } = req.query as { q?: string; lang?: string; installed?: string; nsfw?: string };
+    const { q: term, lang, installed, nsfw, updates, offset: rawOffset, limit: rawLimit } = req.query as {
+      q?: string; lang?: string; installed?: string; nsfw?: string; updates?: string; offset?: string; limit?: string;
+    };
+    // A page of the matches (v0.53.0): `offset` from 0, `limit` up to CATALOG_PAGE_MAX, which is also the default -- the
+    // first 400, as the route always answered. ⚠️ It answered ONLY those: on a 1,300-extension repository the panel said
+    // "Showing 400 of 570 matches -- narrow the search", and an extension past the 400th could not be reached by
+    // scrolling (discussion #121). Admin → Extensions now asks for the next page as it scrolls.
+    const offset = Math.min(1_000_000, Math.max(0, Math.floor(Number(rawOffset)) || 0));
+    const limit = Math.min(CATALOG_PAGE_MAX, Math.max(1, Math.floor(Number(rawLimit)) || CATALOG_PAGE_MAX));
     let all;
     try {
       all = await listExtensions();
@@ -2862,10 +2886,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not reach the extension server.' });
     }
     const needle = (term || '').trim().toLowerCase();
-    const filtered = all
+    const matching = all
       .filter((e) => (!needle || e.name.toLowerCase().includes(needle) || e.pkgName.toLowerCase().includes(needle)))
       .filter((e) => (!lang || lang === 'all' ? true : e.lang === lang))
       .filter((e) => (installed === 'true' ? e.installed : true))
+      // `updates` (v0.53.0): only the extensions with a newer version waiting.
+      .filter((e) => (updates === 'true' ? e.hasUpdate : true));
+    const filtered = matching
       // adult extensions are hidden unless asked for — this is a household server by default, and they
       // otherwise dominate the top of an alphabetical list
       .filter((e) => (nsfw === 'true' ? true : !e.nsfw || e.installed))
@@ -2873,15 +2900,19 @@ export default async function adminRoutes(app: FastifyInstance) {
       .sort((a, b) => Number(b.installed) - Number(a.installed) || Number(b.hasUpdate) - Number(a.hasUpdate) || a.name.localeCompare(b.name));
     const langs = [...new Set(all.map((e) => e.lang).filter(Boolean))].sort() as string[];
     // Serve icons through our own origin; the extension server is not reachable from a browser.
-    const withIcons = filtered.map((e) => ({ ...e, iconUrl: e.iconUrl ? `/img/extensions/icon/${e.pkgName}` : null }));
+    const page = filtered.slice(offset, offset + limit).map((e) => ({ ...e, iconUrl: e.iconUrl ? `/img/extensions/icon/${e.pkgName}` : null }));
     return {
-      content: withIcons.slice(0, 400),
+      content: page,
       total: all.length,
-      shown: Math.min(filtered.length, 400),
+      shown: page.length,
       matched: filtered.length,
+      offset,
+      limit,
       installed: all.filter((e) => e.installed).length,
       updatable: all.filter((e) => e.hasUpdate).length,
-      hiddenAdult: nsfw === 'true' ? 0 : all.filter((e) => e.nsfw && !e.installed).length,
+      // The 18+ extensions the other filters match and the 18+ filter keeps out (v0.53.0; the whole catalogue's before):
+      // what "Nothing matches" can offer to show.
+      hiddenAdult: nsfw === 'true' ? 0 : matching.filter((e) => e.nsfw && !e.installed).length,
       langs,
     };
   });
@@ -2938,8 +2969,27 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {
     if (needExt(reply)) return;
     const { pkgName } = req.params as { pkgName: string };
-    const b = z.object({ action: z.enum(['install', 'uninstall', 'update']) }).safeParse(req.body);
+    const b = z.object({ action: z.enum(['install', 'uninstall', 'update', 'enable']) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    // "Turn on its sources" (v0.53.0): an installed extension's sources switched on as its install would have, and the
+    // engine asked for nothing but the list. An extension installed in the engine's own page showed as installed with
+    // every source off, and Remove then Add again was the only way to switch them on (discussion #121).
+    if (b.data.action === 'enable') {
+      let provided: Awaited<ReturnType<typeof sourcesOfExtension>>;
+      try {
+        provided = await sourcesOfExtension(pkgName);
+      } catch (e) {
+        return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not reach the extension server.' });
+      }
+      if (!provided.length) {
+        return reply.code(409).send({ error: 'no_sources', message: 'That extension is not installed, or provides no source.' });
+      }
+      const turned = await turnOnExtensionSources(provided);
+      await logAudit('extension.enable', { userId: userIdOf(req), detail: { pkgName, on: turned.on }, req });
+      const load = await reloadAll();
+      return { ok: true, sources: provided.length, on: turned.on, hidden: turned.hidden, registered: load.suwayomi };
+    }
 
     // Ask which sources this extension provides BEFORE acting: once it is uninstalled it provides none, and
     // we would leave the rows behind claiming sources that no longer exist.

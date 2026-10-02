@@ -87,6 +87,34 @@ export async function adoptExtensionSources(
   return { on, hidden: left };
 }
 
+/**
+ * "Turn on its sources" (v0.53.0): every source of an installed extension switched on, except a hidden language's
+ * -- the install's own rule, for an extension installed without it: in the engine's own page, which left it showing
+ * as installed with every source off, and Remove then Add again the only way to switch them on (discussion #121).
+ * Unlike adoptExtensionSources it never switches one OFF: a source in a hidden language that someone turned on by
+ * hand stays on. `on` counts the sources on afterwards, `hidden` those left off for their language.
+ */
+export async function turnOnExtensionSources(
+  provided: Array<{ id: string; name: string; lang: string | null; nsfw?: boolean }>,
+): Promise<{ on: number; hidden: number }> {
+  const hidden = new Set(await getHiddenLangs());
+  let on = 0;
+  let left = 0;
+  for (const s of provided) {
+    const want = !(s.lang && hidden.has(s.lang));
+    const rows = await q<{ enabled: boolean }>(
+      `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (source_id) DO UPDATE SET enabled = suwayomi_sources.enabled OR EXCLUDED.enabled,
+         name = EXCLUDED.name, lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw
+       RETURNING enabled`,
+      [s.id, s.name, s.lang, !!s.nsfw, want],
+    );
+    if (rows[0]?.enabled) on++;
+    else left++;
+  }
+  return { on, hidden: left };
+}
+
 export interface LangRow {
   lang: string | null;
   sources: number;

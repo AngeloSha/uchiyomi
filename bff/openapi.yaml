@@ -8205,6 +8205,8 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row
         carries the `pkgName` of the extension it comes from (v0.49.0), and `pkg` narrows the list to one
         extension's sources -- one per language -- as the extension settings sheet's language select reads it.
+        Since v0.53.0 each row also carries `used`: the series in the library that came from that source, switched
+        on or not (removed and merged-away series are not counted).
       parameters:
         - name: q
           in: query
@@ -8237,7 +8239,11 @@ paths:
         - admin
       summary: "Enable or disable many extension sources at once, by id or by language, in one statement and one reload. Languages also record the standing preference (hidden_langs) that installs respect; ids do not."
       operationId: postApiAdminExtensionsSourcesBulk
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. At least one of ids or langs must be non-empty.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. At least one of ids
+        or langs must be non-empty. Since v0.53.0 an id the engine lists that Uchiyomi has not recorded yet -- a source
+        of an extension installed in the engine's own page since the last registration -- is recorded first, so the
+        switch reaches it instead of changing nothing.
       requestBody:
         required: true
         content:
@@ -8401,30 +8407,62 @@ paths:
     get:
       tags:
         - admin
-      summary: "The extension catalogue: installed, updatable, and available."
+      summary: "The extension catalogue: installed, updatable, and available, a page at a time."
       operationId: getApiAdminExtensionsCatalog
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Installed first,
+        then those with an update, then by name. Answers `{content, total, matched, shown, offset, limit, installed,
+        updatable, hiddenAdult, langs}`: `content` is the page `offset`..`offset + limit` of the `matched`
+        extensions (v0.53.0; before, the first 400 alone), `shown` its length, `total` the whole catalogue,
+        `installed` and `updatable` counted over the whole catalogue, and `hiddenAdult` the 18+ extensions the other
+        filters match that the 18+ filter keeps out (0 with `nsfw=true`; the whole catalogue's before v0.53.0).
+        An installed 18+ extension is always listed.
       parameters:
         - name: q
           in: query
           required: false
+          description: Part of the extension's name or package name, any case.
           schema:
             type: string
         - name: lang
           in: query
           required: false
+          description: The extension's language code as the catalogue's `langs` lists it (`all` for a multi-language one); empty or `all` for every language.
           schema:
             type: string
         - name: installed
           in: query
           required: false
+          description: "`true`: installed extensions only."
+          schema:
+            type: string
+        - name: updates
+          in: query
+          required: false
+          description: "`true`: only extensions with a newer version waiting (v0.53.0)."
           schema:
             type: string
         - name: nsfw
           in: query
           required: false
+          description: "`true`: include 18+ extensions that are not installed (they are left out by default)."
           schema:
             type: string
+        - name: offset
+          in: query
+          required: false
+          description: Where the page starts among the matches (v0.53.0). Default 0.
+          schema:
+            type: integer
+            minimum: 0
+        - name: limit
+          in: query
+          required: false
+          description: How many extensions the page holds (v0.53.0). Default and maximum 400.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 400
       security:
         - bearer: []
       responses:
@@ -8501,12 +8539,16 @@ paths:
     post:
       tags:
         - admin
-      summary: Install, update or uninstall an extension; its sources are enabled or removed to match, except
-        sources in a hidden language, which stay off.
+      summary: Install, update or uninstall an extension, or turn an installed one's sources on; its sources are
+        enabled or removed to match, except sources in a hidden language, which stay off.
       operationId: postApiAdminExtensionsCatalogPkgname
       description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
         The 200 body carries `sources` (how many the extension provides), `on` (switched on now) and `hidden`
-        (left off because their language is hidden; see /api/admin/extensions/sources/bulk)."
+        (left off because their language is hidden; see /api/admin/extensions/sources/bulk). `enable` (v0.53.0)
+        asks the engine for nothing but the extension's sources and switches them on as an install would, never
+        switching one off: for an extension installed in the engine's own page, which shows as installed with
+        every source off. It answers 409 `no_sources` when the extension is not installed or provides no source,
+        and is audited as `extension.enable`."
 
       parameters:
         - name: pkgName
@@ -8520,9 +8562,12 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - action
               properties:
                 action:
                   type: string
+                  enum: [install, uninstall, update, enable]
       security:
         - bearer: []
       responses:
@@ -8536,6 +8581,10 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`enable` on an extension that is not installed, or provides no source (`no_sources`)"
+        "502":
+          description: The extension engine did not answer, or refused the change
   /api/admin/extensions/repos:
     get:
       tags:

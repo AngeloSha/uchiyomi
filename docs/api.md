@@ -1814,6 +1814,20 @@ overview as `langs` (sources, enabled, series that came from them, hidden), unaf
 filters, and `GET /api/admin/extensions/status` reports `registered`, `skipped` and `cap` so the
 `SUWAYOMI_MAX_SOURCES` overflow is visible rather than a line in the boot log.
 
+**Admin → Extensions, redesigned (v0.53.0).** `GET /api/admin/extensions/catalog` answers a page at a time: `offset`
+(from 0) and `limit` (default and maximum 400, so a call with neither still gets the first 400), echoed in the answer
+beside `shown` (the page's length) and `matched` (every match), so the last extension of a 1,300-extension repository
+is as reachable as the first -- it used to stop at 400 and say "narrow the search". `updates=true` keeps only the
+extensions with a newer version waiting, and `hiddenAdult` now counts the 18+ extensions the other filters match (it
+counted the whole catalogue). `POST /api/admin/extensions/catalog/:pkgName` takes `enable` beside `install`, `update`
+and `uninstall`: it switches an installed extension's sources on as its install would -- a hidden language's stay off,
+and none is ever switched off -- and asks the engine for nothing but the list, answering `{ ok, sources, on, hidden,
+registered }`, or **409** `no_sources` when the extension is not installed or provides no source; it is audited as
+`extension.enable`. It is what *Turn on its sources* does for an extension installed in the engine's own page, which
+shows as installed with every source off. Rows of `GET /api/admin/extensions/sources` carry `used`, the series that came
+from that source, on or off; and `POST /api/admin/extensions/sources/bulk` records an id the engine lists that Uchiyomi
+has not seen yet before switching it, so a language switch on such a source is not a quiet no-op.
+
 `GET /api/admin/extensions/status` is also what Admin → Extensions' setup screen reads (v0.49.0, #72). With no
 engine to talk to it answers `{ configured: false, reachable: false, off, platform, linkedSeries }`: `off` is
 `switch` (`EXTENSION_ENGINE=0` while `SUWAYOMI_URL` names the bundled container) or `unset` (no address),

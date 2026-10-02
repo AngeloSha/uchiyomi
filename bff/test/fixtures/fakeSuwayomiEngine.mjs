@@ -1158,6 +1158,55 @@ export function defaultSeed() {
   };
 }
 
+// A repository the size of the ones people add: the keiyoushi repository lists more than 1,300 extensions, and
+// Admin → Extensions once stopped at "Showing 400 of 570 matches — narrow the search" on it (discussion #121).
+// The names are made up, two words from the lists below; the languages, the one-in-five multi-language
+// extensions and the one-in-seven 18+ ones are a spread, not a measurement.
+const CATALOGUE_LANGS = ['en', 'en', 'en', 'en', 'es', 'pt-BR', 'fr', 'id', 'ja', 'ko', 'zh', 'ru', 'ar', 'de', 'it', 'tr', 'vi', 'es-419', 'th', 'pl'];
+const MULTI_LANGS = ['en', 'es', 'pt-BR', 'fr', 'id', 'ja', 'ko', 'zh', 'ru', 'ar', 'de', 'it', 'tr', 'vi'];
+const WORD_A = ['Amber', 'Azure', 'Birch', 'Cedar', 'Cinder', 'Coral', 'Dawn', 'Dusk', 'Ember', 'Fable', 'Fern', 'Frost', 'Gale',
+  'Harbor', 'Hollow', 'Indigo', 'Ivory', 'Jade', 'Juniper', 'Kestrel', 'Lantern', 'Lotus', 'Maple', 'Meadow', 'Nova', 'Onyx', 'Opal',
+  'Pebble', 'Quill', 'Raven', 'Saffron', 'Sable', 'Thistle', 'Tide', 'Umber', 'Velvet', 'Willow', 'Wren', 'Yarrow', 'Zephyr'];
+const WORD_B = ['Scans', 'Comics', 'Manga', 'Reader', 'Toons', 'Library', 'Shelf', 'Stories', 'Panels', 'Pages', 'Ink', 'Press', 'Studio',
+  'Archive', 'Club', 'House', 'Lounge', 'Garden', 'Harbor', 'Works', 'Corner', 'Den', 'Tales', 'Novels', 'Streams', 'Hub', 'Box', 'Nest',
+  'Vault', 'Atlas', 'Haven', 'Planet', 'Realm', 'Room'];
+const GENERATED_ID_BASE = 7_000_000_000_000_000_000n;
+
+/**
+ * `n` made-up extensions with their sources -- one per language, two to six for a multi-language one -- none of
+ * them installed. Deterministic: the same `n` gives the same catalogue, ids included, so a test can name one.
+ */
+export function catalogueExtensions(n) {
+  const extensions = [];
+  const sources = [];
+  const span = WORD_A.length * WORD_B.length;
+  let single = 0;
+  for (let i = 0; i < n; i++) {
+    const base = `${WORD_A[i % WORD_A.length]} ${WORD_B[Math.floor(i / WORD_A.length) % WORD_B.length]}`;
+    const name = i < span ? base : `${base} ${Math.floor(i / span) + 1}`;
+    const lang = i % 5 === 1 ? 'all' : CATALOGUE_LANGS[(single++ * 7 + 3) % CATALOGUE_LANGS.length];
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const pkgName = `eu.kanade.tachiyomi.extension.${lang === 'all' ? 'all' : lang.toLowerCase().replace(/[^a-z]/g, '')}.${slug}`;
+    const isNsfw = i % 7 === 3;
+    extensions.push({ pkgName, name, lang, versionName: `1.4.${(i * 13) % 97}`, installed: false, isNsfw, repo: 'https://repo.example/repo.json' });
+    const langs = lang === 'all'
+      ? Array.from({ length: 2 + (Math.floor(i / 5) % 5) }, (_, k) => MULTI_LANGS[(i + k * 3) % MULTI_LANGS.length]).filter((l, k, a) => a.indexOf(l) === k)
+      : [lang];
+    langs.forEach((l, j) => sources.push({
+      id: String(GENERATED_ID_BASE + BigInt(i) * 100n + BigInt(j)), name, lang: l, pkgName, supportsLatest: true, isNsfw,
+      baseUrl: `https://${slug}.example`, mangas: [],
+    }));
+  }
+  return { extensions, sources };
+}
+
+/** The standard installation plus `n` made-up extensions: what the catalogue's paging is tested against. */
+export function catalogueSeed(n) {
+  const seed = defaultSeed();
+  const more = catalogueExtensions(n);
+  return { ...seed, sources: [...seed.sources, ...more.sources], extensions: [...seed.extensions, ...more.extensions] };
+}
+
 /** The settings a fresh v2.3.2243 reports, read off the disposable engine. Others are refused as not implemented. */
 const DEFAULT_SETTINGS = {
   extensionRepos: [],
@@ -1296,6 +1345,8 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     ]);
   }
   const failIf = (src, stage) => { const e = extensionFailure(src, stage); if (e) throw e; };
+  /** A repository that does not answer, as the engine reports it (modelled: no repository can be reached offline). */
+  const repositoryFailure = (frame) => new EngineException('java.net.UnknownHostException', 'repo.example: Name or service not known', [frame]);
   const noSuchElement = (frame) => new EngineException('java.util.NoSuchElementException', 'Collection is empty.', [
     'kotlin.collections.CollectionsKt___CollectionsKt.first(_Collections.kt:209)', frame,
   ]);
@@ -1423,7 +1474,11 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
       settings: () => settingsView(),
       sources: (args) => { only(args, [], 'Query.sources'); return connection(visibleSources().map(sourceView)); },
       source: ({ id }) => { const s = sourceOf(id); return s ? sourceView(s) : null; },
-      extensions: (args) => { only(args, [], 'Query.extensions'); return connection([...st.extensions.values()].map(extensionView)); },
+      extensions: (args) => {
+        only(args, [], 'Query.extensions');
+        if (st.failList) throw repositoryFailure('suwayomi.tachidesk.graphql.queries.ExtensionQuery.extensions(ExtensionQuery.kt:1)');
+        return connection([...st.extensions.values()].map(extensionView));
+      },
       extension: ({ pkgName }) => { const e = st.extensions.get(pkgName); return e ? extensionView(e) : null; },
       manga: ({ id }) => { const m = st.mangas.get(id); return m && sourceOf(m.sourceId) ? mangaView(m) : null; },
       chapter: ({ id }) => { const c = st.chapters.get(id); return c ? chapterView(c) : null; },
@@ -1514,7 +1569,10 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         }
         return { preferences: readPreferences(src), source: sourceView(src), clientMutationId: input.clientMutationId ?? null };
       },
-      fetchExtensions: ({ input }) => ({ extensions: [...st.extensions.values()].map(extensionView), extensionStores: [], clientMutationId: input.clientMutationId ?? null }),
+      fetchExtensions: ({ input }) => {
+        if (st.failFetch) throw repositoryFailure('suwayomi.tachidesk.manga.impl.extension.ExtensionsList.fetchExtensions(ExtensionsList.kt:1)');
+        return { extensions: [...st.extensions.values()].map(extensionView), extensionStores: [], clientMutationId: input.clientMutationId ?? null };
+      },
       updateExtension: ({ input }) => {
         const e = st.extensions.get(input.id);
         if (!e) return { extension: null, clientMutationId: input.clientMutationId ?? null };
@@ -1554,6 +1612,38 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     if (m.mode === 'slow') m.ms ??= 15_000;
     mode = m;
     return mode;
+  }
+  /**
+   * POST /__catalogue: `extensions` made-up extensions (catalogueExtensions) in place of the last ones it added, and
+   * `set` changes to any extension by package -- an update waiting (`hasUpdate`), installed from the engine's own
+   * page (`installed`), `obsolete`, a `versionName`. `empty` first takes every extension away, the seed's too: an
+   * engine no repository has been added to. `failFetch` makes re-reading the repositories (fetchExtensions) fail as
+   * an unreachable repository does, and `failList` the catalogue's own listing (`extensions`); false puts either back.
+   * Never part of the engine; a bad body throws, and is a 400.
+   */
+  function catalogue({ extensions, set, empty, failFetch, failList } = {}) {
+    if (failFetch !== undefined) st.failFetch = failFetch === true;
+    if (failList !== undefined) st.failList = failList === true;
+    if (empty === true) {
+      for (const [id, s] of st.sources) if (s.pkgName !== PKG.local) st.sources.delete(id);
+      st.extensions.clear();
+      st.generated = new Set();
+    }
+    if (extensions !== undefined) {
+      if (!Number.isInteger(extensions) || extensions < 0 || extensions > 5000) throw new Error(`bad extensions ${extensions}`);
+      for (const [id, s] of st.sources) if (st.generated?.has(s.pkgName)) st.sources.delete(id);
+      for (const pkg of st.generated ?? []) st.extensions.delete(pkg);
+      const more = catalogueExtensions(extensions);
+      st.generated = new Set(more.extensions.map((e) => e.pkgName));
+      for (const e of more.extensions) st.extensions.set(e.pkgName, { hasUpdate: false, obsolete: false, versionCode: 1, ...e });
+      for (const s of more.sources) st.sources.set(s.id, { ...s, preferences: [], prefValues: {}, fail: {}, reloads: 0, mangas: [] });
+    }
+    for (const [pkg, patch] of Object.entries(set ?? {})) {
+      const e = st.extensions.get(pkg);
+      if (!e) throw new Error(`no extension ${pkg}`);
+      for (const k of ['hasUpdate', 'installed', 'obsolete', 'versionName']) if (patch?.[k] !== undefined) e[k] = patch[k];
+    }
+    return { extensions: st.extensions.size, sources: st.sources.size };
   }
   function reset(nextSeed = seed) {
     st = buildState(nextSeed);
@@ -1635,6 +1725,11 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         if (req.method === 'GET' && path === '/__mode') return json(res, 200, mode);
         if (req.method === 'GET' && path === '/__log') return json(res, 200, { mode, content: log });
         if (req.method === 'POST' && path === '/__reset') { reset(); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && path === '/__catalogue') {
+          let body;
+          try { body = JSON.parse((await readBody(req)) || '{}'); } catch { return json(res, 400, { error: 'bad_json' }); }
+          try { return json(res, 200, catalogue(body)); } catch (e) { return json(res, 400, { error: 'bad_catalogue', message: e.message }); }
+        }
         if (req.method === 'GET' && path === '/__state') {
           return json(res, 200, {
             mode, settings: st.settings, prefWrites: st.prefWrites, extensions: [...st.extensions.values()],
@@ -1709,6 +1804,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     graphql,
     setMode,
     reset,
+    catalogue,
     get mode() { return mode; },
     get state() { return st; },
     log,

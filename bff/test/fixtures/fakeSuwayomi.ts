@@ -15,11 +15,11 @@
 // to fakeSuwayomiEngine.mjs, measured against a throwaway engine of the pinned image (conformFakeSuwayomi.mjs
 // runs the comparison), rather than loosening the check.
 import {
-  startFakeEngine, checkQuery, defaultSeed, istreveliaPosts, webtoonsNumbers, f32,
+  startFakeEngine, checkQuery, defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32,
   SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES,
 } from './fakeSuwayomiEngine.mjs';
 
-export { defaultSeed, istreveliaPosts, webtoonsNumbers, f32, SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES };
+export { defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32, SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES };
 
 export type FakeMode = 'up' | 'down' | 'slow' | 'extension_error';
 /** Where an extension can fail: fetchSourceManga, fetchManga, fetchChapters, fetchChapterPages, a page image. */

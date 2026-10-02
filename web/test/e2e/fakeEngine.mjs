@@ -17,6 +17,11 @@
 //   POST /__mode {"mode":"extension_error","source":"<id>","stage":"search","message":"java.lang.Exception"}
 //        the engine answers, and the extension throws: every source and stage unless narrowed; stages are
 //        search | manga | chapters | pages | images
+//   POST /__catalogue {"extensions":1300,"set":{"<pkgName>":{"hasUpdate":true}}}
+//        a repository the size of a real one (made-up names, catalogueExtensions in the fixture) in place of the last
+//        one added, and changes to any extension: an update waiting, installed from the engine's own page, obsolete;
+//        {"empty":true} first takes every extension away (an engine no repository was added to); {"failFetch":true}
+//        fails re-reading the repositories as an unreachable one does, {"failList":true} the catalogue's listing
 //   GET  /__mode, GET /__log (every request with its outcome), GET /__state, POST /__reset (fresh seed, mode up)
 // A bad /__mode body is a 400 that names the modes and stages.
 //

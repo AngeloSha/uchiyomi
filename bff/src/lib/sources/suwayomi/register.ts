@@ -48,6 +48,24 @@ async function remember(sources: RemoteSource[]): Promise<void> {
   }
 }
 
+/**
+ * Rows for the engine's sources among `ids` that Uchiyomi has not recorded yet, switched off, as a registration
+ * records them (v0.53.0). An extension installed in the engine's own page has no rows until the next registration,
+ * so a switch by id -- Admin → Extensions' language switches, through the bulk route -- updated nothing and said
+ * nothing. The engine is asked only when one of the ids is missing; a source it no longer lists gets no row.
+ */
+export async function rememberMissing(ids: string[], list: () => Promise<RemoteSource[]> = listRemoteSources): Promise<number> {
+  if (!ids.length) return 0;
+  const known = new Set(
+    (await q<{ source_id: string }>('SELECT source_id FROM suwayomi_sources WHERE source_id = ANY($1::text[])', [ids])).map((r) => r.source_id),
+  );
+  const missing = new Set(ids.filter((id) => !known.has(id)));
+  if (!missing.size) return 0;
+  const found = (await list().catch((): RemoteSource[] => [])).filter((s) => missing.has(String(s.id)));
+  await remember(found);
+  return found.length;
+}
+
 export interface LoadResult {
   configured: boolean;
   reachable: boolean;
