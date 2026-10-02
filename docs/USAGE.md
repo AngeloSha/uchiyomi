@@ -1906,7 +1906,10 @@ import page (`/admin/import/`), which takes the list four ways:
 on the source it came from first, when you have that source installed, and only a result whose catalogue
 address is the backup's own counts as that exact entry; otherwise the usual title rules decide, and a title
 none of them is confident about stays unmatched rather than being given the first thing the source
-answered. Matching a long list takes a few minutes, because each title is looked up on its source; you can
+answered. One import looks up at most 500 titles; titles already in your library do not count toward them (they
+are listed, skipped), so a longer backup, MangaDex list or paste says *(first 500 not in your library kept;
+import again for the rest)*, and once those are in, importing the same list again brings the next ones. Matching
+a long list takes a few minutes, because each title is looked up on its source; you can
 leave the page and come back (the batch is saved, and the intake card lists the **open imports** — every
 admin's, on an install with more than one — so none is lost when the tab closes). A batch a server restart
 interrupted reads *Interrupted — resume* on that card and offers **Resume** when opened. **Discard** throws

@@ -3168,9 +3168,6 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
       if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
 
-      const truncated = capped || entries.length > 500;
-      entries = entries.slice(0, 500);
-
       // Flag what's already here up front so the review screen can default those rows to skipped, visibly.
       // The map carries the series id because a tracker row the library already holds is LINKED right here
       // (below): an existing reader connecting AniList gets sync for the titles they have, which is the most
@@ -3211,6 +3208,23 @@ export default async function adminRoutes(app: FastifyInstance) {
         }
         return null;
       };
+      // The 500 is a cap on the titles to SEARCH (v0.51.0, discussion #121): every row not already here is
+      // matched against the sources, a search per title per source, and 500 keeps one import from hammering
+      // them. Owned rows never enter that loop, so they do not count: counted over every entry, a backup of
+      // more than 500 titles imported a second time landed on the same first 500 -- by then mostly owned and
+      // skipped -- and could never reach the rest. The list is cut just before its 501st title not owned, so
+      // `truncated` still says some remain, and importing the list again once these are in picks them up. A
+      // tracker read keeps its own cap besides (TRACKER_LIST_MAX, `capped`).
+      // Reintroduce by cutting at the 500th ENTRY again: "titles already in the library do not count toward
+      // the 500" in importBatch.int.test.ts keeps 500 rows, not 503.
+      let toSearch = 0;
+      let cut = entries.length;
+      for (let i = 0; i < entries.length; i++) {
+        if (ownedBy(entries[i])) continue;
+        if (++toSearch > 500) { cut = i; break; }
+      }
+      const truncated = capped || cut < entries.length;
+      entries = entries.slice(0, cut);
       const owned = entries.map(ownedBy);
       const inLib = owned.map((o) => !!o);
       const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
@@ -3404,8 +3418,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         // row that is only *selected*, not skipped, can still be left for later without erroring.
         // `.uuid()` for the same reason `batchIdOf` exists: the ids go into `id = ANY($2)` on a uuid column,
         // and one malformed entry made Postgres raise 22P02, which the error handler answered as a 500
-        // carrying the raw database message. A batch never holds more than 500 rows, so a longer list is
-        // a client bug too. ⚠️ Not a 404 like the path params: the body is malformed, not a thing missing.
+        // carrying the raw database message. A batch never holds more than 500 rows to add (since v0.51.0
+        // it may also hold the titles already owned, skipped at intake), so a longer list is a client bug too. ⚠️ Not a 404 like the path params: the body is malformed, not a thing missing.
         candidateIds: z.array(z.string().uuid()).max(500).optional(),
       })
       .safeParse(req.body ?? {});

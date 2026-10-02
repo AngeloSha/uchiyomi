@@ -433,6 +433,35 @@ test('a title already in the library defaults to skipped, visibly, and never ent
   }
 });
 
+test('titles already in the library do not count toward the 500', { skip }, async () => {
+  // Discussion #121: a backup of more than 500 entries imported a second time landed on the same first 500, by then
+  // mostly owned and skipped, and could never reach the rest. Reintroduce by cutting the list at its 500th ENTRY
+  // before ownership is known (`entries.slice(0, 500)` in POST /batches): 500 rows are kept, not 503.
+  const { app, headers } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const owned = [newSeriesId(), newSeriesId(), newSeriesId()];
+  let batchId = '';
+  try {
+    for (const [i, id] of owned.entries()) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'test',$2,$1,1)`, [id, `Owned Long List ${'ABC'[i]}`]);
+    }
+    const titles = ['Owned Long List A', 'Owned Long List B', 'Owned Long List C', ...Array.from({ length: 501 }, (_, i) => `Fresh Long List ${i}`)];
+    const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles } });
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    assert.deepEqual([r.json().total, r.json().truncated], [503, true], 'the owned titles ride along uncounted, and the 501st new one is left for the next import');
+    const rows = await q<{ backup_title: string; in_library: boolean }>(
+      'SELECT backup_title, in_library FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [batchId]);
+    assert.deepEqual(rows.filter((x) => x.in_library).map((x) => x.backup_title), ['Owned Long List A', 'Owned Long List B', 'Owned Long List C']);
+    assert.equal(rows.at(-1)!.backup_title, 'Fresh Long List 499');
+  } finally {
+    // Discarded at once: DELETE stops the resolve loop before its next row, and 500 searches are not the point.
+    if (batchId) await app.inject({ method: 'DELETE', url: `/api/admin/import/batches/${batchId}`, headers });
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [owned]);
+    await app.close();
+  }
+});
+
 test('a backup entry carrying its own Mihon source id is matched against that installed source first', { skip }, async (t) => {
   // Reintroduce by returning null from mihonSourceToAdapter (or dropping the `home` search in
   // resolveCandidate): the match lands on FAKE, which runs first and carries the same title.

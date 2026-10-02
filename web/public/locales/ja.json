@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2545
+    "strings": 2547
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -808,6 +808,8 @@
   "1 novel skipped": "小説1件をスキップ",
   "{n} novels skipped": "小説{n}件をスキップ",
   "(first 500 kept)": "（先頭500件のみ）",
+  "(first 500 not in your library kept; import again for the rest)": "（ライブラリにない先頭500件のみ。残りはもう一度取り込んでください）",
+  "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "ライブラリにまだない最初の 500 作品だけを保持しました。それらを追加したら、同じリストをもう一度取り込むと残りが読み込まれます。",
   "matched under its other name": "別名で一致",
   "Already in your library — linked for progress sync": "すでにライブラリにあります — 進捗の同期用に紐付けました",
   "The tracker rejected the saved token — reconnect it under Profile": "トラッカーが保存済みのトークンを拒否しました — マイページから再連携してください",

@@ -1207,7 +1207,10 @@ importer accepts `oldest` and `newest` only — `none` is the add dialog's).
 with a match-review step in between, and is what the admin UI uses — the plain importer above adds the
 first cross-source hit with no review and stays for scripted callers. `POST .../batches` takes the same
 `dataUrl`/`mangadexList`/`titles` intake as `/api/admin/import/parse`, starts matching in the background
-(one batch resolves at a time server-wide) and returns `{batchId, total, truncated, skippedNovels}`. A
+(one batch resolves at a time server-wide) and returns `{batchId, total, truncated, skippedNovels}`. It
+searches at most 500 titles; since v0.51.0 the titles the library already holds are kept as skipped rows and
+do not count toward them, so `total` can be more than 500, and `truncated` says more titles not owned
+remained, which importing the same list again picks up once these are in. A
 fourth intake, `{origin: 'tracker', tracker: 'anilist' | 'myanimelist' | 'kitsu', statuses?: ('reading' |
 'plan_to_read' | 'completed' | 'on_hold' | 'dropped')[]}`, reads the requesting admin's OWN connected
 account (the connection `GET /api/trackers` shows for them, never another member's; `statuses` defaults to

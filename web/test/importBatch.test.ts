@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
   needsAttention, containsDiverges, matchTitleDiffers, matchedViaAlt, openBatches, batchOriginLabel, runStatusLabel, runStatusColor,
-  linkedCount, linkedLine,
+  linkedCount, linkedLine, truncatedWords,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
 import { readTab } from '../lib/tabParam';
@@ -250,6 +250,19 @@ test('a run status reads as a sentence, and a duplicate reads as "already in you
   // Every branch is a literal, so the locale-parity test above sees each sentence.
   const src = code(read('lib/importBatch.ts'));
   assert.doesNotMatch(src, /runStatusLabel[\s\S]{0,900}tr\([a-z]/, 'runStatusLabel passes a variable to tr(), which no locale file can see');
+});
+
+test('a list cut at the 500 says how to get the rest, and a tracker read keeps its words', () => {
+  // Discussion #121 (v0.51.0): a backup, a MangaDex list or a paste keeps its first 500 titles NOT in the library,
+  // so importing it again once they are in picks up the rest. Reintroduce by returning the tracker's words for every
+  // origin: the backup's note reads "(first 500 kept)" again.
+  assert.match(truncatedWords('backup').note, /import again for the rest/, 'the note does not say how to get the rest');
+  assert.match(truncatedWords('paste').toast, /import the same list again for the rest/, 'the toast does not say how to get the rest');
+  assert.equal(truncatedWords('tracker').note, '(first 500 kept)', 'a tracker read stops at its own cap, which reading it again does not get past');
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /parts\.push\(truncatedWords\(n\.origin\)\.note\)/, 'the review headline does not use the words');
+  assert.match(src, /toast\(truncatedWords\(origin\)\.toast, 'info'\)/, 'the intake toast does not use the words');
+  assert.match(src, /truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin \}/, 'the note is not told where the batch came from');
 });
 
 test('the manual-search results are rails: one flex row per source, scrolling sideways', () => {
@@ -559,7 +572,7 @@ test('the intake note comes from the batch row, so a reload or an Open-imports t
   // uses the intake's answer only until the first GET (and on an older server). Reintroduce by reading
   // `noteText(intakeNote)` alone: "the note is read from page state, not the batch" fails.
   const src = code(read('app/admin/import/page.tsx'));
-  assert.match(src, /const note = noteText\(batch\s*\? \{ skippedNovels: batch\.skippedNovels \?\? intakeNote\?\.skippedNovels \?\? 0, truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false \}\s*: null\);/, 'the note is read from page state, not the batch');
+  assert.match(src, /const note = noteText\(batch\s*\? \{ skippedNovels: batch\.skippedNovels \?\? intakeNote\?\.skippedNovels \?\? 0, truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin \}\s*: null\);/, 'the note is read from page state, not the batch');
   assert.match(read('lib/importBatch.ts'), /skippedNovels\?: number;\s*truncated\?: boolean;/, 'ImportBatch does not type the fields');
 });
 

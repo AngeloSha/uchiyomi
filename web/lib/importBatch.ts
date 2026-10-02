@@ -252,6 +252,24 @@ export function batchOriginLabel(origin: ImportOrigin, tracker?: string | null):
   }
 }
 
+/**
+ * What the intake note and its toast say about a list cut at the 500 (v0.51.0, discussion #121). A backup, a
+ * MangaDex list or a paste keeps the first 500 titles NOT already in the library -- the owned ones ride along as
+ * skipped rows, uncounted -- so importing the same list again once those are in picks up the rest, and the words
+ * say so. A tracker read stops at its own cap, which reading it again does not get past: its words stay as they
+ * were, and the advice for a large account is one list at a time (USAGE).
+ * Reintroduce by returning the tracker's words for every origin: "a list cut at the 500 says how to get the rest"
+ * in importBatch.test.ts reads "(first 500 kept)" for a backup.
+ */
+export function truncatedWords(origin: ImportOrigin | null | undefined): { note: string; toast: string } {
+  return origin === 'tracker'
+    ? { note: tr('(first 500 kept)'), toast: tr('Only the first 500 titles were kept.') }
+    : {
+        note: tr('(first 500 not in your library kept; import again for the rest)'),
+        toast: tr('Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.'),
+      };
+}
+
 /** Short label for the confidence chip. `keys()` isn't needed here — every call site passes a literal. */
 export function confidenceLabel(c: MatchConfidence | null): string {
   switch (c) {

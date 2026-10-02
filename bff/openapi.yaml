@@ -8563,8 +8563,10 @@ paths:
         added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}` — `origin` is
         `backup`, `mangadex`, `paste` or `tracker`, and `tracker` names the service (`anilist`, `myanimelist`,
         `kitsu`) for a tracker batch, null otherwise; `skippedNovels` (integer: the novels a tracker read
-        dropped, 0 for the other origins) and `truncated` (boolean: the intake kept 500 of a longer list, or
-        the tracker read hit its cap) are the intake's own answer kept on the row, so a later view of the
+        dropped, 0 for the other origins) and `truncated` (boolean: the intake kept the first 500 titles not
+        already in the library and more remained -- since v0.51.0 the titles already owned ride along as
+        skipped rows and do not count -- or the tracker read hit its cap) are the intake's own answer kept on
+        the row, so a later view of the
         batch still shows them. `stale` means what it means on GET
         /api/admin/import/batches/{id}: the batch reads `resolving` while nobody in this process is resolving
         it (a restart mid-pass), so the list can say "interrupted" rather than "matching" for it. The
@@ -8596,7 +8598,10 @@ paths:
         `confidence` is `same_source` only when the backup entry's own Mihon source is installed here (a
         Suwayomi extension) and a hit's extension-relative path equals the url the backup stored — Mihon's
         identity for a manga — else `exact`/`contains`/`fuzzy` from the title alone; a title with no confident
-        hit anywhere stays `unresolved`, never the first search result. Answers `{batchId, total, truncated,
+        hit anywhere stays `unresolved`, never the first search result. A batch searches at most 500 titles:
+        since v0.51.0 the titles the library already holds are kept as skipped rows and do not count toward
+        them, so `total` can be more than 500, and `truncated` says more titles not owned remained, which
+        importing the same list again picks up once these are in. Answers `{batchId, total, truncated,
         skippedNovels}`.
 
 

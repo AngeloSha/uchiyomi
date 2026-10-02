@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2545
+    "strings": 2547
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -808,6 +808,8 @@
   "1 novel skipped": "1 novel ignorada",
   "{n} novels skipped": "{n} novels ignoradas",
   "(first 500 kept)": "(mantidos os primeiros 500)",
+  "(first 500 not in your library kept; import again for the rest)": "(mantidos os primeiros 500 que não estão na sua biblioteca; importe de novo para o resto)",
+  "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "Só os primeiros 500 títulos que ainda não estão na sua biblioteca foram mantidos. Depois que eles entrarem, importe a mesma lista de novo para o resto.",
   "matched under its other name": "encontrado pelo outro nome",
   "Already in your library — linked for progress sync": "Já está na sua biblioteca — vinculado para sincronizar o progresso",
   "The tracker rejected the saved token — reconnect it under Profile": "O tracker rejeitou o token salvo — reconecte-o em Você",
