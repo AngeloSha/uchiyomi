@@ -232,8 +232,9 @@ test('the series page only starts a slow archive; watching it is the band\'s', (
   assert.match(page, /\{!archiving && canDownload\(user\) && numbers\.length > 0 && \(/, "the archive's run offers Fetch all");
   assert.match(page, /\{!archiving && mayArchive && numbers\.length > 0 && \(/, "the archive's own run offers to start it again");
   assert.match(page, /const numbers = filteredGhosts\.filter\(\(g\) => g\.why === r\.why &&/, 'a run hands Hide the other kind\'s numbers');
-  // The supply line's "not here yet" is what the sweep would take: the archive's numbers are not.
-  assert.match(page, /notHere: ghosts\.filter\(\(g\) => g\.why !== 'floor' && g\.why !== 'archive' && !haveNumbers\.has\(g\.number\)\)\.length,/,
+  // The supply line's "not here yet" is what the sweep would take: the archive's numbers are not. Since v0.50.0 the
+  // rule is lib/chapterRows.ts countsAsBehind, which chapterRows.test.ts holds to it for every kind of ghost.
+  assert.match(page, /notHere: ghosts\.filter\(\(g\) => countsAsBehind\(g\) && !haveNumbers\.has\(g\.number\)\)\.length,/,
     "the supply line counts the archive's chapters as behind");
   const band = code(read('components/SeriesServerDownloads.tsx'));
   assert.match(band, /\{archive && <ArchiveBand item=\{archive\} view=\{data\?\.archive\} \/>\}/, 'the band has no archive line');
