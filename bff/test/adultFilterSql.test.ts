@@ -98,14 +98,11 @@ test('"Always show" outranks the library rating and the series rating, not just 
   assert.match(V.browsable('s', ctx([], { maxAgeRating: 12 }), new V.Params()), /age_rating IS NULL OR|<= \$/, 'the age cap is still applied');
 });
 
-test('"Always show" also lifts the age cap for its series, and needs no second flag', () => {
-  // Reintroduce by dropping the exemption from visible(): a capped account is refused a title an admin let in.
-  // Or from browsable(): the title is readable by id but never appears on a shelf, since a capped account
-  // always browses with the switch off.
-  const capped = { maxAgeRating: 12 };
-  const v = V.visible('s', ctx([], capped), new V.Params());
-  assert.match(v, /o3\.adult_exempt FROM series_overrides o3 WHERE o3\.series_id = s\.id/);
-  assert.match(v, /OR .*<= \$1/s, 'the cap itself is still bound');
-  assert.doesNotMatch(V.visible('s', ctx([]), new V.Params()), /adult_exempt/, 'an uncapped account pays nothing');
-  assert.doesNotMatch(v + V.browsable('s', ctx([], capped), new V.Params()), /age_cap_exempt/);
+test('"Always show" never reaches visible(): it is a shelf switch, and the age cap stays the permission', () => {
+  // PR #130 let the flag lift a capped account's age limit in visible(); v0.50.0 left that part out. Reintroduce by
+  // OR-ing adult_exempt into the cap clause: the first assertion finds it. adultFilter.int.test.ts runs the same
+  // rule against Postgres ("a capped account still cannot open an exempt 18+ series").
+  const v = V.visible('s', ctx([], { maxAgeRating: 12 }), new V.Params());
+  assert.doesNotMatch(v, /adult_exempt/, 'the permission reads the shelf switch');
+  assert.match(v, /IS NULL OR .*<= \$1/s, 'the cap itself is still bound');
 });

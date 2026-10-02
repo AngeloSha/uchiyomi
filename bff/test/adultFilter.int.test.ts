@@ -197,6 +197,22 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       assert.ok(!(await listed()).includes(EXEMPT), 'the exemption could not be turned off');
     });
 
+    await t.test('a capped account still cannot open an exempt 18+ series', async () => {
+      // "Always show" is a shelf switch, not a permission. PR #130 also let it lift an account's age limit in
+      // visible(), and v0.50.0 left that part out: the admin lets a capped account read one title by rating it
+      // lower. Reintroduce by OR-ing `adult_exempt` into visible()'s cap clause: the capped account sees it.
+      const { seriesVisible, viewCtxFor } = await import('../src/lib/visibility');
+      await q(`INSERT INTO series_overrides (series_id, age_rating, adult_exempt) VALUES ($1, 18, true)
+               ON CONFLICT (series_id) DO UPDATE SET age_rating = 18, adult_exempt = true`, [EXEMPT]);
+      try {
+        assert.equal(await seriesVisible(EXEMPT, await viewCtxFor(member, 'user')), true, 'PREMISE: an uncapped member sees it');
+        assert.equal(await seriesVisible(EXEMPT, await viewCtxFor(capped, 'user')), false,
+          'an account capped at 16 sees a series rated 18 because it is on "Always show"');
+      } finally {
+        await q(`UPDATE series_overrides SET age_rating = NULL, adult_exempt = false WHERE series_id = $1`, [EXEMPT]);
+      }
+    });
+
     await t.test('the PATCH route keeps any label and drops only what is not one', async () => {
       // Nothing configured here ever reaches a query string, so no character needs refusing for safety: a
       // curly apostrophe or a non-Latin script is a real genre, and the old whitelist was dropping both.

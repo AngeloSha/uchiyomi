@@ -2499,5 +2499,5 @@
   "Main: {name}": "Principal: {name}",
   "Any: {name}": "Qualquer: {name}",
   "Tap again to skip to the next chapter": "Toque novamente para pular para o próximo capítulo",
-  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "Mantém esta série na estante enquanto “Mostrar +18” estiver desligado e permite que contas com limite de idade a leiam, mesmo que ela ou um de seus gêneros seja +18."
+  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "Mantém esta série na estante enquanto “Mostrar +18” estiver desligado, mesmo que ela ou um dos gêneros dela seja +18."
 }

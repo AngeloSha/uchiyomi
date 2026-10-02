@@ -2499,5 +2499,5 @@
   "Main: {name}": "الرئيسي: {name}",
   "Any: {name}": "أي: {name}",
   "Tap again to skip to the next chapter": "اضغط مرة أخرى للانتقال إلى الفصل التالي",
-  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "إبقاء هذه السلسلة على الرف ما دام «إظهار +18» متوقفًا، والسماح للحسابات المقيّدة بالعمر بقراءتها، حتى لو كانت هي أو أحد أنواعها +18."
+  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "إبقاء هذه السلسلة على الرف ما دام «إظهار +18» مطفأً، حتى لو كانت هي أو أحد تصنيفاتها +18."
 }

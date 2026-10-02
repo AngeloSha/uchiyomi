@@ -111,8 +111,8 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   );
   const [genres, setGenres] = useState<string[]>(series.overrides?.genres ?? series.metadata?.genres ?? []);
   const [genreDraft, setGenreDraft] = useState('');
-  // "Always show": kept visible while "Show 18+" is off, and readable by accounts whose age limit is below
-  // the rating above.
+  // "Always show": kept on the shelf while "Show 18+" is off, whatever makes it 18+ (its genres, its rating, its
+  // library). Surfacing only: who may open the series is still the age rating above.
   const [adultExempt, setAdultExempt] = useState(series.overrides?.adultExempt === true);
   // Which way the series reads (#102): what the reader's "Series default" direction follows. '' is automatic --
   // the chapter files, then the source, then AniList (bff lib/readingDirection.ts), a webtoon when none says.
@@ -247,7 +247,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
         <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 text-sm">
           <span>
             <span className="text-fog-100">{tr('Always show')}</span>
-            <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.')}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.')}</span>
           </span>
           <input type="checkbox" checked={adultExempt} onChange={(e) => setAdultExempt(e.target.checked)} className="size-4 shrink-0 accent-accent" />
         </label>

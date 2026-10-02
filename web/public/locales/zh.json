@@ -2499,5 +2499,5 @@
   "Main: {name}": "主：{name}",
   "Any: {name}": "任意：{name}",
   "Tap again to skip to the next chapter": "再点一次以跳到下一章",
-  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "在“显示 18+”关闭时仍将此系列保留在书架上，并允许有年龄限制的账户阅读，即使它或它的某个类型属于 18+。"
+  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "即使它本身或它的某个类型属于 18+，“显示 18+”关闭时也让这部作品留在书架上。"
 }

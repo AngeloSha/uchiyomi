@@ -85,10 +85,12 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
       (SELECT l2.age_rating FROM libraries l2 WHERE l2.id = ${alias}.library_id))`;
     // Unrated stays visible on purpose. Treating NULL as adults-only would empty most libraries the first
     // time anyone set a cap, and a parent would reasonably read that as the app being broken.
-    // "Always show" (`adult_exempt`) lifts the cap for one series: a title rated 18+ that a restricted account
-    // may nonetheless read. It lifts the rating only -- library grants above still decide which libraries.
-    parts.push(`(COALESCE((SELECT o3.adult_exempt FROM series_overrides o3 WHERE o3.series_id = ${alias}.id), false)
-      OR ${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
+    // ⚠️ Nothing lifts the cap but the rating itself. "Always show" (`series_overrides.adult_exempt`) is a shelf
+    // switch, read by `browsable()` only: it decides what the 18+ switch tidies away, never who may open a
+    // series, and an admin who wants a capped account to read one title rates that title lower. PR #130 let it
+    // lift the cap here too; that part was left out of v0.50.0. Reintroduce by OR-ing the flag in: "a capped
+    // account still cannot open an exempt 18+ series" in adultFilter.int.test.ts finds it visible.
+    parts.push(`(${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
   }
   return parts.join(' AND ');
 }
@@ -201,9 +203,8 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // emit a `$N` nothing ever binds -- and `q()` would either throw or, worse, collide with the caller's own
   // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
   // "Always show" (`series_overrides.adult_exempt`) is one series' explicit answer, and it outranks every
-  // 18+ rule below -- its library's rating, its own rating and its genres alike -- and the account's
-  // age cap: `visible()` above lifts that too, for the same flag. A restricted account always browses with
-  // the switch off, so the exemption has to hold here or the title it was let into never reaches a shelf.
+  // 18+ rule below -- its library's rating, its own rating and its genres alike. It is display only: `base`
+  // above is `visible()`, so an account whose age cap is below the series' rating still never lists it.
   const exempt = `COALESCE((SELECT o_ex0.adult_exempt FROM series_overrides o_ex0 WHERE o_ex0.series_id = ${alias}.id), false)`;
   const parts = [base, `(${exempt} OR NOT EXISTS (
     SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING}))`];

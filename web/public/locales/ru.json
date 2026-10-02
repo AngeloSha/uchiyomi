@@ -2499,5 +2499,5 @@
   "Main: {name}": "Основной: {name}",
   "Any: {name}": "Любой: {name}",
   "Tap again to skip to the next chapter": "Нажмите ещё раз, чтобы перейти к следующей главе",
-  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "Оставлять эту серию на полке, пока «Показывать 18+» выключено, и разрешить её чтение аккаунтам с возрастным ограничением, даже если она или один из её жанров 18+."
+  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "Оставлять эту серию на полке, пока «Показать 18+» выключено, даже если она сама или один из её жанров — 18+."
 }

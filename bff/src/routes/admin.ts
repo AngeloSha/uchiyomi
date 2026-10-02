@@ -1500,7 +1500,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullish(),
       /**
        * "Always show": keep this series visible when the 18+ switch would hide it (its genres, its rating, its
-       * library), and readable by accounts whose age limit is below its rating.
+       * library). A shelf switch only: an account whose age limit is below the series' rating still cannot open it.
        *
        * Absent leaves the flag as it is, which matters because this route writes every other column
        * unconditionally: the edit modal does not send this field, and without the COALESCE below an

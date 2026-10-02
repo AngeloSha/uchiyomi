@@ -619,8 +619,9 @@ extension declares `isNsfw`, below. The lists are read in SQL from `server_setti
 reach every surface the default does: listings, OPDS, the Komga-compatible API, notification digests, and the
 automatic source hunt, which never follows a named source onto a series that is not itself adult. They widen
 what is hidden and never what is allowed: `max_age_rating` stays the only permission.
-The one exception to that last sentence is the per-series *Always show*: it also lifts `max_age_rating` for
-that title alone, so a series rated 18+ can still be read, and shelved, by an account capped below it.
+Since v0.50.0 a series rated 18+ itself (its own rating, or the admin's override) is hidden like one in an 18+
+library, and *Always show* lets a title through all three rules -- the library's rating, its own and its genres.
+It is a shelf switch, not a permission: an account capped below the series' rating still cannot see it.
 
 **Since v0.42.0 the same default covers Discover's sources.** A source whose extension declares itself
 adult (`isNsfw`) is a listing like any other, and hiding 18+ libraries while painting twelve adult
