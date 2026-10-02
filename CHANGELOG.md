@@ -6,7 +6,8 @@
 chapters, side by side, behind its title and in Home's carousel.** And Find other sources can show you each match
 beside your series before it follows anything, with **Follow all green** for the ones it would have followed anyway.
 That idea is **@TIGamingTV**'s, from issue [#132](https://github.com/AngeloSha/uchiyomi/issues/132) and pull request
-[#133](https://github.com/AngeloSha/uchiyomi/pull/133).
+[#133](https://github.com/AngeloSha/uchiyomi/pull/133). Plus three fixes to importing a list, for **@Kedryn**
+([#121](https://github.com/AngeloSha/uchiyomi/discussions/121)).
 
 ### Hero banners made from a series' own pages
 
@@ -59,6 +60,22 @@ pull request's rules.
   followed already. A source the series already follows another way is never re-pointed (#133's other
   rule), and the cap on followed sources holds as for every follow.
 
+### Import
+
+From **@Kedryn**'s questions in [#121](https://github.com/AngeloSha/uchiyomi/discussions/121), on bringing a Mihon
+library over.
+
+- **Titles you already have no longer count toward the 500.** One import looks up at most 500 titles, and the 500
+  was counted before the titles already in your library were set aside, so a backup of more than 500 imported a
+  second time landed on the same first 500, by then mostly yours, and never reached the rest. Titles you have are
+  listed as skipped and do not count now, and a longer list says *(first 500 not in your library kept; import again
+  for the rest)*: once those are in, importing the same list again brings the next ones. A tracker list keeps its
+  own limit, as before.
+- **Select all “same source as before”** on the review selects the exact pairs, each backup entry found on its own
+  extension at its own address, in one press.
+- **Hide already imported** hides the titles your library holds, so a list brought over again shows only what is
+  left to decide.
+
 ### Upgrading
 
 - **The database** gets one migration on first start, and it only adds a table: `series_hero` (each series' banner
@@ -74,6 +91,8 @@ pull request's rules.
   - `POST /api/admin/sources/find` takes `review: true`; such a run reads `review: true`, and its series carry
     `proposals`. `POST /api/admin/sources/find/:runId/follow` and `…/dismiss`, with `{seriesId, sourceId}`, decide
     one; a follow from a review is audited as `series.follow_source` with `via: find_review`.
+  - `POST /api/admin/import/batches` keeps the titles already in the library as skipped rows besides the 500 it
+    looks up, so its `total` can be more than 500; `truncated` says more titles not in the library remained.
 
 ## v0.50.0 — 2026-10-02
 
