@@ -24,7 +24,7 @@ import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { forStrip } from '@/lib/jobs';
 import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
-interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
+interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; librarySeriesId?: string; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 /** One source's line in a search answer (v0.40.0): what it did with the term, or that it is still being asked. */
 interface SearchSourceLine { id: string; name: string; state: 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending'; ms?: number; why?: 'disabled' | 'cooldown' }
 /**
@@ -237,7 +237,7 @@ export default function DiscoverPage() {
     return [{
       source: pick.source ?? '', sourceId: pick.sourceId ?? g.title,
       title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
-      inLibrary: g.inLibrary, providerCount: g.providers.length,
+      inLibrary: g.inLibrary, librarySeriesId: g.librarySeriesId, providerCount: g.providers.length,
     }];
   }), [searchQ.data, selected]);
   const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});

@@ -630,18 +630,21 @@ export type { MatchConfidence };
  *
  * Was `SELECT s.title FROM lib_series` -- every row, every column value in memory, once per source per wall
  * paint, and again per page as you scroll. Six sources on a 214-series library is six full scans to answer a
- * question about twenty-four titles. The normalisation matches `norm()` and the duplicate check in
+ * question about twenty-four titles. Returns the entry's id too, so a card for an owned title can open it. The normalisation matches `norm()` and the duplicate check in
  * `addSeriesFromSource`, which has always compared this way.
  */
 const NORM_SQL = "lower(regexp_replace(s.title, '[^a-zA-Z0-9]', '', 'g'))";
-async function inLibrary(titles: Array<string | undefined>): Promise<Set<string>> {
+async function inLibrary(titles: Array<string | undefined>): Promise<Map<string, string>> {
   const keys = [...new Set(titles.map((t) => norm(t || '')).filter(Boolean))];
-  if (!keys.length) return new Set();
-  const rows = await q<{ k: string }>(
-    `SELECT ${NORM_SQL} AS k FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1)`,
+  if (!keys.length) return new Map();
+  const rows = await q<{ k: string; id: string }>(
+    `SELECT ${NORM_SQL} AS k, s.id FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1) ORDER BY s.id`,
     [keys],
   ).catch(() => []);
-  return new Set(rows.map((r) => r.k));
+  // Two series can share a normalised title; the first by id is the entry the card opens.
+  const out = new Map<string, string>();
+  for (const r of rows) if (!out.has(r.k)) out.set(r.k, r.id);
+  return out;
 }
 
 /**
@@ -1912,7 +1915,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
   });
 
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
@@ -2543,7 +2546,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const rails = bySource(ans.per, order);
       const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
       return {
-        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) })),
+        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) })),
         ...rest,
       };
     }
@@ -2551,7 +2554,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
     const groups = groupByTitle(ans.per, order);
     const have = await inLibrary(groups.map((g) => g.title));
-    return { content: groups.map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) })), ...rest };
+    return { content: groups.map((g) => ({ ...g, inLibrary: have.has(norm(g.title)), librarySeriesId: have.get(norm(g.title)) })), ...rest };
   });
 
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.
@@ -2577,11 +2580,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p);
       const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)) })) };
+      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)), librarySeriesId: had.get(norm(r.title)) })) };
     }
     const results = await latestPage(src, p);
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
   });
 
   /**
@@ -2604,11 +2607,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p, 'popular');
       const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)) })) };
+      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)), librarySeriesId: had.get(norm(r.title)) })) };
     }
     const results = await latestPage(src, p, 'popular');
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
   });
 
   /**

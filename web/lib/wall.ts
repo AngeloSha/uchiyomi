@@ -63,6 +63,7 @@ export function foldByTitle(
     out[i] = {
       ...card,
       inLibrary: card.inLibrary || it.inLibrary,
+      librarySeriesId: card.librarySeriesId || it.librarySeriesId,
       coverUrl: card.coverUrl || it.coverUrl,
       providerCount: providers.length,
     };

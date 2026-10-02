@@ -1039,7 +1039,7 @@ again.
   sources right now*. The (i) in the sheet's header is the same five-line explainer as on the series page.
 - **Search:** type a title once and Uchiyomi searches **all your sources at the same time**. Results are
   de-duplicated into one card per title (a *{n} sources* chip says how many carry it), and anything you
-  already own is marked **✓ In library**. The wall does the same: a title several of your sources publish is
+  already own is marked **✓ In library**, and tapping it opens that series in your library. The wall does the same: a title several of your sources publish is
   one card with the same chip, and tapping it lets you pick the source. A card's corner shows the favicon of
   the source it came from. The first useful results appear without waiting for the slowest source (within
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
