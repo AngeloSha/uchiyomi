@@ -146,6 +146,19 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
     });
 
     /**
+     * The Browse tab counts `total - adultTotal`, from the answer the panel asks for its installed list. It said
+     * "Browse 1,304" over a list that ended at "1,118 of 1,118". Reintroduce `matching` for `adultTotal` (or drop it):
+     * "the Browse tab counts what Browse lists" fails.
+     */
+    await t.test('adultTotal counts the whole catalogue\'s 18+ extensions not installed, whatever was asked', async () => {
+      const asked = await get('/api/admin/extensions/catalog?installed=true&nsfw=true&limit=400');
+      assert.ok(asked.adultTotal >= 1, 'PREMISE: the catalogue has 18+ extensions that are not installed');
+      assert.equal(asked.total - asked.adultTotal, shown.length, 'the Browse tab counts what Browse lists');
+      const searched = await get('/api/admin/extensions/catalog?q=no-such-extension');
+      assert.equal(searched.adultTotal, asked.adultTotal, 'a search changes a count of the whole catalogue');
+    });
+
+    /**
      * The engine's own page installed Webtoons.com, Manga Ball and Night Shelf: Uchiyomi has no rows for their sources.
      * Reintroduce by dropping the `enable` branch (and its enum value): the route answers 400 and 'the route takes
      * "enable"' fails.

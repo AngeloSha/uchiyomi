@@ -2913,6 +2913,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       // The 18+ extensions the other filters match and the 18+ filter keeps out (v0.53.0; the whole catalogue's before):
       // what "Nothing matches" can offer to show.
       hiddenAdult: nsfw === 'true' ? 0 : matching.filter((e) => e.nsfw && !e.installed).length,
+      // The 18+ extensions in the whole catalogue that are not installed, whatever was asked: what Browse leaves out
+      // while Show 18+ extensions is off. The Browse tab counts `total` less these, as its list does -- it said
+      // "Browse 1,304" over a list that ended at "1,118 of 1,118".
+      adultTotal: all.filter((e) => e.nsfw && !e.installed).length,
       langs,
     };
   });

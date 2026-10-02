@@ -39,8 +39,18 @@ export interface CatalogPage {
   updatable: number;
   /** The 18+ extensions the other filters match and the 18+ filter keeps out. */
   hiddenAdult: number;
+  /** The whole catalogue's 18+ extensions that are not installed, whatever was asked (absent from an older server). */
+  adultTotal?: number;
   langs: string[];
 }
+
+/**
+ * The Browse tab's count: the extensions Browse lists, so the tab and the list's last line agree. Without Show 18+
+ * extensions that is the catalogue less its 18+ extensions not installed (an installed one is always listed); it said
+ * "Browse 1,304" over a list that ended at "1,118 of 1,118".
+ */
+export const browseCount = (p: Pick<CatalogPage, 'total' | 'adultTotal'>, adult: boolean): number =>
+  (adult ? p.total : Math.max(0, p.total - (p.adultTotal ?? 0)));
 
 /** One row of GET /api/admin/extensions/sources: a source an installed extension provides, one per language. */
 export interface ExtSource {

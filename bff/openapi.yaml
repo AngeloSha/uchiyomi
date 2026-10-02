@@ -8427,11 +8427,13 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Installed first,
         then those with an update, then by name. Answers `{content, total, matched, shown, offset, limit, installed,
-        updatable, hiddenAdult, langs}`: `content` is the page `offset`..`offset + limit` of the `matched`
-        extensions (v0.53.0; before, the first 400 alone), `shown` its length, `total` the whole catalogue,
-        `installed` and `updatable` counted over the whole catalogue, and `hiddenAdult` the 18+ extensions the other
-        filters match that the 18+ filter keeps out (0 with `nsfw=true`; the whole catalogue's before v0.53.0).
-        An installed 18+ extension is always listed.
+        updatable, hiddenAdult, adultTotal, langs}`: `content` is the page `offset`..`offset + limit` of the
+        `matched` extensions (v0.53.0; before, the first 400 alone), `shown` its length, `total` the whole
+        catalogue, `installed` and `updatable` counted over the whole catalogue, `hiddenAdult` the 18+ extensions
+        the other filters match that the 18+ filter keeps out (0 with `nsfw=true`; the whole catalogue's before
+        v0.53.0), and `adultTotal` (v0.53.0) the whole catalogue's 18+ extensions that are not installed, whatever
+        was asked: `total` less these is how many the list holds without `nsfw=true`. An installed 18+ extension
+        is always listed.
       parameters:
         - name: q
           in: query

@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { setActiveLocale } from '../lib/format';
 import {
-  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, catalogQuery, engineLine, extLanguageName, helperLine, initialView, installedList,
+  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, browseCount, catalogQuery, engineLine, extLanguageName, helperLine, initialView, installedList,
   languageOptions, languagesOnText, needsTurningOn, nextOffset, overLimitText, reasonLine, sourceHealth, sourcesOnText,
   type CatalogExt, type ExtSource,
 } from '../lib/extensions';
@@ -116,7 +116,21 @@ test('counts say their unit: sources against the limit, an extension\'s language
   assert.equal(overLimitText(0, 25), '', 'a limit nothing is over is said');
   assert.equal(overLimitText(1, 25), '1 enabled source is not registered — over the limit of 25.');
   const tabs = slice(code(read('components/ExtensionsPanel.tsx')), 'function ExtensionLists(', 'function ViewTabs(');
-  assert.match(tabs, /<ViewTabs view=\{view\} onView=\{setView\} installed=\{inst\?\.installed\} total=\{inst\?\.total\}/, 'the Installed tab counts something other than the extensions installed');
+  assert.match(tabs, /<ViewTabs view=\{view\} onView=\{setView\} installed=\{inst\?\.installed\} /, 'the Installed tab counts something other than the extensions installed');
+});
+
+test('the Browse tab counts what Browse lists, and follows Show 18+ extensions', () => {
+  // It said "Browse 1,304" over a list that ended at "1,118 of 1,118": the tab counted the 18+ extensions the list
+  // leaves out. Reintroduce `total={inst?.total}`, or drop the subtraction: these fail.
+  assert.equal(browseCount({ total: 1304, adultTotal: 186 }, false), 1118, 'the tab counts the 18+ extensions Browse leaves out');
+  assert.equal(browseCount({ total: 1304, adultTotal: 186 }, true), 1304, 'with Show 18+ extensions on, the tab leaves them out');
+  assert.equal(browseCount({ total: 40 }, false), 40, 'an older server, which does not count them, breaks the count');
+  const lists = slice(code(read('components/ExtensionsPanel.tsx')), 'function ExtensionLists(', 'function ViewTabs(');
+  assert.match(lists, /<ViewTabs [^>]*total=\{inst \? browseCount\(inst, adult\) : undefined\}/, 'the Browse tab counts something other than what Browse lists');
+  assert.match(lists, /const \[adult, setAdult\] = useState\(false\);/);
+  assert.match(lists, /<BrowseView [^>]*adult=\{adult\} onAdult=\{setAdult\}/, 'the switch Browse shows is not the one the tab counts by');
+  const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'function BrowseView(', 'function NothingFound(');
+  assert.match(browse, /const f = useMemo<BrowseFilters>\(\(\) => \(\{ \.\.\.narrow, adult \}\), \[narrow, adult\]\);/, 'Browse asks with a switch of its own');
 });
 
 test('a language\'s health: off, over the source limit, or what Providers says of it', () => {
@@ -154,7 +168,7 @@ test('Browse reaches every extension: pages as it scrolls, Show more under them,
 test('the 18+ control says what it does, and off hides them', () => {
   // #121: a chip reading "18+" was read as "only 18+". Reintroduce the chip: the switch's words are gone.
   const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'function BrowseView(', 'function NothingFound(');
-  assert.match(browse, /<Switch on=\{f\.adult\} onChange=\{\(v\) => set\(\{ adult: v \}\)\} label=\{tr\('Show 18\+ extensions'\)\} \/>\s*<span>\{tr\('Show 18\+ extensions'\)\}<\/span>/,
+  assert.match(browse, /<Switch on=\{f\.adult\} onChange=\{onAdult\} label=\{tr\('Show 18\+ extensions'\)\} \/>\s*<span>\{tr\('Show 18\+ extensions'\)\}<\/span>/,
     'the 18+ filter is not a switch saying "Show 18+ extensions"');
   assert.doesNotMatch(browse, />\s*18\+\s*</, 'a bare "18+" control is back');
   assert.deepEqual(NO_FILTERS.adult, false, '18+ extensions are shown by default');

@@ -1819,7 +1819,8 @@ filters, and `GET /api/admin/extensions/status` reports `registered`, `skipped` 
 beside `shown` (the page's length) and `matched` (every match), so the last extension of a 1,300-extension repository
 is as reachable as the first -- it used to stop at 400 and say "narrow the search". `updates=true` keeps only the
 extensions with a newer version waiting, and `hiddenAdult` now counts the 18+ extensions the other filters match (it
-counted the whole catalogue). `POST /api/admin/extensions/catalog/:pkgName` takes `enable` beside `install`, `update`
+counted the whole catalogue); `adultTotal` is the whole catalogue's 18+ extensions that are not installed, whatever was
+asked, so `total - adultTotal` is how many the list holds without `nsfw=true`. `POST /api/admin/extensions/catalog/:pkgName` takes `enable` beside `install`, `update`
 and `uninstall`: it switches an installed extension's sources on as its install would -- a hidden language's stay off,
 and none is ever switched off -- and asks the engine for nothing but the list, answering `{ ok, sources, on, hidden,
 registered }`, or **409** `no_sources` when the extension is not installed or provides no source; it is audited as

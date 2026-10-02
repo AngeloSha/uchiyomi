@@ -26,7 +26,7 @@ import { useReduceEffects } from '@/lib/effects';
 import { isDesktop } from '@/lib/desktop';
 import { numberText } from '@/lib/format';
 import {
-  BROWSE_PAGE, NO_FILTERS, catalogQuery, extLanguageName, initialView, installedList, langTag,
+  BROWSE_PAGE, NO_FILTERS, browseCount, catalogQuery, extLanguageName, initialView, installedList, langTag,
   languageOptions, languagesOnText, narrowed, needsTurningOn, nextOffset, reasonLine,
   type BrowseFilters, type CatalogExt, type CatalogPage, type ExtSourcesAnswer, type ExtStatus, type ExtView, type InstalledExt,
 } from '@/lib/extensions';
@@ -199,18 +199,20 @@ function ExtensionLists({ status, onProviders }: { status: ExtStatus; onProvider
   const [view, setView] = useViewParam(inst ? inst.installed : undefined);
   const [open, setOpen] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'repos' | 'langs' | null>(null);
+  // Show 18+ extensions lives here, not in Browse: the Browse tab counts what the list holds, so it follows the switch.
+  const [adult, setAdult] = useState(false);
   const opened = open ? installed.find((e) => e.pkgName === open) ?? null : null;
 
   return (
     <>
       <EngineReady status={status} installed={inst ? inst.installed : null} desktop={isDesktop()} />
       <section aria-label={tr('Extensions')} className="space-y-4">
-        <ViewTabs view={view} onView={setView} installed={inst?.installed} total={inst?.total} updates={inst?.updatable ?? 0} />
+        <ViewTabs view={view} onView={setView} installed={inst?.installed} total={inst ? browseCount(inst, adult) : undefined} updates={inst?.updatable ?? 0} />
         {view === 'installed' ? (
           <InstalledView list={installed} loading={!inst || !srcs} failed={instFailed} actions={actions} updatable={inst?.updatable ?? 0}
             onOpen={setOpen} onBrowse={() => setView('browse')} onLanguages={() => setSheet('langs')} />
         ) : (
-          <BrowseView actions={actions} repos={repos?.content} onOpen={setOpen} onRepos={() => setSheet('repos')} />
+          <BrowseView actions={actions} repos={repos?.content} adult={adult} onAdult={setAdult} onOpen={setOpen} onRepos={() => setSheet('repos')} />
         )}
       </section>
       {opened && (
@@ -413,10 +415,11 @@ function InstalledRow({ e, busy, onOpen, act }: {
 
 // ---- Browse ----------------------------------------------------------------------------------------------------
 
-function BrowseView({ actions, repos, onOpen, onRepos }: {
-  actions: ExtActions; repos?: string[]; onOpen: (pkg: string) => void; onRepos: () => void;
+function BrowseView({ actions, repos, adult, onAdult, onOpen, onRepos }: {
+  actions: ExtActions; repos?: string[]; adult: boolean; onAdult: (on: boolean) => void; onOpen: (pkg: string) => void; onRepos: () => void;
 }) {
-  const [f, setF] = useState<BrowseFilters>(NO_FILTERS);
+  const [narrow, setF] = useState<BrowseFilters>(NO_FILTERS);
+  const f = useMemo<BrowseFilters>(() => ({ ...narrow, adult }), [narrow, adult]);
   const [typed, setTyped] = useState('');
   // The search waits for a pause in the typing: every keystroke was a request for the whole catalogue.
   useEffect(() => {
@@ -492,7 +495,7 @@ function BrowseView({ actions, repos, onOpen, onRepos }: {
             </button>
             {/* A switch with its words, not a chip reading "18+": that read as "only 18+" (#121), and off it hides them. */}
             <label className="flex items-center gap-2 text-[12px] text-fog-300" data-ext-adult>
-              <Switch on={f.adult} onChange={(v) => set({ adult: v })} label={tr('Show 18+ extensions')} />
+              <Switch on={f.adult} onChange={onAdult} label={tr('Show 18+ extensions')} />
               <span>{tr('Show 18+ extensions')}</span>
             </label>
             <button type="button" onClick={onRepos} className="btn-key ms-auto" data-ext-repos>
@@ -518,8 +521,8 @@ function BrowseView({ actions, repos, onOpen, onRepos }: {
               {Array.from({ length: 6 }).map((_, i) => <div key={i} className="flex items-center gap-3 px-4 py-3"><div className="skeleton h-9 w-9 rounded-xl" /><div className="skeleton h-3 w-40 rounded" /></div>)}
             </div>
           ) : rows.length === 0 ? (
-            <NothingFound f={f} hiddenAdult={first.hiddenAdult} total={first.total} onClear={() => { setTyped(''); setF({ ...NO_FILTERS, adult: f.adult }); }}
-              onAdult={() => set({ adult: true })} />
+            <NothingFound f={f} hiddenAdult={first.hiddenAdult} total={first.total} onClear={() => { setTyped(''); setF(NO_FILTERS); }}
+              onAdult={() => onAdult(true)} />
           ) : (
             <>
               <p className="flex items-center gap-2 text-[12px] text-fog-500" data-ext-count>
