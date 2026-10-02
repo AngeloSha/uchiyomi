@@ -703,7 +703,8 @@ components:
             no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
             or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
             which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
-            every one turned off, cooling down, adult for a clean series, or one it follows already (not searched).
+            every one turned off, cooling down, adult for a clean series, in another language than the series (since
+            v0.52.0), or one it follows already (not searched).
             `refused`: a source carried the title and did not pass the title and chapter-number check (another book).
             `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
             chapters, so nothing could be judged. `followed_already`: the sources that answered do not carry it, and
@@ -2608,8 +2609,9 @@ paths:
         title is not this series'), `unreachable` (threw or timed out), `too_few_listed` (the primary lists
         under three numbers, nothing asked), `not_tried` (the 90-second wall ran out first, or the judgement
         itself failed before any source was asked -- every candidate then reads so, never an empty list),
-        `cap` (the series already follows two sources) or `unavailable` (the primary itself, disabled, in a
-        cooldown, not loaded, or outside the caller's age cap). A nothing-yet add with candidates gets a
+        `cap` (the series already follows two sources), `unavailable` (the primary itself, disabled, in a
+        cooldown, not loaded, or outside the caller's age cap) or, since v0.52.0 (#123), `language_differs` (it
+        is in another language than the series; nothing was asked). A nothing-yet add with candidates gets a
         card with `total: 0` and `status: done` purely to carry this. Results survive the dialog closing:
         the card lives a day after the judgement ends, and cannot be dismissed (DELETE answers 409
         `running`) until `autoFollow.done`. Since v0.47.0 (#82) a finished card stays listed for a day
@@ -6580,7 +6582,11 @@ paths:
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
             own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
-            posting_order (the series is numbered by posting order, so a follower would never be merged).
+            posting_order (the series is numbered by posting order, so a follower would never be merged); since
+            v0.52.0 (#123) language_differs (the source is in another language than the series: the scan never
+            offers one, so only a plan from before the series' language changed meets this. `message` and
+            `messageSaid` (code `follow.languageDiffers`, params `theirs` and `ours`, language codes) name both,
+            and `edition` is `{of, lang}`, the add route's edition to add instead).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -9159,7 +9165,7 @@ paths:
         "404":
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
-          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `already_followed`; `full` (the series follows two other sources)"
+          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series); `already_followed`; `full` (the series follows two other sources)"
   /api/admin/sources/find/{runId}/dismiss:
     post:
       tags:

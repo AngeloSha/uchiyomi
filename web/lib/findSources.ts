@@ -486,6 +486,8 @@ export function decideRefusal(code: string | null | undefined): string | null {
     case 'full': return findWhyLine('full');
     case 'already_followed': return tr('The series follows that source already');
     case 'source_unavailable': return tr('That source is not available for this series right now');
+    // v0.52.0 (#123): a match kept from before the language guard, or a series whose language was set since.
+    case 'language_differs': return tr('That source is in another language than this series');
     case 'not_found': return tr('That match is no longer in the search');
   }
   return null;

@@ -295,7 +295,8 @@ chapters with it; either way they leave the day's activity feed and the download
 `done: false` with no results while the other sources are asked, then one entry per candidate in the order
 given, `{source, name, theirTitle, followed, coverage, why}`, with `why` one of `followed`,
 `numbering_differs` (under 90% of the primary's numbers listed there or, when judged both ways, under 90%
-of its numbers listed here — the rule above), `title_differs`, `unreachable` (threw or timed out — never
+of its numbers listed here — the rule above), `language_differs` (since v0.52.0, #123: it is in another language than
+the series, and nothing was asked), `title_differs`, `unreachable` (threw or timed out — never
 mistaken for "lists nothing"), `too_few_listed` (the primary lists under three numbers; nothing was
 asked), `not_tried` (the 90-second wall ran out first, or the judgement itself failed before any source
 was asked — every candidate then reads so, rather than the card finishing with an empty list), `cap`
@@ -1604,7 +1605,10 @@ the admin looking at each candidate; there from the add's own listing plus the c
 numbering both ways unless the title is exact on a listing of at least ten (`lib/autoFollow.ts`, described
 under the add route). Neither takes a bare pair on trust, which would let a client follow anything it
 could name. Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not
-loaded or disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
+loaded or disabled), and since v0.52.0 (#123) `language_differs` -- the source is in another language than the
+series; the scan never offers one, so only a plan from before the series' language changed meets it. Its `message`
+and `messageSaid` (`follow.languageDiffers`, `{theirs, ours}` as language codes) name both, and `edition: {of, lang}`
+is the add route's edition to add instead; **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
 `bad_request` when the plan belongs to another series; **404** for an unknown series. Following the same source again updates its
 series id and coverage, and makes a follower the add-time path chose the confirming admin's (`auto:
 false`). `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
@@ -1688,7 +1692,8 @@ checked again (the series visible and not numbered by posting order; the source 
 source, reachable for the series' rating, and not followed already -- never re-pointed), then written under the
 follower cap with the admin as its author, its listing refreshed, and audited as `series.follow_source` with `via:
 find_review`; it answers `{result}`, the series' result as it now reads, or **404** `not_found`, **409** `decided`
-(with `state`), `posting_order`, `source_unavailable`, `already_followed` or `full`. `POST
+(with `state`), `posting_order`, `source_unavailable`, `language_differs` (since v0.52.0: the source is in another
+language than the series), `already_followed` or `full`. `POST
 /api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
 `dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
 

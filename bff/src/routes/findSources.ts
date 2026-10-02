@@ -31,6 +31,7 @@ const DECLINED: Record<DecideRefusal, [number, string]> = {
   decided: [409, 'That proposal has been decided already.'],
   posting_order: [409, POSTING_ORDER_REFUSAL],
   source_unavailable: [409, 'That source is not available for this series right now.'],
+  language_differs: [409, 'That source is in another language than this series.'],
   already_followed: [409, 'The series follows that source already.'],
   full: [409, 'The series already follows as many other sources as a series may.'],
 };
@@ -174,7 +175,7 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
    * A review-first run's proposal, decided (v0.51.0): follow it -- checked again, then the same write as every follow,
    * under the follower cap -- or dismiss it. Body `{seriesId, sourceId}`; the rest is the run's own record. 200 with
    * the series' result as it now reads; 404 `not_found`; 409 `decided` (with `state`), `posting_order`,
-   * `source_unavailable`, `already_followed` or `full` (lib/findSources.ts decideProposal says each).
+   * `source_unavailable`, `language_differs`, `already_followed` or `full` (lib/findSources.ts decideProposal says each).
    */
   const decision = (kind: 'follow' | 'dismiss') => async (req: FastifyRequest, reply: FastifyReply) => {
     const { runId } = req.params as { runId: string };

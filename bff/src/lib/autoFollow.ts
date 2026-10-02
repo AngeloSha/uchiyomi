@@ -39,6 +39,7 @@ import { logAudit } from './audit';
 import type { SourceChapter } from './sources/types';
 import { normTitle } from './titleMatch';
 import { altTitlesFor, MIN_ALT_KEY } from './altTitles';
+import { languageFits, seriesLanguage } from './seriesLang';
 
 /** How many sources a series may FOLLOW, on top of its primary. */
 export const MAX_FOLLOWERS = 2;
@@ -105,6 +106,13 @@ export interface PrimaryFacts {
   altTitles: string[];
   /** The distinct chapter numbers the primary lists: the listing the add just wrote. */
   numbers: number[];
+  /**
+   * The language the series is in (v0.52.0, #123: lib/seriesLang.ts seriesLanguage), and whether a candidate's must
+   * match it exactly -- the work holds another edition in the same base language (es beside es-419). A candidate in
+   * another language is `language_differs`, whatever it lists.
+   */
+  lang: string;
+  exactLang: boolean;
 }
 
 /** Why a candidate ended up followed or not. Every one is shown to the person; none is swallowed. */
@@ -129,7 +137,12 @@ export type FollowWhy =
   /** The primary itself, a disabled source, one in a cooldown, one not loaded, or one this viewer may not reach. */
   | 'unavailable'
   /** The series is numbered by posting order (#116): another source's numbers cannot line up, so none is judged. */
-  | 'posting_order';
+  | 'posting_order'
+  /**
+   * It is in another language than the series (v0.52.0, #123): followed, its chapters would be mixed into the
+   * series' own, one language per number by chance. Decided from what the two declare, before any network.
+   */
+  | 'language_differs';
 
 export interface FollowResult {
   source: string;
@@ -205,9 +218,11 @@ export function titleMatches(theirs: string, primary: { title: string; altTitles
 /**
  * May this one source be followed for this series? Reads the source, decides, writes nothing.
  *
- * The rule, in full. The candidate's own title must match ours (`titleMatch`; any of our alt titles
- * counts) or it is `title_differs`, whatever its numbers. Then its numbering is measured against the
- * primary's listing, and how much of it is asked depends on how sure the title made us:
+ * The rule, in full. The candidate must be in the series' language (v0.52.0, lib/seriesLang.ts languageFits: one
+ * that serves every language passes) or it is `language_differs`, before it is asked anything. Its own title must
+ * match ours (`titleMatch`; any of our alt titles counts) or it is `title_differs`, whatever its numbers. Then its
+ * numbering is measured against the primary's listing, and how much of it is asked depends on how sure the title
+ * made us:
  *
  * - An EXACT title match, when the primary lists at least ONE_WAY_MIN_LISTED numbers, is judged one way:
  *   the candidate must list at least MIN_COVERAGE of the primary's numbers (`followable`, the manual
@@ -240,6 +255,11 @@ export async function judgeCandidate(
     theirTitle: null as string | null, coverage: null as number | null,
   };
   if (!src) return { ...base, why: 'unavailable' };
+  // The same-language guard (v0.52.0, #123), first: it needs no health and no network, and it is the one refusal
+  // every automatic path shares -- the add's auto-follow, the hunt, Find other sources and its review, borrowed
+  // names. Reintroduce by dropping it: "auto-follow refuses a source in another language" in
+  // languageGuard.int.test.ts asks the Spanish source for its chapters and follows it.
+  if (!languageFits(candidate.source, { lang: primary.lang, sameBaseSibling: primary.exactLang })) return { ...base, why: 'language_differs' };
   const h = opts.health
     ? opts.health.get(candidate.source) ?? null
     : await one<Pick<SourceHealth, 'disabled' | 'blocked_until'>>(
@@ -368,8 +388,12 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
   // measured, and the dialog sees one reason rather than six.
   if (numbers.length < MIN_HAVE) return refuseAll('too_few_listed');
   // The names the series goes by (v0.49.1): the add stores its main source's description names before this runs
-  // (routes/sources.ts), so a candidate that lists the work under another name is judged under it.
-  const primary: PrimaryFacts = { title: row.title, altTitles: opts.altTitles ?? await altTitlesFor(seriesId), numbers };
+  // (routes/sources.ts), so a candidate that lists the work under another name is judged under it. And its language
+  // (v0.52.0): a candidate in another one is refused before it is asked anything.
+  const lang = await seriesLanguage(seriesId);
+  const primary: PrimaryFacts = {
+    title: row.title, altTitles: opts.altTitles ?? await altTitlesFor(seriesId), numbers, lang: lang.lang, exactLang: lang.sameBaseSibling,
+  };
   // The series' own release preferences over the global ones, with patience off, as the fill scan reads
   // them: the question is what each source LISTS, and a copy held for a group is still listed.
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);

@@ -2467,6 +2467,8 @@
   "Followed or skipped already": "Уже отслеживается или пропущено",
   "The series follows that source already": "Серия уже отслеживает этот источник",
   "That source is not available for this series right now": "Этот источник сейчас недоступен для этой серии",
+  "That source is in another language than this series": "Язык этого источника отличается от языка этой серии",
+  "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "Этот источник на языке «{theirs}», а эта серия — на языке «{ours}». Добавьте его вместо этого как издание на языке «{theirs}»: у каждого языка свои главы.",
   "That match is no longer in the search": "Этого совпадения больше нет в поиске",
   "1 could not be followed": "Не удалось начать отслеживать: 1",
   "{n} could not be followed": "Не удалось начать отслеживать: {n}",

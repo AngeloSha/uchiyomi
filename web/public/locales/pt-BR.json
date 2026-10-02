@@ -2467,6 +2467,8 @@
   "Followed or skipped already": "Já seguida ou pulada",
   "The series follows that source already": "A série já segue essa fonte",
   "That source is not available for this series right now": "Essa fonte não está disponível para esta série agora",
+  "That source is in another language than this series": "Essa fonte está em um idioma diferente do desta série",
+  "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "Essa fonte está em {theirs} e esta série está em {ours}. Adicione-a como uma edição em {theirs}: cada idioma mantém os próprios capítulos.",
   "That match is no longer in the search": "Essa correspondência não está mais na busca",
   "1 could not be followed": "1 não pôde ser seguida",
   "{n} could not be followed": "{n} não puderam ser seguidas",

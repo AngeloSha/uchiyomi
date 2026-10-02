@@ -73,6 +73,14 @@ const where = (above: string | null | undefined) => (above == null ? 'the folder
 const loopedTo = (ancestor: string | undefined, detail: string | undefined) =>
   ancestor !== undefined ? `the same folder as ${ancestor ? `"${ancestor}"` : 'the root'}, reached again through a mount` : detail ?? '';
 const statusWord = (status: string) => (status === 'rate_limited' ? 'rate-limiting' : status === 'blocked' ? 'blocking' : 'unreachable for');
+/** A language code by its English name, "es-419" as "Latin American Spanish": the name the web's languageName gives in English. */
+const languageWord = (code: string): string => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+  } catch {
+    return code;
+  }
+};
 
 /**
  * Every sentence, by code. Each takes its parameters as ONE destructured object (the web's test reads their names
@@ -458,6 +466,11 @@ const EN = {
   'pref.choices': ({ label }: { label: string }) => `${label} takes a list of its choices.`,
   'pref.text': ({ label }: { label: string }) => `${label} takes text.`,
   'pref.tooLong': ({ label }: { label: string }) => `${label} is too long.`,
+
+  // ---- A follow refused for its language (v0.52.0, #123: routes/admin.ts, the manual follow's backstop). `theirs`
+  // and `ours` are language codes: the English names them in English, the web in the reader's language.
+  'follow.languageDiffers': ({ theirs, ours }: { theirs: string; ours: string }) =>
+    `That source is in ${languageWord(theirs)} and this series is in ${languageWord(ours)}. Add it as an edition in ${languageWord(theirs)} instead: each language keeps its own chapters.`,
 };
 
 export type SaidCode = keyof typeof EN;

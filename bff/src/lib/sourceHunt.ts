@@ -41,6 +41,10 @@ import { MIN_HAVE } from './fill';
 import { logAudit } from './audit';
 import { ADULT_RATING, adultFilter } from './visibility';
 import { altTitlesFor, exactHit, SEARCH_NAMES } from './altTitles';
+import { followGuard, seriesLanguage } from './seriesLang';
+import { aliasParts, partRulesApply, type HeldPart } from './partAlias';
+import { numKey } from './postingOrder';
+import { heldBooks } from './chapterCleanup';
 
 /** How long after one hunt a series may be hunted for again, whatever became of the first. */
 export const HUNT_COOLDOWN_MS = 24 * 3600_000;
@@ -240,8 +244,14 @@ export async function huntCandidates(
 
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
   const followed = new Set([...(s.source_id ? [s.source_id] : []), ...followers]);
-  const own = s.source_id ? getSource(s.source_id) : null;
-  const candidates = scanOrder(listSources().filter((src) => opts.allowed(src.id)), own ? { id: own.id, lang: own.lang } : null)
+  // The series' language (v0.52.0, #123) orders the search -- its own language first -- and the guard keeps every
+  // source in another language out of it: never searched, not even when it is the only one listing the number, so it
+  // takes none of the HUNT_MAX_SOURCES. Reintroduce by dropping `fits` here: "the hunt never searches a source in
+  // another language" in languageGuard.int.test.ts finds it searched.
+  const lang = await seriesLanguage(seriesId);
+  const fits = await followGuard(seriesId);
+  const candidates = scanOrder(listSources().filter((src) => opts.allowed(src.id)), { id: s.source_id ?? '', lang: lang.lang })
+    .filter(fits)
     .filter((id) => {
       if (followed.has(id)) return false;
       const h = health.get(id);
@@ -277,7 +287,7 @@ export async function huntCandidates(
   }));
 
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);
-  const primary: PrimaryFacts = { title: s.title, altTitles: names, numbers };
+  const primary: PrimaryFacts = { title: s.title, altTitles: names, numbers, lang: lang.lang, exactLang: lang.sameBaseSibling };
   // Judged in scan order, one at a time: the first that is this series and that the caller wants wins,
   // and nothing past it is asked. One that is this series but not wanted is kept as the fallback.
   let fallback: Judgement | null = null;
@@ -325,6 +335,56 @@ export async function followHunted(
   return { source: j.source, sourceSeriesId: j.sourceSeriesId };
 }
 
+/** What a series has at one whole number, for partAlias's R1 (partsAt). */
+interface PartsAt { held: HeldPart[]; listed: number[] }
+
+/**
+ * What the series has at the whole number `w` (v0.52.0): its parts on disk, override-aware with each file's origin --
+ * the updater's own read for lib/partAlias.ts -- and the numbers its listing keeps there. Null when the part rules do
+ * not apply to the series now (partRulesApply: posting order, a numbering change pending or a renumber half-done) or
+ * the read failed: the hunt then wants the exact number alone, as it always did.
+ */
+async function partsAt(seriesId: string, w: number): Promise<PartsAt | null> {
+  try {
+    const s = await one<{ numbering: string | null; numbering_pending: unknown; renumber_plan: unknown }>(
+      'SELECT numbering, numbering_pending, renumber_plan FROM lib_series WHERE id = $1', [seriesId]);
+    if (!s || !partRulesApply(s)) return null;
+    const held = await q<{ number: number; source_id: string | null }>(
+      `SELECT COALESCE(ov.number, b.number) AS number, b.source_id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+        WHERE b.series_id = $1 AND ${heldBooks('b')} AND COALESCE(ov.number, b.number) >= $2 AND COALESCE(ov.number, b.number) < $2 + 1`,
+      [seriesId, w]);
+    const listed = await q<{ number: number }>(
+      'SELECT number FROM series_listing WHERE series_id = $1 AND number >= $2 AND number < $2 + 1', [seriesId, w]);
+    return { held: held.map((r) => ({ number: Number(r.number), sourceId: r.source_id })), listed: listed.map((r) => Number(r.number)) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A candidate's copy of `number` under partAlias's R1 (lib/partAlias.ts, v0.50.0), when it numbers the chapter's parts
+ * its own way: it lists as many parts at that whole number as the series has there (two or more), in other numbers --
+ * its 335.1 and 335.6 for our 335 and 335.5 -- so its part in the same place is ours, renumbered exactly as the sweep
+ * will renumber it once the source is followed. The reference is aliasParts' own: the parts on disk, else the numbers
+ * the series' listing keeps there (handed in as the primary's list). Renumbered first and chosen after, as the
+ * updater does. Anything else -- another count of parts, one part, nothing to go by -- is no copy, as the sweep would
+ * see it.
+ */
+function partCopy(chapters: readonly SourceChapter[], source: string, number: number, at: PartsAt, prefs: ReleasePrefs): SourceChapter | undefined {
+  const w = Math.floor(numKey(number));
+  const LISTING = '\u0000listing';
+  const theirs = chapters.filter((c) => Number.isFinite(c.number) && Math.floor(numKey(c.number)) === w).map((c) => ({ ...c, source }));
+  if (!theirs.length) return undefined;
+  const { tagged } = aliasParts({
+    tagged: [...at.listed.map((n) => ({ sourceId: '', number: n, source: LISTING })), ...theirs],
+    held: at.held,
+    primary: LISTING,
+  });
+  // A renumbered copy is a new object (aliasParts); the ones it left alone are the very ones handed in.
+  const moved = tagged.filter((c) => c.source === source && !theirs.includes(c));
+  return chooseReleases(moved, prefs).releases.find((c) => numKey(c.number) === numKey(number));
+}
+
 /**
  * Search the sources this series does not follow for one that is this series, follow it, and hand back
  * its copy of `number`: huntCandidates wanting "lists the number", then followHunted, then the copy out
@@ -337,8 +397,16 @@ export async function huntSource(seriesId: string, number: number, opts: HuntOpt
   // The copy of the wanted number per judgement, remembered as `wants` finds it so it is not chosen twice
   // (once to accept the judgement, once to hand it back) under preferences read once.
   const copies = new WeakMap<Judgement, SourceChapter>();
+  // What the series has at the wanted number's whole, read once, for a candidate that numbers its parts its own way.
+  const at = await partsAt(seriesId, Math.floor(numKey(number)));
   const wants = (j: Judgement, prefs: ReleasePrefs): boolean => {
-    const c = chooseReleases(j.chapters ?? [], prefs).releases.find((x) => x.number === number);
+    // The exact number first. Then partAlias's R1 (v0.52.0; v0.50.0 left the hunt exact): a candidate with the same
+    // parts under other numbers lists the chapter, and is chosen at once rather than followed as a fallback that
+    // "does not list" it. Its parts are renumbered before the release choice, as the updater does. Reintroduce the
+    // exact match alone: "a candidate that numbers the parts its own way is chosen at once" in sourceHunt.int.test.ts
+    // reads no_copy.
+    const c = chooseReleases(j.chapters ?? [], prefs).releases.find((x) => x.number === number)
+      ?? (at ? partCopy(j.chapters ?? [], j.source, number, at, prefs) : undefined);
     if (!c) return false;
     copies.set(j, { ...c, source: j.source });
     return true;

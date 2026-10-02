@@ -16,7 +16,7 @@
  * the server's wherever the two are meant to read alike.
  */
 import { t as tr } from './i18n';
-import { activeLocale, cached, durationText, relativeTime } from './format';
+import { activeLocale, cached, durationText, languageName, relativeTime } from './format';
 import { isDesktop } from './desktop';
 import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
@@ -664,6 +664,11 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'pref.choices': (p) => tr('{label} takes a list of its choices.', { label: str(p, 'label') }),
   'pref.text': (p) => tr('{label} takes text.', { label: str(p, 'label') }),
   'pref.tooLong': (p) => tr('{label} is too long.', { label: str(p, 'label') }),
+
+  // ---- A follow refused for its language (v0.52.0, #123): the two languages by the reader's own names for them.
+  'follow.languageDiffers': (p) => tr('That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.', {
+    theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')),
+  }),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

@@ -729,6 +729,9 @@ test('review first: green and amber in words, and Follow all green follows only 
   assert.equal(decideRefusal('full'), findWhyLine('full'));
   assert.equal(decideRefusal('posting_order'), findWhyLine('posting_order'));
   assert.equal(decideRefusal('busy'), null);
+  // v0.52.0: a match kept from before the language guard is refused by its language, in words. Reintroduce by dropping
+  // its case: the refusal falls through to the server's English.
+  assert.equal(decideRefusal('language_differs'), 'That source is in another language than this series', 'a refusal for its language is not worded');
 });
 
 test("review first: each match beside the series' own cover, its title in its own direction, and Follow / Skip until decided", () => {

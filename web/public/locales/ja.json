@@ -2467,6 +2467,8 @@
   "Followed or skipped already": "すでにフォローまたはスキップ済みです",
   "The series follows that source already": "このシリーズはそのソースをすでにフォローしています",
   "That source is not available for this series right now": "そのソースは今このシリーズでは使えません",
+  "That source is in another language than this series": "そのソースはこのシリーズとは別の言語です",
+  "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "そのソースは{theirs}、このシリーズは{ours}です。代わりに{theirs}版として追加してください。言語ごとに章が分かれます。",
   "That match is no longer in the search": "その候補はもう検索結果にありません",
   "1 could not be followed": "1 件はフォローできませんでした",
   "{n} could not be followed": "{n} 件はフォローできませんでした",

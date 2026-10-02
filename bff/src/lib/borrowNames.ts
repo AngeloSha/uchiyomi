@@ -15,6 +15,7 @@ import { altTitlesFor } from './altTitles';
 // Whether a donor's text is in the language we want: lib/lang.ts's rule since v0.52.0, which is the one this file
 // had (an unknown language is the unstated one, English by default) and also tells scripts apart: zh-Hant is not zh-Hans.
 import { sameLanguage } from './lang';
+import { seriesLanguage } from './seriesLang';
 
 /**
  * Name a chapter from ANOTHER source, when its own source only ever says "Chapter 12" (#85, @Squeaks72's idea,
@@ -87,17 +88,25 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
   // Coverage against a handful of numbers proves nothing, whatever the donor says (the hunt's MIN_HAVE).
   if (numbers.length < MIN_HAVE) return { named: 0, why: 'too_few' };
 
-  const own = s.source_id ? getSource(s.source_id) : null;
-  const want = own?.lang ?? null;
+  // The series' own language (v0.52.0, lib/seriesLang.ts): stated, else its main source's, else the unstated one -- so
+  // a Spanish title that came in through an English adapter's fallback borrows Spanish names, and an edition its
+  // edition's. Exact codes when the work holds a same-base edition (es beside es-419). Reintroduce the main source's
+  // declared language as `want`: "names are borrowed in the series' own language" in languageGuard.int.test.ts names
+  // the Spanish series in English.
+  const lang = await seriesLanguage(seriesId);
+  const want = lang.lang;
+  const exact = { exact: lang.sameBaseSibling };
   const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId).catch(() => null), 0);
   // The other names the series goes by (v0.49.1, lib/altTitles.ts): a donor that files the work under one of them
   // is this series by name -- exactly, never by containment, and then measured both ways (autoFollow.ts).
-  const primary = { title: s.title, altTitles: await altTitlesFor(seriesId), numbers };
+  const primary = { title: s.title, altTitles: await altTitlesFor(seriesId), numbers, lang: want, exactLang: lang.sameBaseSibling };
+  // A donor is in the series' language: the follow guard's rule (lib/seriesLang.ts languageFits), except that a source
+  // in every language is no donor -- nothing says which language a name from it is in.
   const usable = (id: string) => {
     const src = getSource(id);
-    if (!src || id === s.source_id || !allowed(id) || !sameLanguage(want, src.lang)) return null;
+    if (!src || id === s.source_id || !allowed(id) || !sameLanguage(want, src.lang, exact)) return null;
     const h = health.get(id);
     if (h?.disabled) return null;
     if (h?.blocked_until && new Date(h.blocked_until).getTime() > now) return null;
@@ -117,7 +126,7 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
   if (!donor && searchedRecently && !opts.force) return { named: 0, why: 'waiting' };
   if (!donor) {
     // The hunt's order -- the series' own language first -- over the sources that may be asked at all.
-    const order = scanOrder(listSources().filter((src) => !!usable(src.id)), own ? { id: own.id, lang: own.lang } : null)
+    const order = scanOrder(listSources().filter((src) => !!usable(src.id)), { id: s.source_id ?? '', lang: want })
       .slice(0, HUNT_MAX_SOURCES);
     const deadline = Date.now() + NAMES_WALL_MS;
     for (const id of order) {
@@ -146,7 +155,7 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
   const byNumber = new Map<number, string>();
   for (const c of (donor.chapters ?? []) as SourceChapter[]) {
     if (!Number.isFinite(c.number) || byNumber.has(c.number)) continue;
-    if (!sameLanguage(want, c.lang ?? donorSrc?.lang)) continue;
+    if (!sameLanguage(want, c.lang ?? donorSrc?.lang, exact)) continue;
     const name = chapterName(c.title, c.number);
     if (name) byNumber.set(c.number, name);
   }

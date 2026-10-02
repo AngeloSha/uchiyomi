@@ -2467,6 +2467,8 @@
   "Followed or skipped already": "تمت متابعتها أو تخطيها بالفعل",
   "The series follows that source already": "السلسلة تتابع هذا المصدر بالفعل",
   "That source is not available for this series right now": "هذا المصدر غير متاح لهذه السلسلة الآن",
+  "That source is in another language than this series": "هذا المصدر بلغة غير لغة هذه السلسلة",
+  "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "هذا المصدر باللغة {theirs}، وهذه السلسلة باللغة {ours}. أضِفه بدلًا من ذلك كإصدار باللغة {theirs}: تحتفظ كل لغة بفصولها الخاصة.",
   "That match is no longer in the search": "لم تعد هذه المطابقة ضمن البحث",
   "1 could not be followed": "تعذّرت متابعة واحدة",
   "{n} could not be followed": "تعذّرت متابعة {n}",

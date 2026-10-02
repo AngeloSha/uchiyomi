@@ -2467,6 +2467,8 @@
   "Followed or skipped already": "已关注或已跳过",
   "The series follows that source already": "该作品已经关注了这个来源",
   "That source is not available for this series right now": "该来源目前不能用于此作品",
+  "That source is in another language than this series": "该来源的语言与此作品不同",
+  "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "该来源是{theirs}，而此作品是{ours}。请改为把它添加为{theirs}版本：每种语言保留各自的章节。",
   "That match is no longer in the search": "该匹配已不在搜索结果中",
   "1 could not be followed": "有 1 个无法关注",
   "{n} could not be followed": "有 {n} 个无法关注",

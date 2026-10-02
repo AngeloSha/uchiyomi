@@ -307,3 +307,46 @@ test('a source the admin named adult is kept off a clean series, like one whose 
     invalidateAdultFilter();
   }
 });
+
+// ── v0.52.0: partAlias's R1 in the hunt's wants ─────────────────────────────────────────────────────────────
+//
+// A source that splits a chapter into the same parts as the series and numbers them its own way (lib/partAlias.ts
+// R1): our 11 and 11.5 are its 11.1 and 11.6. The sweep renumbers such a source's parts onto ours once it is followed,
+// so the hunt reads them the same way when it is looking for one. Off unless the test switches it on (`partsOn`): the
+// hooks that register sources run before the first test, so it is a candidate of the tests above too.
+const PARTS = 'hunt-parts';
+let partsOn = false;
+before(async () => {
+  if (!DSN) return;
+  const sources = await import('../src/lib/sources');
+  sources.registerAdapter({
+    id: PARTS, name: PARTS,
+    async search() {
+      searches.set(PARTS, (searches.get(PARTS) ?? 0) + 1);
+      return partsOn ? [{ sourceId: `${PARTS}-series`, source: PARTS, title: TITLE }] : [];
+    },
+    async getSeries(sid: string) { return { sourceId: sid, source: PARTS, title: TITLE }; },
+    async listChapters() {
+      return [...chapters(PARTS).slice(0, 10), { sourceId: `${PARTS}-c11a`, number: 11.1 }, { sourceId: `${PARTS}-c11b`, number: 11.6 }];
+    },
+    async getPageUrls() { return []; },
+  } as any);
+});
+
+test('a candidate that numbers the parts its own way is chosen at once, its part renumbered onto ours', { skip }, async () => {
+  await seed(MAIN);
+  for (const n of [11, 11.5]) {
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1,$2,$3,$4::jsonb)`,
+      [MAIN, n, OWN, JSON.stringify({ sourceId: `${OWN}-c${n}`, source: OWN, number: n })]);
+  }
+  partsOn = true;
+  try {
+    const r = await huntSource(MAIN, 11.5, { allowed: (id: string) => id === PARTS, budget: { left: 5 } });
+    // Reintroduce the exact match alone in huntSource's `wants`: the candidate is followed as the fallback that "does
+    // not list" 11.5, and the answer is no_copy with no chapter.
+    assert.equal(r.why, 'followed', JSON.stringify(r));
+    assert.deepEqual([r.chapter?.number, r.chapter?.sourceNumber, r.chapter?.sourceId, r.chapter?.source], [11.5, 11.6, `${PARTS}-c11b`, PARTS],
+      'the copy is its second part, renumbered as ours');
+    assert.equal(r.followed?.source, PARTS);
+  } finally { partsOn = false; }
+});

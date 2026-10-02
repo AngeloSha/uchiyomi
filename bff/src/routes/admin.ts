@@ -57,6 +57,8 @@ import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
 import { getPlan, followable } from '../lib/fill';
+import { followGuard, seriesLanguage, sourceLanguage } from '../lib/seriesLang';
+import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
@@ -1283,6 +1285,16 @@ export default async function adminRoutes(app: FastifyInstance) {
     const cand = plan.candidates.find((c) => c.source === source && c.sourceSeriesId === sourceSeriesId);
     if (!cand) return reply.code(400).send({ error: 'not_in_plan', message: 'That source was not one of the options.' });
     if (cand.pinned) return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    // The same-language guard's backstop (v0.52.0, #123). The fill scan never offers a source in another language, so
+    // only a plan from before the series' language changed reaches this: refused with both languages and the way to
+    // have both, an edition -- `edition` is the add route's own `{of, lang}`. Reintroduce by dropping it: "the manual
+    // follow refuses a stale plan's source in another language" in languageGuard.int.test.ts follows it.
+    if (!(await followGuard(id))(source)) {
+      const said = say('follow.languageDiffers', { theirs: sourceLanguage(source), ours: (await seriesLanguage(id)).lang });
+      return reply.code(409).send({
+        error: 'language_differs', message: said.text, messageSaid: saidOf(said), edition: { of: id, lang: sourceLanguage(source) },
+      });
+    }
     // The one rule, shared with the add-time auto-follow (lib/fill.ts followable(): coverage at or over
     // MIN_COVERAGE with a verdict that says the numbering lines up), so the two paths cannot disagree
     // about what may be followed.

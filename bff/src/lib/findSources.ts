@@ -9,7 +9,8 @@
 // Everything that decides anything is reused, never copied:
 //   - which series: lib/findScope.ts (the admin's selection, or every series whose main source is the one named);
 //   - where to look: scanOrder over the sources the series may reach -- the adult rule is the hunt's
-//     (sweepAllowedFor: an adult source only for an adult series) -- with the main source excluded ALWAYS (it is
+//     (sweepAllowedFor: an adult source only for an adult series), and so is the language (v0.52.0, #123: a source
+//     in another language than the series is never asked) -- with the main source excluded ALWAYS (it is
 //     the one that is down) and the sources it already follows, and health read per series, so a source disabled
 //     or cooling down since the run started is not asked;
 //   - how to look: the hunt's non-reporting search (sourceHunt.ts searchByNames) under the hunt's shared slots,
@@ -71,6 +72,7 @@ import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
 import { seriesVisible, visibleToAll, type ViewCtx } from './visibility';
+import { followGuard, seriesLanguage } from './seriesLang';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -94,8 +96,8 @@ export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupte
  * - `posting_order`: numbered by posting order, so no follower is ever merged (not searched);
  * - `full`: it already follows MAX_FOLLOWERS sources (not searched), or a hunt filled the last slot meanwhile;
  * - `too_few`: it lists under MIN_HAVE chapter numbers, which no candidate can be measured against (not searched);
- * - `no_source`: no other source could be asked -- every one disabled, cooling down, adult for a clean series, or
- *   one it already follows (not searched);
+ * - `no_source`: no other source could be asked -- every one disabled, cooling down, adult for a clean series, in
+ *   another language than the series (v0.52.0), or one it already follows (not searched);
  * - `refused`: a source carried the title and judgeCandidate refused it, by the title or by the chapter numbers;
  * - `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
  *   chapters, so nothing could be judged;
@@ -419,8 +421,14 @@ async function findFor(
   const allowed = await sweepAllowedFor(await seriesIsAdult(s.id));
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
   const now = Date.now();
-  const own = row.source_id ? getSource(row.source_id) : null;
-  const order = scanOrder(listSources().filter((src) => allowed(src.id)), own ? { id: own.id, lang: own.lang } : null)
+  // The series' language (v0.52.0, #123): its own first in the order, and a source in another language never searched
+  // nor proposed -- a series whose every other source is in another language is `no_source`. Reintroduce by dropping
+  // `fits`: "a Find other sources run never searches a source in another language" in languageGuard.int.test.ts
+  // finds it searched.
+  const lang = await seriesLanguage(s.id);
+  const fits = await followGuard(s.id);
+  const order = scanOrder(listSources().filter((src) => allowed(src.id)), { id: row.source_id ?? '', lang: lang.lang })
+    .filter(fits)
     .filter((id) => {
       // The main source ALWAYS: it is the one this run is working around.
       if (id === row.source_id || followers.has(id)) return false;
@@ -434,7 +442,7 @@ async function findFor(
   // every other source is turned off.
   if (!order.length) return end('no_source', false);
 
-  const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers };
+  const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers, lang: lang.lang, exactLang: lang.sameBaseSibling };
   const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id), 0);
   const deadline = Date.now() + wallMs;
   const left = () => deadline - Date.now();
@@ -557,7 +565,8 @@ function scheduleFindRefresh(ids: readonly string[]): void {
 // ---- deciding a review --------------------------------------------------------------------------------------
 
 /** Why a proposal was not followed or dismissed; the route answers each with its own status and words. */
-export type DecideRefusal = 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'already_followed' | 'full';
+export type DecideRefusal =
+  | 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'language_differs' | 'already_followed' | 'full';
 
 /** One decision at a time in this process: the check, the follow and the mark of one never interleave another's. */
 let deciding: Promise<unknown> = Promise.resolve();
@@ -573,6 +582,8 @@ let deciding: Promise<unknown> = Promise.resolve();
  *   - `posting_order`: numbered by posting order since (#116), whose followers are never merged;
  *   - `source_unavailable`: the source is no longer loaded, is switched off, is the series' main source now, or is
  *     one the series may not reach (an adult source only for an adult series: the run's own rule);
+ *   - `language_differs`: the source is in another language than the series (v0.52.0, #123) -- a run kept from
+ *     before the guard, or a series whose language an admin has set since;
  *   - `already_followed`: the series follows that source already. INSERT-only, PR #133's rule: a run is kept for
  *     weeks, and a source followed another way since may point at another entry, which a stale proposal must not
  *     re-point;
@@ -609,6 +620,9 @@ async function decide(
     const h = await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]).catch(() => null);
     const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId));
     if (!getSource(sourceId) || h?.disabled || series.source_id === sourceId || !allowed(sourceId)) return { refused: 'source_unavailable' };
+    // The same-language guard, again at the follow: a review can wait for weeks. Reintroduce by dropping it: "a
+    // proposal in another language is refused" in languageGuard.int.test.ts follows it.
+    if (!(await followGuard(seriesId))(sourceId)) return { refused: 'language_differs' };
     if (await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId])) return { refused: 'already_followed' };
     const written = await followJudged(seriesId,
       { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },
