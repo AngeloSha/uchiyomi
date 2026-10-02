@@ -152,6 +152,17 @@ const CHUNK = 500;
  */
 export async function replaceListing(seriesId: string, rows: ListingRow[]): Promise<void> {
   await tx(async (qq) => {
+    // ⚠️ The series row first, then its listing rows: the order a delete of the series takes them in (the row,
+    // then the cascade; Forget's FOR UPDATE, then its table-by-table deletes). Taken the other way round -- the
+    // DELETE below locked the listing rows, and the INSERT's foreign-key check then waited on the series row --
+    // a series deleted while a listing refresh was mid-write deadlocked with it, and Postgres could pick the
+    // delete as the victim. The follow route starts exactly such a refresh in the background, and a test that
+    // dropped its series a moment later failed at random with "deadlock detected". KEY SHARE is the lock that
+    // foreign-key check takes anyway, so the sweep's own updates of the row never wait on it. A series deleted
+    // first is gone once its delete commits, and there is nothing left to list.
+    // Reintroduce by dropping this SELECT: "a series deleted while its listing is written" in
+    // seriesListing.int.test.ts reads "deadlock detected".
+    if (!(await qq('SELECT 1 FROM lib_series WHERE id = $1 FOR KEY SHARE', [seriesId])).length) return;
     await qq('DELETE FROM series_listing WHERE series_id = $1', [seriesId]);
     for (let i = 0; i < rows.length; i += CHUNK) {
       const params: any[] = [seriesId];

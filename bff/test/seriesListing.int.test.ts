@@ -367,3 +367,50 @@ test('a held ghost names the group it waits for and the days left', { skip }, as
     await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":["Blocked Group"],"patienceDays":2}'::jsonb WHERE id = 1`);
   }
 });
+
+test('a series deleted while its listing is written: both finish, and neither is a deadlock victim', { skip }, async () => {
+  // The follow route refreshes a listing in the background (routes/admin.ts), and a series can be deleted while
+  // that write is under way. The write locked its listing rows first and the series row second (the INSERT's
+  // foreign-key check), a delete takes them the other way round, and the two deadlocked: autoFollow.int.test.ts's
+  // cleanup lost that race at random and left its series behind for every later add of the title. Staged here in
+  // the losing order: a third transaction holds one listing row so the write stops inside its DELETE, the series'
+  // delete starts behind it, and then the row is let go.
+  const { pool } = await import('../src/lib/db');
+  const { replaceListing } = await import('../src/lib/seriesListing');
+  const G = 's_lst_gone';
+  const row = (n: number) => ({ number: n, title: `Chapter ${n}`, publishedAt: null, scanlator: null, groups: [], sourceId: PRI,
+    chosen: { sourceId: `g/${n}`, number: n }, copies: [], status: 'available' as const });
+  await q('DELETE FROM lib_series WHERE id = $1', [G]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id) VALUES ($1,'T!lst','Gone Series','T!lst/Gone Series',0,$2)`, [G, LIB]);
+  await replaceListing(G, [row(1), row(2)]);
+  /** Until a statement starting with `sql` waits on a lock in this database. */
+  const blocked = async (sql: string) => {
+    for (const until = Date.now() + 10_000; Date.now() < until; await new Promise((r) => setTimeout(r, 20))) {
+      const [{ n }] = await q(`SELECT count(*)::int AS n FROM pg_stat_activity
+                                WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE $1`, [`${sql}%`]);
+      if (n) return;
+    }
+    assert.fail(`PREMISE: "${sql}" never waited on a lock`);
+  };
+  const holder = await pool.connect();
+  const deleter = await pool.connect();
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT 1 FROM series_listing WHERE series_id = $1 AND number = 2 FOR UPDATE', [G]);
+    const write = replaceListing(G, [row(1), row(2), row(3)]);
+    await blocked('DELETE FROM series_listing');
+    const drop = deleter.query('DELETE FROM lib_series WHERE id = $1', [G]);
+    await blocked('DELETE FROM lib_series');
+    await holder.query('COMMIT');
+    const [w, d] = await Promise.allSettled([write, drop]);
+    const why = (s: PromiseSettledResult<unknown>) => (s.status === 'rejected' ? String((s.reason as Error)?.message ?? s.reason) : 'ok');
+    assert.deepEqual([why(w), why(d)], ['ok', 'ok'], 'the listing write and the series delete both finish');
+    assert.equal((await q('SELECT 1 FROM lib_series WHERE id = $1', [G])).length, 0, 'the series is gone');
+    assert.equal((await q('SELECT 1 FROM series_listing WHERE series_id = $1', [G])).length, 0, 'and its listing with it');
+  } finally {
+    await holder.query('ROLLBACK').catch(() => {});
+    holder.release();
+    deleter.release();
+    await q('DELETE FROM lib_series WHERE id = $1', [G]).catch(() => {});
+  }
+});
