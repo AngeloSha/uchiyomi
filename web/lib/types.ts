@@ -382,6 +382,16 @@ export interface KnownGroup {
   series: number;
 }
 
+/** GET /api/admin/settings, the languages Admin → Providers sets (v0.52.0, #123). Codes are the app's (BCP-47). */
+export interface LanguageSettings {
+  /** The MangaDex languages besides English that are on. */
+  mangadex_langs: string[];
+  /** Every language MangaDex is offered in, English first. English is always on. */
+  mangadex_available: string[];
+  /** The language of sources and series that do not say which they are in. */
+  unstated_lang: string;
+}
+
 export interface PageInfo {
   number: number;
   /** Set by the server when this page recurs across chapters of the series -- a credit page, an advert. */

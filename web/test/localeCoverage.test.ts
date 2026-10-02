@@ -254,7 +254,7 @@ const SHIPPED_UNPAIRED = [
   'Syncing {n} series you have already finished…',
   'This one stops working in {n} days. You can revoke it sooner.',
   'Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.',
-  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages',
+  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total',
   '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
   '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series would move',
   '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
@@ -264,7 +264,7 @@ const SHIPPED_UNPAIRED = [
   'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 37;
+const SHIPPED_UNPAIRED_MAX = 36;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

@@ -51,6 +51,15 @@ const day = (iso: string) => new Date(iso).toISOString().slice(0, 10);
 /** "2026-09-23 14:20", UTC, as the English always printed a moment. */
 const minute = (iso: string) => new Date(iso).toISOString().slice(0, 16).replace('T', ' ');
 
+/** A language code as English names it ("Latin American Spanish" for es-419); the web says it in the reader's language. */
+const languageEnglish = (code: string): string => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+  } catch {
+    return code;
+  }
+};
+
 /** A stage of a source (lib/sourceEvidence.ts Stage), as the English names it. */
 type StageName = 'search' | 'chapters' | 'pages' | 'images';
 const STAGE_LABEL: Record<StageName, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
@@ -189,6 +198,9 @@ const EN = {
   'frozen.overLimit': ({ n, source }: { n: number; source: string }) =>
     `${n} chapters; its source ${source} is ${forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit')}`,
   'frozen.uninstalled': ({ n, source }: { n: number; source: string }) => `${n} chapters; its source ${source} is no longer installed`,
+  // v0.52.0 (#123): its source is MangaDex in a language an admin switched off. `lang` is the app code (es-419).
+  'frozen.mangadexOff': ({ n, lang }: { n: number; lang: string }) =>
+    `${n} chapter${s(n, '', 's')}; MangaDex in ${languageEnglish(lang)} is switched off in Admin → Providers`,
   'frozen.following': ({ source, names: followed }: { source: string | null; names: string[] }) =>
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
 

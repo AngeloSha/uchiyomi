@@ -13,7 +13,6 @@ import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBook
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
 import { linkEdition, unlinkEdition, workRows } from '../lib/editions';
-import { canonLang } from '../lib/lang';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
@@ -53,7 +52,7 @@ import { writePreflight } from '../lib/fsGuard';
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
-import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
@@ -74,6 +73,8 @@ import { findingOf, runHealthChecks } from '../lib/health';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
+import { MANGADEX_LANGS, canonLang, mdLang, setUnstatedLang } from '../lib/lang';
+import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
@@ -498,6 +499,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
+    + 'mangadex_langs, unstated_lang, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
@@ -515,6 +517,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       cleanup_read_due: await dueCountCached(row?.cleanup_read_days ?? 30).catch(() => null),
       // The slow archive's disk floor is set against this (#117): GiB free under the download root, null unknown.
       archive_free_gb: await archiveFreeGb().catch(() => null),
+      // v0.52.0 (#123): every language MangaDex is offered in, English first -- what Admin → Providers' picker
+      // offers. `mangadex_langs` beside it is the ones besides English that are on.
+      mangadex_available: MANGADEX_LANGS.map((l) => l.code),
     };
   };
   /**
@@ -563,7 +568,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       sample: !row?.secret,
     };
   });
-  app.patch('/api/admin/settings', async (req) => {
+  app.patch('/api/admin/settings', async (req, reply) => {
     const b = z.object({
       serverName: z.string().min(1).max(64).optional(),
       allowRegistration: z.boolean().optional(),
@@ -613,9 +618,34 @@ export default async function adminRoutes(app: FastifyInstance) {
        * default. Off takes back the names it gave every series that follows this switch.
        */
       borrowNames: z.boolean().optional(),
+      /**
+       * MangaDex in other languages (v0.52.0, #123): the languages besides English that are on, replaced whole, as
+       * app codes from lib/lang.ts MANGADEX_LANGS ("es-419", "pt-BR"; MangaDex's own "es-la" is read as es-419).
+       * Applied live: each language turned on becomes its own source, each turned off goes. English is always on,
+       * so it is refused here, like a code MangaDex is not offered in.
+       */
+      mangadexLangs: z.array(z.string().min(1).max(20)).max(100).optional(),
+      /**
+       * The language of sources and series that do not say (lib/lang.ts unstatedLang): English unless this server's
+       * sites are in another. The same-language guard on automatic follows reads it.
+       */
+      unstatedLang: z.string().min(1).max(35).optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
       ...ARCHIVE_SETTINGS_SHAPE,
     }).superRefine(archiveWindowPair).parse(req.body);
+    // The languages are checked before anything is written: a refused field writes nothing, as for every other.
+    if (b.mangadexLangs) {
+      const unknown = b.mangadexLangs.find((c) => !mdLang(c));
+      if (unknown !== undefined) {
+        return reply.code(400).send({ error: 'unknown_language', message: `MangaDex is not offered in "${unknown}".` });
+      }
+      if (b.mangadexLangs.some((c) => canonLang(c) === 'en')) {
+        return reply.code(400).send({ error: 'english_always_on', message: 'English is always on: list only the other languages.' });
+      }
+    }
+    if (b.unstatedLang !== undefined && !canonLang(b.unstatedLang)) {
+      return reply.code(400).send({ error: 'unknown_language', message: `"${b.unstatedLang}" is not one language.` });
+    }
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
@@ -656,6 +686,26 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
         [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
       invalidateSourcePrefs();
+    }
+    if (b.mangadexLangs !== undefined) {
+      const before = mangadexLangs();
+      const next = cleanMangadexLangs(b.mangadexLangs);
+      await q('UPDATE server_settings SET mangadex_langs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(next)]);
+      // Live: the list in memory, then the registry to match it -- a language on is searchable on the next request.
+      setMangadexLangs(next);
+      const { removed } = syncMangadexSources();
+      // Discover's pages are cached per source for ten minutes: drop them, so a language switched off is not served
+      // from the cache and one switched on is asked at once.
+      clearLatestCache();
+      // A language switched off freezes its series; the header's Health mark should say so now, not at the next look.
+      if (removed.length) scheduleHealthSummaryRefresh();
+      if (before.join() !== next.join()) await logAudit('settings.mangadex_langs', { userId: userIdOf(req), detail: { from: before, to: next }, req });
+    }
+    if (b.unstatedLang !== undefined) {
+      const lang = canonLang(b.unstatedLang)!;
+      await q('UPDATE server_settings SET unstated_lang = $1, updated_at = now() WHERE id = 1', [lang]);
+      // The guard compares synchronously (lib/lang.ts): the next follow decision reads the new language.
+      setUnstatedLang(lang);
     }
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });

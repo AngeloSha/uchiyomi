@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
+import { MANGADEX_GROUP } from '../lib/sources/mangadex';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { sanitize, type DownloadInput } from '../lib/downloader';
 import { downloadWithFallback } from '../lib/chapterFallback';
@@ -1966,6 +1967,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // else in brackets is part of the name: a site called "Manga (Reader)" must stay one word, not fold.
     const stripLangSuffix = (name: string): string => name.replace(/\s\((?:[A-Z]{2,3}(?:-[A-Z]{2,4})?|ALL)\)$/, '').trim() || name;
     const extensionOf = (s: SourceAdapter): { pkgName: string | null; name: string } | null => {
+      // v0.52.0 (#123): MangaDex is one adapter per language, and all of them are one provider to the person
+      // looking -- Providers folds them into one card by this, as it folds an extension's languages.
+      if (s.rateGroup === MANGADEX_GROUP) return { pkgName: MANGADEX_GROUP, name: 'MangaDex' };
       if (!isSwAdapterId(s.id)) return null;
       const row = swRows.get(s.id.slice(SW_PREFIX.length));
       if (row?.pkg_name || row?.ext_name) return { pkgName: row.pkg_name ?? null, name: row.ext_name || stripLangSuffix(s.name) };
@@ -2022,9 +2026,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // like MangaDex belongs in every group rather than in an orphan bucket. An adapter may now declare
           // one itself, which is how MangaDex -- hardcoded to ask for English -- stops joining all thirty.
           lang: s.lang ?? (isSwAdapterId(s.id) ? (swRows.get(s.id.slice(SW_PREFIX.length))?.lang ?? null) : null),
-          // Which extension package an `sw:` source came out of; null for built-ins, packs and custom sites.
-          // Providers groups by `pkgName` (or by `name` when that is null) so 3Hentai's twenty-nine language
-          // variants are one card rather than twenty-nine.
+          // Which extension package an `sw:` source came out of, or `mangadex` for every MangaDex language (v0.52.0);
+          // null for the other built-ins, packs and custom sites. Providers groups by `pkgName` (or by `name` when
+          // that is null) so 3Hentai's twenty-nine language variants are one card rather than twenty-nine.
           extension: extensionOf(s),
           latest: typeof s.latest === 'function',
           // Reported from the method's presence, exactly as `latest` is. A source without it simply

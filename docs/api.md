@@ -153,6 +153,20 @@ declares no single language, which means it belongs to every language group), `l
 browsed without a query), `popular` (whether it can offer its own popularity ranking), `used` (how many
 series in the library came from it), its health `status`, and `note`.
 
+**MangaDex in other languages** (since v0.52.0, #123). `mangadex` is MangaDex in English, always on. Every other
+language an admin switches on (`mangadexLangs` on `PATCH /api/admin/settings`) is a source of its own, with the id
+`mangadex-<code>` and the name "MangaDex (ES-419)" (`mangadex-es-419`, `mangadex-pt-br`, `mangadex-zh-hant`, …) and
+`lang` set to the app code. Its search and Popular find only titles with chapters in that language, its Newest is
+its newest chapters, and its chapter list is that language only, with no fallback; English search is unfiltered and
+English's chapter list still falls back to other languages for a title with no English. Newest, in every language
+including English, is the newest chapters in that language (`/chapter` ordered by `readableAt`) and the series they
+belong to, so a title whose last English chapter is old no longer heads English Newest because of an upload in
+another language. Every MangaDex source shares one rate limit: a 429 pauses all of them until the moment MangaDex
+names, and a request that would wait more than ten seconds is refused without being sent (a listing counts it as
+slow, never as a cooldown). Each carries `extension: {pkgName: "mangadex", name: "MangaDex"}`, so a client can
+show them as one provider. A chapter's `lang` on a MangaDex copy is the app code (`es-419`, never MangaDex's
+`es-la`).
+
 `status` is `ok`, `disabled`, or, while a cooldown is running, one of `rate_limited` / `blocked` / `down`.
 It is also `quiet`, which means the source answers without error and returns nothing: a listing that has
 stopped parsing never throws, so it never earns a cooldown, and before this existed such a source kept
@@ -1186,7 +1200,8 @@ PATCH  /api/admin/import/candidates/:cid
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`, plus
+`extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -1198,7 +1213,17 @@ after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` 
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
 `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
-anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
+anything). Since v0.52.0 it also takes `mangadexLangs` and `unstatedLang`: `mangadexLangs` is the MangaDex
+languages besides English to switch on, replaced whole, as app codes from `mangadex_available` (every language
+MangaDex is offered in, English first; MangaDex's own `es-la`, `pt-br`, `zh`, `zh-hk` are read as `es-419`, `pt-BR`,
+`zh-Hans`, `zh-Hant`). It is applied at once: each language turned on is registered as its own source, each turned
+off is unregistered, and its series keep their chapters and read as frozen on the Health page until it is back.
+English is always on and is refused (**400** `english_always_on`), as is a code MangaDex is not offered in (**400**
+`unknown_language`); a change is audited as `settings.mangadex_langs` `{from, to}`. `unstatedLang` is the language
+of sources and series that do not say which they are in (English by default, `unstated_lang` on GET): a source is
+followed for a series automatically only when both are in the same language. Any one language is accepted and
+normalised (`pt-br` is `pt-BR`); `all`, `other` or an empty string is a **400** `unknown_language`. Each field is
+written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
 

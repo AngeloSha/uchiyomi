@@ -28,6 +28,15 @@ export function registerAdapter(a: SourceAdapter): boolean {
   return true;
 }
 
+/**
+ * Take one adapter out of the live registry: a MangaDex language switched off in Admin → Providers
+ * (sources/mangadexLangs.ts). Everything else leaves only with the whole registry, on a reload. Its series stay
+ * where they are and read as frozen until the adapter is back. False when nothing had that id.
+ */
+export function unregisterAdapter(id: string): boolean {
+  return registry.delete(id);
+}
+
 /** Extract adapters from a loaded module: a register(host) export and/or named/default const adapter(s). */
 function collect(mod: any): SourceAdapter[] {
   const out: SourceAdapter[] = [];

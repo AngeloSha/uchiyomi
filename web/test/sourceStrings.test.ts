@@ -214,3 +214,38 @@ test("Admin → Extensions → Languages and the Offline page say nothing in bar
   assert.match(read('app/series/page.tsx'), /momentCount === 1 \? tr\('1 saved page'\)/, '"1 saved pages" on the series page');
   assert.match(read('components/SourcePicker.tsx'), /count === 1 \? tr\('1 source'\)/, '"All sources · 1 sources" on Discover');
 });
+
+test("the rest of Admin → Extensions, and Providers' source rows, say nothing in bare English", () => {
+  // v0.52.0: the catalogue's paragraph, the out-of-date banner and its Update all, a row's Update / Add / Remove and
+  // obsolete tag, the Added filter, the "Showing n of m" line and the add / update / remove toasts were English in
+  // every language; so were Providers' Enable / Disable and their toasts, which every MangaDex language's row now
+  // carries. Reintroduce any one as it was -- `{busy === '__updateall' ? 'Updating…' : 'Update all'}`, say -- and
+  // this names it.
+  const admin = read('app/admin/page.tsx');
+  const between = (a: string, b: string) => {
+    const i = admin.indexOf(a);
+    const j = admin.indexOf(b, i);
+    assert.ok(i >= 0 && j > i, `PREMISE: ${a} … ${b} is not where this test looks`);
+    return admin.slice(i, j);
+  };
+  const ext = between('const act = async (e: CatalogExt', 'const refreshRepos = async') + between('{!status.reachable ? (', '<EngineReadyFoot');
+  const rows = between('function controlsOf(', 'function sourceCard(');
+  /**
+   * Any word of English in a string or template left outside tr(): a label a ternary picks (`? 'Update' :`), a toast's
+   * other arm (`n ? updated : 'Everything is already up to date'`), a template a toast is built from. A key compared
+   * with `===` ('Enter') is not shown to anyone.
+   */
+  const bareLiterals = (src: string): string[] => {
+    const c = code(src).replace(/\btr\(\s*('(?:[^'\\\n]|\\.)*'|`[^`]*`)/g, 'tr(').replace(/[!=]==\s*'[^']*'/g, '');
+    return [...c.matchAll(/'((?:[^'\\\n]|\\.)*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, ' '))
+      .filter((t) => /\b[A-Z][a-z]+\b/.test(t) || /\b[a-z]{3,} [a-z]{3,}\b/.test(t));
+  };
+  for (const [name, src] of [['Admin → Extensions', ext], ["Providers' source rows", rows]] as const) {
+    assert.deepEqual(bareText(src), [], `bare English text in ${name}`);
+    assert.deepEqual(bareCalls(src), [], `a bare English toast in ${name}`);
+    assert.deepEqual(bareLiterals(src), [], `bare English in a string in ${name}`);
+  }
+  // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half).
+  assert.match(ext, /cat\.updatable === 1 \? tr\('1 extension is out of date'\) : tr\('\{n\} extensions are out of date', \{ n: cat\.updatable \}\)/,
+    '"1 extensions are out of date"');
+});

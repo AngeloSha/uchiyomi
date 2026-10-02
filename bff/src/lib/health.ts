@@ -21,6 +21,7 @@ import { getSource } from './sources';
 import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
+import { mangadexLangOf } from './sources/mangadexLangs';
 import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
@@ -810,9 +811,14 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
   const frozen = unrouted.filter((r) => !followed.has(r.id));
   const covered = unrouted.filter((r) => followed.has(r.id));
   // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
-  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see.
-  const why = (r: typeof rows[number], p: { n: number; source: string }): Part =>
-    r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see. A MangaDex language comes first
+  // (v0.52.0): its adapter is unregistered only by switching the language off, so "no longer installed" was wrong
+  // and sent the admin looking for an extension; the reason names the language and where it is switched back on.
+  const why = (r: typeof rows[number], p: { n: number; source: string }): Part => {
+    const mdOff = mangadexLangOf(r.source_id);
+    if (mdOff) return say('frozen.mangadexOff', { n: p.n, lang: mdOff });
+    return r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+  };
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
   // engine: its own row (engineHealth.ts) and Admin → Extensions say how to bring it back.

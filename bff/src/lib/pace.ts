@@ -15,7 +15,11 @@
 //
 // One caller also asks to be slower than any of that on purpose: the slow archive (#117), through
 // withSlowPace below.
+//
+// A level belongs to a source's RATE GROUP (v0.52.0, rateKeyOf below): every MangaDex language is an adapter of its
+// own, and all of them are one API that limits one address. A 429 earned in Spanish slows Portuguese as well.
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { getSource } from './sources/loader';
 
 /** The slowest we ever go: sixteen times the declared gap between chapters, and MAX_PAGE_GAP_MS inside one. */
 export const PACE_MAX_LEVEL = 4;
@@ -30,6 +34,13 @@ export const MAX_PAGE_GAP_MS = 4000;
 
 interface Pace { level: number; lastHitAt: number }
 const paces = new Map<string, Pace>();
+
+/**
+ * The key a source's pace level and its download gate are kept under: its rate group when it declares one (every
+ * MangaDex language says 'mangadex', types.ts `rateGroup`), else its own id. An id that is not registered is its
+ * own key. The downloader's gate (downloader.ts underGate) and the slow archive's reads of the gate use it too.
+ */
+export const rateKeyOf = (sourceId: string): string => getSource(sourceId)?.rateGroup ?? sourceId;
 
 let clock: () => number = () => Date.now();
 /** Tests only: replace the clock so decay can be exercised without waiting ten minutes. `null` restores it. */
@@ -50,15 +61,16 @@ function current(sourceId: string): Pace | null {
   return decayed;
 }
 
-/** The source answered 429: one level slower, up to PACE_MAX_LEVEL, and the decay clock restarts. */
+/** The source answered 429: one level slower, up to PACE_MAX_LEVEL, and the decay clock restarts -- for its whole rate group. */
 export function noteRateLimited(sourceId: string): void {
-  const p = current(sourceId);
-  paces.set(sourceId, { level: Math.min(PACE_MAX_LEVEL, (p?.level ?? 0) + 1), lastHitAt: clock() });
+  const key = rateKeyOf(sourceId);
+  const p = current(key);
+  paces.set(key, { level: Math.min(PACE_MAX_LEVEL, (p?.level ?? 0) + 1), lastHitAt: clock() });
 }
 
-/** 0 = full speed. Read by downloadChapter for the chapter gate and by the sources list for its badge. */
+/** 0 = full speed: the level of the source's rate group. Read by downloadChapter for the chapter gate and by the sources list for its badge. */
 export function paceLevel(sourceId: string): number {
-  return current(sourceId)?.level ?? 0;
+  return current(rateKeyOf(sourceId))?.level ?? 0;
 }
 
 /** Pool width as the adapter declared it, clamped and NaN-proof (see the comment in downloader.ts). */

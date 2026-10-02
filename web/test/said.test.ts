@@ -45,6 +45,7 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   // v0.52.0, dupes.languages: two language codes, named in the reader's language on both sides.
   a: () => 'en', b: () => 'es-419',
   theirs: () => 'es-419', ours: () => 'en', lib: () => '/library', dl: () => '/library-dl',
+  lang: () => 'es-419',
 };
 
 /**
