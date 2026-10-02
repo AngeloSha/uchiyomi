@@ -256,7 +256,7 @@ test('a series looked at with no banner gets one made in the background, and the
   // calling queueHero there: nothing is made, and the last two assertions fail.
   const realFetch = globalThis.fetch;
   // AniList knows no such title: a 404 is "no match", recorded as a miss (lib/anilist.ts fetchAniListArt).
-  globalThis.fetch = (async (input: any, init?: any) => (String(input?.url ?? input).startsWith('https://graphql.anilist.co')
+  globalThis.fetch = (async (input: any, init?: any) => (new URL(String(input?.url ?? input)).host === 'graphql.anilist.co'
     ? new Response('{}', { status: 404 }) : realFetch(input, init))) as typeof fetch;
   try {
     assert.equal((await payload(fresh)).autoHero, null, 'nothing is made before anyone looks');
