@@ -32,7 +32,8 @@ import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
-import { groupProviders, providerStatus, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { groupProviders, providerStatus, MANGADEX_GROUP, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { MangadexCard, UnstatedLanguageCard } from '@/components/MangadexCard';
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
@@ -562,7 +563,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   // Health reads the same evidence, and the header's mark reads Health's summary: a Test, a block cleared or a
   // source switched off here must not leave either of them saying what they said before (#115).
   const invalHealth = () => { qc.invalidateQueries({ queryKey: ['admin-health'] }); qc.invalidateQueries({ queryKey: ['health-summary'] }); };
-  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast('Failed', 'error'); } };
+  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast(tr('Failed'), 'error'); } };
   const { data: custom } = useQuery({ queryKey: ['admin-custom'], queryFn: () => api<{ content: any[] }>('/api/admin/sources/custom') });
   const customIds = new Set((custom?.content || []).map((c: any) => c.id));
   const [reloading, setReloading] = useState(false);
@@ -729,8 +730,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <button onClick={() => testSource(s.id)} disabled={testingId === s.id} data-source-test={s.id} className="btn-key tabular-nums">
           {testingId === s.id ? testClock(now - testFrom, health?.testMs) : tr('Test')}
         </button>
-        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="btn-key">{tr('Clear block')}</button>}
-        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="btn-key">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
+        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', tr('Block cleared'))} className="btn-key">{tr('Clear block')}</button>}
+        {/* Translated since v0.52.0: every MangaDex language's row carries these, in English in every language before. */}
+        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? tr('Enabled') : tr('Disabled'))} className="btn-key">{st === 'disabled' ? tr('Enable') : tr('Disable')}</button>
         {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
       </>
     );
@@ -755,10 +757,29 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   }
 
   /**
+   * One language of a provider that has several: its code, status and series count on one line with the full
+   * card's controls, and its evidence below. Rows wrap rather than scroll: at 390 px the language, status and count
+   * sit on one line and the buttons drop below. An extension package's rows, and the MangaDex card's.
+   */
+  function variantRow(s: ProviderSrc) {
+    const st: ProviderStatus = s.status ?? 'ok';
+    return (
+      <li key={s.id} className="py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
+          {statusMark(st)}
+          <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
+          <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
+        </div>
+        {evidenceOf(s, st)}
+      </li>
+    );
+  }
+
+  /**
    * One extension package with several language variants: a header that says how many languages, how many
    * are on and the unhappiest status among them (so a blocked language colours the card even folded), and
-   * on unfold one compact row per variant carrying the same controls the full card has. Rows wrap rather
-   * than scroll: at 390 px the language, status and count sit on one line and the buttons drop below.
+   * on unfold one compact row per variant carrying the same controls the full card has.
    */
   function packageCard(g: ProviderGroup) {
     const isOpen = unfolded.has(g.key);
@@ -767,29 +788,14 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={isOpen} className="flex w-full items-center gap-2 text-start">
           <span className="min-w-0 flex-1 text-sm text-fog-100">
             {g.name}
-            <span className="ms-2 text-[11px] text-fog-500">{tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}</span>
+            <span className="ms-2 text-[11px] text-fog-500">
+              {g.languages.length === 1 ? tr('1 language') : tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}
+            </span>
           </span>
           {statusMark(g.worst)}
           <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
         </button>
-        {isOpen && (
-          <ul className="mt-2 divide-y divide-ink-800">
-            {g.sources.map((s) => {
-              const st: ProviderStatus = s.status ?? 'ok';
-              return (
-                <li key={s.id} className="py-2">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
-                    {statusMark(st)}
-                    <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
-                    <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
-                  </div>
-                  {evidenceOf(s, st)}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {isOpen && <ul className="mt-2 divide-y divide-ink-800">{g.sources.map(variantRow)}</ul>}
       </div>
     );
   }
@@ -871,6 +877,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         )}
       </div>
 
+      {/* Beside Add a site: the sites added there say no language of their own (v0.52.0). */}
+      <UnstatedLanguageCard />
+
       {/* Extension sources live on their own tab; this is the door to it. The whole Extensions card used to
           render here as well as there, so the catalogue's search field, its language list and its 1,400 rows
           appeared twice in the console and the `Search extensions` field sat on the Providers tab. */}
@@ -901,7 +910,10 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         </div>
       ) : (
         <>
-          {groups.map((g) => (g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
+          {/* MangaDex is one card with its languages in it (v0.52.0, #123), even while English is all that is on. */}
+          {groups.map((g) => (g.key === MANGADEX_GROUP
+            ? <MangadexCard key={g.key} group={g} row={variantRow} mark={statusMark} onSaved={inval} />
+            : g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
         </>
       )}
 
