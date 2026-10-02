@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { OUT, OS_TAG, DESKTOP, WIN, appExe, record, tmpRoot, launch, waitFor, waitHealthy, freePort, snapshot, runAsync, sleep, readJson, hardKill, isAlive, APP_EXTRA, serveFile } from './lib.mjs';
+import { signInState } from './signinState.mjs';
 
 const exe = appExe();
 if (process.argv.includes('--server-mode')) {
@@ -298,7 +299,8 @@ record('P-product-smoke', fails.length ? 'FAIL' : 'PASS',
 //   -> the app on a FRESH profile with --server-url=http://127.0.0.1:<port> (the non-interactive first-launch
 //      choice). ⚠️ 127.0.0.1 on purpose: a server on this same PC is exactly the address the preload used to
 //      hand the desktop bridge, and then the server's own sign-in page never showed
-//   -> a password form, NO window.uchiyomiDesktop (only the inert uchiyomiShell marker), no desktop reconnect
+//   -> a password form, NO window.uchiyomiDesktop (only the inert uchiyomiShell marker), no desktop reconnect -- read
+//      in the document that stays, after the PWA's one reload (signinState.mjs)
 //   -> signing in works and the library renders
 //   -> nothing of standalone runs or exists: no postgres / bff / java among the app's processes, no secrets.json,
 //      no database folder, no ports in state.json -- and state.json has mainPid
@@ -328,21 +330,12 @@ async function serverMode() {
 
     // Reintroduce by dropping `mode === 'standalone' &&` from preload.js: the page at http://127.0.0.1:<port>
     // gets window.uchiyomiDesktop, and the web app shows the desktop reconnect screen instead of this form.
-    const form = await page.waitForSelector('input[type=password]', { timeout: 90_000 }).then(() => true).catch(() => false);
-    // The PWA's first visit: the service worker installs, claims the page, and web/app/providers.tsx reloads it
-    // once -- typing before that lands in a page that is about to go (127.0.0.1 is a secure context, so it does).
-    await page.waitForFunction(() => !!navigator.serviceWorker?.controller, { timeout: 30_000 }).catch(() => {});
-    await sleep(3000);
-    await page.waitForSelector('input[type=password]', { timeout: 30_000 }).catch(() => {});
-    const seen = await page.evaluate(() => ({
-      desktop: typeof window.uchiyomiDesktop,
-      shell: JSON.stringify(window.uchiyomiShell ?? null),
-      reconnect: /couldn.t open your library/i.test(document.body?.innerText || ''),
-      password: !!document.querySelector('input[type=password]'),
-      url: location.href,
-    })).catch((e) => ({ error: String(e) }));
+    // Decided on ONE read of the document that stays (signinState.mjs): the PWA's first visit reloads the page once
+    // when its service worker takes control, and a waitForSelector across that reload rejected now and then although
+    // the form was there -- the v0.50.0 / PR #138 flake. The sign-in below is typed into that same document.
+    const seen = await signInState(page).catch((e) => ({ error: String(e?.message || e) }));
     await shot(page, 'server-mode-signin');
-    check('a password form, no desktop bridge, no reconnect screen', form && seen.password && seen.desktop === 'undefined' && !seen.reconnect && /"mode":"server"/.test(seen.shell || ''), seen);
+    check('a password form, no desktop bridge, no reconnect screen', !!seen.password && seen.desktop === 'undefined' && !seen.reconnect && /"mode":"server"/.test(seen.shell || ''), seen);
 
     // Sign in the way a person does.
     const inputs = await page.$$('input');

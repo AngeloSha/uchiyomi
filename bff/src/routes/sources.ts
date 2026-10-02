@@ -5,12 +5,14 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
+import { MANGADEX_GROUP } from '../lib/sources/mangadex';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { sanitize, type DownloadInput } from '../lib/downloader';
 import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
+import { followGuard, seriesLanguage } from '../lib/seriesLang';
 import { searchAll, groupByTitle, bySource, SEARCH_FIRST_ANSWER_MS } from '../lib/searchAll';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
@@ -124,6 +126,11 @@ import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
 import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+// v0.52.0 (#72): language editions of one work, and the language model they stand on.
+import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editions';
+import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
+import { canonLang, sameLanguage } from '../lib/lang';
+import { searchByNames, takeHuntSlot, releaseHuntSlot } from '../lib/sourceHunt';
 
 interface Job {
   title: string; total: number; done: number;
@@ -186,6 +193,12 @@ interface Job {
    * (/img/sources/cover) fetches by it.
    */
   cover?: { source: string; url: string };
+  /**
+   * An add of a language edition (v0.52.0, #72): its language, and the work once the series is linked -- or
+   * `unlinked` when it could not be: another add took the language first (`taken`) or the series it was an edition
+   * of went (`gone`). The series is then in the library on its own, and the dialog says so.
+   */
+  edition?: AddedEdition;
   /**
    * What kind of job this is (v0.49.0): `add` for an add from Discover (and its nothing-yet carrier card),
    * otherwise the origin startDownloadJob was given -- `fetch`, `fill` or `refetch`. Sent, so the Downloads view
@@ -626,25 +639,67 @@ import { withOrigin, listActivity, dismissFailed, type Origin, type ActivityEntr
 export type { MatchConfidence };
 
 /**
- * Which of these titles the library already has.
+ * Which of these titles the library already has, and in which languages.
  *
  * Was `SELECT s.title FROM lib_series` -- every row, every column value in memory, once per source per wall
  * paint, and again per page as you scroll. Six sources on a 214-series library is six full scans to answer a
  * question about twenty-four titles. Returns the entry's id too, so a card for an owned title can open it. The normalisation matches `norm()` and the duplicate check in
  * `addSeriesFromSource`, which has always compared this way.
+ *
+ * v0.52.0 (#72): every series holding the title, with the language each is in (lib/seriesLang.ts effectiveLang),
+ * because "owned" is now "owned in this source's language" (`owned` below): an English Blue Lock no longer folds a
+ * Spanish provider under an "In library" card that opens the English series -- what blocked p3t3t3.
  */
 const NORM_SQL = "lower(regexp_replace(s.title, '[^a-zA-Z0-9]', '', 'g'))";
-async function inLibrary(titles: Array<string | undefined>): Promise<Map<string, string>> {
+interface Held { id: string; lang: string }
+async function inLibrary(titles: Array<string | undefined>): Promise<Map<string, Held[]>> {
   const keys = [...new Set(titles.map((t) => norm(t || '')).filter(Boolean))];
   if (!keys.length) return new Map();
-  const rows = await q<{ k: string; id: string }>(
-    `SELECT ${NORM_SQL} AS k, s.id FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1) ORDER BY s.id`,
+  const rows = await q<{ k: string; id: string; lang: string | null; source_id: string | null }>(
+    `SELECT ${NORM_SQL} AS k, s.id, s.lang, s.source_id FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1) ORDER BY s.id`,
     [keys],
   ).catch(() => []);
   // Two series can share a normalised title; the first by id is the entry the card opens.
-  const out = new Map<string, string>();
-  for (const r of rows) if (!out.has(r.k)) out.set(r.k, r.id);
+  const out = new Map<string, Held[]>();
+  for (const r of rows) out.set(r.k, [...(out.get(r.k) ?? []), { id: r.id, lang: effectiveLang(r.lang, r.source_id) }]);
   return out;
+}
+
+/**
+ * What a card says about the library for ONE source's copy of a title (v0.52.0): `inLibrary` when a series holding
+ * the title is in that source's language -- a source in every language ("all") owns it in any -- the languages the
+ * library holds it in, and the entry to open: the one in the source's language, else the first. `lang` is what the
+ * source declares, null when it says nothing: the add dialog's language chip, and its "Sources that do not say".
+ * Reintroduce by answering `inLibrary: !!held.length`: "a Spanish provider of a title held in English is not owned"
+ * in editions.int.test.ts reads true.
+ */
+function owned(held: Held[] | undefined, source: string): { inLibrary: boolean; librarySeriesId?: string; libraryLangs?: string[]; lang: string | null } {
+  const lang = canonLang(getSource(source)?.lang);
+  if (!held?.length) return { inLibrary: false, lang };
+  const serves = sourceLanguage(source);
+  const mine = serves === 'any' ? held[0] : held.find((h) => sameLanguage(h.lang, serves));
+  return { inLibrary: !!mine, librarySeriesId: (mine ?? held[0]).id, libraryLangs: [...new Set(held.map((h) => h.lang))], lang };
+}
+
+/**
+ * A search card carrying several providers: owned only when EVERY provider's language is held, so a card with an
+ * English and a Spanish provider stays addable while only the English edition is here. Each provider says for
+ * itself (`inLibrary`, `lang`): the add dialog marks the held ones "in your library".
+ */
+function ownedGroup<G extends { providers: Array<{ source: string }> }>(g: G, held: Held[] | undefined) {
+  const providers = g.providers.map((p) => {
+    const o = owned(held, p.source);
+    return { ...p, inLibrary: o.inLibrary, lang: o.lang };
+  });
+  const mine = providers.find((p) => p.inLibrary);
+  return {
+    ...g, providers,
+    inLibrary: providers.length > 0 && providers.every((p) => p.inLibrary),
+    ...(held?.length ? {
+      librarySeriesId: (mine ? owned(held, mine.source).librarySeriesId : undefined) ?? held[0].id,
+      libraryLangs: [...new Set(held.map((h) => h.lang))],
+    } : {}),
+  };
 }
 
 /**
@@ -659,6 +714,8 @@ const LATEST_TIMEOUT = env.SOURCE_LATEST_TIMEOUT_MS;
 const LATEST_TTL = 10 * 60_000;
 /** What the two lookups an add must do inline are allowed to take. Matches the /find handler's budget. */
 const ADD_LOOKUP_TIMEOUT = 20_000;
+/** The wall an edition search (GET /api/sources/edition-candidates?lang=) may take over all its sources and names. */
+const EDITION_SEARCH_MS = 30_000;
 
 /**
  * What `/api/sources/detail` just fetched, so an add does not fetch it all over again.
@@ -912,10 +969,20 @@ export function clearLatestCache(): void {
   latestInflight.clear();
 }
 
+/** What an add of a language edition came to (v0.52.0): see `Job.edition`. */
+export interface AddedEdition { lang: string; workId?: string; unlinked?: 'taken' | 'gone' }
+
 export interface AddResult {
   ok: boolean; status: number; error?: string; message?: string;
   title?: string; folder?: string; chapters?: number;
-  existing?: { id: string; title: string; source: string }; blockStatus?: string;
+  /** The copy a refusal is about: the duplicate's source, or the edition holding the language (`lang`, `hidden`). */
+  existing?: { id: string; title: string; source?: string; lang?: string; hidden?: boolean }; blockStatus?: string;
+  /**
+   * v0.52.0 (#72). On a `duplicate`: the server's offer to add this as a language edition of `of` instead, when the
+   * picked source's language is not one the library holds the title in (`heldLangs`). On a success: the edition this
+   * add made (`Job.edition`).
+   */
+  edition?: { of: string; heldLangs: string[]; lang: string } | AddedEdition;
   /** The download was started rather than completed. Absent when the series was already in the library. */
   started?: boolean;
   /** A "nothing yet" add: the series was created and floored, and no chapter was fetched or queued. */
@@ -1041,6 +1108,12 @@ export async function addSeriesFromSource(opts: {
    * choice from the add dialog's switch.
    */
   numbering?: NumberingChoice;
+  /**
+   * Add it as a language edition of the series `of` (v0.52.0, #72): `lang` is this copy's language (absent: what
+   * the source declares), `ofLang` the language of `of`, applied only when `of` does not state one. The caller has
+   * checked that `of` is a series its viewer may open.
+   */
+  edition?: { of: string; lang?: string; ofLang?: string };
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
@@ -1064,12 +1137,44 @@ export async function addSeriesFromSource(opts: {
       message: `${src.name} did not return this title just now. Try again in a moment.`,
     };
   }
+  /**
+   * A language edition of a series already here (v0.52.0, #72). Its language is the one asked for, else the one
+   * the source declares; a source that declares none, or every one, cannot say, and the dialog asks. Weighed
+   * before anything is fetched or written against every edition of the work, a removed one included -- it keeps
+   * its slot, so Put back can never collide -- and `of`'s own language as it will be stated: its own, else the
+   * dialog's "The copy you have is in", else what it is inferred to be. Exact codes, as the unique index compares:
+   * es and es-419 are two editions. Reintroduce by dropping the check: "a language the work holds is refused" in
+   * editions.int.test.ts sees the second Spanish edition added on its own, the index refusing only the link.
+   */
+  let edition: { of: string; lang: string; ofLang?: string } | null = null;
+  if (opts.edition) {
+    const lang = canonLang(opts.edition.lang) ?? canonLang(src.lang);
+    if (!lang) {
+      return { ok: false, status: 400, error: 'edition_lang', message: `${src.name} does not say which language it is in. Choose the language of this edition.` };
+    }
+    const rows = await workRows(opts.edition.of);
+    const of = rows.find((r) => r.id === opts.edition!.of);
+    if (!of || of.hidden) return { ok: false, status: 404, error: 'not_found', message: 'That series is not in the library any more.' };
+    const langOf = (r: WorkRow) => (r === of && !r.stated ? canonLang(opts.edition!.ofLang) ?? r.lang : r.lang);
+    const taken = rows.find((r) => langOf(r) === lang);
+    if (taken) {
+      return {
+        ok: false, status: 409, error: taken.hidden ? 'edition_hidden' : 'edition_exists',
+        existing: { id: taken.id, title: taken.title, lang, ...(taken.hidden ? { hidden: true } : {}) },
+        message: taken.hidden
+          ? `"${taken.title}" holds that language but was removed from the library. Put it back under Admin → Library, or forget it.`
+          : `"${taken.title}" is already in the library in that language.`,
+      };
+    }
+    edition = { of: of.id, lang, ...(opts.edition.ofLang ? { ofLang: opts.edition.ofLang } : {}) };
+  }
   // ⚠️ Windows: the source's name is the first folder, and a custom site's name is whatever the admin typed --
   // `Site: EN` is not a legal Windows name at all (the colon names a data stream) and `CON` or a trailing dot
   // is one Explorer cannot open -- so there it gets the same treatment as the title. Linux keeps the name
   // exactly: every folder already on a server is spelled that way.
   const srcDir = process.platform === 'win32' ? sanitize(src.name) : src.name;
-  let folder = `${srcDir}/${sanitize(title)}`;
+  // An edition's folder carries its language (lib/editions.ts editionFolder), so it never lands in the original's.
+  let folder = edition ? editionFolder(srcDir, title, edition.lang) : `${srcDir}/${sanitize(title)}`;
   // ⚠️ Desktop, case-insensitive disks (NTFS, APFS): a source that now spells the title `Solo leveling`
   // still downloads into the existing `Solo Leveling` folder, and the scanner reads that folder back with
   // its on-disk spelling -- so a row keyed on the new spelling never met its own chapters, and the series
@@ -1087,8 +1192,24 @@ export async function addSeriesFromSource(opts: {
   if (existing?.deleted_at) {
     await q('UPDATE lib_series SET deleted_at = NULL WHERE id = $1', [existing.id]).catch(() => {});
   }
+  /**
+   * Link the series this add landed on as the edition asked for, once its row exists: right after each of the three
+   * writes below, and before the judgement of the other sources, so the follow guard sees the work. A link that
+   * loses -- another add took the language a moment earlier, or `of` went -- leaves the series on its own, and the
+   * answer and the job card say so.
+   */
+  const linkHere = async (id: string): Promise<AddedEdition | undefined> => {
+    if (!edition) return undefined;
+    const r = await linkEdition(id, edition).catch((e) => {
+      console.warn(`[add] ${folder}: edition not linked: ${(e as Error)?.message || e}`);
+      return 'gone' as const;
+    });
+    return typeof r === 'object' ? { lang: r.lang, workId: r.workId } : { lang: edition.lang, unlinked: r };
+  };
   if (existing && !existing.deleted_at) {
-    return { ok: true, status: 200, title, folder, chapters: 0, seriesId: existing.id, message: 'already in library' };
+    // The edition's own folder, already here: added again, or left on its own by an unlink. It is that edition.
+    const linked = await linkHere(existing.id);
+    return { ok: true, status: 200, title, folder, chapters: 0, seriesId: existing.id, message: 'already in library', ...(linked ? { edition: linked } : {}) };
   }
   // Numbered here, before the chooser (#116): the selection, the floor, the have-set, the listing and the files
   // the downloader names all take these numbers, so a Webtoons series whose 226 posts share 13 numbers arrives
@@ -1106,7 +1227,7 @@ export async function addSeriesFromSource(opts: {
   const chapters = numbered.chapters.map((c) => ({ ...c, source: source! }));
   // Other sources' numbers do not line up with posting numbers, so there is nothing to judge a follower by.
   if (numbered.applied === 'posting_order' && opts.alsoFollow?.length) opts = { ...opts, alsoFollow: undefined };
-  if (!force) {
+  if (!force && !edition) {
     // ⚠️ `visibleToAll` stays: this asks "would adding this be a duplicate on THIS SERVER", which is a
     // property of the server, not of the person asking (the same reasoning as `inLibrary` above), so it
     // has to catch a copy in a library the caller cannot open. The id now comes back with it so the
@@ -1118,7 +1239,19 @@ export async function addSeriesFromSource(opts: {
         WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2
           AND ${visibleToAll('lib_series')} LIMIT 1`,
       [norm(title), folder]);
-    if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
+    if (dup) {
+      // The same title in a language the library does not hold it in is a new edition, not a second copy (v0.52.0):
+      // the answer carries the offer, which the route passes on only to a viewer who may open `of`. A source in
+      // every language says nothing about this copy, so it is offered nothing. Reintroduce by dropping the offer:
+      // "a Spanish copy of a title held in English is offered as an edition" in editions.int.test.ts finds none.
+      const held = [...new Set((await workRows(dup.id).catch(() => [] as WorkRow[])).filter((r) => !r.hidden).map((r) => r.lang))];
+      const serves = sourceLanguage(source!);
+      const offer = serves !== 'any' && held.length && !held.some((l) => sameLanguage(l, serves)) ? { of: dup.id, heldLangs: held, lang: serves } : undefined;
+      return {
+        ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?`,
+        ...(offer ? { edition: offer } : {}),
+      };
+    }
   }
 
   // One copy per chapter number, chosen under the GLOBAL preferences: the series row does not exist yet,
@@ -1128,6 +1261,12 @@ export async function addSeriesFromSource(opts: {
   // often the group nobody wanted as the one they did -- would be locked in for the life of the series.
   const prefs = await effectivePrefsFor(null, 0);
   const { releases: chosen } = chooseReleases(chapters, prefs);
+  // The language this add states for the series (v0.52.0): the edition's; else what most of the chosen copies are in
+  // -- MangaDex marks every chapter, and its English adapter falls back to Spanish for a title with no English -- in
+  // the app's codes (es-la is es-419); else what the source declares. Nothing when none of them says: the series then
+  // reads as the server's unstated language. Written COALESCE'd at all three writes, so a language an admin stated is
+  // never overwritten. Reintroduce by writing NULL: "an add states the language" in addSeries.int.test.ts reads null.
+  const stateLang = edition?.lang ?? majorityLang(chosen) ?? canonLang(src.lang);
   // The description as the page will show it: MangaDex writes Markdown, and this is what goes into every
   // ComicInfo the downloader writes and, through the scanner, into lib_series.summary.
   const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
@@ -1184,16 +1323,18 @@ export async function addSeriesFromSource(opts: {
       : libraryIdFor(folder, libs);
     const { id } = (await q<{ id: string }>(
       `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at,
-                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,now(),$15,0)
+                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing, lang)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,now(),$15,0,$16)
        ON CONFLICT (library_id, folder) DO UPDATE SET
          auto_update = EXCLUDED.auto_update, source_id = EXCLUDED.source_id, source_series_id = EXCLUDED.source_series_id,
          chapter_floor = EXCLUDED.chapter_floor, scanned_at = now(), deleted_at = NULL,
-         source_checked_at = now(), source_chapters = EXCLUDED.source_chapters, source_missing = EXCLUDED.source_missing
+         source_checked_at = now(), source_chapters = EXCLUDED.source_chapters, source_missing = EXCLUDED.source_missing,
+         lang = COALESCE(lib_series.lang, EXCLUDED.lang)
        RETURNING id`,
       [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
-       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
+       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length, stateLang],
     ))[0];
+    const linked = await linkHere(id);
     await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     await replaceListing(id, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
     // The other names its source's description lists (v0.49.1, lib/altTitles.ts), from the RAW description --
@@ -1212,7 +1353,7 @@ export async function addSeriesFromSource(opts: {
       // it lands (an 18+ library an admin hides, a library a member cannot browse), and the dialog polls this one
       // for the follow results. Reintroduce by dropping `by`: "a carrier card is its starter's" in
       // downloadsView.int.test.ts finds no card.
-      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}), ...(linked ? { edition: linked } : {}) });
       judgeAlsoFollow(folder, id, opts);
     }
     if (series?.coverUrl) {
@@ -1227,7 +1368,7 @@ export async function addSeriesFromSource(opts: {
         await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
       })
       .catch(() => {});
-    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}) };
+    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}), ...(linked ? { edition: linked } : {}) };
   }
 
   if (!chosen.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
@@ -1306,12 +1447,13 @@ export async function addSeriesFromSource(opts: {
     let heldArchive: AddResult['archive'];
     // The numbering before the routing, so no check can reach the row routed and not yet numbered.
     await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6) WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder, floor, stateLang]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
     // The same call the run makes on its full selection, and for the same reason: these dates are the
     // source's own, and the chapters they belong to are here -- they were simply fetched by somebody else.
     await setBookDates(folder, selected).catch(() => {});
+    const heldEdition = heldId ? await linkHere(heldId) : undefined;
     if (heldId) {
       await replaceListing(heldId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
       await learnAltTitles(heldId, series?.summary); // v0.49.1, as on the nothing-yet branch
@@ -1319,7 +1461,7 @@ export async function addSeriesFromSource(opts: {
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
-        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
+        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}), ...(heldEdition ? { edition: heldEdition } : {}) });
         judgeAlsoFollow(folder, heldId, opts);
       }
     }
@@ -1338,14 +1480,14 @@ export async function addSeriesFromSource(opts: {
       .catch(() => {});
     return {
       ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId,
-      ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}),
+      ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}), ...(heldEdition ? { edition: heldEdition } : {}),
     };
   }
 
   // The cover is for the Downloads view, which draws this card before chapter one is scanned in and the series
   // has a thumbnail of its own.
   jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}),
-    ...(series?.coverUrl ? { cover: { source: source!, url: series.coverUrl } } : {}) });
+    ...(series?.coverUrl ? { cover: { source: source!, url: series.coverUrl } } : {}), ...(edition ? { edition: { lang: edition.lang } } : {}) });
 
   /**
    * Everything from here is the WORK, as opposed to the decision.
@@ -1432,8 +1574,8 @@ export async function addSeriesFromSource(opts: {
     await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     // The floor the person's selection earns, computed above the "nothing left to fetch" branch so both
     // writers use the one expression -- and from `selected`, which is what was asked for.
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6) WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder, floor, stateLang]).catch(() => {});
     // Which way it reads, when the source can say (MangaDex: the original language). After persistScan, so
     // the row exists; below a ComicInfo that already said otherwise (lib/readingDirection.ts).
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
@@ -1442,12 +1584,15 @@ export async function addSeriesFromSource(opts: {
     // its groups and versions at once instead of only what is on disk until the sweep reaches it. Held is
     // empty on purpose: the add ran with patience 0. Best effort, like every stamp above.
     const seriesId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
+    let runEdition: AddedEdition | undefined;
     if (seriesId) {
       // The dialog's "Open in library" navigates by this (#67). A fresh download had no row to name when
       // the add was answered -- persistScan minted it from the chapter above -- so the id reaches the
       // dialog on the card it is already polling, rather than through a title search that can find the
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
+      runEdition = await linkHere(seriesId);
+      if (card && runEdition) card.edition = runEdition;
       await replaceListing(seriesId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
       await learnAltTitles(seriesId, series?.summary); // v0.49.1, as on the nothing-yet branch
       // Queued once the row, its numbering, its floor and its listing exist; the archive then waits on this add's
@@ -1575,7 +1720,7 @@ export async function addSeriesFromSource(opts: {
     // the id is known here whatever the branch -- `existing?.id` is only the revive case (#67).
     return {
       ok: true, status: 200, title, folder, chapters: toFetch.length, seriesId: seriesId ?? existing?.id,
-      ...(opts.archive ? { archive: runArchive ?? 'nothing' } : {}),
+      ...(opts.archive ? { archive: runArchive ?? 'nothing' } : {}), ...(runEdition ? { edition: runEdition } : {}),
     };
   };
 
@@ -1590,7 +1735,24 @@ export async function addSeriesFromSource(opts: {
   return {
     ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id,
     ...(opts.archive ? { archive: archiveOpt ? 'later' as const : 'nothing' as const } : {}),
+    // The link waits for the row, which persistScan mints from chapter one: the job card carries the outcome.
+    ...(edition ? { edition: { lang: edition.lang } } : {}),
   };
+}
+
+/**
+ * The language most of these chapters are in, as an app code, or null when none says (v0.52.0). Ties go to the one
+ * met first, which is the source's own order.
+ */
+function majorityLang(chapters: ReadonlyArray<{ lang?: string }>): string | null {
+  const n = new Map<string, number>();
+  for (const c of chapters) {
+    const l = canonLang(c.lang);
+    if (l) n.set(l, (n.get(l) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [l, k] of n) if (best === null || k > n.get(best)!) best = l;
+  return best;
 }
 
 /**
@@ -1805,6 +1967,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // else in brackets is part of the name: a site called "Manga (Reader)" must stay one word, not fold.
     const stripLangSuffix = (name: string): string => name.replace(/\s\((?:[A-Z]{2,3}(?:-[A-Z]{2,4})?|ALL)\)$/, '').trim() || name;
     const extensionOf = (s: SourceAdapter): { pkgName: string | null; name: string } | null => {
+      // v0.52.0 (#123): MangaDex is one adapter per language, and all of them are one provider to the person
+      // looking -- Providers folds them into one card by this, as it folds an extension's languages.
+      if (s.rateGroup === MANGADEX_GROUP) return { pkgName: MANGADEX_GROUP, name: 'MangaDex' };
       if (!isSwAdapterId(s.id)) return null;
       const row = swRows.get(s.id.slice(SW_PREFIX.length));
       if (row?.pkg_name || row?.ext_name) return { pkgName: row.pkg_name ?? null, name: row.ext_name || stripLangSuffix(s.name) };
@@ -1861,9 +2026,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // like MangaDex belongs in every group rather than in an orphan bucket. An adapter may now declare
           // one itself, which is how MangaDex -- hardcoded to ask for English -- stops joining all thirty.
           lang: s.lang ?? (isSwAdapterId(s.id) ? (swRows.get(s.id.slice(SW_PREFIX.length))?.lang ?? null) : null),
-          // Which extension package an `sw:` source came out of; null for built-ins, packs and custom sites.
-          // Providers groups by `pkgName` (or by `name` when that is null) so 3Hentai's twenty-nine language
-          // variants are one card rather than twenty-nine.
+          // Which extension package an `sw:` source came out of, or `mangadex` for every MangaDex language (v0.52.0);
+          // null for the other built-ins, packs and custom sites. Providers groups by `pkgName` (or by `name` when
+          // that is null) so 3Hentai's twenty-nine language variants are one card rather than twenty-nine.
           extension: extensionOf(s),
           latest: typeof s.latest === 'function',
           // Reported from the method's presence, exactly as `latest` is. A source without it simply
@@ -1915,7 +2080,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
   });
 
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
@@ -2156,10 +2321,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Sources that were asked and did not answer (`unreachable`), and sources never asked because enough
     // already had the title (`not_tried`). Both are shown; neither is "does not have it", and the old scan
     // called all of them `unreachable`.
-    const ownSrc = s.source_id ? getSource(s.source_id) : null;
+    // The series' language orders them, its own first, and a source in another language is never asked (v0.52.0,
+    // #123): Find missing chapters offers only sources the series may follow, and a person wanting the series in
+    // that language adds it as an edition. Reintroduce by dropping `fits`: "the fill scan never asks a source in
+    // another language" in languageGuard.int.test.ts finds it asked.
+    const lang = await seriesLanguage(seriesId);
+    const fits = await followGuard(seriesId);
     const order = scanOrder(
-      findOrder().filter((id) => allowed.has(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
-      ownSrc ? { id: ownSrc.id, lang: ownSrc.lang } : null,
+      findOrder().filter((id) => allowed.has(id) && fits(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
+      { id: s.source_id ?? '', lang: lang.lang },
     ).filter((id) => !found.some((f) => f.source === id && f.pinned));
     // A slot is held before the search starts, so the timeout measures the search and not the queue. The
     // queue is FIFO, so relevance order is the order sources actually get asked in.
@@ -2546,7 +2716,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const rails = bySource(ans.per, order);
       const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
       return {
-        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) })),
+        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), g.source) })) })),
         ...rest,
       };
     }
@@ -2554,7 +2724,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
     const groups = groupByTitle(ans.per, order);
     const have = await inLibrary(groups.map((g) => g.title));
-    return { content: groups.map((g) => ({ ...g, inLibrary: have.has(norm(g.title)), librarySeriesId: have.get(norm(g.title)) })), ...rest };
+    return { content: groups.map((g) => ownedGroup(g, have.get(norm(g.title)))), ...rest };
   });
 
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.
@@ -2580,11 +2750,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p);
       const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)), librarySeriesId: had.get(norm(r.title)) })) };
+      return { content: stale.map((r) => ({ ...r, ...owned(had.get(norm(r.title)), src.id) })) };
     }
     const results = await latestPage(src, p);
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
   });
 
   /**
@@ -2607,11 +2777,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p, 'popular');
       const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)), librarySeriesId: had.get(norm(r.title)) })) };
+      return { content: stale.map((r) => ({ ...r, ...owned(had.get(norm(r.title)), src.id) })) };
     }
     const results = await latestPage(src, p, 'popular');
     const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)), librarySeriesId: have.get(norm(r.title)) })) };
+    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
   });
 
   /**
@@ -2828,7 +2998,69 @@ export default async function sourceRoutes(app: FastifyInstance) {
         } catch { return null; }
       }),
     );
-    return { content: found.filter(Boolean) };
+    // Each provider says its language and whether the library holds its title in it (v0.52.0), as a Discover card
+    // does: the add dialog marks the held ones and offers the others as a new edition.
+    const hits = found.filter((f): f is NonNullable<typeof f> => !!f);
+    const have = await inLibrary(hits.map((f) => f.title));
+    return { content: hits.map((f) => ({ ...f, ...owned(have.get(norm(f.title)), f.source) })) };
+  });
+
+  /**
+   * The languages a series could be added in (v0.52.0, #72): the add dialog's "Which language?" step, opened from
+   * the series page. One row per language some source offers -- by what the source declares, every source this
+   * viewer may be shown (`surfaceable`) that is neither switched off nor cooling down -- leaving out the languages
+   * the work holds already (a removed edition's too: its slot is taken); the sources that declare no single language
+   * are a row of their own, where the dialog asks the person to say. Nothing is searched for this answer.
+   *
+   * With `lang` (a code, or `unstated`), it searches just those sources for the work: the series' title, the other
+   * editions' titles and its other names (lib/altTitles.ts), the title by the fill scan's rule and every other name
+   * exactly (lib/sourceHunt.ts searchByNames), under the hunt's slots so it never out-runs the solver, within one
+   * wall budget. Behind the canDownload hook, like every route here.
+   */
+  app.get('/api/sources/edition-candidates', async (req, reply) => {
+    const { seriesId, lang } = req.query as { seriesId?: string; lang?: string };
+    if (!seriesId || !(await seriesVisible(seriesId, vc(req)).catch(() => false))) return reply.code(404).send({ error: 'not_found' });
+    const rows = await workRows(seriesId);
+    const me = rows.find((r) => r.id === seriesId);
+    if (!me) return reply.code(404).send({ error: 'not_found' });
+    const taken = new Set(rows.map((r) => r.lang));
+    const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
+    const now = Date.now();
+    const usable = surfaceable(req).filter((x) => {
+      const h = health.get(x.id);
+      return !h?.disabled && !(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
+    });
+    const byLang = new Map<string, Array<{ id: string; name: string }>>();
+    const unstated: Array<{ id: string; name: string }> = [];
+    for (const x of usable) {
+      const l = canonLang(x.lang);
+      if (!l) unstated.push({ id: x.id, name: x.name });
+      else if (!taken.has(l)) byLang.set(l, [...(byLang.get(l) ?? []), { id: x.id, name: x.name }]);
+    }
+    if (lang) {
+      const asked = lang === 'unstated' ? unstated : byLang.get(canonLang(lang) ?? '') ?? [];
+      const names = [...new Set([
+        me.title, ...rows.filter((r) => r.id !== me.id && !r.hidden).map((r) => r.title), ...(await altTitlesFor(seriesId, SEARCH_NAMES)),
+      ])];
+      const until = Date.now() + EDITION_SEARCH_MS;
+      const found = await Promise.all(asked.map(async (x) => {
+        const src = getSource(x.id);
+        if (!src) return null;
+        await takeHuntSlot();
+        try {
+          const { hit } = await searchByNames(src, names[0], names.slice(1), () => until - Date.now());
+          return hit ? { source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl ?? null, lang: canonLang(src.lang) } : null;
+        } catch { return null; } finally { releaseHuntSlot(); }
+      }));
+      return { providers: found.filter(Boolean) };
+    }
+    const held = [];
+    for (const r of rows) if (!r.hidden && (r.id === me.id || await seriesVisible(r.id, vc(req)).catch(() => false))) held.push({ seriesId: r.id, lang: r.lang });
+    return {
+      title: me.title, held,
+      languages: [...byLang].map(([l, sources]) => ({ lang: l, sources })).sort((a, b) => b.sources.length - a.sources.length || a.lang.localeCompare(b.lang)),
+      unstated,
+    };
   });
 
   /**
@@ -2920,10 +3152,20 @@ export default async function sourceRoutes(app: FastifyInstance) {
       archive: z.boolean().optional(),
       // #116: the add dialog's numbering switch. Absent is `auto`, what every caller before v0.49.0 meant.
       numbering: z.enum(['auto', 'source', 'posting_order']).optional(),
+      // v0.52.0 (#72): add it as a language edition of the series `of` (lib/editions.ts). Codes are checked by the
+      // add (canonLang); these bounds only keep the strings strings.
+      edition: z.object({
+        of: z.string().min(1).max(64), lang: z.string().min(1).max(35).optional(), ofLang: z.string().min(1).max(35).optional(),
+      }).optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
     if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
+    // An edition of a series this viewer may not open is an edition of nothing they can see: the same 404 as
+    // asking for that series by id, which says nothing about whether it exists.
+    if (b.data.edition && !(await seriesVisible(b.data.edition.of, vc(req)).catch(() => false))) {
+      return reply.code(404).send({ error: 'not_found', message: 'That series is not in your library.' });
+    }
     // Following stays an admin act. The manual follow route (POST /api/admin/series/:id/sources) and the
     // sheet's unfollow are admin-only, so a member whose add followed two sources could never undo it --
     // and a follower decides what the sweep downloads for everyone. A member's `alsoFollow` is therefore
@@ -2947,6 +3189,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
       numbering: b.data.numbering,
       ...(b.data.archive ? { archive: { by: userIdOf(req), ctx: vc(req) } } : {}),
+      ...(b.data.edition ? { edition: b.data.edition } : {}),
     });
     if (!r.ok) {
       // ⚠️ The duplicate answer names a series the caller may not be allowed to open: the check behind it
@@ -2956,8 +3199,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
       // only when this viewer may see that series. `seriesVisible` is the same check every by-id route
       // makes, asked here because this is where the viewer is (#67).
       const seen = r.existing && await seriesVisible(r.existing.id, vc(req)).catch(() => false);
-      const existing = r.existing && { title: r.existing.title, source: r.existing.source, ...(seen ? { id: r.existing.id } : {}) };
-      return reply.code(r.status).send({ error: r.error, message: r.message, existing, status: r.blockStatus });
+      // A removed edition is visible to nobody; its id goes to an admin, who can put it back (Admin → Library).
+      const named = seen || (r.existing?.hidden && roleOf(req) === 'admin');
+      const existing = r.existing && {
+        title: r.existing.title, ...(r.existing.source ? { source: r.existing.source } : {}),
+        ...(r.existing.lang ? { lang: r.existing.lang } : {}), ...(named ? { id: r.existing.id } : {}),
+      };
+      // The edition offer names `of` by id, so it goes only where the id would (v0.52.0).
+      const edition = r.edition && 'of' in r.edition && seen ? r.edition : undefined;
+      return reply.code(r.status).send({ error: r.error, message: r.message, existing, status: r.blockStatus, ...(edition ? { edition } : {}) });
     }
     // Audited here rather than after the download, so a slow or failing download does not delay the record
     // of who asked for it. What actually landed is the job's business.
@@ -2974,6 +3224,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
       ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started, nothing: !!r.nothing,
       ...(seriesId ? { seriesId } : {}), ...(r.alreadyHere === undefined ? {} : { alreadyHere: r.alreadyHere }),
       ...(r.archive ? { archive: r.archive } : {}),
+      // The edition this add made (v0.52.0): its language, and its work once linked; on a download, the card says.
+      ...(r.edition && !('of' in r.edition) ? { edition: r.edition } : {}),
     };
   });
 }

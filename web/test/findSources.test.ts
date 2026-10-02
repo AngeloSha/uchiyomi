@@ -16,10 +16,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { setActiveDict } from '../lib/i18n';
 import {
-  altKey, altOriginLabel, altRefusal, amberNote, bulkOutcome, decideRefusal, findEndedRunIds, findEta, findGate, findReviewFirst,
+  altKey, altOriginLabel, altRefusal, amberNote, bulkOutcome, decideRefusal, earlierRuns, findEndedRunIds, findEta, findGate, findReviewFirst,
   findRunState, findSlotState, findSummary, findWhyLine, greenToFollow, groupResults, lineUpText, notTriedIds, progressLine,
   seriesOutcome, setFindReviewFirst, startRefusal, FIND_SERIES_MAX_MS,
-  type FindProposal, type FindResult, type FindRun, type FindStatus,
+  type FindProposal, type FindResult, type FindRun, type FindRunSummary, type FindStatus,
 } from '../lib/findSources';
 import { ACTION_COPY, runStatusWord } from '../lib/healthCopy';
 import { answerView, evidenceView, healthRowEvidence, type StageLine } from '../lib/sourceEvidence';
@@ -400,7 +400,7 @@ test('Library: Find other sources is a row of More for admins, posts the selecti
   assert.match(fn, /'info', \{ busy: true \}\);/, 'the notice of a run that goes on does not turn');
   assert.match(fn, /void kickDownloads\(qc\);\s*settle\(\);/, 'the Server tasks card waits 30 s, or the selection stays after a start');
   assert.match(fn, /catch \(e\) \{ toast\(findRefusal\(e\), 'error'\); \}/, 'a refused start (another run, nothing to search) is not said');
-  const more = slice(src, "<Sheet title={tr('{n} selected'", '</Sheet>');
+  const more = slice(src, '<Sheet title={selectedText(picked.size)}', '</Sheet>');
   // v0.51.0: through the start dialog, which asks how to follow what it finds.
   assert.match(more, /\{isAdmin && \([\s\S]*?setMore\(false\); setFinding\(true\);[\s\S]*?\{tr\('Find other sources'\)\}/, 'More has no Find other sources for admins');
   assert.match(src, /\{finding && <FindStartDialog onClose=\{\(\) => setFinding\(false\)\} onStart=\{\(review\) => \{ setFinding\(false\); void findSelected\(review\); \}\} \/>\}/,
@@ -473,7 +473,9 @@ test('the results open on <body>, whatever card opened them, and each group is i
   const src = code(read('components/FindSources.tsx'));
   const sheet = slice(src, 'export function FindResultsSheet(', 'export function FindRunCard(');
   assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
-  for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped'], ['not-tried', 'Not tried']]) {
+  // The skipped group has a key of its own (v0.52.0): the shared "Skipped" is also a match's state and an import row's,
+  // and the heading is about series, which es, fr and pt agree it with. Reintroduce the shared key: this fails.
+  for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped series'], ['not-tried', 'Not tried']]) {
     assert.match(sheet, new RegExp(`<Group id="${id}" title=\\{tr\\('${title}'\\)\\}`), `the ${title} group is gone`);
   }
   // What the run never reached can be searched now, through the same one-run rule.
@@ -729,6 +731,9 @@ test('review first: green and amber in words, and Follow all green follows only 
   assert.equal(decideRefusal('full'), findWhyLine('full'));
   assert.equal(decideRefusal('posting_order'), findWhyLine('posting_order'));
   assert.equal(decideRefusal('busy'), null);
+  // v0.52.0: a match kept from before the language guard is refused by its language, in words. Reintroduce by dropping
+  // its case: the refusal falls through to the server's English.
+  assert.equal(decideRefusal('language_differs'), 'That source is in another language than this series', 'a refusal for its language is not worded');
 });
 
 test("review first: each match beside the series' own cover, its title in its own direction, and Follow / Skip until decided", () => {
@@ -745,6 +750,29 @@ test("review first: each match beside the series' own cover, its title in its ow
   assert.ok(html.includes('data-review-state="dismissed"'), 'a skipped match does not say so');
   assert.ok(html.includes('data-amber-note'), 'an amber match does not say why');
   assert.doesNotMatch(html, /rounded-full/, 'a capsule in the review');
+});
+
+test('an earlier search opens in the sheet by its id, and the latest is a key away', () => {
+  // v0.52.0: only the newest run was read in full, so a review-first run with matches still waiting could not be
+  // reopened once another search had run. Reintroduce the earlier lines as plain text (no key): "an earlier search
+  // cannot be opened" fails.
+  const sum = (id: string): FindRunSummary => ({ id, status: 'done', total: 1, done: 1, followed: 0, startedBy: null, startedAt: '2026-10-01T10:00:00Z' });
+  const recent = ['r6', 'r5', 'r4', 'r3', 'r2', 'r1', 'r0'].map(sum);
+  // The newest is the sheet's own view, and the one open now is not listed under itself; five at most.
+  assert.deepEqual(earlierRuns(recent, null).map((r) => r.id), ['r5', 'r4', 'r3', 'r2', 'r1']);
+  assert.deepEqual(earlierRuns(recent, 'r4').map((r) => r.id), ['r5', 'r3', 'r2', 'r1', 'r0']);
+  assert.deepEqual(earlierRuns(undefined, null), []);
+  const sheet = slice(code(read('components/FindSources.tsx')), 'export function FindResultsSheet(', 'export function FindRunCard(');
+  assert.match(sheet, /<button type="button" onClick=\{\(\) => setOpenId\(r\.id\)\} data-find-earlier=\{r\.id\}/, 'an earlier search cannot be opened');
+  assert.match(sheet, /queryFn: \(\) => fetchFindRun\(openId!\)/, 'the opened search is not read by its id');
+  assert.match(read('lib/useFindRun.tsx'), /api<FindStatus>\(`\/api\/admin\/sources\/find\?runId=\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.match(sheet, /onClick=\{\(\) => setOpenId\(null\)\} data-find-latest/, 'there is no way back to the latest search');
+  // The keys sit under the results: the run they open starts at the sheet's top, not a screen above the reader.
+  assert.match(sheet, /useEffect\(\(\) => \{\s*if \(shown\.current === openId\) return;\s*shown\.current = openId;\s*top\.current\?\.scrollIntoView\(\{ block: 'start' \}\);\s*\}, \[openId\]\);/,
+    'an opened run begins a screen above where the reader is');
+  assert.match(sheet, /<div data-find-results ref=\{top\}/);
+  // A match's state has a key of its own too: one match, beside "Followed", in the number and gender it agrees with.
+  assert.match(code(read('components/FindSources.tsx')), /p\.state === 'followed' \? tr\('Followed'\) : tr\('Skipped for good'\)/);
 });
 
 test('the start dialog remembers the last choice on this device; storage that throws reads as automatic', () => {
@@ -781,5 +809,5 @@ test('the start dialog remembers the last choice on this device; storage that th
     "Health's dialog does not start the run it chose");
   const sheet = slice(code(read('components/SourcesSheet.tsx')), 'function FindMore(', 'function OtherNames(');
   assert.match(sheet, /<FindModeChoice review=\{review\} onChange=\{setReview\} \/>/, 'the Sources sheet does not offer the choice');
-  assert.match(sheet, /\{mineRow && run && <SeriesReview runId=\{run\.id\} r=\{mineRow\} onFollowed=\{onFound\} \/>\}/, "the sheet does not show its series' matches");
+  assert.match(sheet, /\{mineRow && run && <SeriesReview runId=\{run\.id\} r=\{mineRow\} onFollowed=\{onFound\} onAddEdition=\{onAddEdition\} \/>\}/, "the sheet does not show its series' matches");
 });

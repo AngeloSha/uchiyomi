@@ -1,5 +1,167 @@
 # Changelog
 
+## v0.52.0 — 2026-10-02
+
+**A series can now be in your library in more than one language, as editions of one work: one card in the Library,
+chips to switch between them on the series page and in the reader, and in each language its own chapters, folder and
+reading progress.** MangaDex serves other languages than English, one source per language, switched on in
+**Admin → Providers**. And a source in another language than a series is never followed for it automatically, so a
+series stays in one language. Editions are **@p3t3t3**'s request on Discussion
+[#72](https://github.com/AngeloSha/uchiyomi/discussions/72), MangaDex's languages **@tagius**'s
+([#123](https://github.com/AngeloSha/uchiyomi/issues/123)), and two smaller ones are **@Kedryn**'s: full paths for
+admins ([#136](https://github.com/AngeloSha/uchiyomi/issues/136)) and a warning when the downloads folder sits inside
+the library ([#134](https://github.com/AngeloSha/uchiyomi/discussions/134)).
+
+### Language editions
+
+Blue Lock in English and in Spanish used to be one title to Uchiyomi: Discover showed the Spanish source folded under
+an *In library* card that opened the English series, and following the Spanish source from the English series mixed
+the two, each chapter in whichever language won that number. Now each language is its own **edition**: a series of
+its own, linked with the others as one work.
+
+- **Each edition is a series.** Its own folder (`MangaDex (ES-419)/Blue Lock (ES-419)`, so it never lands in the
+  original's), its own sources, chapters, numbering and reading progress, so reading the Spanish edition never moves
+  where you are in the English one. A series added now states the language it is in, and an admin can set it for
+  one already here.
+- **Adding one.** *Sources & translations* has a **Languages** section that says which language the series is in and
+  offers **Add a language**: pick one of the languages your sources offer, then the title there (searched under the
+  series' title and its other names). An admin is pointed to MangaDex's languages in **Admin → Providers** too,
+  where the one wanted may be a tap away. Or add it from Discover: a card whose title you have in another language stays
+  addable and says so (*EN in library*), and picking its Spanish source offers the Spanish edition straight away. A
+  source that does not say its language asks which one it is, and *It is a different series* adds it on its own.
+- **One card in the Library.** A work shows once: the edition you read last, else the first one added, with every
+  language under its title (*EN · ES-419*).
+- **Switching.** The series page has a row of language chips under the title, and *Spanish · Ch. 12* says how far
+  you are there. The reader's chapter list has the same chips: one opens the chapter you are on in the other edition,
+  or that edition's page at the chapter when the server does not have it yet, with its Fetch.
+- **For admins.** *Edit details* has a **Language** field (*Automatic* shows what it would be). Health's duplicate
+  check counts works, not series, and a pair in two languages offers **Link as editions** instead of a merge, which
+  is refused inside a work. The × in Languages unlinks an edition, which stays in the library on its own. The age
+  rating and *Always show* in *Edit details* apply to every edition, so an 18+ work is 18+ in each language; and a
+  viewer sees only the editions they may open.
+- **Mihon, OPDS and trackers.** Komga's API (what Mihon reads) and OPDS keep the editions separate and title one
+  *Blue Lock (ES-419)* while another edition is there, with its language set. The editions share their AniList,
+  MyAnimeList or Kitsu entry, and reading the one that is behind never pushes your progress back.
+
+### MangaDex in other languages
+
+**@tagius** ([#123](https://github.com/AngeloSha/uchiyomi/issues/123)) reads MangaDex in other languages than English.
+MangaDex was one English source that fell back to Spanish or Portuguese for a chapter English did not have.
+
+- **One source per language.** In **Admin → Providers**, MangaDex is one card, its languages behind **Manage**. English
+  is always on; each language you tap on becomes a source of its own, *MangaDex (ES-419)* say, at once and with no
+  restart, with its own Newest and Popular in Discover and its chapters in that language only. A series you add from
+  it is in that language. Turning off a language that series came from asks first: they keep their chapters and get
+  no new ones until it is back, and Health says which switch it is.
+- **English is unchanged**, the same source with the same search and fallback, except one thing: Discover's MangaDex
+  **Newest** is now the newest chapters in the language (English for English), where it used to list a title as new
+  when a chapter came out in any language.
+- **One rate limit for all of them.** Every MangaDex request goes through one pace, a quarter of a second apart, and
+  when MangaDex asks Uchiyomi to slow down, with a 429 or by saying none are left, every language waits as long as
+  it says, downloads included. A request that would wait more than ten seconds is given up rather than queued, and
+  costs the source no cooldown.
+- **Sites that do not say their language.** Most sites added by address, and some source packs, declare no language.
+  A new setting beside **Add a site** says which language they are in: English unless you choose another.
+
+### Every automatic follow keeps to the series' language
+
+A Spanish source followed by an English series fills it with Spanish chapters. Now the add dialog's *Also check the
+other sources*, the hunt for a missing chapter, Find other sources (automatic or reviewed) and Find missing chapters
+never follow, search or offer a source in another language than the series; a source in every language counts as any
+of them, and a series' own source always passes. Following one by hand from an older list is refused with both
+languages named, and with **Add it as an edition**, which opens the add dialog on that language. Borrowed chapter
+names come in the series' own language too.
+
+### Full paths, for @Kedryn
+
+- **Where a series and a chapter are on disk** ([#136](https://github.com/AngeloSha/uchiyomi/issues/136)). An admin
+  sees a series' folder, in full, under *Edit details* (**Folder on the server**), and a chapter's file in its ⋯ menu
+  (**Copy file path**); one tap copies it and says what it copied.
+
+### Mark caught up
+
+- For a series already in your library, **Mark caught up** (an admin's, in *Edit details* beside Auto-update) stops
+  the updater fetching what is already out, the whole back catalogue, and keeps it fetching every new chapter, as
+  *Nothing yet* does for a series you add. It says what it does before it does it, and **Undo** puts back the floor
+  the series had. Chapters already here stay; older ones can still be fetched from the chapter list. Asked for by
+  **@p3t3t3** on [#72](https://github.com/AngeloSha/uchiyomi/discussions/72).
+
+### The chapter select bar says what it removes
+
+- The series page's select bar greyed out *Remove* until chapters were ticked, and it read as the way to remove the
+  series. The bar is up from the moment you tap Select, its key says what it acts on (*Remove 3 chapters*), and with
+  nothing ticked it says *Tick chapters to remove them*, beside **Remove the whole series**, the series' own Remove.
+
+### Health: Folders scanned twice
+
+- **@Kedryn** ([#134](https://github.com/AngeloSha/uchiyomi/discussions/134)) mounted his manga at `/library` with
+  Uchiyomi's downloads folder inside it, so the library scan read every downloaded chapter a second time, as a series
+  with no source beside the one with its source, and nothing said why. A new Health check, *Folders scanned twice*,
+  warns while one folder is inside the other, by their paths or as the last scan met it, names where, and says how
+  to fix it: mount them side by side. The install guide has a new
+  [Volumes](docs/INSTALL.md#volumes) section with the compose lines, and the desktop app words it in its own terms.
+
+### Also
+
+- **Earlier searches reopen.** Each earlier Find other sources search is a key in the results sheet that opens it in
+  place, *Back to the latest search* above it, so a review whose matches are still waiting is not lost once another
+  search runs. A search stopped during its first series no longer reads *1 of 4 series* on the Server tasks card;
+  only the series it searched count. *Skipped* has its own key for series (*Skipped series*) and for a match
+  (*Skipped for good*), so Spanish, French and Portuguese agree each with what it names.
+- **Shuffle on a short series.** A series of eight chapters or fewer, ten pages or fewer each, had every page read
+  whatever the shuffle, so **New banner** drew the same four panels and said *Banner changed*. It now chooses among
+  panels about as striking, reaches further down only when nothing near is left, and says *This is the only banner
+  this series’ pages give.* when there is no other.
+- **The hunt reads a chapter's parts the way updates do.** A site that numbers a chapter's parts its own way (its
+  11.1 and 11.6 for your 11 and 11.5) lists that chapter, as v0.50.0 taught the updater, so the hunt for a missing part
+  takes it from there at once.
+- **Singulars and translations.** The last nine counts that read wrong at one in languages that agree a word with its
+  number (*1 seleccionados*, *1 supprimés*) now agree: selected, deleted, saved, filed by hand, not here yet, the two
+  kinds of skipped chapter, and Downloads' two delete confirmations. Still English until now, and translated: Admin →
+  Extensions' paragraph, its out-of-date banner and every toast; the series page's favourite button and save notices;
+  *Deleted 1 file*; *Delete 1 chapter from the server?*; and *Check for new chapters now*.
+- **The desktop app's server-mode check** in CI failed now and then (macOS on v0.50.0, Windows on v0.51.0's pull
+  request) while everything it printed was right. The app was fine: on a first visit the web app reloads once when its
+  offline worker takes over, and the check's wait for the sign-in form could lose its grip across that reload. It
+  now decides on the page that stays.
+
+### Security updates
+
+- `brace-expansion` 5.0.12 ([#139](https://github.com/AngeloSha/uchiyomi/pull/139)), for two high-severity advisories
+  and a medium-severity one, all denials of service on crafted brace patterns. The server reaches it only through
+  `@fastify/static`, which expands one fixed pattern over the web app's files at start, so no request ever did.
+
+### Upgrading
+
+- **The database** gets one migration on first start, and it only adds: `lib_series.lang` (the language a series is
+  in) and `lib_series.work_id` (the work an edition belongs to), with an index that allows one edition per language
+  in a work, and `server_settings.mangadex_langs` and `unstated_lang`. A data migration then states the language of
+  each MangaDex series from its own chapters, so a title that came in through English's fallback and is in Spanish
+  says so. v0.51.0 still starts on a migrated database: every new column is empty or has a default, and it never
+  reads them. There, a series added from a MangaDex language other than English reads *Source not installed*, kept
+  rather than lost, until you come back to v0.52.0.
+- **New source ids:** `mangadex-<code>` for each MangaDex language you switch on (`mangadex-es-419`,
+  `mangadex-pt-br`); `mangadex` stays English.
+- Nothing to change in compose files, and no new environment variables; the MangaDex languages and the language of
+  sites that do not say are settings, kept in the database.
+- **For scripts** ([api.md](docs/api.md)):
+  - New routes: `GET /api/sources/edition-candidates?seriesId=` (the languages a series could be added in, and with
+    `&lang=` the search there), `POST /api/admin/series/:id/editions` (link two series as editions) and
+    `DELETE /api/admin/series/:id/edition` (unlink one).
+  - `POST /api/sources/add` takes `edition: {of, lang?, ofLang?}`; its 409 `duplicate` offers `edition: {of,
+    heldLangs, lang}` when the source's language is not one the library holds the title in, and it refuses with
+    `edition_exists`, `edition_hidden` or `edition_lang`.
+  - Series payloads carry `lang`, `workId` and `edition` (admins also `langStated`, `langAuto`, the series' `paths`
+    and each chapter's `path`); `POST /api/series/search` takes `collapseEditions`; Discover's answers carry
+    `libraryLangs` and each provider's `lang`, and `inLibrary` now means held in that source's language.
+  - `PATCH /api/admin/series/:id` takes `lang` and `chapterFloor: 'caught_up'` (answering `{floor, previous}`), and
+    a merge inside a work is refused as `same_work`. `PATCH /api/admin/settings` takes `mangadexLangs` and
+    `unstatedLang`, and `GET` returns `mangadex_langs`, `unstated_lang` and `mangadex_available`.
+  - A follow refused for its language answers 409 `language_differs` with `edition: {of, lang}`, from the manual
+    follow and from a review's follow. `GET /api/admin/sources/find?runId=` reads an earlier run; Shuffle can answer
+    `{ok: true, seed, same: true}`; Health has a new check, `folders-twice`.
+  - A chapter copy's `lang` from MangaDex is the app's code (`es-419`, no longer `es-la`), as its sources are named.
+
 ## v0.51.0 — 2026-10-02
 
 **A series AniList has no banner for now gets one made from its own pages: four striking panels from different

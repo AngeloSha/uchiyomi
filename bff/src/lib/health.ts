@@ -9,6 +9,8 @@
 //  * `lib_books.pages` is filled in lazily on first read, so "pages = 0" means "never opened", not "broken".
 //  * decimal chapters (12.5, 44.6) are overwhelmingly legitimate side-stories and "Notice!" pages, which are
 //    genuinely one image long. Only whole-numbered chapters are worth flagging as too short.
+import path from 'path';
+import { realpath } from 'fs/promises';
 import { q, one } from './db';
 import { visibleToAll } from './visibility';
 import { latestSolverVersion } from './solverVersion';
@@ -16,7 +18,10 @@ import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPingShared, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
+import { effectiveLang } from './seriesLang';
+import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
+import { mangadexLangOf } from './sources/mangadexLangs';
 import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
@@ -62,7 +67,10 @@ export type HealthAction =
   | 'renumber' | 'keep_numbers'
   // v0.49.1: Find other sources for every series whose MAIN source is the row's `sourceId` (POST
   // /api/admin/sources/find {sourceId}); `findSeries` is how many series that run would search for.
-  | 'find_sources';
+  | 'find_sources'
+  // v0.52.0 (#72): the duplicates check's pair in two languages -- link them as editions of one work (POST
+  // /api/admin/series/{id}/editions {with}) rather than merge one into the other.
+  | 'link_editions';
 
 export interface HealthItem {
   seriesId?: string;
@@ -102,6 +110,8 @@ export interface HealthItem {
   findSeries?: number;
   /** Of `seriesIds`, the one the merge should keep: more live chapters, then more readers, then older. */
   keep?: string;
+  /** v0.52.0, beside `seriesIds` on a duplicates row: the language each is in, for Link as editions' confirmation. */
+  langs?: string[];
   /** What an admin can do about this item, in the order the chips are shown. */
   actions?: HealthAction[];
   /**
@@ -801,9 +811,14 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
   const frozen = unrouted.filter((r) => !followed.has(r.id));
   const covered = unrouted.filter((r) => followed.has(r.id));
   // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
-  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see.
-  const why = (r: typeof rows[number], p: { n: number; source: string }): Part =>
-    r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see. A MangaDex language comes first
+  // (v0.52.0): its adapter is unregistered only by switching the language off, so "no longer installed" was wrong
+  // and sent the admin looking for an extension; the reason names the language and where it is switched back on.
+  const why = (r: typeof rows[number], p: { n: number; source: string }): Part => {
+    const mdOff = mangadexLangOf(r.source_id);
+    if (mdOff) return say('frozen.mangadexOff', { n: p.n, lang: mdOff });
+    return r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+  };
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
   // engine: its own row (engineHealth.ts) and Admin → Extensions say how to bring it back.
@@ -1056,16 +1071,41 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
   };
 }
 
-/** The same manga added twice, spotted by two local series resolving to one AniList entry. */
+/**
+ * The same manga added twice, spotted by two local series resolving to one AniList entry.
+ *
+ * Counted in WORKS, not series (v0.52.0, #72): the language editions of one work share their entry on purpose (the
+ * link copies it), so an English and a Spanish edition are one work and no finding. A work and a series outside it
+ * on the same entry are, and each side is then named by one row: the edition in the other side's language when there
+ * is one -- a second English copy beside an English and Spanish work is a duplicate of the English edition, to merge
+ * -- else the oldest. Two sides whose languages differ are the same work in two languages, and the chip is Link as
+ * editions instead of Merge. Reintroduce by grouping by series again: "two editions of one work are no duplicate" in
+ * editions.int.test.ts finds the pair.
+ */
 async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
-  const rows = await q<{ external_id: string; titles: string; ids: string[] }>(
-    `SELECT t.external_id, string_agg(ls.title, ' + ' ORDER BY ls.title) AS titles,
-            array_agg(ls.id ORDER BY ls.title) AS ids
+  const found = await q<{ external_id: string; members: Array<{ id: string; title: string; work: string; lang: string | null; source_id: string | null }> }>(
+    `SELECT t.external_id,
+            json_agg(json_build_object('id', ls.id, 'title', ls.title, 'work', COALESCE(ls.work_id::text, ls.id),
+                                       'lang', ls.lang, 'source_id', ls.source_id) ORDER BY ls.title, ls.created_at, ls.id) AS members
        FROM series_trackers t JOIN lib_series ls ON ls.id = t.series_id AND ${visibleToAll('ls')}
       WHERE t.provider = 'anilist'
-      GROUP BY t.external_id HAVING count(*) > 1
-      ORDER BY count(*) DESC`,
+      GROUP BY t.external_id HAVING count(DISTINCT COALESCE(ls.work_id::text, ls.id)) > 1
+      ORDER BY count(DISTINCT COALESCE(ls.work_id::text, ls.id)) DESC`,
   );
+  const rows = found.map((f) => {
+    const members = f.members.map((m) => ({ ...m, lang: effectiveLang(m.lang, m.source_id) }));
+    const works = [...new Set(members.map((m) => m.work))].map((w) => members.filter((m) => m.work === w));
+    // Two sides: name each by the edition in a language the other side has, else by its first row.
+    let pick = works.map((w) => w[0]);
+    let languages = false;
+    if (works.length === 2) {
+      const [a, b] = works;
+      const match = a.flatMap((x) => b.filter((y) => sameLanguage(x.lang, y.lang)).map((y) => [x, y] as const))[0];
+      if (match) pick = [...match];
+      else languages = true;
+    }
+    return { external_id: f.external_id, ids: pick.map((m) => m.id), titles: pick.map((m) => m.title).join(' + '), langs: pick.map((m) => m.lang), languages };
+  });
   // Which copy should survive a merge. A merge is ONE-WAY and it moves everything (progress, bookmarks,
   // trackers, chapters) into the survivor, so the suggestion has to be the copy that would lose the most by
   // being the one absorbed: most live chapters first, then the one people have actually read, and an older
@@ -1097,13 +1137,17 @@ async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
         titles: r.titles.split(' + '),
         title: r.titles,
         keep,
+        langs: r.langs,
         // Ignored while the copies are the same ones: a third copy of the entry is a new finding.
         key: `anilist:${r.external_id}`,
         members: [...r.ids].sort(),
         // Only a pair gets the chip. Three copies of one entry is two merges in an order somebody has to
         // choose, and a button that quietly picks one is how a library loses a series it cannot get back.
-        ...(r.ids.length === 2 ? { actions: ['merge' as const] } : {}),
-        ...detailOf([say('dupes.same'), r.ids.length > 2 && say('dupes.copies', { n: r.ids.length })]),
+        // A pair in two languages is linked, never merged: a merge would put two languages' chapters in one list.
+        ...(r.ids.length === 2 ? { actions: [r.languages ? 'link_editions' as const : 'merge' as const] } : {}),
+        ...detailOf(r.languages
+          ? [say('dupes.languages', { a: r.langs[0], b: r.langs[1] })]
+          : [say('dupes.same'), r.ids.length > 2 && say('dupes.copies', { n: r.ids.length })]),
       };
     });
   const ignored = applyIgnores('duplicates', items, ctx);
@@ -1616,6 +1660,56 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   };
 }
 
+/**
+ * Where one library root sits inside the other, by path (v0.52.0, #134), or null when they are side by side: the
+ * download folder inside the library (`root: 'library'`, `folder` its place under it, '' when the two are one folder)
+ * or the library inside the download folder (`root: 'downloads'`). Pure, for the configured roots after realpath.
+ * Case counts, as it does on the server's disks; the desktop app refuses nested roots before the server starts
+ * (lib/desktop.ts rootsOverlap).
+ */
+export function nestedRoots(library: string, downloads: string, impl: typeof path = path): { root: 'library' | 'downloads'; folder: string } | null {
+  const under = (child: string, parent: string): string | null => {
+    const rel = impl.relative(parent, child);
+    return rel === '..' || rel.startsWith(`..${impl.sep}`) || impl.isAbsolute(rel) ? null : rel.split(impl.sep).join('/');
+  };
+  const d = under(downloads, library);
+  if (d !== null) return { root: 'library', folder: d };
+  const l = under(library, downloads);
+  return l === null ? null : { root: 'downloads', folder: l };
+}
+
+/**
+ * The download folder inside the library, or the library inside it (v0.52.0, discussion #134). Uchiyomi scans both
+ * roots, so every chapter in the inner one is read twice -- in its own root, as a series with its source, and again
+ * inside the other, as a series with none -- and the library shows each downloaded series twice. @Kedryn mounted
+ * /epaper at /library while his download folder, /epaper/uchiyomi_manga, was /library-dl.
+ *
+ * Found two ways: the configured roots by path (realpath, so a symlink counts), and the last scan, whose walk meets
+ * one root's own folder inside the other however it was mounted (lib/library.ts findSeriesDirs `watch`) -- two
+ * mounts of one folder share no path. Null while they are side by side: there is nothing to say, so no card.
+ * Reintroduce by leaving it out of runHealthChecks: "the download folder inside the library" in
+ * foldersTwice.int.test.ts finds no card.
+ */
+async function foldersScannedTwice(): Promise<HealthCheck | null> {
+  const real = (p: string) => realpath(p).catch(() => path.resolve(p));
+  const byPath = nestedRoots(await real(LIBRARY_ROOT), await real(DL_ROOT));
+  const found = byPath ?? lastScanReport()?.nested ?? null;
+  if (!found) return null;
+  const where = say('folder', { root: found.root, folder: found.folder });
+  return {
+    id: 'folders-twice',
+    title: 'Folders scanned twice',
+    status: 'warn',
+    ...summaryOf([
+      found.folder === '' ? say('nested.same')
+        : found.root === 'library' ? say('nested.downloadsInside', { folder: found.folder })
+        : say('nested.libraryInside', { folder: found.folder }),
+    ]),
+    ...noteOf([say('nested.note', { lib: LIBRARY_ROOT, dl: DL_ROOT })]),
+    items: [{ title: where.text, titleSaid: saidOf(where), ...detailOf([say(byPath ? 'nested.byPath' : 'nested.byScan')]) }],
+  };
+}
+
 // ---- report -----------------------------------------------------------------
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -1640,6 +1734,8 @@ export async function runHealthChecks(): Promise<HealthReport> {
     updateCheck(),
     libraryScan(),
     downloadsMissing(ctx),
+    // v0.52.0 (#134): null while the library and the download folder sit side by side.
+    foldersScannedTwice().catch(() => null),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
     // #72: the engine itself; null when there is none and nothing depends on one (lib/engineHealth.ts).
     extensionEngineCheck().catch(() => null),

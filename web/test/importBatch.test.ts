@@ -619,8 +619,11 @@ test('the add dialog offers the other sources only when it already holds a list,
   // whatever the switch says ("alsoFollow rides with the switch off" fails).
   const src = code(read('components/AddSeriesDialog.tsx'));
   assert.match(src, /const ALSO_FOLLOW_MAX = 6;/, 'the cap is not six');
-  const memo = src.slice(src.indexOf('const others = useMemo('), src.indexOf('}, [providers, picked]);'));
-  assert.match(memo, /if \(!picked \|\| !providers\) return \[\];/, 'a result seed sends candidates (providers is null there)');
+  // v0.52.0: the list is `offered` -- the seed's providers, or an edition's search in its language -- null all the same
+  // for a result seed.
+  const memo = src.slice(src.indexOf('const others = useMemo('), src.indexOf('}, [offered, picked]);'));
+  assert.match(memo, /if \(!picked \|\| !offered\) return \[\];/, 'a result seed sends candidates (providers is null there)');
+  assert.match(src, /const offered = edSeed \? \(edSearch\.data\?\.providers \?\? null\) : providers;/, 'a result seed has a list to offer');
   assert.match(memo, /if \(seen\.has\(p\.source\)\) continue;/, 'the picked source, or a source twice, can be a candidate');
   assert.match(memo, /return out\.slice\(0, ALSO_FOLLOW_MAX\);/, 'more than six can ride');
   assert.doesNotMatch(memo, /api</, 'others is fetched rather than taken from the list the dialog already has');
@@ -628,7 +631,8 @@ test('the add dialog offers the other sources only when it already holds a list,
   assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length && !view\?\.posting \? others\.map\(\(\{ source, sourceId \}\) => \(\{ source, sourceId \}\)\) : undefined;/, 'alsoFollow rides with the switch off, or carries more than the identity');
   // (#116's `numbering` and #117's "Archive the rest slowly" ride after it, pinned in numbering.test.ts and
   // addSeriesDialog.test.ts.)
-  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering(?:, \.\.\.\(archiving \? \{ archive: true \} : \{\}\))? \}/, 'the add body does not carry alsoFollow');
+  // (v0.52.0's language edition rides after those, pinned in addSeriesDialog.test.ts.)
+  assert.match(src, /json: \{\s*source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,?(?:\s*\.\.\.\(archiving \? \{ archive: true \} : \{\}\),?)?(?:\s*\.\.\.\(editionBody \? \{ edition: editionBody \} : \{\}\),?)?\s*\}/, 'the add body does not carry alsoFollow');
   // The switch is on the options step only with candidates, remembered per device under one key.
   assert.match(src, /\{mayFollow && others\.length > 0 && !view\?\.posting && \(\s*<div className="mt-3" data-also-follow>/, 'the switch shows without candidates');
   assert.match(src, /const ALSO_FOLLOW_KEY = 'uchiyomi\.alsoFollow';/, 'the per-device key changed');

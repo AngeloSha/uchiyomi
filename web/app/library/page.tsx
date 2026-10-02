@@ -19,6 +19,7 @@ import { LibraryFilters, SORTS, READ_STATES, STATUSES, useLibrarySources } from 
 import { Sheet } from '@/components/ui';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { t as tr } from '@/lib/i18n';
+import { selectedText } from '@/lib/counted';
 import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
 import { useLayer } from '@/lib/layers';
 import { useReduceEffects } from '@/lib/effects';
@@ -129,8 +130,11 @@ function LibraryInner() {
     // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
     enabled: view === 'series',
     initialPageParam: 0,
+    // One card per work (v0.52.0, #72): the language editions of a title are one card -- the edition this reader read
+    // last, else the original -- whose caption names the work's languages (SeriesTile). Reintroduce by dropping the
+    // flag: "the Library asks for one card per work" in library.test.ts fails, and Blue Lock sits on the shelf twice.
     queryFn: ({ pageParam }) =>
-      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition } }),
+      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition, collapseEditions: true } }),
     getNextPageParam: (last) => (last.last ? undefined : last.number + 1),
   });
 
@@ -471,7 +475,7 @@ function LibraryInner() {
               is one row, 735 px in English and 822 in German, where German took two rows before. */}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-5xl">
             <span className="me-auto text-sm font-medium text-fog-100">
-              {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : tr('{n} selected', { n: picked.size })}
+              {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : selectedText(picked.size)}
             </span>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
@@ -492,7 +496,7 @@ function LibraryInner() {
       {/* ⚠️ The Sheet (z-60) paints over a Modal (z-50), so each row closes the sheet BEFORE it opens its
           dialog; opened the other way round the dialog is underneath and cannot be tapped. */}
       {more && (
-        <Sheet title={tr('{n} selected', { n: picked.size })} onClose={() => setMore(false)} overBottomNav>
+        <Sheet title={selectedText(picked.size)} onClose={() => setMore(false)} overBottomNav>
           {/* `pb-2`: the sheet's nav clearance is 4 px short of the nav's measured height (see the series
               page), and the last row here would otherwise end 3 px under it. */}
           <div className="space-y-1 pb-2">

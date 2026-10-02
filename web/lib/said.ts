@@ -16,7 +16,7 @@
  * the server's wherever the two are meant to read alike.
  */
 import { t as tr } from './i18n';
-import { activeLocale, cached, durationText, relativeTime } from './format';
+import { activeLocale, cached, durationText, languageName, relativeTime } from './format';
 import { isDesktop } from './desktop';
 import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
@@ -322,6 +322,12 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'frozen.uninstalled': (p) => (num(p, 'n') === 1
     ? tr('1 chapter; its source {source} is no longer installed', { source: str(p, 'source') })
     : tr('{n} chapters; its source {source} is no longer installed', { n: num(p, 'n'), source: str(p, 'source') })),
+  // v0.52.0 (#123): a MangaDex language switched off. The language in the reader's own words, never its code.
+  'frozen.mangadexOff': (p) => {
+    const v = { n: num(p, 'n'), language: languageName(str(p, 'lang')) };
+    return v.n === 1 ? tr('1 chapter; MangaDex in {language} is switched off in Admin → Providers', v)
+      : tr('{n} chapters; MangaDex in {language} is switched off in Admin → Providers', v);
+  },
   'frozen.following': (p) => tr('primary {source} gone; still following {names}', { source: p.source == null ? tr('(none)') : str(p, 'source'), names: strs(p, 'names').join(listSep()) }),
 
   // ---- Source health (#115)
@@ -376,6 +382,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'dupes.note': () => tr('Detected by two series matching the same AniList entry, so it catches copies added from different sources under different names. Progress tracking works best with one copy of each. Merging is one-way and never automatic: the nightly repair leaves these alone and you confirm each one.'),
   'dupes.same': () => tr('Same AniList entry'),
   'dupes.copies': (p) => tr('{n} copies — merge them one pair at a time', { n: num(p, 'n') }),
+  // v0.52.0 (#72): a pair in two languages; the codes named in the reader's language.
+  'dupes.languages': (p) => tr('The same work in {a} and {b}: link them as editions rather than merging.', { a: languageName(str(p, 'a')), b: languageName(str(p, 'b')) }),
 
   // ---- Impossible chapter numbers
   'outliers.live': (p) => (num(p, 'n') === 1 ? tr('1 series has chapters numbered far beyond the rest') : tr('{n} series have chapters numbered far beyond the rest', { n: num(p, 'n') })),
@@ -539,6 +547,16 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'census.stat': (p) => tr('the scan could not check {where}: {error}', { where: whereText(p), error: str(p, 'error') }),
   'census.loop': (p) => tr('the scan took {where} for a loop: {what}', { where: whereText(p), what: loopedTo(p) }),
 
+  // ---- Folders scanned twice (v0.52.0, #134)
+  'nested.same': () => tr('The downloads folder and the library are one folder, so every downloaded chapter is scanned twice'),
+  'nested.downloadsInside': (p) => tr('The downloads folder is inside the library, at {folder}, so every downloaded chapter is scanned twice', { folder: str(p, 'folder') }),
+  'nested.libraryInside': (p) => tr('The library is inside the downloads folder, at {folder}, so every chapter in it is scanned twice', { folder: str(p, 'folder') }),
+  'nested.byPath': () => tr('Their paths put one inside the other.'),
+  'nested.byScan': () => tr('The last library scan read the same files here a second time.'),
+  'nested.note': (p) => (isDesktop()
+    ? tr('Uchiyomi scans its library folder and the manga folder you added both, so neither may be inside the other: each downloaded chapter then shows up twice. Keep the two side by side; then remove the copies with no source.')
+    : tr('Uchiyomi scans the library ({lib}) and its downloads folder ({dl}) both, so neither may be inside the other: each downloaded chapter then shows up twice, once in a series with its source and once in a series with none. Mount them side by side, each in a folder of its own, and restart Uchiyomi; then remove the copies with no source. The Volumes section of the install guide shows how.', { lib: str(p, 'lib'), dl: str(p, 'dl') })),
+
   // ---- The extension engine (#72)
   'engine.waiting': (p) => (num(p, 'n') === 1
     ? tr('1 series that came from extensions keeps its chapters and gets no new ones until it is back')
@@ -664,6 +682,15 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'pref.choices': (p) => tr('{label} takes a list of its choices.', { label: str(p, 'label') }),
   'pref.text': (p) => tr('{label} takes text.', { label: str(p, 'label') }),
   'pref.tooLong': (p) => tr('{label} is too long.', { label: str(p, 'label') }),
+
+  // ---- A follow refused for its language (v0.52.0, #123): the two languages by the reader's own names for them.
+  'follow.languageDiffers': (p) => tr('That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.', {
+    theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')),
+  }),
+  // ...when the work holds an edition that may follow the source already: the follow belongs there.
+  'follow.languageDiffersEdition': (p) => tr('That source is in {theirs} and this series is in {ours}. Follow it on the {edition} edition instead.', {
+    theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')), edition: languageName(str(p, 'edition')),
+  }),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

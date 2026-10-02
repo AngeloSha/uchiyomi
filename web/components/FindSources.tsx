@@ -15,28 +15,31 @@
 // The run itself is the server's (POST /api/admin/sources/find); GET says how far the running one has got, or what the
 // newest one did, and keeps the newest twenty. The idea, the other-names list and the name parsing are @TIGamingTV's
 // (PR #119).
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
-import { durationText, relativeTime } from '@/lib/format';
+import { durationText, languageName, relativeTime } from '@/lib/format';
 import { runStatusWord } from '@/lib/healthCopy';
 import { seriesHref } from '@/lib/healthLinks';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import {
-  amberNote, bulkOutcome, decideRefusal, findReviewFirst, findRunState, findSlotState, findSummary, findWhyLine, greenToFollow,
-  groupResults, lineUpText, notTriedIds, setFindReviewFirst, toMs, type FindProposal, type FindResult, type FindRun,
+  amberNote, bulkOutcome, decideRefusal, earlierRuns, findReviewFirst, findRunState, findSlotState, findSummary, findWhyLine,
+  greenToFollow, groupResults, lineUpText, notTriedIds, setFindReviewFirst, toMs, type FindProposal, type FindResult, type FindRun,
   type FindRunSummary, type FindStatus,
 } from '@/lib/findSources';
-import { FIND_KEY, codeOf, fetchFind, useFindRun, useFindRuns } from '@/lib/useFindRun';
+import { FIND_KEY, codeOf, fetchFind, fetchFindRun, useFindRun, useFindRuns } from '@/lib/useFindRun';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { sourceCover } from '@/components/cards';
 import { SourceIcon } from '@/components/SourcePicker';
 import { Img, OnBody, Sheet } from '@/components/ui';
+import { AddSeriesDialog } from '@/components/AddSeriesDialog';
+import { editionOffer, editionOfferKey, type EditionOffer } from '@/lib/editions';
 
 /** "3h ago", or while it runs "Started 5 min ago": when, beside the run's name. */
 function whenLine(run: FindRunSummary): string {
@@ -107,6 +110,10 @@ function Group({ id, title, rows, note, onOpen }: { id: string; title: string; r
 /**
  * The newest run's results, in four groups. `poll`: ask again every 2 s while it runs -- off where a follower on the
  * page already does (Health's FindRunProvider), since every observer with an interval polls on its own timer.
+ *
+ * An earlier search opens in its place (v0.52.0): each one under Earlier searches is a key, and its results are read by
+ * its id -- a review-first run's matches can be followed or skipped there as on the newest. Its own query, under
+ * FIND_KEY, so the refetch every decision ends with reads it again; and finished, so it is never polled.
  */
 export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void; poll?: boolean }) {
   const { isAdmin } = useAuth();
@@ -118,11 +125,27 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
     retry: false,
     refetchInterval: poll ? (qq) => (qq.state.data?.running ? 2000 : false) : undefined,
   });
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Opening a run (or going back to the latest) starts the sheet at its top: the keys are at the bottom, under the
+  // results, and the run they open would otherwise begin a screen above where the reader is.
+  const top = useRef<HTMLDivElement>(null);
+  const shown = useRef<string | null>(null);
+  useEffect(() => {
+    if (shown.current === openId) return;
+    shown.current = openId;
+    top.current?.scrollIntoView({ block: 'start' });
+  }, [openId]);
+  const opened = useQuery({
+    queryKey: [...FIND_KEY, 'run', openId],
+    queryFn: () => fetchFindRun(openId!),
+    enabled: isAdmin && !!openId,
+    retry: false,
+  });
   // A search of what the run never reached, from here: the same route, the same one-run rule.
   const again = useFindRuns({ enabled: false });
   const [stopping, setStopping] = useState<string | null>(null);
   const data: FindStatus | undefined = q.data;
-  const run = data?.run ?? null;
+  const run = openId ? opened.data?.run ?? null : data?.run ?? null;
   const g = groupResults(run?.results);
   // What the run never reached, once it is over -- stopped, out of time, or cut short by a restart, whose unreached
   // series the server lists as not tried exactly as a stop's.
@@ -135,31 +158,57 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
     void qc.invalidateQueries({ queryKey: FIND_KEY });
     void kickDownloads(qc);
   };
-  const earlier = (data?.recent ?? []).filter((r) => r.id !== run?.id).slice(0, 5);
+  const earlier = earlierRuns(data?.recent, openId);
+  // "Add it as an edition" (v0.52.0): the add dialog in the sheet's place -- a Modal under a Sheet cannot be tapped --
+  // and the sheet back as it was once the dialog closes. On <body>, as the sheet is: Health's card would hold it.
+  // "Open the Spanish edition" instead when the work holds one that may follow the source: the sheet makes way for it.
+  const [adding, setAdding] = useState<EditionAsk | null>(null);
+  const router = useRouter();
+  const addOrOpen = (ask: EditionAsk) => {
+    if (ask.existing) { onClose(); router.push(seriesHref(ask.existing.id)); return; }
+    setAdding(ask);
+  };
+  if (adding) {
+    return (
+      <OnBody>
+        <AddSeriesDialog seed={{ kind: 'edition', of: adding.of, title: adding.title, lang: adding.lang, source: adding.source }}
+          sources={[]} mayFollow={isAdmin} onClose={() => setAdding(null)}
+          onAdded={() => { for (const k of [['series', adding.of], ['library'], ['home'], ['source-jobs']]) void qc.invalidateQueries({ queryKey: k }); }} />
+      </OnBody>
+    );
+  }
   return (
     <OnBody>
       <Sheet title={tr('Other-source search')} onClose={onClose} overBottomNav>
-        <div data-find-results className="pb-2">
-          {q.isLoading && <div className="skeleton h-16 rounded-xl" />}
+        <div data-find-results ref={top} className="pb-2">
+          {openId && (
+            <div className="mb-2">
+              <button type="button" className="btn-key" onClick={() => setOpenId(null)} data-find-latest>{tr('Back to the latest search')}</button>
+            </div>
+          )}
+          {(openId ? opened.isLoading : q.isLoading) && <div className="skeleton h-16 rounded-xl" />}
           {!q.isLoading && q.isError && !data && <p className="text-xs text-rose-300">{tr('Could not load the results')}</p>}
-          {!q.isLoading && data && !run && <p className="text-xs text-fog-500">{tr('No search for other sources has run yet.')}</p>}
+          {!openId && !q.isLoading && data && !run && <p className="text-xs text-fog-500">{tr('No search for other sources has run yet.')}</p>}
+          {openId && opened.isError && <p className="text-xs text-fog-500">{tr('That search is no longer kept.')}</p>}
           {run && (
             <>
               <FindRunRow run={run} label={runStatusWord(run.status)} onStop={isAdmin ? () => { void stop(); } : undefined} stopping={stopping === run.id} />
               {untried.length > 0 && (
                 <div className="mt-2">
                   <button type="button" className="btn-key" disabled={retry?.phase === 'starting' || !!data?.running}
-                    onClick={() => { void again.start('retry', { seriesIds: untried, ...(run.review ? { review: true } : {}) }).then(() => { void q.refetch(); void kickDownloads(qc); }); }}>
+                    onClick={() => { void again.start('retry', { seriesIds: untried, ...(run.review ? { review: true } : {}) }).then(() => { setOpenId(null); void q.refetch(); void kickDownloads(qc); }); }}>
                     {untried.length === 1 ? tr('Search the 1 series not tried') : tr('Search the {n} series not tried', { n: untried.length })}
                   </button>
                   {(retry?.phase === 'refused' || retry?.phase === 'failed') && <ActionStatus state={findSlotState(retry, null)} />}
                 </div>
               )}
               {/* Keyed by the run: a press's state belongs to the run it was made in. */}
-              {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} />}
+              {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} onAddEdition={addOrOpen} />}
               <Group id="found" title={tr('New sources')} rows={g.found} onOpen={onClose} />
               <Group id="nothing" title={tr('Nothing found')} rows={g.nothing} onOpen={onClose} />
-              <Group id="skipped" title={tr('Skipped')} rows={g.skipped} onOpen={onClose} />
+              {/* Its own key, not the shared "Skipped" (v0.52.0): the heading is about series, which several languages
+                  agree it with ("Series omitidas"), and a match's state or an import row is not. */}
+              <Group id="skipped" title={tr('Skipped series')} rows={g.skipped} onOpen={onClose} />
               <Group id="not-tried" title={tr('Not tried')} rows={g.notTried} onOpen={onClose}
                 note={tr('The search was stopped, ran out of time or was interrupted by a restart before it got to these.')} />
             </>
@@ -167,14 +216,20 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
           {earlier.length > 0 && (
             <section data-find-group="earlier" className="mt-5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Earlier searches')}</h3>
-              <ul role="list" className="mt-1 space-y-1.5">
+              <ul role="list" className="mt-1 divide-y divide-ink-800/50">
                 {/* The status word leads each line, so the summary after it leaves its own out: "Stopped before it
-                    finished · 6m ago · Stopped before it finished · 3 of 7 series" said it twice. */}
+                    finished · 6m ago · Stopped before it finished · 3 of 7 series" said it twice. Each line opens its run
+                    in the sheet (v0.52.0); a review-first run says so, since its matches may still wait. */}
                 {earlier.map((r) => (
-                  <li key={r.id} className="text-[11px] leading-relaxed text-fog-400">
-                    <span className="text-fog-300">{runStatusWord(r.status)}</span>
-                    {whenLine(r) && <span className="text-fog-500"> · {whenLine(r)}</span>}
-                    <span className="text-fog-500"> · {findSummary(r, { status: false })}</span>
+                  <li key={r.id}>
+                    <button type="button" onClick={() => setOpenId(r.id)} data-find-earlier={r.id}
+                      className="block w-full py-2 text-start text-[11px] leading-relaxed text-fog-400 hover:text-fog-200">
+                      <span className="text-fog-300">{runStatusWord(r.status)}</span>
+                      {whenLine(r) && <span className="text-fog-500"> · {whenLine(r)}</span>}
+                      {r.review && <span className="text-fog-500"> · {tr('Review first')}</span>}
+                      <span className="text-fog-500"> · {findSummary(r, { status: false })}</span>
+                      <span className="text-accent"> · {tr('Open')}{'\u00a0'}›</span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -233,33 +288,51 @@ export function FindStartDialog({ onStart, onClose }: { onStart: (review: boolea
   );
 }
 
-/** Follow and Skip for one run's matches, and Follow all green: each press posts, then the run is read again. */
-function useReviewActions(runId: string, onFollowed?: () => void) {
+/** A match the language guard refused, offered as an edition instead: the add route's offer and the source. */
+export type EditionAsk = EditionOffer & { source: string; title: string };
+
+/**
+ * Follow and Skip for one run's matches, and Follow all green: each press posts, then the run is read again.
+ * `onAddEdition` (v0.52.0): where a follow is refused for its language, the match offers "Add it as an edition".
+ */
+function useReviewActions(runId: string, onFollowed?: () => void, onAddEdition?: (ask: EditionAsk) => void) {
   const qc = useQueryClient();
   const [pending, setPending] = useState<Record<string, 'follow' | 'dismiss'>>({});
   const [refusals, setRefusals] = useState<Record<string, string>>({});
+  // The refusals that come with an edition to add instead (language_differs), by the same key.
+  const [offers, setOffers] = useState<Record<string, EditionOffer>>({});
   const [bulk, setBulk] = useState<ActionState>(IDLE);
   const key = (seriesId: string, sourceId: string) => `${seriesId}\n${sourceId}`;
-  /** The refusal in words, or null once it is done. */
-  const post = async (kind: 'follow' | 'dismiss', seriesId: string, sourceId: string): Promise<string | null> => {
+  /** The refusal in words and the edition it offers, or null once it is done. */
+  const post = async (kind: 'follow' | 'dismiss', seriesId: string, sourceId: string): Promise<{ why: string; offer: EditionOffer | null } | null> => {
     try {
       await api(`/api/admin/sources/find/${encodeURIComponent(runId)}/${kind}`, { method: 'POST', json: { seriesId, sourceId } });
       return null;
     } catch (e) {
-      return decideRefusal(codeOf(e)) ?? msgOf(e, kind === 'follow' ? tr('Could not follow that source') : tr('Could not skip that match'));
+      return {
+        why: decideRefusal(codeOf(e)) ?? msgOf(e, kind === 'follow' ? tr('Could not follow that source') : tr('Could not skip that match')),
+        offer: editionOffer(e),
+      };
     }
   };
-  const said = (k: string, why: string | null) => setRefusals((all) => {
-    const next = { ...all };
-    if (why) next[k] = why; else delete next[k];
-    return next;
-  });
+  const said = (k: string, out: { why: string; offer: EditionOffer | null } | null) => {
+    setRefusals((all) => {
+      const next = { ...all };
+      if (out) next[k] = out.why; else delete next[k];
+      return next;
+    });
+    setOffers((all) => {
+      const next = { ...all };
+      if (out?.offer) next[k] = out.offer; else delete next[k];
+      return next;
+    });
+  };
   const decide = async (kind: 'follow' | 'dismiss', seriesId: string, sourceId: string) => {
     const k = key(seriesId, sourceId);
     setPending((p) => ({ ...p, [k]: kind }));
-    const why = await post(kind, seriesId, sourceId);
-    said(k, why);
-    if (!why && kind === 'follow') onFollowed?.();
+    const out = await post(kind, seriesId, sourceId);
+    said(k, out);
+    if (!out && kind === 'follow') onFollowed?.();
     await qc.refetchQueries({ queryKey: FIND_KEY }).catch(() => {});
     setPending((p) => { const next = { ...p }; delete next[k]; return next; });
   };
@@ -269,15 +342,15 @@ function useReviewActions(runId: string, onFollowed?: () => void) {
     let followed = 0, refused = 0;
     for (const [i, it] of items.entries()) {
       setBulk({ kind: 'working', startedAt: at, step: tr('Following {done} of {total}…', { done: i + 1, total: items.length }), progress: i / items.length });
-      const why = await post('follow', it.seriesId, it.sourceId);
-      said(key(it.seriesId, it.sourceId), why);
-      if (why) refused++; else followed++;
+      const out = await post('follow', it.seriesId, it.sourceId);
+      said(key(it.seriesId, it.sourceId), out);
+      if (out) refused++; else followed++;
     }
     if (followed) onFollowed?.();
     await qc.refetchQueries({ queryKey: FIND_KEY }).catch(() => {});
     setBulk({ kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, ...bulkOutcome(followed, refused) });
   };
-  return { pending, refusals, bulk, key, decide, followAll };
+  return { pending, refusals, offers, onAddEdition, bulk, key, decide, followAll };
 }
 type ReviewActions = ReturnType<typeof useReviewActions>;
 
@@ -286,6 +359,7 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
   const k = act.key(r.seriesId, p.sourceId);
   const pressed = act.pending[k];
   const why = act.refusals[k];
+  const offer = act.offers[k];
   const note = amberNote(p);
   const busy = (kind: 'follow' | 'dismiss'): ActionState => (pressed === kind ? { kind: 'working', startedAt: Date.now() } : IDLE);
   const keys: ActionSpec[] = [
@@ -315,9 +389,17 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
         <p className={`mt-0.5 text-[11px] tabular-nums ${p.verdict === 'green' ? 'text-fog-400' : 'text-amber-300/90'}`}>{lineUpText(p)}</p>
         {note && !p.state && <p data-amber-note className="mt-0.5 text-[11px] leading-relaxed text-amber-300/90">{note}</p>}
         {p.state
-          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped')}</p>
+          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped for good')}</p>
           : <ActionKeys actions={keys} className="mt-1.5" />}
         {why && !p.state && <ActionStatus state={{ kind: 'refused', reason: why }} />}
+        {/* Refused for its language (v0.52.0): the match is this work in another language, which an edition holds --
+            to add, or the work's own when it has one that may follow the source ("Open the Spanish edition"). */}
+        {offer && !p.state && act.onAddEdition && (
+          <button type="button" className="btn-key mt-1.5" data-add-edition={p.sourceId}
+            onClick={() => act.onAddEdition!({ ...offer, source: p.sourceId, title: r.title ?? '' })}>
+            {editionOfferKey(offer, languageName)}
+          </button>
+        )}
       </div>
     </li>
   );
@@ -344,14 +426,18 @@ function ReviewSeries({ r, act, head = true, onOpen }: { r: FindResult; act: Rev
 }
 
 /** One series' matches where the page is that series (the Sources sheet): no head, and `onFollowed` per follow. */
-export function SeriesReview({ runId, r, onFollowed }: { runId: string; r: FindResult; onFollowed?: () => void }) {
-  const act = useReviewActions(runId, onFollowed);
+export function SeriesReview({ runId, r, onFollowed, onAddEdition }: {
+  runId: string; r: FindResult; onFollowed?: () => void; onAddEdition?: (ask: EditionAsk) => void;
+}) {
+  const act = useReviewActions(runId, onFollowed, onAddEdition);
   return <ul role="list" data-series-review className="mt-1"><ReviewSeries r={r} act={act} head={false} /></ul>;
 }
 
 /** A review's series with their matches, and Follow all green over them. */
-function ReviewGroup({ run, rows, onOpen }: { run: FindRun; rows: FindResult[]; onOpen: () => void }) {
-  const act = useReviewActions(run.id);
+function ReviewGroup({ run, rows, onOpen, onAddEdition }: {
+  run: FindRun; rows: FindResult[]; onOpen: () => void; onAddEdition?: (ask: EditionAsk) => void;
+}) {
+  const act = useReviewActions(run.id, undefined, onAddEdition);
   const greens = greenToFollow(run);
   return (
     <section data-find-group="review" aria-labelledby="find-review" className="mt-4">

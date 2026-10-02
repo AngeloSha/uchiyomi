@@ -28,6 +28,8 @@ import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
+import { loadUnstatedLang } from './lib/seriesLang';
+import { loadMangadexLangs } from './lib/sources/mangadexLangs';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -57,6 +59,9 @@ import { ensureDesktopUser } from './lib/desktopUser';
 
 async function main() {
   await migrate();
+  // The language of sources and series that do not say (lib/lang.ts), before anything compares languages. A
+  // database that cannot be read here leaves English, the default, and never stops the boot.
+  await loadUnstatedLang().catch((e) => console.warn(`[lang] could not read the unstated language: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
@@ -68,7 +73,10 @@ async function main() {
     (n) => { if (n) console.log(`[activity] ${n} finished download(s) from the last day restored`); },
     (e) => console.warn(`[activity] could not read the download log: ${(e as Error)?.message || e}`),
   );
-  const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
+  // The MangaDex languages besides English an admin turned on (v0.52.0, #123), which loadBuiltins registers. A
+  // database that cannot be read here leaves English alone, and never stops the boot.
+  await loadMangadexLangs().catch((e) => console.warn(`[sources] could not read the MangaDex languages: ${(e as Error)?.message || e}`));
+  const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex, one adapter per language)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
   // Extension sources from an optional Suwayomi server. Fails soft: unset or unreachable just means none.

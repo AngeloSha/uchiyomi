@@ -282,6 +282,20 @@ async function pushOne(
   // floor keeps the strict `<` below: equal to a number this app sent is a no-op push, not a refusal.
   // Reintroduce by `chapters < floor.chapters` here: the re-read of the tracker's last chapter pushes.
   if (floor && floor.pushed_at == null && chapters <= floor.chapters) return;
+  // The ENTRY's floor (v0.52.0, #72): the highest count this person's OTHER series on the same tracker entry have
+  // recorded. The language editions of one work are one AniList or MyAnimeList entry, so reading the Spanish
+  // edition, which is twenty chapters behind, must not tell the tracker 30 over the 50 the English one sent -- and
+  // a shorter edition read to its end must not mark the entry COMPLETED below it. A quiet no-op, not an error: the
+  // entry is simply ahead, as an import-seeded floor is. Two copies of one title added by accident are the same
+  // case and gain the same protection. Reintroduce by dropping it: "an edition behind the other pushes nothing" in
+  // trackers.int.test.ts sees 10 sent.
+  const entry = await one<{ chapters: number | null }>(
+    `SELECT max(tp.chapters)::int AS chapters FROM tracker_progress tp
+       JOIN series_trackers st ON st.series_id = tp.series_id AND st.provider = tp.provider
+      WHERE tp.user_id = $1 AND tp.provider = $2 AND st.external_id = $3 AND tp.series_id <> $4`,
+    [userId, conn.provider, link.external_id, seriesId],
+  );
+  if (entry?.chapters != null && chapters <= entry.chapters) return;
   if (floor && chapters < floor.chapters) {
     // ⚠️ Reintroduce by dropping the unstamped return above: every chapter finished below an imported floor
     // writes last_error.
@@ -339,6 +353,11 @@ export function pushSeriesProgressAsync(userId: string, seriesId: string): void 
  * that happens automatically, because it is the only way to lower a number on someone's real account.
  */
 export async function clearTrackerFloor(userId: string, seriesId: string, provider: Provider = 'anilist'): Promise<void> {
-  await q(`DELETE FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3`,
+  // Every series on the same tracker entry (v0.52.0): the editions of one work share the entry's floor (pushOne), so
+  // clearing this series' own would leave a sibling's standing in the way of the lower number asked for.
+  await q(
+    `DELETE FROM tracker_progress WHERE user_id = $1 AND provider = $3 AND (series_id = $2 OR series_id IN (
+       SELECT o.series_id FROM series_trackers o JOIN series_trackers me ON me.provider = o.provider AND me.external_id = o.external_id
+        WHERE me.series_id = $2 AND me.provider = $3))`,
     [userId, seriesId, provider]);
 }

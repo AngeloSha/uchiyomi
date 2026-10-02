@@ -1,4 +1,5 @@
 'use client';
+import type { ReactNode } from 'react';
 import { Sheet } from '@/components/ui';
 import { IcCheck } from '@/components/icons';
 
@@ -15,15 +16,18 @@ export interface ChapterRow { id: string; label: string }
  * The second is that a `<select>`'s options are rendered by the operating system and never pass through
  * `tr()`, so nothing inside it could ever be translated.
  */
-export function ChapterSheet({ title, chapters, activeId, onPick, onClose }: {
+export function ChapterSheet({ title, chapters, activeId, onPick, onClose, header }: {
   title: string;
   chapters: ChapterRow[];
   activeId?: string;
   onPick: (id: string) => void;
   onClose: () => void;
+  /** Above the list (v0.52.0): the reader's language editions of the work, to read this chapter in another. */
+  header?: ReactNode;
 }) {
   return (
     <Sheet title={title} onClose={onClose}>
+      {header}
       <div className="-mx-1 divide-y divide-ink-800/70">
         {chapters.map((c) => (
           <button

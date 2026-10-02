@@ -19,12 +19,15 @@ import { sourceCover } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { selectedText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { followable } from '@/lib/scanlators';
 import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
+import { editionOffer, editionOfferKey, type EditionOffer } from '@/lib/editions';
+import { languageName } from '@/lib/format';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -101,7 +104,7 @@ function ChapterPicker({ numbers, selected, onChange }: {
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fog-500">
-        <span>{tr('{n} selected', { n: count })}</span>
+        <span>{selectedText(count)}</span>
         <button type="button" onClick={() => onChange(new Set(numbers))} className="hover:text-fog-200">{tr('Select all')}</button>
         <button type="button" onClick={() => onChange(new Set())} className="hover:text-fog-200">{tr('Select none')}</button>
       </div>
@@ -139,7 +142,15 @@ function ChapterPicker({ numbers, selected, onChange }: {
   );
 }
 
-export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
+export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
+  seriesId: string;
+  onClose: () => void;
+  /**
+   * A follow the language guard refused (v0.52.0): add that source's language as an edition instead. The page closes
+   * this dialog and opens the add dialog on it; absent for a viewer who may not add series.
+   */
+  onAddEdition?: (ask: EditionOffer & { source: string }) => void;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const { isAdmin } = useAuth();
@@ -149,6 +160,8 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   const [busy, setBusy] = useState(false);
   /** Each source's chosen chapters, by `${source}:${sourceSeriesId}`; absent means everything it offers. */
   const [picked, setPicked] = useState<Record<string, number[]>>({});
+  /** A follow refused for its language (v0.52.0): the source, the server's sentence and the edition it offers. */
+  const [edOffer, setEdOffer] = useState<(EditionOffer & { source: string; message: string }) | null>(null);
 
   // One scan per title: POST starts it (or joins the one already running) and answers after a moment with what
   // has arrived; every read after that is the scan's own route, every two seconds until it is done. A scan used to
@@ -232,7 +245,13 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       if (announce) toast(tr('Now following {s}. It is checked for new chapters every few hours; download what it has now below.', { s: c.name }), 'success');
       return true;
     } catch (e) {
+      const ed = editionOffer(e);
       if (codeOf(e) === 'plan_stale') stale();
+      // The language guard (v0.52.0): a source in another language than the series is never followed for it -- only a
+      // list from before the series' language changed still offers one. Its card says so, naming both languages, and
+      // offers what has both: that language as an edition. Reintroduce by toasting it like any refusal: "Find missing
+      // offers no edition" in editions.test.ts.
+      else if (ed) setEdOffer({ ...ed, source: c.source, message: msgOf(e, tr('That source is in another language than this series')) });
       else toast(msgOf(e, tr('Could not follow that source.')), 'error');
       return false;
     } finally {
@@ -301,6 +320,22 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       setBusy(false);
     }
   };
+
+  /**
+   * Under a card whose follow was refused for its language: the server's sentence, and "Add it as an edition" -- or
+   * "Open the Spanish edition" when the work holds one that may follow the source (the handler goes there).
+   */
+  const languageOffer = (c: Candidate) => edOffer?.source === c.source && (
+    <div className="mt-2" data-edition-offer={c.source}>
+      <p dir="auto" className="text-xs leading-relaxed text-amber-300">{edOffer.message}</p>
+      {onAddEdition && (
+        <button type="button" onClick={() => onAddEdition({ of: edOffer.of, lang: edOffer.lang, source: edOffer.source, existing: edOffer.existing })}
+          className="btn-key mt-2" data-add-edition={c.source}>
+          {editionOfferKey(edOffer, languageName)}
+        </button>
+      )}
+    </div>
+  );
 
   /** The follow button for one candidate, or nothing when this person cannot follow or the source cannot be followed. */
   const followButton = (c: Candidate) => {
@@ -451,6 +486,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                 )}
                 {/* Following alone, for what comes next without downloading anything now. */}
                 {followButton(c)}
+                {languageOffer(c)}
               </div>
             );
           })}
@@ -493,6 +529,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                     </div>
                   </div>
                   {followButton(c)}
+                  {languageOffer(c)}
                 </div>
               ))}
             </div>

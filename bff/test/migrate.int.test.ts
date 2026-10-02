@@ -142,6 +142,11 @@ const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'arch
 const V0491_TABLES = ['series_alt_titles', 'source_find_runs'];
 // v0.51.0's block: one new table (lib/autoHero.ts), so v0.50.0 -- v0.49.1's schema -- boots on it and never meets it.
 const V0510_TABLES = ['series_hero'];
+// v0.52.0's block: no table, four columns on two tables v0.51.0 writes every day (lib/lang.ts, lib/seriesLang.ts).
+const V0520_COLUMNS: Record<string, string[]> = {
+  lib_series: ['lang', 'work_id'],
+  server_settings: ['mangadex_langs', 'unstated_lang'],
+};
 const V049_COLUMNS: Record<string, string[]> = {
   lib_books: ['short_result', 'source_chapter_id'],
   chapter_failures: ['first_at'],
@@ -161,6 +166,11 @@ const V0484 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.48.4-requi
 };
 /** v0.49.0's own schema, captured the same way (see the file's _provenance): what a rollback from v0.49.1 boots. */
 const V0490 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.49.0-required-columns.json'), 'utf8')) as {
+  tables: string[];
+  columns: Record<string, string[]>;
+};
+/** v0.51.0's own schema, captured the same way (see the file's _provenance): what a rollback from v0.52.0 boots. */
+const V0510 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.51.0-required-columns.json'), 'utf8')) as {
   tables: string[];
   columns: Record<string, string[]>;
 };
@@ -329,6 +339,154 @@ test('migrate: v0.51.0 adds its one table and nothing a v0.50.0 image would have
     [V0510_TABLES],
   );
   assert.deepEqual(required.map((r) => `${r.table_name}.${r.column_name}`), ['series_hero.series_id']);
+});
+
+test('migrate: v0.52.0 only adds, and every column lets v0.51.0 keep writing its rows', { skip }, async () => {
+  for (const [table, cols] of Object.entries(V0520_COLUMNS)) {
+    const rows = await q<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+      [table, cols],
+    );
+    assert.deepEqual(rows.map((r) => r.column_name).sort(), [...cols].sort(), `a v0.52.0 column of ${table} is missing`);
+  }
+  // The whole-schema rule again, held against v0.51.0's own schema, which a rollback from v0.52.0 boots: on every
+  // table v0.51.0 has, the only required columns are the ones it already writes. The block adds to lib_series and
+  // server_settings, which v0.51.0 INSERTs into all day. Reintroduce by declaring lib_series.lang NOT NULL: the
+  // assertion names lib_series.lang.
+  assert.ok([...V049_TABLES, ...V0491_TABLES, ...V0510_TABLES].every((t) => V0510.tables.includes(t)),
+    'the fixture is not v0.51.0: a table v0.51.0 has is missing from it');
+  const current = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0510.tables],
+  );
+  assert.deepEqual(current.map((t) => t.table_name).sort(), [...V0510.tables].sort(), 'a v0.51.0 table is gone: v0.52.0 only adds');
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0510.tables],
+  );
+  for (const r of required) {
+    assert.ok(
+      (V0510.columns[r.table_name] ?? []).includes(r.column_name),
+      `${r.table_name}.${r.column_name} is NOT NULL with no default: after a rollback, v0.51.0's INSERTs into ${r.table_name} fail`,
+    );
+  }
+  // As the design declares them: unstated English, no extra MangaDex language, and a series stating nothing and
+  // standing alone. Reintroduce DEFAULT 'es' on unstated_lang: "server_settings.unstated_lang" fails.
+  const declared = await q<{ table_name: string; column_name: string; column_default: string | null; is_nullable: string }>(
+    `SELECT table_name, column_name, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND (table_name, column_name) IN
+        (('lib_series', 'lang'), ('lib_series', 'work_id'), ('server_settings', 'mangadex_langs'), ('server_settings', 'unstated_lang'))`,
+  );
+  assert.deepEqual(Object.fromEntries(declared.map((d) => [`${d.table_name}.${d.column_name}`, [d.column_default, d.is_nullable]])), {
+    'lib_series.lang': [null, 'YES'], 'lib_series.work_id': [null, 'YES'],
+    'server_settings.mangadex_langs': ["'[]'::jsonb", 'NO'], 'server_settings.unstated_lang': ["'en'::text", 'NO'],
+  }, 'server_settings.unstated_lang (or another v0.52.0 column) is not declared as the design set it');
+
+  // One edition per language per work, and nothing for v0.51.0's rows, which never name a work. Reintroduce by
+  // dropping lib_series_work_lang_idx: "a work held one language twice". In a transaction that is rolled back, so
+  // the shared test database keeps no series.
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      const add = (id: string, work: string | null, lang: string) => c.query(
+        `INSERT INTO lib_series (id, source, title, folder, work_id, lang) VALUES ($1, 'test', 'T', $1, $2, $3)`, [id, work, lang]);
+      await add('t-ed-alone-1', null, 'en');
+      await add('t-ed-alone-2', null, 'en');
+      const work = '5a1e0000-0000-4000-8000-000000000520';
+      await add('t-ed-en', work, 'en');
+      await add('t-ed-es', work, 'es-419');
+      await assert.rejects(add('t-ed-en-2', work, 'en'), /lib_series_work_lang_idx/, 'a work held one language twice');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+  // Partial: the index holds only rows in a work, which v0.51.0 never writes. Reintroduce by dropping its WHERE.
+  const [idx] = await q<{ indexdef: string }>(`SELECT indexdef FROM pg_indexes WHERE indexname = 'lib_series_work_lang_idx'`);
+  assert.match(idx?.indexdef ?? '', /^CREATE UNIQUE INDEX .* WHERE \(work_id IS NOT NULL\)$/, 'the edition index is not unique and partial');
+});
+
+test("migrate: v0.52.0's data migration states a MangaDex series' language from its listing", { skip }, async () => {
+  // A Spanish title that came in through the English adapter's fallback reads as English to every other rule; its
+  // MangaDex listing says what it is. Each series: main source, stated language, and its listing as [source, lang].
+  const SEED: Record<string, [string, string | null, [string, string][]]> = {
+    't-mdl-es': ['mangadex', null, [['mangadex', 'es-la'], ['mangadex', 'es-la'], ['mangadex', 'en']]],
+    't-mdl-zh': ['mangadex', null, [['mangadex', 'zh-hk']]],
+    't-mdl-en': ['mangadex', null, [['mangadex', 'en'], ['other-src', 'es'], ['other-src', 'es']]],
+    't-mdl-odd': ['mangadex', null, [['mangadex', 'ja-ro']]],
+    't-mdl-stated': ['mangadex', 'pt-BR', [['mangadex', 'es-la']]],
+    't-mdl-follower': ['other-src', null, [['mangadex', 'es-la']]],
+  };
+  const ids = Object.keys(SEED);
+  try {
+    for (const [id, [source, lang, listing]] of Object.entries(SEED)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, source_id, lang) VALUES ($1, 'test', 'T', $1, $2, $3)`, [id, source, lang]);
+      for (const [i, [src, chLang]] of listing.entries()) {
+        await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1, $2, $3, $4::jsonb)`,
+          [id, i + 1, src, JSON.stringify({ sourceId: `${id}-c${i + 1}`, number: i + 1, lang: chLang })]);
+      }
+    }
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.52.0-series-lang-from-mangadex'`);
+    await migrate();
+    const rows = await q<{ id: string; lang: string | null }>(`SELECT id, lang FROM lib_series WHERE id = ANY($1)`, [ids]);
+    assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, r.lang])), {
+      // Reintroduce by stamping MangaDex's own code (no mapping): es-la and zh-hk.
+      't-mdl-es': 'es-419',
+      't-mdl-zh': 'zh-Hant',
+      // Reintroduce by counting every row, not only MangaDex's own: a follower's Spanish outvotes it.
+      't-mdl-en': 'en',
+      't-mdl-odd': null,
+      // Reintroduce by dropping "s.lang IS NULL": the stated pt-BR is overwritten.
+      't-mdl-stated': 'pt-BR',
+      // Reintroduce by dropping "s.source_id = 'mangadex'": a follower's copies state the series' language.
+      't-mdl-follower': null,
+    }, 'the data migration stated the wrong language for a series');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.52.0-series-lang-from-mangadex'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
+});
+
+test('migrate: an edition v0.51.0 merged away after a rollback gives its language back at the next boot', { skip }, async () => {
+  // The rollback drill's find: v0.51.0's merge sets merged_into and leaves work_id and lang alone, so the absorbed
+  // French row kept its slot in lib_series_work_lang_idx, and v0.52.0 then refused a new French edition of the
+  // survivor as edition_exists while the series page showed no edition at all. Two works, as v0.51.0 leaves them:
+  // a pair whose French edition it merged into the English one, and a trio that loses its French edition the same way.
+  const { linkEdition } = await import('../src/lib/editions');
+  const pair = '5a1e0000-0000-4000-8000-0000005201a0';
+  const trio = '5a1e0000-0000-4000-8000-0000005201b0';
+  const SEED: [string, string | null, string][] = [
+    ['t-rb-en', pair, 'en'], ['t-rb-fr', pair, 'fr'],
+    ['t-rb3-en', trio, 'en'], ['t-rb3-es', trio, 'es'], ['t-rb3-fr', trio, 'fr'],
+    ['t-rb-new', null, 'fr'],
+  ];
+  const ids = SEED.map(([id]) => id);
+  try {
+    for (const [id, work, lang] of SEED) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, work_id, lang) VALUES ($1, 'test', 'T', $1, $2, $3)`, [id, work, lang]);
+    }
+    // v0.51.0's mergeSeries, as far as these columns go: the absorbed row points at its survivor and nothing else.
+    await q(`UPDATE lib_series SET merged_into = 't-rb-en' WHERE id = 't-rb-fr'`);
+    await q(`UPDATE lib_series SET merged_into = 't-rb3-en' WHERE id = 't-rb3-fr'`);
+    await migrate();
+    const work = Object.fromEntries((await q<{ id: string; work_id: string | null }>(
+      `SELECT id, work_id FROM lib_series WHERE id = ANY($1)`, [ids])).map((r) => [r.id, r.work_id]));
+    // Reintroduce by dropping the first UPDATE in the v0.52.0 block: both merged rows keep their work.
+    assert.equal(work['t-rb-fr'], null, 'a row merged away still holds its language in the work');
+    assert.equal(work['t-rb3-fr'], null, 'a row merged away still holds its language in the work');
+    // Reintroduce by dropping the second: the English survivor of the pair stays a "work of one".
+    assert.equal(work['t-rb-en'], null, 'the edition a v0.51.0 merge left alone does not stand on its own');
+    // A work that still has two editions keeps them.
+    assert.deepEqual([work['t-rb3-en'], work['t-rb3-es']], [trio, trio], 'a work with two editions left was dissolved');
+    // What the user saw: French can be added to each survivor again.
+    const again = await linkEdition('t-rb-new', { of: 't-rb3-en', lang: 'fr' });
+    assert.deepEqual(again, { workId: trio, lang: 'fr' }, 'a French edition is still refused where the merged one was');
+  } finally {
+    await q(`UPDATE lib_series SET merged_into = NULL WHERE id = ANY($1)`, [ids]);
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
 });
 
 test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {

@@ -71,7 +71,8 @@ test('the add dialog wires the switch into the request, the counts and the other
   const src = code(read('components/AddSeriesDialog.tsx'));
   // Reintroduce by dropping `numbering` from the add body: the switch is shown and ignored.
   // (#117's "Archive the rest slowly" rides after it, pinned in addSeriesDialog.test.ts.)
-  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering(?:, \.\.\.\(archiving \? \{ archive: true \} : \{\}\))? \}/,
+  // (v0.52.0's language edition rides after those, pinned in addSeriesDialog.test.ts.)
+  assert.match(src, /json: \{\s*source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,?(?:\s*\.\.\.\(archiving \? \{ archive: true \} : \{\}\),?)?(?:\s*\.\.\.\(editionBody \? \{ edition: editionBody \} : \{\}\),?)?\s*\}/,
     'the add body does not carry the numbering');
   assert.match(src, /const numbering = view\?\.send \?\? 'auto';/);
   assert.match(src, /const view = detail \? addNumberingView\(detail, flipNumbering\) : null;/, 'the counts do not follow the switch');

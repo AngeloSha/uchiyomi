@@ -31,8 +31,10 @@ import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
+import { onText } from '@/lib/counted';
 import type { HealthCheck, Series } from '@/lib/types';
-import { groupProviders, providerStatus, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { groupProviders, providerStatus, MANGADEX_GROUP, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { MangadexCard, UnstatedLanguageCard } from '@/components/MangadexCard';
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
@@ -562,7 +564,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   // Health reads the same evidence, and the header's mark reads Health's summary: a Test, a block cleared or a
   // source switched off here must not leave either of them saying what they said before (#115).
   const invalHealth = () => { qc.invalidateQueries({ queryKey: ['admin-health'] }); qc.invalidateQueries({ queryKey: ['health-summary'] }); };
-  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast('Failed', 'error'); } };
+  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast(tr('Failed'), 'error'); } };
   const { data: custom } = useQuery({ queryKey: ['admin-custom'], queryFn: () => api<{ content: any[] }>('/api/admin/sources/custom') });
   const customIds = new Set((custom?.content || []).map((c: any) => c.id));
   const [reloading, setReloading] = useState(false);
@@ -729,8 +731,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <button onClick={() => testSource(s.id)} disabled={testingId === s.id} data-source-test={s.id} className="btn-key tabular-nums">
           {testingId === s.id ? testClock(now - testFrom, health?.testMs) : tr('Test')}
         </button>
-        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="btn-key">{tr('Clear block')}</button>}
-        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="btn-key">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
+        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', tr('Block cleared'))} className="btn-key">{tr('Clear block')}</button>}
+        {/* Translated since v0.52.0: every MangaDex language's row carries these, in English in every language before. */}
+        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? tr('Enabled') : tr('Disabled'))} className="btn-key">{st === 'disabled' ? tr('Enable') : tr('Disable')}</button>
         {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
       </>
     );
@@ -755,10 +758,29 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   }
 
   /**
+   * One language of a provider that has several: its code, status and series count on one line with the full
+   * card's controls, and its evidence below. Rows wrap rather than scroll: at 390 px the language, status and count
+   * sit on one line and the buttons drop below. An extension package's rows, and the MangaDex card's.
+   */
+  function variantRow(s: ProviderSrc) {
+    const st: ProviderStatus = s.status ?? 'ok';
+    return (
+      <li key={s.id} className="py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
+          {statusMark(st)}
+          <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
+          <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
+        </div>
+        {evidenceOf(s, st)}
+      </li>
+    );
+  }
+
+  /**
    * One extension package with several language variants: a header that says how many languages, how many
    * are on and the unhappiest status among them (so a blocked language colours the card even folded), and
-   * on unfold one compact row per variant carrying the same controls the full card has. Rows wrap rather
-   * than scroll: at 390 px the language, status and count sit on one line and the buttons drop below.
+   * on unfold one compact row per variant carrying the same controls the full card has.
    */
   function packageCard(g: ProviderGroup) {
     const isOpen = unfolded.has(g.key);
@@ -767,29 +789,14 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={isOpen} className="flex w-full items-center gap-2 text-start">
           <span className="min-w-0 flex-1 text-sm text-fog-100">
             {g.name}
-            <span className="ms-2 text-[11px] text-fog-500">{tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}</span>
+            <span className="ms-2 text-[11px] text-fog-500">
+              {g.languages.length === 1 ? tr('1 language') : tr('{n} languages', { n: g.languages.length })} · {onText(g.on)}
+            </span>
           </span>
           {statusMark(g.worst)}
           <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
         </button>
-        {isOpen && (
-          <ul className="mt-2 divide-y divide-ink-800">
-            {g.sources.map((s) => {
-              const st: ProviderStatus = s.status ?? 'ok';
-              return (
-                <li key={s.id} className="py-2">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
-                    {statusMark(st)}
-                    <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
-                    <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
-                  </div>
-                  {evidenceOf(s, st)}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {isOpen && <ul className="mt-2 divide-y divide-ink-800">{g.sources.map(variantRow)}</ul>}
       </div>
     );
   }
@@ -871,6 +878,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         )}
       </div>
 
+      {/* Beside Add a site: the sites added there say no language of their own (v0.52.0). */}
+      <UnstatedLanguageCard />
+
       {/* Extension sources live on their own tab; this is the door to it. The whole Extensions card used to
           render here as well as there, so the catalogue's search field, its language list and its 1,400 rows
           appeared twice in the console and the `Search extensions` field sat on the Providers tab. */}
@@ -901,7 +911,10 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         </div>
       ) : (
         <>
-          {groups.map((g) => (g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
+          {/* MangaDex is one card with its languages in it (v0.52.0, #123), even while English is all that is on. */}
+          {groups.map((g) => (g.key === MANGADEX_GROUP
+            ? <MangadexCard key={g.key} group={g} row={variantRow} mark={statusMark} onSaved={inval} />
+            : g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
         </>
       )}
 
@@ -1627,7 +1640,7 @@ function LibrariesSection() {
               </p>
               <p className="truncate text-[11px] text-fog-600">
                 {l.n} {tr('series')}
-                {l.pinned > 0 && <> · {tr('{n} filed by hand', { n: l.pinned })}</>}
+                {l.pinned > 0 && <> · {l.pinned === 1 ? tr('1 filed by hand') : tr('{n} filed by hand', { n: l.pinned })}</>}
                 {/* Who may open it is per-person access, which desktop does not have (one person, no members). */}
                 {!desktopLibs && <>{' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}</>}
               </p>
@@ -1792,7 +1805,9 @@ function LibraryPanel() {
     try {
       const res = await api<{ files: number; bytes: number }>(`/api/admin/series/${r.id}/delete-files`,
         { method: 'POST', json: { confirm: r.title } });
-      toast(`Deleted ${res.files} file(s), ${(res.bytes / 1048576).toFixed(1)} MB`, 'success');
+      // Counted in pairs and translated (v0.52.0): "Deleted 1 file(s)" was the one English toast left on this panel.
+      const size = `${(res.bytes / 1048576).toFixed(1)} MB`;
+      toast(res.files === 1 ? tr('Deleted 1 file, {size}', { size }) : tr('Deleted {n} files, {size}', { n: res.files, size }), 'success');
       setPurge(null);
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
     } catch (e: any) {
@@ -2055,7 +2070,9 @@ function Health() {
                         // arrow is held to the last word by a no-break space).
                         links={healthLinks(c.id, it).map((l) => (
                           <Link key={l.href} href={l.href} className="line-clamp-2 max-w-[11rem] break-words text-end text-xs text-accent hover:underline"
-                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}
+                            // A page off the app (the install guide, v0.52.0) opens beside it, never in place of it.
+                            {...(/^https?:\/\//.test(l.href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
                             {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
                           </Link>
                         ))}>
@@ -2223,15 +2240,26 @@ function Extensions({ span = '' }: { span?: string }) {
 
   const act = async (e: CatalogExt, action: 'install' | 'uninstall' | 'update') => {
     setBusy(e.pkgName);
+    // In the reader's words since v0.52.0, one sentence per count. The name is isolated (FSI … PDI): a toast is a
+    // plain string, and an extension's own name keeps its own direction inside an Arabic sentence.
+    const name = `\u2068${e.name}\u2069`;
     try {
       const r = await api<{ sources: number; hidden?: number }>(`/api/admin/extensions/catalog/${encodeURIComponent(e.pkgName)}`, { json: { action } });
       refreshAll();
       qc.invalidateQueries({ queryKey: ['ext-langs'] });
-      toast(action === 'uninstall' ? `Removed ${e.name}`
-        : action === 'update' ? `Updated ${e.name}`
-        : `Added ${e.name}${r.sources ? ` — ${r.sources} source${r.sources === 1 ? '' : 's'} ready to search` : ''}`
-          + (r.hidden ? ` · ${r.hidden} left off (hidden languages)` : ''), 'success');
-    } catch (err: any) { toast(msgOf(err, `Could not ${action} ${e.name}`), 'error'); }
+      const added = r.sources === 1 ? tr('Added {name} — 1 source ready to search', { name })
+        : r.sources ? tr('Added {name} — {n} sources ready to search', { name, n: r.sources })
+        : tr('Added {name}', { name });
+      const leftOff = !r.hidden ? ''
+        : r.hidden === 1 ? tr('1 source left off (hidden languages)') : tr('{n} sources left off (hidden languages)', { n: r.hidden });
+      toast(action === 'uninstall' ? tr('Removed {name}', { name })
+        : action === 'update' ? tr('Updated {name}', { name })
+        : leftOff ? `${added} · ${leftOff}` : added, 'success');
+    } catch (err: any) {
+      toast(msgOf(err, action === 'uninstall' ? tr('Could not remove {name}', { name })
+        : action === 'update' ? tr('Could not update {name}', { name })
+        : tr('Could not add {name}', { name })), 'error');
+    }
     setBusy(null);
   };
 
@@ -2246,15 +2274,17 @@ function Extensions({ span = '' }: { span?: string }) {
         '/api/admin/extensions/update-all', { json: {} },
       );
       refreshAll();
+      const n = r.updated.length;
+      const updated = n === 1 ? tr('Updated 1 extension') : tr('Updated {n} extensions', { n });
       if (r.failed.length) {
-        // Naming the first one and why beats a count: the reason is usually the repository's, not ours.
-        toast(`Updated ${r.updated.length}. Could not update ${r.failed[0].name}: ${r.failed[0].reason}`, 'error');
+        // Naming the first one and why beats a count: the reason is usually the repository's, not ours. Both are
+        // isolated in the sentence (the reason is the repository's English).
+        const why = tr('Could not update {name}: {reason}', { name: `\u2068${r.failed[0].name}\u2069`, reason: `\u2068${r.failed[0].reason}\u2069` });
+        toast(n ? `${updated} · ${why}` : why, 'error');
       } else {
-        toast(r.updated.length
-          ? `Updated ${r.updated.length} extension${r.updated.length === 1 ? '' : 's'}`
-          : 'Everything is already up to date', 'success');
+        toast(n ? updated : tr('Everything is already up to date'), 'success');
       }
-    } catch (err: any) { toast(msgOf(err, 'Could not update extensions'), 'error'); }
+    } catch (err: any) { toast(msgOf(err, tr('Could not update extensions')), 'error'); }
     setBusy(null);
   };
 
@@ -2358,8 +2388,7 @@ function Extensions({ span = '' }: { span?: string }) {
       ) : (
         <>
           <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
-            The same extensions Mihon and Tachiyomi use. Adding one switches its sources on straight away, so it&apos;s
-            searchable from Discover immediately.
+            {tr('The same extensions Mihon and Tachiyomi use. Adding one switches its sources on straight away, so you can search them from Discover at once.')}
           </p>
 
           {/* repositories — where the catalogue comes from. ⚠️ It used to start collapsed even with none, so a
@@ -2444,7 +2473,7 @@ function Extensions({ span = '' }: { span?: string }) {
                   const working = busy === `__lang:${name}`;
                   const counts = [
                     l.sources === 1 ? tr('1 source') : tr('{n} sources', { n: l.sources }),
-                    tr('{n} on', { n: l.enabled }),
+                    onText(l.enabled),
                     l.used === 1 ? tr('1 series') : tr('{n} series', { n: l.used }),
                   ].join(' · ');
                   return (
@@ -2522,12 +2551,14 @@ function Extensions({ span = '' }: { span?: string }) {
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
               <p className="min-w-0 flex-1 text-[11px] leading-snug text-amber-200">
-                {cat.updatable === 1 ? '1 extension is out of date' : `${cat.updatable} extensions are out of date`}
-                <span className="text-amber-200/60"> · a newer version is available from its repository</span>
+                {cat.updatable === 1 ? tr('1 extension is out of date') : tr('{n} extensions are out of date', { n: cat.updatable })}
+                <span className="text-amber-200/60"> · {cat.updatable === 1
+                  ? tr('a newer version is available from its repository')
+                  : tr('newer versions are available from their repositories')}</span>
               </p>
               <button onClick={updateAll} disabled={!!busy}
                 className="btn-key border-amber-500/40 bg-amber-500/20 text-amber-100 hover:border-amber-400/70 hover:text-amber-50">
-                {busy === '__updateall' ? 'Updating…' : 'Update all'}
+                {busy === '__updateall' ? tr('Updating…') : tr('Update all')}
               </button>
             </div>
           )}
@@ -2547,12 +2578,12 @@ function Extensions({ span = '' }: { span?: string }) {
             </button>
             <button onClick={() => setOnlyInstalled(!onlyInstalled)}
               className={`rounded-full px-2.5 py-1 text-[11px] transition ${onlyInstalled ? 'bg-accent text-white' : 'bg-ink-700 text-fog-300 hover:text-fog-100'}`}>
-              Added{status.enabled ? ` (${cat?.installed ?? 0})` : ''}
+              {tr('Added')}{status.enabled ? ` (${cat?.installed ?? 0})` : ''}
             </button>
           </div>
 
           {cat && cat.matched > cat.shown && (
-            <p className="mb-1 text-[10px] text-fog-600">Showing {cat.shown} of {cat.matched} matches — narrow the search to see the rest.</p>
+            <p className="mb-1 text-[10px] text-fog-600">{tr('Showing {shown} of {matched} matches — narrow the search to see the rest.', { shown: cat.shown, matched: cat.matched })}</p>
           )}
 
           <div data-lenis-prevent className="max-h-96 space-y-1 overflow-y-auto">
@@ -2565,14 +2596,14 @@ function Extensions({ span = '' }: { span?: string }) {
                   <p className="truncate text-xs text-fog-100">
                     {e.name}
                     {e.nsfw && <span className="ms-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
-                    {e.obsolete && <span className="ms-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">obsolete</span>}
+                    {e.obsolete && <span className="ms-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">{tr('obsolete')}</span>}
                   </p>
                   <p className="text-[10px] text-fog-600">{e.lang || 'all'}{e.versionName ? ` · v${e.versionName}` : ''}</p>
                 </div>
                 {e.hasUpdate && (
                   <button onClick={() => act(e, 'update')} disabled={busy === e.pkgName}
                     className="btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100">
-                    {busy === e.pkgName ? '…' : 'Update'}
+                    {busy === e.pkgName ? '…' : tr('Update')}
                   </button>
                 )}
                 {e.installed && (
@@ -2580,7 +2611,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 )}
                 <button onClick={() => act(e, e.installed ? 'uninstall' : 'install')} disabled={busy === e.pkgName}
                   className={`btn-key ${e.installed ? 'btn-key-danger' : 'btn-key-primary'}`}>
-                  {busy === e.pkgName ? '…' : e.installed ? 'Remove' : 'Add'}
+                  {busy === e.pkgName ? '…' : e.installed ? tr('Remove') : tr('Add')}
                 </button>
               </div>
             ))}

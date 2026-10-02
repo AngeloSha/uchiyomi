@@ -7,6 +7,7 @@
 // chapter's page and the row lit up (`?ch=`, read by app/series/page.tsx).
 import { t as tr } from './i18n';
 import { extensionSettingsHref, extSourceIdOf } from './sourcePrefs';
+import { isDesktop } from './desktop';
 import type { HealthItem } from './types';
 
 /** A series page, optionally turned to one chapter. `ch` is a chapter NUMBER, never an id. */
@@ -30,6 +31,9 @@ export function readerHref(bookId: string): string {
 
 export interface HealthLink { href: string; label?: string }
 
+/** The install guide's Volumes section (v0.52.0): the library and the downloads folder, mounted side by side. */
+export const INSTALL_VOLUMES = 'https://github.com/AngeloSha/uchiyomi/blob/main/docs/INSTALL.md#volumes';
+
 /**
  * Every link an item gets, first one is "Open". Empty when the finding is not about a series (a failing source,
  * the solver, an update).
@@ -45,6 +49,11 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     case 'chapter-gaps':
       if (it.seriesId && it.numbers?.length) return [{ href: seriesHref(it.seriesId, Math.min(...it.numbers)) }];
       break;
+    // v0.52.0 (#134): the finding is about how two folders are mounted, not a series, and the install guide's Volumes
+    // section shows the fix. The desktop app chooses its folders itself and has no compose file to point at.
+    // Reintroduce by dropping this case: "a folder scanned twice links to the install guide" in healthLinks.test.ts.
+    case 'folders-twice':
+      return isDesktop() ? [] : [{ href: INSTALL_VOLUMES, label: tr('Volumes, in the install guide') }];
     // Impossible numbers are chapters the library holds: the first one named.
     case 'outliers':
       if (it.seriesId && it.numbers?.length) return [{ href: seriesHref(it.seriesId, it.numbers[0]) }];

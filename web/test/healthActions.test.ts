@@ -78,6 +78,8 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // label is the counted one in healthCopy.ts ("Find other sources (189 series)"), whose tr() findSources.test.ts holds.
   // v0.51.0: the press opens the start dialog (follow automatically, or review first); its Start posts the source.
   { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => setAsking\('find'\)/ },
+  // v0.52.0 (#72): a duplicate pair in two languages is linked as editions after a confirmation that names both.
+  { action: 'link_editions', labels: ["tr('Link as editions')"], wants: /onRun: \(\) => setAsking\('link'\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {
@@ -192,7 +194,7 @@ test('every dialog a Health card opens is on <body>, out of the card', () => {
   // its overflow-hidden cuts the dialog off. Reintroduce by rendering a ConfirmDialog in place: this names it.
   const src = code(read(KEYS));
   const opens = [...src.matchAll(/<ConfirmDialog\b/g)].map((m) => m.index!);
-  assert.equal(opens.length, 5, 'the Health confirmations moved -- update this count');
+  assert.equal(opens.length, 6, 'the Health confirmations moved -- update this count');
   for (const at of opens) {
     const before = src.slice(0, at);
     assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `a Health confirmation is rendered inside its card: ${src.slice(at, at + 90)}`);
@@ -330,11 +332,12 @@ test('a delete that deleted nothing leads with the bookmark, not with a green co
   const fn = src.slice(src.indexOf('const doDelete'), src.indexOf('const doMerge'));
   assert.match(fn, /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/chapters\/delete/, 'delete does not use the existing chapter-delete route');
   assert.match(fn, /json: \{ bookIds \}/, 'delete does not send the item\'s book ids');
-  const bookmarked = fn.indexOf("tr('{n} skipped: bookmarked by a reader'");
-  const notOwned = fn.indexOf("tr('{n} skipped: not downloaded by Uchiyomi'");
+  // Counted in pairs since v0.52.0 (lib/counted.ts): "1 skipped" agrees in the languages that inflect it.
+  const bookmarked = fn.indexOf('skippedBookmarkedText(bookmarked)');
+  const notOwned = fn.indexOf('skippedNotOursText(notOwned)');
   assert.ok(bookmarked > 0 && notOwned > bookmarked, 'the bookmark line is not the first skip reason');
   assert.match(fn, /if \(res\.applied === 0 && lines\.length\) return \{ text: lines\.map\(\(l\) => l\.text\)\.join\(' · '\), ok: false \};/, 'a delete that applied nothing is reported as a success');
-  assert.match(fn, /toast\(tr\('\{n\} deleted', \{ n: res\.applied \}\), 'success'\)/, 'a successful delete does not say how many went');
+  assert.match(fn, /toast\(deletedText\(res\.applied\), 'success'\)/, 'a successful delete does not say how many went');
   // The confirmation is not optional: this is the one key on the page that destroys bytes.
   const dialog = src.slice(src.indexOf("asking === 'delete'"), src.indexOf("asking === 'disable'"));
   assert.match(dialog, /<ConfirmDialog/, 'Delete chapters has no confirmation');
@@ -348,7 +351,9 @@ test('Merge all lists every pair, marks the copy that survives, and says the mer
   const src = code(read(KEYS));
   const block = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
   assert.match(block, /'data-health-merge-all': check\.id/, 'the Merge all row is not tagged for the walk-through');
-  assert.match(block, /const pairs = check\.id === 'duplicates' \? findings\.filter\(\(it\) => \(it\.seriesIds \|\| \[\]\)\.length === 2\) : \[\];/, 'Merge all offers itself on checks that are not duplicates, or on half a pair');
+  // v0.52.0: and only the pairs offering a merge -- a pair in two languages is linked, never merged. Reintroduce by
+  // dropping `it.actions?.includes('merge')`: Merge all folds the Spanish edition's chapters into the English one.
+  assert.match(block, /const pairs = check\.id === 'duplicates' \? findings\.filter\(\(it\) => \(it\.seriesIds \|\| \[\]\)\.length === 2 && !!it\.actions\?\.includes\('merge'\)\) : \[\];/, 'Merge all offers itself on checks that are not duplicates, on half a pair, or on a pair in two languages');
   assert.match(block, /onRun: \(\) => setAsking\(true\)/, 'Merge all has no confirmation');
   const dialog = block.slice(block.indexOf('{asking && ('));
   assert.match(dialog, /tr\('This cannot be undone\. Progress, bookmarks, ratings and tracker links move to the kept copy\.'\)/, 'the one-way sentence is gone');

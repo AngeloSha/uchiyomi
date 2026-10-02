@@ -154,10 +154,17 @@ export interface SourceAdapter {
   /** Lower = earlier in the cross-source "find" provider order (default: large). */
   preferredOrder?: number;
   /**
+   * Several adapters that are one site to its rate limit (v0.52.0): every MangaDex language is its own adapter
+   * and all of them count against one API. The download gate and the 429 pace level (lib/pace.ts rateKeyOf) are
+   * kept per group instead of per id, so a 429 earned in one language slows the others too. Absent: the id.
+   * Cooldowns (source_health) stay per id on purpose.
+   */
+  rateGroup?: string;
+  /**
    * BCP-47-ish language this source publishes in, when it only publishes in one. Suwayomi reports it per
-   * source; a built-in declares it only when its own requests pin a language (MangaDex asks for `en` and
-   * nothing else). Absent means "no single language", which the language grouping reads as "belongs to
-   * every group" -- so declaring it wrongly is worse than leaving it off.
+   * source; a built-in declares it only when its own requests pin a language (each MangaDex adapter asks for
+   * its one language and nothing else). Absent means "no single language", which the language grouping reads
+   * as "belongs to every group" -- so declaring it wrongly is worse than leaving it off.
    */
   lang?: string;
   /**

@@ -23,7 +23,11 @@ export type WallItem = SourceItem;
  * - keyed by normTitle(title); a row that normalises to nothing (all punctuation, or empty) is passed through
  *   untouched rather than folded with every other such row
  * - the first arrival keeps the card, its `source:sourceId` key and its title, so nothing on screen reflows
- * - `inLibrary` is OR-ed: owned on any source is owned
+ * - `inLibrary` is AND-ed (v0.52.0, #72): the server says it per source, in that source's language, so a card is
+ *   owned only when every provider's language is held -- an English Blue Lock in the library and a Spanish
+ *   provider on the wall make a card that is still addable, as a new edition. It was OR-ed: owned on any source
+ *   was owned, and the Spanish provider was folded under an "In library" card that opened the English series.
+ * - `libraryLangs` is the union of what the rows say the library holds the title in; `librarySeriesId` the first
  * - `coverUrl` comes from the first row that has one, as on the server
  * - one provider per source, in arrival order; `providerCount` is that list's length, which is what lights
  *   the badge on the card
@@ -43,7 +47,10 @@ export function foldByTitle(
   for (const it of items) {
     const key = normTitle(it.title);
     if (!key) { out.push(it); continue; }
-    const provider: WallProvider = { source: it.source, name: nameOf(it.source) ?? it.source, sourceId: it.sourceId, title: it.title, coverUrl: it.coverUrl };
+    const provider: WallProvider = {
+      source: it.source, name: nameOf(it.source) ?? it.source, sourceId: it.sourceId, title: it.title, coverUrl: it.coverUrl,
+      ...(it.lang !== undefined ? { lang: it.lang } : {}), ...(it.inLibrary !== undefined ? { inLibrary: it.inLibrary } : {}),
+    };
     const i = slot.get(key);
     if (i === undefined) {
       slot.set(key, out.length);
@@ -60,9 +67,13 @@ export function foldByTitle(
     }
     const card = out[i];
     // A new object, never a write into the row the page holds in state.
+    // Reintroduce by OR-ing `inLibrary` again: "an English item in the library and a Spanish one not in it fold to a
+    // card that is not owned" in wall.test.ts reads owned.
+    const langs = [...new Set([...(card.libraryLangs ?? []), ...(it.libraryLangs ?? [])])];
     out[i] = {
       ...card,
-      inLibrary: card.inLibrary || it.inLibrary,
+      inLibrary: !!card.inLibrary && !!it.inLibrary,
+      ...(langs.length ? { libraryLangs: langs } : {}),
       librarySeriesId: card.librarySeriesId || it.librarySeriesId,
       coverUrl: card.coverUrl || it.coverUrl,
       providerCount: providers.length,

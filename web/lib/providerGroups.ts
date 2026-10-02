@@ -4,6 +4,10 @@
 // twenty-nine rows, enabled or not, and with a few of those installed the panel is a wall of near-identical
 // cards that differ only in a two-letter tag. The server says which package each `sw:` source came out of
 // (`extension.pkgName`); this groups by it, and by the extension's name when the engine never said.
+//
+// MangaDex is the same shape since v0.52.0 (#123): one built-in source per language, `mangadex` for English and
+// `mangadex-es-419` and so on for the others, and the server names the family `mangadex`. It is one card however
+// many languages are on -- with English alone too, because that card is where the other languages are offered.
 
 import type { Src } from './sourceGroups';
 
@@ -40,13 +44,22 @@ export interface ProviderSrc extends Omit<Src, 'status'> {
   /**
    * The extension package an `sw:` source came from. `pkgName` null means the engine did not say and
    * `name` is the display name with its language tag stripped by the server -- a guess, but the same
-   * guess for every variant of the package, which is all grouping needs. Null for every other source.
+   * guess for every variant of the package, which is all grouping needs. `{pkgName: 'mangadex'}` on every
+   * MangaDex language (v0.52.0). Null for every other source.
    */
   extension?: { pkgName: string | null; name: string } | null;
 }
 
+/** The MangaDex family's group key (v0.52.0, #123): the Providers panel gives it a card of its own. */
+export const MANGADEX_GROUP = 'builtin:mangadex';
+
+/** MangaDex's source id in one language, as the server names it: `mangadex` for English, `mangadex-es-419`, … */
+export function mangadexSourceId(code: string): string {
+  return code === 'en' ? 'mangadex' : `mangadex-${code.toLowerCase()}`;
+}
+
 export interface ProviderGroup {
-  /** Stable across renders and refetches; `sw-pkg:` / `sw-name:` for extensions, the source id otherwise. */
+  /** Stable across renders and refetches; `sw-pkg:` / `sw-name:` for extensions, MANGADEX_GROUP, the source id otherwise. */
   key: string;
   /** What the card header says: the extension's name, or the lone source's own name. */
   name: string;
@@ -81,9 +94,12 @@ export function worstStatus(statuses: ProviderStatus[]): ProviderStatus {
   return worst;
 }
 
-/** The grouping key of an extension source, or null for a source that is never folded. */
+/** The grouping key of an extension source or of MangaDex's languages, or null for a source that is never folded. */
 function groupKeyOf(s: ProviderSrc): string | null {
-  if (!s.id.startsWith('sw:') || !s.extension) return null;
+  if (!s.extension) return null;
+  // A built-in that is several sources: the server names the family (MangaDex's languages, v0.52.0). Its own key
+  // space, so a family never folds with an extension package of the same name.
+  if (!s.id.startsWith('sw:')) return s.extension.pkgName ? `builtin:${s.extension.pkgName}` : null;
   if (s.extension.pkgName) return `sw-pkg:${s.extension.pkgName}`;
   // No package name: fold on the server's stripped name, folded for case so "3hentai" and "3Hentai" (two
   // engine versions, one package) still land together. Anything else on the row is per-variant.
@@ -92,8 +108,8 @@ function groupKeyOf(s: ProviderSrc): string | null {
 }
 
 /**
- * The provider list as cards: one per extension package (however many language variants it exposes), and
- * one per every other source. Order is the server's, by each group's first appearance, so the built-ins
+ * The provider list as cards: one per extension package (however many language variants it exposes), one for
+ * MangaDex (however many languages are on), and one per every other source. Order is the server's, by each group's first appearance, so the built-ins
  * and packs keep their registry position and a package sits where its first variant did.
  */
 export function groupProviders(list: ProviderSrc[]): ProviderGroup[] {

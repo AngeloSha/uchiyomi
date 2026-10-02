@@ -71,6 +71,8 @@ const GROUPS = 'add-groups'; // chapter 1 from two groups, the blocked one liste
 const NOTHING = 'add-nothing'; // three chapters, then a fourth appears: the "nothing yet" add
 const IDS = 'add-ids';       // three titles on one adapter: what the add answers with (#67)
 const HELD = 'add-held';     // three chapters the library already holds under the read-only root (#65)
+const LANG_ES = 'add-lang-es';   // v0.52.0: declares es-419, and its chapters say nothing
+const LANG_MDX = 'add-lang-mdx'; // v0.52.0: declares en, and every chapter says es-la -- MangaDex's English fallback
 const USER = 'add-route-user';
 const MEMBER = 'add-route-member';
 let addSeriesFromSource: any, q: any;
@@ -187,6 +189,18 @@ function held() {
   };
 }
 
+/** A source in one language, whose chapters may name their own (`chapterLang`), as MangaDex's do. */
+function langSource(id: string, title: string, lang: string, chapterLang?: string) {
+  return {
+    id, name: `${id} Source`, lang,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title }; },
+    async listChapters() { return [1, 2].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}-${n}`, pages: 1, ...(chapterLang ? { lang: chapterLang } : {}) })); },
+    async getPageUrls(chId: string) { return [`https://example.invalid/${chId}/p1.png`]; },
+    async latest() { return []; },
+  };
+}
+
 function moody() {
   return {
     id: MOODY, name: 'Moody Source',
@@ -228,13 +242,15 @@ before(async () => {
   registerAdapter(nothing() as any);
   registerAdapter(ids() as any);
   registerAdapter(held() as any);
+  registerAdapter(langSource(LANG_ES, 'Lang Spanish Tale', 'es-419') as any);
+  registerAdapter(langSource(LANG_MDX, 'Lang Fallback Tale', 'en', 'es-la') as any);
 });
 
 after(async () => {
   globalThis.fetch = realFetch;
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
-  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS, NOTHING, IDS, HELD]]).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS, NOTHING, IDS, HELD, LANG_ES, LANG_MDX]]).catch(() => {});
   // The held fixture is seeded by hand, so its row can still be unrouted (no source_id) if an add failed.
   await q(`DELETE FROM lib_series WHERE folder LIKE 'Held Source/%'`).catch(() => {});
   await q('DELETE FROM users WHERE username = ANY($1)', [[USER, MEMBER]]).catch(() => {});
@@ -976,4 +992,16 @@ test('POST /api/sources/add forwards the series id, and only to someone who may 
     await q('DELETE FROM libraries WHERE id = $1', [OTHER_LIB]).catch(() => {});
     globalThis.fetch = realFetch;
   }
+});
+
+test('an add states the language the series is in (v0.52.0)', { skip }, async () => {
+  // The language every same-language guard and every edition reads (lib/seriesLang.ts). Reintroduce by writing NULL
+  // where routes/sources.ts writes `stateLang`: both read null, and the second is read as the English its adapter says.
+  const lang = async (id: string) => (await q('SELECT lang FROM lib_series WHERE id = $1', [id]))[0]?.lang;
+  const es = await addSeriesFromSource({ source: LANG_ES, sourceId: `${LANG_ES}-1`, chapterFrom: 'none', wait: true });
+  assert.equal(es.ok, true, es.message);
+  assert.equal(await lang(es.seriesId), 'es-419', 'the language the source declares');
+  const mdx = await addSeriesFromSource({ source: LANG_MDX, sourceId: `${LANG_MDX}-1`, chapterFrom: 'none', wait: true });
+  assert.equal(mdx.ok, true, mdx.message);
+  assert.equal(await lang(mdx.seriesId), 'es-419', 'what its chapters are in, in the app\'s code, over what the adapter declares');
 });

@@ -383,7 +383,7 @@ test('every string the select bar renders is in the locale files, singulars incl
                        'Remove {n} series from the library?', 'Removed 1 series', 'Removed {n} series', '1 skipped', '{n} skipped',
                        '1 failed', '{n} failed', 'Fetched 1 chapter', 'Fetched {n} chapters', '1 up to date', '{n} up to date',
                        'Nothing to fetch', 'Fetching {done} of {total}…', 'Could not start the fetch', 'Could not remove those',
-                       'Lost track of the fetch. Check the library in a moment.', '{n} selected', 'No files are deleted.',
+                       'Lost track of the fetch. Check the library in a moment.', '1 selected', '{n} selected', 'No files are deleted.',
                        'Nothing removed · 1 skipped', 'Nothing removed · {n} skipped',
                        'The chapters stay exactly where they are on disk, and nothing in your library folder is touched.',
                        "Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library."]) {
@@ -403,7 +403,7 @@ test('Archive slowly: a key from lg up, a row of More on a phone, for anyone who
   // More is a member's on a phone only (from lg up Archive slowly is a key), and an admin's at every width (v0.49.1).
   assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className=\{`chip text-xs disabled:opacity-50 \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
     'a member who may download has no way to archive on a phone');
-  const sheet = src.slice(src.indexOf("<Sheet title={tr('{n} selected'"), src.indexOf('</Sheet>', src.indexOf("<Sheet title={tr('{n} selected'")));
+  const sheet = src.slice(src.indexOf('<Sheet title={selectedText(picked.size)}'), src.indexOf('</Sheet>', src.indexOf('<Sheet title={selectedText(picked.size)}')));
   assert.match(sheet, /\{canDownload\(user\) && \(\s*<button onClick=\{\(\) => \{ setMore\(false\); void archiveSelected\(\); \}\}/, 'More has no Archive slowly, or keeps the sheet open under the notice');
   assert.match(sheet, /\{isAdmin && \(\s*<>\s*<button onClick=\{\(\) => \{ setMore\(false\); setMoving\(true\); \}\}/, "a member's More offers the admin's Move to library");
   // One request per 500 (the route's cap), and one notice for the whole selection: components/ArchiveQueue.tsx.
@@ -522,4 +522,17 @@ test('a chosen source chip is drawn chosen, even for a source that is not loaded
   assert.ok(classes('', false).includes('text-fog-500'), 'a source that is not loaded no longer looks it');
   assert.ok(classes('x', true).includes('chip-active'));
   assert.deepEqual(classes('', true), ['chip', 'text-xs']);
+});
+
+test('the Library asks for one card per work, and the card names the work\'s languages (v0.52.0)', () => {
+  // #72: the language editions of a title are one card -- the edition the reader read last, else the original
+  // (bff lib/ownedCatalog.ts collapsedSearch) -- and its caption says `EN · ES-419`. Reintroduce by dropping
+  // `collapseEditions: true` from the grid's search: "the Library asks for one card per work" fails, and Blue Lock
+  // sits on the shelf twice.
+  const page = code(read('app/library/page.tsx'));
+  assert.match(page, /api<Page<Series>>\('\/api\/series\/search', \{ json: \{ page: pageParam, size: 40, sort: active\.sort, condition, collapseEditions: true \} \}\)/,
+    'the Library asks for one card per work');
+  const cards = code(read('components/cards.tsx'));
+  assert.match(cards, /\{!!series\.edition\?\.langs && series\.edition\.langs\.length > 1 && \(/, 'the card does not name its languages');
+  assert.match(cards, /libraryCaption\(series\.edition\.langs, series\.lang\)/, 'the shown edition is not the one marked');
 });

@@ -55,10 +55,10 @@ function source(id: string, o: { lang?: string; nsfw?: boolean; title?: string; 
 
 let q: any, borrowNamesFor: any, clearBorrowedNames: any, updateSeries: any;
 
-async function series(key: string) {
+async function series(key: string, own = 'bn-own') {
   await q('DELETE FROM lib_series WHERE id = $1', [S(key)]);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
-           VALUES ($1,'T!bn',$2,$1,$3,$4,'bn-own','bn-own-1',true)`, [S(key), TITLE, NUMS.length, LIB]);
+           VALUES ($1,'T!bn',$2,$1,$3,$4,$5,'bn-own-1',true)`, [S(key), TITLE, NUMS.length, LIB, own]);
   for (const n of NUMS) {
     await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1,$2,'T!bn',$3,$4,$5,5)`,
       [`${S(key)}_b${n}`, S(key), `${S(key)}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
@@ -83,6 +83,10 @@ before(async () => {
   registerAdapter(source('bn-spanish', { lang: 'es', names: (n) => `Capítulo ${n}: Nombre ${n}` }) as any);
   registerAdapter(source('bn-adult', { lang: 'en', nsfw: true, names: (n) => `Chapter ${n}: Adult Name ${n}` }) as any);
   registerAdapter(source('bn-throws', { lang: 'en', throws: true }) as any);
+  // One language in two scripts: a Simplified series, and a Traditional donor registered ahead of a Simplified one.
+  registerAdapter(source('bn-own-hans', { lang: 'zh-Hans' }) as any);
+  registerAdapter(source('bn-hant', { lang: 'zh-Hant', names: (n) => `Chapter ${n}: 繁體 ${n}` }) as any);
+  registerAdapter(source('bn-zh', { lang: 'zh', names: (n) => `Chapter ${n}: 简体 ${n}` }) as any);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Borrow',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
 });
 
@@ -142,6 +146,17 @@ test('a source in another language, or an adult one, is never asked -- even when
   assert.equal(r.why, 'no_donor', JSON.stringify(r));
   assert.equal((await book('filters', 1)).chapter_name, null, 'a name came from a source that may not be asked');
   assert.ok(searched.includes('bn-throws'), `no source was asked at all, so this proves nothing: ${searched}`);
+});
+
+test('a donor in the other script of the language is never asked: zh-Hant names no zh-Hans series', { skip }, async () => {
+  await on(true);
+  await series('script', 'bn-own-hans');
+  const r = await borrowNamesFor(S('script'));
+  // Reintroduce borrowNames' own rule from before v0.52.0, the base language alone: the Traditional donor, first in
+  // line, is asked and names every chapter in Traditional characters.
+  assert.ok(!searched.includes('bn-hant'), `a Traditional Chinese source was asked for a Simplified series: ${searched}`);
+  assert.equal(r.donor, 'bn-zh', `a bare zh is Simplified, and should have lent the names: ${JSON.stringify(r)}`);
+  assert.equal((await book('script', 3)).chapter_name, '简体 3');
 });
 
 test('a search that throws is not reported to source health', { skip }, async () => {

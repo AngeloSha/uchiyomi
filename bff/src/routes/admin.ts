@@ -12,6 +12,7 @@ import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
+import { editionFollowing, linkEdition, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
@@ -51,12 +52,14 @@ import { writePreflight } from '../lib/fsGuard';
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
-import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
 import { getPlan, followable } from '../lib/fill';
+import { followGuard, seriesLanguage, sourceLanguage } from '../lib/seriesLang';
+import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
@@ -70,6 +73,8 @@ import { findingOf, runHealthChecks } from '../lib/health';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
+import { MANGADEX_LANGS, canonLang, mdLang, setUnstatedLang } from '../lib/lang';
+import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
@@ -176,6 +181,12 @@ async function linkImportedSeries(
   if (!row.tracker || !row.external_id || !PROVIDERS.includes(row.tracker as Provider)) return false;
   const provider = row.tracker as Provider;
   await linkSeries(seriesId, row.external_id, row.backup_title, userId, provider);
+  // Every language edition of its work is the same entry (v0.52.0): linked too, so progress syncs from whichever is
+  // read. The floor is seeded once, here: lib/trackers.ts pushOne holds the entry's floor over all of them.
+  const siblings = await q<{ id: string }>(
+    `SELECT o.id FROM lib_series s JOIN lib_series o ON o.work_id = s.work_id AND o.id <> s.id
+      WHERE s.id = $1 AND s.work_id IS NOT NULL AND o.merged_into IS NULL`, [seriesId]).catch(() => [] as Array<{ id: string }>);
+  for (const sib of siblings) await linkSeries(sib.id, row.external_id, row.backup_title, userId, provider);
   await seedTrackerFloor(userId, seriesId, provider, row.progress ?? 0);
   return true;
 }
@@ -488,6 +499,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
+    + 'mangadex_langs, unstated_lang, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
@@ -505,6 +517,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       cleanup_read_due: await dueCountCached(row?.cleanup_read_days ?? 30).catch(() => null),
       // The slow archive's disk floor is set against this (#117): GiB free under the download root, null unknown.
       archive_free_gb: await archiveFreeGb().catch(() => null),
+      // v0.52.0 (#123): every language MangaDex is offered in, English first -- what Admin → Providers' picker
+      // offers. `mangadex_langs` beside it is the ones besides English that are on.
+      mangadex_available: MANGADEX_LANGS.map((l) => l.code),
     };
   };
   /**
@@ -553,7 +568,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       sample: !row?.secret,
     };
   });
-  app.patch('/api/admin/settings', async (req) => {
+  app.patch('/api/admin/settings', async (req, reply) => {
     const b = z.object({
       serverName: z.string().min(1).max(64).optional(),
       allowRegistration: z.boolean().optional(),
@@ -603,9 +618,34 @@ export default async function adminRoutes(app: FastifyInstance) {
        * default. Off takes back the names it gave every series that follows this switch.
        */
       borrowNames: z.boolean().optional(),
+      /**
+       * MangaDex in other languages (v0.52.0, #123): the languages besides English that are on, replaced whole, as
+       * app codes from lib/lang.ts MANGADEX_LANGS ("es-419", "pt-BR"; MangaDex's own "es-la" is read as es-419).
+       * Applied live: each language turned on becomes its own source, each turned off goes. English is always on,
+       * so it is refused here, like a code MangaDex is not offered in.
+       */
+      mangadexLangs: z.array(z.string().min(1).max(20)).max(100).optional(),
+      /**
+       * The language of sources and series that do not say (lib/lang.ts unstatedLang): English unless this server's
+       * sites are in another. The same-language guard on automatic follows reads it.
+       */
+      unstatedLang: z.string().min(1).max(35).optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
       ...ARCHIVE_SETTINGS_SHAPE,
     }).superRefine(archiveWindowPair).parse(req.body);
+    // The languages are checked before anything is written: a refused field writes nothing, as for every other.
+    if (b.mangadexLangs) {
+      const unknown = b.mangadexLangs.find((c) => !mdLang(c));
+      if (unknown !== undefined) {
+        return reply.code(400).send({ error: 'unknown_language', message: `MangaDex is not offered in "${unknown}".` });
+      }
+      if (b.mangadexLangs.some((c) => canonLang(c) === 'en')) {
+        return reply.code(400).send({ error: 'english_always_on', message: 'English is always on: list only the other languages.' });
+      }
+    }
+    if (b.unstatedLang !== undefined && !canonLang(b.unstatedLang)) {
+      return reply.code(400).send({ error: 'unknown_language', message: `"${b.unstatedLang}" is not one language.` });
+    }
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
@@ -646,6 +686,26 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
         [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
       invalidateSourcePrefs();
+    }
+    if (b.mangadexLangs !== undefined) {
+      const before = mangadexLangs();
+      const next = cleanMangadexLangs(b.mangadexLangs);
+      await q('UPDATE server_settings SET mangadex_langs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(next)]);
+      // Live: the list in memory, then the registry to match it -- a language on is searchable on the next request.
+      setMangadexLangs(next);
+      const { removed } = syncMangadexSources();
+      // Discover's pages are cached per source for ten minutes: drop them, so a language switched off is not served
+      // from the cache and one switched on is asked at once.
+      clearLatestCache();
+      // A language switched off freezes its series; the header's Health mark should say so now, not at the next look.
+      if (removed.length) scheduleHealthSummaryRefresh();
+      if (before.join() !== next.join()) await logAudit('settings.mangadex_langs', { userId: userIdOf(req), detail: { from: before, to: next }, req });
+    }
+    if (b.unstatedLang !== undefined) {
+      const lang = canonLang(b.unstatedLang)!;
+      await q('UPDATE server_settings SET unstated_lang = $1, updated_at = now() WHERE id = 1', [lang]);
+      // The guard compares synchronously (lib/lang.ts): the next follow decision reads the new language.
+      setUnstatedLang(lang);
     }
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
@@ -1093,6 +1153,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ones again. sourcePrefs is the series' own source order (lib/sourcePrefs.ts), which REPLACES the server's;
   // null, or an empty list, clears it. borrowNames switches chapter-name borrowing (lib/borrowNames.ts) for this
   // series, null to follow the server. Each field is written on its own, so a body naming one leaves the rest.
+  //
+  // v0.52.0: `lang` states the language the series is in (lib/seriesLang.ts), null to infer it again -- refused for an
+  // edition, since every row in a work states its language, and for a language another edition of its work holds.
+  // `chapterFloor` is "Mark caught up" (discussion #72): 'caught_up' floors the series just above the newest chapter
+  // the sources list or the library holds -- the "Nothing yet" add's floor (routes/sources.ts), so the back catalogue
+  // is never fetched and every later release is -- and a number or null puts back the floor the answer reported as
+  // `previous`, which is the Undo.
   app.patch('/api/admin/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
@@ -1100,15 +1167,57 @@ export default async function adminRoutes(app: FastifyInstance) {
       scanlatorPrefs: prefsSchema.nullable().optional(),
       sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).nullable().optional(),
       borrowNames: z.boolean().nullable().optional(),
+      lang: z.string().min(1).max(35).nullable().optional(),
+      chapterFloor: z.union([z.literal('caught_up'), z.number().min(0).max(1e6), z.null()]).optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.sourcePrefs === undefined
-        && b.data.borrowNames === undefined) {
+        && b.data.borrowNames === undefined && b.data.lang === undefined && b.data.chapterFloor === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
+    // Every refusal before the first write: the fields below are written one by one.
+    const lang = b.data.lang == null ? null : canonLang(b.data.lang);
+    if (b.data.lang != null && !lang) return reply.code(400).send({ error: 'bad_lang', message: 'That is not a language code.' });
+    if (b.data.lang !== undefined) {
+      const work = await workRows(id);
+      if (lang === null && work.length > 1) {
+        return reply.code(409).send({ error: 'edition_lang', message: 'An edition always says which language it is in. Unlink it first to make it automatic.' });
+      }
+      const other = lang ? work.find((r) => r.id !== id && r.lang === lang) : undefined;
+      if (other) return reply.code(409).send({ error: 'edition_exists', message: `"${other.title}" is already this work's edition in that language.`, existing: { id: other.id, title: other.title, lang } });
+    }
+    let caughtUp: { floor: number | null; previous: number | null } | undefined;
+    if (b.data.chapterFloor !== undefined) {
+      const prev = await one<{ floor: string | null; top: number | null }>(
+        `SELECT s.chapter_floor AS floor,
+                (SELECT max(n) FROM (SELECT l.number::float8 AS n FROM series_listing l WHERE l.series_id = s.id
+                                     UNION ALL
+                                     SELECT COALESCE(ov.number, bk.number)::float8 FROM lib_books bk LEFT JOIN book_overrides ov ON ov.book_id = bk.id
+                                      WHERE bk.series_id = s.id) x) AS top
+           FROM lib_series s WHERE s.id = $1`, [id]);
+      const previous = prev?.floor == null ? null : Number(prev.floor);
+      if (b.data.chapterFloor === 'caught_up' && prev?.top == null) {
+        return reply.code(409).send({ error: 'nothing_listed', message: 'No chapter of this series is listed or here yet. Check for new chapters first.' });
+      }
+      // A hair above the newest number, as the "Nothing yet" add floors: `chapter_floor` is inclusive from below.
+      caughtUp = { floor: b.data.chapterFloor === 'caught_up' ? Number(prev!.top) + 0.001 : b.data.chapterFloor, previous };
+    }
     const detail: Record<string, unknown> = { id };
+    if (b.data.lang !== undefined) {
+      // The unique index is the last word: an edition linked in the same moment can still take the language.
+      const ok = await q('UPDATE lib_series SET lang = $2 WHERE id = $1', [id, lang]).then(() => true, (e) => {
+        if ((e as { code?: string })?.code === '23505') return false;
+        throw e;
+      });
+      if (!ok) return reply.code(409).send({ error: 'edition_exists', message: 'Another edition of this work is already in that language.' });
+      detail.lang = lang;
+    }
+    if (caughtUp) {
+      await q('UPDATE lib_series SET chapter_floor = $2 WHERE id = $1', [id, caughtUp.floor]);
+      detail.chapterFloor = caughtUp;
+    }
     if (b.data.autoUpdate !== undefined) {
       await q('UPDATE lib_series SET auto_update = $2 WHERE id = $1', [id, b.data.autoUpdate]);
       detail.autoUpdate = b.data.autoUpdate;
@@ -1136,7 +1245,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       else await clearBorrowedNames({ seriesId: id }).catch(() => 0);
     }
     await logAudit('series.settings', { userId: userIdOf(req), detail, req });
-    return { ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}) };
+    return {
+      ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}),
+      ...(b.data.lang !== undefined ? { lang } : {}), ...(caughtUp ? { chapterFloor: caughtUp } : {}),
+    };
   });
 
   /**
@@ -1300,6 +1412,26 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     if (!getSource(source) || await isDisabled(source).catch(() => false)) {
       return reply.code(409).send({ error: 'source_unavailable', message: 'That source is not available right now.' });
+    }
+    // The same-language guard's backstop (v0.52.0, #123), once the source is known to be there (one that is not
+    // declares no language). The fill scan never offers a source in another language, so only a plan from before the
+    // series' language changed reaches this: refused with both languages and the way to have both, an edition --
+    // `edition` is the add route's own `{of, lang}`. Reintroduce by dropping it: "the manual follow refuses a stale
+    // plan's source in another language" in languageGuard.int.test.ts follows it.
+    // When the work holds an edition in that language already, the way on is that edition (`existing`): the sentence
+    // says to follow it there, and the web's key opens it instead of adding a second. Reintroduce by always offering a
+    // new edition: "the refusal points at the edition the work holds in that language" in languageGuard.int.test.ts.
+    if (!(await followGuard(id))(source)) {
+      const theirs = sourceLanguage(source);
+      const ours = (await seriesLanguage(id)).lang;
+      const existing = await editionFollowing(id, source, SYSTEM_CTX);
+      const said = existing
+        ? say('follow.languageDiffersEdition', { theirs, ours, edition: existing.lang })
+        : say('follow.languageDiffers', { theirs, ours });
+      return reply.code(409).send({
+        error: 'language_differs', message: said.text, messageSaid: saidOf(said),
+        edition: { of: id, lang: theirs, ...(existing ? { existing } : {}) },
+      });
     }
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
@@ -1478,6 +1610,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (row.deleted_at) return reply.code(400).send({ error: 'deleted', message: `The ${which} series is hidden. Restore it first.` });
       if (row.merged_into) return reply.code(400).send({ error: 'merged', message: `The ${which} series was already merged into another one.` });
     }
+    // Two language editions of one work are two languages' chapters (v0.52.0): merged, the list would hold both under
+    // one number each, in whichever language came first. Reintroduce by dropping this: "a merge inside one work is
+    // refused" in editions.int.test.ts answers 200 and moves the chapters.
+    const works = await q<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = ANY($1)', [[id, into.id]]);
+    if (works.length === 2 && works[0].work_id && works[0].work_id === works[1].work_id) {
+      return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
+    }
 
     const r = await mergeSeries(id, into.id);
     await logAudit('series.merge', {
@@ -1486,6 +1625,55 @@ export default async function adminRoutes(app: FastifyInstance) {
       req,
     });
     return r;
+  });
+
+  /**
+   * Link two series already in the library as language editions of one work (v0.52.0, #72): Health's "Link as
+   * editions" on a duplicate pair in two languages. `lang` states :id's language and `withLang` `with`'s, each where
+   * the series does not state one (otherwise what it is inferred to be). A series already in a work brings the work:
+   * the other joins it. Refused when both are in one language (merge them instead), when the language is taken in
+   * the work, and when each is already in a different work.
+   */
+  app.post('/api/admin/series/:id/editions', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      with: z.string().min(1).max(64), lang: z.string().min(1).max(35).optional(), withLang: z.string().min(1).max(35).optional(),
+    }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it be linked with?' });
+    if (b.data.with === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot be an edition of itself.' });
+    const [mine, theirs] = await Promise.all([workRows(id), workRows(b.data.with)]);
+    const a = mine.find((r) => r.id === id);
+    const w = theirs.find((r) => r.id === b.data.with);
+    if (!a || !w) return reply.code(404).send({ error: 'not_found' });
+    if (a.hidden || w.hidden) return reply.code(400).send({ error: 'deleted', message: 'One of the two is removed from the library. Put it back first.' });
+    if (mine.length > 1 && theirs.length > 1) {
+      return mine.some((r) => r.id === w.id)
+        ? reply.code(409).send({ error: 'same_work', message: 'These two are already editions of one work.' })
+        : reply.code(409).send({ error: 'other_work', message: 'Each is already an edition of another work. Unlink one of them first.' });
+    }
+    // What each will state: the language asked for where the series states none, else its own.
+    const langA = a.stated ? a.lang : canonLang(b.data.lang) ?? a.lang;
+    const langW = w.stated ? w.lang : canonLang(b.data.withLang) ?? w.lang;
+    if (langA === langW) return reply.code(409).send({ error: 'same_lang', message: 'Both are in the same language: merge them instead.' });
+    // The one in a work stays where it is and the other joins it.
+    const [joiner, of, joinerLang, ofLang] = mine.length > 1 ? [w, a, langW, langA] : [a, w, langA, langW];
+    const taken = (mine.length > 1 ? mine : theirs).find((r) => r.id !== of.id && r.lang === joinerLang);
+    const r = taken ? 'taken' as const : await linkEdition(joiner.id, { of: of.id, lang: joinerLang, ofLang });
+    if (r === 'taken') return reply.code(409).send({ error: 'edition_exists', message: 'That language already has its edition in this work.' });
+    if (r === 'gone') return reply.code(404).send({ error: 'not_found' });
+    await logAudit('series.edition_link', { userId: userIdOf(req), detail: { id: joiner.id, title: joiner.title, of: of.id, ofTitle: of.title, lang: r.lang }, req });
+    return { ok: true, workId: r.workId, lang: r.lang };
+  });
+
+  /** Take a series out of its work (v0.52.0): it stays in the library on its own; a work left with one edition dissolves. */
+  app.delete('/api/admin/series/:id/edition', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const r = await unlinkEdition(id);
+    if (!r) return reply.code(409).send({ error: 'not_an_edition', message: 'That series is not an edition of another.' });
+    await logAudit('series.edition_unlink', { userId: userIdOf(req), detail: { id, title: row.title, workId: r.workId }, req });
+    return { ok: true };
   });
 
   app.put('/api/admin/series/:id/meta', async (req, reply) => {
@@ -1546,18 +1734,33 @@ export default async function adminRoutes(app: FastifyInstance) {
     // genres all failed the same way, under a message that only said "Could not save". `?? null` because
     // the field is nullish: absent and null both mean "inherit whatever ComicInfo said".
     const sentDirection = b.data.readingDirection !== undefined;
-    await q(
-      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, reading_direction, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, now())
-       ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
-         genres = $6, age_rating = $7,
-         adult_exempt = COALESCE($8, series_overrides.adult_exempt),
-         reading_direction = CASE WHEN $9::boolean THEN $10 ELSE series_overrides.reading_direction END,
-         updated_at = now()`,
-      [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status),
-       normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null,
-       sentDirection, b.data.readingDirection ?? null],
-    );
+    await tx(async (qq) => {
+      await qq(
+        `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, reading_direction, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, now())
+         ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
+           genres = $6, age_rating = $7,
+           adult_exempt = COALESCE($8, series_overrides.adult_exempt),
+           reading_direction = CASE WHEN $9::boolean THEN $10 ELSE series_overrides.reading_direction END,
+           updated_at = now()`,
+        [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status),
+         normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null,
+         sentDirection, b.data.readingDirection ?? null],
+      );
+      // The 18+ rating is the WORK's (v0.52.0, #72): written onto every other language edition in the same
+      // transaction, so a capped account can never open the Spanish copy of a work rated 18+ in English, nor the 18+
+      // switch tidy one edition away and leave the other. Only the rating and "Always show": a title or a summary is
+      // each edition's own. Reintroduce by dropping this: "rating one edition 18+ hides the other from a capped
+      // account" in editions.int.test.ts opens the sibling.
+      await qq(
+        `INSERT INTO series_overrides (series_id, age_rating, adult_exempt)
+         SELECT o.id, $2, $3 FROM lib_series s JOIN lib_series o ON o.work_id = s.work_id AND o.id <> s.id
+          WHERE s.id = $1 AND s.work_id IS NOT NULL
+         ON CONFLICT (series_id) DO UPDATE SET age_rating = EXCLUDED.age_rating,
+           adult_exempt = COALESCE(EXCLUDED.adult_exempt, series_overrides.adult_exempt), updated_at = now()`,
+        [id, b.data.ageRating ?? null, b.data.adultExempt ?? null],
+      );
+    });
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true };
   });
@@ -3185,11 +3388,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       // is the deleted case above under another name. The rank column keeps the survivor's own title
       // ahead of a merged title that happens to normalise the same (the first hit wins below).
       const have = new Map<string, string>();
+      // Oldest first within a rank (v0.52.0): a title held in two language editions maps to the original, every time,
+      // rather than to whichever row the planner happened to read first.
       for (const r of await q<{ id: string; title: string }>(
-        `SELECT s.id, s.title, 0 AS rank FROM lib_series s WHERE ${visibleToAll('s')}
+        `SELECT s.id, s.title, 0 AS rank, s.created_at FROM lib_series s WHERE ${visibleToAll('s')}
          UNION ALL
-         SELECT t.id, m.title, 1 AS rank FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${visibleToAll('t')}
-         ORDER BY rank`,
+         SELECT t.id, m.title, 1 AS rank, t.created_at FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${visibleToAll('t')}
+         ORDER BY rank, created_at, id`,
       )) {
         const k = norm(r.title);
         if (k && !have.has(k)) have.set(k, r.id);
@@ -3475,12 +3680,12 @@ export default async function adminRoutes(app: FastifyInstance) {
      * id is looked up the way addSeriesFromSource itself found the row. Null when neither is known, and
      * then nothing is linked -- a link must never be guessed.
      */
-    const seriesIdOf = async (r: { folder?: string; existing?: { title: string; source: string } }): Promise<string | null> => {
+    const seriesIdOf = async (r: { folder?: string; existing?: { title: string; source?: string } }): Promise<string | null> => {
       if (r.folder) {
         return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.folder = $1 ORDER BY (${visibleToAll('s')}) DESC LIMIT 1`, [r.folder]))?.id ?? null;
       }
       if (r.existing) {
-        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.title = $1 AND s.source = $2 AND ${visibleToAll('s')} LIMIT 1`, [r.existing.title, r.existing.source]))?.id ?? null;
+        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.title = $1 AND s.source = $2 AND ${visibleToAll('s')} LIMIT 1`, [r.existing.title, r.existing.source ?? '']))?.id ?? null;
       }
       return null;
     };

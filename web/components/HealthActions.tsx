@@ -30,7 +30,9 @@ import { OnBody } from '@/components/ui';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import { FindStartDialog } from '@/components/FindSources';
 import { t as tr } from '@/lib/i18n';
+import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { isDesktop } from '@/lib/desktop';
+import { languageName } from '@/lib/format';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
@@ -116,7 +118,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const slot = slots[slotKey];
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
-  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'find' | null>(null);
+  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | null>(null);
   // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
   const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
@@ -208,16 +210,16 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     const notOwned = count('not_owned');
     const other = res.skipped.length - bookmarked - notOwned;
     const lines = [
-      { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-      { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
+      { n: bookmarked, text: skippedBookmarkedText(bookmarked) },
+      { n: notOwned, text: skippedNotOursText(notOwned) },
       { n: other, text: other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: other }) },
     ].filter((l) => l.n > 0);
     // ⚠️ A delete that deleted nothing is not a success: a green "0 deleted" over unchanged rows is what a
     // refused delete used to look like, and the reason is what the admin needs in front of them.
     if (res.applied === 0 && lines.length) return { text: lines.map((l) => l.text).join(' · '), ok: false };
     // The row goes when Health answers again, taking its status line with it: the count is said in a notice too.
-    toast(tr('{n} deleted', { n: res.applied }), 'success');
-    return { text: [tr('{n} deleted', { n: res.applied }), ...lines.map((l) => l.text)].join(' · ') };
+    toast(deletedText(res.applied), 'success');
+    return { text: [deletedText(res.applied), ...lines.map((l) => l.text)].join(' · ') };
   };
 
   const doMerge = async (): Promise<{ text: string } | null> => {
@@ -229,6 +231,20 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     const r = await api<{ moved: number }>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
     const text = r.moved === 1 ? tr('Merged — one chapter moved') : tr('Merged — {n} chapters moved', { n: r.moved });
     // The pair leaves the page when Health answers, so this is said in a notice as well as on the row.
+    toast(text, 'success');
+    return { text };
+  };
+
+  /**
+   * Link the pair as language editions of one work (v0.52.0, #72): the duplicates row of a work in two languages. Both
+   * stay series of their own; the pair leaves the page when Health answers, so this is said in a notice too.
+   */
+  const doLink = async (): Promise<{ text: string } | null> => {
+    setAsking(null);
+    const ids = item.seriesIds || [];
+    if (ids.length !== 2) return null;
+    await api(`/api/admin/series/${encodeURIComponent(ids[1])}/editions`, { method: 'POST', json: { with: ids[0] } });
+    const text = tr('Linked as editions of one work');
     toast(text, 'success');
     return { text };
   };
@@ -288,6 +304,8 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         return { ...base, danger: true, label: tr('Turn off'), onRun: () => setAsking('disable') };
       case 'merge':
         return { ...base, label: tr('Merge'), onRun: () => setAsking('merge') };
+      case 'link_editions':
+        return { ...base, primary: true, label: tr('Link as editions'), onRun: () => setAsking('link') };
       case 'ignore':
         return { ...base, label: tr('Ignore'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, true) })) };
       case 'unignore':
@@ -423,6 +441,30 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         </OnBody>
       )}
 
+      {asking === 'link' && (item.seriesIds || []).length === 2 && (
+        <OnBody>
+          <ConfirmDialog
+            title={tr('Link these two as editions?')}
+            confirmLabel={tr('Link as editions')}
+            body={
+              <>
+                <p>{tr('Each keeps its own chapters, sources and reading progress. The Library shows one card for the work, and the series page switches between them.')}</p>
+                <ul className="mt-3 space-y-2">
+                  {(item.titles || []).map((t, i) => (
+                    <li key={i} className="flex min-w-0 items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <span dir="auto" className="min-w-0 truncate text-fog-100">{t}</span>
+                      {item.langs?.[i] && <span className="shrink-0 text-[11px] text-fog-500">{languageName(item.langs[i])}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+            onConfirm={() => act('link_editions', doLink)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
+      )}
+
       {asking === 'merge' && (item.seriesIds || []).length === 2 && (
         <OnBody>
           <ConfirmDialog
@@ -458,7 +500,7 @@ const SCAN_CHECKS = ['library-scan', 'downloads-missing'];
 export function hasCardActions(check: HealthCheck): boolean {
   const step = CARD_STEP[check.id];
   return (!!step && stepFindings(check, step).length > 0) || SCAN_CHECKS.includes(check.id) || solverDown(check)
-    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2))
+    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')))
     || laterCopies(check).length > 0;
 }
 
@@ -485,7 +527,8 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
   const [askingPurge, setAskingPurge] = useState(false);
   const ctx: CopyCtx = { limits: status?.limits, check };
   const findings = check.items.filter((it) => !it.info);
-  const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2) : [];
+  // A pair in two languages is linked, never merged (v0.52.0): Merge all takes only the rows offering a merge.
+  const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')) : [];
   const later = laterCopies(check);
 
   const rows: ActionSpec[] = [];
@@ -575,9 +618,9 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
         kept += r.skipped?.length || 0;
       } catch { kept += it.bookIds?.length ?? 0; }
     }
-    const line = [tr('{n} deleted', { n: deleted }),
+    const line = [deletedText(deleted),
       ...(kept ? [kept === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: kept })] : [])].join(' · ');
-    if (deleted) toast(tr('{n} deleted', { n: deleted }), 'success');
+    if (deleted) toast(deletedText(deleted), 'success');
     setPurge({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
     await rr.recheck().catch(() => {});
     setPurge(deleted === 0 && kept

@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { groupProviders, worstStatus, type ProviderSrc, type SrcStatus } from '../lib/providerGroups';
+import { groupProviders, worstStatus, MANGADEX_GROUP, mangadexSourceId, type ProviderSrc, type SrcStatus } from '../lib/providerGroups';
 
 const PKG = 'eu.kanade.tachiyomi.extension.all.hentai3';
 const LANGS = ['all', 'en', 'ja', 'ko', 'zh', 'fr', 'de', 'es', 'it', 'pt-BR', 'ru', 'ar', 'tr', 'vi', 'th', 'id', 'pl', 'nl', 'sv',
@@ -54,6 +54,30 @@ test('engines, packs and custom sites are untouched', () => {
   assert.equal(g[1].sources.length, 1, 'two sites with the same name do not fold');
   assert.deepEqual(g[0].languages, [], 'a source without a language adds none');
   assert.equal(g[4].worst, 'ok', 'a row with no status reads as ok');
+});
+
+test('MangaDex is one card however many languages are on, English alone included (v0.52.0, #123)', () => {
+  // The server names the family (`extension: {pkgName: 'mangadex'}` on every MangaDex language). Reintroduce the
+  // `sw:`-only guard in groupKeyOf: English alone is a plain card keyed `mangadex` with no languages to offer, and
+  // three languages are three cards -- "English alone is the MangaDex card" fails first.
+  const md = (code: string, over: Partial<ProviderSrc> = {}): ProviderSrc => ({
+    id: mangadexSourceId(code), name: code === 'en' ? 'MangaDex' : `MangaDex (${code.toUpperCase()})`, lang: code, status: 'ok',
+    extension: { pkgName: 'mangadex', name: 'MangaDex' }, ...over,
+  });
+  const alone = groupProviders([md('en'), { id: 'aqua', name: 'Aqua Manga', lang: 'en', extension: null }]);
+  assert.equal(alone[0].key, MANGADEX_GROUP, 'English alone is the MangaDex card');
+  assert.equal(alone[0].sources.length, 1);
+  assert.equal(alone[1].key, 'aqua');
+  // Registry order puts a language switched on live at the end, after other sources: it still joins the card.
+  const three = groupProviders([md('en'), sw('1', 'en'), md('es-419', { status: 'rate_limited', used: 3 }), md('pt-BR')]);
+  assert.deepEqual(three.map((g) => [g.key, g.sources.length]), [[MANGADEX_GROUP, 3], [`sw-pkg:${PKG}`, 1]]);
+  assert.equal(three[0].name, 'MangaDex');
+  assert.equal(three[0].worst, 'rate_limited', 'a language MangaDex refused colours the card');
+  assert.equal(mangadexSourceId('es-419'), 'mangadex-es-419');
+  assert.equal(mangadexSourceId('pt-BR'), 'mangadex-pt-br');
+  // A built-in family and an extension package never share a key, whatever they are called.
+  const both = groupProviders([md('en'), sw('2', 'en', { extension: { pkgName: 'mangadex', name: 'MangaDex' } })]);
+  assert.equal(both.length, 2, 'the MangaDex extension folded into the built-in card');
 });
 
 test('the header wears the worst status: a blocked variant colours the card, a disabled one does not', () => {
@@ -110,4 +134,10 @@ test('the panel says each status as a mark in words: the card, the folded header
   assert.equal([...panel.matchAll(/\{statusMark\(g\.worst\)\}/g)].length, 1, 'the folded header does not wear the unhappiest variant\'s status');
   assert.doesNotMatch(panel, /'rate-limited'/, 'the server\'s token is shown as a word again');
   assert.doesNotMatch(src, /\bSTATUS_STYLE\b/, 'the capsule tints are back');
+  // v0.52.0: the MangaDex family gets its own card, built from the same rows and marks as everything else here.
+  // Reintroduce by rendering it as any other group (`g.sources.length === 1 ? sourceCard(…) : packageCard(g)`): the
+  // languages are offered nowhere -- "MangaDex has no card of its own" fails.
+  assert.match(panel, /g\.key === MANGADEX_GROUP\s*\?\s*<MangadexCard key=\{g\.key\} group=\{g\} row=\{variantRow\} mark=\{statusMark\}/,
+    'MangaDex has no card of its own');
+  assert.match(panel, /<UnstatedLanguageCard \/>/, 'the language of sites that do not say is offered nowhere');
 });

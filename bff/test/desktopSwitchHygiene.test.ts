@@ -236,7 +236,7 @@ test('the desktop-only filesystem rules sit behind isDesktop(), with the server 
   // Reintroduce by running the lower(folder) lookup on the server: two series whose titles differ only in case
   // (on a case-sensitive disk, two real folders) would be merged into one on add.
   const add = code(read('routes/sources.ts'));
-  assert.match(add, /let folder = `\$\{srcDir\}\/\$\{sanitize\(title\)\}`;\s*if \(isDesktop\(\)\) \{\s*const stored = await one<\{ folder: string \}>\(\s*'SELECT folder FROM lib_series WHERE lower\(folder\) = lower\(\$1\)/);
+  assert.match(add, /let folder = edition \? editionFolder\(srcDir, title, edition\.lang\) : `\$\{srcDir\}\/\$\{sanitize\(title\)\}`;\s*if \(isDesktop\(\)\) \{\s*const stored = await one<\{ folder: string \}>\(\s*'SELECT folder FROM lib_series WHERE lower\(folder\) = lower\(\$1\)/);
   // The source's folder is made Windows-safe on Windows only; a server keeps the name as it always stored it.
   // Reintroduce by using `src.name` raw: a custom site called `Site: EN` cannot be created as a folder on
   // Windows at all. Or by sanitizing everywhere: a Linux server's `A.B.` source moves to a new folder.

@@ -7,9 +7,11 @@ import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   noteRateLimited, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_DECAY_MS, MAX_PAGE_GAP_MS,
-  pagePace, slowPace, withSlowPace, resumePace,
+  pagePace, slowPace, withSlowPace, resumePace, rateKeyOf,
 } from '../src/lib/pace';
 import { drawGap } from '../src/lib/archivePace';
+import { registerAdapter, unregisterAdapter } from '../src/lib/sources/loader';
+import { makeMangadex } from '../src/lib/sources/mangadex';
 
 let now = 1_000_000;
 beforeEach(() => { now = 1_000_000; setPaceClock(() => now); clearPace(); });
@@ -102,12 +104,12 @@ test('a successful download does not reset the level: only time does', () => {
   // There is deliberately no "reportOk" hook here. A chapter that got through at the slower pace is
   // evidence the slower pace works, not that the fast one does. The absence is pinned by the API surface:
   // nothing exported lowers a level except the clock and the tests-only clearPace(). (withSlowPace only
-  // ever slows a download further, and only inside its own scope.)
+  // ever slows a download further, and only inside its own scope; rateKeyOf only says whose level it is.)
   noteRateLimited(plain.id);
   const before = paceLevel(plain.id);
   assert.equal(before, 1);
   const exported = Object.keys(require('../src/lib/pace')).sort();
-  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'resumePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
+  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'rateKeyOf', 'resumePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
   clearPace();
   assert.equal(paceLevel(plain.id), 0, 'clearPace is for tests');
 });
@@ -229,4 +231,20 @@ test('after 429s at the ceiling the pages still draw their own gaps, never below
     assert.ok(min >= was, `after ${n} 429s: a page drew ${min} ms, below the ${was} ms it was at`);
     assert.ok(max <= MAX_PAGE_GAP_MS, `after ${n} 429s: a page drew ${max} ms, above the ceiling`);
   }
+});
+
+test('a 429 in one MangaDex language slows every MangaDex language: the level belongs to the rate group', (t) => {
+  // v0.52.0 (#123): MangaDex in Spanish and in Portuguese are two adapters and one site to its rate limit.
+  // Reintroduce by keying the level on the source id again (drop rateKeyOf in noteRateLimited/paceLevel):
+  // Portuguese reads 0 after Spanish's 429.
+  const langs = ['es-419', 'pt-BR'].map(makeMangadex);
+  for (const a of langs) registerAdapter(a);
+  t.after(() => { for (const a of langs) unregisterAdapter(a.id); });
+  noteRateLimited('mangadex-es-419');
+  assert.equal(paceLevel('mangadex-pt-br'), 1, 'Portuguese did not slow down after Spanish was refused');
+  assert.equal(rateKeyOf('mangadex-pt-br'), 'mangadex');
+  assert.deepEqual(paceFor({ id: 'mangadex-pt-br' }, DEFAULTS), { gap: 500, workers: 1, level: 1 }, "the downloader's pace reads it");
+  // Anything else keeps a level of its own, registered or not.
+  assert.equal(paceLevel(plain.id), 0);
+  assert.equal(rateKeyOf('not-registered'), 'not-registered');
 });

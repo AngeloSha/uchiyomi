@@ -65,6 +65,13 @@ export function solverVersionLabel(version?: string | null): string {
 }
 /** The engine's version as its Health row says it: " (v2.3.2243)". */
 const engineVersion = (v?: string | null) => (v ? ` (v${v.replace(/^v/i, '')})` : '');
+/**
+ * A language code as English names it ("es-419" is "Latin American Spanish"), the name the web's languageName gives in
+ * English; the code itself where Intl cannot. The web says it in the reader's language.
+ */
+const langName = (code: string) => {
+  try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; }
+};
 /** Up to five names, then how many more: "Manga Ball, MangaDex and 3 more". */
 const names = (list: string[], more: number) => list.join(', ') + (more > 0 ? ` and ${more} more` : '');
 /** Where a census reason found the walk's trouble: this folder, or one above it ('' is the downloads folder). */
@@ -177,6 +184,9 @@ const EN = {
   'frozen.overLimit': ({ n, source }: { n: number; source: string }) =>
     `${n} chapters; its source ${source} is ${forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit')}`,
   'frozen.uninstalled': ({ n, source }: { n: number; source: string }) => `${n} chapters; its source ${source} is no longer installed`,
+  // v0.52.0 (#123): its source is MangaDex in a language an admin switched off. `lang` is the app code (es-419).
+  'frozen.mangadexOff': ({ n, lang }: { n: number; lang: string }) =>
+    `${n} chapter${s(n, '', 's')}; MangaDex in ${langName(lang)} is switched off in Admin → Providers`,
   'frozen.following': ({ source, names: followed }: { source: string | null; names: string[] }) =>
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
 
@@ -223,6 +233,9 @@ const EN = {
     'never automatic: the nightly repair leaves these alone and you confirm each one.',
   'dupes.same': () => 'Same AniList entry',
   'dupes.copies': ({ n }: { n: number }) => `${n} copies — merge them one pair at a time`,
+  // v0.52.0 (#72): a pair in two languages. `a` and `b` are language codes; the web names them in the reader's language.
+  'dupes.languages': ({ a, b }: { a: string; b: string }) =>
+    `The same work in ${langName(a)} and ${langName(b)}: link them as editions rather than merging.`,
 
   // ---- Impossible chapter numbers
   'outliers.live': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} chapters numbered far beyond the rest`,
@@ -354,6 +367,26 @@ const EN = {
   'census.loop': ({ above, ancestor, detail }: { above?: string | null; ancestor?: string; detail?: string }) =>
     `the scan took ${where(above)} for a loop: ${loopedTo(ancestor, detail)}`,
 
+  // ---- Folders scanned twice (v0.52.0, #134: lib/health.ts foldersScannedTwice). `folder` is where one root sits in
+  // the other; `lib` and `dl` the two roots as configured.
+  'nested.same': () => 'The downloads folder and the library are one folder, so every downloaded chapter is scanned twice',
+  'nested.downloadsInside': ({ folder }: { folder: string }) =>
+    `The downloads folder is inside the library, at ${folder}, so every downloaded chapter is scanned twice`,
+  'nested.libraryInside': ({ folder }: { folder: string }) =>
+    `The library is inside the downloads folder, at ${folder}, so every chapter in it is scanned twice`,
+  'nested.byPath': () => 'Their paths put one inside the other.',
+  'nested.byScan': () => 'The last library scan read the same files here a second time.',
+  'nested.note': ({ lib, dl }: { lib: string; dl: string }) => forDesktop(
+    `Uchiyomi scans the library (${lib}) and its downloads folder (${dl}) both, so neither may be inside the other: `
+      + 'each downloaded chapter then shows up twice, once in a series with its source and once in a series with none. '
+      + 'Mount them side by side, each in a folder of its own, and restart Uchiyomi; then remove the copies with no '
+      + 'source. The Volumes section of the install guide shows how.',
+    // The desktop app's own words (docs/DESKTOP.md): its "library folder" is the downloads, the reader's is the manga
+    // folder they added.
+    'Uchiyomi scans its library folder and the manga folder you added both, so neither may be inside the other: each '
+      + 'downloaded chapter then shows up twice. Keep the two side by side; then remove the copies with no source.',
+  ),
+
   // ---- The extension engine (#72, lib/engineHealth.ts)
   'engine.waiting': ({ n }: { n: number }) =>
     `${n} series that came from extensions ${s(n, 'keeps its', 'keep their')} chapters and ${s(n, 'gets', 'get')} no new ones until it is back`,
@@ -458,6 +491,15 @@ const EN = {
   'pref.choices': ({ label }: { label: string }) => `${label} takes a list of its choices.`,
   'pref.text': ({ label }: { label: string }) => `${label} takes text.`,
   'pref.tooLong': ({ label }: { label: string }) => `${label} is too long.`,
+
+  // ---- A follow refused for its language (v0.52.0, #123: routes/admin.ts, the manual follow's backstop). `theirs`
+  // and `ours` are language codes: the English names them in English, the web in the reader's language.
+  'follow.languageDiffers': ({ theirs, ours }: { theirs: string; ours: string }) =>
+    `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Add it as an edition in ${langName(theirs)} instead: each language keeps its own chapters.`,
+  // The same, when the work holds an edition that may follow the source already (`edition` is its language): no new
+  // edition is wanted, the follow belongs there.
+  'follow.languageDiffersEdition': ({ theirs, ours, edition }: { theirs: string; ours: string; edition: string }) =>
+    `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Follow it on the ${langName(edition)} edition instead.`,
 };
 
 export type SaidCode = keyof typeof EN;

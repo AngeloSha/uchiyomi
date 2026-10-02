@@ -17,6 +17,8 @@ import { q } from './db';
 import { NATIVE_PROGRESS } from './backend';
 import { roleOf, userIdOf } from './auth';
 import { autoHeroFor } from './autoHero';
+import { effectiveLang } from './seriesLang';
+import { browsable, Params, type ViewCtx } from './visibility';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -56,6 +58,33 @@ async function seriesProgress(userId: string, seriesIds: string[]): Promise<Map<
   return new Map(rows.map((r) => [r.series_id, { done: r.done, started: r.started }]));
 }
 
+/**
+ * The languages of each listed work this viewer may browse (v0.52.0, #72): the Library card's `EN · ES-419`
+ * caption. One query for every row that is an edition, through browsable() with the request's viewer -- a sibling
+ * in a library they were not granted, above their age cap or tidied away by the 18+ switch is not named, and a work
+ * of which they may browse one edition reads as a plain series (no entry). Oldest edition first, as the series page
+ * lists them. Nothing without a viewer: the caption is per person.
+ */
+async function editionLangs(list: any[], ctx: ViewCtx | undefined): Promise<Map<string, string[]>> {
+  const works = [...new Set(list.map((s) => s.workId).filter((w): w is string => typeof w === 'string' && !!w))];
+  if (!works.length || !ctx) return new Map();
+  const p = new Params();
+  const arr = p.add(works);
+  const rows = await q<{ work_id: string; lang: string | null; source_id: string | null }>(
+    `SELECT s.work_id, s.lang, s.source_id FROM lib_series s
+      WHERE s.work_id = ANY(${arr}::uuid[]) AND ${browsable('s', ctx, p)} ORDER BY s.created_at, s.id`,
+    p.values as any[],
+  ).catch(() => [] as Array<{ work_id: string; lang: string | null; source_id: string | null }>);
+  const out = new Map<string, string[]>();
+  for (const r of rows) {
+    const langs = out.get(r.work_id) ?? [];
+    const lang = effectiveLang(r.lang, r.source_id);
+    if (!langs.includes(lang)) langs.push(lang);
+    out.set(r.work_id, langs);
+  }
+  return out;
+}
+
 export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<any[]> {
   if (!list?.length) return list ?? [];
   const userId = userIdOf(req);
@@ -74,6 +103,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const colors = await seriesColors(list.map((s) => s.id));
   const seen = await seriesSeen(userId, list.map((s) => s.id));
   const heroes = await autoHeroFor(list.map((s) => s.id));
+  const editions = await editionLangs(list, (req as any).viewCtx as ViewCtx | undefined);
   return list.map((s) => {
     const p = progress?.get(s.id);
     const total = s.booksCount ?? 0;
@@ -88,6 +118,8 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
       // v0.51.0: the banner made from its own pages (lib/autoHero.ts), for a series with no banner of its own; null
       // when it has one or may not have one. The web shows /img/series/:id/hero?v=<seed> in its hero.
       autoHero: heroes.get(s.id) ?? null,
+      // v0.52.0: the languages of this work the viewer may browse, when that is more than this one series.
+      edition: (editions.get(s.workId)?.length ?? 0) > 1 ? { langs: editions.get(s.workId)! } : null,
       yomi: {
         favorite: favs.has(s.id),
         rating: ratings.get(s.id) ?? null,

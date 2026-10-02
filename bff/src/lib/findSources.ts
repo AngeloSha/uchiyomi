@@ -11,7 +11,8 @@
 //   - where to look: scanOrder over the sources the admin who started the run may reach -- their own age cap, as
 //     Discover and the manual follow route read it (visibility.sourceAllowedFor), NOT the hunt's sweepAllowedFor,
 //     which drops every extension that flags itself adult for a series not rated 18+: most manhwa extensions do,
-//     and on a typical library every series then had no source to ask (#132) -- with the main source excluded
+//     and on a typical library every series then had no source to ask (#132) -- and in the series' language
+//     (v0.52.0, #123: a source in another language than the series is never asked), with the main source excluded
 //     ALWAYS (it is the one that is down) and the sources it already follows, and health read per series, so a
 //     source disabled or cooling down since the run started is not asked;
 //   - how to look: the hunt's non-reporting search (sourceHunt.ts searchByNames) under the hunt's shared slots,
@@ -76,6 +77,8 @@ import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
 import { seriesVisible, sourceAllowedFor, visibleToAll, type ViewCtx } from './visibility';
+import { followGuard, seriesLanguage, sourceLanguage } from './seriesLang';
+import { editionFollowing } from './editions';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -102,7 +105,8 @@ export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupte
  * - `full`: it already follows MAX_FOLLOWERS sources (not searched), or a hunt filled the last slot meanwhile;
  * - `too_few`: it lists under MIN_HAVE chapter numbers, which no candidate can be measured against (not searched);
  * - `no_source`: no other source could be asked -- every one disabled, cooling down, beyond the starting admin's
- *   age cap, or one it already follows (not searched; the server log says which, by count);
+ *   age cap, in another language than the series (v0.52.0), or one it already follows (not searched; the server log
+ *   says which, by count);
  * - `refused`: a source carried the title and judgeCandidate refused it, by the title or by the chapter numbers;
  * - `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
  *   chapters, so nothing could be judged;
@@ -316,7 +320,11 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       const result: FindResult = outcome?.result ?? { seriesId: s.id, title: s.title, followed: [...progress], ...(progress.length ? {} : { why: 'not_tried' as const }) };
       settled.add(s.id);
       a.results.push(result);
-      a.done++;
+      // A series a stop cut short with nothing to show was not searched through: it is listed as not tried, and not
+      // counted in `done`, which the run's card shows as "{done} of {total} series" -- it read "1 of 4 series" after a
+      // stop during the first (v0.52.0). Reintroduce by counting every series settled: "one run at a time; ... a stop
+      // ends it at once" in findSources.int.test.ts reads done 1.
+      if (!(isStopped(a) && result.why === 'not_tried')) a.done++;
       a.followed += result.followed.length;
       a.card.done = a.done;
       a.card.followed = a.followed;
@@ -466,11 +474,17 @@ async function findFor(
   // The starting admin's reach, not the hunt's: an admin has no age cap, so every source -- including the many
   // manhwa extensions that flag themselves adult -- may be asked for a series that is not rated 18+. Reintroduce
   // the hunt's sweepAllowedFor: "an adult-flagged source is asked for a clean series" in findSources.int.test.ts
-  // reads no_source.
+  // reads no_match.
   const allowed = (id: string) => sourceAllowedFor(getSource(id), a.maxAgeRating);
-  const own = row.source_id ? getSource(row.source_id) : null;
+  // The series' language (v0.52.0, #123): its own first in the order, and a source in another language never searched
+  // nor proposed -- a series whose every other source is in another language is `no_source`. Reintroduce by dropping
+  // `fits`: "a Find other sources run never searches a source in another language" in languageGuard.int.test.ts
+  // finds it searched.
+  const lang = await seriesLanguage(s.id);
+  const fits = await followGuard(s.id);
   const all = listSources();
-  const order = scanOrder(all.filter((src) => allowed(src.id)), own ? { id: own.id, lang: own.lang } : null)
+  const order = scanOrder(all.filter((src) => allowed(src.id)), { id: row.source_id ?? '', lang: lang.lang })
+    .filter(fits)
     .filter((id) => {
       // The main source ALWAYS: it is the one this run is working around.
       if (id === row.source_id || followers.has(id)) return false;
@@ -482,16 +496,18 @@ async function findFor(
   // every other source is turned off.
   if (!order.length) {
     // Said in the server log, by count: "no other source could be asked" on every series is a setup to fix (every
-    // source switched off, cooling down, beyond the age cap, or none loaded), and the result cannot say which.
+    // source switched off, cooling down, beyond the age cap, in another language, or none loaded), and the result
+    // cannot say which.
     const taken = new Set([...(row.source_id ? [row.source_id] : []), ...followers]);
     const others = all.filter((x) => !taken.has(x.id));
     console.warn(`[find] ${s.id}: no source to ask -- ${all.length} loaded, ${all.length - others.length} its own, `
       + `${others.filter((x) => resting(x.id)).length} switched off or cooling down, `
-      + `${others.filter((x) => !allowed(x.id)).length} beyond the age cap`);
+      + `${others.filter((x) => !allowed(x.id)).length} beyond the age cap, `
+      + `${others.filter((x) => !fits(x.id)).length} in another language than ${lang.lang ?? 'the series'}`);
     return end('no_source', false);
   }
 
-  const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers };
+  const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers, lang: lang.lang, exactLang: lang.sameBaseSibling };
   const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id), 0);
   const deadline = Date.now() + wallMs;
   const left = () => deadline - Date.now();
@@ -614,7 +630,13 @@ function scheduleFindRefresh(ids: readonly string[]): void {
 // ---- deciding a review --------------------------------------------------------------------------------------
 
 /** Why a proposal was not followed or dismissed; the route answers each with its own status and words. */
-export type DecideRefusal = 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'already_followed' | 'full';
+export type DecideRefusal =
+  | 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'language_differs' | 'already_followed' | 'full';
+
+/** A refusal, with the proposal's state when it was decided already, and the edition to add when it is the language. */
+export type DecideRefused = {
+  refused: DecideRefusal; state?: FindProposal['state']; edition?: { of: string; lang: string; existing?: { id: string; lang: string } };
+};
 
 /** One decision at a time in this process: the check, the follow and the mark of one never interleave another's. */
 let deciding: Promise<unknown> = Promise.resolve();
@@ -630,6 +652,9 @@ let deciding: Promise<unknown> = Promise.resolve();
  *   - `posting_order`: numbered by posting order since (#116), whose followers are never merged;
  *   - `source_unavailable`: the source is no longer loaded, is switched off, is the series' main source now, or is
  *     beyond the deciding admin's age cap (the run's own rule);
+ *   - `language_differs`: the source is in another language than the series (v0.52.0, #123) -- a run kept from
+ *     before the guard, or a series whose language an admin has set since -- with `edition`, the add route's own
+ *     `{of, lang}`: what has both is that language as an edition, as the manual follow's refusal says;
  *   - `already_followed`: the series follows that source already. INSERT-only, PR #133's rule: a run is kept for
  *     weeks, and a source followed another way since may point at another entry, which a stale proposal must not
  *     re-point;
@@ -638,7 +663,7 @@ let deciding: Promise<unknown> = Promise.resolve();
  */
 export function decideProposal(
   runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
-): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+): Promise<{ result: FindResult } | DecideRefused> {
   const next = deciding.then(() => decide(runId, seriesId, sourceId, decision, userId, ctx));
   deciding = next.catch(() => {});
   return next;
@@ -646,7 +671,7 @@ export function decideProposal(
 
 async function decide(
   runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
-): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+): Promise<{ result: FindResult } | DecideRefused> {
   const find = (results: FindResult[] | undefined) => {
     const r = results?.find((x) => x.seriesId === seriesId);
     return { r, p: r?.proposals?.find((x) => x.sourceId === sourceId) };
@@ -667,6 +692,14 @@ async function decide(
     // The deciding admin's reach, the run's own rule (findFor): a source the run could ask, it can follow.
     const src = getSource(sourceId);
     if (!src || h?.disabled || series.source_id === sourceId || !sourceAllowedFor(src, ctx.maxAgeRating)) return { refused: 'source_unavailable' };
+    // The same-language guard, again at the follow: a review can wait for weeks. Reintroduce by dropping it: "a
+    // proposal in another language is refused" in languageGuard.int.test.ts follows it. The refusal carries the
+    // edition to add instead, which the web offers as a key beside it -- or, when the work holds one that may follow
+    // the source already, that edition (`existing`), which the key opens instead.
+    if (!(await followGuard(seriesId))(sourceId)) {
+      const existing = await editionFollowing(seriesId, sourceId, ctx);
+      return { refused: 'language_differs', edition: { of: seriesId, lang: sourceLanguage(sourceId), ...(existing ? { existing } : {}) } };
+    }
     if (await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId])) return { refused: 'already_followed' };
     const written = await followJudged(seriesId,
       { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },
@@ -755,8 +788,13 @@ const summaryOf = (r: Row): FindRunSummary => ({
 /**
  * GET /api/admin/sources/find: whether a run is going, the running run or else the newest one in full, and the
  * kept runs as summaries, newest first. The running run is read from memory, which is ahead of its row.
+ *
+ * `runId` (v0.52.0): that kept run in full instead -- an earlier search reopened from the results sheet, above all a
+ * review-first run whose matches still wait for a decision, which only the newest run could be read for. `run` is
+ * null when no kept run has that id. Reintroduce by reading the newest whatever is asked: "an earlier search opens by
+ * its id" in findSources.int.test.ts reads the newer run.
  */
-export async function findState(): Promise<{ running: boolean; run: FindRun | null; recent: FindRunSummary[] }> {
+export async function findState(o: { runId?: string } = {}): Promise<{ running: boolean; run: FindRun | null; recent: FindRunSummary[] }> {
   await closeInterruptedFindRuns().catch(() => {});
   const rows = await q<Row>(
     `SELECT r.id, r.status, r.total, r.done, r.followed, u.username, r.started_at, r.finished_at, r.scope
@@ -765,7 +803,7 @@ export async function findState(): Promise<{ running: boolean; run: FindRun | nu
   const a = active;
   const recent = rows.map(summaryOf).map((r) => (a && r.id === a.id ? { ...r, done: a.done, followed: a.followed } : r));
   let run: FindRun | null = null;
-  const lead = recent[0];
+  const lead = o.runId !== undefined ? recent.find((r) => r.id === o.runId) : recent[0];
   if (a && lead?.id === a.id) {
     run = {
       ...lead, results: [...a.results],

@@ -12,9 +12,12 @@ import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
-import { Book, Page, PageInfo, Series } from '@/lib/types';
+import { Book, EditionRow, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
-import { chapterLabel } from '@/lib/format';
+import { chapterLabel, languageName } from '@/lib/format';
+import { editionChipLabels, readerTarget } from '@/lib/editions';
+import { numLabel } from '@/lib/numbering';
+import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
@@ -154,6 +157,11 @@ function ReaderInner() {
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
   // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
   const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
+  // The work's language editions (v0.52.0, #72), for the chapter sheet's chips, and each chapter's number, which a
+  // switch to another edition opens there. Both from requests the page makes anyway.
+  const [editions, setEditions] = useState<EditionRow[] | null>(null);
+  const [numberOf, setNumberOf] = useState<Map<string, number>>(new Map());
+  const toast = useToast();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
@@ -270,7 +278,11 @@ function ReaderInner() {
         // otherwise all there. Stepped over here, EXCEPT when this device holds a copy: then the offline
         // record is the last one anywhere, and the reader consults it before the server, so it opens fine.
         const saved = new Set((await listSeriesDownloads(first.seriesId).catch(() => [])).map((c) => c.bookId));
-        if (alive) { setChapterRefs(openableChapters(list.content, saved).map((b) => ({ id: b.id, label: chapterLabel(b) }))); setRefsFrom('live'); }
+        if (alive) {
+          setChapterRefs(openableChapters(list.content, saved).map((b) => ({ id: b.id, label: chapterLabel(b) })));
+          setRefsFrom('live');
+          setNumberOf(new Map(list.content.map((b) => [b.id, b.number])));
+        }
       } catch {
         // Offline, this is the only list there is. Without it every downloaded chapter reported the end of the
         // series and prev/next were both dead, because an empty list reads as "there is no next chapter".
@@ -287,6 +299,7 @@ function ReaderInner() {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
           setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
+          setEditions((s?.edition?.editions?.length ?? 0) > 1 ? s.edition!.editions! : null);
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
           setSeriesSourceNames(Object.fromEntries((s?.sources ?? []).map((x) => [x.sourceId, x.name])));
@@ -756,6 +769,25 @@ function ReaderInner() {
 
   const back = () => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push(seriesId ? `/series/?id=${seriesId}` : '/'));
   const goChapter = (cid?: string, atEnd = false) => { if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };
+  /**
+   * Read this chapter in another language edition (v0.52.0): the same number there when the server holds it, else
+   * that edition's page at the number, where its ghost row has Fetch -- said first, so the jump is not a surprise.
+   * A chapter whose number is unknown (offline, the list not in yet) opens the edition's page.
+   */
+  const switchEdition = async (e: EditionRow) => {
+    setShowChapters(false);
+    const n = activeChapter ? numberOf.get(activeChapter.id) : undefined;
+    if (n == null) { router.push(`/series/?id=${encodeURIComponent(e.seriesId)}`); return; }
+    try {
+      const target = readerTarget(n, (await fetchAllBooks(e.seriesId)).content, e.seriesId);
+      if (target.kind === 'book') { router.replace(`/reader/?book=${target.id}`); return; }
+      // `{number}`, not `{n}`: a chapter's number, not a count to agree with.
+      toast(tr('Chapter {number} is not on the server in {language} yet.', { number: numLabel(n), language: languageName(e.lang) }), 'info');
+      router.push(target.href);
+    } catch {
+      router.push(`/series/?id=${encodeURIComponent(e.seriesId)}`);
+    }
+  };
   /**
    * Leave for the next chapter. From anywhere but the end of this one it takes two presses: the button sits
    * at the edge of the footer beside the slider and the page counter, where a thumb aiming for either lands on
@@ -1418,7 +1450,14 @@ function ReaderInner() {
       )}
       {showChapters && (
         <ChapterSheet title={tr('Chapters')} chapters={chapterRefs} activeId={activeChapter?.id}
-          onPick={goChapter} onClose={() => setShowChapters(false)} />
+          onPick={goChapter} onClose={() => setShowChapters(false)}
+          header={editions && (
+            <div role="group" aria-label={tr('Editions')} data-editions className="mb-2 flex flex-wrap gap-1.5">
+              {editionChipLabels(editions, { name: languageName, chapter: (n) => chapterLabel({ number: n }) }).map((label, i) => (editions[i].current
+                ? <span key={editions[i].seriesId} aria-current="true" className="chip chip-active text-xs">{label}</span>
+                : <button key={editions[i].seriesId} type="button" onClick={() => void switchEdition(editions[i])} className="chip text-xs">{label}</button>))}
+            </div>
+          )} />
       )}
 
       {!ready && (

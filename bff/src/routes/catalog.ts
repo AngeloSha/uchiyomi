@@ -31,6 +31,10 @@ import { groupStats, type StatCopy } from '../lib/groupStats';
 import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
+import { editionInfo } from '../lib/editions';
+import { effectiveLang } from '../lib/seriesLang';
+import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
+import { join } from 'node:path';
 
 
 
@@ -66,7 +70,20 @@ const searchBody = z.object({
   page: z.coerce.number().int().min(0).default(0),
   size: z.coerce.number().int().min(1).max(100).default(40),
   condition: z.any().optional(),
+  // v0.52.0 (#72): one card per work, the edition this viewer read last (lib/ownedCatalog.ts collapsedSearch).
+  collapseEditions: z.boolean().optional(),
 });
+
+/**
+ * Where a chapter's file is on the server, for an admin (#136): the root it was found under (or the read library,
+ * as OPDS resolves a row with none) and its path below it, in the platform's own separators -- what Explorer or a
+ * shell takes. One query for the page of chapters.
+ */
+async function bookPaths(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const rows = await q<{ id: string; root: string | null; file: string }>('SELECT id, root, file FROM lib_books WHERE id = ANY($1)', [ids]).catch(() => []);
+  return new Map(rows.map((r) => [r.id, join(r.root || LIBRARY_ROOT, r.file)]));
+}
 
 const progressBody = z.object({
   page: z.coerce.number().int().min(0),
@@ -376,10 +393,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/series/search', async (req, reply) => {
-    const { query, sort, page, size, condition } = searchBody.parse(req.body ?? {});
-    const body: { condition?: unknown; fullTextSearch?: string } = {};
+    const { query, sort, page, size, condition, collapseEditions } = searchBody.parse(req.body ?? {});
+    const body: { condition?: unknown; fullTextSearch?: string; collapseEditions?: boolean } = {};
     if (condition) body.condition = condition;
     if (query) body.fullTextSearch = query;
+    if (collapseEditions) body.collapseEditions = true;
     try {
       // The user context enables the read-status filter and the real unread sort. Both have to be answered
       // in SQL: enrichSeries runs after LIMIT/OFFSET, so filtering there would return short pages and a
@@ -432,6 +450,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // Where the chapters come from: the primary source first, then any followed ones. Every viewer gets
     // this -- it is what the "Sources" line under the title shows, and nothing in it names the host.
     out.sources = await seriesSourcesFor(id).catch(() => []);
+    // v0.52.0 (#72): the other language editions of this work this viewer may open, for the series page's switcher
+    // and the reader's; null for a series on its own. `lang` (the DTO's) is the language it is in.
+    out.edition = await editionInfo(id, vc(req), userIdOf(req)).catch(() => null);
     // Admins get the on-disk folder, because the rename control needs something to seed from and to show
     // what is about to move. Members do not: it is the one field here that describes the host filesystem.
     // The series' own release preferences ride along for the same audience: the editor seeds from them, and
@@ -440,11 +461,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
       const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
-                            reading_direction: string | null; reading_direction_from: string | null }>(
+                            reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null }>(
         `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow,
-                reading_direction, reading_direction_from
+                reading_direction, reading_direction_from, lang, source_id,
+                ARRAY(SELECT DISTINCT b.root FROM lib_books b WHERE b.series_id = lib_series.id AND b.root IS NOT NULL ORDER BY b.root) AS roots
            FROM lib_series WHERE id = $1`, [id]);
       if (f) out.folder = f.folder;
+      // The series' folder as full paths on the server (#136): one per root its chapters are under -- a series often
+      // spans the read library and the downloads folder -- or, holding nothing yet, where its first chapter will land.
+      if (f) out.paths = (f.roots?.length ? f.roots : [DL_ROOT]).map((root) => join(root, f.folder));
+      // Whether the language is the series' own (v0.52.0), and what "Automatic" would make it -- its main source's
+      // language, else the server's unstated one -- for Edit details' Language field.
+      out.langStated = !!f?.lang;
+      out.langAuto = effectiveLang(null, f?.source_id);
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
       const order = cleanSourceOrder(f?.source_prefs?.priority);
       out.sourcePrefs = order.length ? { priority: order } : null;
@@ -533,7 +562,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const genres = (s?.metadata?.genres ?? []).slice(0, 3);
     if (!genres.length) return { content: [] };
     const res = await komga.searchSeries(vc(req), { condition: { anyOf: genres.map((g: string) => ({ genre: { operator: 'is', value: g } })) } }, 0, 24);
-    const content = res.content.filter((x: any) => x.id !== id).slice(0, 18);
+    // Another edition of this work is not "more like this" (v0.52.0): it is this, in another language, and the
+    // switcher under the title already offers it.
+    const content = res.content.filter((x: any) => x.id !== id && !(s?.workId && x.workId === s.workId)).slice(0, 18);
     return { content: await enrichSeries(req, content) };
   });
 
@@ -541,7 +572,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const { page = '0', size = '200', sort } = req.query as Record<string, string>;
     const res = await komga.seriesBooks(vc(req), id, Number(page), Number(size), sort || undefined);
-    return { ...res, content: await booksForUser(req, res.content) };
+    const content = await booksForUser(req, res.content);
+    // An admin's chapter menu copies the file's full path (#136). Nobody else is told where anything is on the host.
+    if (roleOf(req) !== 'admin' || !OWNED) return { ...res, content };
+    const paths = await bookPaths(content.map((b: any) => b.id));
+    return { ...res, content: content.map((b: any) => (paths.has(b.id) ? { ...b, path: paths.get(b.id) } : b)) };
   });
 
   /**

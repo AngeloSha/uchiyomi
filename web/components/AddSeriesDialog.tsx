@@ -15,7 +15,7 @@ import { SourceIcon } from '@/components/SourcePicker';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { ActivityDots } from '@/components/ActivityDots';
 import { activityStatus, weeksOf } from '@/lib/activity';
-import { relativeTime } from '@/lib/format';
+import { languageName, relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { fetchingLabel } from '@/lib/jobs';
 import { normTitle } from '@/lib/normTitle';
@@ -28,8 +28,30 @@ import { useServerDownloads } from '@/lib/useServerDownloads';
 import { useAuth } from '@/lib/auth';
 import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
+import { baseOf, codeLabel, editionLangPreset, languageChoices, openingLanguage } from '@/lib/editions';
+import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
 
-export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
+export interface Provider {
+  source: string; name: string; sourceId: string; title: string; coverUrl?: string;
+  /** The language the source declares (v0.52.0), null when it says nothing; absent from an older server. */
+  lang?: string | null;
+  /** The library holds the title in this provider's language (v0.52.0): the row reads "in your library". */
+  inLibrary?: boolean;
+  /** On a trending search's providers (GET /api/sources/find): the entry holding the title, and its languages. */
+  librarySeriesId?: string;
+  libraryLangs?: string[];
+}
+/** What the library holds of a title, from the card that opened the dialog (v0.52.0): the edition an add would join. */
+export interface HeldTitle { seriesId: string; langs: string[] }
+/** GET /api/sources/edition-candidates: the languages a series could be added in (v0.52.0). */
+interface EditionCandidates {
+  title: string;
+  held: Array<{ seriesId: string; lang: string }>;
+  languages: Array<{ lang: string; sources: Array<{ id: string; name: string }> }>;
+  unstated: Array<{ id: string; name: string }>;
+}
+/** What an add of a language edition came to: its work, or that it was added on its own (bff routes/sources.ts). */
+interface AddedEdition { lang: string; workId?: string; unlinked?: 'taken' | 'gone' }
 interface Detail {
   source: string; sourceId: string; title: string; summary: string; coverUrl: string | null;
   genres: string[]; status: string; count: number; first: number | null; last: number | null;
@@ -44,6 +66,8 @@ interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string;
   /** The add-time auto-follow (v0.36.0), once the server has judged the other sources. See lib/types.ts. */
   autoFollow?: AutoFollow;
+  /** An edition's add (v0.52.0): linked once the first chapter is scanned in, or added on its own. */
+  edition?: AddedEdition;
   /**
    * The series this job is filling, once the server has scanned its first chapter in (v0.42.0, #67). A
    * fresh download has no library row when the add is answered, so this card is how the id reaches
@@ -68,12 +92,21 @@ interface AddAnswer {
    * chapters are in), or why not. Absent when it was not asked for.
    */
   archive?: EnqueueOutcome | 'later';
+  /** The edition this add made (v0.52.0): its language, its work once linked, or why it stands on its own. */
+  edition?: AddedEdition;
 }
 
+/**
+ * What opened the dialog. `library` (v0.52.0): what the library holds of the card's title, when it holds it in
+ * another language than every provider's -- the dialog offers the new language as an edition. `edition`: the series
+ * page's "Add a language", which starts from the languages the sources offer rather than from a title; with `lang`
+ * and `source`, a follow the language guard refused ("Add it as an edition"), which opens on that source's language.
+ */
 export type AddSeed =
   | { kind: 'trending'; title: string }
-  | { kind: 'result'; provider: Provider }
-  | { kind: 'group'; title: string; providers: Provider[] };
+  | { kind: 'result'; provider: Provider; library?: HeldTitle }
+  | { kind: 'group'; title: string; providers: Provider[]; library?: HeldTitle }
+  | { kind: 'edition'; of: string; title: string; lang?: string; source?: string };
 
 /**
  * Per-device memory of the "Also check the other sources" switch. A device setting, not an account one: it
@@ -100,6 +133,8 @@ export function autoFollowWhy(why: FollowWhy | string): string {
     case 'unavailable': return tr('not available');
     // #116: nothing is judged -- no other source's numbers line up with posts numbered 1..K.
     case 'posting_order': return tr('this series is numbered by posting order');
+    // v0.52.0 (#123): another language's source is never followed for a series; it would be that title's other edition.
+    case 'language_differs': return tr('in another language');
     default: return why;
   }
 }
@@ -208,6 +243,76 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
 
+  // ---- a language edition (v0.52.0, #72) ----
+  // An add can make a language edition of a series already here: a series of its own -- folder, chapters, sources,
+  // reading progress -- linked with the one the library has, so the Library keeps one card. The series page starts one
+  // from the languages the sources offer (the `edition` seed); Discover's card brings what the library holds
+  // (`library`); and the server, answering a duplicate whose source is in a language the library does not hold the
+  // title in, brings its offer.
+  const edSeed = seed.kind === 'edition' ? seed : null;
+  // The languages the sources offer, asked again each time the dialog opens: a MangaDex language switched on in
+  // Admin -> Providers a minute ago (its "Turn on more" link below) is a row the next time, not after a reload.
+  // Reintroduce by dropping `refetchOnMount`: "the language list is asked again" in addSeriesDialog.test.ts fails.
+  const candQ = useQuery({
+    queryKey: ['edition-candidates', edSeed?.of],
+    queryFn: () => api<EditionCandidates>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}`),
+    enabled: !!edSeed, staleTime: 60_000, refetchOnMount: 'always', retry: false,
+  });
+  /**
+   * The edition seed's language: a code, `unstated` for the sources that do not say theirs, or null for the list.
+   * Until the person chooses, the one the dialog was opened on (a follow refused for its language, lib/editions.ts
+   * openingLanguage) -- "Other languages" still goes back to the list.
+   */
+  const [edChoice, setEdPick] = useState<string | null | undefined>(undefined);
+  const edPick = edChoice !== undefined ? edChoice : edSeed ? openingLanguage(candQ.data, edSeed) : null;
+  // The search in that language: the work's title and other names, on just those sources (the server's budget).
+  const edSearch = useQuery({
+    queryKey: ['edition-candidates', edSeed?.of, edPick],
+    queryFn: () => api<{ providers: Provider[] }>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}&lang=${encodeURIComponent(edPick!)}`),
+    enabled: !!edSeed && !!edPick, staleTime: 5 * 60_000, retry: false,
+  });
+  /** The server's offer on a duplicate: the same title, in a language the library does not hold it in. */
+  const [offer, setOffer] = useState<{ of: string; heldLangs: string[]; lang: string } | null>(null);
+  /** The duplicate's "It is in another language": the series the person says this is another edition of. */
+  const [anotherOf, setAnotherOf] = useState<string | null>(null);
+  // The providers to pick from: the seed's or a trending search's -- or, for an edition, the search in its language.
+  const offered = edSeed ? (edSearch.data?.providers ?? null) : providers;
+  // What the library holds of the title, and the series an edition joins: the server's offer first (its word), then
+  // the person's own "It is in another language", the series page's seed, the card's, a trending search's.
+  const findHeld = providers?.find((p) => p.librarySeriesId && p.libraryLangs?.length);
+  const held: { of: string; langs: string[] } | null = offer ? { of: offer.of, langs: offer.heldLangs }
+    : anotherOf ? { of: anotherOf, langs: [] }
+    : edSeed ? { of: edSeed.of, langs: (candQ.data?.held ?? []).map((h) => h.lang) }
+    : (seed.kind === 'result' || seed.kind === 'group') && seed.library ? { of: seed.library.seriesId, langs: seed.library.langs }
+    : findHeld ? { of: findHeld.librarySeriesId!, langs: findHeld.libraryLangs! }
+    : null;
+  // Whether this add makes an edition: when the dialog began from one, or the picked provider is in a language the
+  // library does not hold the title in. The duplicate prompt's "It is in another language" turns it on for the pick,
+  // and "It is a different series" off -- derived per pick, as the numbering switch is.
+  const [editionFor, setEditionFor] = useState<{ key: string; on: boolean } | null>(null);
+  const asEdition = !!held && (editionFor?.key === pickKey ? editionFor.on : !!edSeed || picked?.inLibrary === false);
+  // This copy's language: what its source declares, else the one the dialog began from (for the source a follow was
+  // refused for, the language the refusal named), else the server's word in its offer -- and what the person chose for
+  // this pick over all of them (lib/editions.ts editionLangPreset). Empty when nobody knows: the add then waits.
+  const [edLangFor, setEdLangFor] = useState<{ key: string; lang: string } | null>(null);
+  const edLang = edLangFor?.key === pickKey ? edLangFor.lang
+    : editionLangPreset({ picked, pick: edPick, seed: edSeed, offer: offer?.lang });
+  const needsLang = asEdition && !edLang;
+  // The series an edition joins, for its languages when the dialog does not know them yet, and -- for an admin, the
+  // only one told whether a language is stated -- "The copy you have is in", asked when it is not.
+  const ofQ = useQuery({
+    queryKey: ['series', held?.of],
+    queryFn: () => api<Series>(`/api/series/${encodeURIComponent(held!.of)}`),
+    enabled: asEdition && !!held?.of, staleTime: 60_000, retry: false,
+  });
+  const heldLangs = held?.langs.length ? held.langs
+    : ofQ.data?.edition?.editions?.map((e) => e.lang) ?? (ofQ.data?.lang ? [ofQ.data.lang] : []);
+  const askOfLang = isAdmin && ofQ.data?.langStated === false;
+  const [ofLangChoice, setOfLangChoice] = useState<string | null>(null);
+  const ofLang = ofLangChoice ?? ofQ.data?.lang ?? '';
+  /** The server's refusal of the edition: the language is taken, a removed edition holds it, or it must be said. */
+  const [edRefusal, setEdRefusal] = useState<{ error: 'edition_exists' | 'edition_hidden' | 'edition_lang'; lang: string; id?: string } | null>(null);
+
   // ---- also follow the other sources (v0.36.0, #49) ----
   // The candidates are the sources this dialog ALREADY found for the title (a trending search, or the
   // wall's fold): no new search is ever run for them, one per source, the picked one left out, at most six.
@@ -215,16 +320,19 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // null -- so it gets no switch and sends nothing; the series page's Find missing chapters is its way in.
   // Reintroduce by seeding `others` from a search here: every wall tap becomes a fan-out to every source.
   const others = useMemo(() => {
-    if (!picked || !providers) return [];
+    if (!picked || !offered) return [];
     const seen = new Set<string>([picked.source]);
     const out: Provider[] = [];
-    for (const p of providers) {
+    for (const p of offered) {
       if (seen.has(p.source)) continue;
       seen.add(p.source);
+      // Another language's provider is that title's other edition, never a backup for this one (v0.52.0): the server's
+      // guard refuses to follow it (`language_differs`), so it is not offered as a candidate at all.
+      if (p.lang && picked.lang && baseOf(p.lang) !== baseOf(picked.lang)) continue;
       out.push(p);
     }
     return out.slice(0, ALSO_FOLLOW_MAX);
-  }, [providers, picked]);
+  }, [offered, picked]);
   const [alsoFollow, setAlsoFollowState] = useState<boolean>(() => {
     try { return typeof localStorage !== 'undefined' && localStorage.getItem(ALSO_FOLLOW_KEY) === '1'; } catch { return false; }
   });
@@ -320,7 +428,11 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
 
   const add = async (force = false) => {
     if (!picked) return;
-    setAdding(true); setDup(null);
+    setAdding(true); setDup(null); setEdRefusal(null);
+    // An edition names the series it joins, its own language when known, and the language of the copy the library
+    // has when the dialog asked (bff routes/sources.ts). `force` is "add it on its own", never an edition.
+    const editionBody = asEdition && held && !force
+      ? { of: held.of, ...(edLang ? { lang: edLang } : {}), ...(askOfLang && ofLang ? { ofLang } : {}) } : undefined;
     // Only the identity of each candidate goes: the server looks each up itself and judges it against the
     // listing it has just written, so a stale title or cover from the search cannot steer the match.
     // Not under posting order: another site's numbers cannot line up with posts numbered 1..K, and the server
@@ -331,7 +443,10 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     const numbering = view?.send ?? 'auto';
     try {
       const r = await api<AddAnswer>('/api/sources/add', {
-        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering, ...(archiving ? { archive: true } : {}) },
+        json: {
+          source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,
+          ...(archiving ? { archive: true } : {}), ...(editionBody ? { edition: editionBody } : {}),
+        },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
         // on. The request now answers in seconds, so this is a backstop rather than the usual path. The
@@ -348,8 +463,15 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     } catch (e: any) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch { /* not JSON */ }
-      if (body.error === 'duplicate') setDup({ message: body.message || tr('You already have this title.'), id: body.existing?.id });
-      else toast(msgOf(e, tr('Add failed. Try another source.')), 'error');
+      if (body.error === 'duplicate' && body.edition?.of) {
+        // The server's offer: this source is in a language the library does not hold the title in. The edition block
+        // takes the prompt's place -- "You have it in English. This adds Spanish…" says more than "Add anyway?".
+        setOffer(body.edition);
+        setEditionFor({ key: pickKey, on: true });
+      } else if (body.error === 'duplicate') setDup({ message: body.message || tr('You already have this title.'), id: body.existing?.id });
+      else if (body.error === 'edition_exists' || body.error === 'edition_hidden' || body.error === 'edition_lang') {
+        setEdRefusal({ error: body.error, lang: body.existing?.lang ?? edLang, ...(body.existing?.id ? { id: body.existing.id } : {}) });
+      } else toast(msgOf(e, tr('Add failed. Try another source.')), 'error');
     }
     setAdding(false);
   };
@@ -394,7 +516,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     const fresh = !!done.started || !!done.nothing || !!done.alreadyHere;
     const followBlock = (() => {
       if (seed.kind === 'result') return <p className="text-start text-[11px] text-fog-500">{tr('Other sources: Find missing chapters on the series page.')}</p>;
-      if (!providers || !fresh) return null;
+      if (!offered || !fresh) return null;
       // A member never had the switch, so there are no results to show and nothing was "checked": one dim
       // line naming who can, and where.
       if (!mayFollow) return <p className="text-start text-[11px] text-fog-500">{tr('Other sources: an admin can follow them from Sources & translations.')}</p>;
@@ -427,14 +549,27 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
         </div>
       );
     })();
+    // An edition's add (v0.52.0): linked on the answer, or on the job card once its first chapter is scanned in -- or
+    // added on its own after all, which is said rather than left for the person to discover in the Library.
+    const added = done.edition ?? job?.edition;
+    const unlinked = job?.edition?.unlinked ?? done.edition?.unlinked;
     return (
-      <Modal title={tr('Added to your library')} onClose={onClose}>
+      <Modal title={added ? tr('Edition added') : tr('Added to your library')} onClose={onClose}>
         <div className="space-y-4 text-center">
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-500/15 text-emerald-400">
             <IcCheck width={26} height={26} />
           </span>
           <div>
-            <p className="font-display text-base font-semibold text-fog-50">{done.title}</p>
+            <p dir="auto" className="font-display text-base font-semibold text-fog-50">
+              {added ? tr('The {language} edition of {title}', { language: languageName(added.lang), title: done.title }) : done.title}
+            </p>
+            {unlinked && (
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-300" data-edition-unlinked={unlinked}>
+                {unlinked === 'taken'
+                  ? tr('It was added as a series of its own: another add took the {language} edition a moment earlier.', { language: languageName(added!.lang) })
+                  : tr('It was added as a series of its own: the series it was an edition of is no longer in the library.')}
+              </p>
+            )}
             <p className="mt-0.5 text-sm text-fog-400">
               {/* "Fetching", the server-side word: the chapters land on the server for everyone, which is not
                   what "download" means on this device. `nothing` is a nothing-yet add: no job, no bar.
@@ -453,7 +588,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               {/* v0.40.0: a chapter the picked source could not serve is taken from another followed one,
                   and one that arrived short is saved with placeholders. Both are worth a line under the
                   counter while it runs, in the same words as the downloads pill. */}
-              {jobNoteLines(job, (id) => providers?.find((p) => p.source === id)?.name ?? id).map((line, i) => (
+              {jobNoteLines(job, (id) => offered?.find((p) => p.source === id)?.name ?? id).map((line, i) => (
                 <p key={i} className="text-start text-[11px] leading-relaxed text-fog-400" data-job-note>{line}</p>
               ))}
             </>
@@ -472,33 +607,106 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     );
   }
 
+  // ---------------------------------------------------------------- an edition: which language? (v0.52.0)
+  // The series page's "Add a language": one row per language the sources offer, the held ones left out by the
+  // server, and the sources that do not say theirs as a row of their own. Nothing is searched until one is chosen.
+  if (edSeed && !picked && !edPick) {
+    const c = candQ.data;
+    return (
+      <Modal title={tr('Add a language')} onClose={onClose}>
+        <p dir="auto" className="-mt-2 mb-3 truncate text-sm text-fog-400">{edSeed.title}</p>
+        {candQ.isLoading ? (
+          <div className="skeleton h-28 rounded-xl" />
+        ) : candQ.isError ? (
+          <p className="py-6 text-center text-sm text-amber-300">{tr('Could not be reached right now.')}</p>
+        ) : !c || (!c.languages.length && !c.unstated.length) ? (
+          <div className="py-6 text-center text-sm text-fog-500" data-edition-none>
+            <p>{tr('None of your sources is in another language yet.')}</p>
+            {/* MangaDex in another language is a switch away (Admin → Providers); a member is not sent to a page they cannot open. */}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-2 inline-block text-xs text-accent hover:underline">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
+          </div>
+        ) : (
+          <>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Which language?')}</p>
+            <div className="divide-y divide-ink-800/70" data-edition-langs>
+              {c.languages.map((l) => (
+                <button key={l.lang} type="button" onClick={() => setEdPick(l.lang)}
+                  className="flex w-full items-center gap-3 px-2.5 py-2.5 text-start hover:bg-ink-800/60">
+                  <span className="min-w-0 flex-1 truncate text-sm text-fog-100">{languageName(l.lang)}</span>
+                  <span className="shrink-0 text-[11px] text-fog-500">{l.sources.length === 1 ? tr('1 source') : tr('{n} sources', { n: l.sources.length })}</span>
+                </button>
+              ))}
+              {c.unstated.length > 0 && (
+                <button type="button" onClick={() => setEdPick('unstated')}
+                  className="flex w-full items-center gap-3 px-2.5 py-2.5 text-start hover:bg-ink-800/60">
+                  <span className="min-w-0 flex-1 text-sm text-fog-300">{tr('Sources that do not say their language')}</span>
+                  <span className="shrink-0 text-[11px] text-fog-500">{c.unstated.length === 1 ? tr('1 source') : tr('{n} sources', { n: c.unstated.length })}</span>
+                </button>
+              )}
+            </div>
+            {/* The language wanted may be a MangaDex switch away, with others on already: an admin is told where. */}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-3 inline-block text-[11px] text-fog-500 hover:text-accent">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
+          </>
+        )}
+      </Modal>
+    );
+  }
+
   // ---------------------------------------------------------------- pick a source
   if (!picked) {
+    const searching = edSeed ? edSearch.isLoading : loading;
+    const inLang = edPick && edPick !== 'unstated' ? languageName(edPick) : null;
     return (
-      <Modal title={title} onClose={onClose}>
-        {loading ? (
+      <Modal title={edSeed ? tr('Add a language') : title} onClose={onClose}>
+        {/* The edition's search: what it is a language of, and the way back to the other languages. */}
+        {edSeed && (
+          <p className="-mt-2 mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fog-400">
+            <span dir="auto" className="min-w-0 truncate">{edSeed.title}</span>
+            <button type="button" onClick={() => setEdPick(null)} className="chip py-0.5 text-[11px]">{tr('Other languages')}</button>
+          </p>
+        )}
+        {/* A card for a title the library holds in another language: which, and the way to it. */}
+        {!edSeed && held && held.langs.length > 0 && (
+          <p className="mb-3 text-xs text-fog-400" data-held-langs>
+            {tr('In your library in {languages}.', { languages: held.langs.map(languageName).join(', ') })}{' '}
+            <button type="button" onClick={() => { qc.invalidateQueries({ queryKey: ['library'] }); router.push(`/series/?id=${encodeURIComponent(held.of)}`); }}
+              className="font-semibold text-accent hover:underline">{tr('Open')}</button>
+          </p>
+        )}
+        {searching ? (
           <p className="py-8 text-center text-sm text-fog-500">{tr('Searching…')}</p>
-        ) : !providers?.length ? (
-          <p className="py-8 text-center text-sm text-fog-500">{tr('Not found on any source yet — try searching manually.')}</p>
+        ) : edSeed && edSearch.isError ? (
+          <p className="py-8 text-center text-sm text-amber-300">{tr('Could not be reached right now.')}</p>
+        ) : !offered?.length ? (
+          <p className="py-8 text-center text-sm text-fog-500">
+            {!edSeed ? tr('Not found on any source yet — try searching manually.')
+              : inLang ? tr('Not found in {language}. Try another language.', { language: inLang })
+              : tr('Not found there. Try another language.')}
+          </p>
         ) : (
           <>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Available on — pick a source')}</p>
             <div className="space-y-1">
-              {providers.map((p, i) => (
+              {offered.map((p, i) => (
                 <button key={`${p.source}:${p.sourceId}`} onClick={() => setPicked(p)}
                   className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60">
                   <Img src={sourceCover(p.source, p.coverUrl)} alt="" fallbackSrc={p.coverUrl}
                     className="h-14 w-10 shrink-0 rounded" />
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5 text-sm text-fog-100">
+                    <span className="flex min-w-0 items-center gap-1.5 text-sm text-fog-100">
                       <SourceIcon id={p.source} name={p.name} size={20} />
                       <span className="truncate">{p.name}</span>
+                      {/* Its language, as the versions sheet marks a copy's (v0.52.0): which edition picking it adds. */}
+                      {p.lang && <span className="shrink-0 rounded border border-ink-700 px-1 text-[10px] leading-4 text-fog-500">{codeLabel(p.lang)}</span>}
                     </span>
-                    <span className="block truncate text-[11px] text-fog-500">{p.title}</span>
+                    <span dir="auto" className="block truncate text-[11px] text-fog-500">{p.title}</span>
                   </span>
                   {/* The page's own rank: health first, then what the library actually came from. "Most used"
-                      is what that is; "preferred" made it sound like a setting someone had chosen. */}
-                  {i === 0 && <span className="chip shrink-0 text-[10px]">{tr('most used')}</span>}
+                      is what that is; "preferred" made it sound like a setting someone had chosen. A provider in a
+                      language the library holds says so instead: picking it is the copy you already have. */}
+                  {p.inLibrary
+                    ? <span className="shrink-0 text-[10px] text-fog-500">{tr('in your library')}</span>
+                    : i === 0 && !edSeed && <span className="chip shrink-0 text-[10px]">{tr('most used')}</span>}
                 </button>
               ))}
             </div>
@@ -539,7 +747,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               <SourceIcon id={picked.source} name={picked.name} size={16} />
               <span className="text-fog-200">{picked.name}</span>
             </span>
-            {providers && providers.length > 1 && (
+            {((offered && offered.length > 1) || !!edSeed) && (
               <button type="button" onClick={() => { setPicked(null); setPickChoice(null); }} className="chip py-0.5 text-[11px]">
                 {tr('Change')}
               </button>
@@ -555,6 +763,14 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             <p className="text-xs text-amber-300" data-detail="failed">{tr('Could not be reached right now.')}</p>
           ) : (
             <p className="text-xs text-fog-500" aria-live="polite" data-detail="loading">{tr('Loading chapter list…')}</p>
+          )}
+          {/* A new language for a title the library has (v0.52.0): before the chapters, because it changes what the
+              add is. Rendered from the pick, like the switches: nothing in it waits for the chapter list. */}
+          {asEdition && held && (
+            <EditionNotice title={title} held={heldLangs} lang={edLang} onLang={(l) => setEdLangFor({ key: pickKey, lang: l })}
+              askOfLang={askOfLang} ofLang={ofLang} onOfLang={setOfLangChoice} refusal={edRefusal} busy={adding}
+              onOpen={(sid) => { qc.invalidateQueries({ queryKey: ['library'] }); router.push(`/series/?id=${encodeURIComponent(sid)}`); }}
+              onAlone={() => { setEditionFor({ key: pickKey, on: false }); void add(true); }} />
           )}
           {detail && (<>
             {detail.numbering && view!.offer && (
@@ -686,12 +902,23 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                   {tr('Open it')}
                 </button>
               )}
+              {/* v0.52.0: the way out for a site that does not say its language, or says the wrong one -- this copy
+                  becomes another language edition of the series named, and the edition block asks which language. */}
+              {dup.id && (
+                <button type="button" data-another-language
+                  onClick={() => { setAnotherOf(dup.id!); setEditionFor({ key: pickKey, on: true }); setEdLangFor({ key: pickKey, lang: '' }); setDup(null); }}
+                  className="ms-3 mt-1 font-semibold underline underline-offset-2">
+                  {tr('It is in another language')}
+                </button>
+              )}
             </div>
           )}
 
           {/* Disabled until the chapter list is here: the count and the from/none choice go in the request. */}
-          <button onClick={() => add(!!dup)} disabled={adding || !detail} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
-            {adding ? tr('Working…') : dup ? tr('Add anyway') : tr('Add to library')}
+          <button onClick={() => add(!!dup && !asEdition)} disabled={adding || !detail || needsLang} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
+            {adding ? tr('Working…')
+              : asEdition ? (edLang ? tr('Add the {language} edition', { language: languageName(edLang) }) : tr('Choose its language'))
+              : dup ? tr('Add anyway') : tr('Add to library')}
           </button>
           {/* Whether a title is worth keeping is usually one chapter's worth of question; this answers it and
               leaves nothing behind. Every source, extensions included: the server fetches the pages itself. */}
@@ -710,11 +937,76 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           sourceId={picked.sourceId}
           title={picked.title || title}
           onClose={() => setPreviewing(false)}
-          canAdd={!adding && !!detail}
-          onAdd={() => { if (adding || !detail) return; setPreviewing(false); void add(!!dup); }}
+          canAdd={!adding && !!detail && !needsLang}
+          onAdd={() => { if (adding || !detail || needsLang) return; setPreviewing(false); void add(!!dup && !asEdition); }}
         />
       )}
     </Modal>
+  );
+}
+
+/**
+ * The add dialog's edition block (v0.52.0, #72): this copy becomes a language edition of the series the library has --
+ * a series of its own, with its own chapters, folder and reading progress, under the Library's one card for the work.
+ * A text block with an accent start-edge rule, as the numbering notice is. The language this copy is in is prefilled
+ * from what its source declares and required when it declares nothing; the language of the copy the library has is
+ * asked only when that one does not state it. "It is a different series" is the way out of all of it.
+ */
+function EditionNotice({ title, held, lang, onLang, askOfLang, ofLang, onOfLang, refusal, busy, onOpen, onAlone }: {
+  title: string;
+  /** The languages the library holds the title in, as codes. */
+  held: string[];
+  /** This copy's language, or '' while nobody has said. */
+  lang: string;
+  onLang: (l: string) => void;
+  askOfLang: boolean;
+  ofLang: string;
+  onOfLang: (l: string) => void;
+  refusal: { error: 'edition_exists' | 'edition_hidden' | 'edition_lang'; lang: string; id?: string } | null;
+  busy: boolean;
+  onOpen: (seriesId: string) => void;
+  onAlone: () => void;
+}) {
+  const choices = languageChoices([lang, ofLang, ...held], languageName);
+  const have = held.map(languageName).join(', ');
+  return (
+    <div data-add-edition className="mt-2 border-s-2 border-accent/60 bg-accent/5 py-2 pe-2.5 ps-2.5">
+      <p dir="auto" className="text-[12px] font-semibold text-fog-100">{tr('A new language for {title}', { title })}</p>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-fog-400">
+        {have && lang
+          ? tr('You have it in {languages}. This adds {language} as a separate edition, with its own chapters, folder and reading progress. The Library keeps one card for both.', { languages: have, language: languageName(lang) })
+          : tr('This adds it as a separate edition, with its own chapters, folder and reading progress. The Library keeps one card for both.')}
+      </p>
+      <label className="mt-2 block text-[11px] text-fog-400">
+        <span className="mb-0.5 block">{tr('This one is in')}</span>
+        <select value={lang} onChange={(e) => onLang(e.target.value)} className="field" required aria-invalid={!lang || undefined}>
+          {!lang && <option value="">{tr('Choose a language')}</option>}
+          {choices.map((c) => <option key={c} value={c}>{languageName(c)}</option>)}
+        </select>
+      </label>
+      {askOfLang && (
+        <label className="mt-2 block text-[11px] text-fog-400">
+          <span className="mb-0.5 block">{tr('The copy you have is in')}</span>
+          <select value={ofLang} onChange={(e) => onOfLang(e.target.value)} className="field">
+            {choices.map((c) => <option key={c} value={c}>{languageName(c)}</option>)}
+          </select>
+        </label>
+      )}
+      {refusal && (
+        <p className="mt-2 text-[11px] leading-relaxed text-amber-300" data-edition-refusal={refusal.error}>
+          {refusal.error === 'edition_lang' ? tr('Choose the language this one is in.')
+            : refusal.error === 'edition_hidden'
+              ? tr('A removed edition holds {language}. Put it back under Admin → Library, or forget it.', { language: languageName(refusal.lang) })
+              : tr('It is already in your library in {language}.', { language: languageName(refusal.lang) })}
+          {refusal.error === 'edition_exists' && refusal.id && (
+            <button type="button" onClick={() => onOpen(refusal.id!)} className="ms-2 font-semibold underline underline-offset-2">{tr('Open it')}</button>
+          )}
+        </p>
+      )}
+      <button type="button" onClick={onAlone} disabled={busy} className="mt-2 text-start text-[11px] text-fog-400 underline underline-offset-2 hover:text-fog-200 disabled:opacity-50">
+        {tr('It is a different series. Add it on its own.')}
+      </button>
+    </div>
   );
 }
 

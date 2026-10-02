@@ -426,6 +426,13 @@ sources it already follows are kept but not asked, and a new follow is refused w
   chapters for 20 still follows. Up to two sources are followed per series. Nothing is searched for this;
   only the sources the dialog already found are asked, each for its page and chapter list.
 
+**In the series' language only** (since v0.52.0). A series follows sources in its own language: the add dialog's
+check, the hunt for a missing chapter and Find other sources never follow a source in another, and Find missing
+chapters never offers one, because its chapters would be mixed in, one language per number by chance. A source in
+every language counts as any, and a series' own source always passes. To read a title in two languages, add the
+other as an edition (*Reading a series in two languages*, below); a follow refused for its language offers
+**Add it as an edition**.
+
 The **Sources** list at the top of *Sources
 & translations* shows what is followed — *main* for the source the series was added from, *also checked*
 for one you followed yourself, *followed for you* for one the add dialog followed — with the chapter count
@@ -514,6 +521,33 @@ It only decides where chapters you **do not have yet** come from. A chapter alre
 fetched again because another source ranks higher. An order is kept exactly as saved, including a source
 that is not available at the moment (an extension while the extension engine restarts, say): it is listed
 as *Not available right now* and keeps its place until you take it off.
+
+### Reading a series in two languages
+
+Since v0.52.0 a series can be in your library in more than one language — Blue Lock in English and in Spanish,
+say. Each language is its own **edition**: a series of its own, with its own folder, chapters, sources and reading
+progress, so reading the Spanish edition never touches where you are in the English one. The Library shows **one
+card** for them — the edition you read last, or the first one added until you have read either — with the languages
+under its title (*EN · ES-419*).
+
+- **Adding one.** In *Sources & translations*, the **Languages** section says which language the series is in and
+  offers **Add a language**: pick one of the languages your sources offer, then the title in it. Or add it from
+  Discover: a card whose title you have in another language stays addable, marked *EN in library*, and picking its
+  Spanish source adds the Spanish edition. When the source does not say what language it is in, you are asked.
+- **Switching.** The series page shows a row of language chips under the title — *Spanish · Ch. 12* says how far
+  you have read there. The reader's chapter list has the same chips: one opens the chapter you are on in the other
+  edition, or that edition's page at the chapter when the server does not have it yet.
+- **Admins** set a series' language in *Edit details* (**Language**), link two series already here as editions from
+  Health (**Link as editions**, offered on a duplicate pair in two languages), and unlink one with the × in the
+  Languages section; it stays in the library as a series of its own. The age rating and *Always show* set in *Edit
+  details* apply to every edition, so an 18+ work is 18+ in each language.
+
+### Mark caught up
+
+For a series already in your library, **Mark caught up** (an admin's, in *Edit details* next to Auto-update) stops
+the updater fetching what is already out — the whole back catalogue — and keeps it fetching every new chapter, the
+way *Nothing yet* does when you add one. It says what it will do before it does it, and **Undo** puts things back as
+they were. Chapters already here stay, and older ones can still be fetched from the chapter list.
 
 ### When a source or page fails
 
@@ -926,24 +960,29 @@ row too), and the bar at the bottom shows what can be done with the selection. *
   waiting out the patience window, and it retries a chapter that had failed three times; it never takes a
   blocked group's copy. *Fetch* on a single copy in the chapter's sheet (see *The chapter sheet*) is the one
   manual fetch that does take a blocked copy.
-- **Fetch again** and **Delete from server** — admins only, for chapters Uchiyomi downloaded itself. See
-  the next section.
+- **Fetch again** and **Remove *n* chapters** — admins only, for chapters Uchiyomi downloaded itself. See
+  the next section. With nothing ticked the bar says so, and links to **Remove the whole series** — the series'
+  own *Remove from library*, which this bar is not.
 
-The selection is cleared when you leave the page or flip the sort order.
+The bar is up from the moment you tap Select. The selection is cleared when you leave the page or flip the sort
+order.
+
+An admin's chapter menu (⋯) also has **Copy file path**: the chapter's file, in full, on the server. The series'
+folder is in *Edit details* (**Folder on the server**), with a Copy beside each path.
 
 ### Deleting a chapter from the server and fetching it again
 
-An admin can free the space a chapter takes without losing the record of it. **Delete from server** removes
-the file and keeps everything else: the chapter row, marked *Deleted from the server*, everyone's reading
-progress on it, and every count — the series' unread number does not move, and nothing is pushed to
-AniList. If the chapter was the one the series' cover came from, the cover moves to the lowest chapter that
-still has a file. It is the same tombstone the scheduled cleanup in section 8 leaves, and it has the same
-two rules: **only a chapter downloaded by Uchiyomi** — one in its own downloads folder — is ever deleted,
-and **a chapter anyone has bookmarked is kept**, because the bookmark names a page inside the file. A
-chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast says how many
-were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a delete that
-deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter is not
-fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
+An admin can free the space a chapter takes without losing the record of it. **Remove** in the select bar,
+confirmed with **Delete from server**, removes the file and keeps everything else: the chapter row, marked
+*Deleted from the server*, everyone's reading progress on it, and every count — the series' unread number does
+not move, and nothing is pushed to AniList. If the chapter was the one the series' cover came from, the cover
+moves to the lowest chapter that still has a file. It is the same tombstone the scheduled cleanup in section 8
+leaves, and it has the same two rules: **only a chapter downloaded by Uchiyomi** — one in its own downloads
+folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, because the bookmark names a page
+inside the file. A chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast
+says how many were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a
+delete that deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter
+is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
 
 **Fetch again** is the replace that the translation rules deliberately never do on their own: it downloads
 the copy those rules choose *now* — the group you ranked since, from whichever followed source carries it —
@@ -1266,6 +1305,22 @@ got (*Checking 7 of 40 · …*), and a check that was already running when you o
 ends, a message counts the sources that need attention and those that could not finish in time. The same check
 runs by itself once a day; since v0.49.0 it notifies admins once per new or changed failure, not every day, and
 the notification opens Health.
+
+### MangaDex in other languages
+
+Since v0.52.0 ([#123](https://github.com/AngeloSha/uchiyomi/issues/123)) MangaDex serves other languages than
+English. In **Admin → Providers** MangaDex is one card, its languages behind **Manage**: English is always on, and
+each language you tap on becomes a source of its own at once, *MangaDex (ES-419)* say, with its own Newest and
+Popular in Discover and chapters in that language only. A series added from it is in that language, and a series you
+already have can take it as another language edition (*Reading a series in two languages*, in section 4). Turning off
+a language that series came from asks first: they keep their chapters, get no new ones until it is back, and Health
+lists them under its frozen series with the switch named. All the languages share one rate limit: when MangaDex asks
+Uchiyomi to slow down, every language waits.
+
+Beside **Add a site**, **Sites that do not say their language** is the language Uchiyomi takes a source to be in
+when it declares none, which most sites added by address do: English unless you choose another. It matters for
+the rule in *Following a second source* (section 4): a source is followed automatically only for a series in its
+language.
 
 ### When a site won't work
 

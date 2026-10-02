@@ -96,7 +96,8 @@ test('the options step paints before the detail lands', () => {
   assert.match(gated, /tr\('Translated by'\)/, 'the groups are rendered before the detail');
   const after = options.slice(options.indexOf('</>)}'));
   assert.match(after, /<Switch on=\{autoUpdate\}/, 'the auto-update switch waits for the detail');
-  assert.match(after, /disabled=\{adding \|\| !detail\}/, 'Add is not disabled until the detail lands');
+  // v0.52.0: an edition's Add also waits for its language (`needsLang`).
+  assert.match(after, /disabled=\{adding \|\| !detail( \|\| needsLang)?\}/, 'Add is not disabled until the detail lands');
 });
 
 test('a source that does not answer says so, with Change right beside it', () => {
@@ -202,4 +203,49 @@ test('"Archive the rest slowly" is offered only where there is a rest, and rides
   assert.match(src, /const perHour = downloads\?\.archive\?\.perHour \?\? ARCHIVE_PACE\.perHour;/, 'the estimate does not use the server\'s pace');
   // And the done step says where the rest went.
   assert.match(src, /\{done\.archive && <p [^>]*data-archive-outcome=\{done\.archive\}>\{archiveAddLine\(done\.archive, !!done\.nothing\)\}<\/p>\}/, 'the done step does not say where the rest went');
+});
+
+test('a provider in a language the library does not hold the title in is added as an edition (v0.52.0)', () => {
+  // p3t3t3's Blue Lock (#72): a Spanish provider on the card of a title held in English. The dialog opens the edition
+  // block straight away -- by the provider's own `inLibrary`, which the server says per language -- the add sends
+  // `edition: {of, lang}`, and "It is a different series" sends `force` with no edition. Reintroduce by dropping
+  // `picked?.inLibrary === false`: "the edition block does not open for a provider in a new language" fails; by
+  // dropping `!force` from editionBody: "a different series still goes as an edition" fails.
+  const src = code(read(DIALOG));
+  assert.match(src, /const asEdition = !!held && \(editionFor\?\.key === pickKey \? editionFor\.on : !!edSeed \|\| picked\?\.inLibrary === false\);/,
+    'the edition block does not open for a provider in a new language');
+  assert.match(src, /\{asEdition && held && \(\s*<EditionNotice /, 'the edition block is not rendered');
+  assert.match(src, /const editionBody = asEdition && held && !force\s*\? \{ of: held\.of, \.\.\.\(edLang \? \{ lang: edLang \} : \{\}\), \.\.\.\(askOfLang && ofLang \? \{ ofLang \} : \{\}\) \} : undefined;/,
+    'a different series still goes as an edition, or the edition does not name its series and language');
+  assert.match(src, /\.\.\.\(editionBody \? \{ edition: editionBody \} : \{\}\)/, 'the add does not carry the edition');
+  assert.match(src, /onAlone=\{\(\) => \{ setEditionFor\(\{ key: pickKey, on: false \}\); void add\(true\); \}\}/, '"It is a different series" does not add it on its own');
+  // The server's own offer on a duplicate opens the block too, and the duplicate prompt's "It is in another language"
+  // is the way out for a site that does not say its language.
+  const offerAt = src.indexOf("if (body.error === 'duplicate' && body.edition?.of) {");
+  assert.ok(offerAt >= 0 && src.slice(offerAt, offerAt + 400).includes('setOffer(body.edition);'), "the server's offer is not taken");
+  assert.match(src, /tr\('It is in another language'\)/, 'the duplicate prompt has no way to say it is another language');
+  // The series page's "Add a language" starts from the languages, and one with nothing to offer says so.
+  assert.match(src, /\| \{ kind: 'edition'; of: string; title: string; lang\?: string; source\?: string \};/, 'there is no edition seed');
+  assert.match(src, /tr\('None of your sources is in another language yet\.'\)/);
+});
+
+test('another language\'s provider is never offered as a source to follow too (v0.52.0)', () => {
+  // A Spanish provider beside an English pick is that title's other edition, not a backup for this one: following it
+  // would put Spanish chapters in the English series, and the server's language guard refuses it. es and es-419 share
+  // a base and stay offered. Reintroduce by dropping the line: "another language is offered to follow too" fails.
+  const src = code(read(DIALOG));
+  const memo = src.slice(src.indexOf('const others = useMemo('), src.indexOf('}, [offered, picked]);'));
+  assert.match(memo, /if \(p\.lang && picked\.lang && baseOf\(p\.lang\) !== baseOf\(picked\.lang\)\) continue;/,
+    'another language is offered to follow too');
+});
+
+test('the edition\'s language list is asked again each time the dialog opens (v0.52.0)', () => {
+  // Where #72 meets #123: "None of your sources is in another language yet" links to Admin → Providers, where a MangaDex
+  // language goes on in one tap and becomes a source at once (bff mangadexLangs.int: the edition's languages list it).
+  // Back on the series page within the minute, the list was the cached "none". Reintroduce by dropping
+  // `refetchOnMount: 'always'`: "the language list is asked again" fails.
+  const src = code(read(DIALOG));
+  const cand = src.slice(src.indexOf('const candQ = useQuery({'), src.indexOf('const [edChoice, setEdPick]'));
+  assert.match(cand, /queryKey: \['edition-candidates', edSeed\?\.of\],/);
+  assert.match(cand, /refetchOnMount: 'always'/, 'the language list is asked again');
 });

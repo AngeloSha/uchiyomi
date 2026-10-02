@@ -444,7 +444,28 @@ export interface WalkIssue {
    */
   params?: { ancestor?: string; n?: number; names?: string[]; max?: number; failed?: string };
 }
+/**
+ * Another root as a walk would meet it (v0.52.0, #134): its key (dirKey) and its entries, sorted. A folder of this
+ * walk with both is that root, reached again from here -- two mounts of one folder, or a path inside it.
+ */
+export interface RootMark { key: string; names: string }
+
+/** `root` as findSeriesDirs' `watch` -- null when it cannot be read or holds nothing, so there is nothing to meet twice. */
+export async function rootMark(root: string, fsx: WalkFs = nodeFs, platform: NodeJS.Platform = process.platform): Promise<RootMark | null> {
+  const st = await fsx.stat(root).catch(() => null);
+  if (!st) return null;
+  const listing = await listDir(root, fsx);
+  if (listing.error || !listing.entries.length) return null;
+  return { key: await dirKey(root, st, platform), names: listing.entries.map((e) => e.name).sort().join('\n') };
+}
+
 export interface WalkResult {
+  /**
+   * v0.52.0 (#134): where this walk met `watch`, the other root -- relative to this root, '' for the root itself.
+   * Absent when it did not. The folder is scanned all the same; meeting it is what makes every file in it a second
+   * copy of the other root's, which is Health's to say.
+   */
+  met?: string;
   found: FoundSeries[];
   issues: WalkIssue[];
   /**
@@ -478,9 +499,12 @@ export interface WalkResult {
  * a loop, and the depth and folder caps all come back in `issues`, which the scan report and Admin → Health →
  * Library scan carry. `fsx` and `platform` are parameters for the test.
  */
-export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platform: NodeJS.Platform = process.platform): Promise<WalkResult> {
+export async function findSeriesDirs(
+  root: string, fsx: WalkFs = nodeFs, platform: NodeJS.Platform = process.platform, watch: RootMark | null = null,
+): Promise<WalkResult> {
   const found: FoundSeries[] = [];
   const issues: WalkIssue[] = [];
+  let met: string | undefined;
   const reported = new Set<string>();
   let sharedIds = 0;
   let visited = 0;
@@ -524,6 +548,11 @@ export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platfor
       });
       return;
     }
+    // The other root, reached again from this one (v0.52.0, #134): @Kedryn mounted his downloads at /library-dl and
+    // their parent folder at /library, so the library walk read every downloaded chapter a second time, as a series
+    // with no source. The same key AND the same entries, as the loop guard above asks of an ancestor: an Unraid share
+    // reports one key for unrelated folders. Noted, never refused -- the folder is scanned as it always was.
+    if (watch && met === undefined && key === watch.key && names() === watch.names) met = rel;
     if (reported.has(key)) sharedIds++;
     else reported.add(key);
 
@@ -574,7 +603,7 @@ export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platfor
       detail: `the walk stopped after ${MAX_DIRS.toLocaleString('en-US')} folders; the rest were not looked into`,
     });
   }
-  return { found, issues, sharedIds };
+  return { found, issues, sharedIds, ...(met !== undefined ? { met } : {}) };
 }
 
 export interface LibraryRow { id: string; path: string }
@@ -679,6 +708,11 @@ export interface ScanReport {
   sharedIds: number;
   /** Folders passed over because their series was removed: on purpose, and put back under Admin → Library. */
   removed: number;
+  /**
+   * v0.52.0 (#134): the other root, met inside one root's walk -- `root` is the walk that met it, `folder` where (''
+   * for that root itself). Every chapter file in it was scanned twice. Absent when neither walk met the other.
+   */
+  nested?: { root: 'library' | 'downloads'; folder: string };
 }
 /** Walk findings that leave nothing out: a loop refused is the guard working, and the depth cap is a setting. */
 export const QUIET_WALK: ReadonlySet<WalkReason> = new Set<WalkReason>(['loop', 'depth']);
@@ -770,11 +804,13 @@ async function scanOnce(): Promise<ScanResult> {
   // The walk reports rather than throws; the catch is the last word: a walk that fails outright costs its root,
   // named, never the scan.
   const walks: Array<{ root: string; label: 'library' | 'downloads' } & WalkResult> = [];
+  // Each root watched for in the other's walk (v0.52.0, #134): Health says so when one is met inside the other.
+  const marks = new Map([[LIBRARY_ROOT, await rootMark(DL_ROOT).catch(() => null)], [DL_ROOT, await rootMark(LIBRARY_ROOT).catch(() => null)]]);
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
     const label = root === DL_ROOT ? 'downloads' as const : 'library' as const;
     walks.push({
       root, label,
-      ...(await findSeriesDirs(root).catch((e): WalkResult => ({
+      ...(await findSeriesDirs(root, nodeFs, process.platform, marks.get(root) ?? null).catch((e): WalkResult => ({
         found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}`, params: { failed: errCode(e) } }],
       }))),
     });
@@ -953,11 +989,13 @@ async function scanOnce(): Promise<ScanResult> {
   await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
   const ms = Date.now() - t0;
   const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
+  const meeting = walks.find((w) => w.met !== undefined);
   lastScan = {
     at: new Date().toISOString(), startedAt: new Date(t0).toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal,
     walk: [...loud, ...walkIssues.filter((i) => QUIET_WALK.has(i.reason))].slice(0, SKIPS_KEPT),
     walkTotal: walkIssues.length, walkProblems: loud.length,
     sharedIds: walks.reduce((n, w) => n + w.sharedIds, 0), removed,
+    ...(meeting ? { nested: { root: meeting.label, folder: meeting.met! } } : {}),
   };
   if (loud.length) console.warn(`[scan] ${loud.length} folder(s) or file(s) were left out by the walk; Admin → Health → Library scan lists them`);
   if (skippedTotal) console.warn(`[scan] ${skippedTotal} folder(s) could not be indexed; Admin → Health → Library scan lists them`);
