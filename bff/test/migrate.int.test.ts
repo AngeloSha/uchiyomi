@@ -281,6 +281,37 @@ test('migrate: v0.49.1 adds its two tables and nothing a v0.49.0 image would hav
   });
 });
 
+test('migrate: a fork-shaped series_alt_titles (PR #119\'s build) is brought to v0.49.1\'s shape', { skip }, async () => {
+  // An install that ran the fork build of PR #119 before v0.49.1: no removed_at (every read of the names failed on
+  // it), added_by a uuid referencing users, a source_id column, origins 'confirmed' and 'merged', no CHECK.
+  // Reintroduce by dropping the repair block: removed_at is missing and the read below throws.
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-fork', 'test', 'Fork Tale', '/t-fork') ON CONFLICT (id) DO NOTHING`);
+  try {
+    await q(`ALTER TABLE series_alt_titles DROP CONSTRAINT IF EXISTS series_alt_titles_origin_check`);
+    await q(`ALTER TABLE series_alt_titles DROP COLUMN removed_at`);
+    await q(`ALTER TABLE series_alt_titles ADD COLUMN source_id text`);
+    await q(`ALTER TABLE series_alt_titles ALTER COLUMN added_by TYPE uuid
+               USING CASE WHEN added_by ~ '^[0-9a-f-]{36}$' THEN added_by::uuid END`);
+    await q(`ALTER TABLE series_alt_titles ADD CONSTRAINT series_alt_titles_added_by_fkey FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL`);
+    await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin, source_id) VALUES
+               ('t-fork', 'otherforkname', 'Other Fork Name', 'confirmed', 'x'), ('t-fork', 'mergedfork', 'Merged Fork', 'merged', null)`);
+    await migrate();
+    const cols = Object.fromEntries((await q<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'series_alt_titles'`))
+      .map((c) => [c.column_name, c.data_type]));
+    assert.equal(cols.removed_at, 'timestamp with time zone');
+    assert.equal(cols.added_by, 'text');
+    assert.equal('source_id' in cols, false);
+    const rows = await q(`SELECT norm, origin FROM series_alt_titles WHERE series_id = 't-fork' AND removed_at IS NULL ORDER BY norm`);
+    assert.deepEqual(rows.map((r: any) => [r.norm, r.origin]), [['mergedfork', 'admin'], ['otherforkname', 'admin']]);
+    await assert.rejects(q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ('t-fork', 'bogusname', 'Bogus', 'guessed')`), /check constraint/i);
+    // And a table already in shape is left as it is.
+    await migrate();
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = 't-fork'`).catch(() => {});
+  }
+});
+
 test('migrate: v0.51.0 adds its one table and nothing a v0.50.0 image would have to write', { skip }, async () => {
   // v0.50.0 changed no schema, so a rollback from v0.51.0 boots v0.49.1's: v0.49.0's tables (the fixture) and
   // v0.49.1's two. The block is one CREATE TABLE. Reintroduce by dropping it: "a v0.51.0 table is missing".
