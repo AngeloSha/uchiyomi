@@ -16,6 +16,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
+import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
@@ -1592,8 +1593,8 @@ function SeriesInner() {
       const bookmarked = count('bookmarked');
       const other = res.skipped.length - notOwned - bookmarked;
       const lines = [
-        { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
-        { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
+        { n: notOwned, text: skippedNotOursText(notOwned) },
+        { n: bookmarked, text: skippedBookmarkedText(bookmarked) },
         { n: other, text: other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: other }) },
       ].filter((l) => l.n > 0);
       if (res.applied === 0 && lines.length) {
@@ -1605,7 +1606,7 @@ function SeriesInner() {
         toast(head.text, 'error');
         for (const l of rest) toast(l.text, 'info');
       } else {
-        toast(tr('{n} deleted', { n: res.applied }), 'success');
+        toast(deletedText(res.applied), 'success');
         for (const l of lines) toast(l.text, 'info');
       }
       invalidateChapters();
@@ -1695,8 +1696,11 @@ function SeriesInner() {
   const newBanner = async () => {
     setBusyAdmin(true);
     try {
-      const r = await api<{ ok: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
-      if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
+      const r = await api<{ ok: boolean; same?: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
+      // v0.52.0: the series' pages give no other banner (a short series whose few good crops are all on it). Said, rather
+      // than "Banner changed" over the same picture.
+      if (r.ok && r.same) toast(tr('This is the only banner this series’ pages give.'), 'info');
+      else if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
       else toast(tr('Could not make a new banner'), 'error');
     } catch {
       toast(tr('Could not make a new banner'), 'error');
@@ -1983,7 +1987,7 @@ function SeriesInner() {
   const Toolbar = selecting && (
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
-        <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
+        <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}

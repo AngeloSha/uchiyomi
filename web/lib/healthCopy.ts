@@ -32,7 +32,7 @@ const CHECK_TITLE_KEYS = keys(
   'Chapter gaps', 'Suspiciously short chapters', 'Chapters that would not download', 'Series that can no longer update',
   'Source health', 'Duplicate series', 'Impossible chapter numbers', 'Cloudflare solver', 'Version',
   'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine', 'Chapter numbering',
-  'The same chapter saved twice',
+  'The same chapter saved twice', 'Folders scanned twice',
 );
 export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[number]>> = {
   'chapter-gaps': CHECK_TITLE_KEYS[0],
@@ -53,6 +53,8 @@ export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[num
   numbering: CHECK_TITLE_KEYS[13],
   // v0.50.0: chapters downloaded again in another site's split of their parts (bff lib/health.ts savedTwice).
   'saved-twice': CHECK_TITLE_KEYS[14],
+  // v0.52.0 (#134): the downloads folder inside the library, or the library inside it (bff lib/health.ts foldersScannedTwice).
+  'folders-twice': CHECK_TITLE_KEYS[15],
 };
 
 export function checkTitle(c: Pick<HealthCheck, 'id' | 'title'>): string {

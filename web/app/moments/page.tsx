@@ -166,7 +166,7 @@ function Moments() {
                     min-content, so a long series title refuses to shrink and shoves the count off-screen. */}
                 <Link href={`/series/?id=${g.id}`}
                   className="min-w-0 truncate font-display text-base font-semibold text-fog-100 hover:text-white">{g.title}</Link>
-                <span className="shrink-0 text-[11px] text-fog-500">{tr('{n} saved', { n: g.items.length })}</span>
+                <span className="shrink-0 text-[11px] text-fog-500">{g.items.length === 1 ? tr('1 saved') : tr('{n} saved', { n: g.items.length })}</span>
               </h2>
               <div className="grid grid-cols-3 gap-x-3 gap-y-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
                 {g.items.map((m) => (

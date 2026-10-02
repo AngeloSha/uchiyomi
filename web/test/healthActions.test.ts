@@ -332,11 +332,12 @@ test('a delete that deleted nothing leads with the bookmark, not with a green co
   const fn = src.slice(src.indexOf('const doDelete'), src.indexOf('const doMerge'));
   assert.match(fn, /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/chapters\/delete/, 'delete does not use the existing chapter-delete route');
   assert.match(fn, /json: \{ bookIds \}/, 'delete does not send the item\'s book ids');
-  const bookmarked = fn.indexOf("tr('{n} skipped: bookmarked by a reader'");
-  const notOwned = fn.indexOf("tr('{n} skipped: not downloaded by Uchiyomi'");
+  // Counted in pairs since v0.52.0 (lib/counted.ts): "1 skipped" agrees in the languages that inflect it.
+  const bookmarked = fn.indexOf('skippedBookmarkedText(bookmarked)');
+  const notOwned = fn.indexOf('skippedNotOursText(notOwned)');
   assert.ok(bookmarked > 0 && notOwned > bookmarked, 'the bookmark line is not the first skip reason');
   assert.match(fn, /if \(res\.applied === 0 && lines\.length\) return \{ text: lines\.map\(\(l\) => l\.text\)\.join\(' · '\), ok: false \};/, 'a delete that applied nothing is reported as a success');
-  assert.match(fn, /toast\(tr\('\{n\} deleted', \{ n: res\.applied \}\), 'success'\)/, 'a successful delete does not say how many went');
+  assert.match(fn, /toast\(deletedText\(res\.applied\), 'success'\)/, 'a successful delete does not say how many went');
   // The confirmation is not optional: this is the one key on the page that destroys bytes.
   const dialog = src.slice(src.indexOf("asking === 'delete'"), src.indexOf("asking === 'disable'"));
   assert.match(dialog, /<ConfirmDialog/, 'Delete chapters has no confirmation');

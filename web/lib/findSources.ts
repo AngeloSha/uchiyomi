@@ -272,10 +272,12 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
   if (o.status !== false && run.status === 'stopped') bits.push(tr('Stopped before it finished'));
   if (o.status !== false && run.status === 'interrupted') bits.push(tr('Interrupted by a restart'));
   const g = run.results ? groupResults(run.results) : null;
-  // How far it got, in series it settled with an outcome. The server's `done` counts every series it settled, the one a
-  // Stop caught in flight among them, which it lists as not tried; the rest, listed after them, it does not count. So
-  // a run over 4 stopped during its first read "1 of 4 series · 4 series not tried", as if one had been searched.
-  // Reintroduce `run.done` as it is: "a series a stop caught in flight counts as searched" in findSources.test.ts.
+  // How far it got, in series it settled with an outcome. Before v0.52.0 the server's `done` counted every series it
+  // settled, the one a Stop caught in flight among them, which it lists as not tried; the rest, listed after them, it
+  // did not count. So a run over 4 stopped during its first read "1 of 4 series · 4 series not tried", as if one had
+  // been searched. The server counts only the series it searched through now, and runs kept from before still read
+  // right through this. Reintroduce `run.done` as it is: "a series a stop caught in flight counts as searched" in
+  // findSources.test.ts.
   const untriedSettled = g ? Math.max(0, g.notTried.length - Math.max(0, run.results!.length - run.done)) : 0;
   const through = Math.max(0, run.done - untriedSettled);
   if (run.status !== 'done' && run.total > 0 && through > 0) bits.push(tr('{done} of {total} series', { done: Math.min(through, run.total), total: run.total }));
@@ -300,6 +302,17 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
 
 /** The series the run never reached, to search again: its `not_tried` rows. */
 export const notTriedIds = (run: FindRun | null | undefined): string[] => groupResults(run?.results).notTried.map((r) => r.seriesId);
+
+/**
+ * The kept runs listed under Earlier searches, each a key that opens it in the sheet (v0.52.0, GET ...?runId=): every
+ * one but the newest -- the sheet's own view, a key away while another is open -- and the one open now, newest first,
+ * at most five. Before, only the newest run could be read in full, so a review-first run with matches still waiting
+ * could not be reopened once another search had run.
+ */
+export function earlierRuns(recent: readonly FindRunSummary[] | null | undefined, open: string | null): FindRunSummary[] {
+  const list = recent ?? [];
+  return list.filter((r, i) => i > 0 && r.id !== open).slice(0, 5);
+}
 
 /**
  * A run as an action's status line (Health's row and card, the results sheet): working with how far it has got and
@@ -486,6 +499,8 @@ export function decideRefusal(code: string | null | undefined): string | null {
     case 'full': return findWhyLine('full');
     case 'already_followed': return tr('The series follows that source already');
     case 'source_unavailable': return tr('That source is not available for this series right now');
+    // v0.52.0 (#123): a match kept from before the language guard, or a series whose language was set since.
+    case 'language_differs': return tr('That source is in another language than this series');
     case 'not_found': return tr('That match is no longer in the search');
   }
   return null;

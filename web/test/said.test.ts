@@ -44,6 +44,7 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   title: () => 'Walk Tale', ranges: () => '3-7, 12', fs: () => 'ext4', library: () => 'ext4', downloads: () => 'nfs',
   // v0.52.0, dupes.languages: two language codes, named in the reader's language on both sides.
   a: () => 'en', b: () => 'es-419',
+  theirs: () => 'es-419', ours: () => 'en', lib: () => '/library', dl: () => '/library-dl',
 };
 
 /**
@@ -497,6 +498,8 @@ test('on the desktop app, every platform wording says Uchiyomi, never a containe
   const DESKTOP = [
     'solver.down', 'solver.downNote', 'solver.failingNote', 'cap.note', 'cap.title', 'cap.detail', 'frozen.overLimit',
     'fix.solverCrash', 'fix.solverDown', 'fix.bypassOff', 'fix.engineLogin', 'fix.engineDown', 'fix.solverBroken',
+    // v0.52.0 (#134): the desktop app chooses its folders; nothing is mounted there.
+    'nested.note',
   ];
   for (const code of DESKTOP) {
     const line = saidText({ code, params: { n: 2, cap: 25, source: 'sw:1', url: 'http://127.0.0.1:1/token', error: null } });

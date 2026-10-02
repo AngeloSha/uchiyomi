@@ -9,6 +9,8 @@
 //  * `lib_books.pages` is filled in lazily on first read, so "pages = 0" means "never opened", not "broken".
 //  * decimal chapters (12.5, 44.6) are overwhelmingly legitimate side-stories and "Notice!" pages, which are
 //    genuinely one image long. Only whole-numbered chapters are worth flagging as too short.
+import path from 'path';
+import { realpath } from 'fs/promises';
 import { q, one } from './db';
 import { visibleToAll } from './visibility';
 import { latestSolverVersion } from './solverVersion';
@@ -1652,6 +1654,56 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   };
 }
 
+/**
+ * Where one library root sits inside the other, by path (v0.52.0, #134), or null when they are side by side: the
+ * download folder inside the library (`root: 'library'`, `folder` its place under it, '' when the two are one folder)
+ * or the library inside the download folder (`root: 'downloads'`). Pure, for the configured roots after realpath.
+ * Case counts, as it does on the server's disks; the desktop app refuses nested roots before the server starts
+ * (lib/desktop.ts rootsOverlap).
+ */
+export function nestedRoots(library: string, downloads: string, impl: typeof path = path): { root: 'library' | 'downloads'; folder: string } | null {
+  const under = (child: string, parent: string): string | null => {
+    const rel = impl.relative(parent, child);
+    return rel === '..' || rel.startsWith(`..${impl.sep}`) || impl.isAbsolute(rel) ? null : rel.split(impl.sep).join('/');
+  };
+  const d = under(downloads, library);
+  if (d !== null) return { root: 'library', folder: d };
+  const l = under(library, downloads);
+  return l === null ? null : { root: 'downloads', folder: l };
+}
+
+/**
+ * The download folder inside the library, or the library inside it (v0.52.0, discussion #134). Uchiyomi scans both
+ * roots, so every chapter in the inner one is read twice -- in its own root, as a series with its source, and again
+ * inside the other, as a series with none -- and the library shows each downloaded series twice. @Kedryn mounted
+ * /epaper at /library while his download folder, /epaper/uchiyomi_manga, was /library-dl.
+ *
+ * Found two ways: the configured roots by path (realpath, so a symlink counts), and the last scan, whose walk meets
+ * one root's own folder inside the other however it was mounted (lib/library.ts findSeriesDirs `watch`) -- two
+ * mounts of one folder share no path. Null while they are side by side: there is nothing to say, so no card.
+ * Reintroduce by leaving it out of runHealthChecks: "the download folder inside the library" in
+ * foldersTwice.int.test.ts finds no card.
+ */
+async function foldersScannedTwice(): Promise<HealthCheck | null> {
+  const real = (p: string) => realpath(p).catch(() => path.resolve(p));
+  const byPath = nestedRoots(await real(LIBRARY_ROOT), await real(DL_ROOT));
+  const found = byPath ?? lastScanReport()?.nested ?? null;
+  if (!found) return null;
+  const where = say('folder', { root: found.root, folder: found.folder });
+  return {
+    id: 'folders-twice',
+    title: 'Folders scanned twice',
+    status: 'warn',
+    ...summaryOf([
+      found.folder === '' ? say('nested.same')
+        : found.root === 'library' ? say('nested.downloadsInside', { folder: found.folder })
+        : say('nested.libraryInside', { folder: found.folder }),
+    ]),
+    ...noteOf([say('nested.note', { lib: LIBRARY_ROOT, dl: DL_ROOT })]),
+    items: [{ title: where.text, titleSaid: saidOf(where), ...detailOf([say(byPath ? 'nested.byPath' : 'nested.byScan')]) }],
+  };
+}
+
 // ---- report -----------------------------------------------------------------
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -1676,6 +1728,8 @@ export async function runHealthChecks(): Promise<HealthReport> {
     updateCheck(),
     libraryScan(),
     downloadsMissing(ctx),
+    // v0.52.0 (#134): null while the library and the download folder sit side by side.
+    foldersScannedTwice().catch(() => null),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
     // #72: the engine itself; null when there is none and nothing depends on one (lib/engineHealth.ts).
     extensionEngineCheck().catch(() => null),

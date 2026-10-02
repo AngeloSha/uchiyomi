@@ -11,6 +11,7 @@ import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
+import { followGuard, seriesLanguage } from '../lib/seriesLang';
 import { searchAll, groupByTitle, bySource, SEARCH_FIRST_ANSWER_MS } from '../lib/searchAll';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
@@ -2316,10 +2317,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Sources that were asked and did not answer (`unreachable`), and sources never asked because enough
     // already had the title (`not_tried`). Both are shown; neither is "does not have it", and the old scan
     // called all of them `unreachable`.
-    const ownSrc = s.source_id ? getSource(s.source_id) : null;
+    // The series' language orders them, its own first, and a source in another language is never asked (v0.52.0,
+    // #123): Find missing chapters offers only sources the series may follow, and a person wanting the series in
+    // that language adds it as an edition. Reintroduce by dropping `fits`: "the fill scan never asks a source in
+    // another language" in languageGuard.int.test.ts finds it asked.
+    const lang = await seriesLanguage(seriesId);
+    const fits = await followGuard(seriesId);
     const order = scanOrder(
-      findOrder().filter((id) => allowed.has(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
-      ownSrc ? { id: ownSrc.id, lang: ownSrc.lang } : null,
+      findOrder().filter((id) => allowed.has(id) && fits(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
+      { id: s.source_id ?? '', lang: lang.lang },
     ).filter((id) => !found.some((f) => f.source === id && f.pinned));
     // A slot is held before the search starts, so the timeout measures the search and not the queue. The
     // queue is FIFO, so relevance order is the order sources actually get asked in.

@@ -30,6 +30,7 @@ import { OnBody } from '@/components/ui';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import { FindStartDialog } from '@/components/FindSources';
 import { t as tr } from '@/lib/i18n';
+import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { isDesktop } from '@/lib/desktop';
 import { languageName } from '@/lib/format';
 import { IDLE, type ActionState } from '@/lib/actionState';
@@ -209,16 +210,16 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     const notOwned = count('not_owned');
     const other = res.skipped.length - bookmarked - notOwned;
     const lines = [
-      { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-      { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
+      { n: bookmarked, text: skippedBookmarkedText(bookmarked) },
+      { n: notOwned, text: skippedNotOursText(notOwned) },
       { n: other, text: other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: other }) },
     ].filter((l) => l.n > 0);
     // ⚠️ A delete that deleted nothing is not a success: a green "0 deleted" over unchanged rows is what a
     // refused delete used to look like, and the reason is what the admin needs in front of them.
     if (res.applied === 0 && lines.length) return { text: lines.map((l) => l.text).join(' · '), ok: false };
     // The row goes when Health answers again, taking its status line with it: the count is said in a notice too.
-    toast(tr('{n} deleted', { n: res.applied }), 'success');
-    return { text: [tr('{n} deleted', { n: res.applied }), ...lines.map((l) => l.text)].join(' · ') };
+    toast(deletedText(res.applied), 'success');
+    return { text: [deletedText(res.applied), ...lines.map((l) => l.text)].join(' · ') };
   };
 
   const doMerge = async (): Promise<{ text: string } | null> => {
@@ -617,9 +618,9 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
         kept += r.skipped?.length || 0;
       } catch { kept += it.bookIds?.length ?? 0; }
     }
-    const line = [tr('{n} deleted', { n: deleted }),
+    const line = [deletedText(deleted),
       ...(kept ? [kept === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: kept })] : [])].join(' · ');
-    if (deleted) toast(tr('{n} deleted', { n: deleted }), 'success');
+    if (deleted) toast(deletedText(deleted), 'success');
     setPurge({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
     await rr.recheck().catch(() => {});
     setPurge(deleted === 0 && kept

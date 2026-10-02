@@ -295,7 +295,8 @@ chapters with it; either way they leave the day's activity feed and the download
 `done: false` with no results while the other sources are asked, then one entry per candidate in the order
 given, `{source, name, theirTitle, followed, coverage, why}`, with `why` one of `followed`,
 `numbering_differs` (under 90% of the primary's numbers listed there or, when judged both ways, under 90%
-of its numbers listed here — the rule above), `title_differs`, `unreachable` (threw or timed out — never
+of its numbers listed here — the rule above), `language_differs` (since v0.52.0, #123: it is in another language than
+the series, and nothing was asked), `title_differs`, `unreachable` (threw or timed out — never
 mistaken for "lists nothing"), `too_few_listed` (the primary lists under three numbers; nothing was
 asked), `not_tried` (the 90-second wall ran out first, or the judgement itself failed before any source
 was asked — every candidate then reads so, rather than the card finishing with an empty list), `cap`
@@ -488,7 +489,10 @@ and since v0.48.2 folders it could not look into at all), and since v0.48.2 `dow
 file in the downloads folder that is not in the library, per folder, with the reason when the scan knows it, and
 since v0.50.0 `saved-twice`: series where two sources' splits of one chapter are both on disk, each item with
 `bookIds` and `numbers` for the files that arrived later and the `delete` action (nothing is deleted by the check
-itself). Each check reports `status` (`ok`, `warn`, `problem`), a
+itself), and since v0.52.0 `folders-twice`, only while the downloads folder sits inside the library or the library
+inside it (by path, or met by the last scan's walk however it was mounted): `warn`, one item naming where, and the
+fix in its note -- every chapter in the inner folder is otherwise scanned twice. Each check reports `status` (`ok`,
+`warn`, `problem`), a
 one-line `summary`, and the individual `items`. A check is `ok` exactly when none of its items is a finding:
 an item flagged `info` is listed for reference (a source you turned off, a source no series uses, a chapter
 already confirmed short, a gap the nightly repair has already searched for) and never decides the verdict.
@@ -1637,7 +1641,10 @@ the admin looking at each candidate; there from the add's own listing plus the c
 numbering both ways unless the title is exact on a listing of at least ten (`lib/autoFollow.ts`, described
 under the add route). Neither takes a bare pair on trust, which would let a client follow anything it
 could name. Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not
-loaded or disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
+loaded or disabled), and since v0.52.0 (#123) `language_differs` -- the source is in another language than the
+series; the scan never offers one, so only a plan from before the series' language changed meets it. Its `message`
+and `messageSaid` (`follow.languageDiffers`, `{theirs, ours}` as language codes) name both, and `edition: {of, lang}`
+is the add route's edition to add instead; **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
 `bad_request` when the plan belongs to another series; **404** for an unknown series. Following the same source again updates its
 series id and coverage, and makes a follower the add-time path chose the confirming admin's (`auto:
 false`). `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
@@ -1686,7 +1693,10 @@ failing). `GET /api/admin/sources/find` answers `{running, run, recent}`: `run` 
 newest, `{id, status: running|done|stopped|failed|interrupted, total, done, followed, startedBy (a username),
 startedAt, finishedAt?, sourceId?, sourceName?, current?: {seriesId, title}, waiting?: sweep|repair|check,
 results: [{seriesId, title?, followed: [{sourceId, name, chapters}], why?}]}`, and `recent` the newest 20 runs
-without `results` or `current`. `why` is set when nothing was followed, and says exactly what happened. Decided
+without `results` or `current`. Since v0.52.0 `?runId=` reads that kept run in full as `run` instead, an earlier
+search reopened (a review-first run's matches can still be decided there), or **404** `not_found` when no kept run
+has that id. `done` counts the series searched through: a series a stop cut short with nothing to show is listed
+as `not_tried` and, since v0.52.0, not counted (runs kept from before count it). `why` is set when nothing was followed, and says exactly what happened. Decided
 without a search: `posting_order`, `full` (two sources followed already), `too_few` (fewer than three chapter
 numbers, which nothing can be measured against) and `no_source` (no other source to ask: all turned off, cooling
 down or excluded). After one: `refused` (a candidate failed the title and chapter-number check), `no_answer`
@@ -1721,7 +1731,8 @@ checked again (the series visible and not numbered by posting order; the source 
 source, reachable for the series' rating, and not followed already -- never re-pointed), then written under the
 follower cap with the admin as its author, its listing refreshed, and audited as `series.follow_source` with `via:
 find_review`; it answers `{result}`, the series' result as it now reads, or **404** `not_found`, **409** `decided`
-(with `state`), `posting_order`, `source_unavailable`, `already_followed` or `full`. `POST
+(with `state`), `posting_order`, `source_unavailable`, `language_differs` (since v0.52.0: the source is in another
+language than the series), `already_followed` or `full`. `POST
 /api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
 `dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
 
@@ -1912,8 +1923,10 @@ last try that made none, which is left alone for a week — and **404** when a t
 keeps its usual art. Every series in a payload carries `autoHero`: `{seed}` once its banner is made (`v` is that
 seed, a cache-buster only), `null` otherwise — not made yet included, so a client asks only for a banner that is
 there. `POST /api/admin/series/:id/hero/shuffle` (admin) picks a new seed and makes
-the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept;
-**409** `not_automatic` for a series that may not have one. Banners are made one at a time server-wide: by a paced
+the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept,
+or since v0.52.0 `{ok: true, seed, same: true}` when the series' pages give no other banner (a short series whose few
+good crops are all on the one it has; nothing changes, and `seed` is the one it had); **409** `not_automatic` for a
+series that may not have one. Banners are made one at a time server-wide: by a paced
 background pass (twenty minutes after start, then daily), for a series soon after its backdrop is asked for, by
 Shuffle, and by this route when its cache misses; the background ones stand aside for a sweep, a repair or the daily
 source check.

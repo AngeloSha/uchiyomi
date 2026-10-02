@@ -1627,7 +1627,7 @@ function LibrariesSection() {
               </p>
               <p className="truncate text-[11px] text-fog-600">
                 {l.n} {tr('series')}
-                {l.pinned > 0 && <> · {tr('{n} filed by hand', { n: l.pinned })}</>}
+                {l.pinned > 0 && <> · {l.pinned === 1 ? tr('1 filed by hand') : tr('{n} filed by hand', { n: l.pinned })}</>}
                 {/* Who may open it is per-person access, which desktop does not have (one person, no members). */}
                 {!desktopLibs && <>{' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}</>}
               </p>
@@ -2057,7 +2057,9 @@ function Health() {
                         // arrow is held to the last word by a no-break space).
                         links={healthLinks(c.id, it).map((l) => (
                           <Link key={l.href} href={l.href} className="line-clamp-2 max-w-[11rem] break-words text-end text-xs text-accent hover:underline"
-                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}
+                            // A page off the app (the install guide, v0.52.0) opens beside it, never in place of it.
+                            {...(/^https?:\/\//.test(l.href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
                             {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
                           </Link>
                         ))}>

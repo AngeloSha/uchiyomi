@@ -15,7 +15,7 @@
 // The run itself is the server's (POST /api/admin/sources/find); GET says how far the running one has got, or what the
 // newest one did, and keeps the newest twenty. The idea, the other-names list and the name parsing are @TIGamingTV's
 // (PR #119).
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
@@ -26,11 +26,11 @@ import { runStatusWord } from '@/lib/healthCopy';
 import { seriesHref } from '@/lib/healthLinks';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import {
-  amberNote, bulkOutcome, decideRefusal, findReviewFirst, findRunState, findSlotState, findSummary, findWhyLine, greenToFollow,
-  groupResults, lineUpText, notTriedIds, setFindReviewFirst, toMs, type FindProposal, type FindResult, type FindRun,
+  amberNote, bulkOutcome, decideRefusal, earlierRuns, findReviewFirst, findRunState, findSlotState, findSummary, findWhyLine,
+  greenToFollow, groupResults, lineUpText, notTriedIds, setFindReviewFirst, toMs, type FindProposal, type FindResult, type FindRun,
   type FindRunSummary, type FindStatus,
 } from '@/lib/findSources';
-import { FIND_KEY, codeOf, fetchFind, useFindRun, useFindRuns } from '@/lib/useFindRun';
+import { FIND_KEY, codeOf, fetchFind, fetchFindRun, useFindRun, useFindRuns } from '@/lib/useFindRun';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
@@ -107,6 +107,10 @@ function Group({ id, title, rows, note, onOpen }: { id: string; title: string; r
 /**
  * The newest run's results, in four groups. `poll`: ask again every 2 s while it runs -- off where a follower on the
  * page already does (Health's FindRunProvider), since every observer with an interval polls on its own timer.
+ *
+ * An earlier search opens in its place (v0.52.0): each one under Earlier searches is a key, and its results are read by
+ * its id -- a review-first run's matches can be followed or skipped there as on the newest. Its own query, under
+ * FIND_KEY, so the refetch every decision ends with reads it again; and finished, so it is never polled.
  */
 export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void; poll?: boolean }) {
   const { isAdmin } = useAuth();
@@ -118,11 +122,27 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
     retry: false,
     refetchInterval: poll ? (qq) => (qq.state.data?.running ? 2000 : false) : undefined,
   });
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Opening a run (or going back to the latest) starts the sheet at its top: the keys are at the bottom, under the
+  // results, and the run they open would otherwise begin a screen above where the reader is.
+  const top = useRef<HTMLDivElement>(null);
+  const shown = useRef<string | null>(null);
+  useEffect(() => {
+    if (shown.current === openId) return;
+    shown.current = openId;
+    top.current?.scrollIntoView({ block: 'start' });
+  }, [openId]);
+  const opened = useQuery({
+    queryKey: [...FIND_KEY, 'run', openId],
+    queryFn: () => fetchFindRun(openId!),
+    enabled: isAdmin && !!openId,
+    retry: false,
+  });
   // A search of what the run never reached, from here: the same route, the same one-run rule.
   const again = useFindRuns({ enabled: false });
   const [stopping, setStopping] = useState<string | null>(null);
   const data: FindStatus | undefined = q.data;
-  const run = data?.run ?? null;
+  const run = openId ? opened.data?.run ?? null : data?.run ?? null;
   const g = groupResults(run?.results);
   // What the run never reached, once it is over -- stopped, out of time, or cut short by a restart, whose unreached
   // series the server lists as not tried exactly as a stop's.
@@ -135,21 +155,27 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
     void qc.invalidateQueries({ queryKey: FIND_KEY });
     void kickDownloads(qc);
   };
-  const earlier = (data?.recent ?? []).filter((r) => r.id !== run?.id).slice(0, 5);
+  const earlier = earlierRuns(data?.recent, openId);
   return (
     <OnBody>
       <Sheet title={tr('Other-source search')} onClose={onClose} overBottomNav>
-        <div data-find-results className="pb-2">
-          {q.isLoading && <div className="skeleton h-16 rounded-xl" />}
+        <div data-find-results ref={top} className="pb-2">
+          {openId && (
+            <div className="mb-2">
+              <button type="button" className="btn-key" onClick={() => setOpenId(null)} data-find-latest>{tr('Back to the latest search')}</button>
+            </div>
+          )}
+          {(openId ? opened.isLoading : q.isLoading) && <div className="skeleton h-16 rounded-xl" />}
           {!q.isLoading && q.isError && !data && <p className="text-xs text-rose-300">{tr('Could not load the results')}</p>}
-          {!q.isLoading && data && !run && <p className="text-xs text-fog-500">{tr('No search for other sources has run yet.')}</p>}
+          {!openId && !q.isLoading && data && !run && <p className="text-xs text-fog-500">{tr('No search for other sources has run yet.')}</p>}
+          {openId && opened.isError && <p className="text-xs text-fog-500">{tr('That search is no longer kept.')}</p>}
           {run && (
             <>
               <FindRunRow run={run} label={runStatusWord(run.status)} onStop={isAdmin ? () => { void stop(); } : undefined} stopping={stopping === run.id} />
               {untried.length > 0 && (
                 <div className="mt-2">
                   <button type="button" className="btn-key" disabled={retry?.phase === 'starting' || !!data?.running}
-                    onClick={() => { void again.start('retry', { seriesIds: untried, ...(run.review ? { review: true } : {}) }).then(() => { void q.refetch(); void kickDownloads(qc); }); }}>
+                    onClick={() => { void again.start('retry', { seriesIds: untried, ...(run.review ? { review: true } : {}) }).then(() => { setOpenId(null); void q.refetch(); void kickDownloads(qc); }); }}>
                     {untried.length === 1 ? tr('Search the 1 series not tried') : tr('Search the {n} series not tried', { n: untried.length })}
                   </button>
                   {(retry?.phase === 'refused' || retry?.phase === 'failed') && <ActionStatus state={findSlotState(retry, null)} />}
@@ -159,7 +185,9 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
               {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} />}
               <Group id="found" title={tr('New sources')} rows={g.found} onOpen={onClose} />
               <Group id="nothing" title={tr('Nothing found')} rows={g.nothing} onOpen={onClose} />
-              <Group id="skipped" title={tr('Skipped')} rows={g.skipped} onOpen={onClose} />
+              {/* Its own key, not the shared "Skipped" (v0.52.0): the heading is about series, which several languages
+                  agree it with ("Series omitidas"), and a match's state or an import row is not. */}
+              <Group id="skipped" title={tr('Skipped series')} rows={g.skipped} onOpen={onClose} />
               <Group id="not-tried" title={tr('Not tried')} rows={g.notTried} onOpen={onClose}
                 note={tr('The search was stopped, ran out of time or was interrupted by a restart before it got to these.')} />
             </>
@@ -167,14 +195,20 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
           {earlier.length > 0 && (
             <section data-find-group="earlier" className="mt-5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Earlier searches')}</h3>
-              <ul role="list" className="mt-1 space-y-1.5">
+              <ul role="list" className="mt-1 divide-y divide-ink-800/50">
                 {/* The status word leads each line, so the summary after it leaves its own out: "Stopped before it
-                    finished · 6m ago · Stopped before it finished · 3 of 7 series" said it twice. */}
+                    finished · 6m ago · Stopped before it finished · 3 of 7 series" said it twice. Each line opens its run
+                    in the sheet (v0.52.0); a review-first run says so, since its matches may still wait. */}
                 {earlier.map((r) => (
-                  <li key={r.id} className="text-[11px] leading-relaxed text-fog-400">
-                    <span className="text-fog-300">{runStatusWord(r.status)}</span>
-                    {whenLine(r) && <span className="text-fog-500"> · {whenLine(r)}</span>}
-                    <span className="text-fog-500"> · {findSummary(r, { status: false })}</span>
+                  <li key={r.id}>
+                    <button type="button" onClick={() => setOpenId(r.id)} data-find-earlier={r.id}
+                      className="block w-full py-2 text-start text-[11px] leading-relaxed text-fog-400 hover:text-fog-200">
+                      <span className="text-fog-300">{runStatusWord(r.status)}</span>
+                      {whenLine(r) && <span className="text-fog-500"> · {whenLine(r)}</span>}
+                      {r.review && <span className="text-fog-500"> · {tr('Review first')}</span>}
+                      <span className="text-fog-500"> · {findSummary(r, { status: false })}</span>
+                      <span className="text-accent"> · {tr('Open')}{'\u00a0'}›</span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -315,7 +349,7 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
         <p className={`mt-0.5 text-[11px] tabular-nums ${p.verdict === 'green' ? 'text-fog-400' : 'text-amber-300/90'}`}>{lineUpText(p)}</p>
         {note && !p.state && <p data-amber-note className="mt-0.5 text-[11px] leading-relaxed text-amber-300/90">{note}</p>}
         {p.state
-          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped')}</p>
+          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped for good')}</p>
           : <ActionKeys actions={keys} className="mt-1.5" />}
         {why && !p.state && <ActionStatus state={{ kind: 'refused', reason: why }} />}
       </div>

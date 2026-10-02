@@ -703,7 +703,8 @@ components:
             no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
             or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
             which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
-            every one turned off, cooling down, adult for a clean series, or one it follows already (not searched).
+            every one turned off, cooling down, adult for a clean series, in another language than the series (since
+            v0.52.0), or one it follows already (not searched).
             `refused`: a source carried the title and did not pass the title and chapter-number check (another book).
             `no_answer`: the sources asked did not answer, or the one that carried the title did not answer for its
             chapters, so nothing could be judged. `followed_already`: the sources that answered do not carry it, and
@@ -762,7 +763,7 @@ components:
           enum: [running, done, stopped, failed, interrupted]
           description: "`stopped`: an admin stopped it (POST .../find/stop, or Cancel on its card). `interrupted`: the server went away under it -- a shutdown, where the run closes its own row, or a row found still running after a restart, closed at boot. Either way `results` then lists every series it never reached as `not_tried`, as a stopped run does."
         total: { type: integer, minimum: 0, description: Series in its scope. }
-        done: { type: integer, minimum: 0, description: Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here. }
+        done: { type: integer, minimum: 0, description: "Series settled so far; a stopped or interrupted run's rest are in `results` as not_tried but not counted here, and since v0.52.0 neither is the series a stop cut short with nothing to show (runs kept from before count it)." }
         followed: { type: integer, minimum: 0, description: Sources followed, across its series. }
         startedBy: { type: [string, "null"], description: "The admin who started it, by username (never the account id); null for an account since deleted." }
         startedAt: { type: string, format: date-time }
@@ -2684,8 +2685,9 @@ paths:
         title is not this series'), `unreachable` (threw or timed out), `too_few_listed` (the primary lists
         under three numbers, nothing asked), `not_tried` (the 90-second wall ran out first, or the judgement
         itself failed before any source was asked -- every candidate then reads so, never an empty list),
-        `cap` (the series already follows two sources) or `unavailable` (the primary itself, disabled, in a
-        cooldown, not loaded, or outside the caller's age cap). A nothing-yet add with candidates gets a
+        `cap` (the series already follows two sources), `unavailable` (the primary itself, disabled, in a
+        cooldown, not loaded, or outside the caller's age cap) or, since v0.52.0 (#123), `language_differs` (it
+        is in another language than the series; nothing was asked). A nothing-yet add with candidates gets a
         card with `total: 0` and `status: done` purely to carry this. Results survive the dialog closing:
         the card lives a day after the judgement ends, and cannot be dismissed (DELETE answers 409
         `running`) until `autoFollow.done`. Since v0.47.0 (#82) a finished card stays listed for a day
@@ -6767,7 +6769,11 @@ paths:
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
             own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
-            posting_order (the series is numbered by posting order, so a follower would never be merged).
+            posting_order (the series is numbered by posting order, so a follower would never be merged); since
+            v0.52.0 (#123) language_differs (the source is in another language than the series: the scan never
+            offers one, so only a plan from before the series' language changed meets this. `message` and
+            `messageSaid` (code `follow.languageDiffers`, params `theirs` and `ours`, language codes) name both,
+            and `edition` is `{of, lang}`, the add route's edition to add instead).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -7981,7 +7987,10 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: "`{ok: true, seed}`, the seed the series' `autoHero` now carries; or `{ok: false, error: 'not_made'}`."
+          description: >-
+            `{ok: true, seed}`, the seed the series' `autoHero` now carries; or `{ok: false, error: 'not_made'}`; or,
+            since v0.52.0, `{ok: true, seed, same: true}` when the series' pages give no other banner (a short
+            series whose few good crops are all on the one it has): nothing changes, and `seed` is the one it had.
           content:
             application/json:
               schema:
@@ -7990,6 +7999,7 @@ paths:
                 properties:
                   ok: { type: boolean }
                   seed: { type: integer, description: Present when ok. }
+                  same: { type: boolean, enum: [true], description: "Since v0.52.0: present when the pages give no other banner." }
                   error: { type: string, enum: [not_made], description: Present when not ok. }
         "401":
           description: Not authenticated
@@ -8590,6 +8600,9 @@ paths:
         disk, the later group arriving after the earlier one (`warn` while it finds any); each item carries
         `bookIds` and `numbers` for the later files only (at most 20) and the `delete` action. Nothing is deleted
         by the check.
+        Since v0.52.0 (#134) the `folders-twice` check is there only while the downloads folder sits inside the
+        library, or the library inside it -- by path, or met by the last scan's walk however it was mounted --
+        and every chapter in the inner one is scanned twice: `warn`, one item naming where, the fix in its note.
         Since v0.49.0 an item may carry `outcome`, what the last attempt at it found, from stored rows:
         {kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable[], scanned} (the
         gap `detail` is now '<n> missing — <ranges>' alone; the conclusion it used to end with is here), {kind:
@@ -9265,7 +9278,16 @@ paths:
         (the newest 20), newest first, without results. A run still `running` after a restart reads `interrupted`,
         with every series it never reached in `results` as `not_tried`.
         A series the viewer may not list (the 18+ hide, above all) keeps its entry in `results` without its
-        `title`, and is left out of `current`.
+        `title`, and is left out of `current`. Since v0.52.0 `?runId=` reads that kept run in full as `run` instead
+        (an earlier search reopened -- a review-first run's matches can still be decided), and answers 404
+        `not_found` when no kept run has that id.
+      parameters:
+        - name: runId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
       security:
         - bearer: []
       responses:
@@ -9286,10 +9308,14 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/FindRunSummary"
+        "400":
+          description: "`bad_request`: `runId` is empty or longer than 64 characters."
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found` (since v0.52.0): no kept run has the `runId` asked for."
     post:
       tags:
         - admin
@@ -9435,7 +9461,7 @@ paths:
         "404":
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
-          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `already_followed`; `full` (the series follows two other sources)"
+          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series); `already_followed`; `full` (the series follows two other sources)"
   /api/admin/sources/find/{runId}/dismiss:
     post:
       tags:

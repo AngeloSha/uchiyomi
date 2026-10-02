@@ -68,4 +68,8 @@ test('the series page offers New banner to an admin, and only while the hero is 
   assert.ok(admin > 0, 'New banner sits outside the admin actions');
   assert.match(src.slice(admin, at), /\{series\?\.autoHero && \(\s*<button[^>]*$/, 'New banner must be offered only while the hero is an automatic one');
   assert.match(src, /\/api\/admin\/series\/\$\{encodeURIComponent\(id\)\}\/hero\/shuffle/);
+  // v0.52.0: the pages give no other banner (`same`), and the page says so rather than "Banner changed" over the same
+  // picture. Reintroduce by dropping the `same` branch: the toast below is gone.
+  assert.match(src, /if \(r\.ok && r\.same\) toast\(tr\('This is the only banner this series’ pages give\.'\), 'info'\);\s*else if \(r\.ok\)/,
+    'Shuffle says "Banner changed" when the pages give no other banner');
 });

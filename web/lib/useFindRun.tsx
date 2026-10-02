@@ -28,6 +28,8 @@ export const FIND_KEY = ['find-sources'] as const;
 const POLL_MS = 2000;
 
 export const fetchFind = () => api<FindStatus>('/api/admin/sources/find');
+/** One kept run in full, by its id (v0.52.0): an earlier search, reopened in the results sheet. */
+export const fetchFindRun = (id: string) => api<FindStatus>(`/api/admin/sources/find?runId=${encodeURIComponent(id)}`);
 
 export interface FindRunApi {
   status: FindStatus | undefined;
