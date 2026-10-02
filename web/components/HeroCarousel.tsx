@@ -5,7 +5,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api, img } from '@/lib/api';
 import { Series } from '@/lib/types';
-import { Backdrop, backdropUrl, useWideViewport } from './ui';
+import { Backdrop, useWideViewport } from './ui';
+import { backdropSources } from '@/lib/art';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
 import { t as tr } from '@/lib/i18n';
@@ -51,7 +52,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
   useEffect(() => {
     if (n < 2) return;
     const nxt = slides[(i + 1) % n];
-    if (nxt) { const im = new Image(); im.src = backdropUrl(nxt.id, { hero: true, wide }); }
+    if (nxt) { const im = new Image(); im.src = backdropSources(nxt.id, nxt.autoHero, { hero: true, wide }, '')[0]; }
   }, [i, n, slides, wide]);
 
   if (!n || !cur) return null;
@@ -68,9 +69,10 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
     >
       <AnimatePresence>
         <motion.div key={cur.id} initial={{ opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} className="absolute inset-0">
-          {/* real art pulled from the internet (AniList) — sharp banner in the hero; genre-banner fallback.
+          {/* real art pulled from the internet (AniList) — sharp banner in the hero; for a series AniList has no banner
+              for, the one the server made from its own pages (v0.51.0); genre-banner fallback.
               Scrims stay light so the actual art shows: clear top, legibility gradient only bottom-left. */}
-          <Backdrop seriesId={cur.id} genres={cur.metadata?.genres} hero className="absolute inset-0" />
+          <Backdrop seriesId={cur.id} genres={cur.metadata?.genres} autoHero={cur.autoHero} hero className="absolute inset-0" />
           <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/30 to-transparent" />
           <div className="absolute inset-0 bg-linear-to-r from-ink-950/65 via-ink-950/20 to-transparent" />
           <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 70% at 22% 55%, rgb(var(--cover, 124 92 255) / 0.12), transparent 70%)' }} />
