@@ -26,6 +26,7 @@ import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
+import { editionOffer, type EditionOffer } from '@/lib/editions';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -140,7 +141,15 @@ function ChapterPicker({ numbers, selected, onChange }: {
   );
 }
 
-export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
+export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
+  seriesId: string;
+  onClose: () => void;
+  /**
+   * A follow the language guard refused (v0.52.0): add that source's language as an edition instead. The page closes
+   * this dialog and opens the add dialog on it; absent for a viewer who may not add series.
+   */
+  onAddEdition?: (ask: EditionOffer & { source: string }) => void;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const { isAdmin } = useAuth();
@@ -150,6 +159,8 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   const [busy, setBusy] = useState(false);
   /** Each source's chosen chapters, by `${source}:${sourceSeriesId}`; absent means everything it offers. */
   const [picked, setPicked] = useState<Record<string, number[]>>({});
+  /** A follow refused for its language (v0.52.0): the source, the server's sentence and the edition it offers. */
+  const [edOffer, setEdOffer] = useState<(EditionOffer & { source: string; message: string }) | null>(null);
 
   // One scan per title: POST starts it (or joins the one already running) and answers after a moment with what
   // has arrived; every read after that is the scan's own route, every two seconds until it is done. A scan used to
@@ -233,7 +244,13 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       if (announce) toast(tr('Now following {s}. It is checked for new chapters every few hours; download what it has now below.', { s: c.name }), 'success');
       return true;
     } catch (e) {
+      const ed = editionOffer(e);
       if (codeOf(e) === 'plan_stale') stale();
+      // The language guard (v0.52.0): a source in another language than the series is never followed for it -- only a
+      // list from before the series' language changed still offers one. Its card says so, naming both languages, and
+      // offers what has both: that language as an edition. Reintroduce by toasting it like any refusal: "Find missing
+      // offers no edition" in editions.test.ts.
+      else if (ed) setEdOffer({ ...ed, source: c.source, message: msgOf(e, tr('That source is in another language than this series')) });
       else toast(msgOf(e, tr('Could not follow that source.')), 'error');
       return false;
     } finally {
@@ -302,6 +319,19 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       setBusy(false);
     }
   };
+
+  /** Under a card whose follow was refused for its language: the server's sentence, and "Add it as an edition". */
+  const languageOffer = (c: Candidate) => edOffer?.source === c.source && (
+    <div className="mt-2" data-edition-offer={c.source}>
+      <p dir="auto" className="text-xs leading-relaxed text-amber-300">{edOffer.message}</p>
+      {onAddEdition && (
+        <button type="button" onClick={() => onAddEdition({ of: edOffer.of, lang: edOffer.lang, source: edOffer.source })}
+          className="btn-key mt-2" data-add-edition={c.source}>
+          {tr('Add it as an edition')}
+        </button>
+      )}
+    </div>
+  );
 
   /** The follow button for one candidate, or nothing when this person cannot follow or the source cannot be followed. */
   const followButton = (c: Candidate) => {
@@ -452,6 +482,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                 )}
                 {/* Following alone, for what comes next without downloading anything now. */}
                 {followButton(c)}
+                {languageOffer(c)}
               </div>
             );
           })}
@@ -494,6 +525,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                     </div>
                   </div>
                   {followButton(c)}
+                  {languageOffer(c)}
                 </div>
               ))}
             </div>

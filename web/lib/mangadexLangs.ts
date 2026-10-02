@@ -3,6 +3,16 @@
 import { mangadexSourceId, type ProviderGroup } from './providerGroups';
 
 /**
+ * Admin -> Providers at the MangaDex card, its languages unfolded (v0.52.0): where the add dialog's "Turn on more
+ * MangaDex languages" goes, from an edition with no source in another language yet. `card=` as Profile's
+ * `?tab=Connections&card=tracking` is.
+ */
+export const MANGADEX_LANGUAGES_HREF = '/admin/?tab=Providers&card=mangadex';
+
+/** Whether the address asks for the MangaDex card with its languages unfolded (MANGADEX_LANGUAGES_HREF). */
+export const opensMangadexLanguages = (params: { get(name: string): string | null }): boolean => params.get('card') === 'mangadex';
+
+/**
  * The languages besides English after one tap on `code`: on if it was off, off if it was on, in the picker's order
  * (the server's, MANGADEX_LANGS) however the taps came. English is always on and never in the list.
  */

@@ -26,6 +26,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const ADMIN = 'mdl-admin';
 const SERIES = 's_mdl_es';
+const EN_SERIES = 's_mdl_en';
 
 let q: any;
 let app: any;
@@ -71,7 +72,7 @@ after(async () => {
   if (!DSN) return;
   await app?.close();
   await q(`UPDATE server_settings SET mangadex_langs = '[]'::jsonb, unstated_lang = 'en' WHERE id = 1`).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = $1', [SERIES]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[SERIES, EN_SERIES]]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   const { setUnstatedLang } = await import('../src/lib/lang');
   setUnstatedLang('en');
@@ -158,4 +159,52 @@ test("Health says a series' MangaDex language is switched off, and where to swit
   // Switched back on, it updates again: nothing frozen.
   await patch({ mangadexLangs: ['es-419'] });
   assert.equal((await frozenSeries()).items.some((i: any) => i.seriesId === SERIES), false, 'switched back on, it is still frozen');
+});
+
+test("an edition's languages list MangaDex in a language once it is on, and its search asks MangaDex in that language", { skip }, async () => {
+  // Where #123 meets #72 (v0.52.0): the add dialog's "Which language?" is GET /api/sources/edition-candidates, the
+  // sources in each language the work does not hold, read from the live registry -- so MangaDex in Spanish is a row
+  // the moment it is switched on, and the search in it asks MangaDex for Spanish titles only. Reintroduce by
+  // declaring no language on MangaDex's other languages (`lang: app` in makeMangadex): "MangaDex (ES-419) is not
+  // offered in Spanish" fails, the source sitting under "Sources that do not say their language".
+  const { _setMangadexPacing, _resetMangadexLimiter } = await import('../src/lib/sources/mangadex');
+  await patch({ mangadexLangs: [] });
+  await q('DELETE FROM lib_series WHERE id = $1', [EN_SERIES]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id, auto_update)
+           VALUES ($1,'MangaDex','Zzz Edition Tale','MangaDex/Zzz Edition Tale',3,'mangadex','md-en-1',true)`, [EN_SERIES]);
+  const languages = async () => {
+    const r = await app.inject({ method: 'GET', url: `/api/sources/edition-candidates?seriesId=${EN_SERIES}`, headers });
+    assert.equal(r.statusCode, 200, r.body);
+    return r.json();
+  };
+  const before = await languages();
+  assert.deepEqual(before.held, [{ seriesId: EN_SERIES, lang: 'en' }]);
+  assert.ok(!before.languages.some((l: any) => l.lang === 'es-419'), 'a language that is off is offered');
+
+  await patch({ mangadexLangs: ['es-419'] });
+  const after = await languages();
+  assert.deepEqual(after.languages.find((l: any) => l.lang === 'es-419')?.sources, [{ id: 'mangadex-es-419', name: 'MangaDex (ES-419)' }],
+    'MangaDex (ES-419) is not offered in Spanish');
+  assert.ok(!after.languages.some((l: any) => l.lang === 'en'), "the series' own language is offered as another");
+
+  const asked: string[] = [];
+  const realFetch = globalThis.fetch;
+  _setMangadexPacing({ apiGapMs: 0 });
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = String(input?.url ?? input);
+    if (new URL(url).host !== 'api.mangadex.org') return realFetch(input, init);
+    asked.push(url);
+    return new Response(JSON.stringify({ data: [{ id: 'md-es-1', type: 'manga', attributes: { title: { en: 'Zzz Edition Tale' } }, relationships: [] }] }),
+      { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const r = await app.inject({ method: 'GET', url: `/api/sources/edition-candidates?seriesId=${EN_SERIES}&lang=es-419`, headers });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(r.json().providers.map((p: any) => [p.source, p.sourceId, p.lang]), [['mangadex-es-419', 'md-es-1', 'es-419']]);
+    assert.ok(asked.length > 0 && asked.every((u) => u.includes('availableTranslatedLanguage[]=es-la')), `MangaDex was not asked in Spanish: ${asked.join(' ')}`);
+  } finally {
+    globalThis.fetch = realFetch;
+    _setMangadexPacing(null);
+    _resetMangadexLimiter();
+  }
 });

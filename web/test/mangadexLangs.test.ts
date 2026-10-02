@@ -3,7 +3,9 @@
 // (components/MangadexCard.tsx) only wires these to its chips; the server half is bff/test/mangadexLangs.int.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { offCost, serial, toggleLang } from '../lib/mangadexLangs';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { MANGADEX_LANGUAGES_HREF, offCost, opensMangadexLanguages, serial, toggleLang } from '../lib/mangadexLangs';
 import { groupProviders, type ProviderSrc } from '../lib/providerGroups';
 
 const AVAILABLE = ['en', 'es-419', 'es', 'pt-BR', 'pt', 'fr', 'zh-Hans', 'zh-Hant'];
@@ -48,4 +50,23 @@ test('quick taps are saved one at a time, in tap order, and a refused save does 
   assert.equal(await b, 'b');
   assert.equal(await c, 'c');
   assert.deepEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+});
+
+test("the add dialog's link opens Providers at the MangaDex card, its languages unfolded (v0.52.0)", () => {
+  // An edition with no source in another language says "Turn on more MangaDex languages in Admin → Providers", and
+  // the link lands on the card's language chips, not at the top of a long tab. Reintroduce the bare
+  // `/admin/?tab=Providers`: "the link does not name the card" fails; start the card folded: "the card does not
+  // unfold" fails.
+  const at = new URL(MANGADEX_LANGUAGES_HREF, 'http://x');
+  assert.equal(at.pathname, '/admin/');
+  assert.equal(at.searchParams.get('tab'), 'Providers');
+  assert.equal(opensMangadexLanguages(at.searchParams), true);
+  assert.equal(opensMangadexLanguages(new URLSearchParams('tab=Providers')), false, 'every visit to Providers unfolds it');
+  const src = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
+  const dialog = src('components/AddSeriesDialog.tsx');
+  assert.equal(dialog.match(/<Link href=\{MANGADEX_LANGUAGES_HREF\}/g)?.length, 2, 'the link does not name the card (none found, or one under the list)');
+  assert.doesNotMatch(dialog, /href="\/admin\/\?tab=Providers"/, 'the link does not name the card');
+  const card = src('components/MangadexCard.tsx');
+  assert.match(card, /const \[arrived\] = useState\(\(\) => opensMangadexLanguages\(params\)\);\s*const \[open, setOpen\] = useState\(arrived\);/, 'the card does not unfold');
+  assert.match(card, /if \(arrived\) cardRef\.current\?\.scrollIntoView\(/, 'the card is not brought on screen');
 });

@@ -9508,7 +9508,7 @@ paths:
         "404":
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
-          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series); `already_followed`; `full` (the series follows two other sources)"
+          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series, with `edition: {of, lang}`, the add route's edition to add instead); `already_followed`; `full` (the series follows two other sources)"
   /api/admin/sources/find/{runId}/dismiss:
     post:
       tags:

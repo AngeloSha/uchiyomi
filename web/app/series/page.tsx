@@ -1674,11 +1674,13 @@ function SeriesInner() {
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
-  // A language edition (v0.52.0): the add dialog's "Add a language", and the unlink an admin confirms.
-  const [addingLang, setAddingLang] = useState(false);
+  // A language edition (v0.52.0): the add dialog's "Add a language", and the unlink an admin confirms. `lang` and
+  // `source` when a follow was refused for its language ("Add it as an edition"): the dialog opens on that language.
+  const [addingLang, setAddingLang] = useState<{ lang?: string; source?: string } | null>(null);
   const [unlinking, setUnlinking] = useState<EditionRow | null>(null);
   const editions = (series?.edition?.editions?.length ?? 0) > 1 ? series!.edition!.editions! : null;
-  const addLanguage = canDownload(user) ? () => setAddingLang(true) : undefined;
+  const addLanguage = canDownload(user) ? () => setAddingLang({}) : undefined;
+  const addEdition = canDownload(user) ? (o: { lang: string; source: string }) => setAddingLang({ lang: o.lang, source: o.source }) : undefined;
   const unlink = async () => {
     if (!unlinking) return;
     setBusyAdmin(true);
@@ -2090,7 +2092,8 @@ function SeriesInner() {
           onExplain={() => { setSourcesOpen(false); setExplaining(true); }}
           onFindMissing={() => { setSourcesOpen(false); setFindingMissing(true); }}
           // v0.52.0, the Languages section. Each closes the sheet first: a dialog opened under a Sheet cannot be tapped.
-          onAddLanguage={addLanguage ? () => { setSourcesOpen(false); setAddingLang(true); } : undefined}
+          onAddLanguage={addLanguage ? () => { setSourcesOpen(false); setAddingLang({}); } : undefined}
+          onAddEdition={addEdition ? (o) => { setSourcesOpen(false); addEdition(o); } : undefined}
           onChangeLanguage={isAdmin ? () => { setSourcesOpen(false); setEditing(true); } : undefined}
           onUnlink={isAdmin ? (e) => { setSourcesOpen(false); setUnlinking(e); } : undefined}
           onShowChapter={showChapter} />
@@ -2159,8 +2162,8 @@ function SeriesInner() {
       )}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
       {addingLang && series && (
-        <AddSeriesDialog seed={{ kind: 'edition', of: id, title }} sources={[]} mayFollow={isAdmin}
-          onClose={() => setAddingLang(false)}
+        <AddSeriesDialog seed={{ kind: 'edition', of: id, title, ...addingLang }} sources={[]} mayFollow={isAdmin}
+          onClose={() => setAddingLang(null)}
           // The new edition is in the work at once on a "Nothing yet" add, and once its first chapter lands otherwise.
           onAdded={() => { for (const k of [['series', id], ['library'], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k }); }} />
       )}
@@ -2174,7 +2177,10 @@ function SeriesInner() {
           onClose={() => setUnlinking(null)}
         />
       )}
-      {findingMissing && <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)} />}
+      {findingMissing && (
+        <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)}
+          onAddEdition={addEdition ? (o) => { setFindingMissing(false); addEdition(o); } : undefined} />
+      )}
       {Toolbar}
       {confirming === 'delete' && (
         <ConfirmDialog

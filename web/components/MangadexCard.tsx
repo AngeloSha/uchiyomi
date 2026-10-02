@@ -11,7 +11,9 @@
 // languages themselves fold behind a "Languages · …  Manage" strip, the Extensions tab's pattern: 26 of them are a
 // wall of chips on a phone for a setting most servers change once. Each tap is one PATCH of the whole list, saved as
 // it is tapped -- no draft, no Save -- and "Saving… / ✓ Saved" says so beside the chips.
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useReducedMotion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
@@ -20,7 +22,8 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OnBody } from '@/components/ui';
 import { Row, SaveState, useAutosave } from '@/components/settings';
 import { mangadexSourceId, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
-import { offCost, serial, toggleLang } from '@/lib/mangadexLangs';
+import { offCost, opensMangadexLanguages, serial, toggleLang } from '@/lib/mangadexLangs';
+import { useReduceEffects } from '@/lib/effects';
 import type { ProviderStatus } from '@/lib/status';
 import type { LanguageSettings } from '@/lib/types';
 
@@ -52,7 +55,21 @@ export function MangadexCard({ group, row, mark, onSaved }: {
   const qc = useQueryClient();
   const { data } = useLanguageSettings();
   const available = data?.mangadex_available ?? [];
-  const [open, setOpen] = useState(false);
+  // Arrived by the add dialog's "Turn on more MangaDex languages" (`?card=mangadex`, v0.52.0): the languages unfolded
+  // and the card on screen, once -- read in a lazy initialiser, as every address the console reads is
+  // (lib/useTabParam.ts), so a refetch or a later tap never pulls the page back. Reintroduce by starting folded:
+  // "the card does not unfold" in mangadexLangs.test.ts.
+  const params = useSearchParams();
+  const [arrived] = useState(() => opensMangadexLanguages(params));
+  const [open, setOpen] = useState(arrived);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const plain = useReduceEffects();
+  const still = useReducedMotion();
+  useEffect(() => {
+    if (arrived) cardRef.current?.scrollIntoView({ block: 'start', behavior: plain || still ? 'auto' : 'smooth' });
+    // Once, on arrival: the motion settings changing afterwards must not scroll the page again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrived]);
   const [confirm, setConfirm] = useState<{ code: string; name: string; used: number } | null>(null);
   const { status, run } = useAutosave();
   // While taps are being saved, the list they make; null otherwise, and the server's list shows. Each tap toggles
@@ -95,7 +112,7 @@ export function MangadexCard({ group, row, mark, onSaved }: {
   const panel = useId();
 
   return (
-    <div data-source-card="mangadex" className="card grad-border wide p-4">
+    <div ref={cardRef} data-source-card="mangadex" className="card grad-border wide scroll-mt-4 p-4 lg:scroll-mt-20">
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 text-sm text-fog-100">
           MangaDex

@@ -3,8 +3,14 @@
 // and the reader's switch opens the same chapter in the other edition, or that edition's page at the chapter.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { editionChipLabels, editionNames, libraryCaption, readerTarget, languageChoices } from '../lib/editions';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { editionChipLabels, editionNames, editionOffer, libraryCaption, openingLanguage, readerTarget, languageChoices } from '../lib/editions';
 import type { EditionRow } from '../lib/types';
+
+/** A web file with its comments removed, so a comment that quotes the code does not pass a pin. */
+const code = (p: string): string => readFileSync(join(__dirname, '..', p), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 const NAMES: Record<string, string> = {
   en: 'English', es: 'Spanish', 'es-419': 'Latin American Spanish', 'pt-BR': 'Brazilian Portuguese', pt: 'Portuguese',
@@ -51,4 +57,43 @@ test('the language picker offers MangaDex\'s languages and whatever is already i
   assert.equal(list.filter((l) => l === 'en').length, 1, 'a code is offered once');
   const named = list.map(name);
   assert.deepEqual(named, [...named].sort((a, b) => a.localeCompare(b)), 'sorted by name');
+});
+
+test('a follow refused for its language offers the edition: Find missing, the review, and the dialog on that language', () => {
+  // Where #123's guard meets #72's editions (v0.52.0): the manual follow and a Review-first match's Follow answer 409
+  // language_differs with the add route's `edition: {of, lang}`, and each surface offers "Add it as an edition",
+  // which opens the add dialog on that source's language.
+  const refusal = (body: unknown) => ({ body: JSON.stringify(body) });
+  assert.deepEqual(editionOffer(refusal({ error: 'language_differs', edition: { of: 's1', lang: 'es-419' } })), { of: 's1', lang: 'es-419' });
+  assert.equal(editionOffer(refusal({ error: 'already_followed', edition: { of: 's1', lang: 'es-419' } })), null, 'another refusal is no offer');
+  assert.equal(editionOffer(refusal({ error: 'language_differs' })), null, 'an older server sends no edition');
+  assert.equal(editionOffer({ body: '<html>' }), null);
+  // The dialog opens on the refused source's row: its language, or the sources that do not say theirs; else the
+  // language named, when offered; else the list.
+  const cands = { languages: [{ lang: 'es-419', sources: [{ id: 'mangadex-es-419' }] }, { lang: 'fr', sources: [{ id: 'fr-site' }] }], unstated: [{ id: 'site' }] };
+  assert.equal(openingLanguage(cands, { lang: 'es', source: 'mangadex-es-419' }), 'es-419', 'the source\'s own row');
+  assert.equal(openingLanguage(cands, { lang: 'en', source: 'site' }), 'unstated', 'a source that does not say its language');
+  assert.equal(openingLanguage(cands, { lang: 'fr' }), 'fr');
+  assert.equal(openingLanguage(cands, { lang: 'de' }), null, 'a language no source offers opens on the list');
+  assert.equal(openingLanguage(undefined, { lang: 'fr' }), null);
+
+  // Reintroduce by toasting the refusal like any other in Find missing chapters' follow: "Find missing offers no
+  // edition" fails.
+  const missing = code('components/FindMissingDialog.tsx');
+  assert.match(missing, /else if \(ed\) setEdOffer\(\{ \.\.\.ed, source: c\.source, message: msgOf\(e, /, 'Find missing offers no edition');
+  assert.match(missing, /onClick=\{\(\) => onAddEdition\(\{ of: edOffer\.of, lang: edOffer\.lang, source: edOffer\.source \}\)\}/);
+  assert.equal(missing.match(/\{languageOffer\(c\)\}/g)?.length, 2, 'both cards that follow say it: the ones that fill and "Could also be followed"');
+  // The review: the refusal's offer kept beside its words, and the key under them.
+  const find = code('components/FindSources.tsx');
+  assert.match(find, /offer: editionOffer\(e\),/, 'the review drops the offer');
+  assert.match(find, /\{offer && !p\.state && act\.onAddEdition && \(/);
+  assert.match(find, /seed=\{\{ kind: 'edition', of: adding\.of, title: adding\.title, lang: adding\.lang, source: adding\.source \}\}/, 'the results sheet does not open the dialog');
+  // The series page: the Sources sheet's review and Find missing open the page's own dialog, on the language.
+  const page = code('app/series/page.tsx');
+  assert.match(page, /onAddEdition=\{addEdition \? \(o\) => \{ setFindingMissing\(false\); addEdition\(o\); \} : undefined\}/);
+  assert.match(page, /onAddEdition=\{addEdition \? \(o\) => \{ setSourcesOpen\(false\); addEdition\(o\); \} : undefined\}/);
+  assert.match(page, /seed=\{\{ kind: 'edition', of: id, title, \.\.\.addingLang \}\}/);
+  // And the dialog starts there, until the person picks another.
+  assert.match(code('components/AddSeriesDialog.tsx'), /const edPick = edChoice !== undefined \? edChoice : edSeed \? openingLanguage\(candQ\.data, edSeed\) : null;/,
+    'the dialog does not open on the language');
 });

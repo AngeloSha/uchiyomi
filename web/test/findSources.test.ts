@@ -809,5 +809,5 @@ test('the start dialog remembers the last choice on this device; storage that th
     "Health's dialog does not start the run it chose");
   const sheet = slice(code(read('components/SourcesSheet.tsx')), 'function FindMore(', 'function OtherNames(');
   assert.match(sheet, /<FindModeChoice review=\{review\} onChange=\{setReview\} \/>/, 'the Sources sheet does not offer the choice');
-  assert.match(sheet, /\{mineRow && run && <SeriesReview runId=\{run\.id\} r=\{mineRow\} onFollowed=\{onFound\} \/>\}/, "the sheet does not show its series' matches");
+  assert.match(sheet, /\{mineRow && run && <SeriesReview runId=\{run\.id\} r=\{mineRow\} onFollowed=\{onFound\} onAddEdition=\{onAddEdition\} \/>\}/, "the sheet does not show its series' matches");
 });

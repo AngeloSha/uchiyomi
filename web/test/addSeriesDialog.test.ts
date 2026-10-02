@@ -224,7 +224,7 @@ test('a provider in a language the library does not hold the title in is added a
   assert.match(src, /if \(body\.error === 'duplicate' && body\.edition\?\.of\) \{\s*(\/\/[^\n]*\s*)*setOffer\(body\.edition\);/, "the server's offer is not taken");
   assert.match(src, /tr\('It is in another language'\)/, 'the duplicate prompt has no way to say it is another language');
   // The series page's "Add a language" starts from the languages, and one with nothing to offer says so.
-  assert.match(src, /\| \{ kind: 'edition'; of: string; title: string \};/, 'there is no edition seed');
+  assert.match(src, /\| \{ kind: 'edition'; of: string; title: string; lang\?: string; source\?: string \};/, 'there is no edition seed');
   assert.match(src, /tr\('None of your sources is in another language yet\.'\)/);
 });
 
@@ -236,4 +236,15 @@ test('another language\'s provider is never offered as a source to follow too (v
   const memo = src.slice(src.indexOf('const others = useMemo('), src.indexOf('}, [offered, picked]);'));
   assert.match(memo, /if \(p\.lang && picked\.lang && baseOf\(p\.lang\) !== baseOf\(picked\.lang\)\) continue;/,
     'another language is offered to follow too');
+});
+
+test('the edition\'s language list is asked again each time the dialog opens (v0.52.0)', () => {
+  // Where #72 meets #123: "None of your sources is in another language yet" links to Admin → Providers, where a MangaDex
+  // language goes on in one tap and becomes a source at once (bff mangadexLangs.int: the edition's languages list it).
+  // Back on the series page within the minute, the list was the cached "none". Reintroduce by dropping
+  // `refetchOnMount: 'always'`: "the language list is asked again" fails.
+  const src = code(read(DIALOG));
+  const cand = src.slice(src.indexOf('const candQ = useQuery({'), src.indexOf('const [edChoice, setEdPick]'));
+  assert.match(cand, /queryKey: \['edition-candidates', edSeed\?\.of\],/);
+  assert.match(cand, /refetchOnMount: 'always'/, 'the language list is asked again');
 });

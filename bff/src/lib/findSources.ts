@@ -72,7 +72,7 @@ import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { logAudit } from './audit';
 import { seriesVisible, visibleToAll, type ViewCtx } from './visibility';
-import { followGuard, seriesLanguage } from './seriesLang';
+import { followGuard, seriesLanguage, sourceLanguage } from './seriesLang';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -572,6 +572,9 @@ function scheduleFindRefresh(ids: readonly string[]): void {
 export type DecideRefusal =
   | 'not_found' | 'decided' | 'posting_order' | 'source_unavailable' | 'language_differs' | 'already_followed' | 'full';
 
+/** A refusal, with the proposal's state when it was decided already, and the edition to add when it is the language. */
+export type DecideRefused = { refused: DecideRefusal; state?: FindProposal['state']; edition?: { of: string; lang: string } };
+
 /** One decision at a time in this process: the check, the follow and the mark of one never interleave another's. */
 let deciding: Promise<unknown> = Promise.resolve();
 
@@ -587,7 +590,8 @@ let deciding: Promise<unknown> = Promise.resolve();
  *   - `source_unavailable`: the source is no longer loaded, is switched off, is the series' main source now, or is
  *     one the series may not reach (an adult source only for an adult series: the run's own rule);
  *   - `language_differs`: the source is in another language than the series (v0.52.0, #123) -- a run kept from
- *     before the guard, or a series whose language an admin has set since;
+ *     before the guard, or a series whose language an admin has set since -- with `edition`, the add route's own
+ *     `{of, lang}`: what has both is that language as an edition, as the manual follow's refusal says;
  *   - `already_followed`: the series follows that source already. INSERT-only, PR #133's rule: a run is kept for
  *     weeks, and a source followed another way since may point at another entry, which a stale proposal must not
  *     re-point;
@@ -596,7 +600,7 @@ let deciding: Promise<unknown> = Promise.resolve();
  */
 export function decideProposal(
   runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
-): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+): Promise<{ result: FindResult } | DecideRefused> {
   const next = deciding.then(() => decide(runId, seriesId, sourceId, decision, userId, ctx));
   deciding = next.catch(() => {});
   return next;
@@ -604,7 +608,7 @@ export function decideProposal(
 
 async function decide(
   runId: string, seriesId: string, sourceId: string, decision: 'follow' | 'dismiss', userId: string, ctx: ViewCtx,
-): Promise<{ result: FindResult } | { refused: DecideRefusal; state?: FindProposal['state'] }> {
+): Promise<{ result: FindResult } | DecideRefused> {
   const find = (results: FindResult[] | undefined) => {
     const r = results?.find((x) => x.seriesId === seriesId);
     return { r, p: r?.proposals?.find((x) => x.sourceId === sourceId) };
@@ -625,8 +629,9 @@ async function decide(
     const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId));
     if (!getSource(sourceId) || h?.disabled || series.source_id === sourceId || !allowed(sourceId)) return { refused: 'source_unavailable' };
     // The same-language guard, again at the follow: a review can wait for weeks. Reintroduce by dropping it: "a
-    // proposal in another language is refused" in languageGuard.int.test.ts follows it.
-    if (!(await followGuard(seriesId))(sourceId)) return { refused: 'language_differs' };
+    // proposal in another language is refused" in languageGuard.int.test.ts follows it. The refusal carries the
+    // edition to add instead, which the web offers as a key beside it.
+    if (!(await followGuard(seriesId))(sourceId)) return { refused: 'language_differs', edition: { of: seriesId, lang: sourceLanguage(sourceId) } };
     if (await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId])) return { refused: 'already_followed' };
     const written = await followJudged(seriesId,
       { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },

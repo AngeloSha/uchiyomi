@@ -62,6 +62,40 @@ export function readerTarget(
     : { kind: 'series', href: `/series/?id=${encodeURIComponent(seriesId)}&ch=${Math.floor(number)}` };
 }
 
+/** A follow refused for its language, as the add route takes an edition: the series it joins, and the language. */
+export interface EditionOffer { of: string; lang: string }
+
+/**
+ * The edition a refused follow offers instead (v0.52.0, where #123's guard meets #72's editions): 409
+ * `language_differs` from the manual follow (Find missing chapters) and from a Review-first match's Follow, both
+ * with the add route's own `edition: {of, lang}`. Null for any other answer, or a body that is not JSON.
+ */
+export function editionOffer(e: unknown): EditionOffer | null {
+  let j: { error?: unknown; edition?: { of?: unknown; lang?: unknown } } | null = null;
+  try { j = JSON.parse(String((e as { body?: unknown } | null)?.body ?? '')); } catch { return null; }
+  const ed = j?.error === 'language_differs' ? j.edition : null;
+  return ed && typeof ed.of === 'string' && ed.of && typeof ed.lang === 'string' && ed.lang ? { of: ed.of, lang: ed.lang } : null;
+}
+
+/**
+ * The language "Add a language" opens on when it was asked for one (an edition offer): the row holding the refused
+ * source -- its own language, or `unstated` for the sources that do not say theirs, which the server takes to be in
+ * the unstated language -- else the language the server named, when the sources offer it. Null opens on the list, as
+ * the series page's "Add a language" does, and so does a language the work holds already.
+ */
+export function openingLanguage(
+  c: { languages: ReadonlyArray<{ lang: string; sources: ReadonlyArray<{ id: string }> }>; unstated: ReadonlyArray<{ id: string }> } | undefined,
+  want: { lang?: string; source?: string },
+): string | null {
+  if (!c) return null;
+  if (want.source) {
+    const row = c.languages.find((l) => l.sources.some((s) => s.id === want.source));
+    if (row) return row.lang;
+    if (c.unstated.some((s) => s.id === want.source)) return 'unstated';
+  }
+  return want.lang && c.languages.some((l) => l.lang === want.lang) ? want.lang : null;
+}
+
 /**
  * The languages a picker offers, sorted by name in the reader's language: EDITION_LANGS and whatever is already in
  * play (`extra`: the source's own code, the series' current one), each once.

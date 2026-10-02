@@ -1757,7 +1757,8 @@ source, reachable for the series' rating, and not followed already -- never re-p
 follower cap with the admin as its author, its listing refreshed, and audited as `series.follow_source` with `via:
 find_review`; it answers `{result}`, the series' result as it now reads, or **404** `not_found`, **409** `decided`
 (with `state`), `posting_order`, `source_unavailable`, `language_differs` (since v0.52.0: the source is in another
-language than the series), `already_followed` or `full`. `POST
+language than the series, with `edition: {of, lang}`, the add route's edition to add instead, as the manual follow
+answers it), `already_followed` or `full`. `POST
 /api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
 `dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
 

@@ -205,6 +205,9 @@ test('a review\'s match in another language is refused at the follow, by name', 
   // Reintroduce by dropping the guard in decideProposal: 200, and the series follows the Spanish source.
   assert.equal(r.statusCode, 409, r.body);
   assert.equal(r.json().error, 'language_differs');
+  // What has both is an edition, as the manual follow's refusal says (the web offers "Add it as an edition" from it).
+  // Reintroduce by refusing without `edition`: the review's Follow has no way on.
+  assert.deepEqual(r.json().edition, { of: S('review'), lang: 'es-419' }, 'the add route\'s own edition shape');
   assert.deepEqual(await followed('review'), []);
 });
 

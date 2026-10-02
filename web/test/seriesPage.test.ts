@@ -335,5 +335,5 @@ test('a work in two languages switches edition under the title, on the phone and
   assert.match(page, /<div role="group" aria-label=\{tr\('Editions'\)\}/, 'the editions are not one labelled group');
   assert.match(page, /\{editions && <EditionChips editions=\{editions\} onAdd=\{addLanguage\} className="pointer-events-auto mt-3" \/>\}/, 'the chips over the banner take no taps');
   assert.match(page, /\{editions && <EditionChips editions=\{editions\} onAdd=\{addLanguage\} className="mt-3 lg:hidden" \/>\}/, 'the phone has no switcher');
-  assert.match(page, /seed=\{\{ kind: 'edition', of: id, title \}\}/, '"+ Language" does not open the add dialog for this series');
+  assert.match(page, /seed=\{\{ kind: 'edition', of: id, title, \.\.\.addingLang \}\}/, '"+ Language" does not open the add dialog for this series');
 });

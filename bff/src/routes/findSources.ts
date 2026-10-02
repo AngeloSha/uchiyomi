@@ -181,7 +181,8 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
    * A review-first run's proposal, decided (v0.51.0): follow it -- checked again, then the same write as every follow,
    * under the follower cap -- or dismiss it. Body `{seriesId, sourceId}`; the rest is the run's own record. 200 with
    * the series' result as it now reads; 404 `not_found`; 409 `decided` (with `state`), `posting_order`,
-   * `source_unavailable`, `language_differs`, `already_followed` or `full` (lib/findSources.ts decideProposal says each).
+   * `source_unavailable`, `language_differs` (with `edition: {of, lang}`, v0.52.0), `already_followed` or `full`
+   * (lib/findSources.ts decideProposal says each).
    */
   const decision = (kind: 'follow' | 'dismiss') => async (req: FastifyRequest, reply: FastifyReply) => {
     const { runId } = req.params as { runId: string };
@@ -190,7 +191,7 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
     const out = await decideProposal(runId, b.data.seriesId, b.data.sourceId, kind, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)));
     if ('refused' in out) {
       const [code, message] = DECLINED[out.refused];
-      return reply.code(code).send({ error: out.refused, message, ...(out.state ? { state: out.state } : {}) });
+      return reply.code(code).send({ error: out.refused, message, ...(out.state ? { state: out.state } : {}), ...(out.edition ? { edition: out.edition } : {}) });
     }
     return { result: shown(out.result, await listable(req, [out.result.seriesId])) };
   };

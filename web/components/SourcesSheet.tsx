@@ -35,7 +35,7 @@ import {
   altKey, altOriginLabel, altRefusal, findGate, findReviewFirst, findSlotState, seriesOutcome, setFindReviewFirst, type AltTitle,
 } from '@/lib/findSources';
 import { useFindRuns } from '@/lib/useFindRun';
-import { FindModeChoice, SeriesReview } from '@/components/FindSources';
+import { FindModeChoice, SeriesReview, type EditionAsk } from '@/components/FindSources';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -153,7 +153,7 @@ const codeOf = (e: unknown): string | null => {
  * inline above the key (a dialog opened from a Sheet would sit under it), on the admin's last choice; a review's
  * matches for this series then show under the key, each with Follow and Skip.
  */
-function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
+function FindMore({ id, onFound, onAddEdition }: { id: string; onFound: () => void; onAddEdition?: (ask: EditionAsk) => void }) {
   const fr = useFindRuns({ onEnded: onFound });
   const [review, setReview] = useState(findReviewFirst);
   const slot = fr.slots.series;
@@ -180,7 +180,7 @@ function FindMore({ id, onFound }: { id: string; onFound: () => void }) {
       <div className="mb-2"><FindModeChoice review={review} onChange={setReview} /></div>
       <ActionKeys actions={[spec]} />
       <ActionStatus state={state} />
-      {mineRow && run && <SeriesReview runId={run.id} r={mineRow} onFollowed={onFound} />}
+      {mineRow && run && <SeriesReview runId={run.id} r={mineRow} onFollowed={onFound} onAddEdition={onAddEdition} />}
     </div>
   );
 }
@@ -459,7 +459,7 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
  * turn "follows the defaults" into a per-series copy of them on the first tap -- a copy that then stops
  * following when the defaults change. Blank patience means the same thing for the same reason.
  */
-export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter, onAddLanguage, onChangeLanguage, onUnlink }: {
+export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter, onAddLanguage, onChangeLanguage, onUnlink, onAddEdition }: {
   id: string;
   series: Series | undefined;
   groups: GroupStat[];
@@ -491,6 +491,8 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   onAddLanguage?: () => void;
   onChangeLanguage?: () => void;
   onUnlink?: (e: EditionRow) => void;
+  /** A review's match refused for its language (v0.52.0): "Add it as an edition", on that source's language. */
+  onAddEdition?: (ask: EditionAsk) => void;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -780,7 +782,8 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
           disk may gain its first one this way, and the server says so when there is nothing it may search for. */}
       {adminAccount && <OtherNames id={id} />}
       {adminAccount && (
-        <FindMore id={id} onFound={() => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions', 'series-alt-titles']) qc.invalidateQueries({ queryKey: [k, id] }); }} />
+        <FindMore id={id} onAddEdition={onAddEdition}
+          onFound={() => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions', 'series-alt-titles']) qc.invalidateQueries({ queryKey: [k, id] }); }} />
       )}
     </Sheet>
   );

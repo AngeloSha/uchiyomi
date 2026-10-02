@@ -28,7 +28,8 @@ import { useServerDownloads } from '@/lib/useServerDownloads';
 import { useAuth } from '@/lib/auth';
 import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
-import { baseOf, codeLabel, languageChoices } from '@/lib/editions';
+import { baseOf, codeLabel, languageChoices, openingLanguage } from '@/lib/editions';
+import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
 
 export interface Provider {
   source: string; name: string; sourceId: string; title: string; coverUrl?: string;
@@ -98,13 +99,14 @@ interface AddAnswer {
 /**
  * What opened the dialog. `library` (v0.52.0): what the library holds of the card's title, when it holds it in
  * another language than every provider's -- the dialog offers the new language as an edition. `edition`: the series
- * page's "Add a language", which starts from the languages the sources offer rather than from a title.
+ * page's "Add a language", which starts from the languages the sources offer rather than from a title; with `lang`
+ * and `source`, a follow the language guard refused ("Add it as an edition"), which opens on that source's language.
  */
 export type AddSeed =
   | { kind: 'trending'; title: string }
   | { kind: 'result'; provider: Provider; library?: HeldTitle }
   | { kind: 'group'; title: string; providers: Provider[]; library?: HeldTitle }
-  | { kind: 'edition'; of: string; title: string };
+  | { kind: 'edition'; of: string; title: string; lang?: string; source?: string };
 
 /**
  * Per-device memory of the "Also check the other sources" switch. A device setting, not an account one: it
@@ -248,13 +250,21 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // (`library`); and the server, answering a duplicate whose source is in a language the library does not hold the
   // title in, brings its offer.
   const edSeed = seed.kind === 'edition' ? seed : null;
-  /** The edition seed's language: a code, or `unstated` for the sources that do not say theirs. */
-  const [edPick, setEdPick] = useState<string | null>(null);
+  // The languages the sources offer, asked again each time the dialog opens: a MangaDex language switched on in
+  // Admin -> Providers a minute ago (its "Turn on more" link below) is a row the next time, not after a reload.
+  // Reintroduce by dropping `refetchOnMount`: "the language list is asked again" in addSeriesDialog.test.ts fails.
   const candQ = useQuery({
     queryKey: ['edition-candidates', edSeed?.of],
     queryFn: () => api<EditionCandidates>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}`),
-    enabled: !!edSeed, staleTime: 60_000, retry: false,
+    enabled: !!edSeed, staleTime: 60_000, refetchOnMount: 'always', retry: false,
   });
+  /**
+   * The edition seed's language: a code, `unstated` for the sources that do not say theirs, or null for the list.
+   * Until the person chooses, the one the dialog was opened on (a follow refused for its language, lib/editions.ts
+   * openingLanguage) -- "Other languages" still goes back to the list.
+   */
+  const [edChoice, setEdPick] = useState<string | null | undefined>(undefined);
+  const edPick = edChoice !== undefined ? edChoice : edSeed ? openingLanguage(candQ.data, edSeed) : null;
   // The search in that language: the work's title and other names, on just those sources (the server's budget).
   const edSearch = useQuery({
     queryKey: ['edition-candidates', edSeed?.of, edPick],
@@ -612,7 +622,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           <div className="py-6 text-center text-sm text-fog-500" data-edition-none>
             <p>{tr('None of your sources is in another language yet.')}</p>
             {/* MangaDex in another language is a switch away (Admin → Providers); a member is not sent to a page they cannot open. */}
-            {isAdmin && <Link href="/admin/?tab=Providers" className="mt-2 inline-block text-xs text-accent hover:underline">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-2 inline-block text-xs text-accent hover:underline">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
           </div>
         ) : (
           <>
@@ -633,6 +643,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 </button>
               )}
             </div>
+            {/* The language wanted may be a MangaDex switch away, with others on already: an admin is told where. */}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-3 inline-block text-[11px] text-fog-500 hover:text-accent">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
           </>
         )}
       </Modal>
