@@ -1866,6 +1866,7 @@ not one origin: the URL on the wire is rebuilt from the configured engine base p
 and it is fetched only if it round-trips to exactly the origin and path the caller named, so no other path
 on the engine (and nothing on any other host) is ever fetched with the engine's credentials, and a redirect
 from it is refused rather than followed.
+
 **The automatic banner** (since v0.51.0). `GET /img/series/:id/hero[?ar=tall][&v=<seed>]` is a banner made from
 the series' own pages, for a series with no banner of its own: four crops from different chapters, side by side
 (1920x640 JPEG), or two by two with `ar=tall` (1080x1440). It is gated as the series' cover is, then answers **404**

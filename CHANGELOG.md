@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.51.0 — 2026-10-02
+
+**A series AniList has no banner for now gets one made from its own pages: four striking panels from different
+chapters, side by side, behind its title and in Home's carousel.** And Find other sources can show you each match
+beside your series before it follows anything, with **Follow all green** for the ones it would have followed anyway.
+That idea is **@TIGamingTV**'s, from issue [#132](https://github.com/AngeloSha/uchiyomi/issues/132) and pull request
+[#133](https://github.com/AngeloSha/uchiyomi/pull/133).
+
+### Hero banners made from a series' own pages
+
+The banner behind a series' title, on its page and in Home's carousel, is AniList's banner art or one an admin set.
+On the server this was built for, 84 of 283 series had one; the other 199 showed their cover over a blur of itself.
+
+- **Four panels from the series itself.** For a series with no banner of its own, the server reads pages from up to
+  eight chapters spread across the series, picks the four most striking crops, from four different chapters where
+  it can, and sets them side by side. It looks for colour and detail, and stays away from what makes a poor banner:
+  white gutters and speech bubbles (a crop more than 12 % paper white is never used), flat text boxes, lettering,
+  glare, and the top and bottom of a page, where watermarks and credits sit. A chapter's first and last two pages,
+  the credits and the "read it at" plugs, are never used, and a black-and-white manga is judged as one.
+- **Never for 18+.** No banner is made for a series rated 18+, by its scan or by an admin, in an 18+ library,
+  carrying one of the admin's 18+ genres, or from an adult source, whatever *Always show* says. A banner is shown,
+  unasked, to everyone who can open the series, and an explicit panel must never become one.
+- **A real banner always wins.** AniList's banner or an admin's shows as before, and an automatic one is only made
+  once the AniList lookup has found none.
+- **New banner.** Under *Edit details* on the series page, while its banner is an automatic one, an admin can press
+  **New banner** for other chapters and other pages. The new banner is made before it replaces the old one, so a
+  series whose other pages make nothing keeps the one it had.
+- **The tall frame on phones.** On a phone, Home's carousel is taller than it is wide, and a strip of four would show
+  the gap between the middle two panels and half of each. A phone gets the same four panels, two by two.
+- **When they are made.** In the background: 20 minutes after the server starts (10 in the desktop app), then daily,
+  up to 60 series a run, ten seconds apart and one at a time, standing aside for the sweep, a repair or the daily
+  source check. A series someone opens before then makes its own, waiting up to 15 seconds for its turn. Until a
+  banner is there, and for a series whose pages make none (not tried again for a week), the page looks as it did.
+
+### Review first, for Find other sources
+
+**@TIGamingTV** ([#132](https://github.com/AngeloSha/uchiyomi/issues/132)) confirms matches by eye: one of his other
+sources offered a match whose chapter count was exact and whose cover showed it was another series, and the automatic
+judgement would have followed it. His pull request [#133](https://github.com/AngeloSha/uchiyomi/pull/133) replaced
+automatic following with a review page; here the review is an option beside it, on the same search, with two of the
+pull request's rules.
+
+- **Follow automatically, or Review first.** Every place that starts Find other sources asks which: Health's source
+  row, the Library's **More**, and **Find more sources** in a series' *Sources & translations*. *Follow
+  automatically* is the default and works as before, and the choice you make is remembered on that device.
+- **To review.** A review-first search follows nothing. Its results list what it found under *To review*: for each
+  series, your cover beside each match's, with its title, its source, its chapter count and how the numbers line up
+  (*13 of our 14 chapters line up*, *We list 12 of its 14*), and **Follow** and **Skip**.
+- **Green and amber.** A green match is one an automatic search would have followed. An amber one says why it needs
+  a look first: it matched only under another name of the series, or a name matches exactly and the chapter numbers
+  do not line up. A title that merely contains yours, with numbers that do not line up, is the shape of a sequel or a
+  spin-off, and is not offered at all (#133's rule).
+- **Follow all green** follows every green match, one after the other, and leaves the amber ones to follow one at a
+  time. **Skip** is for good: a skipped match stays skipped.
+- **Checked again when you follow.** A review can wait, so a follow checks again that the series is not numbered by
+  posting order by now, and that the source is still loaded, switched on, not the series' main source and not
+  followed already. A source the series already follows another way is never re-pointed (#133's other
+  rule), and the cap on followed sources holds as for every follow.
+
+### Upgrading
+
+- **The database** gets one migration on first start, and it only adds a table: `series_hero` (each series' banner
+  seed, when its banner was made, and when a try last failed). v0.50.0 still starts on a migrated database and never
+  reads it, so going back is safe. The banners themselves are files in the image cache (`CACHE_DIR`), beside the
+  covers.
+- Nothing to change in compose files or settings, and no new environment variables.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET /img/series/:id/hero` is the automatic banner (`?ar=tall` for the two-by-two frame), gated as the series'
+    cover is, and **404** where there is none. Every series payload carries `autoHero`: `{seed}`, or `null`.
+    `POST /api/admin/series/:id/hero/shuffle` (admin) makes a new one: `{ok: true, seed}`, or `{ok: false, error:
+    'not_made'}` with the old one kept, and **409** `not_automatic` for a series that may not have one.
+  - `POST /api/admin/sources/find` takes `review: true`; such a run reads `review: true`, and its series carry
+    `proposals`. `POST /api/admin/sources/find/:runId/follow` and `…/dismiss`, with `{seriesId, sourceId}`, decide
+    one; a follow from a review is audited as `series.follow_source` with `via: find_review`.
+
 ## v0.50.0 — 2026-10-02
 
 **Following a second site no longer downloads chapters you already have: Uchiyomi compares a chapter's parts, not
