@@ -418,6 +418,46 @@ test("migrate: v0.52.0's data migration states a MangaDex series' language from 
   }
 });
 
+test('migrate: an edition v0.51.0 merged away after a rollback gives its language back at the next boot', { skip }, async () => {
+  // The rollback drill's find: v0.51.0's merge sets merged_into and leaves work_id and lang alone, so the absorbed
+  // French row kept its slot in lib_series_work_lang_idx, and v0.52.0 then refused a new French edition of the
+  // survivor as edition_exists while the series page showed no edition at all. Two works, as v0.51.0 leaves them:
+  // a pair whose French edition it merged into the English one, and a trio that loses its French edition the same way.
+  const { linkEdition } = await import('../src/lib/editions');
+  const pair = '5a1e0000-0000-4000-8000-0000005201a0';
+  const trio = '5a1e0000-0000-4000-8000-0000005201b0';
+  const SEED: [string, string | null, string][] = [
+    ['t-rb-en', pair, 'en'], ['t-rb-fr', pair, 'fr'],
+    ['t-rb3-en', trio, 'en'], ['t-rb3-es', trio, 'es'], ['t-rb3-fr', trio, 'fr'],
+    ['t-rb-new', null, 'fr'],
+  ];
+  const ids = SEED.map(([id]) => id);
+  try {
+    for (const [id, work, lang] of SEED) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, work_id, lang) VALUES ($1, 'test', 'T', $1, $2, $3)`, [id, work, lang]);
+    }
+    // v0.51.0's mergeSeries, as far as these columns go: the absorbed row points at its survivor and nothing else.
+    await q(`UPDATE lib_series SET merged_into = 't-rb-en' WHERE id = 't-rb-fr'`);
+    await q(`UPDATE lib_series SET merged_into = 't-rb3-en' WHERE id = 't-rb3-fr'`);
+    await migrate();
+    const work = Object.fromEntries((await q<{ id: string; work_id: string | null }>(
+      `SELECT id, work_id FROM lib_series WHERE id = ANY($1)`, [ids])).map((r) => [r.id, r.work_id]));
+    // Reintroduce by dropping the first UPDATE in the v0.52.0 block: both merged rows keep their work.
+    assert.equal(work['t-rb-fr'], null, 'a row merged away still holds its language in the work');
+    assert.equal(work['t-rb3-fr'], null, 'a row merged away still holds its language in the work');
+    // Reintroduce by dropping the second: the English survivor of the pair stays a "work of one".
+    assert.equal(work['t-rb-en'], null, 'the edition a v0.51.0 merge left alone does not stand on its own');
+    // A work that still has two editions keeps them.
+    assert.deepEqual([work['t-rb3-en'], work['t-rb3-es']], [trio, trio], 'a work with two editions left was dissolved');
+    // What the user saw: French can be added to each survivor again.
+    const again = await linkEdition('t-rb-new', { of: 't-rb3-en', lang: 'fr' });
+    assert.deepEqual(again, { workId: trio, lang: 'fr' }, 'a French edition is still refused where the merged one was');
+  } finally {
+    await q(`UPDATE lib_series SET merged_into = NULL WHERE id = ANY($1)`, [ids]);
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
+});
+
 test('migrate: the archive compares its bounds in the listing\'s own type', { skip }, async () => {
   // #117 picks `series_listing.number < boundary`. With boundary numeric, Postgres compares the real as float8,
   // and 45.3::real reads as 45.29999923706055 -- below a numeric 45.3 -- so the boundary chapter counted as

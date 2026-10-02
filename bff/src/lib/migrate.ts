@@ -1343,6 +1343,15 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS mangadex_langs jsonb NOT NU
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS unstated_lang  text  NOT NULL DEFAULT 'en';
 -- (Every column is nullable or has a default, and the unique index is partial on work_id, which v0.51.0 never
 -- writes: v0.51.0 boots on this schema and keeps writing its rows.)
+-- What a rollback leaves, put right at every boot (in steady state both match nothing). v0.52.0's merge takes the
+-- row merged away out of its work (lib/libraryAdmin.ts mergeSeries); v0.51.0's, after a rollback, does not, so the
+-- absorbed row kept its language's slot in the unique index above, and adding that language to the work again was
+-- refused as "That language already has its edition" with no such edition in sight. Then a work left with one
+-- edition, by that merge or by a v0.51.0 Forget, stands alone again, as lib/editions.ts dissolveLoneWork leaves it.
+UPDATE lib_series SET work_id = NULL WHERE merged_into IS NOT NULL AND work_id IS NOT NULL;
+UPDATE lib_series s SET work_id = NULL
+ WHERE s.work_id IS NOT NULL
+   AND (SELECT count(*) FROM lib_series w WHERE w.work_id = s.work_id AND w.merged_into IS NULL) <= 1;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
