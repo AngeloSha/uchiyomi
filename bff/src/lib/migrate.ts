@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { pool, one } from './db';
 import { env } from '../env';
+import { MANGADEX_LANGS } from './lang';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -1326,6 +1327,22 @@ CREATE TABLE IF NOT EXISTS series_hero (
   failed_at   timestamptz,
   fail_reason text
 );
+
+-- v0.52.0: the language a series is in, and editions of one work (lib/lang.ts, lib/seriesLang.ts, lib/editions.ts).
+-- lang: BCP-47, as lib/lang.ts canonLang writes it, stated at add time, by the v0.52.0 data migration (below, in
+-- DATA_MIGRATIONS) or by an admin; NULL = not stated, inferred from the main source, else unstated_lang.
+-- work_id: series that are language editions of one work share it; NULL = a series on its own.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS lang    text;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS work_id uuid;
+CREATE INDEX IF NOT EXISTS lib_series_work_idx ON lib_series (work_id) WHERE work_id IS NOT NULL;
+-- One edition per language per work. A hidden edition keeps its slot, so Put back can never collide.
+CREATE UNIQUE INDEX IF NOT EXISTS lib_series_work_lang_idx ON lib_series (work_id, lang) WHERE work_id IS NOT NULL;
+-- MangaDex languages besides English, as app codes (the choices are lib/lang.ts MANGADEX_LANGS). Applied live.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS mangadex_langs jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- The language of sources and series that do not say. English, as lib/borrowNames.ts has assumed since v0.47.0.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS unstated_lang  text  NOT NULL DEFAULT 'en';
+-- (Every column is nullable or has a default, and the unique index is partial on work_id, which v0.51.0 never
+-- writes: v0.51.0 boots on this schema and keeps writing its rows.)
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
@@ -1455,6 +1472,35 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
     id: 'v0.40.0-retry-incomplete',
     run: async (c) => {
       await c.query(`UPDATE chapter_failures SET attempts = 0 WHERE status = 'incomplete'`);
+    },
+  },
+
+  // v0.52.0: state the language of every series whose main source is MangaDex, from the copies its listing chose.
+  // The one case inference cannot see: when a title has no English chapters, MangaDex's English adapter falls back
+  // to Spanish, Portuguese and the rest (lib/sources/mangadex.ts CHAPTER_LANGS), so a Spanish title added through it
+  // reads as the adapter's English. The majority language of its MangaDex rows is what it really is, in the app's
+  // codes (es-la is es-419: lib/lang.ts MANGADEX_LANGS); a code outside the table stays unstated. Only MangaDex's own
+  // rows count, since a follower's copies say nothing about the main source, and a stated language is never
+  // overwritten. One grouped read of those series' listings and one UPDATE.
+  {
+    id: 'v0.52.0-series-lang-from-mangadex',
+    run: async (c) => {
+      await c.query(
+        `WITH tally AS (
+           SELECT l.series_id, lower(l.chosen->>'lang') AS md, count(*) AS n
+             FROM series_listing l
+             JOIN lib_series s ON s.id = l.series_id
+            WHERE s.source_id = 'mangadex' AND s.lang IS NULL
+              AND l.source_id = 'mangadex' AND COALESCE(l.chosen->>'lang', '') <> ''
+            GROUP BY 1, 2
+         ), top AS (
+           SELECT DISTINCT ON (series_id) series_id, md FROM tally ORDER BY series_id, n DESC, md
+         )
+         UPDATE lib_series s SET lang = m.code
+           FROM top t JOIN unnest($1::text[], $2::text[]) AS m(md, code) ON m.md = t.md
+          WHERE s.id = t.series_id AND s.lang IS NULL`,
+        [MANGADEX_LANGS.map((l) => l.md), MANGADEX_LANGS.map((l) => l.code)],
+      );
     },
   },
 
