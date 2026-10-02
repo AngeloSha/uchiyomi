@@ -1554,8 +1554,11 @@ function SeriesInner() {
   const newBanner = async () => {
     setBusyAdmin(true);
     try {
-      const r = await api<{ ok: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
-      if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
+      const r = await api<{ ok: boolean; same?: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
+      // v0.52.0: the series' pages give no other banner (a short series whose few good crops are all on it). Said, rather
+      // than "Banner changed" over the same picture.
+      if (r.ok && r.same) toast(tr('This is the only banner this series’ pages give.'), 'info');
+      else if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
       else toast(tr('Could not make a new banner'), 'error');
     } catch {
       toast(tr('Could not make a new banner'), 'error');

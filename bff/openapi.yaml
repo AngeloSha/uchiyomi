@@ -7716,7 +7716,10 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: "`{ok: true, seed}`, the seed the series' `autoHero` now carries; or `{ok: false, error: 'not_made'}`."
+          description: >-
+            `{ok: true, seed}`, the seed the series' `autoHero` now carries; or `{ok: false, error: 'not_made'}`; or,
+            since v0.52.0, `{ok: true, seed, same: true}` when the series' pages give no other banner (a short
+            series whose few good crops are all on the one it has): nothing changes, and `seed` is the one it had.
           content:
             application/json:
               schema:
@@ -7725,6 +7728,7 @@ paths:
                 properties:
                   ok: { type: boolean }
                   seed: { type: integer, description: Present when ok. }
+                  same: { type: boolean, enum: [true], description: "Since v0.52.0: present when the pages give no other banner." }
                   error: { type: string, enum: [not_made], description: Present when not ok. }
         "401":
           description: Not authenticated

@@ -1883,8 +1883,10 @@ admin's rating, an 18+ library, one of the admin's 18+ genres, an adult source),
 last try that made none, which is left alone for a week — and **404** when a try made now makes none, so a client
 keeps its usual art. Every series in a payload carries `autoHero`: `{seed}` when it shows one (`v` is that seed, a
 cache-buster only), `null` otherwise. `POST /api/admin/series/:id/hero/shuffle` (admin) picks a new seed and makes
-the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept;
-**409** `not_automatic` for a series that may not have one. Banners are made one at a time server-wide, on demand and
+the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept,
+or since v0.52.0 `{ok: true, seed, same: true}` when the series' pages give no other banner (a short series whose few
+good crops are all on the one it has; nothing changes, and `seed` is the one it had); **409** `not_automatic` for a
+series that may not have one. Banners are made one at a time server-wide, on demand and
 by a paced background pass that stands aside for a sweep, a repair or the daily source check.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop

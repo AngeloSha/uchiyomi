@@ -106,6 +106,26 @@ test('four crops from four chapters while there are good ones, and never one und
   assert.ok(!h.chooseCrops([c(1, 3, 5), c(2, 3, 4), c(3, 3, 3), c(4, 3, 0.1)]).some((p) => p.chapter === 4));
 });
 
+test('the seed chooses among near-equal crops, and a reach that is long enough finds the next best', () => {
+  // v0.52.0: a short series has every page read whatever the seed, so these are the crops every Shuffle sees. Five
+  // within TUNE.near of each other and a sixth far below. Reintroduce by ranking on the score alone in chooseCrops:
+  // every seed draws the same four, and "the seed never chooses" fails.
+  const c = (chapter: number, score: number): Candidate => ({ chapter, page: 3, crop: { x: 0, y: 0, w: 1, h: 1, score, f: {} as any } });
+  const cands = [c(1, 3), c(2, 2.95), c(3, 2.9), c(4, 2.85), c(5, 2.8), c(6, 1)];
+  const four = (picks: Candidate[]) => picks.map((p) => p.chapter).sort().join(',');
+  assert.equal(four(h.chooseCrops(cands)), '1,2,3,4', 'seed 0 is not the best four');
+  const near = new Set<string>();
+  for (let seed = 1; seed <= 40; seed++) near.add(four(h.chooseCrops(cands, 4, { rand: h.rng(seed), reach: h.TUNE.near })));
+  assert.ok(near.size > 1, 'the seed never chooses among near-equal crops');
+  assert.ok(![...near].some((f) => f.includes('6')), 'a near reach took the crop two points below');
+  // A seed whose first draw reaches far (choiceOf) can take it: what Shuffle needs on a series with nothing near.
+  const far = new Set<string>();
+  for (let seed = 1; seed <= 200; seed++) far.add(four(h.chooseCrops(cands, 4, { rand: h.rng(seed), reach: 40 * h.TUNE.near })));
+  assert.ok([...far].some((f) => f.includes('6')), 'no reach takes the next best crop');
+  // And the seed alone decides: the same seed, the same four.
+  assert.equal(four(h.chooseCrops(cands, 4, h.choiceOf(48271))), four(h.chooseCrops(cands, 4, h.choiceOf(48271))));
+});
+
 test('one banner is made at a time, server-wide', async () => {
   let inside = 0, most = 0;
   const job = () => h.withHeroSlot(async () => {

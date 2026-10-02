@@ -136,6 +136,11 @@ export const TUNE = {
   gutterCap: 0.2,
   /** A crop scoring under this is not used at all: no banner beats a banner with a text box in it. */
   minScore: 0.6,
+  /**
+   * Crops within this much of each other are near-equal, and a seed chooses among them (choiceOf, chooseCrops) --
+   * about ten points of colourfulness. Seed 0 takes the best, as every banner did before v0.52.0.
+   */
+  near: 0.25,
   // Pixel classes, on 0..255 luma (L) and chroma (max - min of R, G, B).
   whiteL: 225, whiteC: 30, // paper: gutters, bubbles, blank margins
   blackL: 24, // ink-black fill
@@ -358,13 +363,37 @@ export function bestWindow(g: Grid, pageW: number): Crop | null {
 /** A scored crop and where it came from. `chapter` is the chapter's index in reading order. */
 export interface Candidate { chapter: number; page: number; crop: Crop }
 
+/** How a seed chooses among crops: its draws, and how far below a better crop it reaches (chooseCrops). */
+export interface Choice { rand: () => number; reach: number }
+
+/**
+ * A seed's choice (v0.52.0), or null for seed 0, which takes the best crops. Its first draw says how far it reaches:
+ * TUNE.near for most seeds and rarely up to 64 times that, `near / (1 - u)`. Shuffle weighs new seeds from the nearest
+ * reach outwards, so it changes the banner by a near-equal crop where it can, and reaches further down only on a
+ * series whose pages give nothing near-equal. The seed alone decides, so a banner made again from its seed is the
+ * same banner. A stream of its own (the salt), so the pages a seed samples are what they always were.
+ */
+export function choiceOf(seed: number): Choice | null {
+  if (!seed) return null;
+  const rand = rng(seed ^ 0x2c1b3c6d);
+  return { rand, reach: TUNE.near / Math.max(1 / 64, 1 - rand()) };
+}
+
 /**
  * The `n` crops the banner is made of, best first: only ones scoring at least TUNE.minScore, never two of one page,
  * and from different chapters while the candidates allow it -- four moments of one chapter read as one scene, four
  * chapters as the series.
+ *
+ * A seed's `choice` (v0.52.0) ranks each crop by its score plus a draw of up to `reach`: one within reach of a
+ * better crop may pass it, one further below never does. A short series (eight chapters or fewer, ten pages or
+ * fewer each) has every page read whatever the seed, and without this its Shuffle always drew the same four. Reintroduce
+ * by ranking on the score alone: "the seed chooses among near-equal crops" in autoHero.test.ts finds every seed's
+ * four the same.
  */
-export function chooseCrops<T extends Candidate>(cands: T[], n = 4): T[] {
-  const ranked = cands.filter((c) => c.crop.score >= TUNE.minScore).sort((a, b) => b.crop.score - a.crop.score);
+export function chooseCrops<T extends Candidate>(cands: T[], n = 4, choice: Choice | null = null): T[] {
+  const ok = cands.filter((c) => c.crop.score >= TUNE.minScore);
+  const key = new Map(ok.map((c) => [c, c.crop.score + (choice ? choice.rand() * choice.reach : 0)]));
+  const ranked = ok.sort((a, b) => key.get(b)! - key.get(a)!);
   const picked: T[] = [];
   const chapters = new Set<number>();
   for (const c of ranked) {
@@ -413,14 +442,21 @@ const ROUND_ORDER = [2, 4, 1, 3, 5, 0];
 /** Rounds stop once this many usable crops from four chapters are in hand: most series never need a second. */
 const ENOUGH = 8;
 
+/** A page's best crop by `path` and entry name, or null for a page that holds none: what Shuffle reads once. */
+type Scored = Map<string, Crop | null>;
+
 /**
- * Make the banner of these chapters (absolute paths, in reading order) with this seed: both frames.
+ * The crops a banner of these chapters (absolute paths, in reading order) is made of with this seed, scored and
+ * chosen but not drawn. `read` counts the pages that could be read; `fresh` those scored now rather than found in
+ * `scored`, which Shuffle passes to weigh many seeds over one reading of a short series' pages.
  *
  * Pages are read in rounds, one more page of every sampled chapter each round, until there are enough good crops:
  * a series drawn on white needs more of its pages read than one drawn edge to edge, and most need a single round.
  * `deadline` is checked between pages, so a run over its limit stops at the next one.
  */
-export async function composeHero(chapters: string[], seed: number, deadline = Infinity): Promise<HeroImages & { picks: Sourced[]; cands: Sourced[] }> {
+async function heroPicks(
+  chapters: string[], seed: number, deadline: number, scored: Scored = new Map(),
+): Promise<{ picks: Sourced[]; cands: Sourced[]; read: number; fresh: number }> {
   if (!chapters.length) throw new HeroUnavailable('no_chapters');
   const rand = seed ? rng(seed ^ 0x5bd1e995) : null;
   const sampled: Array<{ chapter: number; path: string; names: string[]; pages: number[] }> = [];
@@ -431,23 +467,41 @@ export async function composeHero(chapters: string[], seed: number, deadline = I
     sampled.push({ chapter, path, names, pages: ROUND_ORDER.filter((i) => i < spread.length).map((i) => spread[i]) });
   }
   const cands: Sourced[] = [];
-  let read = 0;
+  let read = 0, fresh = 0;
   for (let round = 0; round < PAGES_PER_CHAPTER; round++) {
     for (const s of sampled) {
       const page = s.pages[round];
       if (page === undefined) continue;
       if (Date.now() > deadline) throw new HeroUnavailable('timeout');
-      const bytes = await cbzEntry(s.path, s.names[page]).catch(() => null);
-      if (!bytes) continue;
+      const key = `${s.path}\u0000${s.names[page]}`;
+      let crop = scored.get(key);
+      if (crop === undefined) {
+        const bytes = await cbzEntry(s.path, s.names[page]).catch(() => null);
+        if (!bytes) continue;
+        fresh++;
+        crop = (await scorePage(bytes).catch(() => null))?.crop ?? null;
+        scored.set(key, crop);
+      }
       read++;
-      const scored = await scorePage(bytes).catch(() => null);
-      if (scored) cands.push({ chapter: s.chapter, page, path: s.path, name: s.names[page], crop: scored.crop });
+      if (crop) cands.push({ chapter: s.chapter, page, path: s.path, name: s.names[page], crop });
     }
     const good = cands.filter((c) => c.crop.score >= TUNE.minScore);
     if (good.length >= ENOUGH && new Set(good.map((c) => c.chapter)).size >= LAYOUT.length) break;
   }
-  const picks = chooseCrops(cands, LAYOUT.length);
+  return { picks: chooseCrops(cands, LAYOUT.length, choiceOf(seed)), cands, read, fresh };
+}
+
+/**
+ * Make the banner of these chapters (absolute paths, in reading order) with this seed: both frames.
+ */
+export async function composeHero(chapters: string[], seed: number, deadline = Infinity): Promise<HeroImages & { picks: Sourced[]; cands: Sourced[] }> {
+  const { picks, cands, read } = await heroPicks(chapters, seed, deadline);
   if (picks.length < LAYOUT.length) throw new HeroUnavailable(read ? 'not_enough_art' : 'unreadable');
+  return { ...(await drawHero(picks, deadline)), picks, cands };
+}
+
+/** Both frames of a banner from its four crops, cut from the full-size pages. */
+async function drawHero(picks: Sourced[], deadline: number): Promise<HeroImages> {
   // Cut at the tall frame's cell size, the larger of the two, and scaled down again for the wide strips.
   const cellW = (AUTO_HERO_FRAMES.tall.w - HERO_GAP) / 2, cellH = (AUTO_HERO_FRAMES.tall.h - HERO_GAP) / 2;
   const cells: Buffer[] = [];
@@ -474,7 +528,7 @@ export async function composeHero(chapters: string[], seed: number, deadline = I
     return sharp({ create: { width: f.w, height: f.h, channels: 3, background: BG } })
       .composite(parts).modulate({ saturation: 1.06 }).jpeg({ quality: 82, progressive: true }).toBuffer();
   };
-  return { wide: await frame('wide'), tall: await frame('tall'), picks, cands };
+  return { wide: await frame('wide'), tall: await frame('tall') };
 }
 
 // ── which series ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -624,17 +678,58 @@ export async function heroFrame(id: string, seed: number, ar: AutoHeroAr, waitMs
   return { buffer: made.images[ar], contentType: 'image/jpeg' };
 }
 
+/** How many new seeds one Shuffle weighs, and how many of them may read pages the ones before did not. */
+export const SHUFFLE_SEEDS = 64;
+const SHUFFLE_READS = 3;
+
+/** New seeds for a Shuffle away from `old`, the nearest-reaching first (choiceOf). */
+function shuffleSeeds(old: number): number[] {
+  const seeds = new Set<number>();
+  while (seeds.size < SHUFFLE_SEEDS) {
+    const seed = 1 + Math.floor(Math.random() * 0x7ffffffe);
+    if (seed !== old) seeds.add(seed);
+  }
+  return [...seeds].sort((a, b) => choiceOf(a)!.reach - choiceOf(b)!.reach);
+}
+
 /**
- * Shuffle: a new seed, so other chapters and other pages. The banner is made BEFORE the seed is switched, so a
- * series whose new pages make nothing keeps the one it had. Null when the series may not have one at all.
+ * Shuffle: a new seed, so other chapters and other pages -- and a different banner, or the plain word that there is
+ * none. The banner is made BEFORE the seed is switched, so a series whose new pages make nothing keeps the one it had.
+ * Null when the series may not have one at all.
+ *
+ * v0.52.0: a short series (eight chapters or fewer, ten pages or fewer each) has every page read whatever the seed,
+ * and the same four crops came back while the page said "Banner changed". Now the four crops of the banner shown are
+ * worked out first, and new seeds are weighed from the nearest reach outwards (shuffleSeeds) until one gives another
+ * four: a near-equal crop where there is one, a further one only where there is not. A short series' pages are read
+ * once for all of them; a seed that reads new pages (a longer series) is charged, and at most SHUFFLE_READS are. When
+ * every seed gives the same four, the pages give no other banner: `same`, and nothing changes. Reintroduce by taking the
+ * first new seed: "Shuffle on a short series" in autoHero.int.test.ts reads no `same` for the series of four crops.
  */
-export async function shuffleHero(id: string): Promise<{ ok: true; seed: number } | { ok: false; error: 'not_made' } | null> {
+export async function shuffleHero(id: string): Promise<{ ok: true; seed: number; same?: true } | { ok: false; error: 'not_made' } | null> {
   const [row] = await heroRows([id]).catch(() => [] as HeroRow[]);
   if (!row) return null;
-  let seed = 0;
-  while (!seed || seed === Number(row.seed)) seed = 1 + Math.floor(Math.random() * 0x7ffffffe);
-  const made = await heroImages(id, seed, { waitMs: HERO_LIMIT_MS, record: false });
-  if (!made.ok) return { ok: false, error: 'not_made' };
+  const old = Number(row.seed) || 0;
+  const four = (picks: Sourced[]) => picks.map((p) => `${p.path}\u0000${p.name}`).sort().join('\n');
+  const made = await withHeroSlot(async () => {
+    const chapters = await heroChapters(id);
+    const deadline = Date.now() + HERO_LIMIT_MS;
+    const scored: Scored = new Map();
+    const shown = await heroPicks(chapters, old, deadline, scored)
+      .then((p) => (p.picks.length === LAYOUT.length ? four(p.picks) : null), () => null);
+    let reads = 0, cut = false;
+    for (const seed of shuffleSeeds(old)) {
+      if (Date.now() > deadline || reads >= SHUFFLE_READS) { cut = true; break; }
+      const p = await heroPicks(chapters, seed, deadline, scored).catch(() => null);
+      if (p?.fresh) reads++;
+      if (p?.picks.length === LAYOUT.length && four(p.picks) !== shown) return { seed, images: await drawHero(p.picks, deadline) };
+    }
+    // Every seed weighed gave the four on screen: the pages give no other banner. Cut short by the clock or the reading
+    // budget, it is only that none was found in time, which is `not_made`.
+    return shown && !cut ? 'same' as const : null;
+  }, HERO_LIMIT_MS).catch(() => null);
+  if (made === 'same') return { ok: true, seed: old, same: true };
+  if (!made) return { ok: false, error: 'not_made' };
+  const { seed } = made;
   for (const ar of ['wide', 'tall'] as const) {
     await getOrFetch(heroVariant(id, seed, ar), async () => ({ buffer: made.images[ar], contentType: 'image/jpeg' })).catch(() => {});
   }

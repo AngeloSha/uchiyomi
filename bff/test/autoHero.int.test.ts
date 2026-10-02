@@ -45,12 +45,12 @@ async function artPage(w: number, h: number, phase: number): Promise<Buffer> {
   return sharp(px, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 85 }).toBuffer();
 }
 
-/** A series folder of five chapters, eight pages each, from `page`. */
-async function seriesOf(folder: string, page: (ch: number, n: number) => Promise<Buffer>) {
+/** A series folder of five chapters, eight pages each (or as many as `size` says), from `page`. */
+async function seriesOf(folder: string, page: (ch: number, n: number) => Promise<Buffer>, size = { chapters: 5, pages: 8 }) {
   await mkdir(join(ROOT, 'library', folder), { recursive: true });
-  for (let ch = 1; ch <= 5; ch++) {
+  for (let ch = 1; ch <= size.chapters; ch++) {
     const zip = new AdmZip();
-    for (let n = 1; n <= 8; n++) zip.addFile(`${String(n).padStart(3, '0')}.jpg`, await page(ch, n));
+    for (let n = 1; n <= size.pages; n++) zip.addFile(`${String(n).padStart(3, '0')}.jpg`, await page(ch, n));
     await writeFile(join(ROOT, 'library', folder, `Chapter ${ch}.cbz`), zip.toBuffer());
   }
 }
@@ -65,7 +65,7 @@ before(async () => {
 
   await rm(ROOT, { recursive: true, force: true });
   await mkdir(join(ROOT, 'downloads'), { recursive: true });
-  await q(`DELETE FROM lib_series WHERE folder IN ('Hero Art', 'Hero Blank')`);
+  await q(`DELETE FROM lib_series WHERE folder IN ('Hero Art', 'Hero Blank', 'Hero Four')`);
   await seriesOf('Hero Art', (ch, n) => artPage(600, 1500, ch + n / 3));
   // Every page paper: nothing on it can make a banner.
   await seriesOf('Hero Blank', () => sharp({ create: { width: 600, height: 1500, channels: 3, background: '#ffffff' } }).jpeg().toBuffer());
@@ -104,7 +104,7 @@ before(async () => {
 after(async () => {
   if (!DSN) return;
   await app?.close();
-  await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[art, blank]]);
+  await q(`DELETE FROM lib_series WHERE folder IN ('Hero Art', 'Hero Blank', 'Hero Four')`);
   await q(`DELETE FROM users WHERE username LIKE 'ah-%'`);
   await q(`DELETE FROM libraries WHERE id = ANY($1)`, [LIBS]);
   await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb, adult_sources = '[]'::jsonb WHERE id = 1`);
@@ -215,4 +215,29 @@ test('a series whose pages make no banner: 404, recorded, and left alone after t
   assert.equal((await hero(blank, adminCookie)).statusCode, 404);
   const again = (await q(`SELECT failed_at FROM series_hero WHERE series_id = $1`, [blank]))[0];
   assert.equal(String(again.failed_at), String(row.failed_at), 'tried again on the next view');
+});
+
+test('Shuffle on a short series gives another banner when its pages hold one, and says so when they do not', { skip }, async () => {
+  // v0.52.0. A short series has every page read whatever the seed, and Shuffle drew the same four crops every time
+  // while the page said "Banner changed". Hero Art is short too: five chapters of eight pages, twenty crops of art.
+  const shuffle = (id: string) => app.inject({ method: 'POST', url: `/api/admin/series/${id}/hero/shuffle`, headers: adminAuth });
+  const was = (await hero(art, adminCookie)).rawPayload as Buffer;
+  const r = await shuffle(art);
+  assert.equal(r.statusCode, 200, r.body);
+  // Reintroduce by ranking crops on their score alone (chooseCrops without the seed's choice): every seed draws the
+  // same four, and this reads `same`.
+  assert.equal(r.json().same, undefined, `Hero Art's pages hold other crops, and Shuffle found none: ${r.body}`);
+  const now = (await hero(art, adminCookie)).rawPayload as Buffer;
+  assert.ok(!now.equals(was), 'Shuffle answered a new seed and the banner is the same picture');
+
+  // Four chapters of five pages: one page each past the credits, so four crops and no other banner.
+  await seriesOf('Hero Four', (ch, n) => artPage(600, 1500, ch * 2 + n / 3), { chapters: 4, pages: 5 });
+  await (await import('../src/lib/library')).persistScan();
+  const four = (await q(`SELECT id FROM lib_series WHERE folder = 'Hero Four'`))[0].id as string;
+  await q(`INSERT INTO series_art (series_id) VALUES ($1) ON CONFLICT (series_id) DO NOTHING`, [four]);
+  const same = await shuffle(four);
+  assert.equal(same.statusCode, 200, same.body);
+  // Reintroduce by taking the first new seed in shuffleHero: it answers a new seed for the same four crops.
+  assert.deepEqual(same.json(), { ok: true, seed: 0, same: true }, 'Shuffle claims a new banner where the pages give no other');
+  assert.equal((await q(`SELECT seed FROM series_hero WHERE series_id = $1`, [four]))[0]?.seed ?? 0, 0, 'the seed changed for nothing');
 });

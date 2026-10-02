@@ -13,16 +13,17 @@ import { shuffleHero } from '../lib/autoHero';
 export default async function autoHeroRoutes(app: FastifyInstance) {
   /**
    * Other chapters and other pages: `{ok: true, seed}`, the seed the web's banner URL now carries. The banner is made
-   * before the seed changes, so `{ok: false, error: 'not_made'}` leaves the series with the one it had. 404 for a
-   * series that is not there; 409 `not_automatic` for one that may not have an automatic banner (a real banner, or
-   * 18+ by any rule).
+   * before the seed changes, so `{ok: false, error: 'not_made'}` leaves the series with the one it had. Since v0.52.0
+   * `{ok: true, seed, same: true}` says the series' pages give no other banner (a short series whose few good crops
+   * are all on it): nothing changes, and the seed is the one it had. 404 for a series that is not there; 409
+   * `not_automatic` for one that may not have an automatic banner (a real banner, or 18+ by any rule).
    */
   app.post('/api/admin/series/:id/hero/shuffle', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!(await seriesVisible(id, await viewCtxFor(userIdOf(req), roleOf(req))))) return reply.code(404).send({ error: 'not_found' });
     const r = await shuffleHero(id);
     if (!r) return reply.code(409).send({ error: 'not_automatic' });
-    if (r.ok) await logAudit('series.hero_shuffle', { userId: userIdOf(req), detail: { id, seed: r.seed }, req });
+    if (r.ok && !r.same) await logAudit('series.hero_shuffle', { userId: userIdOf(req), detail: { id, seed: r.seed }, req });
     return r;
   });
 }
