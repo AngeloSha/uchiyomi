@@ -711,6 +711,46 @@ components:
             `no_match`: the sources that answered do not carry it, and it follows no other source. `not_tried`: a
             stop, the series' 90 s wall or a restart cut it short (rarely also a series deleted or merged away before
             or during its turn) -- never "not found".
+        proposals:
+          type: array
+          description: "Since v0.51.0, a review-first run only, for a series it found candidates for: each, in scan order, for an admin to follow or dismiss. Such a series carries no `why`, and `followed` gains each proposal an admin follows."
+          items:
+            $ref: "#/components/schemas/FindProposal"
+    FindProposal:
+      type: object
+      description: "A candidate a review-first Find other sources run kept for an admin to confirm, the best one per source (since v0.51.0). For a series the viewer may not list, `title`, `coverUrl` and `url` are left out."
+      required: [sourceId, sourceName, sourceSeriesId, chapters, ours, theirs, coverage, verdict]
+      properties:
+        sourceId: { type: string }
+        sourceName: { type: string }
+        sourceSeriesId: { type: string, description: "The series' id on that source: what a follow writes." }
+        url: { type: string, description: "Its page on the source, when the source's search gave one." }
+        title: { type: string, description: The title as the source names it. }
+        coverUrl: { type: string, description: "The source's own cover URL, as its search gave it; shown through GET /img/sources/cover." }
+        chapters: { type: integer, minimum: 0, description: The distinct chapter numbers it lists. }
+        ours:
+          type: object
+          description: "Of the series' own chapter numbers (whole numbers), how many it lists: `lined` of `of`."
+          required: [lined, of]
+          properties: { lined: { type: integer, minimum: 0 }, of: { type: integer, minimum: 0 } }
+        theirs:
+          type: object
+          description: "Of its chapter numbers (whole numbers, one copy each under the series' release preferences), how many the series lists."
+          required: [lined, of]
+          properties: { lined: { type: integer, minimum: 0 }, of: { type: integer, minimum: 0 } }
+        coverage: { type: [number, "null"], description: "The judgement's coverage: the lower of the two shares when it measured both ways." }
+        verdict:
+          type: string
+          enum: [green, amber]
+          description: "`green`: an automatic run would have followed it (title and chapter numbers). `amber`: for a person to look at first, `amber` says why."
+        amber:
+          type: string
+          enum: [numbering, other_name]
+          description: "`numbering`: a name matches exactly and the chapter numbers do not line up (a title that merely contains the series' with numbers that do not line up -- a sequel's shape -- is never proposed). `other_name`: it lines up, but matched only under another name of the series, not its title."
+        state:
+          type: string
+          enum: [followed, dismissed]
+          description: Set once an admin decided; final.
     FindRunSummary:
       type: object
       description: One Find other sources run, without its per-series results (since v0.49.1).
@@ -729,6 +769,7 @@ components:
         finishedAt: { type: string, format: date-time }
         sourceId: { type: string, description: The source whose series it was about, when the scope was a source. }
         sourceName: { type: string, description: That source's display name, or its id when it is not loaded. }
+        review: { type: boolean, enum: [true], description: "Since v0.51.0: a review-first run, which followed nothing itself; its results carry `proposals`. Absent for an automatic run." }
     FindRun:
       description: A Find other sources run in full (since v0.49.1).
       allOf:
@@ -8993,6 +9034,9 @@ paths:
         scope, status, total, done, followed, series} when it ends, and each follow as `series.follow_source` with
         `via: find_sources`. While it runs, GET /api/sources/jobs carries its card (kind `find_sources`) to admins.
         The idea is @TIGamingTV's (PR #119).
+        `review: true` (since v0.51.0, #132, @TIGamingTV's idea from PR #133): review first -- the same run, which
+        follows nothing and keeps each series' candidates as `proposals` in its result (POST
+        .../find/{runId}/follow or .../dismiss decides each); audited with `review` and `proposed` (series with any).
       requestBody:
         required: true
         content:
@@ -9003,11 +9047,13 @@ paths:
                   additionalProperties: false
                   properties:
                     seriesIds: { type: array, maxItems: 500, items: { type: string } }
+                    review: { type: boolean }
                 - type: object
                   additionalProperties: false
                   required: [sourceId]
                   properties:
                     sourceId: { type: string }
+                    review: { type: boolean }
       security:
         - bearer: []
       responses:
@@ -9055,6 +9101,108 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/find/{runId}/follow:
+    post:
+      tags:
+        - admin
+      summary: "Follow one proposal of a review-first Find other sources run (since v0.51.0)."
+      operationId: postApiAdminSourcesFindRunIdFollow
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body {seriesId,
+        sourceId}; what is followed (the source's series id, its title, the coverage) is the run's own record, never
+        the request's. Checked again first: the series is one this admin may see and not numbered by posting order,
+        the source is loaded, switched on, not the series' main source and one it may reach (an adult source only
+        for an adult series), and the series does not follow that source already (a stale proposal never re-points
+        one). Then written as every follow is, under the follower cap, with this admin as its author; the proposal
+        reads `followed` and the series' `followed` gains it, and its listing is refreshed in the background.
+        Audited as `series.follow_source` with `via: find_review`, the run's id and the proposal's `verdict`.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seriesId, sourceId]
+              properties:
+                seriesId: { type: string }
+                sourceId: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The series' result as it now reads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result:
+                    $ref: "#/components/schemas/FindResult"
+        "400":
+          description: "`bad_request`: a malformed body"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
+        "409":
+          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `already_followed`; `full` (the series follows two other sources)"
+  /api/admin/sources/find/{runId}/dismiss:
+    post:
+      tags:
+        - admin
+      summary: "Dismiss one proposal of a review-first Find other sources run (since v0.51.0)."
+      operationId: postApiAdminSourcesFindRunIdDismiss
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body {seriesId,
+        sourceId}. The proposal reads `dismissed`, for good: a follow of it is then refused as `decided`.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seriesId, sourceId]
+              properties:
+                seriesId: { type: string }
+                sourceId: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The series' result as it now reads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result:
+                    $ref: "#/components/schemas/FindResult"
+        "400":
+          description: "`bad_request`: a malformed body"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
+        "409":
+          description: "`decided` (with `state`): followed or dismissed already"
   /api/admin/sources/{id}/test:
     post:
       tags:

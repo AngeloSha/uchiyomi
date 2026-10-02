@@ -28,6 +28,7 @@ import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/compone
 import { StatusMark } from '@/components/StatusMark';
 import { OnBody } from '@/components/ui';
 import { NumberingSheet } from '@/components/NumberingSheet';
+import { FindStartDialog } from '@/components/FindSources';
 import { t as tr } from '@/lib/i18n';
 import { isDesktop } from '@/lib/desktop';
 import { IDLE, type ActionState } from '@/lib/actionState';
@@ -115,7 +116,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const slot = slots[slotKey];
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
-  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | null>(null);
+  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'find' | null>(null);
   // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
   const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
@@ -311,11 +312,12 @@ export function HealthRow({ check, item, rowKey, links, children }: {
       // longer update because of its source), in ONE background run. The key carries the run's own state -- working with
       // its Stop, then what it did -- and waits, saying why, while another run goes (one at a time, server-wide). Its
       // label says how many series that is, "Find other sources (189 series)": the count was in its title alone.
+      // v0.51.0: the press asks first how it should follow what it finds -- automatically, or after a review.
       case 'find_sources':
         return {
           ...base, ...findGate(fr?.status, findNow.kind === 'working' || findNow.kind === 'starting'),
           state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: copy.label({ ...ctx, n: item.findSeries }),
-          onRun: () => { if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId }); },
+          onRun: () => setAsking('find'),
         };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
       // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen
@@ -401,6 +403,11 @@ export function HealthRow({ check, item, rowKey, links, children }: {
             onClose={() => setAsking(null)}
           />
         </OnBody>
+      )}
+
+      {asking === 'find' && (
+        <FindStartDialog onClose={() => setAsking(null)}
+          onStart={(review) => { setAsking(null); if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId, ...(review ? { review } : {}) }); }} />
       )}
 
       {asking === 'disable' && (

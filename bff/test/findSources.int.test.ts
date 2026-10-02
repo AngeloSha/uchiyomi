@@ -46,7 +46,8 @@ const CATALOGUE: Record<string, Array<{ title: string; nums: number[] }>> = {
   'fs-a': [{ title: 'Alpha Tale', nums: R(1, 14) }],
   'fs-b': [{ title: 'Alpha Tale', nums: R(1, 13) }, { title: 'Gamma Legend', nums: R(1, 12) }],
   'fs-c': [{ title: 'Alpha Tale', nums: R(1, 12) }, { title: 'Zeta Wrong', nums: R(40, 55) }],
-  'fs-d': [{ title: 'Zeta Wrong', nums: R(60, 75) }],
+  // v0.51.0: a title that contains ours, numbered past it -- a sequel's shape, which a review never proposes.
+  'fs-d': [{ title: 'Zeta Wrong', nums: R(60, 75) }, { title: 'Kappa Story Season Two', nums: R(1, 40) }],
   'fs-e': [{ title: 'Zeta Wrong', nums: R(80, 95) }],
   // Would line up -- and is never asked: three sources carried the title before its turn.
   'fs-f': [{ title: 'Zeta Wrong', nums: R(1, 12) }],
@@ -78,7 +79,7 @@ function fake(id: string) {
       if (gate && id === 'fs-a') await gate;
       const k = norm(term);
       return CATALOGUE[id].filter((c) => norm(c.title).includes(k) || k.includes(norm(c.title)))
-        .map((c) => ({ sourceId: `${id}|${c.title}`, source: id, title: c.title }));
+        .map((c) => ({ sourceId: `${id}|${c.title}`, source: id, title: c.title, coverUrl: `https://${id}.example/${norm(c.title)}.jpg`, url: `https://${id}.example/${norm(c.title)}` }));
     },
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid.split('|')[1] }; },
     async listChapters(sid: string) {
@@ -218,6 +219,9 @@ test('a run over a down source follows other sources for each of its series, by 
   assert.equal(run.sourceName, 'Main Down');
   assert.equal(st.recent[0].id, runId);
   assert.equal('results' in st.recent[0], false, 'recent is summaries');
+  // Automatic mode is unchanged by v0.51.0's review first: no mode on the run, no proposals on a result.
+  assert.equal('review' in run, false);
+  assert.ok(run.results.every((x: any) => !('proposals' in x)), 'an automatic run keeps proposals');
   const by = Object.fromEntries(run.results.map((x: any) => [x.seriesId, x]));
   // The order: series that follow nothing first, then by title; B already follows two, so it is last.
   assert.deepEqual(run.results.map((x: any) => x.title),
@@ -556,6 +560,117 @@ test('an admin who hides 18+ reads no adult title in a run', { skip }, async () 
   assert.equal(h.followed.length, 1);
   assert.equal(hidden.run.results.find((x: any) => x.seriesId === S('e')).title, 'Epsilon Nothing');
   assert.equal((await state('?adult=1')).run.results.find((x: any) => x.seriesId === S('h')).title, 'Eta Adult');
+});
+
+/* ---- v0.51.0: review first (#132; the idea is @TIGamingTV's, PR #133) ---- */
+
+/** A review-first run over these series, settled; its id. */
+async function reviewRun(ids: string[]): Promise<string> {
+  const r = await post({ seriesIds: ids, review: true });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  return r.json().runId;
+}
+const decide = (runId: string, kind: 'follow' | 'dismiss', seriesId: string, sourceId: string, headers = adminAuth) =>
+  app.inject({ method: 'POST', url: `/api/admin/sources/find/${runId}/${kind}`, headers, payload: { seriesId, sourceId } });
+const followers = async (ids: string[]) => (await q(
+  `SELECT series_id, source_id, source_series_id, added_by FROM series_sources WHERE series_id = ANY($1) AND source_id NOT LIKE 'fs-x%' ORDER BY 1, 2`, [ids]))
+  .map((x: any) => `${x.series_id}:${x.source_id}:${x.source_series_id}:${x.added_by === adminId ? 'admin' : x.added_by}`);
+
+test('a review-first run follows nothing, and keeps each candidate with its cover, its counts and a verdict', { skip }, async () => {
+  await series('a', 'Alpha Tale');
+  await series('c', 'Gamma Saga');
+  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1,'gammalegend','Gamma Legend','admin')`, [S('c')]);
+  await series('f', 'Zeta Wrong');
+  await series('k', 'Kappa Story');
+  await series('h', 'Eta Adult', { library: ADULT_LIB });
+  const runId = await reviewRun([S('a'), S('c'), S('f'), S('k'), S('h')]);
+
+  // The same search as an automatic run, and nothing written. Reintroduce by dropping the review branch in findFor
+  // (and its guard on the follows): A, C and H follow their sources, and "nothing is followed" fails.
+  assert.deepEqual(await followers([S('a'), S('c'), S('f'), S('k'), S('h')]), [], 'nothing is followed');
+  assert.equal(searches.includes('fs-c:Alpha Tale'), false, 'the same stop once the free slots are filled');
+  const st = await state();
+  const run = st.run;
+  assert.deepEqual([run.id, run.status, run.review, run.followed, st.recent[0].review], [runId, 'done', true, 0, true]);
+  const by = Object.fromEntries(run.results.map((x: any) => [x.seriesId, x]));
+  // A: both sources the automatic run would follow, green, in scan order -- with the cover and page its search gave,
+  // what it lists, and the line-up both ways (12 of our 12; we list 12 of its 14).
+  assert.deepEqual(by[S('a')].proposals[0], {
+    sourceId: 'fs-a', sourceName: 'Name fs-a', sourceSeriesId: 'fs-a|Alpha Tale', url: 'https://fs-a.example/alphatale',
+    title: 'Alpha Tale', coverUrl: 'https://fs-a.example/alphatale.jpg', chapters: 14,
+    ours: { lined: 12, of: 12 }, theirs: { lined: 12, of: 14 }, coverage: 1, verdict: 'green',
+  });
+  assert.deepEqual(by[S('a')].proposals.map((p: any) => [p.sourceId, p.verdict]), [['fs-a', 'green'], ['fs-b', 'green']]);
+  assert.deepEqual([by[S('a')].followed, 'why' in by[S('a')]], [[], false]);
+  // C: it lines up, but only under another name of the series -- amber, for a person to look at.
+  assert.deepEqual(by[S('c')].proposals.map((p: any) => [p.sourceId, p.verdict, p.amber, p.title]), [['fs-b', 'amber', 'other_name', 'Gamma Legend']]);
+  // F: the exact title, and numbers that do not line up -- amber, with the counts that say so.
+  assert.deepEqual(by[S('f')].proposals.map((p: any) => [p.sourceId, p.amber, p.ours.lined, p.theirs.of]),
+    [['fs-c', 'numbering', 0, 16], ['fs-d', 'numbering', 0, 16], ['fs-e', 'numbering', 0, 16]]);
+  // K: a title that merely contains ours, numbered past it, is a sequel's shape (PR #133's rule): never proposed.
+  // Reintroduce by keeping numbering_differs whatever matched: K is proposed, amber.
+  assert.deepEqual([by[S('k')].why, 'proposals' in by[S('k')]], ['refused', false], 'a sequel is proposed');
+  // H: an adult series' proposal names it as plainly as its title, so an admin hiding 18+ reads neither. Reintroduce
+  // by answering results as stored (shown() in routes/findSources.ts): its candidate's title and cover are read.
+  const hid = (await state('')).run.results.find((x: any) => x.seriesId === S('h'));
+  assert.deepEqual(hid.proposals.map((p: any) => [p.sourceId, p.verdict, 'title' in p, 'coverUrl' in p, 'url' in p]), [['fs-adult', 'green', false, false, false]],
+    'an admin hiding 18+ reads the candidate of an adult series');
+  assert.equal(by[S('h')].proposals[0].title, 'Eta Adult');
+  const [audit] = await q(`SELECT detail FROM audit_log WHERE event = 'source.find'`);
+  assert.deepEqual([audit.detail.review, audit.detail.proposed, audit.detail.followed], [true, 4, 0]);
+});
+
+test('following a proposal follows exactly that one, under the cap, the posting-order rule and what it follows', { skip }, async () => {
+  await series('a', 'Alpha Tale');
+  await series('c', 'Gamma Saga');
+  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1,'gammalegend','Gamma Legend','admin')`, [S('c')]);
+  await series('f', 'Zeta Wrong');
+  const runId = await reviewRun([S('a'), S('c'), S('f')]);
+  assert.equal((await decide(runId, 'follow', S('a'), 'fs-b', memberAuth)).statusCode, 403, 'admins only');
+
+  // Exactly the one named, written by the follow path with the admin as its author; its result says so.
+  const r = await decide(runId, 'follow', S('a'), 'fs-b');
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual(await followers([S('a'), S('c'), S('f')]), [`${S('a')}:fs-b:fs-b|Alpha Tale:admin`]);
+  assert.deepEqual(r.json().result.followed, [{ sourceId: 'fs-b', name: 'Name fs-b', chapters: 13 }]);
+  assert.deepEqual(r.json().result.proposals.map((p: any) => [p.sourceId, p.state ?? null]), [['fs-a', null], ['fs-b', 'followed']]);
+  const run = (await state()).run;
+  assert.equal(run.followed, 1);
+  assert.equal(run.results.find((x: any) => x.seriesId === S('a')).proposals[1].state, 'followed', 'the run keeps the decision');
+  const [audit] = await q(`SELECT detail FROM audit_log WHERE event = 'series.follow_source' AND detail->>'via' = 'find_review'`);
+  assert.deepEqual([audit.detail.runId, audit.detail.source, audit.detail.verdict], [runId, 'fs-b', 'green']);
+  assert.equal((await decide(runId, 'follow', S('a'), 'fs-b')).json().error, 'decided', 'one follow per proposal');
+  assert.equal((await decide(runId, 'follow', S('a'), 'fs-c')).statusCode, 404, 'no such proposal: nothing on trust');
+
+  // Numbered by posting order since the run: refused as the manual route refuses it. Reintroduce by dropping the
+  // postingOrderSeries check in decide(): C follows fs-b.
+  await q(`UPDATE lib_series SET numbering = 'posting_order' WHERE id = $1`, [S('c')]);
+  const po = await decide(runId, 'follow', S('c'), 'fs-b');
+  assert.deepEqual([po.statusCode, po.json().error], [409, 'posting_order'], 'a series numbered by posting order is followed');
+  // A source the series follows already, another way since, is never re-pointed (PR #133's rule).
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,'fs-c','fs-c|Elsewhere')`, [S('f')]);
+  assert.equal((await decide(runId, 'follow', S('f'), 'fs-c')).json().error, 'already_followed', 'a source it follows is re-pointed');
+  // At the cap: followJudged's own refusal. Reintroduce by dropping its `cap` arm in decide(): it reads not_found.
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,'fs-x1','x1')`, [S('f')]);
+  const full = await decide(runId, 'follow', S('f'), 'fs-d');
+  assert.deepEqual([full.statusCode, full.json().error], [409, 'full'], 'a series at the cap is not said to be full');
+  assert.deepEqual(await followers([S('c'), S('f')]), [`${S('f')}:fs-c:fs-c|Elsewhere:null`], 'nothing else was written');
+  assert.equal((await state()).run.results.find((x: any) => x.seriesId === S('f')).proposals.every((p: any) => !p.state), true,
+    'a refused follow decides nothing');
+});
+
+test('a dismissed proposal stays dismissed', { skip }, async () => {
+  await series('a', 'Alpha Tale');
+  const runId = await reviewRun([S('a')]);
+  const d = await decide(runId, 'dismiss', S('a'), 'fs-a');
+  assert.equal(d.statusCode, 200, d.body);
+  assert.deepEqual(d.json().result.proposals.map((p: any) => p.state ?? null), ['dismissed', null]);
+  // Reintroduce by dropping the `decided` refusal in decide(): the dismissed source is followed.
+  const again = await decide(runId, 'follow', S('a'), 'fs-a');
+  assert.deepEqual([again.statusCode, again.json().error, again.json().state], [409, 'decided', 'dismissed'], 'a dismissed proposal is followed');
+  assert.deepEqual(await followers([S('a')]), [], 'nothing followed');
+  assert.equal((await state()).run.results[0].proposals[0].state, 'dismissed');
 });
 
 test("Health offers Find other sources on a failing source's row and on the series that can no longer update", { skip }, async () => {

@@ -16,16 +16,18 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { setActiveDict } from '../lib/i18n';
 import {
-  altKey, altOriginLabel, altRefusal, findEndedRunIds, findEta, findGate, findRunState, findSlotState, findSummary, findWhyLine,
-  groupResults, notTriedIds, progressLine, seriesOutcome, startRefusal, FIND_SERIES_MAX_MS,
-  type FindResult, type FindRun, type FindStatus,
+  altKey, altOriginLabel, altRefusal, amberNote, bulkOutcome, decideRefusal, findEndedRunIds, findEta, findGate, findReviewFirst,
+  findRunState, findSlotState, findSummary, findWhyLine, greenToFollow, groupResults, lineUpText, notTriedIds, progressLine,
+  seriesOutcome, setFindReviewFirst, startRefusal, FIND_SERIES_MAX_MS,
+  type FindProposal, type FindResult, type FindRun, type FindStatus,
 } from '../lib/findSources';
 import { ACTION_COPY, runStatusWord } from '../lib/healthCopy';
 import { answerView, evidenceView, healthRowEvidence, type StageLine } from '../lib/sourceEvidence';
 import { diagnosisFix, diagnosisReason } from '../lib/said';
 import { runProgress, runTitle, type RunCard } from '../lib/jobs';
 import { navRing, runName, runWaitLine, type SourceJobs } from '../lib/serverDownloads';
-import { FindResultRow, FindRunRow } from '../components/FindSources';
+import { FindResultRow, FindRunRow, SeriesReview } from '../components/FindSources';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 (globalThis as any).React = React;
 const ROOT = join(__dirname, '..');
@@ -260,7 +262,9 @@ test('the Sources sheet: Find more sources for this one series, and the other na
   // start while another run goes: the matching assertion fails.
   const sheet = code(read('components/SourcesSheet.tsx'));
   const find = slice(sheet, 'function FindMore(', 'function OtherNames(');
-  assert.match(find, /onRun: \(\) => \{ void fr\.start\('series', \{ seriesIds: \[id\] \}\); \}/, 'Find more sources does not start a run for this series');
+  // v0.51.0: in the mode chosen inline above the key (a dialog opened from this Sheet would sit under it), remembered.
+  assert.match(find, /onRun: \(\) => \{ setFindReviewFirst\(review\); void fr\.start\('series', \{ seriesIds: \[id\], \.\.\.\(review \? \{ review \} : \{\}\) \}\); \}/,
+    'Find more sources does not start a run for this series');
   assert.match(find, /\.\.\.findGate\(fr\.status, busy\),/, 'Find more sources starts while another run goes');
   assert.match(find, /const mine = slot\?\.phase === 'ended' \? seriesOutcome\(run, id\) : null;/, 'the sheet says the run\'s counts, not what it did for this series');
   assert.match(find, /<ActionKeys actions=\{\[spec\]\} \/>\s*<ActionStatus state=\{state\} \/>/, 'the key has no status line');
@@ -389,15 +393,18 @@ test('Library: Find other sources is a row of More for admins, posts the selecti
   // Reintroduce the key in the bar from lg up: library.test.ts measures the row. Post `picked.size` instead of the ids,
   // or keep the selection after a start: the matching assertion fails.
   const src = code(read('app/library/page.tsx'));
-  const fn = slice(src, 'const findSelected = async () => {', 'const sentinel = useRef');
-  assert.match(fn, /api<\{ runId: string; total: number \}>\('\/api\/admin\/sources\/find', \{ method: 'POST', json: \{ seriesIds: \[\.\.\.picked\] \} \}\)/);
+  const fn = slice(src, 'const findSelected = async (review: boolean) => {', 'const sentinel = useRef');
+  assert.match(fn, /api<\{ runId: string; total: number \}>\('\/api\/admin\/sources\/find', \{ method: 'POST', json: \{ seriesIds: \[\.\.\.picked\], \.\.\.\(review \? \{ review \} : \{\}\) \} \}\)/);
   assert.match(fn, /n === 1 \? tr\('Looking for other sources for 1 series… Library → Downloads shows how it goes\.'\)/, 'one series is counted as many');
   // A run that goes on after the notice: the notice turns, and says it is busy (notices.test.ts).
   assert.match(fn, /'info', \{ busy: true \}\);/, 'the notice of a run that goes on does not turn');
   assert.match(fn, /void kickDownloads\(qc\);\s*settle\(\);/, 'the Server tasks card waits 30 s, or the selection stays after a start');
   assert.match(fn, /catch \(e\) \{ toast\(findRefusal\(e\), 'error'\); \}/, 'a refused start (another run, nothing to search) is not said');
   const more = slice(src, "<Sheet title={tr('{n} selected'", '</Sheet>');
-  assert.match(more, /\{isAdmin && \([\s\S]*?setMore\(false\); void findSelected\(\);[\s\S]*?\{tr\('Find other sources'\)\}/, 'More has no Find other sources for admins');
+  // v0.51.0: through the start dialog, which asks how to follow what it finds.
+  assert.match(more, /\{isAdmin && \([\s\S]*?setMore\(false\); setFinding\(true\);[\s\S]*?\{tr\('Find other sources'\)\}/, 'More has no Find other sources for admins');
+  assert.match(src, /\{finding && <FindStartDialog onClose=\{\(\) => setFinding\(false\)\} onStart=\{\(review\) => \{ setFinding\(false\); void findSelected\(review\); \}\} \/>\}/,
+    'the start dialog does not start the search it chose');
 });
 
 test("Server tasks: the run's card is named as a noun, counts its follows, stops through its own route, and shows its results", () => {
@@ -470,7 +477,8 @@ test('the results open on <body>, whatever card opened them, and each group is i
     assert.match(sheet, new RegExp(`<Group id="${id}" title=\\{tr\\('${title}'\\)\\}`), `the ${title} group is gone`);
   }
   // What the run never reached can be searched now, through the same one-run rule.
-  assert.match(sheet, /again\.start\('retry', \{ seriesIds: untried \}\)/, 'the untried series cannot be searched again');
+  // In the run's own mode (v0.51.0): what a review never reached is searched for review too.
+  assert.match(sheet, /again\.start\('retry', \{ seriesIds: untried, \.\.\.\(run\.review \? \{ review: true \} : \{\}\) \}\)/, 'the untried series cannot be searched again');
   assert.match(sheet, /untried\.length === 1 \? tr\('Search the 1 series not tried'\) : tr\('Search the \{n\} series not tried', \{ n: untried\.length \}\)/);
   // Health's card polls nothing of its own: the page's follower does.
   assert.match(slice(src, 'export function FindRunCard(', ''), /<FindResultsSheet poll=\{false\}/, 'Health polls the run twice');
@@ -673,4 +681,105 @@ test('nit: Find more sources says it follows the sources that match -- a run can
   const find = slice(code(read('components/SourcesSheet.tsx')), 'function FindMore(', 'function OtherNames(');
   assert.match(find, /what: tr\('Searches the other sources under this title and its other names, and follows the ones whose title and chapter numbers match\.'\),/,
     'Find more sources promises one source');
+});
+
+/* ================================================================ review first (v0.51.0) */
+
+const prop = (sourceId: string, o: Partial<FindProposal> = {}): FindProposal => ({
+  sourceId, sourceName: `Name ${sourceId}`, sourceSeriesId: `${sourceId}|x`, title: 'Alpha Tale', coverUrl: `https://${sourceId}.example/c.jpg`,
+  chapters: 15, ours: { lined: 13, of: 14 }, theirs: { lined: 13, of: 15 }, coverage: 0.93, verdict: 'green', ...o,
+});
+const reviewRun = () => run({
+  status: 'done', review: true, total: 5, done: 5, followed: 1, finishedAt: '2026-09-28T10:05:00Z', results: [
+    res('a', { proposals: [prop('s1'), prop('s2', { verdict: 'amber', amber: 'numbering', ours: { lined: 0, of: 14 } }), prop('s3', { state: 'dismissed' })] }),
+    res('b', { proposals: [prop('s4', { verdict: 'amber', amber: 'other_name' })] }),
+    // Hidden by the 18+ filter: the server sends no title for it, nor its matches'.
+    { seriesId: 'c', followed: [], proposals: [prop('s5', { title: undefined, coverUrl: undefined })] },
+    res('d', { followed: [followed('Name s6', 15)], proposals: [prop('s6', { state: 'followed' }), prop('s7')] }),
+    res('e', { why: 'no_match' }),
+  ],
+});
+
+test('review first: green and amber in words, and Follow all green follows only the green matches nobody decided', () => {
+  // #132 (@TIGamingTV): a person confirms each match by its cover. Reintroduce the bulk over every open match (drop
+  // `p.verdict === 'green' &&` in greenToFollow): the amber ones are followed unseen, and the named assertion fails.
+  const r = reviewRun();
+  // Every series with matches is the review's, decided or not; a series without them keeps its group. Reintroduce
+  // groupResults without its review arm: the named assertion fails.
+  const g = groupResults(r.results);
+  assert.deepEqual(g.review.map((x) => x.seriesId), ['a', 'b', 'c', 'd'], "a review's series reads as found or nothing found");
+  assert.deepEqual([g.found.length, g.nothing.map((x) => x.seriesId)], [0, ['e']]);
+  assert.deepEqual(greenToFollow(r), [{ seriesId: 'a', sourceId: 's1' }, { seriesId: 'd', sourceId: 's7' }],
+    'Follow all green follows a match it must leave: an amber one, a decided one, or one nobody could see');
+  assert.deepEqual(greenToFollow(null), []);
+  assert.equal(findSummary(r), '1 source followed · 4 series to review · Nothing found for 1 series');
+  // The words: the line-up both ways, and why a match is amber.
+  assert.equal(lineUpText(prop('s1')), '13 of our 14 chapters line up · We list 13 of its 15');
+  assert.equal(amberNote(prop('s1')), null, 'a green match says it is amber');
+  assert.match(amberNote(prop('s2', { verdict: 'amber', amber: 'numbering' }))!, /^Amber: a name matches, but the chapter numbers do not line up\./);
+  assert.match(amberNote(prop('s4', { verdict: 'amber', amber: 'other_name' }))!, /^Amber: it matched only under another name of this series/);
+  // The Sources sheet's line for its own series, and the bulk's.
+  assert.deepEqual(seriesOutcome(r, 'b'), { text: '1 match to review' });
+  assert.deepEqual(seriesOutcome(r, 'a'), { text: '2 matches to review' });
+  assert.deepEqual(seriesOutcome(run({ status: 'done', review: true, results: [res('z', { proposals: [prop('s1', { state: 'dismissed' })] })] }), 'z'),
+    { text: 'No source followed', partial: true });
+  assert.deepEqual(bulkOutcome(3, 0), { outcome: '3 sources followed' });
+  assert.deepEqual(bulkOutcome(1, 1), { outcome: '1 source followed · 1 could not be followed', partial: true });
+  // A refusal is the reason in words; the cap and posting order are the run's own sentences for them.
+  assert.equal(decideRefusal('full'), findWhyLine('full'));
+  assert.equal(decideRefusal('posting_order'), findWhyLine('posting_order'));
+  assert.equal(decideRefusal('busy'), null);
+});
+
+test("review first: each match beside the series' own cover, its title in its own direction, and Follow / Skip until decided", () => {
+  // Reintroduce the keys on every match (drop `p.state ?` in ProposalRow): a followed match offers Follow again.
+  const r = reviewRun().results[0];
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() },
+    createElement(SeriesReview, { runId: 'r1', r })));
+  // Both covers, side by side: the series' own and the match's, through the cover proxy.
+  assert.ok(html.includes('src="/img/series/a/thumb'), "the series' own cover is missing");
+  assert.ok(html.includes(`src="/img/sources/cover?source=s1&amp;u=${encodeURIComponent('https://s1.example/c.jpg')}`), "the match's cover is not through the proxy");
+  assert.match(html, /<p dir="auto"[^>]*>Alpha Tale<\/p>/, "a match's title takes the page's direction");
+  assert.ok(html.includes('13 of our 14 chapters line up · We list 13 of its 15'));
+  assert.equal((html.match(/data-review-follow="/g) ?? []).length, 2, 'a decided match offers Follow again');
+  assert.ok(html.includes('data-review-state="dismissed"'), 'a skipped match does not say so');
+  assert.ok(html.includes('data-amber-note'), 'an amber match does not say why');
+  assert.doesNotMatch(html, /rounded-full/, 'a capsule in the review');
+});
+
+test('the start dialog remembers the last choice on this device; storage that throws reads as automatic', () => {
+  // Reintroduce the read without its try/catch: a private window, whose storage throws, breaks every start point.
+  const g = globalThis as { localStorage?: unknown };
+  const had = Object.getOwnPropertyDescriptor(g, 'localStorage');
+  try {
+    Object.defineProperty(g, 'localStorage', { configurable: true, get() { throw new Error('SecurityError: storage is off'); } });
+    assert.doesNotThrow(() => findReviewFirst(), 'storage that throws breaks the start dialog');
+    assert.equal(findReviewFirst(), false);
+    assert.doesNotThrow(() => setFindReviewFirst(true), 'storage that throws breaks Start');
+    const store = new Map<string, string>();
+    Object.defineProperty(g, 'localStorage', {
+      configurable: true,
+      value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } },
+    });
+    assert.equal(findReviewFirst(), false, 'automatic is not the default');
+    setFindReviewFirst(true);
+    assert.equal(findReviewFirst(), true, 'the last choice is not remembered');
+    setFindReviewFirst(false);
+    assert.deepEqual([findReviewFirst(), store.size], [false, 0]);
+  } finally {
+    if (had) Object.defineProperty(g, 'localStorage', had);
+    else delete g.localStorage;
+  }
+  // Every start point asks: Health's row and the Library's More through the dialog, the Sources sheet inline. The
+  // dialog opens on the last choice and remembers the one it starts with.
+  const comp = code(read('components/FindSources.tsx'));
+  const dialog = slice(comp, 'export function FindStartDialog(', 'function useReviewActions(');
+  assert.match(dialog, /const \[review, setReview\] = useState\(findReviewFirst\);/, 'the dialog forgets the last choice');
+  assert.match(dialog, /onClick=\{\(\) => \{ setFindReviewFirst\(review\); onStart\(review\); \}\}/, 'Start does not remember the choice');
+  const health = code(read('components/HealthActions.tsx'));
+  assert.match(health, /\{asking === 'find' && \(\s*<FindStartDialog onClose=\{\(\) => setAsking\(null\)\}\s*onStart=\{\(review\) => \{ setAsking\(null\); if \(item\.sourceId\) void fr\?\.start\(slotKey, \{ sourceId: item\.sourceId, \.\.\.\(review \? \{ review \} : \{\}\) \}\); \}\} \/>/,
+    "Health's dialog does not start the run it chose");
+  const sheet = slice(code(read('components/SourcesSheet.tsx')), 'function FindMore(', 'function OtherNames(');
+  assert.match(sheet, /<FindModeChoice review=\{review\} onChange=\{setReview\} \/>/, 'the Sources sheet does not offer the choice');
+  assert.match(sheet, /\{mineRow && run && <SeriesReview runId=\{run\.id\} r=\{mineRow\} onFollowed=\{onFound\} \/>\}/, "the sheet does not show its series' matches");
 });

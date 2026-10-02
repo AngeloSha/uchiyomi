@@ -44,7 +44,7 @@ export interface FindRunApi {
 }
 
 /** The error code of a refusal (`{ error: 'busy' }`), or null. */
-const codeOf = (e: unknown): string | null => {
+export const codeOf = (e: unknown): string | null => {
   try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
 };
 
