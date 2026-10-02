@@ -1814,7 +1814,7 @@ overview as `langs` (sources, enabled, series that came from them, hidden), unaf
 filters, and `GET /api/admin/extensions/status` reports `registered`, `skipped` and `cap` so the
 `SUWAYOMI_MAX_SOURCES` overflow is visible rather than a line in the boot log.
 
-**Admin → Extensions, redesigned (v0.53.0).** `GET /api/admin/extensions/catalog` answers a page at a time: `offset`
+**v0.53.0 redesigned Admin → Extensions.** `GET /api/admin/extensions/catalog` answers a page at a time: `offset`
 (from 0) and `limit` (default and maximum 400, so a call with neither still gets the first 400), echoed in the answer
 beside `shown` (the page's length) and `matched` (every match), so the last extension of a 1,300-extension repository
 is as reachable as the first -- it used to stop at 400 and say "narrow the search". `updates=true` keeps only the
