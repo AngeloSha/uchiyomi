@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2495
+    "strings": 2496
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2498,5 +2498,6 @@
   "Series added from this source.": "Серии, добавленные из этого источника.",
   "Series that read from this source, as their main source or a followed one.": "Серии, которые читаются из этого источника — как основного или отслеживаемого.",
   "Main: {name}": "Основной: {name}",
-  "Any: {name}": "Любой: {name}"
+  "Any: {name}": "Любой: {name}",
+  "Tap again to skip to the next chapter": "Нажмите ещё раз, чтобы перейти к следующей главе"
 }
