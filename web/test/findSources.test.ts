@@ -767,6 +767,10 @@ test('an earlier search opens in the sheet by its id, and the latest is a key aw
   assert.match(sheet, /queryFn: \(\) => fetchFindRun\(openId!\)/, 'the opened search is not read by its id');
   assert.match(read('lib/useFindRun.tsx'), /api<FindStatus>\(`\/api\/admin\/sources\/find\?runId=\$\{encodeURIComponent\(id\)\}`\)/);
   assert.match(sheet, /onClick=\{\(\) => setOpenId\(null\)\} data-find-latest/, 'there is no way back to the latest search');
+  // The keys sit under the results: the run they open starts at the sheet's top, not a screen above the reader.
+  assert.match(sheet, /useEffect\(\(\) => \{\s*if \(shown\.current === openId\) return;\s*shown\.current = openId;\s*top\.current\?\.scrollIntoView\(\{ block: 'start' \}\);\s*\}, \[openId\]\);/,
+    'an opened run begins a screen above where the reader is');
+  assert.match(sheet, /<div data-find-results ref=\{top\}/);
   // A match's state has a key of its own too: one match, beside "Followed", in the number and gender it agrees with.
   assert.match(code(read('components/FindSources.tsx')), /p\.state === 'followed' \? tr\('Followed'\) : tr\('Skipped for good'\)/);
 });

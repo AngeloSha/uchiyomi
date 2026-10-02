@@ -15,7 +15,7 @@
 // The run itself is the server's (POST /api/admin/sources/find); GET says how far the running one has got, or what the
 // newest one did, and keeps the newest twenty. The idea, the other-names list and the name parsing are @TIGamingTV's
 // (PR #119).
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
@@ -123,6 +123,15 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
     refetchInterval: poll ? (qq) => (qq.state.data?.running ? 2000 : false) : undefined,
   });
   const [openId, setOpenId] = useState<string | null>(null);
+  // Opening a run (or going back to the latest) starts the sheet at its top: the keys are at the bottom, under the
+  // results, and the run they open would otherwise begin a screen above where the reader is.
+  const top = useRef<HTMLDivElement>(null);
+  const shown = useRef<string | null>(null);
+  useEffect(() => {
+    if (shown.current === openId) return;
+    shown.current = openId;
+    top.current?.scrollIntoView({ block: 'start' });
+  }, [openId]);
   const opened = useQuery({
     queryKey: [...FIND_KEY, 'run', openId],
     queryFn: () => fetchFindRun(openId!),
@@ -150,7 +159,7 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
   return (
     <OnBody>
       <Sheet title={tr('Other-source search')} onClose={onClose} overBottomNav>
-        <div data-find-results className="pb-2">
+        <div data-find-results ref={top} className="pb-2">
           {openId && (
             <div className="mb-2">
               <button type="button" className="btn-key" onClick={() => setOpenId(null)} data-find-latest>{tr('Back to the latest search')}</button>
