@@ -1168,7 +1168,6 @@
   "Sources to treat as adult, on top of the ones their extension already declares.": "除扩展本身已声明的之外，另外视为成人内容的来源。",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "单部作品可以在它自己的页面上放行 — 编辑详情 ▸ “始终显示”。",
   "Always show": "始终显示",
-  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "即使它的某个类型在 18+ 过滤中，“显示 18+”关闭时也让这部作品留在书架上。",
   "Type anywhere to search": "在任意位置输入即可搜索",
   "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "在任意页面开始输入标题，即可带着它打开搜索。同时开启或关闭 / 快捷键，仅限此设备。",
   "This source": "此来源",
@@ -2499,5 +2498,6 @@
   "Series that read from this source, as their main source or a followed one.": "从此来源读取的系列（作为主来源或已关注来源）。",
   "Main: {name}": "主：{name}",
   "Any: {name}": "任意：{name}",
-  "Tap again to skip to the next chapter": "再点一次以跳到下一章"
+  "Tap again to skip to the next chapter": "再点一次以跳到下一章",
+  "Keep this series on the shelf while “Show 18+” is off, and let age-restricted accounts read it, even if it or one of its genres is 18+.": "在“显示 18+”关闭时仍将此系列保留在书架上，并允许有年龄限制的账户阅读，即使它或它的某个类型属于 18+。"
 }

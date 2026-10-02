@@ -6924,9 +6924,9 @@ paths:
                   type: [boolean, "null"]
                   description: >-
                     Keep this series in listings while "Show 18+" is off even when one of its genres is on
-                    the 18+ filter (adultGenres on PATCH /api/admin/settings). Absent or null leaves the
-                    current value alone; every other field here is written as sent. Does not affect 18+
-                    libraries or the age limit.
+                    the 18+ filter (adultGenres on PATCH /api/admin/settings), it is rated 18+, or it sits
+                    in an 18+ library. Absent or null leaves the current value alone; every other field
+                    here is written as sent. Also lifts an account's age limit (max_age_rating) for this series.
                 readingDirection:
                   type: [string, "null"]
                   enum: [LEFT_TO_RIGHT, RIGHT_TO_LEFT, VERTICAL, WEBTOON, null]

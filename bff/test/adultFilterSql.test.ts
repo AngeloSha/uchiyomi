@@ -76,3 +76,36 @@ test('sourceBrowsableFor: named sources hide only while the switch is on, case-i
   // The permission still wins over the reveal: an account capped below 18 never reaches an NSFW source.
   assert.equal(V.sourceBrowsableFor({ id: 'x', isNsfw: true }, { ...on, hideAdultLibraries: false, maxAgeRating: 16 }), false);
 });
+
+test("a series' own 18+ rating leaves the listing, without binding a parameter", () => {
+  // Reintroduce by dropping the series clause from browsable(): a series rated 18+ inside an ordinary library
+  // stayed on Home's Continue Reading with "Show 18+" off, because only the library's rating was checked.
+  const p = new V.Params();
+  const sql = V.browsable('s', ctx([]), p);
+  assert.match(sql, /o_ar\.age_rating FROM series_overrides o_ar WHERE o_ar\.series_id = s\.id/, 'the override is consulted');
+  assert.match(sql, /s\.age_rating, 0\) < 18/, 'and what the scan read, against the adult rating');
+  assert.deepEqual(p.values, []);
+  assert.doesNotMatch(V.browsable('s', ctx([], { hideAdultLibraries: false }), new V.Params()), /o_ar/, 'the reveal switches it off');
+});
+
+test('"Always show" outranks the library rating and the series rating, not just the genres', () => {
+  // Reintroduce by leaving the exemption off either clause: an exempt series in an 18+ library, or rated 18+
+  // itself, vanishes from the shelf despite its checkbox.
+  const sql = V.browsable('s', ctx([]), new V.Params());
+  const guarded = (needle: RegExp) => sql.split(/\n/).join(' ').match(needle);
+  assert.ok(guarded(/o_ex0\.adult_exempt[^]*?\) OR NOT EXISTS \(\s*SELECT 1 FROM libraries l_ad/), 'library clause is exemptable');
+  assert.ok(guarded(/\) OR COALESCE\(\s*\(SELECT o_ar\.age_rating/), 'series rating clause is exemptable');
+  assert.match(V.browsable('s', ctx([], { maxAgeRating: 12 }), new V.Params()), /age_rating IS NULL OR|<= \$/, 'the age cap is still applied');
+});
+
+test('"Always show" also lifts the age cap for its series, and needs no second flag', () => {
+  // Reintroduce by dropping the exemption from visible(): a capped account is refused a title an admin let in.
+  // Or from browsable(): the title is readable by id but never appears on a shelf, since a capped account
+  // always browses with the switch off.
+  const capped = { maxAgeRating: 12 };
+  const v = V.visible('s', ctx([], capped), new V.Params());
+  assert.match(v, /o3\.adult_exempt FROM series_overrides o3 WHERE o3\.series_id = s\.id/);
+  assert.match(v, /OR .*<= \$1/s, 'the cap itself is still bound');
+  assert.doesNotMatch(V.visible('s', ctx([]), new V.Params()), /adult_exempt/, 'an uncapped account pays nothing');
+  assert.doesNotMatch(v + V.browsable('s', ctx([], capped), new V.Params()), /age_cap_exempt/);
+});

@@ -130,7 +130,7 @@ export interface Series {
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
-    /** Let through the 18+ filter's genre rule (Admin → Settings → 18+ filter). Absent on older servers. */
+    /** "Always show": exempt from the 18+ filter and from accounts' age limits. Absent on older servers. */
     adultExempt?: boolean;
     /** The admin's reading direction for this series; null follows `detectedDirection`. Absent before v0.48.0. */
     readingDirection?: SeriesMetadata['readingDirection'] | null;

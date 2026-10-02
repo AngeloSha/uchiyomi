@@ -85,7 +85,10 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
       (SELECT l2.age_rating FROM libraries l2 WHERE l2.id = ${alias}.library_id))`;
     // Unrated stays visible on purpose. Treating NULL as adults-only would empty most libraries the first
     // time anyone set a cap, and a parent would reasonably read that as the app being broken.
-    parts.push(`(${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
+    // "Always show" (`adult_exempt`) lifts the cap for one series: a title rated 18+ that a restricted account
+    // may nonetheless read. It lifts the rating only -- library grants above still decide which libraries.
+    parts.push(`(COALESCE((SELECT o3.adult_exempt FROM series_overrides o3 WHERE o3.series_id = ${alias}.id), false)
+      OR ${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
   }
   return parts.join(' AND ');
 }
@@ -197,8 +200,19 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // interpolate the result into queries whose parameter arrays are hand-written, so a bound parameter would
   // emit a `$N` nothing ever binds -- and `q()` would either throw or, worse, collide with the caller's own
   // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
-  const parts = [base, `NOT EXISTS (
-    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`];
+  // "Always show" (`series_overrides.adult_exempt`) is one series' explicit answer, and it outranks every
+  // 18+ rule below -- its library's rating, its own rating and its genres alike -- and the account's
+  // age cap: `visible()` above lifts that too, for the same flag. A restricted account always browses with
+  // the switch off, so the exemption has to hold here or the title it was let into never reaches a shelf.
+  const exempt = `COALESCE((SELECT o_ex0.adult_exempt FROM series_overrides o_ex0 WHERE o_ex0.series_id = ${alias}.id), false)`;
+  const parts = [base, `(${exempt} OR NOT EXISTS (
+    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING}))`];
+  // The SERIES' own rating, as `visible()` resolves it (admin override, then what the scan read). Only the
+  // library's rating was consulted above, so rating a single series 18+ in an ordinary library did nothing to
+  // any listing: it stayed on Home's Continue Reading, in Library and in every rail while "Show 18+" was off.
+  parts.push(`(${exempt} OR COALESCE(
+    (SELECT o_ar.age_rating FROM series_overrides o_ar WHERE o_ar.series_id = ${alias}.id),
+    ${alias}.age_rating, 0) < ${ADULT_RATING})`);
   // Genres the admin has named as adult, READ HERE, IN SQL, from server_settings -- never interpolated. This
   // function cannot bind (see above), and an admin-entered list is not a code constant, so the list stays
   // in the database and the query only names the column. That also makes the rule hold for EVERY context
@@ -220,8 +234,7 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
           SELECT lower(btrim(x_ad)) FROM server_settings s2_ad, jsonb_array_elements_text(s2_ad.adult_genres) AS x_ad
            WHERE s2_ad.id = 1 AND jsonb_typeof(s2_ad.adult_genres) = 'array')
       )
-      AND NOT COALESCE(
-        (SELECT o_ex.adult_exempt FROM series_overrides o_ex WHERE o_ex.series_id = ${alias}.id), false)
+      AND NOT ${exempt}
     )
   )`);
   return parts.join(' AND ');
