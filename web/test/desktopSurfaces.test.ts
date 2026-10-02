@@ -115,19 +115,21 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   assert.match(libs, /const desktopLibs = isDesktop\(\);/);
   assert.match(libs, /\{!desktopLibs && <button onClick=\{\(\) => setAccess\(l\)\} className="chip text-xs">\{tr\('Access'\)\}<\/button>\}/, 'the Access chip shows on desktop');
   assert.match(libs, /\{!desktopLibs && <>\{' · '\}\{!anyMembers \? tr\('admins only'\)/, 'the "who can open it" fact shows on desktop');
-  const ext = slice(admin, 'function Extensions(', 'const refreshAll = () =>');
-  const gate = ext.indexOf('if (isDesktop() && !(status.configured && status.reachable)) return <EngineInstall span={span} />;');
+  // v0.53.0: the tab is components/ExtensionsPanel.tsx; the desktop gate is its own, before the server's setup card.
+  const ext = slice(code(read('components/ExtensionsPanel.tsx')), 'export function ExtensionsPanel(', 'function useViewParam(');
+  const gate = ext.indexOf('if (isDesktop() && !ready) return <EngineInstall />;');
   assert.ok(gate > 0, 'Extensions on desktop is still the Docker card');
-  assert.ok(gate < ext.indexOf('if (!status.configured) {'), 'the Docker card is decided before the desktop one');
-  assert.ok(gate > ext.indexOf('if (!status) return null;'), 'the engine card renders before the server has answered');
-  // v0.45.0: the card names the shipped container (it named the development stack's); extensionRepoRow.test.ts
-  // pins the rest of its copy.
+  assert.ok(gate < ext.indexOf('if (!ready) return <EngineSetup status={status} />;'), 'the Docker card is decided before the desktop one');
+  assert.ok(gate > ext.indexOf('if (!status) return'), 'the engine card renders before the server has answered');
   // v0.49.0 (#72): the server's card is the setup screen (components/EngineSetup.tsx), whose steps name the shipped
   // container; engineSetup.test.ts pins them.
-  assert.match(ext, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the server\'s own card is not the setup screen');
-  // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated.
-  assert.match(admin, /\{sentenceGap\(overCap\)\}\{isDesktop\(\)\s*\? tr\('Hide languages you don’t read\.'\)\s*: tr\('Hide languages you don’t read, or raise \{name\}\.', \{ name: 'SUWAYOMI_MAX_SOURCES' \}\)\}/,
+  assert.match(ext, /if \(!ready\) return <EngineSetup status=\{status\} \/>;/, 'the server\'s own card is not the setup screen');
+  // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated -- in the
+  // engine's part of the header since v0.53.0, beside the count it limits.
+  assert.match(code(read('components/EngineSetup.tsx')), /\{over\}\{sentenceGap\(over\)\}\s*<span[^>]*>\{desktop\s*\? tr\('Hide languages you don’t read\.'\)\s*: tr\('Hide languages you don’t read, or raise \{name\}\.', \{ name: 'SUWAYOMI_MAX_SOURCES' \}\)\}/,
     'the source-limit line names an env var on desktop, or changed on the server');
+  assert.match(code(read('components/ExtensionsPanel.tsx')), /<EngineReady status=\{status\} installed=\{inst \? inst\.installed : null\} desktop=\{isDesktop\(\)\} \/>/,
+    'the header is not told it is on desktop');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));
   assert.match(card, /import \{ bridge, type EngineStatus \} from '@\/lib\/desktop';/);
@@ -148,7 +150,8 @@ test('the desktop-only admin additions render nothing without the bridge', () =>
   assert.match(backups, /onClick=\{\(\) => b\.revealBackups\(\)\}/);
   assert.match(backups, /<ConfirmDialog[\s\S]*?danger[\s\S]*?onConfirm=\{\(\) => \{ void restore\(\); \}\}/, 'restoring does not ask first');
   assert.match(admin, /\{c\.id === 'update' && <DesktopUpdateNote \/>\}/, 'the Version card has no desktop update note');
-  const note = slice(admin, 'function DesktopUpdateNote(', 'interface ExtStatus');
+  const note = admin.slice(admin.indexOf('function DesktopUpdateNote('));
+  assert.ok(note.length > 0, 'DesktopUpdateNote is not where this test looks');
   assert.match(note, /if \(!b \|\| !u\?\.available\) return null;/, 'the update note renders on the server, or with nothing to say');
 });
 

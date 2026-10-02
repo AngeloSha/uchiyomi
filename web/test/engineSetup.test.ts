@@ -157,8 +157,13 @@ test('the card polls the status while it is looked at, and Check again refetches
   assert.match(src, /<ProgressRing size="bar" progress=\{waiting \? 'spin' : 'idle'\}/);
   assert.doesNotMatch(src, /animate-|@keyframes|motion\./, 'a custom animation the Reduce effects switch does not reach');
   assert.doesNotMatch(src, /rounded-full/, 'a capsule');
-  const admin = code(read('app/admin/page.tsx'));
-  assert.match(admin, /<EngineReadyFoot status=\{status\} desktop=\{isDesktop\(\)\} \/>/, 'the ready panel lost its helper line and Turning it off');
+  // v0.53.0: a working engine's header keeps the helper's Connect and the way to turn the engine off (a sheet now).
+  const panel = code(read('components/ExtensionsPanel.tsx'));
+  assert.match(panel, /<EngineReady status=\{status\} installed=\{inst \? inst\.installed : null\} desktop=\{isDesktop\(\)\} \/>/, 'the ready panel lost its helper line and Turning it off');
+  const ready = src.slice(src.indexOf('export function EngineReady('));
+  assert.match(ready, /\{!said\?\.ok && helper\?\.action === 'connect' && \(\s*<button[^>]*data-engine-connect>/, 'the helper has no Connect');
+  assert.match(ready, /\{!desktop && \(\s*<button type="button" onClick=\{\(\) => setShowOff\(true\)\}/, 'Turning it off is gone, or shows on desktop');
+  assert.match(ready, /<Steps steps=\{offSteps\(platform\)\} \/>\s*<DataWarning platform=\{platform\} linked=\{status\.linkedSeries \?\? 0\} \/>/, 'turning it off lost its steps or the data warning');
 });
 
 /**

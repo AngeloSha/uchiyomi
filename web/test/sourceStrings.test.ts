@@ -187,10 +187,12 @@ const code = (src: string): string =>
   src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 /**
  * JSX text a person reads that is not a tr() call: words between a tag's `>` and the next `<`. Code has `(`, `;` or
- * `=` in it (an arrow's `=>` then a call, a generic's `>` then its argument) and JSX text as good as never does.
+ * `=` in it (an arrow's `=>` then a call, a generic's `>` then its argument) and JSX text as good as never does. Nor
+ * does it follow an arrow's `>` (`queryFn: () => api<Page>(…)` read as the text "api"), or hold `&&` or `||` (a
+ * comparison's `>` before a condition: `{n > MAX && <span`).
  */
 const bareText = (src: string): string[] =>
-  [...code(src).matchAll(/>([^<>{}();=]*[A-Za-z]{2,}[^<>{}();=]*)</g)].map((m) => m[1].trim()).filter(Boolean);
+  [...code(src).matchAll(/(?<!=)>([^<>{}();=]*[A-Za-z]{2,}[^<>{}();=]*)</g)].map((m) => m[1].trim()).filter((t) => t && !/&&|\|\|/.test(t));
 /** A toast, a confirm or an error fallback written as an English template or string, not through tr(). */
 const bareCalls = (src: string): string[] =>
   [...code(src).matchAll(/\b(?:toast|confirm|msgOf\([^,]+,)\s*\(?\s*(`[^`]*[A-Za-z]{3,}[^`]*`|'[^']*[A-Za-z]{3,}[^']*')/g)].map((m) => m[1]);
@@ -199,10 +201,9 @@ test("Admin → Extensions → Languages and the Offline page say nothing in bar
   // v0.49.1: pre-existing English in every language -- the Languages panel's heading, counts, note, empty line and
   // paragraph, the over-the-limit banner and the hide/show toasts; the Offline page's counts ("Deleted ${n} chapters",
   // "12 chapters · …"), its confirms and its storage line. Reintroduce any one of them as it was: this names it.
-  const admin = read('app/admin/page.tsx');
-  const toggle = admin.slice(admin.indexOf('const toggleLang = async'), admin.indexOf('const list = cat?.content'));
-  const panel = toggle + admin.slice(admin.indexOf('{/* languages — a standing instruction'), admin.indexOf('Out of date is a thing to be told'));
-  assert.ok(toggle.includes('/api/admin/extensions/sources/bulk') && panel.includes("tr('Languages')"), 'PREMISE: the slices hold toggleLang and the Languages panel');
+  // v0.53.0: the Languages panel is a sheet of its own (components/ExtensionLanguages.tsx), toggleLang with it.
+  const panel = read('components/ExtensionLanguages.tsx');
+  assert.ok(panel.includes('/api/admin/extensions/sources/bulk') && panel.includes("tr('Languages')"), 'PREMISE: the file holds toggleLang and the Languages panel');
   assert.deepEqual(bareText(panel), [], 'bare English text in the Languages panel');
   assert.deepEqual(bareCalls(panel), [], 'a bare English toast in the Languages panel');
   const offline = read('app/downloads/page.tsx');
@@ -222,14 +223,18 @@ test("the rest of Admin → Extensions, and Providers' source rows, say nothing 
   // carries. Reintroduce any one as it was -- `{busy === '__updateall' ? 'Updating…' : 'Update all'}`, say -- and
   // this names it.
   const admin = read('app/admin/page.tsx');
-  const between = (a: string, b: string) => {
-    const i = admin.indexOf(a);
-    const j = admin.indexOf(b, i);
+  const between = (src: string, a: string, b: string) => {
+    const i = src.indexOf(a);
+    const j = b ? src.indexOf(b, i) : src.length;
     assert.ok(i >= 0 && j > i, `PREMISE: ${a} … ${b} is not where this test looks`);
-    return admin.slice(i, j);
+    return src.slice(i, j);
   };
-  const ext = between('const act = async (e: CatalogExt', 'const refreshRepos = async') + between('{!status.reachable ? (', '<EngineReadyFoot');
-  const rows = between('function controlsOf(', 'function sourceCard(');
+  // v0.53.0: the tab is components/ExtensionsPanel.tsx and its sheets; the engine's header is EngineSetup.tsx's.
+  const ext = [
+    read('components/ExtensionsPanel.tsx'), read('components/ExtensionSheet.tsx'), read('components/ExtensionRepos.tsx'),
+    read('components/ExtensionBits.tsx'), between(read('components/EngineSetup.tsx'), 'export function EngineReady(', ''),
+  ].join('\n');
+  const rows = between(admin, 'function controlsOf(', 'function sourceCard(');
   /**
    * Any word of English in a string or template left outside tr(): a label a ternary picks (`? 'Update' :`), a toast's
    * other arm (`n ? updated : 'Everything is already up to date'`), a template a toast is built from. A key compared
@@ -240,12 +245,20 @@ test("the rest of Admin → Extensions, and Providers' source rows, say nothing 
     return [...c.matchAll(/'((?:[^'\\\n]|\\.)*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, ' '))
       .filter((t) => /\b[A-Z][a-z]+\b/.test(t) || /\b[a-z]{3,} [a-z]{3,}\b/.test(t));
   };
-  for (const [name, src] of [['Admin → Extensions', ext], ["Providers' source rows", rows]] as const) {
+  // Whole files since v0.53.0, so what a file says to the bundler (its imports, 'use client') and a class list a
+  // ternary picks are not words anyone reads: a class list is tokens of Tailwind's shape with one hyphenated at least.
+  // An English phrase in lower case ("none of its sources are on") has no hyphenated token, and is still caught.
+  const isClassList = (t: string) => t.trim().split(/\s+/).every((w) => /^[a-z0-9:[\]/.%!-]+$/.test(w)) && /(^|\s)-?[a-z]+-[a-z0-9[]/.test(t.trim());
+  const program = (src: string) => src.split('\n').filter((l) => !/^\s*(import\b|'use client';)/.test(l) && !/^\s*\} from '/.test(l)).join('\n');
+  for (const [name, src] of [['Admin → Extensions', program(ext)], ["Providers' source rows", rows]] as const) {
     assert.deepEqual(bareText(src), [], `bare English text in ${name}`);
     assert.deepEqual(bareCalls(src), [], `a bare English toast in ${name}`);
-    assert.deepEqual(bareLiterals(src), [], `bare English in a string in ${name}`);
+    assert.deepEqual(bareLiterals(src).filter((t) => !isClassList(t)), [], `bare English in a string in ${name}`);
   }
   // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half).
-  assert.match(ext, /cat\.updatable === 1 \? tr\('1 extension is out of date'\) : tr\('\{n\} extensions are out of date', \{ n: cat\.updatable \}\)/,
+  assert.match(ext, /updatable === 1 \? tr\('1 extension is out of date'\) : tr\('\{n\} extensions are out of date', \{ n: updatable \}\)/,
     '"1 extensions are out of date"');
+  assert.match(ext, /first\.matched === 1 \? tr\('1 extension matches'\) : tr\('\{n\} extensions match', \{ n: numberText\(first\.matched\) \}\)/,
+    '"1 extensions match"');
+  assert.match(ext, /ext\.used === 1 \? tr\('1 series from it will stop updating but stay readable\.'\)/, 'Remove counts one series in the plural');
 });

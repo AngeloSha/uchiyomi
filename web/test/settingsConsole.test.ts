@@ -338,10 +338,11 @@ test('Providers no longer embeds the Extensions card', () => {
   assert.match(link, /onTab\('Extensions'\)/, 'the door does not switch to the Extensions tab');
   assert.match(link, /queryKey: \['ext-status'\][^\n]*\/api\/admin\/extensions\/status/, 'the door reads a different status than the Extensions tab does');
   assert.match(link, /rtl:-scale-x-100/, 'the chevron does not mirror under RTL');
-  // The tab itself still mounts the card, once.
+  // The tab itself mounts the panel (components/ExtensionsPanel.tsx since v0.53.0), once.
   const panel = src.slice(src.indexOf('const panel = ('), src.indexOf('<ConsoleNav'));
-  assert.match(panel, /tab === 'Extensions' && <div className="board"><Extensions span="full" \/><\/div>/, 'the Extensions tab no longer mounts the card');
-  assert.equal((src.match(/<Extensions /g) ?? []).length, 1, 'the Extensions card is mounted from more than one place');
+  assert.match(panel, /tab === 'Extensions' && <ExtensionsPanel onProviders=\{\(\) => setTab\('Providers'\)\} \/>/, 'the Extensions tab no longer mounts the panel');
+  assert.equal((src.match(/<ExtensionsPanel\b/g) ?? []).length, 1, 'the Extensions panel is mounted from more than one place');
+  assert.doesNotMatch(src, /function Extensions\(/, 'the old Extensions card is back in the admin page');
 });
 
 test('read-chapter cleanup still asks first and carries the day count', () => {

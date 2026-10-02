@@ -26,11 +26,16 @@ test('a language code reads as the language, in the reader\'s own language', () 
 });
 
 test('the Hide and Show keys, and the question before hiding, name the language', () => {
-  const page = src('app/admin/page.tsx');
-  const block = page.slice(page.indexOf("tr('Hide {lang}', {"), page.indexOf('onConfirm={() => toggleLang(hiding, false)}'));
-  const uses = block.match(/\{ lang: [^,}]+/g) ?? [];
-  assert.ok(uses.length >= 7, `the Hide/Show keys and the dialog pass {lang} (${uses.length} found)`);
-  for (const u of uses) assert.match(u, /\{ lang: languageName\(/, `a bare language code reaches a sentence: ${u}`);
+  // v0.53.0: the Languages sheet (components/ExtensionLanguages.tsx). Every {lang} it fills is the language's name:
+  // `lang` in the switch's toasts, `name` in the question, each made by languageName. Reintroduce by passing the code
+  // (`{ lang: code }`, or `const lang = l.lang`): the assertions below name it.
+  const sheet = src('components/ExtensionLanguages.tsx');
+  assert.match(sheet, /const lang = languageName\(l\.lang \?\? ''\);/, 'the toasts are not given the language\'s name');
+  assert.match(sheet, /const name = code \? languageName\(code\) : tr\('No language'\);/, 'the question is not given the language\'s name');
+  const block = sheet.slice(sheet.indexOf('const toggleLang = async'), sheet.indexOf('</Sheet>'));
+  const uses = (block.match(/\{ lang(?:: [^,}]*?)?\s*(?=[,}])/g) ?? []).map((u) => u.trim());
+  assert.ok(uses.length >= 12, `the Hide/Show keys and the question pass {lang} (${uses.length} found)`);
+  for (const u of uses) assert.match(u, /^\{ lang(?:: name)?$/, `a bare language code reaches a sentence: ${u}`);
 });
 
 test('two sentences never get a plain space after a CJK full stop', () => {
@@ -39,8 +44,8 @@ test('two sentences never get a plain space after a CJK full stop', () => {
   assert.equal(joinSentences('完了しました。', '次へ'), '完了しました。次へ');
   assert.equal(joinSentences('Done.', 'Next'), 'Done. Next');
   // The three places the final string pass found joining with a plain space.
-  const page = src('app/admin/page.tsx');
-  assert.match(page, /body=\{joinSentences\(hiding\.enabled === 1/, 'the Hide question joins its sentences with a plain space');
+  const sheet = src('components/ExtensionLanguages.tsx');
+  assert.match(sheet, /\{joinSentences\(l\.enabled === 1/, 'the Hide question joins its sentences with a plain space');
   const archive = src('components/ArchiveSettings.tsx');
   assert.doesNotMatch(archive, /nothing queued is lost\.'\)\} \$\{tr\(/, 'the desktop archive help joins its sentences with a plain space');
   assert.match(archive, /joinSentences\(tr\('Off pauses every archive; nothing queued is lost\.'\)/);

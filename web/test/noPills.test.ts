@@ -57,6 +57,13 @@ const SURFACES = [
   // v0.49.1, Find other sources: the run's row, its results and Health's card.
   'components/FindSources.tsx',
   'lib/findSources.ts',
+  // v0.53.0, Admin → Extensions redesigned: an extension's sheet, the languages and repositories sheets, the pieces
+  // the rows share and the words they say. Browse's filter row keeps its chips: ExtensionsPanel.tsx is sliced below.
+  'components/ExtensionSheet.tsx',
+  'components/ExtensionLanguages.tsx',
+  'components/ExtensionRepos.tsx',
+  'components/ExtensionBits.tsx',
+  'lib/extensions.ts',
 ];
 
 /**
@@ -65,19 +72,16 @@ const SURFACES = [
  *
  * The admin console's status badges (step 3) and its action keys: the owner ruled that only filter and sort
  * chips keep the chip shape, so the Providers panel's Test / Clear block / Enable / Update address / Check
- * all / Reload and the Extensions tab's Refresh, Add, languages, Update all, Update, Add and Remove are
- * `.btn-key`s. The Extensions tab's 18+ and Added toggles are filters and stay chips, so its slices stop
- * short of them. Health()'s own capsules belong to the Health step, which adds its slice when it redesigns
- * them.
+ * all / Reload and the Extensions tab's keys (v0.53.0: Install, Update, Manage, Turn on its sources, Update all,
+ * Check for extension updates, Languages, Repositories, Connect) are `.btn-key`s. Browse's Installed and Has an
+ * update are filters and stay chips, so its slices stop short of them, and so does the engine header's slice of
+ * the platform picker's chips. Health()'s own capsules belong to the Health step, which adds its slice when it
+ * redesigns them.
  */
 const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'function TabTile('],
   ['app/admin/page.tsx', 'Providers: source cards and their keys', 'function controlsOf(', '<div className="board">'],
   ['app/admin/page.tsx', 'Providers: Check all and Reload', "{tr('{n} sources in {m} providers'", '{sweep && ('],
-  // Anchored on the header's own code: the first "{tr('Extensions')}</p>" is the not-configured card's.
-  ['app/admin/page.tsx', 'Extensions: engine status and Refresh', 'const list = cat?.content || [];', '{!status.reachable ? ('],
-  ['app/admin/page.tsx', 'Extensions: repositories, languages and Update all', '<button onClick={() => setShowRepos(!reposOpen)}', '<input value={q2}'],
-  ['app/admin/page.tsx', 'Extensions: catalogue rows', '{list.map((e) => (', '{!list.length && !isFetching && ('],
   // The owner's call (fixB): Providers' own calls to action -- Add a site's Add and "Import and review matches"
   // -- are keys too, like the Extensions repository's Add beside them.
   ['app/admin/page.tsx', 'Providers: Add a site and Import a list', "{tr('Add a site')}</p>", '{list.length === 0 ? ('],
@@ -102,6 +106,11 @@ const SLICES: [string, string, string, string][] = [
   // v0.49.1: the Sources sheet's Find more sources and Other names -- keys and a plain list, beside the sheet's
   // Prefer/Block chips, which stay.
   ['components/SourcesSheet.tsx', 'Sources sheet: Find more sources and Other names', 'function FindMore(', 'const emptyStat'],
+  // v0.53.0, Admin → Extensions: the engine's header (beside the platform picker's chips, which stay), the tab's
+  // actions, Installed and its rows, and Browse after its filter chips: its list, its paging and its empty states.
+  ['components/EngineSetup.tsx', 'Extensions: the engine header', 'export function EngineReady(', 'function EngineOffSheet('],
+  ['components/ExtensionsPanel.tsx', 'Extensions: actions, tabs, Installed and its rows', 'export function useExtensionActions(', 'function BrowseView('],
+  ['components/ExtensionsPanel.tsx', 'Extensions: Browse below its filters', '{noRepos && (', ''],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
@@ -180,7 +189,9 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
   // not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, toolbar, engine, repos, rows, calls, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, providers, toolbar, calls, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  const ext = (name: string) => { const [f, , from, to] = SLICES.find(([, n]) => n === name)!; return slice(code(read(f)), from, to, name); };
+  const [engine, installed, browse] = ['Extensions: the engine header', 'Extensions: actions, tabs, Installed and its rows', 'Extensions: Browse below its filters'].map(ext);
   // Health (step 8): a mark per card, Re-check a key, and nothing called HEALTH_LABEL left to be a capsule.
   assert.match(health, /<StatusMark \{\.\.\.mark\} size="xs" \/>/, 'the Health slice has no mark');
   assert.match(health, /className="btn-key"/, 'Re-check is not a key');
@@ -194,14 +205,19 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.equal(keys(providers), 3, 'Test, Clear block and Enable/Disable are not all keys');
   assert.equal(keys(code(read('components/SourceEvidence.tsx'))), 1, 'Update address is not a key');
   assert.equal(keys(toolbar), 2, 'Check all and Reload are not both keys');
-  assert.match(engine, /<StatusMark \{\.\.\.engineMark\(/, 'the Extensions slice has no mark');
-  assert.match(engine, /onClick=\{refreshRepos\}[^>]*className="btn-key"/, 'Refresh is not a key');
-  assert.doesNotMatch(engine, /No extension engine is set up|refreshAll = \(\) =>/, 'the engine slice holds the not-configured card');
-  assert.ok(engine.split('\n').length < 20, `the engine slice is ${engine.split('\n').length} lines: a marker moved`);
-  assert.equal(keys(repos), 4, 'the repository Add, Choose languages, a language\'s Hide/Show and Update all are not all keys');
-  assert.doesNotMatch(repos, /value=\{q2\}|setShowAdult/, 'the repositories slice runs into the filter chips');
-  // #116 added Settings on an installed row: Update, Settings and Add/Remove.
-  assert.equal(keys(rows), 3, 'a catalogue row\'s Update, Settings and Add/Remove are not keys');
+  // v0.53.0: the engine and its helper are marks, Connect is a key; Installed's Languages, Check for extension updates,
+  // Update all, Turn on all their sources, a row's Update and Turn on its sources and the empty state's Browse are
+  // keys; Browse's Try again, Show more, the empty state's two and a row's Install, Update and Manage too (its
+  // Repositories key sits in the filter row, beside the chips, and is a key there: the ExtensionsPanel scan reads it).
+  assert.match(engine, /<StatusMark tone=\{engine\.tone\} label=\{engine\.label\} size="md" \/>/, 'the engine is not a mark');
+  assert.match(engine, /<StatusMark tone=\{helperTone\}/, 'the Cloudflare helper is not a mark');
+  assert.match(engine, /onClick=\{connect\}[^>]*className="btn-key btn-key-primary[^"]*"/, 'Connect is not a key');
+  assert.doesNotMatch(engine, /className="[^"]*\bchip\b/, 'the engine header slice runs into the platform chips');
+  assert.equal(keys(installed), 7, 'Installed\'s keys are not all keys');
+  assert.doesNotMatch(installed, /chip-active|className=\{`chip /, 'the Installed slice runs into Browse\'s filter chips');
+  assert.equal(keys(browse), 7, 'Browse\'s keys are not all keys');
+  assert.match(code(read('components/ExtensionsPanel.tsx')), /onClick=\{onRepos\} className="btn-key ms-auto"/, 'Repositories is not a key');
+  assert.equal(keys(code(read('components/ExtensionSheet.tsx'))), 5, 'the sheet\'s Update, Turn on its sources, Remove extension, Remove and Cancel are not keys');
   // Reintroduce `btn-accent` on either: the capsule scan fails, and so does this.
   assert.match(calls, /onClick=\{addSite\}[^>]*className="btn-key btn-key-primary"/, "Add a site's Add is not a key");
   assert.match(calls, /router\.push\('\/admin\/import\/'\)\} className="btn-key btn-key-primary w-full"/, '"Import and review matches" is not a key');

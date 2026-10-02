@@ -305,8 +305,9 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   assert.match(src, /\{p\.numbering && \(\s*<div className="[^"]*" data-renumber-warning>/, 'the renumber warning is not in the setting\'s row');
   assert.match(src, /<Sheet\b[^>]*\boverBottomNav\b/s, 'the settings sheet opens under the phone nav');
   // An extension whose package lists no source says so, and stops saying "Loading…" beside it. Reintroduce the guard
-  // without `!pkgSources`: this fails.
-  assert.match(src, /\{\(isLoading \|\| \(!sourceId && !pkgFailed && !pkgSources\)\) && <p[^>]*>\{tr\('Loading…'\)\}<\/p>\}/, 'an empty package reads "Loading…" for good');
+  // without `!pkgSources`: this fails. (v0.53.0: the sheet's own wait; the body has its own, for the settings.)
+  assert.match(src, /\{!sourceId && !pkgFailed && !pkgSources && <p[^>]*>\{tr\('Loading…'\)\}<\/p>\}/, 'an empty package reads "Loading…" for good');
+  assert.match(src, /\{isLoading && <p[^>]*>\{tr\('Loading…'\)\}<\/p>\}/, 'the settings say nothing while they load');
   // Reintroduce by returning the Sheet itself: inside the Extensions `.card` (backdrop-filter) it covers the card
   // only, and the admin header shows through above it.
   assert.match(src, /return createPortal\(\s*<Sheet\b/, 'the settings sheet is not portalled out of the card');
@@ -315,15 +316,24 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   assert.match(src, /const id = params\.get\('settings'\);/, 'the sheet does not read ?settings=');
   assert.match(src, /u\.searchParams\.delete\('settings'\);/, 'a closed sheet reopens on reload');
 
-  const admin = code(read('app/admin/page.tsx'));
-  const ext = admin.slice(admin.indexOf('function Extensions('), admin.indexOf('\n}\n', admin.indexOf('function Extensions(')));
-  // Reintroduce by dropping the hook from Extensions: /admin/?tab=Extensions&settings=<id> opens nothing.
+  // v0.53.0: the tab is components/ExtensionsPanel.tsx, and an installed extension's settings are a section of its
+  // sheet (components/ExtensionSheet.tsx) -- the same body as this sheet's.
+  const panel = code(read('components/ExtensionsPanel.tsx'));
+  const ext = panel.slice(panel.indexOf('export function ExtensionsPanel('), panel.indexOf('function useViewParam('));
+  // Reintroduce by dropping the hook from the panel: /admin/?tab=Extensions&settings=<id> opens nothing.
   assert.match(ext, /const \[settingsFor, setSettingsFor\] = useExtensionSettingsParam\(\);/, 'Extensions does not read the ?settings= deep link');
-  assert.match(ext, /\{e\.installed && \(\s*<button onClick=\{\(\) => setSettingsFor\(\{ pkgName: e\.pkgName, name: e\.name \}\)\} className="btn-key">\{tr\('Settings'\)\}<\/button>/,
-    'an installed extension has no Settings key');
-  assert.match(ext, /\{settingsFor && status\.reachable && <ExtensionSettings target=\{settingsFor\} onClose=\{\(\) => setSettingsFor\(null\)\} \/>\}/);
+  assert.match(ext, /\{settingsFor && <ExtensionSettings target=\{settingsFor\} onClose=\{\(\) => setSettingsFor\(null\)\} \/>\}/);
   // The hook sits with the other state, before the early returns (hooks keep their order).
-  assert.ok(ext.indexOf('useExtensionSettingsParam()') < ext.indexOf('if (!status) return null;'), 'the deep-link hook runs after an early return');
+  assert.ok(ext.indexOf('useExtensionSettingsParam()') < ext.indexOf('if (!status) return'), 'the deep-link hook runs after an early return');
+  // Reintroduce by dropping the Settings section from the sheet: an installed extension has no way to its settings.
+  const sheet = code(read('components/ExtensionSheet.tsx'));
+  assert.match(sheet, /<ExtensionSettingsBody sourceId=\{settingsOf\} onSourceId=\{setSettingsOf\} note \/>/, 'an installed extension has no settings');
+  // One extension, several sources: the picker says whose settings these are, by language, and that each keeps its
+  // own -- a "Source" select read as choosing the language the extension reads in (#121). Reintroduce the old label:
+  // this fails.
+  assert.match(src, /\{tr\('Settings for'\)\}<\/span>\s*<select [^\n]*data-ext-settings-for>/, 'the language picker does not say it picks whose settings these are');
+  assert.match(src, /\{tr\('Each language keeps its own settings\.'\)\}/);
+  assert.doesNotMatch(src, /tr\('Source'\)/, 'the settings picker is labelled "Source" again');
 });
 
 test("the plan sheet's title wraps onto a second line rather than being cut", () => {

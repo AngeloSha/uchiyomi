@@ -1,10 +1,12 @@
-// Adding an extension repository, made obvious (v0.45.0): Admin → Extensions' repository row, read from source.
+// Adding an extension repository, made obvious (v0.45.0), in Admin → Extensions as v0.53.0 lays it out: read from source.
 //
 // The owner's ask was "mention better how to add the extensions repo so people know how to do it", and the
 // audit found the UI itself in the way: the input sat behind a collapsed "Manage" row even with no repository
 // at all (while the empty catalogue said "add a repository above"), the placeholder named a file Mihon users do
 // not have, the server's reason for a refusal was never shown, and not one string of the flow was translated.
-// Each of those is invisible to a type check, so each is pinned here and names the edit that brings it back.
+// Since v0.53.0 the form stands on Browse itself on a first visit (components/ExtensionsPanel.tsx) and is a sheet
+// behind Browse's Repositories key after that (components/ExtensionRepos.tsx). Each rule is pinned here and names the
+// edit that brings its fault back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
@@ -17,7 +19,7 @@ const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 const slice = (src: string, from: string, to: string): string => {
   const a = src.indexOf(from);
-  const b = src.indexOf(to, a + 1);
+  const b = to ? src.indexOf(to, a + 1) : src.length;
   assert.ok(a >= 0 && b > a, `${from} … ${to} is not where this test looks`);
   return src.slice(a, b);
 };
@@ -28,49 +30,50 @@ const trKeys = (src: string): Set<string> => {
 };
 
 const admin = code(read('app/admin/page.tsx'));
-const ext = slice(admin, 'function Extensions(', '\n}\n');
-const row = slice(ext, '<button onClick={() => setShowRepos(!reposOpen)}', 'onClick={() => setShowLangs(!showLangs)}');
+const panel = code(read('components/ExtensionsPanel.tsx'));
+const repos = code(read('components/ExtensionRepos.tsx'));
+const browse = slice(panel, 'function BrowseView(', 'function NothingFound(');
+const form = slice(repos, 'export function RepoForm(', 'export function ReposSheet(');
 
-test('the repository row opens by itself while there are none, and a click wins from then on', () => {
-  // Reintroduce by `useState(false)` for showRepos (or rendering `{showRepos && (`): the first visit shows a
-  // closed "Manage" row, the input is hidden, and "opens by itself" fails.
-  assert.match(ext, /const \[showRepos, setShowRepos\] = useState<boolean \| null>\(null\);/, 'the toggle starts decided instead of following the list');
-  assert.match(ext, /const reposOpen = showRepos \?\? \(!!repos && repos\.content\.length === 0\);/, 'opens by itself');
-  assert.match(row, /^<button onClick=\{\(\) => setShowRepos\(!reposOpen\)\} aria-expanded=\{reposOpen\}/, 'the toggle flips what is shown, not the raw state');
-  assert.match(row, /\{reposOpen && \(/, 'the row renders from reposOpen');
-  assert.doesNotMatch(row, /\{showRepos && \(/, 'the row still renders from the raw toggle');
-  // After an add the list is no longer empty; the row stays where the person is working.
-  const add = slice(ext, 'const addRepo = async', 'const removeRepo = async');
-  assert.match(add, /setShowRepos\(true\);/, 'a successful add collapses the row under the cursor');
+test('with no repository, the form stands on Browse itself, and a first visit with nothing installed opens on Browse', () => {
+  // Reintroduce by showing the catalogue's empty line instead (`firstRun` gone): a first visit says "add a repository"
+  // with no field in sight -- the v0.45.0 audit's first finding. Reintroduce `return 'installed'` for nothing installed:
+  // a first visit opens on an empty Installed list.
+  assert.match(browse, /const firstRun = noRepos && !!first && first\.total === 0;/, 'the first-run card is not decided by "no repository, empty catalogue"');
+  assert.match(browse, /\{firstRun \? \(\s*<div className="[^"]*" data-ext-first-run>[\s\S]*?<RepoForm \/>/, 'the first visit has no repository field');
+  assert.match(browse, /tr\('An extension repository is a list of extensions that someone publishes\. Uchiyomi doesn’t host any, so you add one you trust\.'\)/,
+    'the first visit does not say what a repository is');
+  const lib = read('lib/extensions.ts');
+  assert.match(lib, /return installedCount > 0 \? 'installed' : 'browse';/, 'a first visit with nothing installed opens on Installed');
+  // Later, the repositories are one key away, with their count, beside Browse's filters.
+  assert.match(browse, /<button type="button" onClick=\{onRepos\} className="btn-key ms-auto" data-ext-repos>\s*\{tr\('Repositories'\)\}/, 'Browse has no way to the repositories');
+  assert.match(repos, /export function ReposSheet\([\s\S]*?<RepoForm \/>/, 'the repositories sheet cannot add one');
 });
 
-test('the input asks for the address Mihon users have, and the help says what a repository is', () => {
+test('the input asks for the address Mihon users have, and the help says where Mihon keeps it', () => {
   // Reintroduce by putting back `placeholder="https://…/index.json"`: the first assertion fails.
-  assert.match(row, /placeholder="https:\/\/…\/index\.min\.json"/, 'the placeholder does not show the index.min.json shape');
-  assert.doesNotMatch(row, /placeholder="https:\/\/…\/index\.json"/);
-  assert.match(row, /tr\('An extension repository is a list of extensions that someone publishes\. Uchiyomi doesn’t host any, so you add one you trust\.'\)/);
-  assert.match(row, /tr\('Paste the same address you added in Mihon \(\{path\}\); a repository’s “Add to Mihon” link works too\.', \{ path: tr\('More → Settings → Browse → Extension repos'\) \}\)/, 'the help does not say where the address is in Mihon');
-  // The old help promised an index.json retry "where most repositories now keep the real catalogue"; on the
-  // pinned engine that alternative cannot succeed for a folder, and the server no longer tries it for one.
-  assert.doesNotMatch(row, /where most repositories now keep/);
+  assert.match(form, /placeholder="https:\/\/…\/index\.min\.json"/, 'the placeholder does not show the index.min.json shape');
+  assert.doesNotMatch(form, /placeholder="https:\/\/…\/index\.json"/);
+  assert.match(form, /tr\('Paste the same address you added in Mihon \(\{path\}\); a repository’s “Add to Mihon” link works too\.', \{ path: tr\('More → Settings → Browse → Extension repos'\) \}\)/, 'the help does not say where the address is in Mihon');
   // While the (slow) check runs, say so.
-  assert.match(row, /\{addingRepo && \(\s*<p role="status" aria-live="polite"[^>]*>\s*\{tr\('Checking the repository — this can take up to a minute\.'\)\}/, 'no time hint while Checking');
+  assert.match(form, /\{addingRepo && \(\s*<p role="status" aria-live="polite"[^>]*>\s*\{tr\('Checking the repository — this can take up to a minute\.'\)\}/, 'no time hint while Checking');
+  // An address reads left to right in Arabic too: an RTL field put "https://" at its end.
+  assert.match(form, /inputMode="url" dir="ltr"/, 'the address field follows the page\'s direction');
 });
 
 test('the toast says what the server said, in the viewer\'s language, and counts only this repository', () => {
-  // Reintroduce by `const why = msgOf(e, tr('Could not add that repository'))` in addRepo: "every code the
-  // route sends is translated" still passes but "addRepo shows the server's refusal" fails; by dropping a
-  // `case` from repoAddError: "…has no translated line" fails, naming the code; by deleting the
-  // `{repoError && …}` line: "the refusal outlives the toast" fails.
-  const add = slice(ext, 'const addRepo = async', 'const removeRepo = async');
+  // Reintroduce by `const why = msgOf(e, tr('Could not add that repository'))` in addRepo: "every code the route sends
+  // is translated" still passes but "addRepo shows the server's refusal" fails; by dropping a `case` from repoAddError:
+  // "…has no translated line" fails, naming the code; by deleting the `{repoError && …}` line: "the refusal outlives
+  // the toast" fails.
+  const add = slice(form, 'const addRepo = async', 'return (');
   assert.match(add, /catch \(e: unknown\) \{\s*const why = repoAddError\(e\);\s*setRepoError\(why\);\s*toast\(why, 'error'\);\s*\}/, 'addRepo shows the server\'s refusal');
-  // A toast lasts 3.2 s; the two-sentence refusal stays under the input until the address is edited.
-  assert.match(row, /\{repoError && !addingRepo && \(\s*<p role="alert"[^>]*>\{repoError\}<\/p>/, 'the refusal outlives the toast');
-  assert.match(row, /onChange=\{\(e\) => \{ setRepoUrl\(e\.target\.value\); setRepoError\(null\); \}\}/, 'an old refusal stays up while the address is being fixed');
+  assert.match(form, /\{repoError && !addingRepo && \(\s*<p role="alert"[^>]*>\{repoError\}<\/p>/, 'the refusal outlives the toast');
+  assert.match(form, /onChange=\{\(e\) => \{ setRepoUrl\(e\.target\.value\); setRepoError\(null\); \}\}/, 'an old refusal stays up while the address is being fixed');
   assert.match(add, /api<\{ url: string; corrected: boolean; added: number \}>/, 'the success toast reads something other than `added`');
   assert.doesNotMatch(add, /r\.total/, 'the success toast counts the whole catalogue again ("Added — 1396 extensions")');
   // Every code the route can answer has its own translated line; the engine's reason is appended as it came.
-  const helper = slice(admin, 'function repoAddError(', 'function Extensions(');
+  const helper = slice(repos, 'export function repoAddError(', 'const REPO_KEYS');
   const route = readFileSync(join(ROOT, '..', 'bff/src/routes/admin.ts'), 'utf8');
   const post = slice(route, "app.post('/api/admin/extensions/repos'", "app.delete('/api/admin/extensions/repos'");
   const lib = readFileSync(join(ROOT, '..', 'bff/src/lib/sources/suwayomi/extensions.ts'), 'utf8');
@@ -81,45 +84,24 @@ test('the toast says what the server said, in the viewer\'s language, and counts
   assert.match(helper, /default: return msgOf\(e, tr\('Could not add that repository'\)\);/, 'an unknown code does not fall back to the server\'s own message');
 });
 
-test('after a first repository, the next step and the source limit are said once, beside the row', () => {
-  // Reintroduce by deleting the `{justAdded !== null && (` block: the next-step assertions fail.
-  const next = slice(ext, '{justAdded !== null && (', 'onClick={() => setShowLangs(!showLangs)}');
-  assert.match(next, /tr\('Next: choose extensions from the list below and press Add on each one you want\.'\)/);
-  assert.match(next, /tr\('Tip: hide the languages you don’t read first — only \{n\} sources can be switched on at once\.', \{ n: status\.cap \?\? 25 \}\)/, 'the tip does not state the limit the server enforces');
-  assert.match(next, /onClick=\{\(\) => setShowLangs\(true\)\}/, 'the tip does not open Languages');
-});
-
-test('no English is left bare in the repository flow', () => {
-  // Reintroduce by writing any line of the row as plain JSX text (e.g. `{addingRepo ? 'Checking…' : tr('Add')}`)
-  // or a toast as a string literal: "bare English" fails and names it.
-  const flow = [
-    row,
-    slice(ext, 'const refreshRepos = async', 'const toggleLang = async'),
-    slice(ext, '{justAdded !== null && (', 'onClick={() => setShowLangs(!showLangs)}'),
-    slice(ext, '{!list.length && !isFetching && (', '{isFetching && !list.length'),
-    slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>'),
-  ].join('\n');
-  const bare = [
-    ...[...flow.matchAll(/>\s*([A-Za-z][^<>{}]*[A-Za-z.…])\s*</g)].map((m) => m[1]),
-    ...[...flow.matchAll(/toast\(\s*(['"`][^'"`]*['"`])/g)].map((m) => m[1]),
-    ...[...flow.matchAll(/\?\s*'([A-Z][^']*)'\s*:/g)].map((m) => m[1]),
-  ].filter((t) => !/^(uchiyomi-suwayomi|docker compose up -d)$/.test(t));
-  assert.deepEqual(bare, [], `bare English in the repository flow: ${bare.join(' | ')}`);
+test('a repository change asks again for everything it can move', () => {
+  // An add brings a catalogue, a removal takes one away -- and with it what Installed and the engine's counts say.
+  // Reintroduce by invalidating ['ext-repos'] alone: Browse keeps the old catalogue until the next reload.
+  assert.match(repos, /const REPO_KEYS = \[\['ext-repos'\], \['ext-catalog'\], \['ext-installed'\], \['ext-status'\], \['ext-sources'\]\] as const;/,
+    'a repository change leaves a list stale');
+  assert.equal((repos.match(/for \(const queryKey of REPO_KEYS\) void qc\.invalidateQueries/g) ?? []).length, 2, 'the add or the removal does not ask again');
 });
 
 test('with no engine the tab is the setup screen, and the Providers card says why without calling a missing download a fault', () => {
   // v0.49.0 (#72): the not-configured card was one sentence for every platform ("If you turned it off by emptying
   // SUWAYOMI_URL, put that line back"), wrong for a Compose admin who set EXTENSION_ENGINE=0 and for Unraid and
-  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx now, and its steps are pinned by
-  // engineSetup.test.ts (shipped names only, never `yomi-suwayomi`). Reintroduce the old card: "the setup screen"
-  // fails. Drop the `engine === 'absent'` arm of ExtensionsLink: "not installed yet" fails, and desktop's first
+  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx, whose steps engineSetup.test.ts pins -- the
+  // whole tab while the engine is off, not set up or not answering (v0.53.0). Reintroduce the old card: "the setup
+  // screen" fails. Drop the `engine === 'absent'` arm of ExtensionsLink: "not installed yet" fails, and desktop's first
   // visit reads as a fault again. Collapse the three server arms back into one: its assertion names the arm.
-  const card = slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>');
-  assert.match(card, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the setup screen');
-  assert.doesNotMatch(card, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
-  // Set up and not answering: the same screen inside the panel, under its header and status mark.
-  assert.match(ext, /\{!status\.reachable \? \(\s*<EngineSetup status=\{status\} bare \/>\s*\) : \(/, 'the unreachable panel is not the setup screen');
-  assert.doesNotMatch(ext, /Can&apos;t reach the extension engine/, 'the untranslated unreachable line is back');
+  const top = slice(panel, 'export function ExtensionsPanel(', 'function useViewParam(');
+  assert.match(top, /if \(!ready\) return <EngineSetup status=\{status\} \/>;/, 'the setup screen');
+  assert.doesNotMatch(panel, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
   const link = slice(admin, 'function ExtensionsLink(', 'function ArtReview(');
   assert.match(link, /: down && engine === 'absent' \? tr\('Not installed yet — download it under Extensions'\)/, 'not installed yet');
   assert.match(link, /: down && status\.off === 'switch' \? tr\('Extensions are turned off'\)/, 'switched off on purpose');
@@ -131,58 +113,49 @@ test('with no engine the tab is the setup screen, and the Providers card says wh
 });
 
 test('the engine\'s state is a mark in the viewer\'s words, not an English capsule', () => {
-  // v0.49.0 ("no more pills"): the header's `rounded-full border px-2` badge read "ready · v2.3.2243" or
-  // "engine unreachable" in every language. Reintroduce the badge
-  // (`<span className={`rounded-full border px-2 py-0.5 text-[10px] …`}>{status.reachable ? `ready…` : 'engine unreachable'}</span>`):
-  // "the engine's state is not a mark" fails (and noPills names the capsule).
-  // From the header's own code: the first "{tr('Extensions')}</p>" is the not-configured card's.
-  const header = slice(ext, 'const list = cat?.content || [];', '{status.reachable && (');
-  assert.doesNotMatch(header, /No extension engine is set up/, 'the header slice starts at the not-configured card');
-  assert.match(header, /<StatusMark \{\.\.\.engineMark\(status\.reachable, status\.version\)\} \/>/, 'the engine\'s state is not a mark');
-  assert.doesNotMatch(header, /engine unreachable|`ready/, 'the English badge text is back');
+  // v0.49.0 ("no more pills"): the header's `rounded-full border px-2` badge read "ready · v2.3.2243" or "engine
+  // unreachable" in every language. v0.53.0's header says the engine and its Cloudflare helper each as a mark, from
+  // lib/extensions.ts engineLine / helperLine. Reintroduce a badge with English in it: the assertions name it.
+  const ready = slice(code(read('components/EngineSetup.tsx')), 'export function EngineReady(', 'function EngineOffSheet(');
+  assert.match(ready, /<StatusMark tone=\{engine\.tone\} label=\{engine\.label\} size="md" \/>/, 'the engine\'s state is not a mark');
+  assert.match(ready, /const engine = engineLine\(status\);\s*const helper = helperLine\(status\.solver\);/, 'the header does not read its states from lib/extensions.ts');
+  assert.doesNotMatch(ready, /engine unreachable|`ready|rounded-full/, 'the English badge, or a capsule, is back');
 });
 
-test('one extension available is said in the singular', () => {
-  // A repository offering exactly one extension read "1 extension repository · 1 extensions available" (v0.44.0's
-  // hard-coded line had the same bug; the real engine and a one-extension repository showed it in the v0.45.0 review).
-  // Reintroduce by dropping either `cat?.total === 1` arm from the row's summary: its assertion fails.
-  assert.match(row, /cat\?\.total === 1\s*\?\s*tr\('1 extension repository · 1 extension available'\)/, 'one repository, one extension');
-  assert.match(row, /cat\?\.total === 1\s*\?\s*tr\('\{n\} extension repositories · 1 extension available', \{ n: repos\.content\.length \}\)/, 'several repositories, one extension');
-});
-
-test('hiding a language asks on <body>, out of the Extensions card, in the reader\'s words', () => {
-  // The Extensions panel is a `.card`: its backdrop blur made it the containing block of the `fixed` dialog, which
-  // dimmed only the panel and could land off-screen (the web2 review's scan: the last dialog left inside a card),
-  // and its title, body and key were English templates. Reintroduce the bare `<ConfirmDialog` (no OnBody): the
-  // first assertion names it; put back `title={`Hide ${…}?`}`: "the title is English".
-  const at = ext.indexOf('{hiding && (');
-  assert.ok(at > 0, 'the hide confirmation is not where this test looks');
-  const dialog = ext.slice(at, ext.indexOf('/>', ext.indexOf('<ConfirmDialog', at)));
-  assert.match(dialog, /^\{hiding && \(\s*<OnBody>\s*<ConfirmDialog\b/, 'the hide confirmation is rendered inside the Extensions card');
-  assert.match(dialog, /title=\{tr\('Hide \{lang\}\?', \{ lang: /, 'the title is English');
+test('the sheets are portalled out of every card, and a hide asks inside its sheet, in the reader\'s words', () => {
+  // A `.card` blurs its backdrop, which makes it the containing block of a `fixed` dialog: a sheet inside one dimmed
+  // only the card and could land off-screen. Every sheet the tab opens goes to <body>. A ConfirmDialog over a Sheet
+  // paints UNDER it (z-50 against z-60), so the hide asks inside the Languages sheet. Reintroduce a bare
+  // `<ExtensionSheet` (no OnBody): the first assertion names it.
+  const lists = slice(panel, 'function ExtensionLists(', 'function ViewTabs(');
+  assert.match(lists, /<OnBody>\s*<ExtensionSheet\b/, 'an extension\'s sheet is rendered inside the panel');
+  assert.match(lists, /<OnBody><ReposSheet\b/, 'the repositories sheet is rendered inside the panel');
+  assert.match(lists, /<OnBody><LanguagesSheet\b/, 'the languages sheet is rendered inside the panel');
+  const langs = code(read('components/ExtensionLanguages.tsx'));
+  assert.doesNotMatch(langs, /<ConfirmDialog\b|<Modal\b/, 'the hide question is a dialog the sheet would cover');
+  const ask = slice(langs, '{asking === code && code !== null && (', '</li>');
+  assert.match(ask, /role="alertdialog" aria-label=\{tr\('Hide \{lang\}\?', \{ lang: name \}\)\}/, 'the question is English, or not announced');
   // Its own key, not the bare "Hide", which is the app's collapse toggle ("收起" in Chinese).
-  assert.match(dialog, /confirmLabel=\{tr\('Hide \{lang\}', \{ lang: /, 'the key is English, or the collapse toggle\'s word');
-  assert.doesNotMatch(dialog, /`Hid(?:e|ing) \$\{/, 'the title or body is an English template');
+  assert.match(ask, /\{tr\('Hide \{lang\}', \{ lang: name \}\)\}<\/button>/, 'the key is English, or the collapse toggle\'s word');
   // One sentence per count: "turns off 1 sources", and "1 series … they stay readable".
-  assert.match(dialog, /hiding\.enabled === 1\s*\? tr\('Hiding \{lang\} turns off 1 source\.'/, 'one source is said with the plural');
-  assert.match(dialog, /hiding\.used === 1\s*\? tr\('1 series from \{lang\} will stop updating/, 'one series is said with the plural');
+  assert.match(ask, /l\.enabled === 1\s*\? tr\('Hiding \{lang\} turns off 1 source\.'/, 'one source is said with the plural');
+  assert.match(ask, /l\.used === 1\s*\? tr\('1 series from \{lang\} will stop updating/, 'one series is said with the plural');
+  // A hide that stops nothing updating goes straight through; one that would asks first.
+  assert.match(langs, /onChange=\{\(v\) => \(v \? void toggleLang\(l, true\) : l\.used > 0 \? setAsking\(code\) : void toggleLang\(l, false\)\)\}/,
+    'a hide that stops series updating does not ask first');
 });
 
 test('the repository flow is translated in all eight languages', () => {
   // Reintroduce by deleting any one of these keys from public/locales/ar.json.
   const keys = new Set<string>([
-    ...trKeys(slice(admin, 'function repoAddError(', 'function Extensions(')),
-    ...trKeys(row),
-    ...trKeys(slice(ext, 'const refreshRepos = async', 'const toggleLang = async')),
-    ...trKeys(slice(ext, '{justAdded !== null && (', 'onClick={() => setShowLangs(!showLangs)}')),
-    ...trKeys(slice(ext, '{!list.length && !isFetching && (', '{isFetching && !list.length')),
-    ...trKeys(slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>')),
+    ...trKeys(repos),
+    ...trKeys(browse),
     ...trKeys(slice(admin, 'function ExtensionsLink(', 'function ArtReview(')),
     ...trKeys(read('components/EngineInstall.tsx')),
     ...trKeys(read('components/EngineSetup.tsx')),
     ...trKeys(read('lib/engineSetup.ts')),
   ]);
-  assert.ok(keys.size >= 40, `only ${keys.size} strings found -- the scan is broken`);
+  assert.ok(keys.size >= 50, `only ${keys.size} strings found -- the scan is broken`);
   const dir = join(ROOT, 'public/locales');
   const locales = readdirSync(dir).filter((f) => f.endsWith('.json'));
   assert.equal(locales.length, 8);

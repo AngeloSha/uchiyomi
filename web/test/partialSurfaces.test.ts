@@ -174,7 +174,7 @@ test('Health keeps explanatory notes reachable when a check has no active findin
   // operable disclosure when `items` is empty, or Health says everything is fine but hides how the hole is
   // repaired. The aria relationship makes the newly available disclosure understandable to assistive tech.
   const src = code(read('app/admin/page.tsx'));
-  const health = between(src, 'function Health()', '\ninterface ExtStatus', 'Health');
+  const health = between(src, 'function Health()', '\nfunction DesktopUpdateNote(', 'Health');
   // v0.49.0: a card with an action of its own (Scan the library now) opens too -- after the note, never instead.
   assert.match(health, /const expandable = !!c\.items\.length \|\| !!c\.note \|\| hasCardActions\(c\);/, 'a note without findings cannot make its Health card expandable');
   assert.match(health, /type="button"[\s\S]*?aria-expanded=\{expandable \? isOpen : undefined\}[\s\S]*?aria-controls=\{expandable \? `health-\$\{c\.id\}-details` : undefined\}[\s\S]*?disabled=\{!expandable\}/, 'the Health disclosure does not announce or control its note panel');
