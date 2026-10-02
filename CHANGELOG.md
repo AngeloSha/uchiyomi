@@ -30,9 +30,12 @@ chapters that were already there.
   as up to date; the cloud icon on the row still fetches it if you want it. A part the same site lists beside the
   chapter it already gave you is part of that site's own numbering and is downloaded as before, which is how a real
   extra like 40.5 still arrives.
+- **One split per new chapter.** When nothing of a chapter is here yet and two sites split it into different
+  numbers of parts (540 and 540.5 on one, 540, 540.1 and 540.2 on another), only the parts of the site that comes
+  first in the series' source order are downloaded; the other's show as *another site’s split of this chapter*.
 - **What you will see.** No more second copies after following another site, and grey rows like *78.1 · another
-  split of a chapter you have* under chapters you hold. Mihon does not list those rows. Neither rule touches a series
-  numbered by posting order, or one whose numbering change is waiting for you.
+  split of a chapter you have* under chapters you hold. Mihon does not list those rows. None of these rules touches a
+  series numbered by posting order, or one whose numbering change is waiting for you.
 
 ### Health: the same chapter saved twice
 
