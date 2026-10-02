@@ -24,6 +24,7 @@ import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
+import { aliasParts, partRulesApply } from './partAlias';
 
 /**
  * Why a series produced nothing this run.
@@ -358,6 +359,26 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // in sourceOrder.int.test.ts takes it from the primary.
   const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
   const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)) };
+  // Chapter parts that sources number or split differently (lib/partAlias.ts): another site's N.1 / N.6 for the N /
+  // N.5 on disk is renumbered onto them (R1), and another site's split of a chapter already here is `covered` (R2) --
+  // listed and shown on the series page, fetchable by hand, never fetched by the sweep nor counted as missing. Here,
+  // before the chooser, so the chooser, the floor, the have-set and the stored listing all see one numbering. Not
+  // under posting order, nor while the numbering is in question. The disk is what the have-set below calls held,
+  // override-aware, with each file's origin; a read that fails leaves the listing as the sources gave it.
+  // Reintroduce by dropping this block: "a follower's other numbering of the parts on disk" in updater.int.test.ts
+  // downloads 12.1 and 12.6.
+  let covered = new Set<number>();
+  if (partRulesApply(s)) {
+    const disk = await q<{ number: number; source_id: string | null }>(
+      `SELECT COALESCE(ov.number, b.number) AS number, b.source_id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+        WHERE b.series_id = $1 AND ${heldBooks('b')}`, [seriesId]).catch(() => null);
+    if (disk) {
+      ({ tagged, covered } = aliasParts({
+        tagged, held: disk.map((r) => ({ number: Number(r.number), sourceId: r.source_id })), primary: s.source_id ?? null,
+        sourceRank: chooseOpts.sourceRank,
+      }));
+    }
+  }
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
@@ -392,7 +413,8 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
   // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
   const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
-  const missing = wanted.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
+  // A covered number is another split of a chapter on disk: not this sweep's to fetch, and not "behind" either.
+  const missing = wanted.filter((c) => !have.has(c.number) && !covered.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, releases.length, missing.length);
   // The ledger for this series, read once: which chapters have already failed CHAPTER_RETRY_CAP times and
   // are not attempted again by the sweep, and which have been REFUSED twice by the very source that still
@@ -449,6 +471,8 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     const via = top ? (top.source ?? (s.source_id as string)) : '';
     if (!top) newest = { number: null, state: 'unlisted' };
     else if (have.has(top.number)) newest = { number: top.number, state: live.has(top.number) ? 'up_to_date' : 'deleted' };
+    // The newest listed number is another site's split of a chapter we hold: the chapter is here.
+    else if (covered.has(top.number)) newest = { number: top.number, state: 'up_to_date' };
     else if (heldNums.has(top.number)) newest = { number: top.number, state: 'held' };
     else if (await isDisabled(via).catch(() => false)) newest = { number: top.number, state: 'disabled' };
     else if (opts.sourceAllowed && !opts.sourceAllowed(via)) newest = { number: top.number, state: 'denied' };
@@ -478,7 +502,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // previous listing standing" in seriesListing.int.test.ts reads 0 rows.
   // The copies of each number are stored in the same order the chooser ranked them (releaseOrder with
   // the same source ranks), so the listing's "best first" is the sweep's, not a second opinion.
-  if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts))).catch(() => {});
+  if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts), covered)).catch(() => {});
 
   let added = 0;
   let failed = 0;

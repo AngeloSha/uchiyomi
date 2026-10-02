@@ -217,8 +217,9 @@ export interface Book {
  *   failed   the downloader gave up on it (`attempts` says how many times)
  *   floor    below the series' Latest-N floor; Find missing chapters is the way to reach it
  *   archive  an active slow archive will fetch it (#117): available, under the retry cap, below its boundary
+ *   covered  another site's split of a chapter this server holds (v0.50.0): never fetched by itself, still fetchable
  */
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered';
 
 /** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
 export interface Ghost {

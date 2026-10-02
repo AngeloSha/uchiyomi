@@ -20,7 +20,7 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
@@ -1064,14 +1064,15 @@ function SeriesInner() {
   const primarySource = series?.sources?.find((s) => s.primary)?.sourceId;
   // The supply line's facts. `checkedAt`: the groups route's, or the listing's when the route did not send
   // one, or the source row's -- all the same `series_listing` check. `notHere` counts what the sweep would
-  // take (the old "behind" semantics); the older run under the floor is the run row's to say. Settled =
+  // take (the old "behind" semantics); the older run under the floor is the run row's to say, and a covered
+  // number is another split of a chapter that is here (v0.50.0). Settled =
   // the three queries behind it have answered or failed, so the line does not rewrite itself as they land.
   const supplyChecked = groupsCheckedAt ?? listing?.checkedAt ?? series?.sources?.find((s) => s.primary)?.checkedAt ?? null;
   const supplyLoaded = !!series && !!listingSettled && !groupsLoading;
   const supplyInput = useMemo(() => ({
     sources: series?.sources ?? [],
     groups: groups.map((g) => g.name),
-    notHere: ghosts.filter((g) => g.why !== 'floor' && g.why !== 'archive' && !haveNumbers.has(g.number)).length,
+    notHere: ghosts.filter((g) => countsAsBehind(g) && !haveNumbers.has(g.number)).length,
     listedTotal: ghosts.length,
     booksCount: series?.booksCount ?? 0,
     checkedAt: supplyChecked,

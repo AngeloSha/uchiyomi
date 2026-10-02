@@ -401,6 +401,22 @@ test('ghost chapters: the opt-in, the list, what a tap gets, and the tracker num
       await q(`DELETE FROM series_listing WHERE series_id = $1 AND number = 1.5`, [S_MIX]);
     });
 
+    await t.test('another site\'s split of a chapter here is not a ghost: covered rows stay off the phone', async () => {
+      // v0.50.0 (lib/partAlias.ts R2): a follower's parts of a chapter the disk holds whole are listed `covered`.
+      // Mihon cannot fetch them and the reader has the chapter: as ghosts they would be "not downloaded" rows
+      // nobody can clear, and the highest of them the total the trackers read. Reintroduce by dropping
+      // `l.status <> 'covered'` from lib/komgaGhosts.ts: maxNumberSort reads 5.5.
+      await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status)
+               VALUES ($1, 5.5, 'Chapter 5.5', 'src', '{}'::jsonb, 'covered')`, [S_MIX]);
+      try {
+        assert.equal((await progress(S_MIX)).maxNumberSort, 5, 'the covered row raised the chapter total');
+        assert.ok(!(await books(S_MIX)).content.some((b: any) => b.number === 5.5), 'the covered row is listed as a ghost');
+        assert.equal((await get('/api/v1/books/g_s_kg_mix~5.5', key(tok.read))).statusCode, 404, 'the covered row opens by id');
+      } finally {
+        await q(`DELETE FROM series_listing WHERE series_id = $1 AND number = 5.5`, [S_MIX]);
+      }
+    });
+
     await t.test('the series DTO carries the same counts as the progress endpoint', async () => {
       // `/api/v1/series/:id` is what the extension shows at a glance AND what the tracker's getTrackSearch
       // reads, and it takes its three read counts from readProgressV2 -- so an unread count that included

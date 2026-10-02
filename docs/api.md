@@ -793,7 +793,10 @@ sweep, or **Check now**) that this server has no row for, each with the reason �
 `Ghost = {number, title, publishedAt, scanlator, groups, sourceId, sourceName, why, attempts?, reason?,
 waitingFor?, waitDaysLeft?, read?}`, `why` one of `missing` (not fetched yet), `held` (waiting for a preferred
 group under the release preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how
-many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor).
+many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor),
+`covered` (since v0.50.0: another site's split of a chapter this server holds -- a number not on disk, at a whole
+number the disk holds a file at, from a source none of those files came from; the sweep never fetches it and it is
+not counted in `source_missing`, but `POST /api/sources/fetch` still takes it).
 A `held` ghost also carries `waitingFor` (since v0.34.0) — the effective first-choice group it is being
 held for, the series' own priority over the global one, minus anything blocked — and `waitDaysLeft`, the
 whole days until the patience window closes, counted as the sweep counts it: from the oldest hosted copy
@@ -1986,7 +1989,8 @@ at all. Turned on, `GET /api/v1/series/:id/books` also lists the chapters this s
 **tombstones** it stops filtering out (`media_status=READY` no longer excludes them), and the **ghosts** —
 numbers the sources listed at the last check with no chapter row at all, from `series_listing`, whatever the
 reason they are absent, the chapter floor included. They are merged into the ordinary chapter order by number,
-not appended.
+not appended. Since v0.50.0 a `covered` number -- another site's split of a chapter this server holds -- is not a
+ghost: the reader has the chapter, and Mihon could neither fetch it nor clear it.
 
 A ghost's id is `g_<series id>~<number>`, the decimal point kept as a point (chapter 10.5 is `g_s_…~10.5`).
 The separator is a `~` and not a `_` because `g_s_x_1_5` reads equally as series `s_x` chapter 1.5 and as

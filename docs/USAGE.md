@@ -699,6 +699,10 @@ hold. Each grey row's caption says why it is not here:
   know it exists; unblock the group if you would rather have their copy than none. The row has no cloud
   icon and the selection bar's *Fetch* skips it; **Fetch** on the copy itself, in the chapter's sheet, does
   take it.
+- **another split of a chapter you have · {group}** (since v0.50.0) — a followed site splits or numbers this
+  chapter's parts differently, and the chapter is already here the other way: its 78.1 … 78.9 beside the 78
+  you have as one file. The updater leaves it alone and it is not counted in *{n} not here yet*; the cloud icon
+  still fetches it if you want that site's copy too. See *Parts that sites number differently* below.
 - Chapters **below the "Latest N" floor** of a series added as *Latest N* (or as *Nothing yet*) fold into
   one line, `Ch. 1–40 · 40 older chapters not here yet`. **Show** expands it into real grey rows, each with
   the cloud icon and its own sheet, folded past fifty into *Show all*; **Fetch all {n}** on the line takes
@@ -730,6 +734,27 @@ row (except one only a blocked group has) ends in a cloud icon: tap it and that 
 same request the selection bar's *Fetch* makes for many. It is the cloud, not the ⬇ on the rows above — that
 arrow saves a chapter to this device, the cloud brings one onto the server. Tapping the row itself opens the
 chapter's sheet, next.
+
+#### Parts that sites number differently
+
+A long chapter is often posted in parts, and sites do not agree on how to number them. One writes part 1 as 335
+and part 2 as 335.5, another as 335.1 and 335.6, and a third splits chapter 78 into ten parts, 78 and 78.1 to
+78.9, where another posts it whole. Since v0.50.0 the updater compares the parts, not just the numbers, before
+it decides what is new, so following a second site no longer downloads chapters you already have under its
+numbers:
+
+- **Same parts, other numbers.** When a site lists as many parts of a chapter as you have (two or more), under
+  other numbers, they are taken as the same parts, in order: its 335.1 and 335.6 are your 335 and 335.5, nothing
+  is downloaded, and a part that is missing is saved under your numbering. With nothing on disk yet, the main
+  source's numbering decides, then the numbering most of the series' chapters already use, so two sites that
+  disagree still give you one copy of each part.
+- **Another split of a chapter you have.** A part a site lists at a chapter number you already hold a file for,
+  from a different site than that file came from, is shown as *another split of a chapter you have* and is not
+  downloaded by itself. A part the same site lists beside the chapter it already gave you is a part of its own
+  numbering, and is downloaded as before.
+
+Neither rule applies to a series numbered by posting order, or while a numbering change is waiting for you.
+Chapters downloaded twice before v0.50.0 are listed by Health's *The same chapter saved twice* check.
 
 ### Marking chapters you don't have as read
 

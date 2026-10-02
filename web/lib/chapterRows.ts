@@ -117,7 +117,7 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
 
 // Declared through `keys()` because they reach `tr()` through whyLabel's return value, which the string
 // extractor cannot see (lib/i18n.ts says why that has shipped untranslated labels three times).
-const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it');
+const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it', 'another split of a chapter you have');
 
 /**
  * The ghost row's caption: the string key and its arguments, for `tr(key, args)`. Null for `floor` and
@@ -127,6 +127,9 @@ const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'wai
  * (`waitingFor`/`waitDaysLeft`, v0.34.0); an older server, or a series whose every preferred group is
  * blocked, gets the wording without a name -- "waiting for  · undefined days left" is what the named form
  * would render then.
+ *
+ * `covered` (v0.50.0): another site numbers or splits this chapter's parts differently, and the chapter is here in
+ * the other split -- its 78.1 ... 78.9 beside the whole 78 on disk. The sweep leaves it; Fetch still takes it.
  */
 export function whyLabel(g: Pick<Ghost, 'why'> & Partial<Pick<Ghost, 'attempts' | 'waitingFor' | 'waitDaysLeft'>>): { key: string; args: Record<string, string | number> } | null {
   switch (g.why) {
@@ -136,9 +139,18 @@ export function whyLabel(g: Pick<Ghost, 'why'> & Partial<Pick<Ghost, 'attempts' 
       : { key: WHY_LABELS[2], args: {} };
     case 'failed': return { key: WHY_LABELS[3], args: { n: g.attempts ?? 0 } };
     case 'blocked': return { key: WHY_LABELS[4], args: {} };
+    case 'covered': return { key: WHY_LABELS[5], args: {} };
     default: return null;
   }
 }
+
+/**
+ * Does this ghost count as "not here" on the series page's supply line -- something the sweep would take? Not a
+ * floor or archive ghost (the run rows say those), and not a covered one (v0.50.0): another site's split of a
+ * chapter that IS here is not a chapter behind. Reintroduce by dropping the `covered` test: "another site's split"
+ * in chapterRows.test.ts counts it.
+ */
+export const countsAsBehind = (g: Pick<Ghost, 'why'>): boolean => g.why !== 'floor' && g.why !== 'archive' && g.why !== 'covered';
 
 // Declared through `keys()` for the same reason as WHY_LABELS: they reach `tr()` through runLabel's return.
 const RUN_LABELS = keys('Ch. {a}–{b} · {n} older chapters not here yet', 'Ch. {n} · 1 older chapter not here yet');

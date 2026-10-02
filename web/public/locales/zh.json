@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2496
+    "strings": 2497
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2499,5 +2499,6 @@
   "Main: {name}": "主：{name}",
   "Any: {name}": "任意：{name}",
   "Tap again to skip to the next chapter": "再点一次以跳到下一章",
-  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "即使它本身或它的某个类型属于 18+，“显示 18+”关闭时也让这部作品留在书架上。"
+  "Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.": "即使它本身或它的某个类型属于 18+，“显示 18+”关闭时也让这部作品留在书架上。",
+  "another split of a chapter you have": "已有章节的另一种拆分"
 }

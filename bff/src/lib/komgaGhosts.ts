@@ -31,6 +31,15 @@ import { q, one } from './db';
 import { seriesVisible, type ViewCtx } from './visibility';
 
 /**
+ * A `covered` listing row (v0.50.0, lib/partAlias.ts R2) is another site's split of a chapter this server holds:
+ * the reader has the chapter, and Mihon can neither fetch it nor tell it from a chapter not downloaded yet. As a
+ * ghost it would be a row nobody can clear, and the highest of them the total the trackers read. The web's series
+ * page shows these rows with their reason; this surface leaves them out. A Komga reader's "read up to here" still
+ * marks them (lib/komgaProgress.ts): reading past chapter 78 is reading 78's parts, whoever split it.
+ */
+export const NOT_COVERED = "l.status <> 'covered'";
+
+/**
  * Is the opt-in on?
  *
  * Re-read per request and never cached, like every other setting in this codebase (lib/chapterCleanup's
@@ -133,7 +142,7 @@ export async function ghostBooksFor(seriesId: string): Promise<GhostBook[]> {
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1
+      WHERE l.series_id = $1 AND ${NOT_COVERED}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -171,7 +180,7 @@ export async function ghostBookById(id: string, ctx: ViewCtx): Promise<GhostBook
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND l.number = $2::real
+      WHERE l.series_id = $1 AND l.number = $2::real AND ${NOT_COVERED}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -202,7 +211,7 @@ export async function ghostNumbers(seriesId: string): Promise<number[]> {
   const rows = await q<{ number: string | number }>(
     `SELECT l.number
        FROM series_listing l
-      WHERE l.series_id = $1
+      WHERE l.series_id = $1 AND ${NOT_COVERED}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, mergeRows, openableChapters, runLabel, whyLabel, type Row } from '../lib/chapterRows';
+import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, countsAsBehind, mergeRows, openableChapters, runLabel, whyLabel, type Row } from '../lib/chapterRows';
 import type { Book, Ghost } from '../lib/types';
 
 const book = (number: number, over: Partial<Book> = {}): Book =>
@@ -54,6 +54,16 @@ test('floor ghosts collapse into one run row', () => {
   assert.deepEqual(whyLabel({ why: 'failed', attempts: 3 }), { key: 'failed {n} times', args: { n: 3 } });
   assert.deepEqual(whyLabel({ why: 'blocked' }), { key: 'only a blocked group has it', args: {} });
   assert.deepEqual(whyLabel({ why: 'missing' }), { key: 'not here yet', args: {} });
+});
+
+test('another site\'s split of a chapter here says so, and is not a chapter behind', () => {
+  // v0.50.0 (bff lib/partAlias.ts): a follower's 78.1 ... 78.9 beside the whole 78 on disk come back `covered`.
+  // Reintroduce by dropping the `covered` case in whyLabel: the row has no caption; or the `covered` test in
+  // countsAsBehind: the supply line counts nine chapters "not here" that are.
+  assert.deepEqual(whyLabel({ why: 'covered' }), { key: 'another split of a chapter you have', args: {} });
+  assert.equal(countsAsBehind({ why: 'covered' }), false, 'a covered ghost counted as behind');
+  assert.deepEqual(['missing', 'held', 'failed', 'blocked', 'floor', 'archive'].map((why) => countsAsBehind({ why: why as any })),
+    [true, true, true, true, false, false]);
 });
 
 test('a held chapter names the group it waits for and the days left, when the server says', () => {

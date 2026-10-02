@@ -23,7 +23,12 @@ import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
-export type ListingStatus = 'available' | 'held' | 'blocked';
+/**
+ * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
+ * is here as one file. Listed, so the series page can show it and a person can fetch it; never fetched by the
+ * sweep or the slow archive (both take `available` only), never counted as missing, not a Komga ghost.
+ */
+export type ListingStatus = 'available' | 'held' | 'blocked' | 'covered';
 
 /**
  * One copy of a number as the listing stores it: what the versions view shows, what the group panel
@@ -82,10 +87,13 @@ export interface ListingRow {
  * reads what the sweep would take; the rest follow in `order`, the release rules' own ranking, so the
  * list reads "best first" the way the sweep sees it rather than in whatever order the sites listed. With
  * no `order` the listing order stands.
+ *
+ * `covered` is lib/partAlias.ts's: numbers that are another split of a chapter on disk. A blocked number stays
+ * blocked (nothing could be fetched for it either way); a covered one is never `held`, since nothing waits for it.
  */
 export function listingRows(
   tagged: SourceChapter[], releases: SourceChapter[], held: Set<number>, fallbackSource: string,
-  order?: (a: SourceChapter, b: SourceChapter) => number,
+  order?: (a: SourceChapter, b: SourceChapter) => number, covered: ReadonlySet<number> = new Set(),
 ): ListingRow[] {
   const chosenOf = new Map<number, SourceChapter>();
   for (const r of releases) if (Number.isFinite(r.number)) chosenOf.set(r.number, r);
@@ -136,7 +144,7 @@ export function listingRows(
       sourceId: shown.source ?? fallbackSource,
       chosen: shown,
       copies: [shown, ...others].map(toCopy),
-      status: !chosen ? 'blocked' : held.has(number) ? 'held' : 'available',
+      status: !chosen ? 'blocked' : covered.has(number) ? 'covered' : held.has(number) ? 'held' : 'available',
     });
   }
   return out;
@@ -259,7 +267,7 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
   };
 }
 
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered';
 
 export interface Ghost {
   number: number;
@@ -305,10 +313,14 @@ export interface Ghost {
  * its own reason, since the archive will not fetch it either. `archiveBoundary` is null with no active archive.
  * Reintroduce by testing the boundary after the cap: "the series page's reason for a number an active archive
  * will fetch" in archivePlan.test.ts reads archive for a capped number.
+ *
+ * Covered (v0.50.0) after the floor and before everything else: another split of a chapter on disk is not missing,
+ * and a failure count from before the sweep knew that says nothing about it now.
  */
 export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null): GhostWhy {
   if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < CHAPTER_RETRY_CAP) return 'archive';
   if (floor != null && number < floor) return 'floor';
+  if (status === 'covered') return 'covered';
   if (status === 'blocked') return 'blocked';
   if (attempts >= CHAPTER_RETRY_CAP) return 'failed';
   if (status === 'held') return 'held';

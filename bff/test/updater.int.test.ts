@@ -1024,6 +1024,100 @@ test('a series followed on two sources takes what the primary has and the rest f
   assert.equal(ext.chapters, 6, 'and what it listed');
 });
 
+// ---- chapter parts that sources number or split differently (v0.50.0, lib/partAlias.ts) ------------------------
+// aqua went offline and series followed sites that number a chapter's parts their own way. `upd-pq` is that dead
+// primary (it throws), `upd-pa` writes parts as N / N.5 (mangapill), `upd-pb` as N.1 / N.6 (mangaread) or splits
+// a chapter in ten (natomanga). Each test sets what the followers list.
+const SRC_PQ = 'upd-pq', SRC_PA = 'upd-pa', SRC_PB = 'upd-pb';
+const partLists: Record<string, number[]> = { [SRC_PA]: [], [SRC_PB]: [] };
+const partAsked: string[] = [];
+before(async () => {
+  if (!DSN) return;
+  const { registerAdapter } = await import('../src/lib/sources');
+  registerAdapter({
+    id: SRC_PQ, name: SRC_PQ,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_PQ, title: sid }; },
+    async listChapters() { throw new Error('site offline'); },
+    async getPageUrls() { return []; },
+    async latest() { return []; },
+  } as any);
+  for (const id of [SRC_PA, SRC_PB]) {
+    registerAdapter({
+      id, name: id,
+      async search() { return []; },
+      async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
+      async listChapters() { return partLists[id].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}:${n}` })); },
+      async getPageUrls(chId: string) { partAsked.push(chId); return [`https://example.invalid/${chId}.png`]; },
+      async latest() { return []; },
+    } as any);
+  }
+});
+after(async () => {
+  if (!DSN) return;
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PQ, SRC_PA, SRC_PB]]).catch(() => {});
+});
+/** A series on the dead primary that follows `followers` in that order, holding `disk` (number, origin). */
+async function partsSeries(key: string, followers: string[], disk: Array<[number, string | null]>) {
+  await mkSeries(key, SRC_PQ);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+  await q('DELETE FROM series_sources WHERE series_id = $1', [S(key)]);
+  // One statement per row, so created_at -- the follow order -- is the order given.
+  for (const f of followers) await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [S(key), f, `${f}-${key}`]);
+  for (const [n, from] of disk) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, source_id) VALUES ($1, $2, 'T!upd', $3, $4, $5, 1, $6)`,
+      [`${S(key)}_b${n}`, S(key), `${S(key)}/Chapter ${n}.cbz`, n, `Chapter ${n}`, from]);
+  }
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PQ, SRC_PA, SRC_PB]]);
+  partAsked.length = 0;
+  globalThis.fetch = (async () => png()) as typeof fetch;
+}
+
+test('a follower\'s other numbering of the parts on disk, or its own split of a chapter on disk, is not downloaded', { skip }, async () => {
+  // .1 / .6 against .0 / .5 on disk, and ten parts of 78 against the whole 78 on disk -- both from the dead primary.
+  // Reintroduce by dropping the aliasParts block in updateSeries: 12.1, 12.6 and 78.1 ... 78.9 are all downloaded
+  // and counted missing. Reintroduce R2 alone (no `covered`): the nine parts of 78 are.
+  const tens = [78, 78.1, 78.2, 78.3, 78.4, 78.5, 78.6, 78.7, 78.8, 78.9];
+  partLists[SRC_PB] = [12.1, 12.6, ...tens];
+  await partsSeries('parts', [SRC_PB], [[12, SRC_PQ], [12.5, SRC_PQ], [78, SRC_PQ]]);
+
+  const r = await updateSeries(S('parts'), 20);
+  assert.equal(r.outcome, 'ok', JSON.stringify(r));
+  assert.deepEqual(partAsked, [], 'nothing was downloaded');
+  assert.equal(r.added, 0);
+  assert.equal((await stamp('parts')).m, 0, 'and nothing is missing');
+  const rows = await q('SELECT number, status, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [S('parts')]);
+  const status = Object.fromEntries(rows.map((x: any) => [Number(x.number), x.status]));
+  assert.deepEqual([status[12], status[12.5], status[78]], ['available', 'available', 'available'], JSON.stringify(status));
+  assert.deepEqual(tens.slice(1).map((n) => status[n]), Array(9).fill('covered'), 'the other split is listed, as covered');
+  assert.equal(status[12.1] ?? status[12.6], undefined, 'the follower\'s own numbers for the parts on disk are gone');
+  const half = rows.find((x: any) => Number(x.number) === 12.5);
+  assert.deepEqual([half.copies[0].source, half.copies[0].sourceNumber], [SRC_PB, 12.6], 'the copy keeps the number its source gave it');
+  const { listingFor } = await import('../src/lib/seriesListing');
+  const ghosts = (await listingFor(S('parts'), { floor: null, admin: true })).content;
+  assert.deepEqual(ghosts.map((g: any) => [g.number, g.why]), tens.slice(1).map((n) => [n, 'covered']), 'the series page says why');
+  // "Fetch newest": the newest listed number is 78.9, another split of the 78 on disk -- the chapter is here.
+  const newest = await updateSeries(S('parts'), 1, { newestOnly: true });
+  assert.deepEqual([newest.newest?.number, newest.newest?.state, newest.added], [78.9, 'up_to_date', 0], JSON.stringify(newest.newest));
+});
+
+test('two followers disagreeing about chapter 531 with nothing on disk: one download per part, in the series\' convention', { skip }, async () => {
+  // Tales of Demons and Gods: mangapill (followed first) writes 531 / 531.5, mangaread 531.1 / 531.6, and most of
+  // the series' two-part chapters on disk are .1 / .6. Reintroduce by dropping the convention step in aliasParts
+  // (`ref = own`): the files are named 531 and 531.5. Drop R1 entirely: four downloads.
+  partLists[SRC_PA] = [531, 531.5];
+  partLists[SRC_PB] = [531.1, 531.6];
+  await partsSeries('tdg', [SRC_PA, SRC_PB], [[528, SRC_PQ], [528.5, SRC_PQ], [529.1, SRC_PQ], [529.6, SRC_PQ], [530.1, SRC_PQ], [530.6, SRC_PQ]]);
+
+  const r = await updateSeries(S('tdg'), 10);
+  assert.equal(r.outcome, 'ok', JSON.stringify(r));
+  assert.equal(partAsked.length, 2, `one download per part; asked: ${partAsked}`);
+  assert.deepEqual(partAsked, [`${SRC_PA}:531`, `${SRC_PA}:531.5`], 'from the follower ranked first');
+  assert.deepEqual(r.landed.map((l: any) => l.number), [531.1, 531.6], 'the parts land under the series\' own numbering');
+  assert.ok(onDisk('tdg', 531.1) && onDisk('tdg', 531.6), 'named in the convention most of the series\' chapters use');
+  assert.ok(!onDisk('tdg', 531) && !onDisk('tdg', 531.5), 'and not in the first follower\'s');
+});
+
 /**
  * A series whose primary adapter is gone -- the extension was uninstalled, or its language hidden -- but
  * which follows a source that is still here keeps updating from that source. That is what following is
