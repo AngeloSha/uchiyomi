@@ -310,35 +310,37 @@ async function main() {
     await sleep(900);
   };
 
-  // A first visit: no repository yet, so the row is open by itself with the address typed; then the add, with
-  // the next-step line under the row. Unlike the old shots, these fail loudly: a missing input or line is a
-  // thrown error, not a silently absent file.
+  // A first visit: no repository yet, so Browse is the first-run card with its address field (v0.53.0), typed in;
+  // then the add, and Browse lists the repository's catalogue. Unlike the old shots, these fail loudly: a missing
+  // field or list is a thrown error, not a silently absent file.
+  /** From Browse's search row to the end of its `rows`-th extension, in document coordinates. */
+  const browseTop = (p, rows) => p.evaluate((rows) => {
+    const search = document.querySelector('[data-ext-search]')?.closest('div.flex');
+    const items = [...document.querySelectorAll('[data-ext-list] > li')];
+    if (!search || items.length < rows) return null;
+    search.scrollIntoView({ block: 'start', behavior: 'instant' });
+    window.scrollBy(0, -100);
+    const a = search.getBoundingClientRect(), b = items[rows - 1].getBoundingClientRect();
+    return { x: a.left - 10 + window.scrollX, y: a.top - 10 + window.scrollY, width: a.width + 20, height: b.bottom - a.top + 20 };
+  }, rows);
   if (want('crop-repo-empty') || want('crop-repo-added')) {
     const state = { repos: [] };
     const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture(state)]);
     await tabOn(xp, 'Extensions');
-    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
     await sleep(400);
-    await cropOn(xp, 'crop-repo-empty', 'Extensions');
+    await cropOn(xp, 'crop-repo-empty', 'Add an extension repository');
     await clickText(xp, 'button', 'Add');
     await xp.waitForFunction(() => document.body.innerText.includes('Checking the repository'), { timeout: 5000 });
     await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
     await settle(xp, 200);
     if (want('crop-repo-added')) {
-      // The repository row and the next-step line under it, not the whole card: the card is taller than the
-      // viewport by now, and an element clip that runs under the fixed top bar photographs the bar.
-      await xp.setViewport({ ...PROFILES.desk, height: 1400 });
-      await sleep(500);
-      const box = await xp.evaluate(() => {
-        const next = [...document.querySelectorAll('p')].find((e) => (e.textContent || '').startsWith('Next: choose extensions'));
-        const card = next?.closest('.card');
-        if (!card) return null;
-        card.scrollIntoView({ block: 'center', behavior: 'instant' });
-        const c = card.getBoundingClientRect(), n = next.closest('[role=status]').getBoundingClientRect();
-        return { x: c.left + window.scrollX, y: c.top + window.scrollY, width: c.width, height: n.bottom - c.top + 14 };
-      });
-      if (!box) throw new Error('crop-repo-added: no next-step line after the add');
+      // Browse after the add: the search, the filters, the count and the first extensions with their Install keys.
+      await xp.waitForSelector('[data-ext-list] > li', { timeout: 15000 });
+      await settle(xp, 300);
+      const box = await browseTop(xp, 5);
+      if (!box) throw new Error('crop-repo-added: no catalogue after the add');
       await sleep(500);
       await xp.screenshot({ path: `${OUT}/crop-repo-added.png`, clip: box });
       console.log('  ✓ crop-repo-added');
@@ -353,7 +355,7 @@ async function main() {
   if (want('crop-repo-toast')) {
     const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [] })]);
     await tabOn(xp, 'Extensions');
-    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
     await clickText(xp, 'button', 'Add');
     // The card itself (components/Toast.tsx `data-notice`), not the capsule at the top it replaced: a selector
@@ -372,64 +374,78 @@ async function main() {
     await xp.close();
   }
 
-  // The same two moments at phone width, for the site's phone plates: the repository row alone (and, after the
-  // add, the next-step line under it), at native scale -- a desktop crop in a 390px column is unreadable.
+  // The same two moments at phone width, for the site's phone plates: the first-run card alone (and, after the
+  // add, the top of Browse), at native scale -- a desktop crop in a 390px column is unreadable.
   if (want('phone-repo-empty') || want('phone-repo-added')) {
     const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [] })]);
     await tabOn(xp, 'Extensions');
-    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
-    // The repository row is the bordered box around the field; after the add, down to the next-step line.
-    const rowBox = (withNext) => xp.evaluate((withNext) => {
-      const row = document.querySelector('input[placeholder="https://…/index.min.json"]')?.closest('div.rounded-lg');
-      if (!row) return null;
-      row.scrollIntoView({ block: 'start', behavior: 'instant' });
+    // Out of the field, so it shows the address from its start: at 390 px the caret's end of it began "xample.org/…".
+    await xp.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
+    const box = await xp.evaluate(() => {
+      const card = document.querySelector('[data-ext-first-run]');
+      if (!card) return null;
+      card.scrollIntoView({ block: 'start', behavior: 'instant' });
       window.scrollBy(0, -90);
-      const next = withNext ? [...document.querySelectorAll('[role=status]')].find((e) => (e.textContent || '').startsWith('Next: choose extensions')) : null;
-      if (withNext && !next) return null;
-      const r = row.getBoundingClientRect(), b = (next || row).getBoundingClientRect();
-      return { x: r.left - 10 + window.scrollX, y: r.top - 10 + window.scrollY, width: r.width + 20, height: b.bottom - r.top + 20 };
-    }, withNext);
-    let box = await rowBox(false);
-    if (!box) throw new Error('phone-repo-empty: no repository row');
+      const r = card.getBoundingClientRect();
+      return { x: r.left - 10 + window.scrollX, y: r.top - 10 + window.scrollY, width: r.width + 20, height: r.height + 20 };
+    });
+    if (!box) throw new Error('phone-repo-empty: no first-run card');
     await sleep(600);
     if (want('phone-repo-empty')) { await xp.screenshot({ path: `${OUT}/phone-repo-empty.png`, clip: box }); console.log('  ✓ phone-repo-empty'); }
     await clickText(xp, 'button', 'Add');
     await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
     // Let the notice go: on a phone it sits above the bottom nav, and a crop that reaches down would take it in.
     await xp.waitForFunction(() => !document.querySelector('[data-notices] [data-notice]'), { timeout: 15000 }).catch(() => {});
-    await sleep(300);
-    box = await rowBox(true);
-    if (!box) throw new Error('phone-repo-added: no next-step line after the add');
+    await xp.waitForSelector('[data-ext-list] > li', { timeout: 15000 });
+    await settle(xp, 300);
+    const added = await browseTop(xp, 4);
+    if (!added) throw new Error('phone-repo-added: no catalogue after the add');
     await sleep(600);
-    if (want('phone-repo-added')) { await xp.screenshot({ path: `${OUT}/phone-repo-added.png`, clip: box }); console.log('  ✓ phone-repo-added'); }
+    if (want('phone-repo-added')) { await xp.screenshot({ path: `${OUT}/phone-repo-added.png`, clip: added }); console.log('  ✓ phone-repo-added'); }
     await xp.close();
   }
 
-  // The catalogue on a later visit: one repository (the row folded again), three extensions added, one out of date.
+  // A later visit: one repository, three extensions installed and one out of date -- the engine's header and
+  // Installed (v0.53.0). The crop is Installed alone, from its tabs to its last row.
   if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
     const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
     await tabOn(xp, 'Extensions');
     await xp.waitForFunction(() => document.body.innerText.includes('Example Manga (EN)'), { timeout: 15000 });
     await settle(xp, 300);
-    if (want('admin-extensions')) { await focusOn(xp, 'Extensions'); await shot(xp, 'admin-extensions'); }
-    await cropOn(xp, 'crop-extensions', 'Extensions');
+    if (want('admin-extensions')) { await focusOn(xp, 'Extension engine'); await shot(xp, 'admin-extensions'); }
+    if (want('crop-extensions')) {
+      const box = await xp.evaluate(() => {
+        const tabs = document.querySelector('[data-ext-view="installed"]')?.closest('[role=tablist]');
+        const list = document.querySelector('[data-ext-installed]');
+        if (!tabs || !list) return null;
+        tabs.scrollIntoView({ block: 'start', behavior: 'instant' });
+        window.scrollBy(0, -100);
+        const a = tabs.getBoundingClientRect(), b = list.getBoundingClientRect();
+        return { x: b.left - 12 + window.scrollX, y: a.top - 12 + window.scrollY, width: b.width + 24, height: b.bottom - a.top + 24 };
+      });
+      if (!box) throw new Error('crop-extensions: no Installed list');
+      await sleep(500);
+      await xp.screenshot({ path: `${OUT}/crop-extensions.png`, clip: box });
+      console.log('  ✓ crop-extensions');
+    }
     // Icon-only strips for the marketing site's extension wall.
     //
     // Deliberately NOT screenshots of the list, and since v0.45.0 not the real icons either: a site's icon is
     // its logo, and a third of the old strips spelled the site's name. They are the fixture's generated tiles.
     if (want('ext-strip-1')) {
+      // Browse, every page of it (v0.53.0: the list is the page's, a page at a time, with Show more under it).
+      await xp.goto(`${BASE}/admin/?tab=Extensions&view=browse`, { waitUntil: 'networkidle2', timeout: 60000 });
+      await xp.waitForSelector('[data-ext-list] img', { timeout: 15000 });
       const icons = await xp.evaluate(async () => {
-        const list = [...document.querySelectorAll('div')]
-          .find((d) => d.className && String(d.className).includes('overflow-y-auto') && d.querySelector('img'));
-        if (!list) return [];
-        const seen = new Set();
-        for (let i = 0; i < 40 && seen.size < 90; i++) {
-          list.querySelectorAll('img[src*="/img/extensions/icon/"]').forEach((im) => seen.add(im.getAttribute('src')));
-          list.scrollTop += list.clientHeight;
-          await new Promise((r) => setTimeout(r, 220));
+        for (let i = 0; i < 10 && document.querySelector('[data-ext-more]'); i++) {
+          document.querySelector('[data-ext-more]').click();
+          await new Promise((r) => setTimeout(r, 900));
         }
-        return [...seen];
+        const seen = new Set();
+        document.querySelectorAll('[data-ext-list] img[src*="/img/extensions/icon/"]').forEach((im) => seen.add(im.getAttribute('src')));
+        return [...seen].slice(0, 90);
       });
       console.log(`  · collected ${icons.length} extension icons`);
       if (icons.length < 12) throw new Error(`ext-strip: only ${icons.length} icons in the fixture list`);
@@ -472,19 +488,11 @@ async function main() {
   // The list at phone width for the site: the search row and the first extensions, at native scale.
   if (want('phone-extensions')) {
     const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
-    await tabOn(xp, 'Extensions');
-    await xp.waitForFunction(() => document.body.innerText.includes('Sample Webtoons'), { timeout: 15000 });
-    await sleep(500);
-    const box = await xp.evaluate(() => {
-      const search = document.querySelector('input[placeholder^="Search extensions"]');
-      const rows = [...document.querySelectorAll('p')].filter((e) => /^(Example Manga \(EN\)|Example Manga \(FR\))/.test((e.textContent || '').trim()));
-      if (!search || rows.length < 2) return null;
-      const top = search.closest('div').getBoundingClientRect();
-      search.scrollIntoView({ block: 'start', behavior: 'instant' });
-      window.scrollBy(0, -100);
-      const a = search.closest('div').getBoundingClientRect(), b = rows[rows.length - 1].closest('div.rounded-lg').getBoundingClientRect();
-      return top && { x: a.left - 10 + window.scrollX, y: a.top - 10 + window.scrollY, width: a.width + 20, height: b.bottom - a.top + 20 };
-    });
+    await tabOn(xp, 'Extensions&view=browse');
+    await xp.waitForSelector('[data-ext-list] > li', { timeout: 15000 });
+    await settle(xp, 300);
+    // Browse's search, filters and its first extensions: the installed three lead, then the catalogue by name.
+    const box = await browseTop(xp, 5);
     if (!box) throw new Error('phone-extensions: no search row or extension rows');
     await sleep(600);
     await xp.screenshot({ path: `${OUT}/phone-extensions.png`, clip: box });

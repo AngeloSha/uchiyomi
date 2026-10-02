@@ -61,16 +61,22 @@ export function fixtureIcon(i) {
 export function extensionFixture(state) {
   const cat = () => (state.repos.length ? FIXTURE_EXTENSIONS : []);
   const langs = () => [...new Set(cat().map((e) => e.lang))];
+  // The installed extensions' sources, one per language, all on (v0.53.0's Installed rows and sheets read them).
+  const sources = () => cat().filter((e) => e.installed).flatMap((e, i) => (e.lang === 'all' ? ['en', 'es', 'fr'] : [e.lang]).map((l, j) => ({
+    id: String(9100 + i * 10 + j), name: `${e.name} (${l.toUpperCase()})`, lang: l, nsfw: false, enabled: true, supportsLatest: true, pkgName: e.pkgName, used: 0,
+  })));
   return async (url, req) => {
     const path = url.pathname;
     if (path.startsWith('/img/extensions/icon/fixture-')) {
       return { contentType: 'image/svg+xml', body: fixtureIcon(Number(path.match(/fixture-(\d+)/)?.[1] || 0)) };
     }
     if (!path.startsWith('/api/admin/extensions/')) return null;
-    const on = cat().filter((e) => e.installed).length * 2;
     const route = path.slice('/api/admin/extensions/'.length);
     if (route === 'status') {
-      return { json: { configured: true, reachable: true, version: 'v2.3.2243', enabled: on, known: on, registered: on, skipped: 0, cap: 25, hiddenLangs: [] } };
+      return { json: {
+        configured: true, reachable: true, version: 'v2.3.2243', enabled: sources().length, known: sources().length, registered: sources().length,
+        skipped: 0, cap: 25, hiddenLangs: [], solver: { supported: true, enabled: true, wiring: 'ok', connectable: true },
+      } };
     }
     if (route === 'repos' && req.method() === 'POST') {
       await sleep(1800);
@@ -79,14 +85,25 @@ export function extensionFixture(state) {
     }
     if (route === 'repos') return { json: { content: state.repos } };
     if (route === 'sources') {
-      return { json: { langs: langs().map((l) => ({ lang: l, sources: cat().filter((e) => e.lang === l).length, enabled: cat().filter((e) => e.lang === l && e.installed).length, used: 0, hidden: false })) } };
+      const pkg = url.searchParams.get('pkg');
+      const ls = [...new Set(sources().map((s) => s.lang))];
+      return { json: {
+        content: sources().filter((s) => !pkg || s.pkgName === pkg), reachable: true, total: sources().length, hiddenLangs: [],
+        langs: ls.map((l) => ({ lang: l, sources: sources().filter((s) => s.lang === l).length, enabled: sources().filter((s) => s.lang === l).length, used: 0, hidden: false })),
+      } };
     }
     if (route.startsWith('catalog')) {
       const q = (url.searchParams.get('q') || '').toLowerCase();
       const lang = url.searchParams.get('lang') || '';
       const only = url.searchParams.get('installed') === 'true';
-      const content = cat().filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!lang || e.lang === lang) && (!only || e.installed));
-      return { json: { content, total: cat().length, matched: content.length, shown: content.length, installed: cat().filter((e) => e.installed).length, updatable: cat().filter((e) => e.hasUpdate).length, hiddenAdult: 0, langs: langs() } };
+      const updates = url.searchParams.get('updates') === 'true';
+      const matched = cat().filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!lang || e.lang === lang) && (!only || e.installed) && (!updates || e.hasUpdate))
+        .sort((a, b) => Number(b.installed) - Number(a.installed) || Number(b.hasUpdate) - Number(a.hasUpdate) || a.name.localeCompare(b.name));
+      // A page at a time, as the route answers since v0.53.0.
+      const offset = Number(url.searchParams.get('offset')) || 0;
+      const limit = Math.min(400, Number(url.searchParams.get('limit')) || 400);
+      const content = matched.slice(offset, offset + limit);
+      return { json: { content, total: cat().length, matched: matched.length, shown: content.length, offset, limit, installed: cat().filter((e) => e.installed).length, updatable: cat().filter((e) => e.hasUpdate).length, hiddenAdult: 0, langs: langs() } };
     }
     if (route === 'refresh') return { json: { count: cat().length } };
     return { status: 404, json: { error: 'not_in_fixture' } };
