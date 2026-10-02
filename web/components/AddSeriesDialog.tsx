@@ -28,7 +28,7 @@ import { useServerDownloads } from '@/lib/useServerDownloads';
 import { useAuth } from '@/lib/auth';
 import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
-import { baseOf, codeLabel, languageChoices, openingLanguage } from '@/lib/editions';
+import { baseOf, codeLabel, editionLangPreset, languageChoices, openingLanguage } from '@/lib/editions';
 import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
 
 export interface Provider {
@@ -291,11 +291,12 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // and "It is a different series" off -- derived per pick, as the numbering switch is.
   const [editionFor, setEditionFor] = useState<{ key: string; on: boolean } | null>(null);
   const asEdition = !!held && (editionFor?.key === pickKey ? editionFor.on : !!edSeed || picked?.inLibrary === false);
-  // This copy's language: what its source declares, else the one the dialog began from, else the server's word in its
-  // offer -- and what the person chose for this pick over all of them. Empty when nobody knows: the add then waits.
+  // This copy's language: what its source declares, else the one the dialog began from (for the source a follow was
+  // refused for, the language the refusal named), else the server's word in its offer -- and what the person chose for
+  // this pick over all of them (lib/editions.ts editionLangPreset). Empty when nobody knows: the add then waits.
   const [edLangFor, setEdLangFor] = useState<{ key: string; lang: string } | null>(null);
   const edLang = edLangFor?.key === pickKey ? edLangFor.lang
-    : picked?.lang || (edPick && edPick !== 'unstated' ? edPick : '') || offer?.lang || '';
+    : editionLangPreset({ picked, pick: edPick, seed: edSeed, offer: offer?.lang });
   const needsLang = asEdition && !edLang;
   // The series an edition joins, for its languages when the dialog does not know them yet, and -- for an admin, the
   // only one told whether a language is stated -- "The copy you have is in", asked when it is not.

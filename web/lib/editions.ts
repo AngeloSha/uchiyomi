@@ -97,6 +97,24 @@ export function openingLanguage(
 }
 
 /**
+ * The language the edition block starts on for the copy picked (the person's own choice overrides it): what its source
+ * declares; else the language "Which language?" was answered with; else, for the very source a follow was refused for,
+ * the language the refusal named -- "Add it as an edition in Spanish instead" opens on the sources that do not say
+ * theirs when that source is one, and must not ask "Choose a language" again; else the server's own offer. Empty when
+ * nobody knows (another source that says nothing is not guessed): the add then waits for a choice.
+ */
+export function editionLangPreset(p: {
+  picked?: { source: string; lang?: string | null } | null;
+  pick?: string | null;
+  seed?: { lang?: string; source?: string } | null;
+  offer?: string | null;
+}): string {
+  return p.picked?.lang || (p.pick && p.pick !== 'unstated' ? p.pick : '')
+    || (p.seed?.source && p.picked?.source === p.seed.source ? p.seed.lang ?? '' : '')
+    || p.offer || '';
+}
+
+/**
  * The languages a picker offers, sorted by name in the reader's language: EDITION_LANGS and whatever is already in
  * play (`extra`: the source's own code, the series' current one), each once.
  */

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { editionChipLabels, editionNames, editionOffer, libraryCaption, openingLanguage, readerTarget, languageChoices } from '../lib/editions';
+import { editionChipLabels, editionLangPreset, editionNames, editionOffer, libraryCaption, openingLanguage, readerTarget, languageChoices } from '../lib/editions';
 import type { EditionRow } from '../lib/types';
 
 /** A web file with its comments removed, so a comment that quotes the code does not pass a pin. */
@@ -57,6 +57,22 @@ test('the language picker offers MangaDex\'s languages and whatever is already i
   assert.equal(list.filter((l) => l === 'en').length, 1, 'a code is offered once');
   const named = list.map(name);
   assert.deepEqual(named, [...named].sort((a, b) => a.localeCompare(b)), 'sorted by name');
+});
+
+test('the source a follow was refused for starts on the language the refusal named', () => {
+  // The v0.52.0 check pass: "That source is in Spanish and this series is in English. Add it as an edition in Spanish
+  // instead" opened the dialog on the sources that do not say their language -- the refused one is such a source, its
+  // Spanish only the server's unstated language -- and picking it asked "Choose a language" all over again. Reintroduce
+  // by dropping the seed's term from editionLangPreset: "the refused source asks its language again".
+  const seed = { lang: 'es', source: 'site-a' };
+  assert.equal(editionLangPreset({ picked: { source: 'site-a', lang: null }, pick: 'unstated', seed }), 'es', 'the refused source asks its language again');
+  assert.equal(editionLangPreset({ picked: { source: 'site-b', lang: null }, pick: 'unstated', seed }), '', 'another source that says nothing is guessed');
+  assert.equal(editionLangPreset({ picked: { source: 'mangadex-fr', lang: 'fr' }, pick: 'unstated', seed }), 'fr', 'a declared language wins over the seed');
+  assert.equal(editionLangPreset({ picked: { source: 'mangadex-es-419' }, pick: 'es-419', seed: null }), 'es-419', 'the row "Which language?" was answered with');
+  assert.equal(editionLangPreset({ picked: { source: 'site-a' }, pick: 'unstated', seed: null, offer: 'pt-BR' }), 'pt-BR', "the server's offer");
+  assert.equal(editionLangPreset({ picked: { source: 'site-a' }, pick: 'unstated', seed: null }), '', 'nobody knows: the add waits');
+  // The dialog derives it there, not inline. Reintroduce the old inline chain: this pin fails.
+  assert.match(code('components/AddSeriesDialog.tsx'), /: editionLangPreset\(\{ picked, pick: edPick, seed: edSeed, offer: offer\?\.lang \}\);/, 'the dialog does not use editionLangPreset');
 });
 
 test('a follow refused for its language offers the edition: Find missing, the review, and the dialog on that language', () => {
