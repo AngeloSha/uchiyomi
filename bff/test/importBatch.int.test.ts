@@ -1267,6 +1267,43 @@ test('an entry already in the library is linked and floored at intake, and reads
   }
 });
 
+test('a title held in two language editions maps to the original, and every edition is linked (v0.52.0)', { skip }, async () => {
+  // The Spanish edition is inserted FIRST, so a scan in physical order meets it before the original: only the
+  // `created_at` order in the `have` map makes the answer the original. Reintroduce by ordering the map by rank alone:
+  // the row links the Spanish edition. Reintroduce the sibling links by dropping the loop in linkImportedSeries
+  // (routes/admin.ts): the Spanish edition is not on the entry, and progress read there never reaches the tracker.
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const original = newSeriesId();
+  const spanish = newSeriesId();
+  const work = '7f3c2a10-0000-4000-8000-0000000000e1';
+  const restore = await stubAniList(async () => [entry('edition', 'Edition Import Tale', { progress: 30 })]);
+  let batchId = '';
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, lang, work_id, created_at)
+             VALUES ($1,'Other ES','Edition Import Tale',$1,1,'es-419',$3, now()), ($2,'Other','Edition Import Tale',$2,1,'en',$3, now() - interval '30 days')`,
+      [spanish, original, work]);
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    // Its one row is owned and linked at intake, so the batch is done at once.
+    const body = await waitForState(app, headers, batchId, ['review', 'done']);
+    const row = body.items.find((i: any) => i.backup_title === 'Edition Import Tale');
+    assert.deepEqual([row.in_library, row.status, row.linked], [true, 'already', true]);
+    const links = await q('SELECT series_id FROM series_trackers WHERE external_id = $1 AND provider = $2 ORDER BY series_id', [`${T36}-edition`, 'anilist']);
+    assert.deepEqual(links.map((l: any) => l.series_id).sort(), [original, spanish].sort(), 'both editions are the same entry');
+    const floors = await q('SELECT series_id, chapters FROM tracker_progress WHERE user_id = $1 AND provider = $2', [uid, 'anilist']);
+    assert.deepEqual(floors, [{ series_id: original, chapters: 30 }], 'the floor is seeded once, on the original');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[original, spanish]]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
 test('a row matched under its other name records which', { skip }, async () => {
   // Reintroduce by searching `entry.title` alone in resolveCandidate (routes/sources.ts, drop the `terms`
   // loop): Attack on Titan stays unresolved, because FAKE carries it only as Shingeki no Kyojin.

@@ -42,6 +42,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   label: () => 'Image quality', value: () => 'best', url: () => 'http://solver:8191', host: () => 'aquareader.org',
   transport: () => 'ENOTFOUND', name: () => 'Webtoons', source: () => 'aqua', from: () => 'Aqua', to: () => 'MangaDex',
   title: () => 'Walk Tale', ranges: () => '3-7, 12', fs: () => 'ext4', library: () => 'ext4', downloads: () => 'nfs',
+  // v0.52.0, dupes.languages: two language codes, named in the reader's language on both sides.
+  a: () => 'en', b: () => 'es-419',
 };
 
 /**

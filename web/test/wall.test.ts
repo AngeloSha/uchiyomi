@@ -34,8 +34,9 @@ test('the same title on two sources is one card that knows both', () => {
   assert.equal(card.providerCount, 2, 'the badge does not count both sources');
   assert.deepEqual([card.source, card.sourceId], ['a', '1'], 'the card did not keep the ids it arrived with');
   assert.equal(card.coverUrl, 'https://b/solo.jpg', 'the cover was not taken from the first row that had one');
-  assert.equal(card.inLibrary, true, 'owned on one source did not read as owned');
-  assert.equal(card.librarySeriesId, 'ser-9', 'the owned card lost the library entry it should open');
+  // v0.52.0: owned on ONE source no longer makes the card owned -- see "a title held in one language" below.
+  assert.equal(card.inLibrary, false, 'a card is owned only when every provider is held');
+  assert.equal(card.librarySeriesId, 'ser-9', 'the card lost the library entry it should open');
 
   const key = normTitle('Solo Leveling');
   assert.deepEqual(groups[key]?.map((p) => `${p.source}:${p.sourceId}`), ['a:1', 'b:2'], 'groups[key] does not hold both providers');
@@ -43,6 +44,30 @@ test('the same title on two sources is one card that knows both', () => {
   assert.equal(groups[key][1].title, 'SOLO LEVELING!', 'a provider must carry the title as its own source spells it');
   // Every keyed card has a groups entry, as every search hit does, so open() treats the two the same.
   assert.equal(groups[normTitle('Tower of God')]?.length, 1, 'a single-source card has no groups entry');
+});
+
+test('a title held in one language folds with a provider in another to a card that is still addable', () => {
+  // v0.52.0 (#72), p3t3t3's Blue Lock: the server says `inLibrary` per source, in that source's language, so the
+  // English row is owned and the Spanish one is not. OR-ed, the card read "In library", opened the English series,
+  // and the Spanish edition could not be added from Discover at all. Reintroduce by OR-ing `inLibrary` in
+  // foldByTitle: "an English item in the library and a Spanish one not in it fold to a card that is not owned" fails.
+  const { items, groups } = foldByTitle([
+    row({ source: 'a', sourceId: '1', title: 'Blue Lock', lang: 'en', inLibrary: true, librarySeriesId: 'ser-en', libraryLangs: ['en'] }),
+    row({ source: 'b', sourceId: '2', title: 'Blue Lock', lang: 'es-419', inLibrary: false, librarySeriesId: 'ser-en', libraryLangs: ['en'] }),
+  ], nameOf);
+  const [card] = items;
+  assert.equal(card.inLibrary, false, 'an English item in the library and a Spanish one not in it fold to a card that is not owned');
+  assert.deepEqual(card.libraryLangs, ['en'], 'the card does not say which language the library holds');
+  assert.equal(card.librarySeriesId, 'ser-en', 'the card lost the entry its dialog opens');
+  // The dialog marks each provider: the held one "in your library", the other as a new language.
+  assert.deepEqual(groups[normTitle('Blue Lock')].map((p) => [p.source, p.lang, p.inLibrary]), [['a', 'en', true], ['b', 'es-419', false]]);
+  // Held in every provider's language, it is owned.
+  const both = foldByTitle([
+    row({ source: 'a', sourceId: '1', title: 'Blue Lock', inLibrary: true, libraryLangs: ['en'] }),
+    row({ source: 'b', sourceId: '2', title: 'Blue Lock', inLibrary: true, libraryLangs: ['en', 'es-419'] }),
+  ], nameOf).items[0];
+  assert.equal(both.inLibrary, true, 'a card held in every provider\'s language is not owned');
+  assert.deepEqual(both.libraryLangs, ['en', 'es-419'], 'the languages are not the union');
 });
 
 test("the providers of a folded card are in the page's order, not arrival order", () => {

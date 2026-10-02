@@ -189,6 +189,12 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: () => tr('Makes the two copies one series. Progress, bookmarks, ratings and tracker links move to the kept copy; it cannot be undone.'),
     eta: moment,
   },
+  // v0.52.0 (#72): the same work in two languages -- linked as editions, each keeping its own chapters and progress.
+  link_editions: {
+    label: () => tr('Link as editions'),
+    what: () => tr('Keeps both series, each with its own chapters and reading progress, as language editions of one work: the Library shows one card for them. Unlinking from the series page undoes it.'),
+    eta: moment,
+  },
   // Card-level: the step acts on every source that blames the solver, whatever row was pressed.
   solver_reset: {
     label: (c) => (c.n === 1 ? tr('Reset the solver (1 source)') : tr('Reset the solver ({n} sources)', { n: c.n ?? 0 })),

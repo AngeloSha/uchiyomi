@@ -4,6 +4,7 @@ import { q, one } from './db';
 import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, persistScan } from './library';
 import { ViewCtx, Params, visible, browsable, ADULT_RATING } from './visibility';
 import { cleanDescription } from './htmlText';
+import { effectiveLang } from './seriesLang';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -14,7 +15,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
 // ⚠️ Every name here must ALSO be produced by the inner SELECT of `seriesSrcWith` below, which enumerates
 // its columns explicitly. Adding one to only one of the two makes EVERY series read fail with "column does
 // not exist" -- the series page, the library grid, search, the home rails, OPDS, all of it.
-const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, reading_direction, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, source_chapters, source_missing, source_checked_at';
+const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, reading_direction, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, source_chapters, source_missing, source_checked_at, source_id, lang, work_id';
 
 /**
  * The one place a series is read from.
@@ -41,7 +42,10 @@ const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
          s.auto_update, s.library_id, s.library_pinned,
          -- What the source last said, so "how far behind is this?" is a column rather than a network call.
          -- Kept in step with SERIES_COLS above; see the warning there.
-         s.source_chapters, s.source_missing, s.source_checked_at
+         s.source_chapters, s.source_missing, s.source_checked_at,
+         -- v0.52.0: the language a series is in (stated, else its main source's -- lib/seriesLang.ts) and the work
+         -- it is an edition of (lib/editions.ts), which the Library collapses to one card.
+         s.source_id, s.lang, s.work_id
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
    WHERE ${gate('s', ctx, p)}
 ) ${alias}`;
@@ -122,9 +126,16 @@ function seriesDto(r: any) {
       genres,
       tags: [],
       ageRating: r.age_rating ?? null,
-      language: 'en',
+      // The language the series is in (v0.52.0): its own, else its main source's, else the server's unstated
+      // language -- what Komga's `metadata.language` tells Mihon, and what the series page names. Was 'en' for
+      // every series.
+      language: effectiveLang(r.lang, r.source_id),
     },
     booksMetadata: { summary, genres, tags: [] },
+    // v0.52.0 (#72): the series' language, and the work it is a language edition of, or null on its own
+    // (lib/editions.ts). enrichSeries adds which other editions this viewer may browse.
+    lang: effectiveLang(r.lang, r.source_id),
+    workId: r.work_id ?? null,
     // whether the scheduled updater pulls new chapters for this series; settable from the series page
     autoUpdate: r.auto_update !== false,
     // What the source said when it was last asked. ONE nested object, present or null, because "never
@@ -321,11 +332,42 @@ function sortSql(sort?: string, perUser = false): string {
 const MINE_CTE = `WITH mine AS (
   SELECT series_id,
          count(*) FILTER (WHERE completed)::int     AS done,
-         count(*) FILTER (WHERE NOT completed)::int AS started
+         count(*) FILTER (WHERE NOT completed)::int AS started,
+         -- When this viewer last read in the series: the edition of a work the Library shows (searchSeries).
+         max(updated_at)                            AS last_at
     FROM read_progress WHERE user_id = $1 GROUP BY series_id
 ), fav AS (
   SELECT series_id FROM favorites WHERE user_id = $1
 )`;
+
+/**
+ * The Library's search with one card per work (v0.52.0, #72, `collapseEditions`): of the editions that pass the
+ * filters and the gates, the one this viewer read most recently, else the oldest -- the original. The window runs
+ * over the ALREADY filtered set, so a search that matches only the Spanish title shows the Spanish edition, and a
+ * viewer who may browse one edition sees that one. `total` counts works, so the grid's paging agrees with its cards.
+ * The outer query reads the per-user CTEs again by the chosen row's id: `sortSql` names `m` and `f`, and a filter
+ * already applied inside is not applied twice.
+ *
+ * Reintroduce by returning the plain search: "the Library shows one card per work" in editions.int.test.ts finds
+ * two cards, and none for a title only the Spanish edition carries if the window runs before the filter.
+ */
+async function collapsedSearch(cte: string, from: string, where: string, p: Params, pg: number, size: number, order: string, perUser: boolean) {
+  const t = (await one<{ c: number }>(
+    `${cte} SELECT count(DISTINCT COALESCE(sv.work_id::text, sv.id))::int AS c FROM ${from} WHERE ${where}`,
+    clone(p).values as any[],
+  ))?.c ?? 0;
+  const mine = perUser ? 'm.last_at DESC NULLS LAST, ' : '';
+  const joins = perUser ? 'LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id' : '';
+  const rows = await q(
+    `${cte} SELECT ${SERIES_COLS} FROM (
+       SELECT sv.*, row_number() OVER (PARTITION BY COALESCE(sv.work_id::text, sv.id) ORDER BY ${mine}sv.created_at, sv.id) AS edition_pick
+         FROM ${from} WHERE ${where}
+     ) sv ${joins}
+     WHERE sv.edition_pick = 1 ORDER BY ${order} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+    p.values as any[],
+  );
+  return page(rows.map(seriesDto), t, pg, size);
+}
 
 /**
  * The chapter before or after this one, within the same series.
@@ -529,8 +571,9 @@ export const owned = {
    * follows. Nothing here counts placeholders by hand.
    */
   searchSeries: async (ctx: ViewCtx, body: any, pg = 0, size = 40, sort?: string) => {
+    const collapse = body?.collapseEditions === true;
     const wantsUser = !!ctx.userId
-      && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite/i.test(sort || ''));
+      && (collapse || JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite/i.test(sort || ''));
     const p = new Params();
     const cte = wantsUser ? MINE_CTE : '';
     if (wantsUser) p.add(ctx.userId); // MINE_CTE reads $1
@@ -543,6 +586,7 @@ export const owned = {
     if (body?.fullTextSearch) {
       where = `(${where}) AND title ILIKE ${p.add(`%${body.fullTextSearch}%`)}`;
     }
+    if (collapse) return collapsedSearch(cte, from, where, p, pg, size, sortSql(sort, wantsUser), wantsUser);
     const t = await total(ctx, where, clone(p), cte, from);
     const rows = await q(
       `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort, wantsUser)} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,

@@ -755,6 +755,37 @@ Komga backend. `name` is the one Health uses: the loaded source's, else the name
 else the id; `installed` is false while a source is not loaded (its extension gone or switched off, or the
 engine down).
 
+**Language editions of one work** (since v0.52.0, #72). Blue Lock in English and in Spanish are two series —
+each with its own folder, chapters, sources and reading progress — linked as editions of one work. Every series
+DTO carries `lang` (the BCP-47 code it is in: its own, else its main source's declared language, else the
+server's unstated language, English by default; also `metadata.language`), `workId` (or null), and from the list
+routes `edition: {langs} | null`, the work's languages the caller may browse. `GET /api/series/:id` carries
+`edition: {workId, editions: [{seriesId, lang, title, booksCount, current, lastRead}]} | null` instead, the
+editions the caller may open, oldest first; admins also get `langStated` and `langAuto` (what "Automatic"
+means). `POST /api/series/search {collapseEditions: true}` (the Library grid) answers one series per work — the
+edition the caller read last, else the oldest — and counts works in `totalElements`. An edition is added with
+`POST /api/sources/add {edition: {of, lang?, ofLang?}}` into its own folder, `<source>/<title> (<LANG>)`; `GET
+/api/sources/edition-candidates ?seriesId=` lists the languages the sources offer and, with `&lang=`, searches
+them for the work. Discover's `inLibrary` now means held in that source's language, with `libraryLangs` beside
+it, and a `duplicate` from a source in a new language carries the offer `edition: {of, heldLangs, lang}`. Admins
+link two series already here with `POST /api/admin/series/:id/editions {with, lang?, withLang?}` (Health's "Link
+as editions" on a duplicate pair in two languages), unlink with `DELETE /api/admin/series/:id/edition`, and
+state a series' language with `PATCH /api/admin/series/:id {lang}`. The age rating set in Edit details is the
+work's, a merge inside one work is refused (`same_work`), and a work left with one edition — by an unlink, a
+merge or a forget — dissolves. The Komga-compatible API and OPDS keep every edition a series of its own and
+title it with its code, "Blue Lock (ES-419)", while a sibling is in the caller's sight; a tracker push never
+goes below what another series on the same tracker entry has sent.
+
+**Mark caught up** (since v0.52.0, from discussion #72). `PATCH /api/admin/series/:id {chapterFloor:
+'caught_up'}` floors a series just above the newest chapter its sources list or the library holds, as a
+"Nothing yet" add does: the back catalogue is not fetched, every later release is. The answer's
+`chapterFloor: {floor, previous}` is the Undo: `{chapterFloor: previous}` (a number, or null) puts the old floor
+back.
+
+**Where things are on disk** (since v0.52.0, #136, admins only). `GET /api/series/:id` carries `paths`, the
+series' folder as full paths on the server — one per root its chapters are under — and each chapter of `GET
+/api/series/:id/books` its file's `path`.
+
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
 any source the series has been followed on (`POST /api/admin/series/:id/sources`, below); each entry is
 `{sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto}`, where `registered` says
@@ -881,6 +912,7 @@ GET    /api/discover/trending     POST   /api/sources/fill/scan
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
 GET    /api/sources/archive       POST   /api/sources/archive
+GET    /api/sources/edition-candidates
 POST   /api/sources/archive/:seriesId/pause
 POST   /api/sources/archive/:seriesId/resume
 DELETE /api/sources/archive/:seriesId
@@ -1111,6 +1143,7 @@ PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
 POST   /api/admin/series/bulk/hide
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
@@ -1303,7 +1336,7 @@ compared case-insensitively with spaces and punctuation ignored. The server-wide
 `scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
 {scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
 `null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
-`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?}` — at least one, no other
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?, lang?, chapterFloor?}` — at least one, no other
 fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
 **blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
 `null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the

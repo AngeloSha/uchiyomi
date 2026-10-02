@@ -46,6 +46,15 @@ async function readSeries(id: string, qq: Qq): Promise<SeriesLang & { sourceId: 
   };
 }
 
+/**
+ * The same rule over a row the caller has read already (v0.52.0, editions): every series DTO, the Discover
+ * ownership check and an edition list read `lang` and `source_id` alongside everything else, and asking
+ * seriesLanguage per row would be a query each.
+ */
+export function effectiveLang(lang: string | null | undefined, sourceId: string | null | undefined): string {
+  return canonLang(lang) ?? canonLang(sourceId ? getSource(sourceId)?.lang : null) ?? unstatedLang();
+}
+
 /** A series' language, whether it is stated, and its work. A series that is not there reads as unstated. */
 export async function seriesLanguage(id: string, qq: Qq = q): Promise<SeriesLang> {
   const { sourceId: _own, ...facts } = await readSeries(id, qq);

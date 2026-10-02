@@ -1792,7 +1792,9 @@ function LibraryPanel() {
     try {
       const res = await api<{ files: number; bytes: number }>(`/api/admin/series/${r.id}/delete-files`,
         { method: 'POST', json: { confirm: r.title } });
-      toast(`Deleted ${res.files} file(s), ${(res.bytes / 1048576).toFixed(1)} MB`, 'success');
+      // Counted in pairs and translated (v0.52.0): "Deleted 1 file(s)" was the one English toast left on this panel.
+      const size = `${(res.bytes / 1048576).toFixed(1)} MB`;
+      toast(res.files === 1 ? tr('Deleted 1 file, {size}', { size }) : tr('Deleted {n} files, {size}', { n: res.files, size }), 'success');
       setPurge(null);
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
     } catch (e: any) {

@@ -78,6 +78,8 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // label is the counted one in healthCopy.ts ("Find other sources (189 series)"), whose tr() findSources.test.ts holds.
   // v0.51.0: the press opens the start dialog (follow automatically, or review first); its Start posts the source.
   { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => setAsking\('find'\)/ },
+  // v0.52.0 (#72): a duplicate pair in two languages is linked as editions after a confirmation that names both.
+  { action: 'link_editions', labels: ["tr('Link as editions')"], wants: /onRun: \(\) => setAsking\('link'\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {
@@ -192,7 +194,7 @@ test('every dialog a Health card opens is on <body>, out of the card', () => {
   // its overflow-hidden cuts the dialog off. Reintroduce by rendering a ConfirmDialog in place: this names it.
   const src = code(read(KEYS));
   const opens = [...src.matchAll(/<ConfirmDialog\b/g)].map((m) => m.index!);
-  assert.equal(opens.length, 5, 'the Health confirmations moved -- update this count');
+  assert.equal(opens.length, 6, 'the Health confirmations moved -- update this count');
   for (const at of opens) {
     const before = src.slice(0, at);
     assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `a Health confirmation is rendered inside its card: ${src.slice(at, at + 90)}`);
@@ -348,7 +350,9 @@ test('Merge all lists every pair, marks the copy that survives, and says the mer
   const src = code(read(KEYS));
   const block = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
   assert.match(block, /'data-health-merge-all': check\.id/, 'the Merge all row is not tagged for the walk-through');
-  assert.match(block, /const pairs = check\.id === 'duplicates' \? findings\.filter\(\(it\) => \(it\.seriesIds \|\| \[\]\)\.length === 2\) : \[\];/, 'Merge all offers itself on checks that are not duplicates, or on half a pair');
+  // v0.52.0: and only the pairs offering a merge -- a pair in two languages is linked, never merged. Reintroduce by
+  // dropping `it.actions?.includes('merge')`: Merge all folds the Spanish edition's chapters into the English one.
+  assert.match(block, /const pairs = check\.id === 'duplicates' \? findings\.filter\(\(it\) => \(it\.seriesIds \|\| \[\]\)\.length === 2 && !!it\.actions\?\.includes\('merge'\)\) : \[\];/, 'Merge all offers itself on checks that are not duplicates, on half a pair, or on a pair in two languages');
   assert.match(block, /onRun: \(\) => setAsking\(true\)/, 'Merge all has no confirmation');
   const dialog = block.slice(block.indexOf('{asking && ('));
   assert.match(dialog, /tr\('This cannot be undone\. Progress, bookmarks, ratings and tracker links move to the kept copy\.'\)/, 'the one-way sentence is gone');

@@ -16,6 +16,8 @@ import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPingShared, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
+import { effectiveLang } from './seriesLang';
+import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
@@ -62,7 +64,10 @@ export type HealthAction =
   | 'renumber' | 'keep_numbers'
   // v0.49.1: Find other sources for every series whose MAIN source is the row's `sourceId` (POST
   // /api/admin/sources/find {sourceId}); `findSeries` is how many series that run would search for.
-  | 'find_sources';
+  | 'find_sources'
+  // v0.52.0 (#72): the duplicates check's pair in two languages -- link them as editions of one work (POST
+  // /api/admin/series/{id}/editions {with}) rather than merge one into the other.
+  | 'link_editions';
 
 export interface HealthItem {
   seriesId?: string;
@@ -102,6 +107,8 @@ export interface HealthItem {
   findSeries?: number;
   /** Of `seriesIds`, the one the merge should keep: more live chapters, then more readers, then older. */
   keep?: string;
+  /** v0.52.0, beside `seriesIds` on a duplicates row: the language each is in, for Link as editions' confirmation. */
+  langs?: string[];
   /** What an admin can do about this item, in the order the chips are shown. */
   actions?: HealthAction[];
   /**
@@ -1056,16 +1063,41 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
   };
 }
 
-/** The same manga added twice, spotted by two local series resolving to one AniList entry. */
+/**
+ * The same manga added twice, spotted by two local series resolving to one AniList entry.
+ *
+ * Counted in WORKS, not series (v0.52.0, #72): the language editions of one work share their entry on purpose (the
+ * link copies it), so an English and a Spanish edition are one work and no finding. A work and a series outside it
+ * on the same entry are, and each side is then named by one row: the edition in the other side's language when there
+ * is one -- a second English copy beside an English and Spanish work is a duplicate of the English edition, to merge
+ * -- else the oldest. Two sides whose languages differ are the same work in two languages, and the chip is Link as
+ * editions instead of Merge. Reintroduce by grouping by series again: "two editions of one work are no duplicate" in
+ * editions.int.test.ts finds the pair.
+ */
 async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
-  const rows = await q<{ external_id: string; titles: string; ids: string[] }>(
-    `SELECT t.external_id, string_agg(ls.title, ' + ' ORDER BY ls.title) AS titles,
-            array_agg(ls.id ORDER BY ls.title) AS ids
+  const found = await q<{ external_id: string; members: Array<{ id: string; title: string; work: string; lang: string | null; source_id: string | null }> }>(
+    `SELECT t.external_id,
+            json_agg(json_build_object('id', ls.id, 'title', ls.title, 'work', COALESCE(ls.work_id::text, ls.id),
+                                       'lang', ls.lang, 'source_id', ls.source_id) ORDER BY ls.title, ls.created_at, ls.id) AS members
        FROM series_trackers t JOIN lib_series ls ON ls.id = t.series_id AND ${visibleToAll('ls')}
       WHERE t.provider = 'anilist'
-      GROUP BY t.external_id HAVING count(*) > 1
-      ORDER BY count(*) DESC`,
+      GROUP BY t.external_id HAVING count(DISTINCT COALESCE(ls.work_id::text, ls.id)) > 1
+      ORDER BY count(DISTINCT COALESCE(ls.work_id::text, ls.id)) DESC`,
   );
+  const rows = found.map((f) => {
+    const members = f.members.map((m) => ({ ...m, lang: effectiveLang(m.lang, m.source_id) }));
+    const works = [...new Set(members.map((m) => m.work))].map((w) => members.filter((m) => m.work === w));
+    // Two sides: name each by the edition in a language the other side has, else by its first row.
+    let pick = works.map((w) => w[0]);
+    let languages = false;
+    if (works.length === 2) {
+      const [a, b] = works;
+      const match = a.flatMap((x) => b.filter((y) => sameLanguage(x.lang, y.lang)).map((y) => [x, y] as const))[0];
+      if (match) pick = [...match];
+      else languages = true;
+    }
+    return { external_id: f.external_id, ids: pick.map((m) => m.id), titles: pick.map((m) => m.title).join(' + '), langs: pick.map((m) => m.lang), languages };
+  });
   // Which copy should survive a merge. A merge is ONE-WAY and it moves everything (progress, bookmarks,
   // trackers, chapters) into the survivor, so the suggestion has to be the copy that would lose the most by
   // being the one absorbed: most live chapters first, then the one people have actually read, and an older
@@ -1097,13 +1129,17 @@ async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
         titles: r.titles.split(' + '),
         title: r.titles,
         keep,
+        langs: r.langs,
         // Ignored while the copies are the same ones: a third copy of the entry is a new finding.
         key: `anilist:${r.external_id}`,
         members: [...r.ids].sort(),
         // Only a pair gets the chip. Three copies of one entry is two merges in an order somebody has to
         // choose, and a button that quietly picks one is how a library loses a series it cannot get back.
-        ...(r.ids.length === 2 ? { actions: ['merge' as const] } : {}),
-        ...detailOf([say('dupes.same'), r.ids.length > 2 && say('dupes.copies', { n: r.ids.length })]),
+        // A pair in two languages is linked, never merged: a merge would put two languages' chapters in one list.
+        ...(r.ids.length === 2 ? { actions: [r.languages ? 'link_editions' as const : 'merge' as const] } : {}),
+        ...detailOf(r.languages
+          ? [say('dupes.languages', { a: r.langs[0], b: r.langs[1] })]
+          : [say('dupes.same'), r.ids.length > 2 && say('dupes.copies', { n: r.ids.length })]),
       };
     });
   const ignored = applyIgnores('duplicates', items, ctx);

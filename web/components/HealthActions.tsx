@@ -31,6 +31,7 @@ import { NumberingSheet } from '@/components/NumberingSheet';
 import { FindStartDialog } from '@/components/FindSources';
 import { t as tr } from '@/lib/i18n';
 import { isDesktop } from '@/lib/desktop';
+import { languageName } from '@/lib/format';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
@@ -116,7 +117,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const slot = slots[slotKey];
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
-  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'find' | null>(null);
+  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | null>(null);
   // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
   const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
@@ -233,6 +234,20 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     return { text };
   };
 
+  /**
+   * Link the pair as language editions of one work (v0.52.0, #72): the duplicates row of a work in two languages. Both
+   * stay series of their own; the pair leaves the page when Health answers, so this is said in a notice too.
+   */
+  const doLink = async (): Promise<{ text: string } | null> => {
+    setAsking(null);
+    const ids = item.seriesIds || [];
+    if (ids.length !== 2) return null;
+    await api(`/api/admin/series/${encodeURIComponent(ids[1])}/editions`, { method: 'POST', json: { with: ids[0] } });
+    const text = tr('Linked as editions of one work');
+    toast(text, 'success');
+    return { text };
+  };
+
   const doDisable = async (): Promise<{ text: string }> => {
     setAsking(null);
     await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/disable`, { method: 'POST' });
@@ -288,6 +303,8 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         return { ...base, danger: true, label: tr('Turn off'), onRun: () => setAsking('disable') };
       case 'merge':
         return { ...base, label: tr('Merge'), onRun: () => setAsking('merge') };
+      case 'link_editions':
+        return { ...base, primary: true, label: tr('Link as editions'), onRun: () => setAsking('link') };
       case 'ignore':
         return { ...base, label: tr('Ignore'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, true) })) };
       case 'unignore':
@@ -423,6 +440,30 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         </OnBody>
       )}
 
+      {asking === 'link' && (item.seriesIds || []).length === 2 && (
+        <OnBody>
+          <ConfirmDialog
+            title={tr('Link these two as editions?')}
+            confirmLabel={tr('Link as editions')}
+            body={
+              <>
+                <p>{tr('Each keeps its own chapters, sources and reading progress. The Library shows one card for the work, and the series page switches between them.')}</p>
+                <ul className="mt-3 space-y-2">
+                  {(item.titles || []).map((t, i) => (
+                    <li key={i} className="flex min-w-0 items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <span dir="auto" className="min-w-0 truncate text-fog-100">{t}</span>
+                      {item.langs?.[i] && <span className="shrink-0 text-[11px] text-fog-500">{languageName(item.langs[i])}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+            onConfirm={() => act('link_editions', doLink)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
+      )}
+
       {asking === 'merge' && (item.seriesIds || []).length === 2 && (
         <OnBody>
           <ConfirmDialog
@@ -458,7 +499,7 @@ const SCAN_CHECKS = ['library-scan', 'downloads-missing'];
 export function hasCardActions(check: HealthCheck): boolean {
   const step = CARD_STEP[check.id];
   return (!!step && stepFindings(check, step).length > 0) || SCAN_CHECKS.includes(check.id) || solverDown(check)
-    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2))
+    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')))
     || laterCopies(check).length > 0;
 }
 
@@ -485,7 +526,8 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
   const [askingPurge, setAskingPurge] = useState(false);
   const ctx: CopyCtx = { limits: status?.limits, check };
   const findings = check.items.filter((it) => !it.info);
-  const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2) : [];
+  // A pair in two languages is linked, never merged (v0.52.0): Merge all takes only the rows offering a merge.
+  const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')) : [];
   const later = laterCopies(check);
 
   const rows: ActionSpec[] = [];

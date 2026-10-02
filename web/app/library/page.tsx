@@ -129,8 +129,11 @@ function LibraryInner() {
     // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
     enabled: view === 'series',
     initialPageParam: 0,
+    // One card per work (v0.52.0, #72): the language editions of a title are one card -- the edition this reader read
+    // last, else the original -- whose caption names the work's languages (SeriesTile). Reintroduce by dropping the
+    // flag: "the Library asks for one card per work" in library.test.ts fails, and Blue Lock sits on the shelf twice.
     queryFn: ({ pageParam }) =>
-      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition } }),
+      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition, collapseEditions: true } }),
     getNextPageParam: (last) => (last.last ? undefined : last.number + 1),
   });
 

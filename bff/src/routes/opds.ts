@@ -16,6 +16,7 @@ import { resolveOpdsBasic } from '../lib/auth';
 import { viewCtxFor, visibleBookFile, Params, visible, browsable, type ViewCtx } from '../lib/visibility';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { serveImage } from '../lib/imageCache';
+import { editionLabels } from '../lib/editions';
 const AdmZip = require('adm-zip');
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -226,10 +227,12 @@ export default async function opdsRoutes(app: FastifyInstance) {
     // detection: every series looked freshly changed on every fetch.
     const stamp = (r: { latest_mtime: number | null; created_at: string }) =>
       r.latest_mtime && Number(r.latest_mtime) > 0 ? new Date(Number(r.latest_mtime)).toISOString() : iso(r.created_at)!;
+    // A language edition is titled with its code while a sibling is in this reader's sight (v0.52.0), as the Komga API does.
+    const labels = await editionLabels(rows.map((r) => r.id), vc(req));
     const entries = rows.map((s) =>
       `<entry>
     <id>yomi:series:${esc(s.id)}</id>
-    <title>${esc(s.title)}</title>
+    <title>${esc(s.title + (labels.get(s.id) ?? ''))}</title>
     <updated>${stamp(s)}</updated>
     ${s.author ? `<author><name>${esc(s.author)}</name></author>` : ''}
     <content type="text">${esc((s.summary || '').slice(0, 600))}</content>
@@ -307,8 +310,9 @@ export default async function opdsRoutes(app: FastifyInstance) {
     ${stream}
   </entry>`;
     });
+    const label = (await editionLabels([id], vc(req))).get(id) ?? '';
     return sendXml(reply, 'acq', feed({
-      id: `yomi:series:${id}`, title: s.title, self: `/opds/series/${esc(id)}`, kind: 'acq', up: '/opds/series', entries,
+      id: `yomi:series:${id}`, title: s.title + label, self: `/opds/series/${esc(id)}`, kind: 'acq', up: '/opds/series', entries,
       updated: newest(books.map((b) => iso(b.updated_at))),
     }));
   });

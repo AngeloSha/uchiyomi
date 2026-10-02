@@ -523,3 +523,16 @@ test('a chosen source chip is drawn chosen, even for a source that is not loaded
   assert.ok(classes('x', true).includes('chip-active'));
   assert.deepEqual(classes('', true), ['chip', 'text-xs']);
 });
+
+test('the Library asks for one card per work, and the card names the work\'s languages (v0.52.0)', () => {
+  // #72: the language editions of a title are one card -- the edition the reader read last, else the original
+  // (bff lib/ownedCatalog.ts collapsedSearch) -- and its caption says `EN · ES-419`. Reintroduce by dropping
+  // `collapseEditions: true` from the grid's search: "the Library asks for one card per work" fails, and Blue Lock
+  // sits on the shelf twice.
+  const page = code(read('app/library/page.tsx'));
+  assert.match(page, /api<Page<Series>>\('\/api\/series\/search', \{ json: \{ page: pageParam, size: 40, sort: active\.sort, condition, collapseEditions: true \} \}\)/,
+    'the Library asks for one card per work');
+  const cards = code(read('components/cards.tsx'));
+  assert.match(cards, /\{!!series\.edition\?\.langs && series\.edition\.langs\.length > 1 && \(/, 'the card does not name its languages');
+  assert.match(cards, /libraryCaption\(series\.edition\.langs, series\.lang\)/, 'the shown edition is not the one marked');
+});

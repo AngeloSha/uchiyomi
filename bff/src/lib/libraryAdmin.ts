@@ -19,6 +19,7 @@ import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
 import { carryAltTitles } from './altTitles';
+import { dissolveLoneWork } from './editions';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
 import { toStoredRel, dirnameRel } from './relPath';
@@ -177,7 +178,14 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
-    await qq(`UPDATE lib_series SET merged_into = $2 WHERE id = $1`, [fromId, intoId]);
+    // A row merged away is no language edition of anything any more (v0.52.0, lib/editions.ts): it leaves its work --
+    // or it would keep holding its language's slot there -- and a work it leaves with one edition dissolves. The route
+    // refuses a merge inside one work (`same_work`). Reintroduce by dropping the work_id clear: "a row merged away is
+    // no edition" in editions.int.test.ts fails; by dropping the dissolve: "the edition a merge leaves alone stands on
+    // its own" does.
+    const [gone] = await qq<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = $1', [fromId]);
+    await qq(`UPDATE lib_series SET merged_into = $2, work_id = NULL WHERE id = $1`, [fromId, intoId]);
+    await dissolveLoneWork(qq, gone?.work_id);
     // Flatten the chain: anything `fromId` had absorbed EARLIER now points at the final survivor too. Both
     // readers of `merged_into` follow exactly one hop and stop -- persistScan (lib/library.ts) files a
     // merged folder's chapters under `known.merged_into`, and the batch importer's `have` map joins the
@@ -508,8 +516,12 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
     // absorbed row left standing for even one statement would be flipped live by its survivor's delete.
     const b = await qq('DELETE FROM lib_books WHERE series_id = ANY($1) RETURNING 1', [ids]);
     count('lib_books', b.length);
-    const s = await qq('DELETE FROM lib_series WHERE id = ANY($1) RETURNING 1', [ids]);
+    const s = await qq<{ work_id: string | null }>('DELETE FROM lib_series WHERE id = ANY($1) RETURNING work_id', [ids]);
     count('lib_series', s.length);
+    // A forgotten edition frees its language, and the edition it leaves alone stands on its own again (v0.52.0).
+    // Reintroduce by dropping this: "forgetting an edition dissolves the work" in editions.int.test.ts finds the
+    // other edition still in a work of one.
+    for (const w of new Set(s.map((r) => r.work_id))) await dissolveLoneWork(qq, w);
 
     return {
       ok: true as const,
