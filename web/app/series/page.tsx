@@ -37,7 +37,7 @@ import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
 import { useContextMenu } from '@/components/ContextMenu';
-import { useLayer } from '@/lib/layers';
+import { useLayer, useLayers } from '@/lib/layers';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
@@ -2011,9 +2011,9 @@ function SeriesInner() {
   );
 
   // Room under the last rows while the bar is up: on a phone that is the bar (three rows of chips at
-  // 390 px) plus the nav it now sits on, so pb-24 left the last two chapters unreachable.
+  // 390 px) plus the nav it now sits on, so pb-24 left the last two chapters unreachable. SelectBarRoom, at the end.
   return (
-    <div className={`min-h-screen-d ${Toolbar ? 'pb-40 lg:pb-24' : ''}`}>
+    <div className="min-h-screen-d">
       {/* sticky back bar */}
       <div className="safe-top sticky top-0 z-30 flex items-center gap-2 bg-linear-to-b from-ink-950 to-transparent px-4 pb-3 lg:static lg:bg-none lg:px-0 lg:py-4">
         <button onClick={back} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-800/70 text-fog-100 backdrop-blur lg:bg-ink-850">
@@ -2224,8 +2224,23 @@ function SeriesInner() {
           <Rail>{similar!.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
         </section>
       )}
+      {Toolbar && <SelectBarRoom />}
     </div>
   );
+}
+
+/**
+ * Room under the last rows while the select bar is up, as tall as the bar is now: lib/layers.ts measures it for the
+ * notices, and the room follows the same number. A fixed pb-40 fitted three rows of chips; v0.52.0's hint under the
+ * bar adds a line with nothing ticked -- two in German, whose chips already wrap to four rows at 390 px -- and left
+ * the last chapter half under the bar just as it is reached for. The fixed room stays until the bar is measured.
+ * Its own component, so a bar that re-wraps re-renders this and not the page.
+ */
+function SelectBarRoom() {
+  const { toolbarHeight } = useLayers();
+  return toolbarHeight
+    ? <div aria-hidden style={{ height: `calc(${toolbarHeight}px + env(safe-area-inset-bottom) + 1rem)` }} />
+    : <div aria-hidden className="h-40 lg:h-24" />;
 }
 
 export default function SeriesPage() {

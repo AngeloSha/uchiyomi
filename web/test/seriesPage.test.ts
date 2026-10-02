@@ -287,6 +287,12 @@ test('the chapter select bar says it removes chapters, and where the series\' ow
   assert.match(page, /\{isAdmin && !deletable\.length && \(\s*<p [^>]*data-remove-hint>/, 'nothing says how to remove chapters, or where the series\' Remove is');
   assert.match(hint, /tr\('Tick chapters to remove them'\)/);
   assert.match(hint, /onClick=\{\(\) => \{ leaveSelect\(\); setDeleting\(true\); \}\}[^>]*>\s*\{tr\('Remove the whole series'\)\}/, 'the link is not the series\' Remove');
+  // The hint makes the bar a line taller (two in German, over four rows of chips at 390 px), so the room under the
+  // last rows is the bar's measured height, not a fixed pb-40. Reintroduce by putting the fixed padding back on the
+  // page and dropping the room: "the room under the rows does not follow the bar's height" fails.
+  assert.match(page, /\{Toolbar && <SelectBarRoom \/>\}\s*<\/div>\s*\);\s*\}/, 'the room under the rows does not follow the bar\'s height');
+  assert.match(page, /function SelectBarRoom\(\) \{\s*const \{ toolbarHeight \} = useLayers\(\);[\s\S]*?height: `calc\(\$\{toolbarHeight\}px \+ env\(safe-area-inset-bottom\) \+ 1rem\)`/,
+    'the room is not the measured bar');
 });
 
 test('Mark caught up floors the series where Auto-update is, and its Undo puts the old floor back (v0.52.0)', () => {

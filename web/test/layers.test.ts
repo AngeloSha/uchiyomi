@@ -166,7 +166,7 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     const declared = declares(src);
     const registered = (src.match(/useLayer\('dialog'/g) || []).length;
     assert.ok(registered >= declared, `${rel} declares a dialog but never registers it, so notices land on its buttons`);
-    assert.match(src, /import \{ useLayer \} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
+    assert.match(src, /import \{[^}]*\buseLayer\b[^}]*\} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
   }
   // A dialog also hides behind a hand-rolled overlay: a `fixed inset-0` root with no aria-modal (Edit series,
   // Add to collection, Edit chapter, the art picker, New collection, the reader's settings all were). Each
@@ -190,7 +190,7 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     if (NOT_DIALOGS[rel]) continue;
     const registered = (src.match(/useLayer\('dialog'/g) || []).length;
     assert.ok(registered >= n, `${rel} has ${n} full-screen overlays but registers ${registered} dialogs, so notices land on their buttons`);
-    assert.match(src, /import \{ useLayer \} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
+    assert.match(src, /import \{[^}]*\buseLayer\b[^}]*\} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
   }
   assert.ok(roots >= 12, `only ${roots} full-screen overlays found -- the scan is broken`);
   for (const rel of Object.keys(NOT_DIALOGS)) assert.ok(overlays(code(read(rel))) > 0, `${rel} no longer has an overlay; drop it from NOT_DIALOGS`);
