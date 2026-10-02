@@ -21,7 +21,8 @@ its own, linked with the others as one work.
 
 - **Each edition is a series.** Its own folder (`MangaDex (ES-419)/Blue Lock (ES-419)`, so it never lands in the
   original's), its own sources, chapters, numbering and reading progress, so reading the Spanish edition never moves
-  where you are in the English one. Every series now states the language it is in.
+  where you are in the English one. A series added now states the language it is in, and an admin can set it for
+  one already here.
 - **Adding one.** *Sources & translations* has a **Languages** section that says which language the series is in and
   offers **Add a language**: pick one of the languages your sources offer, then the title there (searched under the
   series' title and its other names). An admin is pointed to MangaDex's languages in **Admin → Providers** too,
