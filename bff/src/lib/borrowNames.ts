@@ -12,6 +12,9 @@ import { HEALED_NAME } from './naming';
 import { HUNT_MAX_SOURCES, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { visibleToAll } from './visibility';
 import { altTitlesFor } from './altTitles';
+// Whether a donor's text is in the language we want: lib/lang.ts's rule since v0.52.0, which is the one this file
+// had (an unknown language is the unstated one, English by default) and also tells scripts apart: zh-Hant is not zh-Hans.
+import { sameLanguage } from './lang';
 
 /**
  * Name a chapter from ANOTHER source, when its own source only ever says "Chapter 12" (#85, @Squeaks72's idea,
@@ -53,16 +56,6 @@ export type BorrowWhy = 'off' | 'nothing_to_do' | 'too_few' | 'waiting' | 'no_do
 export interface BorrowResult { named: number; donor?: string; why?: BorrowWhy }
 
 type NameDonor = { source?: string; sourceId?: string; none?: number };
-
-/**
- * Whether a donor's text is in the language we want. An unknown language counts as English, because the
- * sources that declare none here are the add-a-site engines, which serve English -- and the rule has to put a
- * Spanish source's names on an English series nowhere, whichever side leaves its language blank.
- */
-export function sameLanguage(want: string | null | undefined, got: string | null | undefined): boolean {
-  const norm = (l: string | null | undefined) => (l ? l.toLowerCase().split(/[-_]/)[0] : 'en');
-  return norm(want) === norm(got);
-}
 
 /** Whether borrowing is on for this series: its own switch, else the server's. */
 export async function borrowingOn(own: boolean | null): Promise<boolean> {

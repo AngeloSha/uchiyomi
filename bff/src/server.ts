@@ -28,6 +28,7 @@ import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
+import { loadUnstatedLang } from './lib/seriesLang';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -57,6 +58,9 @@ import { ensureDesktopUser } from './lib/desktopUser';
 
 async function main() {
   await migrate();
+  // The language of sources and series that do not say (lib/lang.ts), before anything compares languages. A
+  // database that cannot be read here leaves English, the default, and never stops the boot.
+  await loadUnstatedLang().catch((e) => console.warn(`[lang] could not read the unstated language: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
