@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2686
+    "strings": 2688
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -45,6 +45,7 @@
   "It is in another language": "ほかの言語です",
   "Add the {language} edition": "{language}版を追加",
   "Add it as an edition": "言語版として追加",
+  "Open the {language} edition": "{language}版を開く",
   "Choose its language": "言語を選んでください",
   "Edition added": "言語版を追加しました",
   "The {language} edition of {title}": "{title} の{language}版",
@@ -2592,6 +2593,7 @@
   "That source is not available for this series right now": "そのソースは今このシリーズでは使えません",
   "That source is in another language than this series": "そのソースはこのシリーズとは別の言語です",
   "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "そのソースは{theirs}、このシリーズは{ours}です。代わりに{theirs}版として追加してください。言語ごとに話は別々です。",
+  "That source is in {theirs} and this series is in {ours}. Follow it on the {edition} edition instead.": "そのソースは{theirs}、このシリーズは{ours}です。代わりに{edition}版で追跡してください。",
   "That match is no longer in the search": "その候補はもう検索結果にありません",
   "1 could not be followed": "1 件はフォローできませんでした",
   "{n} could not be followed": "{n} 件はフォローできませんでした",

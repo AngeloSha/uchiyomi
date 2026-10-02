@@ -1680,7 +1680,11 @@ function SeriesInner() {
   const [unlinking, setUnlinking] = useState<EditionRow | null>(null);
   const editions = (series?.edition?.editions?.length ?? 0) > 1 ? series!.edition!.editions! : null;
   const addLanguage = canDownload(user) ? () => setAddingLang({}) : undefined;
-  const addEdition = canDownload(user) ? (o: { lang: string; source: string }) => setAddingLang({ lang: o.lang, source: o.source }) : undefined;
+  // The work's own edition when it may follow the refused source already ("Open the Spanish edition"): its page, not a
+  // second edition. The sheet or dialog the key sits in has closed itself (the wrappers below).
+  const addEdition = canDownload(user) ? (o: { lang: string; source: string; existing?: { id: string } }) => (o.existing
+    ? router.push(`/series/?id=${encodeURIComponent(o.existing.id)}`)
+    : setAddingLang({ lang: o.lang, source: o.source })) : undefined;
   const unlink = async () => {
     if (!unlinking) return;
     setBusyAdmin(true);

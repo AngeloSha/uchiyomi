@@ -6820,7 +6820,10 @@ paths:
             v0.52.0 (#123) language_differs (the source is in another language than the series: the scan never
             offers one, so only a plan from before the series' language changed meets this. `message` and
             `messageSaid` (code `follow.languageDiffers`, params `theirs` and `ours`, language codes) name both,
-            and `edition` is `{of, lang}`, the add route's edition to add instead).
+            and `edition` is `{of, lang}`, the add route's edition to add instead. When the series' work already
+            holds an edition that may follow the source, `edition` also carries `existing: {id, lang}`, that
+            edition's series id and language, and the sentence is `follow.languageDiffersEdition` (params `theirs`,
+            `ours` and `edition`): follow it on that edition instead).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -9508,7 +9511,7 @@ paths:
         "404":
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
-          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series, with `edition: {of, lang}`, the add route's edition to add instead); `already_followed`; `full` (the series follows two other sources)"
+          description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series, with `edition: {of, lang}`, the add route's edition to add instead, plus `existing: {id, lang}` when the work already holds an edition that may follow the source -- the follow belongs there); `already_followed`; `full` (the series follows two other sources)"
   /api/admin/sources/find/{runId}/dismiss:
     post:
       tags:

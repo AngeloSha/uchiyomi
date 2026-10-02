@@ -243,6 +243,46 @@ test('the manual follow refuses a stale plan\'s source in another language, and 
   assert.deepEqual(await followed('manual'), []);
 });
 
+test('the refusal points at the edition the work holds in that language, the manual follow\'s and the review\'s', { skip }, async () => {
+  // The v0.52.0 check pass: an English series whose work holds a Spanish edition was told "Add it as an edition in
+  // Spanish instead", and the add then ended on "already in your library". That edition can follow the source, so
+  // the refusal says so and carries it, and the web's key opens it. A plan from while the series was Spanish, as above.
+  await series('both', { lang: 'es-419' });
+  const scan = (await app.inject({ method: 'POST', url: '/api/sources/fill/scan', headers: auth, payload: { seriesId: S('both') } })).json();
+  const es = scan.candidates.find((c: any) => c.source === ES);
+  assert.ok(es, `the Spanish series' scan offers the Spanish source: ${JSON.stringify(scan.candidates.map((c: any) => c.source))}`);
+  await q('UPDATE lib_series SET lang = $2 WHERE id = $1', [S('both'), 'en']);
+  // Its Spanish edition, on the Spanish source, in one work with it.
+  await series('both-es', { own: ES, lang: 'es-419' });
+  await q('UPDATE lib_series SET work_id = $2 WHERE id = ANY($1)', [[S('both'), S('both-es')], '5a1e0000-0000-4000-8000-00000052c0d1']);
+  const there = { of: S('both'), lang: 'es-419', existing: { id: S('both-es'), lang: 'es-419' } };
+  const r = await app.inject({
+    method: 'POST', url: `/api/admin/series/${S('both')}/sources`, headers: auth,
+    payload: { planId: scan.planId, source: ES, sourceSeriesId: es.sourceSeriesId },
+  });
+  assert.equal(r.statusCode, 409, r.body);
+  const body = r.json();
+  assert.equal(body.error, 'language_differs');
+  // Reintroduce by dropping editionFollowing from the manual follow's refusal: no `existing`, a second edition offered.
+  assert.deepEqual(body.edition, there, 'the manual follow does not point at the Spanish edition');
+  assert.deepEqual(body.messageSaid, { code: 'follow.languageDiffersEdition', params: { theirs: 'es-419', ours: 'en', edition: 'es-419' } });
+  assert.equal(body.message, 'That source is in Latin American Spanish and this series is in English. Follow it on the Latin American Spanish edition instead.');
+  // The review's Follow, the same way.
+  const proposal = {
+    sourceId: ES, sourceName: `Name ${ES}`, sourceSeriesId: `${ES}|s`, title: TITLE, chapters: 13,
+    ours: { lined: 12, of: 12 }, theirs: { lined: 12, of: 13 }, coverage: 1, verdict: 'green',
+  };
+  const [{ id }] = await q(
+    `INSERT INTO source_find_runs (started_by, status, scope, total, done, followed, results)
+     VALUES ($1, 'done', $2::jsonb, 1, 1, 0, $3::jsonb) RETURNING id`,
+    [adminId, JSON.stringify({ seriesIds: [S('both')], review: true }), JSON.stringify([{ seriesId: S('both'), title: TITLE, followed: [], proposals: [proposal] }])]);
+  const rr = await app.inject({ method: 'POST', url: `/api/admin/sources/find/${id}/follow`, headers: auth, payload: { seriesId: S('both'), sourceId: ES } });
+  assert.equal(rr.statusCode, 409, rr.body);
+  // Reintroduce by dropping it from decideProposal's refusal: the review offers a second Spanish edition.
+  assert.deepEqual(rr.json().edition, there, 'the review does not point at the Spanish edition');
+  assert.deepEqual(await followed('both'), []);
+});
+
 test('names are borrowed in the series\' own language, stated, not its main source\'s', { skip }, async () => {
   // A Spanish title that came in through the English adapter's fallback: its main source says English, the series
   // says Spanish (the v0.52.0 data migration, or an admin).

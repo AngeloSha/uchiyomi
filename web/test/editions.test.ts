@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { editionChipLabels, editionLangPreset, editionNames, editionOffer, libraryCaption, openingLanguage, readerTarget, languageChoices } from '../lib/editions';
+import { editionChipLabels, editionLangPreset, editionNames, editionOffer, editionOfferKey, libraryCaption, openingLanguage, readerTarget, languageChoices } from '../lib/editions';
 import type { EditionRow } from '../lib/types';
 
 /** A web file with its comments removed, so a comment that quotes the code does not pass a pin. */
@@ -59,6 +59,24 @@ test('the language picker offers MangaDex\'s languages and whatever is already i
   assert.deepEqual(named, [...named].sort((a, b) => a.localeCompare(b)), 'sorted by name');
 });
 
+test('a refused follow whose work holds that language already opens that edition, not a second one', () => {
+  // The v0.52.0 check pass: the guard offered "Add it as an edition in Spanish" beside a Spanish edition already there,
+  // and the add ended on "already in your library". The server's offer carries that edition (`existing`) and the key
+  // opens it. Reintroduce by dropping `existing` from editionOffer: "the offer drops the edition the work holds".
+  const refusal = (body: unknown) => ({ body: JSON.stringify(body) });
+  const offer = editionOffer(refusal({ error: 'language_differs', edition: { of: 's1', lang: 'es-419', existing: { id: 's2', lang: 'es-419' } } }));
+  assert.deepEqual(offer, { of: 's1', lang: 'es-419', existing: { id: 's2', lang: 'es-419' } }, 'the offer drops the edition the work holds');
+  assert.deepEqual(editionOffer(refusal({ error: 'language_differs', edition: { of: 's1', lang: 'es', existing: { id: 7 } } })), { of: 's1', lang: 'es' }, 'a malformed one is no edition');
+  // Reintroduce by keying on "Add it as an edition" whatever the offer: "the key adds a second Spanish edition".
+  assert.equal(editionOfferKey(offer!, name), 'Open the Latin American Spanish edition', 'the key adds a second Spanish edition');
+  assert.equal(editionOfferKey({ of: 's1', lang: 'fr' }, name), 'Add it as an edition');
+  // Both surfaces say it, and each handler goes to that edition instead of the add dialog.
+  assert.match(code('components/FindMissingDialog.tsx'), /\{editionOfferKey\(edOffer, languageName\)\}/, 'Find missing keeps "Add it as an edition"');
+  assert.match(code('components/FindSources.tsx'), /\{editionOfferKey\(offer, languageName\)\}/, 'the review keeps "Add it as an edition"');
+  assert.match(code('components/FindSources.tsx'), /if \(ask\.existing\) \{ onClose\(\); router\.push\(seriesHref\(ask\.existing\.id\)\); return; \}/, 'the results sheet opens the add dialog');
+  assert.match(code('app/series/page.tsx'), /\(o\.existing\s+\? router\.push\(`\/series\/\?id=\$\{encodeURIComponent\(o\.existing\.id\)\}`\)/, 'the series page opens the add dialog');
+});
+
 test('the source a follow was refused for starts on the language the refusal named', () => {
   // The v0.52.0 check pass: "That source is in Spanish and this series is in English. Add it as an edition in Spanish
   // instead" opened the dialog on the sources that do not say their language -- the refused one is such a source, its
@@ -97,7 +115,7 @@ test('a follow refused for its language offers the edition: Find missing, the re
   // edition" fails.
   const missing = code('components/FindMissingDialog.tsx');
   assert.match(missing, /else if \(ed\) setEdOffer\(\{ \.\.\.ed, source: c\.source, message: msgOf\(e, /, 'Find missing offers no edition');
-  assert.match(missing, /onClick=\{\(\) => onAddEdition\(\{ of: edOffer\.of, lang: edOffer\.lang, source: edOffer\.source \}\)\}/);
+  assert.match(missing, /onClick=\{\(\) => onAddEdition\(\{ of: edOffer\.of, lang: edOffer\.lang, source: edOffer\.source, existing: edOffer\.existing \}\)\}/);
   assert.equal(missing.match(/\{languageOffer\(c\)\}/g)?.length, 2, 'both cards that follow say it: the ones that fill and "Could also be followed"');
   // The review: the refusal's offer kept beside its words, and the key under them.
   const find = code('components/FindSources.tsx');

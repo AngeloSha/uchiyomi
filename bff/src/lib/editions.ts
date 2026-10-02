@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { q, tx } from './db';
 import { sanitize } from './downloader';
 import { canonLang, langLabel } from './lang';
-import { effectiveLang } from './seriesLang';
+import { effectiveLang, followGuard } from './seriesLang';
 import { Params, visible, type ViewCtx } from './visibility';
 
 /** The module's q, or a transaction's own (db.ts tx). */
@@ -159,6 +159,27 @@ export async function editionInfo(id: string, ctx: ViewCtx, userId: string | nul
       current: r.id === id, lastRead: r.last_read == null ? null : Number(r.last_read),
     })),
   };
+}
+
+/**
+ * The edition of `id`'s work that may follow `sourceId` (v0.52.0, where #123's guard meets #72's editions): a follow
+ * refused for its language points there when the work holds that language already -- "Add it as an edition" would
+ * only end on "already in your library". The oldest edition this viewer may open (visible()) whose own guard passes
+ * the source; null when there is none, and the refusal offers the edition to add instead.
+ */
+export async function editionFollowing(id: string, sourceId: string, ctx: ViewCtx): Promise<{ id: string; lang: string } | null> {
+  const p = new Params();
+  const me = p.add(id);
+  const rows = await q<{ id: string; lang: string | null; source_id: string | null }>(
+    `SELECT s.id, s.lang, s.source_id FROM lib_series s
+      WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND s.id <> ${me} AND ${visible('s', ctx, p)}
+      ORDER BY s.created_at, s.id`,
+    p.values as any[],
+  );
+  for (const r of rows) {
+    if ((await followGuard(r.id))(sourceId)) return { id: r.id, lang: effectiveLang(r.lang, r.source_id) };
+  }
+  return null;
 }
 
 /**

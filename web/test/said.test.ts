@@ -44,7 +44,7 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   title: () => 'Walk Tale', ranges: () => '3-7, 12', fs: () => 'ext4', library: () => 'ext4', downloads: () => 'nfs',
   // v0.52.0, dupes.languages: two language codes, named in the reader's language on both sides.
   a: () => 'en', b: () => 'es-419',
-  theirs: () => 'es-419', ours: () => 'en', lib: () => '/library', dl: () => '/library-dl',
+  theirs: () => 'es-419', ours: () => 'en', lib: () => '/library', dl: () => '/library-dl', edition: () => 'es-419',
   lang: () => 'es-419',
 };
 

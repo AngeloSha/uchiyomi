@@ -17,11 +17,12 @@
 // (PR #119).
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
-import { durationText, relativeTime } from '@/lib/format';
+import { durationText, languageName, relativeTime } from '@/lib/format';
 import { runStatusWord } from '@/lib/healthCopy';
 import { seriesHref } from '@/lib/healthLinks';
 import { IDLE, type ActionState } from '@/lib/actionState';
@@ -38,7 +39,7 @@ import { sourceCover } from '@/components/cards';
 import { SourceIcon } from '@/components/SourcePicker';
 import { Img, OnBody, Sheet } from '@/components/ui';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
-import { editionOffer, type EditionOffer } from '@/lib/editions';
+import { editionOffer, editionOfferKey, type EditionOffer } from '@/lib/editions';
 
 /** "3h ago", or while it runs "Started 5 min ago": when, beside the run's name. */
 function whenLine(run: FindRunSummary): string {
@@ -160,7 +161,13 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
   const earlier = earlierRuns(data?.recent, openId);
   // "Add it as an edition" (v0.52.0): the add dialog in the sheet's place -- a Modal under a Sheet cannot be tapped --
   // and the sheet back as it was once the dialog closes. On <body>, as the sheet is: Health's card would hold it.
+  // "Open the Spanish edition" instead when the work holds one that may follow the source: the sheet makes way for it.
   const [adding, setAdding] = useState<EditionAsk | null>(null);
+  const router = useRouter();
+  const addOrOpen = (ask: EditionAsk) => {
+    if (ask.existing) { onClose(); router.push(seriesHref(ask.existing.id)); return; }
+    setAdding(ask);
+  };
   if (adding) {
     return (
       <OnBody>
@@ -196,7 +203,7 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
                 </div>
               )}
               {/* Keyed by the run: a press's state belongs to the run it was made in. */}
-              {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} onAddEdition={setAdding} />}
+              {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} onAddEdition={addOrOpen} />}
               <Group id="found" title={tr('New sources')} rows={g.found} onOpen={onClose} />
               <Group id="nothing" title={tr('Nothing found')} rows={g.nothing} onOpen={onClose} />
               {/* Its own key, not the shared "Skipped" (v0.52.0): the heading is about series, which several languages
@@ -385,11 +392,12 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
           ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped for good')}</p>
           : <ActionKeys actions={keys} className="mt-1.5" />}
         {why && !p.state && <ActionStatus state={{ kind: 'refused', reason: why }} />}
-        {/* Refused for its language (v0.52.0): the match is this work in another language, which an edition holds. */}
+        {/* Refused for its language (v0.52.0): the match is this work in another language, which an edition holds --
+            to add, or the work's own when it has one that may follow the source ("Open the Spanish edition"). */}
         {offer && !p.state && act.onAddEdition && (
           <button type="button" className="btn-key mt-1.5" data-add-edition={p.sourceId}
             onClick={() => act.onAddEdition!({ ...offer, source: p.sourceId, title: r.title ?? '' })}>
-            {tr('Add it as an edition')}
+            {editionOfferKey(offer, languageName)}
           </button>
         )}
       </div>

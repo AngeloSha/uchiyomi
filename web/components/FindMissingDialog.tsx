@@ -26,7 +26,8 @@ import { healthLine, offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
-import { editionOffer, type EditionOffer } from '@/lib/editions';
+import { editionOffer, editionOfferKey, type EditionOffer } from '@/lib/editions';
+import { languageName } from '@/lib/format';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -320,14 +321,17 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
     }
   };
 
-  /** Under a card whose follow was refused for its language: the server's sentence, and "Add it as an edition". */
+  /**
+   * Under a card whose follow was refused for its language: the server's sentence, and "Add it as an edition" -- or
+   * "Open the Spanish edition" when the work holds one that may follow the source (the handler goes there).
+   */
   const languageOffer = (c: Candidate) => edOffer?.source === c.source && (
     <div className="mt-2" data-edition-offer={c.source}>
       <p dir="auto" className="text-xs leading-relaxed text-amber-300">{edOffer.message}</p>
       {onAddEdition && (
-        <button type="button" onClick={() => onAddEdition({ of: edOffer.of, lang: edOffer.lang, source: edOffer.source })}
+        <button type="button" onClick={() => onAddEdition({ of: edOffer.of, lang: edOffer.lang, source: edOffer.source, existing: edOffer.existing })}
           className="btn-key mt-2" data-add-edition={c.source}>
-          {tr('Add it as an edition')}
+          {editionOfferKey(edOffer, languageName)}
         </button>
       )}
     </div>

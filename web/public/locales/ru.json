@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2686
+    "strings": 2688
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -45,6 +45,7 @@
   "It is in another language": "Это на другом языке",
   "Add the {language} edition": "Добавить издание (язык: {language})",
   "Add it as an edition": "Добавить как издание",
+  "Open the {language} edition": "Открыть издание (язык: {language})",
   "Choose its language": "Выберите язык",
   "Edition added": "Издание добавлено",
   "The {language} edition of {title}": "{title} — издание (язык: {language})",
@@ -2592,6 +2593,7 @@
   "That source is not available for this series right now": "Этот источник сейчас недоступен для этой серии",
   "That source is in another language than this series": "Язык этого источника отличается от языка этой серии",
   "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "Этот источник на языке «{theirs}», а эта серия — на языке «{ours}». Добавьте его вместо этого как издание на языке «{theirs}»: у каждого языка свои главы.",
+  "That source is in {theirs} and this series is in {ours}. Follow it on the {edition} edition instead.": "Этот источник на языке «{theirs}», а эта серия — на языке «{ours}». Следите за ним вместо этого в издании на языке «{edition}».",
   "That match is no longer in the search": "Этого совпадения больше нет в поиске",
   "1 could not be followed": "Не удалось начать отслеживать: 1",
   "{n} could not be followed": "Не удалось начать отслеживать: {n}",

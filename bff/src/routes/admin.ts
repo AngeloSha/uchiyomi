@@ -12,7 +12,7 @@ import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
-import { linkEdition, unlinkEdition, workRows } from '../lib/editions';
+import { editionFollowing, linkEdition, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
@@ -1418,10 +1418,19 @@ export default async function adminRoutes(app: FastifyInstance) {
     // series' language changed reaches this: refused with both languages and the way to have both, an edition --
     // `edition` is the add route's own `{of, lang}`. Reintroduce by dropping it: "the manual follow refuses a stale
     // plan's source in another language" in languageGuard.int.test.ts follows it.
+    // When the work holds an edition in that language already, the way on is that edition (`existing`): the sentence
+    // says to follow it there, and the web's key opens it instead of adding a second. Reintroduce by always offering a
+    // new edition: "the refusal points at the edition the work holds in that language" in languageGuard.int.test.ts.
     if (!(await followGuard(id))(source)) {
-      const said = say('follow.languageDiffers', { theirs: sourceLanguage(source), ours: (await seriesLanguage(id)).lang });
+      const theirs = sourceLanguage(source);
+      const ours = (await seriesLanguage(id)).lang;
+      const existing = await editionFollowing(id, source, SYSTEM_CTX);
+      const said = existing
+        ? say('follow.languageDiffersEdition', { theirs, ours, edition: existing.lang })
+        : say('follow.languageDiffers', { theirs, ours });
       return reply.code(409).send({
-        error: 'language_differs', message: said.text, messageSaid: saidOf(said), edition: { of: id, lang: sourceLanguage(source) },
+        error: 'language_differs', message: said.text, messageSaid: saidOf(said),
+        edition: { of: id, lang: theirs, ...(existing ? { existing } : {}) },
       });
     }
     const row = await getSeriesRow(id);

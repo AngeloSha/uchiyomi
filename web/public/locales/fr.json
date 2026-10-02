@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2686
+    "strings": 2688
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -45,6 +45,7 @@
   "It is in another language": "Elle est dans une autre langue",
   "Add the {language} edition": "Ajouter l’édition en {language}",
   "Add it as an edition": "Ajouter comme édition",
+  "Open the {language} edition": "Ouvrir l’édition en {language}",
   "Choose its language": "Choisissez sa langue",
   "Edition added": "Édition ajoutée",
   "The {language} edition of {title}": "L’édition en {language} de {title}",
@@ -2592,6 +2593,7 @@
   "That source is not available for this series right now": "Cette source n’est pas disponible pour cette série pour le moment",
   "That source is in another language than this series": "Cette source est dans une autre langue que cette série",
   "That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.": "Cette source est en {theirs} et cette série est en {ours}. Ajoutez-la plutôt comme une édition en {theirs} : chaque langue garde ses propres chapitres.",
+  "That source is in {theirs} and this series is in {ours}. Follow it on the {edition} edition instead.": "Cette source est en {theirs} et cette série est en {ours}. Suivez-la plutôt dans l’édition en {edition}.",
   "That match is no longer in the search": "Cette correspondance ne fait plus partie de la recherche",
   "1 could not be followed": "1 n’a pas pu être suivie",
   "{n} could not be followed": "{n} n’ont pas pu être suivies",

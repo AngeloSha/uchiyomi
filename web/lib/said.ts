@@ -687,6 +687,10 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'follow.languageDiffers': (p) => tr('That source is in {theirs} and this series is in {ours}. Add it as an edition in {theirs} instead: each language keeps its own chapters.', {
     theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')),
   }),
+  // ...when the work holds an edition that may follow the source already: the follow belongs there.
+  'follow.languageDiffersEdition': (p) => tr('That source is in {theirs} and this series is in {ours}. Follow it on the {edition} edition instead.', {
+    theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')), edition: languageName(str(p, 'edition')),
+  }),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

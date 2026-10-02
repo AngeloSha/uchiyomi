@@ -496,6 +496,10 @@ const EN = {
   // and `ours` are language codes: the English names them in English, the web in the reader's language.
   'follow.languageDiffers': ({ theirs, ours }: { theirs: string; ours: string }) =>
     `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Add it as an edition in ${langName(theirs)} instead: each language keeps its own chapters.`,
+  // The same, when the work holds an edition that may follow the source already (`edition` is its language): no new
+  // edition is wanted, the follow belongs there.
+  'follow.languageDiffersEdition': ({ theirs, ours, edition }: { theirs: string; ours: string; edition: string }) =>
+    `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Follow it on the ${langName(edition)} edition instead.`,
 };
 
 export type SaidCode = keyof typeof EN;

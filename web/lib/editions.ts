@@ -3,6 +3,7 @@
 // Pure on purpose -- a language's name comes in as a function (lib/format.ts languageName in the app), so the
 // rules are tested without Intl or a locale (test/editions.test.ts).
 import type { EditionRow } from './types';
+import { t as tr } from './i18n';
 
 /**
  * The languages an edition can be said to be in, when a person chooses: MangaDex's (bff lib/lang.ts
@@ -62,19 +63,36 @@ export function readerTarget(
     : { kind: 'series', href: `/series/?id=${encodeURIComponent(seriesId)}&ch=${Math.floor(number)}` };
 }
 
-/** A follow refused for its language, as the add route takes an edition: the series it joins, and the language. */
-export interface EditionOffer { of: string; lang: string }
+/**
+ * A follow refused for its language, as the add route takes an edition: the series it joins, and the language. And
+ * `existing`, when the work holds an edition that may follow the source already: its series and language.
+ */
+export interface EditionOffer { of: string; lang: string; existing?: { id: string; lang: string } }
 
 /**
  * The edition a refused follow offers instead (v0.52.0, where #123's guard meets #72's editions): 409
  * `language_differs` from the manual follow (Find missing chapters) and from a Review-first match's Follow, both
- * with the add route's own `edition: {of, lang}`. Null for any other answer, or a body that is not JSON.
+ * with the add route's own `edition: {of, lang}` -- and `existing: {id, lang}` when the work already holds an edition
+ * the source may follow. Null for any other answer, or a body that is not JSON.
  */
 export function editionOffer(e: unknown): EditionOffer | null {
-  let j: { error?: unknown; edition?: { of?: unknown; lang?: unknown } } | null = null;
+  let j: { error?: unknown; edition?: { of?: unknown; lang?: unknown; existing?: { id?: unknown; lang?: unknown } } } | null = null;
   try { j = JSON.parse(String((e as { body?: unknown } | null)?.body ?? '')); } catch { return null; }
   const ed = j?.error === 'language_differs' ? j.edition : null;
-  return ed && typeof ed.of === 'string' && ed.of && typeof ed.lang === 'string' && ed.lang ? { of: ed.of, lang: ed.lang } : null;
+  if (!(ed && typeof ed.of === 'string' && ed.of && typeof ed.lang === 'string' && ed.lang)) return null;
+  const x = ed.existing;
+  return x && typeof x.id === 'string' && x.id && typeof x.lang === 'string' && x.lang
+    ? { of: ed.of, lang: ed.lang, existing: { id: x.id, lang: x.lang } }
+    : { of: ed.of, lang: ed.lang };
+}
+
+/**
+ * The key under a follow refused for its language: "Open the Spanish edition" when the work holds one that may follow
+ * the source -- the follow belongs there, and adding another would only end on "already in your library" -- else
+ * "Add it as an edition".
+ */
+export function editionOfferKey(offer: EditionOffer, name: (code: string) => string): string {
+  return offer.existing ? tr('Open the {language} edition', { language: name(offer.existing.lang) }) : tr('Add it as an edition');
 }
 
 /**

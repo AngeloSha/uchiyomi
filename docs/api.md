@@ -1669,7 +1669,9 @@ could name. Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_u
 loaded or disabled), and since v0.52.0 (#123) `language_differs` -- the source is in another language than the
 series; the scan never offers one, so only a plan from before the series' language changed meets it. Its `message`
 and `messageSaid` (`follow.languageDiffers`, `{theirs, ours}` as language codes) name both, and `edition: {of, lang}`
-is the add route's edition to add instead; **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
+is the add route's edition to add instead -- or, when the work already holds an edition that may follow the source,
+`edition` also carries `existing: {id, lang}` (that edition's series id and language) and the sentence is
+`follow.languageDiffersEdition` (`{theirs, ours, edition}`): follow it on that edition instead; **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
 `bad_request` when the plan belongs to another series; **404** for an unknown series. Following the same source again updates its
 series id and coverage, and makes a follower the add-time path chose the confirming admin's (`auto:
 false`). `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
@@ -1757,8 +1759,9 @@ source, reachable for the series' rating, and not followed already -- never re-p
 follower cap with the admin as its author, its listing refreshed, and audited as `series.follow_source` with `via:
 find_review`; it answers `{result}`, the series' result as it now reads, or **404** `not_found`, **409** `decided`
 (with `state`), `posting_order`, `source_unavailable`, `language_differs` (since v0.52.0: the source is in another
-language than the series, with `edition: {of, lang}`, the add route's edition to add instead, as the manual follow
-answers it), `already_followed` or `full`. `POST
+language than the series, with `edition: {of, lang}`, the add route's edition to add instead, and `existing: {id,
+lang}` in it when the work already holds an edition that may follow the source, as the manual follow answers it),
+`already_followed` or `full`. `POST
 /api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
 `dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
 
