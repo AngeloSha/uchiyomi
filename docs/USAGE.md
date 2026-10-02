@@ -1937,7 +1937,8 @@ Leveling*, which is a different work under a familiar name.
 
 Nothing is added until you check some rows and press **Import selected — {n}**. **Select all** marks every
 row (a skipped or still-unmatched one is a harmless no-op); **Select ready to import** marks only the rows
-that found a match. Every import here is a *Nothing yet* add — the title lands in your library with its
+that found a match; and on a backup, **Select all “same source as before”** marks only the exact pairs, each
+entry found on its own extension at the address the backup stored. Every import here is a *Nothing yet* add — the title lands in your library with its
 listing and no chapter downloaded — so a few hundred titles is a few minutes of look-ups, not hours of
 fetching; new chapters arrive the normal way through auto-update, or fetch older ones by hand from each
 series page. Each row then says what happened: *Added to your library*; *Already in your library* when the

@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
   needsAttention, containsDiverges, matchTitleDiffers, matchedViaAlt, openBatches, batchOriginLabel, runStatusLabel, runStatusColor,
-  linkedCount, linkedLine, truncatedWords,
+  linkedCount, linkedLine, truncatedWords, sameSourcePair,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
 import { readTab } from '../lib/tabParam';
@@ -263,6 +263,19 @@ test('a list cut at the 500 says how to get the rest, and a tracker read keeps i
   assert.match(src, /parts\.push\(truncatedWords\(n\.origin\)\.note\)/, 'the review headline does not use the words');
   assert.match(src, /toast\(truncatedWords\(origin\)\.toast, 'info'\)/, 'the intake toast does not use the words');
   assert.match(src, /truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin \}/, 'the note is not told where the batch came from');
+});
+
+test('Select all “same source as before” takes the exact pairs only', () => {
+  // Discussion #121 (v0.51.0): the backup entries found on their own extension at their own address, in one press.
+  // Reintroduce by dropping the confidence test from sameSourcePair: the exact-title row is taken too.
+  assert.equal(sameSourcePair(row({ confidence: 'same_source' })), true, 'an exact pair');
+  assert.equal(sameSourcePair(row({ confidence: 'exact' })), false, 'a title match on another source is not a same-source pair');
+  assert.equal(sameSourcePair(row({ confidence: 'same_source', status: 'added' })), false, 'a row already run');
+  assert.equal(sameSourcePair(row({ confidence: 'same_source', decision: 'skip' })), false, 'a skipped row');
+  assert.equal(sameSourcePair(row({ confidence: null, decision: 'manual' })), false, 'a pick by hand');
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /const selectSameSource = \(\) => setSelected\(new Set\(items\.filter\(sameSourcePair\)\.map\(\(c\) => c\.id\)\)\);/, 'the key does not select the pairs');
+  assert.match(src, /onClick=\{onSelectSameSource\}[^>]*>\{tr\('Select all “same source as before”'\)\} · \{sameSourceCount\}/, 'the key is not on the review card');
 });
 
 test('the manual-search results are rails: one flex row per source, scrolling sideways', () => {

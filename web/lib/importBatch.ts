@@ -253,6 +253,16 @@ export function batchOriginLabel(origin: ImportOrigin, tracker?: string | null):
 }
 
 /**
+ * A row matched on the very entry it came from (v0.51.0, discussion #121): the backup's own extension, at the address
+ * the backup stored (`same_source`), as the resolve pass found it and not run yet. "Select all “same source as
+ * before”" takes exactly these: an exact pair needs no second look, where every other tier was matched by title.
+ * Reintroduce by dropping the confidence test: "Select all “same source as before” takes the exact pairs only" in
+ * importBatch.test.ts takes the exact-title row too.
+ */
+export const sameSourcePair = (c: ImportCandidate): boolean =>
+  c.decision === 'auto' && c.confidence === 'same_source' && !!c.match_source_id && !c.status;
+
+/**
  * What the intake note and its toast say about a list cut at the 500 (v0.51.0, discussion #121). A backup, a
  * MangaDex list or a paste keeps the first 500 titles NOT already in the library -- the owned ones ride along as
  * skipped rows, uncounted -- so importing the same list again once those are in picks up the rest, and the words

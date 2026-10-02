@@ -31,7 +31,7 @@ import type { Src } from '@/lib/sourceGroups';
 import type { TrackerStatus } from '@/lib/types';
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
-  runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords,
+  runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair,
   type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
 } from '@/lib/importBatch';
 
@@ -346,11 +346,11 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 }
 
 function ReviewCard({
-  items, allCount, attentionCount, skippedCount, readyCount, selectedIds, note,
-  filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onClearSelection, onRun, running, sourceName,
+  items, allCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
+  filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onSelectSameSource, onClearSelection, onRun, running, sourceName,
 }: {
   items: ImportCandidate[];
-  allCount: number; attentionCount: number; skippedCount: number; readyCount: number;
+  allCount: number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
   note: string | null;
   selectedIds: Set<string>;
   filter: Filter; setFilter: (f: Filter) => void;
@@ -359,6 +359,7 @@ function ReviewCard({
   onToggle: (id: string) => void;
   onSelectAll: () => void;
   onSelectReady: () => void;
+  onSelectSameSource: () => void;
   onClearSelection: () => void;
   onRun: () => void;
   running: boolean;
@@ -391,6 +392,11 @@ function ReviewCard({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button onClick={onSelectAll} className="chip text-xs">{tr('Select all')}</button>
         <button onClick={onSelectReady} className="chip text-xs">{tr('Select ready to import')} · {readyCount}</button>
+        {/* v0.51.0 (discussion #121): the exact pairs -- each backup entry found on its own extension at its own
+            address -- in one press. Only on a list that has any: a paste, a MangaDex list or a tracker never does. */}
+        {sameSourceCount > 0 && (
+          <button onClick={onSelectSameSource} className="chip text-xs" data-select-same-source>{tr('Select all “same source as before”')} · {sameSourceCount}</button>
+        )}
         {selectedIds.size > 0 && (
           <button onClick={onClearSelection} className="chip text-xs">{tr('Clear selection')}</button>
         )}
@@ -618,6 +624,7 @@ function ImportWizardInner() {
   const attentionCount = items.filter(needsAttention).length;
   const skippedCount = items.filter((c) => c.decision === 'skip').length;
   const readyCount = items.filter(isReady).length;
+  const sameSourceCount = items.filter(sameSourcePair).length;
   // The selection as it will be sent: only ready rows have a checkbox, so an id "Select all" put in for a
   // skipped or unmatched row is invisible on the list and must not be counted -- "8 selected" over five
   // checkboxes, then "Importing… 0/5", was the mismatch. One Set for the checkboxes, the count and /run.
@@ -632,6 +639,7 @@ function ImportWizardInner() {
   const toggleSelected = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const selectAll = () => setSelected(new Set(items.map((c) => c.id)));
   const selectReady = () => setSelected(new Set(items.filter(isReady).map((c) => c.id)));
+  const selectSameSource = () => setSelected(new Set(items.filter(sameSourcePair).map((c) => c.id)));
   const clearSelection = () => setSelected(new Set());
   const runImport = async () => {
     if (!batchId || selectedReady.size === 0) return;
@@ -715,8 +723,9 @@ function ImportWizardInner() {
         <ResolvingCard batch={batch} note={note} onResume={resume} />
       ) : batch.state === 'review' ? (
         <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          readyCount={readyCount} selectedIds={selectedReady} note={note} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
-          onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
+          readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedReady} note={note} filter={filter} setFilter={setFilter}
+          q={q} setQ={setQ} onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
+          onSelectSameSource={selectSameSource}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
         <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2547
+    "strings": 2548
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -761,6 +761,7 @@
   "Select all": "Selecionar tudo",
   "Select for import": "Selecionar para importar",
   "Select ready to import": "Selecionar os prontos para importar",
+  "Select all “same source as before”": "Selecionar todos com “a mesma fonte de antes”",
   "Selected titles are added to your library only — no chapters are downloaded, but each title is looked up on its source, so a long list takes a few minutes. New releases arrive through auto-update, or fetch older ones from the series page.": "Os títulos selecionados só são adicionados à sua biblioteca — nenhum capítulo é baixado, mas cada título é consultado na sua fonte, então uma lista longa leva alguns minutos. Os lançamentos novos chegam com a atualização automática; os anteriores podem ser buscados na página da série.",
   "Skip this one": "Pular este",
   "Skipped": "Pulados",
