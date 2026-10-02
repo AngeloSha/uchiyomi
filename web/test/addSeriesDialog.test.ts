@@ -227,3 +227,13 @@ test('a provider in a language the library does not hold the title in is added a
   assert.match(src, /\| \{ kind: 'edition'; of: string; title: string \};/, 'there is no edition seed');
   assert.match(src, /tr\('None of your sources is in another language yet\.'\)/);
 });
+
+test('another language\'s provider is never offered as a source to follow too (v0.52.0)', () => {
+  // A Spanish provider beside an English pick is that title's other edition, not a backup for this one: following it
+  // would put Spanish chapters in the English series, and the server's language guard refuses it. es and es-419 share
+  // a base and stay offered. Reintroduce by dropping the line: "another language is offered to follow too" fails.
+  const src = code(read(DIALOG));
+  const memo = src.slice(src.indexOf('const others = useMemo('), src.indexOf('}, [offered, picked]);'));
+  assert.match(memo, /if \(p\.lang && picked\.lang && baseOf\(p\.lang\) !== baseOf\(picked\.lang\)\) continue;/,
+    'another language is offered to follow too');
+});
