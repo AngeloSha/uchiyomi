@@ -1451,9 +1451,9 @@ paths:
                 properties:
                   autoHero:
                     description: >-
-                      Since v0.51.0, on every series in a payload: `{seed}` when the series shows the banner made from
-                      its own pages -- GET /img/series/{id}/hero?v={seed} -- and null when it has a banner of its own
-                      or may not have one (18+, or a last try made none).
+                      Since v0.51.0, on every series in a payload: `{seed}` once the banner made from its own pages
+                      is made -- GET /img/series/{id}/hero?v={seed} -- and null when none is made yet, when it has a
+                      banner of its own, or when it may not have one (18+, or a last try made none).
                     oneOf:
                       - type: object
                         required: [seed]
@@ -5030,9 +5030,10 @@ paths:
         different chapters, side by side. Gated as the series' cover is, then 404 for a series that may not have one
         -- a banner of its own, 18+ by any rule (its rating or an admin's, an 18+ library, one of the admin's 18+
         genres, an adult source), its AniList lookup not done yet, or a last try that made none (left alone for a
-        week) -- and 404 when a try made now makes none, so a client keeps its usual art. Made on the first request
-        and kept in the image cache; one is made at a time server-wide, under a time limit. The series payload's
-        `autoHero` says when to ask, with the seed for `v`.
+        week) -- and 404 when a try made now makes none, so a client keeps its usual art. Made in the background (a
+        paced daily pass, and soon after the series' backdrop is asked for), by Shuffle, or here when the image cache
+        misses, and kept in that cache; one is made at a time server-wide, under a time limit. The series payload's
+        `autoHero` says when to ask -- once it is made -- with the seed for `v`.
       parameters:
         - name: id
           in: path

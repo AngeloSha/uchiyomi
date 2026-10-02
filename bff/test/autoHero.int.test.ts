@@ -29,7 +29,8 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const AdmZip = require('adm-zip');
 
 let app: any, q: any, sharp: any, autoHeroFor: (ids: string[]) => Promise<Map<string, { seed: number }>>;
-let art = '', blank = '';
+let heroQueueSettled: () => Promise<void>;
+let art = '', blank = '', fresh = '';
 let adminCookie = '', memberCookie = '', adminAuth: Record<string, string> = {}, memberAuth: Record<string, string> = {};
 const LIBS = ['ah-private', 'ah-adult'];
 
@@ -60,19 +61,25 @@ before(async () => {
   sharp = (await import('sharp')).default;
   ({ q } = await import('../src/lib/db'));
   await (await import('../src/lib/migrate')).migrate();
-  ({ autoHeroFor } = await import('../src/lib/autoHero'));
+  ({ autoHeroFor, heroQueueSettled } = await import('../src/lib/autoHero'));
+  // The background queue runs where the warm-up runs (server.ts); started here for its own test. The warm-up's first
+  // run is twenty minutes off, on a timer that does not hold the process.
+  (await import('../src/lib/autoHero')).startHeroWarmup({ info() {}, warn() {} });
   const { IMG_COOKIE } = await import('../src/lib/auth');
 
   await rm(ROOT, { recursive: true, force: true });
   await mkdir(join(ROOT, 'downloads'), { recursive: true });
-  await q(`DELETE FROM lib_series WHERE folder IN ('Hero Art', 'Hero Blank')`);
+  await q(`DELETE FROM lib_series WHERE folder IN ('Hero Art', 'Hero Blank', 'Hero Fresh')`);
   await seriesOf('Hero Art', (ch, n) => artPage(600, 1500, ch + n / 3));
   // Every page paper: nothing on it can make a banner.
   await seriesOf('Hero Blank', () => sharp({ create: { width: 600, height: 1500, channels: 3, background: '#ffffff' } }).jpeg().toBuffer());
+  // Art, but no AniList lookup yet: the state of a series just added, until someone looks at it.
+  await seriesOf('Hero Fresh', (ch, n) => artPage(600, 1500, 7 + ch + n / 3));
   await (await import('../src/lib/library')).persistScan();
   const id = async (folder: string) => (await q(`SELECT id FROM lib_series WHERE folder = $1`, [folder]))[0].id as string;
   art = await id('Hero Art');
   blank = await id('Hero Blank');
+  fresh = await id('Hero Fresh');
   // The AniList lookup has happened and found no banner: the state 199 of the owner's 283 series are in.
   for (const s of [art, blank]) await q(`INSERT INTO series_art (series_id) VALUES ($1) ON CONFLICT (series_id) DO NOTHING`, [s]);
 
@@ -104,7 +111,8 @@ before(async () => {
 after(async () => {
   if (!DSN) return;
   await app?.close();
-  await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[art, blank]]);
+  await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[art, blank, fresh]]);
+  await q(`DELETE FROM series_art WHERE series_id = ANY($1)`, [[art, blank, fresh]]);
   await q(`DELETE FROM users WHERE username LIKE 'ah-%'`);
   await q(`DELETE FROM libraries WHERE id = ANY($1)`, [LIBS]);
   await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb, adult_sources = '[]'::jsonb WHERE id = 1`);
@@ -115,6 +123,31 @@ after(async () => {
 const hero = (id: string, cookie: string, ar = '') =>
   app.inject({ method: 'GET', url: `/img/series/${id}/hero${ar ? `?ar=${ar}` : ''}`, headers: { cookie } });
 const payload = async (id: string) => (await app.inject({ method: 'GET', url: `/api/series/${id}`, headers: adminAuth })).json();
+
+test('a payload offers a banner only once it is made, and not after a failure since', { skip }, async () => {
+  // Offered before it was made, the web asked for it on every page that showed the series, and a page view waited on
+  // a make -- for a series whose pages make none, a 404 and a console error each time (the e2e gate on PR #138).
+  // Reintroduce by offering every heroServable series in autoHeroFor: the first assertion finds { seed: 0 }.
+  assert.equal((await payload(art)).autoHero, null, 'a banner that was never made is offered');
+  assert.equal((await autoHeroFor([art])).get(art), undefined);
+  // A direct request still makes one (the route's own behaviour, as on a cache miss)...
+  assert.equal((await hero(art, adminCookie)).statusCode, 200);
+  // ...and from then on the payload offers it, under its seed.
+  assert.deepEqual((await payload(art)).autoHero, { seed: 0 });
+  // A try that failed after it was made takes it off the payload, and keeps it off once the failure is old enough to
+  // be retried (a week, when heroServable stops leaving it out): only a make since puts it back. (A failed try clears
+  // made_at as well -- recordHero -- so this is the payload's own rule, held on its own.) Reintroduce by testing
+  // made_at alone in autoHero.ts `isMade`: it is still offered.
+  const was = (await q(`SELECT made_at FROM series_hero WHERE series_id = $1`, [art]))[0].made_at;
+  await q(`UPDATE series_hero SET made_at = now() - interval '10 days', failed_at = now() - interval '9 days', fail_reason = 'unreadable'
+            WHERE series_id = $1`, [art]);
+  try {
+    assert.equal((await payload(art)).autoHero, null, 'a banner whose last try failed is still offered');
+  } finally {
+    await q(`UPDATE series_hero SET failed_at = NULL, fail_reason = NULL, made_at = $2 WHERE series_id = $1`, [art, was]);
+  }
+  assert.deepEqual((await payload(art)).autoHero, { seed: 0 });
+});
 
 test('an admin gets the banner, wide and tall, made once and recorded', { skip }, async () => {
   const r = await hero(art, adminCookie);
@@ -210,9 +243,30 @@ test('a series whose pages make no banner: 404, recorded, and left alone after t
   assert.ok(row?.failed_at, 'the failed try is recorded');
   assert.equal(row.fail_reason, 'not_enough_art');
   assert.equal(row.made_at, null);
-  // Reintroduce by dropping the failedLately filter from autoHeroFor: the payload still offers it.
   assert.equal((await autoHeroFor([blank])).get(blank), undefined, 'the payload stops offering a banner that is not there');
+  // Reintroduce by dropping the failedLately filter from heroServable: the next request tries again, and failed_at moves.
   assert.equal((await hero(blank, adminCookie)).statusCode, 404);
   const again = (await q(`SELECT failed_at FROM series_hero WHERE series_id = $1`, [blank]))[0];
   assert.equal(String(again.failed_at), String(row.failed_at), 'tried again on the next view');
+});
+
+test('a series looked at with no banner gets one made in the background, and the payload offers it then', { skip }, async () => {
+  // A series just added waited for the next daily warm-up; now its first backdrop -- the lookup that finds AniList has
+  // no banner for it -- queues one (routes/images.ts backdropRecipe, lib/autoHero.ts queueHero). Reintroduce by not
+  // calling queueHero there: nothing is made, and the last two assertions fail.
+  const realFetch = globalThis.fetch;
+  // AniList knows no such title: a 404 is "no match", recorded as a miss (lib/anilist.ts fetchAniListArt).
+  globalThis.fetch = (async (input: any, init?: any) => (String(input?.url ?? input).startsWith('https://graphql.anilist.co')
+    ? new Response('{}', { status: 404 }) : realFetch(input, init))) as typeof fetch;
+  try {
+    assert.equal((await payload(fresh)).autoHero, null, 'nothing is made before anyone looks');
+    const r = await app.inject({ method: 'GET', url: `/img/series/${fresh}/backdrop`, headers: { cookie: adminCookie } });
+    assert.equal(r.statusCode, 200, r.body.slice(0, 160));
+    await heroQueueSettled();
+    const row = (await q(`SELECT made_at FROM series_hero WHERE series_id = $1`, [fresh]))[0];
+    assert.ok(row?.made_at, 'the banner was not made in the background');
+    assert.deepEqual((await payload(fresh)).autoHero, { seed: 0 });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

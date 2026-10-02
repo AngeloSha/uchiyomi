@@ -6,7 +6,7 @@
 // then the genre art are still behind it, so a failure looks like today, never like an empty box.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { autoHeroUrl, backdropSources, backdropUrl } from '../lib/art';
 
@@ -26,6 +26,26 @@ test('without one -- a real banner, 18+, or none could be made -- the chain is t
       [backdropUrl('s_1', { hero: true, wide: true }), GENRE]);
   }
   assert.deepEqual(backdropSources(undefined, { seed: 7 }, {}, GENRE), [GENRE], 'no series, no request');
+});
+
+test('no hero URL is built without autoHero: backdropSources builds none, and nothing else builds one', () => {
+  // The payload offers `autoHero` only once the banner is MADE (bff lib/autoHero.ts autoHeroFor), and the web must ask
+  // for nothing else: a request for one that is not there is a 404 and a console error, on every page that shows the
+  // series (the e2e gate on PR #138). Reintroduce by building the hero URL from `autoHero?.seed ?? 0` in
+  // backdropSources: every shape below asks for a /hero.
+  for (const none of [null, undefined]) for (const hero of [false, true]) for (const wide of [false, true]) for (const version of [undefined, 3]) {
+    const chain = backdropSources('s_1', none, { hero, wide, version }, GENRE);
+    assert.ok(!chain.some((u) => /\/hero(\?|$)/.test(u)), `${JSON.stringify({ none, hero, wide, version })} asks for ${chain.join(', ')}`);
+  }
+  // And no other file builds one: autoHeroUrl is lib/art.ts's own, and the route is spelt there alone.
+  const root = join(__dirname, '..');
+  for (const dir of ['app', 'components', 'lib']) {
+    for (const f of readdirSync(join(root, dir), { recursive: true }) as string[]) {
+      if (!/\.tsx?$/.test(f) || join(dir, f) === join('lib', 'art.ts')) continue;
+      const src = readFileSync(join(root, dir, f), 'utf8');
+      assert.doesNotMatch(src, /autoHeroUrl\(|\/img\/series\/[^'"`\n]*\/hero\b/, `${dir}/${f} builds a hero URL of its own`);
+    }
+  }
 });
 
 test('a portrait hero asks for the two-by-two frame; a wide one and the series page for the strip', () => {

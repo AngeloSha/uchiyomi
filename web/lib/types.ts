@@ -129,7 +129,7 @@ export interface Series {
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
   /**
    * v0.51.0: the banner the server makes from the series' own pages, for a series with no banner of its own --
-   * `{seed}` when there is one to show (lib/art.ts autoHeroUrl), null when it has a banner, is 18+ or none could be made.
+   * `{seed}` once one is made (lib/art.ts autoHeroUrl), null when it has a banner, is 18+, or none is made (yet).
    * Absent on older servers.
    */
   autoHero?: { seed: number } | null;

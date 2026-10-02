@@ -23,7 +23,7 @@ import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile } from '../lib/seriesArt';
 import { HERO_FRAMES, heroFit, type HeroAr } from '../lib/heroFrame';
-import { autoHeroFor, heroFrame, heroVariant, type AutoHeroAr } from '../lib/autoHero';
+import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
 
 async function fetchUpstream(path: string): Promise<Buffer> {
   const res = await komgaImage(path);
@@ -351,6 +351,11 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr, ctx: ViewCt
       art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
     }
   }
+  // v0.51.0: a series someone looks at with no banner of its own -- one just added, or one the daily warm-up has not
+  // reached -- gets the one made from its pages soon, in the background (lib/autoHero.ts queueHero: one at a time,
+  // paced, standing aside for a sweep, a repair or the source check; a no-op for one made, tried lately or not
+  // eligible). Nothing here waits on it: the payload offers it once it is made.
+  if (!art.banner) queueHero(id);
   const url = art.banner || art.cover;
   const sharpHero = hero && !!url; // banner OR cover: show the real art sharp; only the no-art first-page fallback stays ambient
   const variant = url ? `artw${sharpHero ? `7h${ar}` : '6'}:${id}:${art.banner ? 'b' : 'c'}` : `artw6:${id}:p`;
@@ -739,13 +744,14 @@ export default async function imageRoutes(app: FastifyInstance) {
   // The automatic banner (v0.51.0, lib/autoHero.ts): four crops of the series' own pages, for a series with no banner
   // of its own. Gated exactly as its cover is -- deleted, merged, outside the viewer's libraries or above their age
   // cap is a 404 -- and then a 404 again for a series that may not have one: a real banner, 18+ by any rule, or a last
-  // try that made none. A 404 is also what a try that makes none answers, so the web keeps today's look.
+  // try that made none. The web asks only for one the payload offers, which is one already made (autoHeroFor); a miss
+  // here -- the cache's sweeper evicted the file, or a direct request -- makes it, and a try that makes none is a 404.
   // ?ar=tall is the phone's frame (2 x 2); ?v=<seed> on the web's URL is only a cache-buster: the seed served is the
   // stored one, so an old URL still gets the current banner.
   app.get('/img/series/:id/hero', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
-    const hero = (await autoHeroFor([id])).get(id);
+    const hero = (await heroServable([id])).get(id);
     if (!hero) return reply.code(404).send({ error: 'not_found' });
     const ar: AutoHeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
     return serveImage(req, reply, heroVariant(id, hero.seed, ar), () => heroFrame(id, hero.seed, ar));

@@ -32,9 +32,13 @@
 // needs the seed for its URL and the admin's New banner), and a file per series per list would not do.
 //
 // Making one costs a few seconds of decoding, so ONE is made at a time, server-wide (withHeroSlot), with a time
-// limit; a view that finds none waits for its turn briefly and otherwise keeps today's look. The background warm-up
-// (warmHeroes) makes them for the series nobody has opened yet, paced, and stands aside for a sweep, a repair or the
-// daily source check, as the slow archive and Find other sources do.
+// limit, and never because someone opened a page: a payload offers a banner (`autoHero`) only once it is MADE, so the
+// web never asks for one that is not there -- each such ask was a 404 and a console error on every page that showed
+// the series. The background warm-up (warmHeroes) makes them, paced, and stands aside for a sweep, a repair or the
+// daily source check, as the slow archive and Find other sources do; a series someone looks at meanwhile -- its
+// backdrop asked for with no banner of its own, routes/images.ts -- is queued to be made the same way (queueHero), and
+// Shuffle makes one on an admin's press. The image route itself still makes one on a miss (a cache file the sweeper
+// evicted, or a direct request).
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { q } from './db';
@@ -527,16 +531,31 @@ async function heroRows(ids: string[]): Promise<HeroRow[]> {
 
 const failedLately = (r: HeroRow) => !!r.failed_at && Date.now() - new Date(r.failed_at).getTime() < FAIL_RETRY_MS;
 
+/** Made, and no try has failed since: the banner is there to show. */
+const isMade = (r: HeroRow) => !!r.made_at && (!r.failed_at || new Date(r.failed_at) < new Date(r.made_at));
+
 /**
- * The series of these that show an automatic banner, with its seed: the `autoHero` of every series payload
- * (lib/enrich.ts) and what the image route serves. A series whose last try failed is left out until it may be tried
- * again, so the web keeps today's look rather than asking for a banner that is not there. Never throws: a payload
- * without the field is today's look.
+ * The series of these that may have an automatic banner now, made or not, with its seed: what the image route
+ * serves (making it on a miss) and what the warm-up and the queue make. A series whose last try failed is left out
+ * until it may be tried again. Never throws.
  */
-export async function autoHeroFor(ids: string[]): Promise<Map<string, { seed: number }>> {
+export async function heroServable(ids: string[]): Promise<Map<string, { seed: number; made: boolean }>> {
   if (!ids.length) return new Map();
   const rows = await heroRows(ids).catch(() => [] as HeroRow[]);
-  return new Map(rows.filter((r) => !failedLately(r)).map((r) => [r.id, { seed: Number(r.seed) || 0 }]));
+  return new Map(rows.filter((r) => !failedLately(r)).map((r) => [r.id, { seed: Number(r.seed) || 0, made: isMade(r) }]));
+}
+
+/**
+ * The series of these whose automatic banner is MADE, with its seed: the `autoHero` of every series payload
+ * (lib/enrich.ts). Not one that could be made on request: the web asks for what the payload offers, and a banner that
+ * is not there was a 404 -- a console error on every page that showed the series (the e2e gate counts each) -- after a
+ * page view had waited on a make. Never throws: a payload without the field is today's look.
+ * Reintroduce by offering every heroServable series: "a payload offers a banner only once it is made" in
+ * autoHero.int.test.ts finds one offered before anything was made.
+ */
+export async function autoHeroFor(ids: string[]): Promise<Map<string, { seed: number }>> {
+  const all = await heroServable(ids);
+  return new Map([...all].filter(([, h]) => h.made).map(([id, h]) => [id, { seed: h.seed }]));
 }
 
 /** The chapter files of a series, one per number, in reading order. */
@@ -676,13 +695,8 @@ export async function warmHeroes(opts: { max?: number; paceMs?: number; quietMs?
     for (const [i, id] of ids.entries()) {
       while (heroWaitsFor() && !runtime.stopping) await sleep(opts.quietMs ?? QUIET_POLL_MS);
       if (runtime.stopping) break;
-      const hero = (await autoHeroFor([id])).get(id);
-      if (!hero) continue;
-      let ok = true;
-      for (const ar of ['wide', 'tall'] as const) {
-        ok = await getOrFetch(heroVariant(id, hero.seed, ar), () => heroFrame(id, hero.seed, ar, HERO_LIMIT_MS)).then(() => true, () => false);
-        if (!ok) break;
-      }
+      const ok = await makeOne(id);
+      if (ok === null) continue;
       if (ok) out.made++; else out.failed++;
       if (i < ids.length - 1) await sleep(opts.paceMs ?? HERO_PACE_MS);
     }
@@ -692,8 +706,70 @@ export async function warmHeroes(opts: { max?: number; paceMs?: number; quietMs?
   return out;
 }
 
+/**
+ * Make one series' banner, both frames, unless it may not have one or it is made already (null). Under the single slot
+ * like every make, and recorded (heroImages): true when it is made, false when its pages made none.
+ */
+async function makeOne(id: string): Promise<boolean | null> {
+  const hero = (await heroServable([id])).get(id);
+  if (!hero || hero.made) return null;
+  for (const ar of ['wide', 'tall'] as const) {
+    const ok = await getOrFetch(heroVariant(id, hero.seed, ar), () => heroFrame(id, hero.seed, ar, HERO_LIMIT_MS)).then(() => true, () => false);
+    if (!ok) return false;
+  }
+  return true;
+}
+
+// ── a series that just became eligible ───────────────────────────────────────────────────────────────────────────
+
+/** Where the warm-up runs (startHeroWarmup: the server, owned mode), so does the queue; elsewhere it is a no-op. */
+let queueOn = false;
+const queued = new Set<string>();
+let draining: Promise<void> | null = null;
+/** The queue's waits never hold a process open: it is background work, and a test or a shutdown does not wait for it. */
+const idle = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref());
+
+/**
+ * Make this series' banner soon, in the background (v0.51.0): called whenever someone looks at a series with no
+ * banner of its own (routes/images.ts backdropRecipe, after its AniList lookup), so a series added today -- or one the
+ * daily warm-up has not reached -- need not wait for the next run. The warm-up's manners: one at a time under the same
+ * slot, HERO_PACE_MS between two makes, standing aside while a sweep, a repair or the source check runs; a series
+ * made already, tried lately or not eligible is a query and nothing else. Nothing waits on it; the payload offers the
+ * banner once it is made.
+ * Reintroduce by not calling it from backdropRecipe: "a series looked at with no banner gets one made in the
+ * background" in autoHero.int.test.ts never sees it made.
+ */
+export function queueHero(id: string): void {
+  if (!queueOn) return;
+  queued.add(id);
+  // Started a microtask later, so the drain's own `draining = null` always lands after this assignment.
+  if (!draining) draining = Promise.resolve().then(drainHeroQueue);
+}
+
+/** Resolves once the queue is empty (tests). */
+export const heroQueueSettled = (): Promise<void> => draining ?? Promise.resolve();
+
+async function drainHeroQueue(): Promise<void> {
+  try {
+    while (queued.size && !runtime.stopping) {
+      const id: string = queued.values().next().value!;
+      queued.delete(id);
+      try {
+        while (heroWaitsFor() && !runtime.stopping) await idle(QUIET_POLL_MS);
+        if (runtime.stopping) break;
+        if ((await makeOne(id)) === null) continue;
+      } catch { /* a database gone away mid-make (a shutdown): the warm-up tries again */ }
+      if (queued.size) await idle(HERO_PACE_MS);
+    }
+  } finally {
+    // In the same turn as the loop's last look at the queue, so an id added after it starts a new drain.
+    draining = null;
+  }
+}
+
 /** The warm-up's schedule: a first run a while after boot, then daily. Owned mode only (server.ts). */
 export function startHeroWarmup(log: { info(msg: string): void; warn(msg: string): void }): void {
+  queueOn = true;
   const tick = async () => {
     try {
       const r = await warmHeroes();

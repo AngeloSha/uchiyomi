@@ -1876,11 +1876,14 @@ the series' own pages, for a series with no banner of its own: four crops from d
 for a series that may not have one — a banner of its own (AniList's or an admin's), 18+ by any rule (its own or an
 admin's rating, an 18+ library, one of the admin's 18+ genres, an adult source), an AniList lookup not done yet, or a
 last try that made none, which is left alone for a week — and **404** when a try made now makes none, so a client
-keeps its usual art. Every series in a payload carries `autoHero`: `{seed}` when it shows one (`v` is that seed, a
-cache-buster only), `null` otherwise. `POST /api/admin/series/:id/hero/shuffle` (admin) picks a new seed and makes
+keeps its usual art. Every series in a payload carries `autoHero`: `{seed}` once its banner is made (`v` is that
+seed, a cache-buster only), `null` otherwise — not made yet included, so a client asks only for a banner that is
+there. `POST /api/admin/series/:id/hero/shuffle` (admin) picks a new seed and makes
 the banner with it before switching: `{ok: true, seed}`, or `{ok: false, error: 'not_made'}` with the old banner kept;
-**409** `not_automatic` for a series that may not have one. Banners are made one at a time server-wide, on demand and
-by a paced background pass that stands aside for a sweep, a repair or the daily source check.
+**409** `not_automatic` for a series that may not have one. Banners are made one at a time server-wide: by a paced
+background pass (twenty minutes after start, then daily), for a series soon after its backdrop is asked for, by
+Shuffle, and by this route when its cache misses; the background ones stand aside for a sweep, a repair or the daily
+source check.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero
