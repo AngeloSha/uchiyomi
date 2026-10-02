@@ -263,6 +263,14 @@ export const sameSourcePair = (c: ImportCandidate): boolean =>
   c.decision === 'auto' && c.confidence === 'same_source' && !!c.match_source_id && !c.status;
 
 /**
+ * A row for a title the library holds (v0.51.0, discussion #121's "Hide already imported"): held at intake
+ * (`in_library`, skipped from the start), or added -- or found already there -- by a run of this batch. A long list
+ * imported again is mostly these rows; hiding them leaves the titles still to decide.
+ */
+export const alreadyImported = (c: ImportCandidate): boolean =>
+  c.in_library || c.status === 'added' || c.status === 'already' || c.status === 'duplicate';
+
+/**
  * What the intake note and its toast say about a list cut at the 500 (v0.51.0, discussion #121). A backup, a
  * MangaDex list or a paste keeps the first 500 titles NOT already in the library -- the owned ones ride along as
  * skipped rows, uncounted -- so importing the same list again once those are in picks up the rest, and the words

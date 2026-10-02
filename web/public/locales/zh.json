@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2548
+    "strings": 2549
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -762,6 +762,7 @@
   "Select for import": "选择以导入",
   "Select ready to import": "选择可导入的",
   "Select all “same source as before”": "全选“与之前相同的来源”",
+  "Hide already imported": "隐藏已导入的",
   "Selected titles are added to your library only — no chapters are downloaded, but each title is looked up on its source, so a long list takes a few minutes. New releases arrive through auto-update, or fetch older ones from the series page.": "所选作品只会添加到你的书库 — 不会下载任何章节，但每个标题都要到其来源上查找，所以长列表需要几分钟。新章节会随自动更新到来；更早的章节可以在系列页面获取。",
   "Skip this one": "跳过此作品",
   "Skipped": "已跳过",

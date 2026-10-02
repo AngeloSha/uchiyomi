@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
   needsAttention, containsDiverges, matchTitleDiffers, matchedViaAlt, openBatches, batchOriginLabel, runStatusLabel, runStatusColor,
-  linkedCount, linkedLine, truncatedWords, sameSourcePair,
+  linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
 import { readTab } from '../lib/tabParam';
@@ -276,6 +276,19 @@ test('Select all “same source as before” takes the exact pairs only', () => 
   const src = code(read('app/admin/import/page.tsx'));
   assert.match(src, /const selectSameSource = \(\) => setSelected\(new Set\(items\.filter\(sameSourcePair\)\.map\(\(c\) => c\.id\)\)\);/, 'the key does not select the pairs');
   assert.match(src, /onClick=\{onSelectSameSource\}[^>]*>\{tr\('Select all “same source as before”'\)\} · \{sameSourceCount\}/, 'the key is not on the review card');
+});
+
+test('Hide already imported hides the titles the library holds', () => {
+  // Discussion #121 (v0.51.0): a long backup imported again is mostly titles already here. Reintroduce by dropping
+  // the filter line in page.tsx: the toggle is wired to nothing.
+  assert.equal(alreadyImported(row({ in_library: true, decision: 'skip' })), true, 'held at intake');
+  assert.equal(alreadyImported(row({ status: 'added' })), true, 'added by a run of this batch');
+  assert.equal(alreadyImported(row({ status: 'duplicate' })), true, 'found already there by a run');
+  assert.equal(alreadyImported(row({})), false, 'a title still to decide');
+  assert.equal(alreadyImported(row({ status: 'no_chapters' })), false, 'an add that failed is not in the library');
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /if \(hideHere && alreadyImported\(c\)\) return false;/, 'the toggle hides nothing');
+  assert.match(src, /onClick=\{\(\) => setHideHere\(!hideHere\)\} aria-pressed=\{hideHere\}/, 'the toggle is not on the review card');
 });
 
 test('the manual-search results are rails: one flex row per source, scrolling sideways', () => {

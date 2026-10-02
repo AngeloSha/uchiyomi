@@ -31,7 +31,7 @@ import type { Src } from '@/lib/sourceGroups';
 import type { TrackerStatus } from '@/lib/types';
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
-  runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair,
+  runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
   type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
 } from '@/lib/importBatch';
 
@@ -348,6 +348,7 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 function ReviewCard({
   items, allCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
   filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onSelectSameSource, onClearSelection, onRun, running, sourceName,
+  hideHere, setHideHere, hereCount,
 }: {
   items: ImportCandidate[];
   allCount: number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
@@ -364,6 +365,7 @@ function ReviewCard({
   onRun: () => void;
   running: boolean;
   sourceName: (id: string | null) => string;
+  hideHere: boolean; setHideHere: (on: boolean) => void; hereCount: number;
 }) {
   // The sticky "Import selected" footer is a toolbar to the notices (lib/layers.ts): on a phone it rests on the
   // bottom nav, where a notice would otherwise sit on it -- and "Could not start the import" stays six seconds.
@@ -384,6 +386,12 @@ function ReviewCard({
         <button onClick={() => setFilter('all')} className={`chip text-xs ${filter === 'all' ? 'chip-active' : ''}`}>{tr('All')} · {allCount}</button>
         <button onClick={() => setFilter('attention')} className={`chip text-xs ${filter === 'attention' ? 'chip-active' : ''}`}>{tr('Needs attention')} · {attentionCount}</button>
         <button onClick={() => setFilter('skipped')} className={`chip text-xs ${filter === 'skipped' ? 'chip-active' : ''}`}>{tr('Skipped')} · {skippedCount}</button>
+        {/* v0.51.0 (discussion #121): a long list imported again is mostly titles already here; a switch, on top of
+            the filter, leaves the titles still to decide. */}
+        {hereCount > 0 && (
+          <button onClick={() => setHideHere(!hideHere)} aria-pressed={hideHere} data-hide-imported
+            className={`chip text-xs ${hideHere ? 'chip-active' : ''}`}>{tr('Hide already imported')} · {hereCount}</button>
+        )}
       </div>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr('Filter by title…')} className="field mb-3" />
 
@@ -585,6 +593,8 @@ function ImportWizardInner() {
 
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
+  // v0.51.0 (discussion #121): Hide already imported. A view preference, so a fresh batch keeps it.
+  const [hideHere, setHideHere] = useState(false);
   const [editing, setEditing] = useState<ImportCandidate | null>(null);
   const [running, setRunning] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -615,6 +625,9 @@ function ImportWizardInner() {
   const filtered = items.filter((c) => {
     if (filter === 'attention' && !needsAttention(c)) return false;
     if (filter === 'skipped' && c.decision !== 'skip') return false;
+    // Reintroduce by dropping this line: "Hide already imported hides the titles the library holds" in
+    // importBatch.test.ts finds the toggle wired to nothing.
+    if (hideHere && alreadyImported(c)) return false;
     // Backup title OR matched title: a row that reads "Naruto → Boruto: Naruto Next Generations" is the
     // one a person types "Boruto" to find, and the filter found nothing.
     const needle = q.trim().toLowerCase();
@@ -625,6 +638,7 @@ function ImportWizardInner() {
   const skippedCount = items.filter((c) => c.decision === 'skip').length;
   const readyCount = items.filter(isReady).length;
   const sameSourceCount = items.filter(sameSourcePair).length;
+  const hereCount = items.filter(alreadyImported).length;
   // The selection as it will be sent: only ready rows have a checkbox, so an id "Select all" put in for a
   // skipped or unmatched row is invisible on the list and must not be counted -- "8 selected" over five
   // checkboxes, then "Importing… 0/5", was the mismatch. One Set for the checkboxes, the count and /run.
@@ -725,7 +739,7 @@ function ImportWizardInner() {
         <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
           readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedReady} note={note} filter={filter} setFilter={setFilter}
           q={q} setQ={setQ} onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
-          onSelectSameSource={selectSameSource}
+          onSelectSameSource={selectSameSource} hideHere={hideHere} setHideHere={setHideHere} hereCount={hereCount}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
         <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />

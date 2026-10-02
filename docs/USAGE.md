@@ -1933,7 +1933,9 @@ so it never looks as if nothing happened. **Needs attention** filters to what wa
 look: anything unmatched, every *possible match*, and a *close match* that only contains your title where
 the two names differ by more than an edition tag such as *(Official)* or *Colored* — or where the longer
 name looks like a season, part, novel or spin-off of the shorter one, *Solo Leveling: Ragnarok* for *Solo
-Leveling*, which is a different work under a familiar name.
+Leveling*, which is a different work under a familiar name. **Hide already imported** hides the rows of titles
+your library holds, those it held before the import and those the import has added, so a long list brought over
+again shows only what is left to decide.
 
 Nothing is added until you check some rows and press **Import selected — {n}**. **Select all** marks every
 row (a skipped or still-unmatched one is a harmless no-op); **Select ready to import** marks only the rows
