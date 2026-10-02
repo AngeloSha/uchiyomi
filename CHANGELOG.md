@@ -42,8 +42,8 @@ chapters that were already there.
 - **A new check, *The same chapter saved twice*,** lists series where two sites' splits of one chapter are both on
   disk, the second having arrived after the first: 335.1 and 335.6 from mangaread beside 335 and 335.5 from
   mangapill. Each row names the files that arrived later and offers **Delete chapters** for exactly those; the
-  card's **Fix all** does the same for every row, after a confirmation that lists them. It is information, never a
-  warning, and nothing is deleted until you confirm. A part one site supplied under another's numbers, when that
+  card's **Fix all** does the same for every row, after a confirmation that lists them. It warns while it finds any,
+  and nothing is deleted until you confirm. A part one site supplied under another's numbers, when that
   site lists it too, is not a second copy and is not listed. Deleted files stay listed as deleted chapters, everyone
   keeps their reading history, and updates do not fetch them back.
 

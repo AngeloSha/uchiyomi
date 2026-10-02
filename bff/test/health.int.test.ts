@@ -645,7 +645,7 @@ const S_TWICE = 's_health_twice';
  * Reintroduce by dropping the listing test in savedTwice: "the chip names the later files, and only them" fails, with
  * 336.5 offered for deletion.
  */
-test('the same chapter saved twice names the later split, offers Delete only for it, and never deletes', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+test('the same chapter saved twice names the later split, offers Delete only for it, warns, and never deletes', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
   const { runHealthChecks } = await import('../src/lib/health');
@@ -679,15 +679,17 @@ test('the same chapter saved twice names the later split, offers Delete only for
     assert.ok(!item.bookIds.includes(`b_${S_TWICE}_336.5`), 'the fallback\'s part under mangapill\'s own numbering is not a second copy');
     assert.equal(item.detail, '2 files from tw-read saved again in another split: 335.1, 335.6');
     assert.deepEqual(item.actions, ['delete'], 'Delete is offered, and nothing else does anything on its own');
-    assert.equal(item.info, true, 'information, never a warning');
-    assert.equal(c.status, 'ok');
+    assert.equal(c.status, 'warn', 'a card with something to look at reads All good');
+    assert.equal(item.info, undefined, 'a finding, not a row for reference');
     assert.equal(c.summary, '1 series has chapters saved twice, split two ways');
     assert.equal((await q('SELECT count(*)::int AS n FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [S_TWICE]))[0].n, files.length,
       'running the check deleted nothing');
 
     // The existing delete path keeps the rows as tombstones; the finding goes with the files.
     await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = ANY($1)`, [item.bookIds]);
-    assert.equal((await check()).items.find((i: any) => i.title === 'Saved Twice Fixture'), undefined, 'deleting the later files clears it');
+    const after = await check();
+    assert.equal(after.items.find((i: any) => i.title === 'Saved Twice Fixture'), undefined, 'deleting the later files clears it');
+    assert.equal(after.status, after.items.length ? 'warn' : 'ok', 'and the card is all good once nothing is left');
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_TWICE]);
   }

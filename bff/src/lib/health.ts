@@ -1195,8 +1195,10 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
  * parts (lib/partAlias.ts): mangaread's 335.1 and 335.6 beside mangapill's 335 and 335.5, natomanga's 78.6 ... 78.9
  * beside a 78 held whole. Each row names the later files and offers Delete chapters, the existing route: it keeps
  * their rows as tombstones, so reading history stays and the sweep, which holds a tombstone, never fetches them
- * back. NOTHING here deletes on its own (lib/libraryAdmin.ts): which copy goes is the admin's call. Info only,
- * never a warning: a second copy costs disk and a doubled chapter in the list, not a chapter.
+ * back. NOTHING here deletes on its own (lib/libraryAdmin.ts): which copy goes is the admin's call. Its rows are
+ * findings, so the check warns while it has any and is ok once they are gone: with every row `info` it read "All
+ * good" beside "1 series has chapters saved twice" (the v0.50.0 browser check). Reintroduce by marking the rows
+ * `info`: "a card with something to look at reads All good" in health.int.test.ts fails.
  *
  * Both sources known -- a file scanned in from elsewhere has no origin to tell apart -- and the later group's
  * first file after the earlier group's last. And it is another split only when the earlier group's source does
@@ -1268,7 +1270,6 @@ async function savedTwice(): Promise<HealthCheck> {
       bookIds: twice.slice(0, MAX_BOOK_IDS).map((b) => b.id),
       numbers: twice.slice(0, MAX_BOOK_IDS).map((b) => b.n),
       actions: ['delete'],
-      info: true,
     });
   }
   return {

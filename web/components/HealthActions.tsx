@@ -456,8 +456,8 @@ export function hasCardActions(check: HealthCheck): boolean {
 }
 
 /**
- * v0.50.0, The same chapter saved twice: the rows whose later files the card's Fix all deletes. Every one of them
- * is `info` (the check never warns), so the rule is "names later files", not "is a finding".
+ * v0.50.0, The same chapter saved twice: the rows whose later files the card's Fix all deletes -- every row that names
+ * later files and that nobody chose to ignore.
  */
 const laterCopies = (check: HealthCheck): HealthItem[] =>
   check.id === 'saved-twice' ? check.items.filter((it) => !it.ignored && !!it.seriesId && (it.bookIds?.length ?? 0) > 0) : [];

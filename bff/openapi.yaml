@@ -8179,8 +8179,9 @@ paths:
         /api/admin/series/{id}/chapters/delete; merge is POST /api/admin/series/{id}/merge; test, unblock and
         disable are the existing POST /api/admin/sources/{id}/... routes.
         Since v0.50.0 the `saved-twice` check lists series where two sources' splits of one chapter are both on
-        disk, the later group arriving after the earlier one; each item is `info` and carries `bookIds` and
-        `numbers` for the later files only (at most 20) and the `delete` action. Nothing is deleted by the check.
+        disk, the later group arriving after the earlier one (`warn` while it finds any); each item carries
+        `bookIds` and `numbers` for the later files only (at most 20) and the `delete` action. Nothing is deleted
+        by the check.
         Since v0.49.0 an item may carry `outcome`, what the last attempt at it found, from stored rows:
         {kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable[], scanned} (the
         gap `detail` is now '<n> missing — <ranges>' alone; the conclusion it used to end with is here), {kind:
