@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.54.0 — 2026-10-03
+
+**Admin → Providers and Admin → Extensions are now one place, Admin → Sources, and a source that stopped working can
+be replaced in one press: its series move to sources that work, and it is turned off.** Until now nothing could change
+a series' main source. Find other sources added followers, so a series whose site went offline kept that site as its
+main source for good, in every count, filter and queue.
+
+### One Sources section
+
+- **Admin → Sources** holds every source, of every kind: the built-in ones, MangaDex's languages, the sites you
+  added by address and every extension's sources. One list, the ones your series use first, each row one line
+  (*Healthy · 125 series · English*) and at most one key. The switched-off ones fold away.
+- **Needs attention** comes first, when there is anything: a broken source your series depend on, with **Replace**;
+  the failing sources nothing uses, with **Turn off all**; extension updates, with **Update**.
+- **Test all** tests every source, with how far it has got. **Add sources** has the extensions catalogue, adding a
+  site by its address, MangaDex's languages and Import a list.
+- **One sheet for every source:** how it is doing (with the evidence under *Details*), how many series use it, which
+  opens the Library on them, **Test**, **Replace**, **Turn off** or **on** (which asks first when series use it) and
+  **Remove** for a site, and, for an extension, its languages and settings.
+- **Old links still land.** `?tab=Providers`, `?tab=Extensions`, `card=mangadex` and `settings=` open the same things
+  in Sources, so bookmarks and notifications keep working.
+
+### Replace a source
+
+- **Replace** on a broken source says what it will do before it does it: *184 already follow a working source: it
+  becomes their main source. The other 11 are searched for on your other sources. It is turned off once nothing uses
+  it.* Then it does it, with the series moving as you watch and the count of moved, newly found and not replaced.
+- A series that already follows a working source moves at once: the best of them becomes its main source, by health,
+  then by how many of your chapters it carries, then your source order. One that follows none is searched for, under
+  its other names too, and the first match becomes its main source. A series numbered by posting order is left alone
+  and says why: its numbers come from its main source.
+- **Let me review each match first** shows every move before it happens, with **Make main** and **Make all green
+  main**.
+- **Make main** is also on each working source in a series' *Sources & translations*, for one series at a time.
+- Nothing moves on disk: chapters stay in the series' folder, and what you read stays read. A chapter that had failed
+  too often on the old source gets another try from the new one.
+
+### Turned off means off
+
+- A switched-off source was still asked for every chapter list by the scheduled check, and new chapters could still
+  be downloaded from it, whatever the button said. Now a switched-off source is never asked and never downloaded
+  from, and a series whose every source is off is skipped until one is back.
+- **Health** leads with **Replace** on a broken source that some series use as their main source. *Series that can no
+  longer update* now also lists series whose main source is broken or switched off with nothing working to fall back
+  on, and a switched-off source no longer counts as a working backup.
+- A source still main to any series cannot be removed or retired: *It is the main source of 3 series. Replace it
+  first.* A site added by address could be removed before, and its series stopped updating without a word.
+
+### Upgrading
+
+- **No database change.** v0.53.1 runs on the same database, and nothing changes in compose files or the environment.
+- **A behaviour change:** turning a source off now stops its chapter lists too, not just its downloads. Turn it back on
+  to see its lists again.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET /api/admin/sources/overview`: every source with its kind, standing, series counts and what needs attention.
+  - `POST /api/admin/series/:id/main-source` `{sourceId, old?}` makes a followed source the main one. It answers 409
+    for posting order, a pending renumber, a series being checked, a source switched off, unloaded or in another
+    language, and a source not followed.
+  - `POST /api/admin/sources/find` takes `mode: "replace"` (with `turnOff`), with
+    `GET /api/admin/sources/:id/replace-preview` and `POST /api/admin/sources/find/:runId/promote`. Runs carry
+    `mode`, `promoted`, `left`, `turnedOff`, `sourceId` and `sourceName`.
+  - `POST /api/admin/sources/:id/retire` `{how}` turns off or removes a source no series has as its main source,
+    and `DELETE /api/admin/sources/custom/:id` refuses while the site is in use.
+  - Series sources carry `standing`, and Health's source rows and frozen series carry `replace_source`.
+
 ## v0.53.1 — 2026-10-03
 
 **Find other sources asks the sources you can see, and learns a series' other names before it searches.** Both, and a
