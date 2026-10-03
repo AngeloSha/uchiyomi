@@ -221,25 +221,11 @@ feature ideas are all welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md), or
 - 📜 **[Releases](https://github.com/AngeloSha/uchiyomi/releases)** / **[Changelog](CHANGELOG.md)** — watch the repo to hear about new ones
 - 🔒 **[Security policy](SECURITY.md)** — please report vulnerabilities privately
 
-Thanks to everyone who has helped build Uchiyomi:
+Thanks to everyone who has helped build Uchiyomi, with code, reports and ideas:
 
 [![Uchiyomi contributors](https://contrib.rocks/image?repo=AngeloSha/uchiyomi)](https://github.com/AngeloSha/uchiyomi/graphs/contributors)
 
-That image is drawn from GitHub's contributors graph, which only counts the author of a commit. Some help
-arrives as a report or a diagnosis that lands as someone else's commit, and is invisible there — so it is
-named here instead:
-
-- **Unraid install instructions, and a template that installs** — [@hawwwwwk](https://github.com/hawwwwwk),
-  who spotted that Unraid had removed the *Template repositories* field the docs told people to use, and
-  opened pull requests against both this repo and [`unraid-templates`](https://github.com/AngeloSha/unraid-templates);
-  then came back with [PR #50](https://github.com/AngeloSha/uchiyomi/pull/50), which found that the very
-  fix for that report had left the template invalid XML (a `--` inside a comment, so nothing could install
-  it), fixed it, and laid this repository out as the Community Applications template repository
-  (`templates/uchiyomi.xml`, `ca_profile.xml`). `unraid-templates` is now only a pointer here.
-- **The scanner finding zero series in a Tranga library** — [@ThomasRunting](https://github.com/ThomasRunting),
-  who did not stop at the bug report: they read the scanner, found the early return that made a cover image
-  turn a whole series folder into a "chapter of the root", proved it against their own 38-series library,
-  and proposed the one-line fix ([#34](https://github.com/AngeloSha/uchiyomi/issues/34)).
+[@Squeaks72](https://github.com/Squeaks72) · [@TIGamingTV](https://github.com/TIGamingTV) · [@hawwwwwk](https://github.com/hawwwwwk) · [@ThomasRunting](https://github.com/ThomasRunting) · [@Kedryn](https://github.com/Kedryn) · [@Jamie96ITS](https://github.com/Jamie96ITS) · [@tagius](https://github.com/tagius) · [@p3t3t3](https://github.com/p3t3t3) · [@nealhead](https://github.com/nealhead) · [@ZukiFen](https://github.com/ZukiFen) · [@Maaster](https://github.com/Maaster) · [@DannyDynamite39](https://github.com/DannyDynamite39)
 
 ## License
 
