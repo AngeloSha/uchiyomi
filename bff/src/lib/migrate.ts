@@ -1386,6 +1386,11 @@ UPDATE lib_series SET work_id = NULL WHERE merged_into IS NOT NULL AND work_id I
 UPDATE lib_series s SET work_id = NULL
  WHERE s.work_id IS NOT NULL
    AND (SELECT count(*) FROM lib_series w WHERE w.work_id = s.work_id AND w.merged_into IS NULL) <= 1;
+
+-- v0.55.0: what the nightly runs (server.ts): 'repair', the safe repair, as every release before, or 'autofix', Health's
+-- Fix everything (lib/autofix.ts). Its runs are repair_runs rows of kind 'autofix', so there is no table. One column with
+-- a default: v0.54.x boots on this schema and never reads it, and going back runs its own nightly repair as it always did.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS nightly_mode text NOT NULL DEFAULT 'repair';
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -513,8 +513,12 @@ export default async function adminRoutes(app: FastifyInstance) {
   // controls for a job that can never run.
   const settingsRow = async () => {
     const row = await one<any>(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`);
+    // v0.55.0: what the nightly runs, `repair` (the safe repair) or `autofix` (Fix everything). Read apart from the
+    // columns above and said as the contract names it; an unknown value reads as the default.
+    const mode = await one<{ m: string | null }>('SELECT nightly_mode AS m FROM server_settings WHERE id = 1').catch(() => null);
     return {
       ...row,
+      nightlyMode: mode?.m === 'autofix' ? 'autofix' : 'repair',
       extensions_configured: suwayomiConfigured(),
       // How many chapters the read-chapter cleanup would delete if it ran now, at the CURRENT day setting.
       // Computed here rather than only in the tasks list because the tasks list does not show the job until
@@ -598,6 +602,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       // renumbers anything. The tick re-reads this column every time, so switching it off takes effect
       // without a restart.
       repairEnabled: z.boolean().optional(),
+      /**
+       * v0.55.0: what the nightly runs -- `repair`, the safe repair (the default, as before), or `autofix`, Health's Fix
+       * everything (lib/autofix.ts). `repairEnabled` still switches the nightly off entirely; the scheduler reads this
+       * every tick, so a change applies to the next run without a restart.
+       */
+      nightlyMode: z.enum(['repair', 'autofix']).optional(),
       // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
@@ -665,6 +675,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
     if (b.repairEnabled !== undefined) await q('UPDATE server_settings SET repair_enabled = $1, updated_at = now() WHERE id = 1', [b.repairEnabled]);
+    if (b.nightlyMode !== undefined) await q('UPDATE server_settings SET nightly_mode = $1, updated_at = now() WHERE id = 1', [b.nightlyMode]);
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }

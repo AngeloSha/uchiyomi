@@ -22,10 +22,10 @@ import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
 import { notifyAdmins } from './lib/push';
-import { closeInterruptedAutofix } from './lib/autofix';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
+import { autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
 import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
@@ -428,11 +428,24 @@ async function main() {
     const tick = async () => {
       let next = REPAIR_HOURS * 60 * 60 * 1000;
       try {
-        const s = await pool.query('SELECT repair_enabled FROM server_settings WHERE id = 1');
+        const s = await pool.query('SELECT repair_enabled, nightly_mode FROM server_settings WHERE id = 1');
         if (s.rows[0]?.repair_enabled === false) {
           app.log.info('repair: switched off in settings, nothing to do');
         } else if (runtime.updating) {
           app.log.info('repair: a chapter sweep is running, trying again in 10 minutes');
+          next = 10 * 60 * 1000;
+        } else if (s.rows[0]?.nightly_mode === 'autofix') {
+          // v0.55.0: Admin → Settings chose Fix everything for the nightly (lib/autofix.ts), as if an admin had pressed it
+          // on Health, with nobody's name on it -- the background view that sees everything, as the scanner's. Read every
+          // tick, so the choice applies to the next night without a restart. Beside a repair, a Find or another Fix
+          // everything it waits ten minutes, as for a sweep.
+          const r = startAutofix(null, { origin: 'nightly', log: app.log });
+          if ('busy' in r) {
+            app.log.info(`repair: Fix everything could not start beside a running ${r.busy}, trying again in 10 minutes`);
+            next = 10 * 60 * 1000;
+          } else await autofixSettled();
+        } else if (runtime.autofixing) {
+          app.log.info('repair: Fix everything is running, trying again in 10 minutes');
           next = 10 * 60 * 1000;
         } else {
           // No opts at all: an automatic run honours the switch (checked again inside the job) and audits
@@ -452,8 +465,14 @@ async function main() {
     void (async () => {
       let last = 0;
       try {
-        const s = await pool.query('SELECT repair_last_run FROM server_settings WHERE id = 1');
-        last = s.rows[0]?.repair_last_run ? new Date(s.rows[0].repair_last_run).getTime() : 0;
+        // The nightly's last end, whichever it ran: the full repair writes repair_last_run, and a nightly Fix everything
+        // (v0.55.0) is a repair_runs row of its own -- without it a deploy after a nightly Fix everything ran the next
+        // one thirty minutes after boot.
+        const s = await pool.query(
+          `SELECT GREATEST(st.repair_last_run,
+                           (SELECT max(r.finished_at) FROM repair_runs r WHERE r.kind = 'autofix' AND r.origin = 'nightly' AND r.status <> 'interrupted')) AS last
+             FROM server_settings st WHERE st.id = 1`);
+        last = s.rows[0]?.last ? new Date(s.rows[0].last).getTime() : 0;
       } catch { /* settings row not readable yet -- run on the floor */ }
       const delay = Math.max(firstRunFloor(30 * 60 * 1000, 'repair'), last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
       app.log.info(`repair: first run in ${Math.round(delay / 60000)} min`

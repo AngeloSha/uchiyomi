@@ -5929,6 +5929,10 @@ paths:
                 type: object
                 additionalProperties: true
                 properties:
+                  nightlyMode:
+                    type: string
+                    enum: [repair, autofix]
+                    description: Since v0.55.0, what the nightly runs (PATCH nightlyMode); `repair` unless set.
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -6084,6 +6088,14 @@ paths:
                     Run the library repair nightly (REPAIR_HOURS, default 24h). On by default. Switching it
                     off stops the schedule only -- POST /api/admin/tasks/repair/run and the Health page's
                     chips are unaffected, because nothing it does deletes, merges or renumbers anything.
+                nightlyMode:
+                  type: string
+                  enum: [repair, autofix]
+                  description: >-
+                    Since v0.55.0, what the nightly runs: `repair`, the safe repair above (the default, as before),
+                    or `autofix`, Health's Fix everything (POST /api/admin/health/autofix), as if an admin had pressed
+                    it, with nobody's name on it. repairEnabled still switches the nightly off entirely. Read every
+                    tick, so a change applies to the next run without a restart. GET answers it as `nightlyMode`.
                 komgaGhostChapters:
                   description: >-
                     List the chapters this server does not hold on the Komga-compatible API: the ones the

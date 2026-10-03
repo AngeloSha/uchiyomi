@@ -479,7 +479,7 @@ test('a solver that is down: the sources behind it are left alone, and it is Nee
   }
 });
 
-test('the routes: start, follow, one run, stop', { skip }, async () => {
+test('the routes: start, follow, one run, stop, and the nightly choice', { skip }, async () => {
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
   const app = Fastify();
@@ -507,7 +507,29 @@ test('the routes: start, follow, one run, stop', { skip }, async () => {
     const one = await app.inject({ method: 'GET', url: `/api/admin/health/autofix/${runId}`, headers: auth });
     assert.equal(one.json().id, runId);
     assert.equal((await app.inject({ method: 'GET', url: '/api/admin/health/autofix/00000000-0000-0000-0000-000000000000', headers: auth })).statusCode, 404);
+    // The nightly choice: the safe repair unless told otherwise, saved and read back.
+    const s0 = (await app.inject({ method: 'GET', url: '/api/admin/settings', headers: auth })).json();
+    assert.equal(s0.nightlyMode, 'repair', 'the safe repair by default');
+    const set = await app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: auth, payload: { nightlyMode: 'autofix' } });
+    assert.equal(set.statusCode, 200, set.body);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/settings', headers: auth })).json().nightlyMode, 'autofix');
+    // A value that is not a mode is refused (the server's error handler answers the ZodError 400; this bare app, 500).
+    assert.notEqual((await app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: auth, payload: { nightlyMode: 'everything' } })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/settings', headers: auth })).json().nightlyMode, 'autofix', 'and nothing is stored');
+    await app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: auth, payload: { nightlyMode: 'repair' } });
   } finally {
     await app.close();
   }
+});
+
+test('the nightly runs Fix everything when Settings chose it, and the safe repair otherwise', { skip }, async () => {
+  // server.ts starts listening on import, so its scheduler is read, as findSources.int.test.ts reads its shutdown.
+  // Reintroduce by dropping the `nightly_mode` branch from the repair tick: the first two assertions fail.
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(join(__dirname, '..', 'src', 'server.ts'), 'utf8');
+  const tick = src.slice(src.indexOf('SELECT repair_enabled, nightly_mode FROM server_settings'), src.indexOf('setRepairNext(Date.now() + next)'));
+  assert.ok(tick.length > 0, 'the tick reads the nightly choice with the switch, every time');
+  assert.match(tick, /nightly_mode === 'autofix'[\s\S]*startAutofix\(null, \{ origin: 'nightly'/, 'and starts Fix everything, as nobody, when it is chosen');
+  assert.match(tick, /runRepair\(app\.log\)/, 'the safe repair otherwise, as before');
+  assert.ok(tick.indexOf("repair_enabled === false") < tick.indexOf("nightly_mode === 'autofix'"), 'the nightly switch still turns either off');
 });

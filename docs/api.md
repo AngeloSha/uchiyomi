@@ -562,7 +562,8 @@ most twelve, with `items`), `clears` what ends by itself (with `at`), `needsYou`
 its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or `{kind: 'settings', key}`). Runs are kept in the
 repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
 audited as `library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
-`done`/`total` its phases, `step` the phase).
+`done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly
+runs.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
