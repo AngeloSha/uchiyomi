@@ -1274,16 +1274,21 @@ POST   /api/admin/import/batches/:id/run
 PATCH  /api/admin/import/candidates/:cid
 ```
 
-**Libraries.** A library is declared on a folder under the library root: `POST /api/admin/libraries {name, path,
-ageRating?}`, and `PATCH /api/admin/libraries/:id` takes the same fields and `members`. Since v0.55.1 every save moves
-the series it reaches in its own transaction: each series that is not filed by hand (`POST
-/api/admin/series/:id/library`) and sits under a folder the library held before the save or holds after it goes to the
-library holding the longest folder its own folder is in, across every library's folders, or to the default library
-`lib`. `DELETE /api/admin/libraries/:id` also moves what the library holds by hand. All three answer `moved`, the number
-of series that changed library. `GET /api/admin/libraries/preview?path=` runs the same statement without saving and
-answers `{path, series, sample}` (the series an admin can see, and up to 20 of their titles); with `&id=` it is an edit
-of that library, counting what would leave it as well as what would come in. A folder is matched by its name: `_` and
-`%` in it are not wildcards.
+**Libraries.** A library is declared on one or more folders under the library root (since v0.55.1, #148): `POST
+/api/admin/libraries {name, paths, ageRating?}`, where `paths` is every folder it holds and `path` alone still means
+one; `PATCH /api/admin/libraries/:id` takes the same fields, `paths` replacing the list whole, and `members`. Each
+folder is checked as `path` always was, the same folder twice is held once, and a folder belongs to one library at
+most: **409** `duplicate` names the first folder another library holds (`path`) and that library (`library: {id,
+name}`), and nothing is saved. `GET /api/admin/libraries` gives each library its `paths`, the first first -- the one
+`path` names, and the only one a v0.55.0 server reads after a rollback -- then the rest by name. Every save moves the
+series it reaches in its own transaction: each series that is not filed by hand (`POST /api/admin/series/:id/library`)
+and sits under a folder the library held before the save or holds after it goes to the library holding the longest
+folder its own folder is in, across every library's folders, or to the default library `lib`. `DELETE
+/api/admin/libraries/:id` also moves what the library holds by hand. All three answer `moved`, the number of series that
+changed library. `GET /api/admin/libraries/preview?paths=…&paths=…` runs the same statement without saving and answers
+`{path, paths, series, sample}` (the series an admin can see, and up to 20 of their titles), and **409** for a folder
+another library holds; with `&id=` it is an edit of that library, counting what would leave it as well as what would
+come in. A folder is matched by its name: `_` and `%` in it are not wildcards.
 
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,

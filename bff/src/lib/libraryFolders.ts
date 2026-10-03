@@ -9,8 +9,53 @@
 //
 // The preview runs the same statement and stops short of the UPDATE, so the count it promises is what the save does.
 import { visibleToAll } from './visibility';
+import { diskSpelling } from './libraryAdmin';
+import { LIBRARY_ROOT, DL_ROOT } from './library';
+import { toStoredRel, trimTrailingSlashes } from './relPath';
 
 type Qq = <R = any>(text: string, params?: any[]) => Promise<R[]>;
+
+/** How many folders one library may hold: a list an admin ticks by hand, kept to a size every save can carry. */
+export const LIBRARY_MAX_FOLDERS = 200;
+
+/**
+ * The folders a save names, as they are stored, or null when one is not a folder under the root.
+ *
+ * Each is checked as a library's one folder always was: relative and posix (a `\` typed on Windows is a separator,
+ * lib/relPath.ts), no `..`, and on the desktop in the spelling the disk already has (libraryAdmin.ts diskSpelling:
+ * NTFS and APFS find `manga/seinen` for `Manga/Seinen`, but series folders are compared as exact strings). The same
+ * folder named twice -- or typed in two spellings the disk resolves to one -- is held once, in its first place.
+ */
+export async function storedFolders(raw: string[]): Promise<string[] | null> {
+  const out: string[] = [];
+  for (const r of raw) {
+    const typed = trimTrailingSlashes(toStoredRel(r).replace(/^\/+/, '')).trim();
+    if (!typed || typed.includes('..') || typed.startsWith('/')) return null;
+    const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
+    if (!out.includes(path)) out.push(path);
+  }
+  return out.length ? out : null;
+}
+
+/**
+ * The first of `paths`, in the order given, that a library other than `id` already holds, and that library: a folder
+ * belongs to one library at most, since two on the same folder have no rule to separate them. Nesting is fine --
+ * `Manga/Seinen` inside another library's `Manga` is a folder of its own, and the longest one wins.
+ *
+ * libraries.path is asked too, though in steady state it is always among library_paths: a first folder a v0.55.0
+ * wrote is reconciled only at the next boot, and answering 409 beats the unique index's 500.
+ */
+export async function heldElsewhere(qq: Qq, id: string, paths: string[]): Promise<{ path: string; id: string; name: string } | null> {
+  const [held] = await qq<{ path: string; id: string; name: string }>(
+    `SELECT h.path, l.id, l.name
+       FROM (SELECT path, library_id FROM library_paths
+             UNION SELECT path, id FROM libraries WHERE path <> '') AS h (path, library_id)
+       JOIN libraries l ON l.id = h.library_id
+      WHERE h.path = ANY($2::text[]) AND h.library_id <> $1
+      ORDER BY array_position($2::text[], h.path) LIMIT 1`,
+    [id, paths]);
+  return held ?? null;
+}
 
 /**
  * Library saves, one at a time. A save decides where series go from every OTHER library's folders, so two saves at
