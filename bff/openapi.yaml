@@ -1364,13 +1364,16 @@ paths:
       summary: The sources the viewer's library comes from, with series counts -- the library's source filters (since v0.49.2).
       operationId: getApiLibrarySources
       description: >-
-        `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
+        `{content: [{id, name, main, any, installed}], none}`, busiest first: `main` counts the series added from
         the source, `any` the series that read from it at all (added from it, or following it as a fallback).
+        `none` (since v0.55.1, #149) counts the series with no main source at all -- folders added by hand, and
+        anything never matched to a site: what `hasMainSource: isFalse` returns in POST /api/series/search, the
+        Library's "No source".
         Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
         the ones the filtered grid shows. `name` is the one Health uses: the loaded source's, else the name the
         extension engine gave it, else the id. `installed` is false for a source that is not loaded now (its
-        extension is gone or switched off, or the engine is down); its series still filter. Empty on a Komga
-        backend. Use the ids as `mainSource` / `anySource` in POST /api/series/search.
+        extension is gone or switched off, or the engine is down); its series still filter. On a Komga backend
+        `content` is empty and `none` 0. Use the ids as `mainSource` / `anySource` in POST /api/series/search.
       parameters:
         - name: adult
           in: query
@@ -1516,8 +1519,10 @@ paths:
         read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
         (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
         `genre`, `author`, and -- owned library only, since v0.49.2 -- `mainSource` (the source a series was added
-        from, by id) and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
-        `unsupported_filter`."
+        from, by id) and `anySource` (that, or a source it follows as a fallback); since v0.55.1 (#149)
+        `hasMainSource` in Komga's boolean shape (`{operator: isTrue|isFalse}`, no value), `isFalse` being the series
+        with no main source at all, whatever they follow. An unknown key is 400 `unsupported_filter`, and so is
+        `hasMainSource` with any other operator."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult

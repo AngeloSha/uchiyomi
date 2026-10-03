@@ -834,13 +834,16 @@ DELETE /api/series/:id/listing-progress
 **Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
 backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
 by id) and `anySource` (that, or a source it follows as a fallback). Both take `is` / `isNot`, and a source whose
-extension is gone still filters.
-`GET /api/library/sources` lists `{id, name, main, any, installed}` for every source the viewer's library
-comes from, busiest first: `main` counts the series added from it, `any` the series that read from it at all.
-It is counted over what the viewer may list, so the numbers match the filtered grid, and it is empty on a
-Komga backend. `name` is the one Health uses: the loaded source's, else the name the extension engine gave it,
-else the id; `installed` is false while a source is not loaded (its extension gone or switched off, or the
-engine down).
+extension is gone still filters. Since v0.55.1 (#149) a third, `hasMainSource`, in Komga's boolean shape
+(`{operator: isTrue|isFalse}`, no value): `isFalse` is the series with no main source at all -- folders added by hand,
+and anything never matched to a site -- whatever sources they follow. Any other operator is 400 `unsupported_filter`.
+`GET /api/library/sources` answers `{content, none}`: `content` lists `{id, name, main, any, installed}` for every
+source the viewer's library comes from, busiest first -- `main` counts the series added from it, `any` the series
+that read from it at all -- and `none` (since v0.55.1) counts the series with no main source, what `hasMainSource:
+isFalse` returns. Both are counted over what the viewer may list, so the numbers match the filtered grid; on a Komga
+backend `content` is empty and `none` 0. `name` is the one Health uses: the loaded source's, else the name the
+extension engine gave it, else the id; `installed` is false while a source is not loaded (its extension gone or
+switched off, or the engine down).
 
 **Language editions of one work** (since v0.52.0, #72). Blue Lock in English and in Spanish are two series —
 each with its own folder, chapters, sources and reading progress — linked as editions of one work. Every series
