@@ -140,6 +140,52 @@ test('every sentence the server builds has words here, and they read as the serv
   for (const code of [...Object.keys(DIFFERS), ...ONE_DIFFERS]) assert.ok(codes.includes(code), `${code} is no longer a server code: drop it from this test's exceptions`);
 });
 
+test('every line Fix everything sends has words here: each kind of thing done, and each reason a part was passed over', async (t) => {
+  // v0.55.0 (bff lib/autofix.ts). The walk above fills each code's parameters with one sample, and two of the run's
+  // lines get past it: a done line's code is BUILT from its kind (`autofix.done.${kind}`, a cast the typechecker cannot
+  // follow), and `autofix.item.skipped` words its `why` from a table of its own, of which the sample says one. Each
+  // kind and each why the run can send is held here to the server's English. Reintroduce by dropping a `why` from the
+  // web's words (lib/said.ts, 'installs'): "'installs' has no words" fails; a DoneKind without its code fails by name.
+  if (!haveBff) { t.skip('no bff/ beside web/ in this checkout'); return; }
+  const server = (await import(join(BFF, 'said.ts'))) as { SAID_ENGLISH: Record<string, (p: never) => string> };
+  const src = readFileSync(join(BFF, 'autofix.ts'), 'utf8');
+  const union = /export type DoneKind =([^;]+);/.exec(src);
+  assert.ok(union, 'DoneKind is not in bff lib/autofix.ts -- this scan is broken');
+  const kinds = [...union![1].matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]);
+  assert.ok(kinds.length >= 20, `only ${kinds.length} kinds read -- this scan is broken`);
+  // doneLines' own words for the kinds it does not build: the rest are `autofix.done.<kind>`.
+  const SPECIAL: Record<string, Array<[string, Record<string, unknown>]>> = {
+    replaced: [['autofix.done.replaced', { n: 3, names: ['Aqua'], more: 0 }]],
+    installed: [['autofix.done.installed', { names: ['Asura Scans'], more: 0, n: 3 }]],
+    uninstalled: [['autofix.done.uninstalled', { names: ['Amber Comics'], more: 0 }]],
+    scanned: [['autofix.done.counted', { n: 3 }], ['autofix.done.scanned', {}]],
+    engineConnected: [['autofix.done.engineConnected', {}]],
+  };
+  for (const kind of kinds) {
+    for (const [code, params] of SPECIAL[kind] ?? [[`autofix.done.${kind}`, { n: 3 }]]) {
+      const fn = server.SAID_ENGLISH[code] as ((p: unknown) => string) | undefined;
+      assert.ok(fn, `done kind '${kind}': the server has no code ${code}`);
+      const web = saidText({ code, params }, '\0');
+      assert.notEqual(web, '\0', `${code} has no words`);
+      assert.equal(web, fn!(params), `${code} reads otherwise than the server`);
+    }
+  }
+  // Every reason the run passes a part over for, from its own calls, and the server's table of them.
+  const sent = [...src.matchAll(/say\('autofix\.item\.skipped', \{ why: '([a-z_]+)' \}\)/g)].map((m) => m[1]);
+  const said = readFileSync(join(BFF, 'said.ts'), 'utf8');
+  const table = /const AUTOFIX_SKIPPED: Record<string, string> = \{([^}]+)\}/.exec(said);
+  assert.ok(table && sent.length >= 4, 'the skipped reasons were not read -- this scan is broken');
+  const known = [...table![1].matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]);
+  // A ternary picks two of them (`a.engine === 'none' ? 'no_engine' : 'engine_down'`): the table holds those too.
+  for (const why of new Set([...sent, ...known])) {
+    assert.ok(known.includes(why), `the run passes a part over for '${why}', which the server's table does not word`);
+    const english = (server.SAID_ENGLISH['autofix.item.skipped'] as (p: { why: string }) => string)({ why });
+    const web = saidText({ code: 'autofix.item.skipped', params: { why } }, '\0');
+    assert.notEqual(web, '\0', `'${why}' has no words`);
+    assert.equal(web, english, `'${why}' reads otherwise than the server`);
+  }
+});
+
 test('every diagnosis the server can reach reads as its English: each reason by its code, each fix by its own', async (t) => {
   if (!haveBff) { t.skip('no bff/ beside web/ in this checkout'); return; }
   // Reintroduce by deleting REASON_WORDS.edge_403: "diagnosis 'edge_403' has no reason" fails. Deleting
