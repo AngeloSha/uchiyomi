@@ -1504,7 +1504,9 @@ without you pressing anything. Since v0.48.3:
   - **Fix it for me** (the default) runs one background run that tries every remedy on every card: it replaces
     broken sources, fetches missing and broken chapters, finds new sources (installing up to 3 extensions if it has
     to, and keeping only those that found something), merges duplicate series, deletes chapters saved twice or
-    numbered impossibly, and applies the renumbering plans that are safe. Merges and deletes cannot be undone. While it
+    numbered impossibly, and applies the renumbering plans that are safe. A site that asked Uchiyomi to slow down is
+    not broken (since v0.55.1): the run never replaces it, never moves a series onto a source that cannot update it,
+    and leaves the chapters a rate limit holds back to clear by themselves. Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
     *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says how
@@ -1710,8 +1712,11 @@ error*.
 **A rate limit is a cooldown, never a failure** (since v0.55.1). A site that answered *429* — *slow down* — at its
 chapter list, its page list or its images works; it asked Uchiyomi to wait. Its row reads *Rate limited* (until when,
 while the cooldown runs) and never offers **Replace**, its series still count as updating, and **Fix everything**
-never replaces it. Before, five refused image downloads in a row read as *Images failing*, and Fix everything moved
-the series off a source whose searches and chapter lists answered fine.
+leaves it alone: it never replaces it, never Tests it or clears its cooldown, retries none of its failed chapters and
+fetches nothing through it during the run, and lists what it holds back — and every chapter a rate limit failed —
+under what clears by itself, never under what needs you. Before, five refused image downloads in a row read as *Images
+failing*, Fix everything moved the series off a source whose searches and chapter lists answered fine, and its retries
+ran straight into the rate limit again.
 
 **A site that says it is offline** (since v0.49.1). A site that answers with its own maintenance page — a small page
 whose title says *temporarily offline*, *maintenance* or *be back soon*, with none of the site's own markup — reads

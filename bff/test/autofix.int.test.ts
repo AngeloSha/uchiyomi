@@ -51,9 +51,11 @@ const MAIN = 'af-main', GOOD = 'af-good', DEAD = 'af-dead', UNUSED = 'af-unused'
 // af-held: in a cooldown, and failing its Test.
 const HELD = 'af-held';
 // v0.55.1: af-limit works, but its images answered 429 five times in a row -- the owner's Mangakakalot, as its row was
-// stored. af-err works but its images fail with a 500.
-const LIMIT = 'af-limit', ERR = 'af-err';
-const SOURCES = [MAIN, GOOD, DEAD, UNUSED, COOL, DOWN, WEB, CF, HELD, LIMIT, ERR];
+// stored. af-err works but its images fail with a 500. af-nato works, but its image server answers 429 (the owner's
+// Natomanga): rate-limited, its cooldown over, the main of a series with a chapter that failed on it. af-ratefail failed
+// a Test at its chapter list and is rate-limited, in a cooldown; it passes its Test now.
+const LIMIT = 'af-limit', ERR = 'af-err', NATO = 'af-nato', RATEFAIL = 'af-ratefail';
+const SOURCES = [MAIN, GOOD, DEAD, UNUSED, COOL, DOWN, WEB, CF, HELD, LIMIT, ERR, NATO, RATEFAIL];
 const BROKEN = new Set([DEAD, UNUSED, DOWN, CF, HELD]);
 /** source -> title -> numbers it lists. */
 const catalog = new Map<string, Map<string, number[]>>();
@@ -96,6 +98,8 @@ const adapter = (id: string) => ({
 
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 9)]);
 const realFetch = globalThis.fetch;
+/** Pages asked of af-nato's image server, which answers 429 to every one. */
+let natoAsked = 0;
 let solverReady = true;
 let solver: Server | null = null;
 
@@ -104,7 +108,7 @@ const LIB = 'lib_af';
 const S = {
   repl: 's_af_repl', cool: 's_af_cool', failOk: 's_af_failok', failBad: 's_af_failbad', short: 's_af_short', gap: 's_af_gap',
   oddGap: 's_af_oddgap', oddMark: 's_af_oddmark', twice: 's_af_twice', twiceShort: 's_af_twiceshort', twiceMark: 's_af_twicemark',
-  twicePartial: 's_af_twicepartial', held: 's_af_held', limit: 's_af_limit', err: 's_af_err',
+  twicePartial: 's_af_twicepartial', held: 's_af_held', limit: 's_af_limit', err: 's_af_err', nato: 's_af_nato',
   dupA: 's_af_dupa', dupB: 's_af_dupb', dupC: 's_af_dupc', dupD: 's_af_dupd', edA: 's_af_eda', edB: 's_af_edb',
   numClean: 's_af_numclean', numTracker: 's_af_numtracker', paused: 's_af_paused', cf: 's_af_cf',
   againA: 's_af_againa', againB: 's_af_againb', againOdd: 's_af_againodd',
@@ -113,7 +117,7 @@ const ALL = Object.values(S);
 const T: Record<keyof typeof S, string> = {
   repl: 'Fix Replace', cool: 'Fix Cool', failOk: 'Fix Fail Ok', failBad: 'Fix Fail Bad', short: 'Fix Short', gap: 'Fix Gap',
   oddGap: 'Fix Odd Gap', oddMark: 'Fix Odd Mark', twice: 'Fix Twice', twiceShort: 'Fix Twice Short', twiceMark: 'Fix Twice Mark',
-  twicePartial: 'Fix Twice Partial', held: 'Fix Held', limit: 'Fix Limit', err: 'Fix Err',
+  twicePartial: 'Fix Twice Partial', held: 'Fix Held', limit: 'Fix Limit', err: 'Fix Err', nato: 'Fix Nato',
   dupA: 'Fix Twin', dupB: 'Fix Twin', dupC: 'Fix Alpha', dupD: 'Totally Unrelated', edA: 'Fix Edition', edB: 'Fix Edicion',
   numClean: 'Istrevelia', numTracker: 'Istrevelia', paused: 'Fix Paused', cf: 'Fix Cloudflare',
   againA: 'Fix Again', againB: 'Fix Again', againOdd: 'Fix Again Odd',
@@ -162,6 +166,10 @@ before(async () => {
   if (!DSN) return;
   globalThis.fetch = (async (u: any, init?: any) => {
     const url = String(u);
+    if (url.includes('example.invalid') && decodeURIComponent(url).includes(`${NATO}::`)) {
+      natoAsked++;
+      return new Response('slow down', { status: 429, headers: { 'retry-after': '1' } });
+    }
     if (url.includes('example.invalid')) return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
     if (url.includes('127.0.0.1')) return realFetch(u, init);
     return new Response('', { status: 404 });
@@ -222,8 +230,9 @@ test('Fix everything: one run over a library with something wrong on every card'
   catalog.get(MAIN)!.set(T.oddGap, range(1, 4));
   await q(`INSERT INTO source_health (source_id, status, stages) VALUES ($1,'ok',$2::jsonb), ($3,'ok',$4::jsonb), ($5,'ok',$6::jsonb)`,
     [DEAD, failedAt('chapters'), UNUSED, failedAt('chapters'), DOWN, failedAt('pages')]);
-  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error) VALUES ($1,'rate_limited',2, now() + interval '30 minutes','HTTP 429'),
-             ($2,'rate_limited',2, now() + interval '30 minutes','HTTP 429')`, [COOL, HELD]);
+  // Blocks of their own (a timeout, a 403), not rate limits: a rate limit's cooldown is never cleared (v0.55.1, below).
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error) VALUES ($1,'down',2, now() + interval '30 minutes','timeout'),
+             ($2,'blocked',2, now() + interval '30 minutes','HTTP 403')`, [COOL, HELD]);
 
   // ---- series
   await seedSeries('repl', { source: DEAD });
@@ -245,6 +254,21 @@ test('Fix everything: one run over a library with something wrong on every card'
     for (const n of [1, 2, 3]) await seedBook(k, n, { src });
     await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,$3,$4)`, [S[k], GOOD, `${GOOD}::${T[k]}`, T[k]]);
   }
+  // v0.55.1: a chapter that failed on a rate limit three times (the retry cap), on a source still rate-limited -- one
+  // 429 noted, its cooldown over. And a rate-limited source in a cooldown that failed a Test at its chapter list.
+  catalog.get(NATO)!.set(T.nato, range(1, 4));
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error, stages) VALUES
+             ($1, 'rate_limited', 1, now() - interval '5 minutes', '0/3 pages downloaded (HTTP 429)', $2::jsonb),
+             ($3, 'rate_limited', 3, now() + interval '30 minutes', 'HTTP 429', $4::jsonb)`,
+    [NATO, JSON.stringify({ images: { failAt: new Date().toISOString(), failBy: 'traffic', streak: 1, kind: 'rate_limited', error: '0/3 pages downloaded (HTTP 429)' } }),
+      RATEFAIL, failedAt('chapters')]);
+  catalog.get(RATEFAIL)!.set('The Ratefail Series', range(1, 3)); // what its Test's search finds
+  // With a gap its own source lists, which the gap step would fetch through it.
+  await seedSeries('nato', { source: NATO });
+  for (const n of [1, 3]) await seedBook('nato', n, { src: NATO });
+  await seedListing('nato', NATO, range(1, 4));
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at) VALUES ($1, 4, $2, 'rate_limited', 'no images downloaded (blocked?)', 3, now() - interval '1 hour')`,
+    [S.nato, NATO]);
   // A failed chapter on a source that can be asked: reset and fetched. One on a source failing at its page lists: left.
   await seedSeries('failOk');
   for (const n of [1, 2]) await seedBook('failOk', n);
@@ -384,6 +408,35 @@ test('Fix everything: one run over a library with something wrong on every card'
     const by = new Map(tests.map((x: any) => [x.detail.source, x.detail.ok]));
     assert.equal(by.get(COOL), true);
     assert.equal(by.get(DEAD), false, 'the failing main was tested and failed, which is why it was Replaced');
+  });
+
+  await t.test('sources: a rate limit is never Tested, nor its cooldown cleared', async () => {
+    // v0.55.1: a Test sends a site that asked for room more requests and fetches no image, so it proves nothing about a
+    // rate limit. The owner's first run Tested Natomanga and Mangakakalot, cleared their cooldowns, and then sent them
+    // the requests those cooldowns were holding back. Reintroduce by Testing a rate limit's row (the `testable` filter
+    // in lib/autofix.ts sources): af-limit is tested. By clearing after any passing Test (drop `rateLimited`):
+    // af-ratefail, which passed its, loses its cooldown.
+    const tested = new Set((await q(`SELECT detail->>'source' AS source FROM audit_log WHERE event = 'source.test' AND detail->>'runId' = $1`, [run.id]))
+      .map((x: any) => x.source));
+    assert.ok(!tested.has(LIMIT) && !tested.has(NATO), 'a source whose trouble is a rate limit is not Tested');
+    assert.ok(tested.has(RATEFAIL), 'PREMISE: one failing at its chapter list is');
+    assert.ok((await health(RATEFAIL)).blocked_until, "and a rate limit's cooldown is never cleared, even after a passing Test");
+  });
+
+  await t.test('chapters: a 429 failure is not retried by the run and ends in what clears by itself', async () => {
+    // v0.55.1, the owner's first run: its chapters phase reset failures and fetched through Natomanga and Mangakakalot
+    // while they answered 429, 28 chapters failed again, and the end listed 25 under Needs you -- though a rate limit
+    // clears by itself. Reintroduce by driving the chapters phase without `resting` (lib/autofix.ts chapters, or
+    // repair.ts failuresDriven): af-nato's row is reset and its site asked again. By listing a resting source in
+    // updateSeries (lib/updater.ts): the gap step fetches af-nato's gap through it. By dropping the rate-limit lines of
+    // the summary: its chapter is counted under Needs you.
+    const row = (await q(`SELECT attempts FROM chapter_failures WHERE series_id = $1 AND number = 4`, [S.nato]))[0];
+    assert.equal(row?.attempts, 3, 'a 429 failure is not retried by the run');
+    assert.equal(natoAsked, 0, "and nothing was fetched through the source that is rate-limiting");
+    assert.ok(run.summary.clears.some((c: any) => c.said.code === 'autofix.clears.cooldown' && c.said.params?.name === `Fix ${NATO}`),
+      `it is said to clear by itself: ${JSON.stringify(run.summary.clears)}`);
+    const failures = run.summary.needsYou.find((n: any) => n.check === 'chapter-failures');
+    assert.equal(failures?.said.params?.n, 1, 'and Needs you counts only the chapter no source can download (af-down\'s)');
   });
 
   await t.test('chapters: the failures step resets only the sources that can be asked', async () => {

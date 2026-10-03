@@ -64,7 +64,7 @@ import { testSource } from './sourceCheck';
 import { clearBlock, pruneOrphanedHealth } from './sourceHealth';
 import { retireSource } from './retireSource';
 import { switchMainSource } from './mainSource';
-import { standingOf, standingRows, EXTENSION_OFF_BY } from './sourceStanding';
+import { standingOf, standingRows, EXTENSION_OFF, EXTENSION_OFF_BY, type StandingRow } from './sourceStanding';
 import { currentFailures } from './sourceEvidence';
 import {
   runHealthChecks, sourceTrouble, frozenSeries, duplicateSeries, savedTwiceGroups, impossibleLimit, gapsAnswered, plausibleNumbers,
@@ -209,6 +209,13 @@ interface Run {
   cut: Set<AutofixPhase>;
   /** Renumber reviews passed over because a download or a check was inside the series: the next run's. */
   numberingBusy: number;
+  /**
+   * v0.55.1, read by the recheck for the summary: the sources resting at the end (cooling down or rate-limited now,
+   * restingSources), with their cooldown's end when one runs, and the failed chapters each holds that a rate limit
+   * caused. Both clear by themselves: never Needs you.
+   */
+  restingAtEnd: Map<string, string | null>;
+  limitedRows: Map<string, number>;
 }
 
 let active: Run | null = null;
@@ -275,7 +282,7 @@ export function startAutofix(
     deadline: startedAt + AUTOFIX_MAX_MINUTES * 60_000, phase: null, phaseIndex: 0, phaseMs: {}, current: null, repairCur: null,
     stop: false, card, log: o.log, budget: { left: AUTOFIX_SEARCHES }, engine: 'none', solver: 'none', timeUp: false,
     counts: {}, items: {}, counted: 0, replacedNames: [], replacing: [], keptPkgs: [], removedPkgs: [], installs: 0, installed: [], tried: [], noRoom: [], lines: [],
-    finished: new Set(), cut: new Set(), numberingBusy: 0,
+    finished: new Set(), cut: new Set(), numberingBusy: 0, restingAtEnd: new Map(), limitedRows: new Map(),
   };
   active = a;
   // The audit line is written when the run ends, long after the request: its IP and user agent are taken now.
@@ -577,6 +584,33 @@ async function solver(a: Run): Promise<void> {
 
 // ── 4. sources ──────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The source's own state is a rate limit (v0.55.1): it stays `rate_limited` from the 429 until a download succeeds. */
+async function rateLimited(id: string): Promise<boolean> {
+  return (await one<{ status: string }>('SELECT status FROM source_health WHERE source_id = $1', [id]).catch(() => null))?.status === 'rate_limited';
+}
+
+/**
+ * The sources the chapters phase leaves alone, with their cooldown's end while one runs (v0.55.1): cooling down
+ * (lib/sourceStanding.ts: a cooldown, or a confirmed rate limit at a step an update needs), or rate-limited now -- its
+ * status stays `rate_limited` from the 429 until a download succeeds, whatever the cooldown's clock says. The owner's
+ * first run re-checked failed chapters through Natomanga and Mangakakalot while they answered 429, and 28 chapters
+ * failed again inside four minutes; what a rate limit holds back is the sweep's, once the site is ready.
+ */
+async function restingSources(): Promise<Map<string, string | null>> {
+  const rows = await q<StandingRow & { status: string }>(
+    `SELECT sh.source_id, (sh.disabled OR ${EXTENSION_OFF('sh.source_id')}) AS disabled, sh.blocked_until, sh.stages, sh.status
+       FROM source_health sh
+      WHERE sh.status = 'rate_limited' OR sh.blocked_until > now() OR sh.stages::text LIKE '%failAt%'`).catch(() => []);
+  const t = Date.now();
+  const out = new Map<string, string | null>();
+  for (const r of rows) {
+    if (r.disabled || (r.status !== 'rate_limited' && standingOf(r.source_id, r, t) !== 'cooling')) continue;
+    const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
+    out.set(r.source_id, until > t ? new Date(until).toISOString() : null);
+  }
+  return out;
+}
+
 /** A source the solver being down speaks for: one behind Cloudflare, or one whose failure names the solver. */
 async function solverSpeaksFor(a: Run, id: string): Promise<boolean> {
   if (a.solver !== 'down') return false;
@@ -592,13 +626,20 @@ async function solverSpeaksFor(a: Run, id: string): Promise<boolean> {
  * whose extension is gone -- never for a configuration cause: the engine, the source limit, a hidden language, a
  * MangaDex language switched off, or a solver that is down. One Replace run after another, each awaited. Then retire,
  * as `off`, the failing sources no series uses (retire refuses one that is some series' main).
+ * ⚠️ A rate limit is left alone (v0.55.1): a source whose row is only a rate limit is not Tested -- a Test sends the
+ * site that asked for room four more requests and proves nothing about its images -- and a rate limit's cooldown is
+ * never cleared, after any Test. The owner's first run cleared Natomanga's and Mangakakalot's, and its chapters phase
+ * then sent them the requests their cooldowns were holding back.
  */
 async function sources(a: Run): Promise<void> {
   const trouble = await sourceTrouble(await loadIgnores());
   // A finding an admin chose to ignore is theirs: tested, Replaced or retired by nobody but them.
   const ignored = new Set(trouble.items.filter((i) => i.ignored && i.sourceId).map((i) => i.sourceId!));
+  // Reintroduce by Testing a rate limit's row: "a rate limit is never Tested, nor its cooldown cleared" in
+  // autofix.int.test.ts finds af-limit tested.
   const testable = trouble.items.filter((i) => i.sourceId && !i.ignored && i.state !== 'off' && getSource(i.sourceId)
-    && (i.state === 'failing' || i.state === 'inconclusive' || i.state === 'untested' || (i.state === 'blocked' && !i.info)));
+    && (i.state === 'failing' || i.state === 'inconclusive' || i.state === 'untested'
+      || (i.state === 'blocked' && !i.info && i.cooldown?.status !== 'rate_limited')));
   let tests = 0;
   for (const [n, it] of testable.entries()) {
     if (halted(a)) break;
@@ -617,8 +658,10 @@ async function sources(a: Run): Promise<void> {
     note(a, say('autofix.item.tested', { name: src.name, ok: r.smoke.ok }));
     // ⚠️ Only after a passing Test: clearing also wipes the escalation memory, and a source still refusing would earn a
     // shorter cooldown than the one before. Reintroduce by clearing every block: "a block is cleared only after a passing
-    // Test" in autofix.int.test.ts finds the failing source unblocked.
-    if (r.smoke.ok && r.blocked) {
+    // Test" in autofix.int.test.ts finds the failing source unblocked. And never a rate limit's (v0.55.1): the Test
+    // fetched no image. Reintroduce by dropping `rateLimited`: "a rate limit is never Tested, nor its cooldown cleared"
+    // finds af-ratefail's cooldown gone.
+    if (r.smoke.ok && r.blocked && !(await rateLimited(id))) {
       await clearBlock(id).catch(() => {});
       did(a, 'unblocked', 1, say('autofix.item.unblocked', { name: src.name }));
     }
@@ -855,7 +898,12 @@ async function numbering(a: Run): Promise<void> {
  */
 async function chapters(a: Run): Promise<void> {
   if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'chapters'); return; }
-  const r: RepairResult = await held(() => repairForAutofix(a.log, { only: ['failures', 'short', 'gaps'], userId: a.by }, drive(a)));
+  // v0.55.1: a source cooling down or rate-limited now is left alone -- its failed chapters not reset, nothing listed,
+  // fetched or hunted through it (repair.ts AutofixDrive.resting). Reintroduce by driving without it: "a 429 failure is
+  // not retried by the run" in autofix.int.test.ts finds its row reset and the site asked.
+  const rest = await restingSources();
+  const r: RepairResult = await held(() => repairForAutofix(a.log, { only: ['failures', 'short', 'gaps'], userId: a.by },
+    { ...drive(a), resting: (id) => rest.has(id) }));
   a.repairCur = null;
   did(a, 'failuresCleared', r.failures.reset);
   did(a, 'refetched', r.failures.retried?.added ?? 0);
@@ -1198,6 +1246,12 @@ async function recheckReport(a: Run): Promise<HealthReport> {
   now(a, say('autofix.now.rechecking'));
   const report = await runHealthChecks();
   await storeHealthSummary(report).catch(() => {});
+  // What a rate limit holds back clears by itself (v0.55.1): the summary needs which sources rest now, and which failed
+  // chapters a rate limit caused, beside what Health says.
+  a.restingAtEnd = await restingSources();
+  a.limitedRows = new Map((await q<{ source_id: string; n: number }>(
+    `SELECT f.source_id, count(*)::int AS n FROM chapter_failures f JOIN lib_series s ON s.id = f.series_id AND ${visibleToAll('s')}
+      WHERE f.status = 'rate_limited' GROUP BY f.source_id`).catch(() => [])).map((r) => [r.source_id, Number(r.n)]));
   return report;
 }
 
@@ -1339,15 +1393,24 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
 
   // Chapters that would not download: a source that is off is a person's; reset rows wait for the sweep; rows of a
   // source still failing at their chapters no source here can download.
+  // v0.55.1: what a rate limit holds back clears by itself, never Needs you -- every row of a source cooling down or
+  // rate-limited now (with the cooldown's end), and a row a rate limit caused on any source. The owner's first run
+  // listed 25 such chapters under Needs you. Reintroduce by dropping both: "a 429 failure is not retried by the run and
+  // ends in what clears by itself" in autofix.int.test.ts finds chapter-failures under Needs you.
   const fails = findings(by.get('chapter-failures'));
   let sweepN = 0, stuckN = 0;
   for (const it of fails) {
     const n = Number(it.detailSaid?.[0]?.params?.n ?? 1) || 1;
     const cooling = it.caveats?.find((c) => c.code === 'source_cooling_down');
+    const resting = it.sourceId && a.restingAtEnd.has(it.sourceId);
+    const limited = Math.min(n, (it.sourceId && a.limitedRows.get(it.sourceId)) || 0);
     if (it.caveats?.some((c) => c.code === 'source_off')) stuckN += n;
-    else if (cooling) clear(say('autofix.clears.cooldown', { name: it.title }), cooling.until ?? null);
+    else if (cooling || resting) clear(say('autofix.clears.cooldown', { name: it.title }), cooling?.until ?? a.restingAtEnd.get(it.sourceId!) ?? null);
     else if (it.outcome?.kind === 'failures' && it.outcome.resetPending) sweepN += n;
-    else stuckN += n;
+    else {
+      if (limited) clear(say('autofix.clears.cooldown', { name: it.title }));
+      stuckN += n - limited;
+    }
   }
   if (sweepN) clear(say('autofix.clears.sweep', { n: sweepN }));
   needAfter(['chapters'], 'chapter-failures', stuckN, say('autofix.needs.failures', { n: stuckN }));

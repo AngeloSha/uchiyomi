@@ -545,12 +545,16 @@ beside it are refused in turn (`POST /api/admin/sources/find` answers 409 `autof
 order, reuse what Health's own keys run: `preflight` (the engine and the solver), `scan` (the library scan and the
 page count), `solver` (the repair's solver step, interrupted renumbers finished, the engine's Cloudflare helper
 connected when Health's engine row offers it and `FLARESOLVERR_URL` is set), `sources` (failing, inconclusive and
-blocked sources Tested, a block cleared only after a passing Test; Replace with turnOff for every source some series
+blocked sources Tested, a block cleared only after a passing Test -- since v0.55.1 a source whose row is a rate limit
+is not Tested and a rate limit's cooldown is never cleared; Replace with turnOff for every source some series
 has as its main that is off, failing or uninstalled -- never for a setting or behind a solver that is down; failing
 sources nothing uses retired), `duplicates` (two-language pairs linked as editions; same-language copies merged only
 when their AniList entry, language and titles or chapter lists agree, keeping the copy that still updates), `numbering`
 (a renumbering plan applied only when the plan built at the apply is clean), `chapters` (the repair's failures, short
-and gap steps, uncapped but paced), `extensions` (up to `AUTOFIX_INSTALLS` extensions installed in the series'
+and gap steps, uncapped but paced; since v0.55.1 it leaves alone every source cooling down or rate-limited when it
+begins -- `status` stays `rate_limited` until a download succeeds -- resetting none of its failed chapters and listing,
+fetching or searching nothing through it; what such a source holds back, and every chapter a rate limit failed, is
+`clears` (`autofix.clears.cooldown` {name}, `at` the cooldown's end while one runs), never `needsYou`), `extensions` (up to `AUTOFIX_INSTALLS` extensions installed in the series'
 language for series no source carries or gaps nobody had, only that language's source switched on, kept only when a
 series now reads through it), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
 impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
