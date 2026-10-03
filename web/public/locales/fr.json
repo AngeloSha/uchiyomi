@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2750
+    "strings": 2777
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -2753,5 +2753,32 @@
   "Turned on {name} — 1 source ready to search": "{name} activée — 1 source prête pour la recherche",
   "Turned on {name} — {n} sources ready to search": "{name} activée — {n} sources prêtes pour la recherche",
   "Turning on…": "Activation…",
-  "Could not reach the repositories to check for updates.": "Impossible de joindre les dépôts pour rechercher des mises à jour."
+  "Could not reach the repositories to check for updates.": "Impossible de joindre les dépôts pour rechercher des mises à jour.",
+  "Add a genre…": "Ajouter un genre…",
+  "Automatic · {direction}": "Automatique · {direction}",
+  "Background": "Arrière-plan",
+  "Background reset to automatic": "L’arrière-plan est revenu à l’automatique",
+  "Background updated": "Arrière-plan mis à jour",
+  "Changes apply for everyone": "Les modifications valent pour tout le monde",
+  "Could not change the background": "Impossible de changer l’arrière-plan",
+  "Could not change the cover": "Impossible de changer la couverture",
+  "Cover": "Couverture",
+  "Cover reset to automatic": "La couverture est revenue à l’automatique",
+  "Cover updated": "Couverture mise à jour",
+  "Files": "Fichiers",
+  "From a link": "Depuis un lien",
+  "From the files": "D’après les fichiers",
+  "Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.": "Les genres alimentent Parcourir et les rangées de recommandations. Les retirer tous signifie que cette série n’en a vraiment aucun.",
+  "Image link": "Lien de l’image",
+  "Images up to {n} MB. You can also drop one onto a preview.": "Images jusqu’à {n} Mo. Vous pouvez aussi en déposer une sur un aperçu.",
+  "Members with an age limit below this will not see the series anywhere: not in the library, search, the reader, or an external OPDS app.": "Les membres dont la limite d’âge est inférieure ne verront la série nulle part : ni dans la bibliothèque, ni dans la recherche, ni dans le lecteur, ni dans une app OPDS externe.",
+  "More background options": "Plus d’options pour l’arrière-plan",
+  "More cover options": "Plus d’options pour la couverture",
+  "Paste a full link to an image, starting with https://": "Collez un lien complet vers une image, commençant par https://",
+  "Reset to automatic": "Revenir à l’automatique",
+  "Set": "Utiliser",
+  "That file is not an image this server can read.": "Ce fichier n’est pas une image que ce serveur sait lire.",
+  "That image is over {n} MB. Pick a smaller one.": "Cette image dépasse {n} Mo. Choisissez-en une plus petite.",
+  "Upload": "Envoyer",
+  "Where its chapters come from, and which translation groups come first.": "D’où viennent ses chapitres, et quels groupes de traduction passent en premier."
 }

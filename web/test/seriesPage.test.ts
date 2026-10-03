@@ -297,8 +297,9 @@ test('the chapter select bar says it removes chapters, and where the series\' ow
 
 test('Mark caught up floors the series where Auto-update is, and its Undo puts the old floor back (v0.52.0)', () => {
   // Discussion #72. Reintroduce by undoing with `null` instead of the answer's `previous`: "Undo does not put back
-  // the floor the answer reported" fails, and a series added as Latest 25 loses its floor to an Undo.
-  const page = code(read('app/series/page.tsx'));
+  // the floor the answer reported" fails, and a series added as Latest 25 loses its floor to an Undo. Edit details
+  // is components/SeriesEditor.tsx since v0.53.0 (its Updates tab).
+  const page = code(read('components/SeriesEditor.tsx'));
   assert.match(page, /onClick=\{\(\) => void floorTo\('caught_up'\)\}/, 'the confirmation does not mark it caught up');
   assert.match(page, /json: \{ chapterFloor \}/, 'the floor is not what is sent');
   assert.match(page, /onClick=\{\(\) => void floorTo\(caught\.previous\)\}/, 'Undo does not put back the floor the answer reported');
@@ -308,13 +309,16 @@ test('Mark caught up floors the series where Auto-update is, and its Undo puts t
 });
 
 test('an admin copies a chapter\'s file path and the series\' folder with one tap (#136)', () => {
-  // Reintroduce by dropping the menu entry: "a chapter's menu cannot copy its file path" fails.
+  // Reintroduce by dropping the menu entry: "a chapter's menu cannot copy its file path" fails. The folder and the
+  // copy itself are Edit details' (components/SeriesEditor.tsx, its Files tab, since v0.53.0), which the page imports.
   const page = code(read('app/series/page.tsx'));
+  const editor = code(read('components/SeriesEditor.tsx'));
   assert.match(page, /\.\.\.\(onCopyPath \? \[\{ label: tr\('Copy file path'\), divider: !onEdit, onSelect: onCopyPath \}\] : \[\]\)/, 'a chapter\'s menu cannot copy its file path');
   assert.match(page, /onCopyPath=\{isAdmin && b\.path \? \(\) => void copyPath\(b\.path!, toast\) : undefined\}/, 'the copy is offered to someone other than an admin');
-  assert.match(page, /\{series\.paths\.map\(\(path\) => \(/, 'Edit details does not show the folder');
-  assert.match(page, /onClick=\{\(\) => void copyPath\(path, toast\)\}/, 'the folder is not copied with one tap');
-  assert.match(page, /toast\(tr\('Copied: \{path\}', \{ path: shown \}\), 'success'\)/, 'a copy is not said');
+  assert.match(page, /import \{[^}]*\bcopyPath\b[^}]*\} from '@\/components\/SeriesEditor'/, 'the page copies with a copy of its own');
+  assert.match(editor, /\{series\.paths\.map\(\(path\) => \(/, 'Edit details does not show the folder');
+  assert.match(editor, /onClick=\{\(\) => void copyPath\(path, toast\)\}/, 'the folder is not copied with one tap');
+  assert.match(editor, /toast\(tr\('Copied: \{path\}', \{ path: shown \}\), 'success'\)/, 'a copy is not said');
 });
 
 test('the favourite button and the save notices are in the reader\'s words (v0.52.0)', () => {
@@ -324,9 +328,10 @@ test('the favourite button and the save notices are in the reader\'s words (v0.5
   assert.match(page, /\{fav \? tr\('In favourites'\) : tr\('Favourite'\)\}/, 'the favourite button is not translated');
   assert.match(page, /tr\('Saved\. \{n\} readers had finished this chapter\.', \{ n: r\.affectedUsers \}\)/, 'the chapter save notice is not a counted pair');
   assert.doesNotMatch(page, /reader\(s\)/, 'a "(s)" plural is back');
-  // Edit details' check key was the last bare English on the page (v0.52.0). Reintroduce `'Check for new chapters
-  // now'` without tr(): "the check key is English in every language" fails.
-  assert.match(page, /\{checking \? tr\('Checking…'\) : tr\('Check for new chapters now'\)\}/, 'the check key is English in every language');
+  // Edit details' check key was the last bare English on the page (v0.52.0); it is components/SeriesEditor.tsx's
+  // since v0.53.0. Reintroduce `'Check for new chapters now'` without tr(): "the check key is English in every
+  // language" fails.
+  assert.match(code(read('components/SeriesEditor.tsx')), /\{checking \? tr\('Checking…'\) : tr\('Check for new chapters now'\)\}/, 'the check key is English in every language');
   assert.match(code(read('app/admin/page.tsx')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
     'Delete files says "file(s)" again');
 });

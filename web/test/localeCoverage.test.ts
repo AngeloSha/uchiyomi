@@ -27,7 +27,7 @@ function walk(dir: string, out: string[] = []): string[] {
  * The source with its comments blanked and its strings left alone.
  *
  * ⚠️ Not the `code()` regex the other tests use. Its `/\*[\s\S]*?\*\/` reads the `/*` inside
- * `accept="image/*"` (series/page.tsx) as the start of a comment and deletes everything up to the next `*\/`
+ * `accept="image/*"` (components/SeriesEditor.tsx) as the start of a comment and deletes everything up to the next `*\/`
  * -- which, over the whole app, would silently drop real keys from this scan. This walks the characters
  * instead, so a `//` or `/*` inside a string is left as the string it is. Comments go because several quote
  * the code they forbid (ConfirmDialog.tsx says `tr('Type')` in one).
@@ -97,18 +97,20 @@ const placeholders = (s: string) => [...new Set(s.match(/\{\w+\}/g) ?? [])].sort
 
 test('the scan itself sees the app: inline keys, keys() arrays, and nothing from comments', () => {
   // A scan that silently finds nothing passes everything. Reintroduce the naive block-comment regex in
-  // stripComments: series/page.tsx loses the strings after its `accept="image/*"` and "a key after
-  // image/* in series/page.tsx" fails.
+  // stripComments: everything after an `accept="image/*"` up to the next comment's end is lost, and "a key after
+  // image/* is not scanned" fails.
   const keys = appKeys();
   assert.ok(keys.size >= 1300, `only ${keys.size} keys found -- the scan is broken`);
   assert.ok(keys.get('Library')?.has('components/BottomNav.tsx (keys)'), 'the bottom nav\'s keys() labels are not scanned');
   assert.ok(keys.get('Needs attention')?.has('lib/status.ts (keys)'), 'a keys() array in lib/ is not scanned');
   assert.ok(keys.has('Up to {n} minutes'), 'an inline tr() in lib/ is not scanned');
   assert.ok(keys.has('Not asked: enough other sources already list this series'), 'an inline tr() in components/ is not scanned');
-  const series = readFileSync(join(ROOT, 'app/series/page.tsx'), 'utf8');
-  const after = series.slice(series.indexOf('accept="image/*"'));
-  const later = after.match(/\btr\('((?:[^'\\\n]|\\.)*)'/);
-  assert.ok(later && keys.has(unescape(later[1])), 'a key after image/* in series/page.tsx is not scanned');
+  // The case on a snippet of its own: the app's one such string (Edit details' file input, v0.53.0) is the last thing
+  // in its file, where the naive regex finds no comment end to run to and so eats nothing a real scan would miss.
+  const tricky = '<input accept="image/*" hidden />\n<p>{tr(\'After the accept\')}</p>\n{/* a comment */}\n';
+  assert.match(stripComments(tricky), /tr\('After the accept'\)/, 'a key after image/* is not scanned');
+  assert.doesNotMatch(stripComments(tricky), /a comment/, 'a comment after it is scanned as code');
+  assert.ok(readFileSync(join(ROOT, 'components/SeriesEditor.tsx'), 'utf8').includes('accept="image/*"'), 'no file input left to make this case real');
   assert.ok(!keys.has('Type'), 'a key quoted only in a comment (ConfirmDialog.tsx) is scanned as if it were used');
 });
 

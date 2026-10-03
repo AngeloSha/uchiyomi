@@ -15,7 +15,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
-import { t as tr, keys } from '@/lib/i18n';
+import { t as tr } from '@/lib/i18n';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
@@ -29,7 +29,7 @@ import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { fetchingToast } from '@/lib/jobs';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
-import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
+import { SourcesSheet, useSeriesGroups } from '@/components/SourcesSheet';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
@@ -46,338 +46,15 @@ import { listingArchiveLine } from '@/lib/archive';
 import { NumberingNotice } from '@/components/NumberingNotice';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import type { PlanMode } from '@/lib/numbering';
-import { numLabel } from '@/lib/numbering';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
-import { editionChipLabels, languageChoices } from '@/lib/editions';
-
-/**
- * Put a path on the clipboard, and say so with the path in the notice (#136): copying is one tap, and the notice is
- * where the path can be read too. Isolated (FSI…PDI) so a path reads left to right inside an Arabic sentence. Where
- * the browser has no clipboard (plain http on a LAN) or refuses, the notice says where the file is instead.
- */
-async function copyPath(path: string, toast: ReturnType<typeof useToast>): Promise<void> {
-  const shown = `\u2068${path}\u2069`;
-  try {
-    await navigator.clipboard.writeText(path);
-    toast(tr('Copied: {path}', { path: shown }), 'success');
-  } catch {
-    toast(tr('Could not copy it. The path is {path}', { path: shown }), 'info');
-  }
-}
+import { editionChipLabels } from '@/lib/editions';
+import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
 
-// The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
-// than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
-const STATUSES = ['ONGOING', 'COMPLETED', 'HIATUS', 'CANCELLED'];
+// The one field style the page's own small dialogs share (Add to collection, Edit chapter).
 const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-hidden transition focus:border-accent/60';
-
-function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: string; kind: 'cover' | 'banner'; busy: boolean; onUpload: (k: 'cover' | 'banner', f: File) => void; onSetUrl: (k: 'cover' | 'banner', url: string) => void; onReset: (k: 'cover' | 'banner') => void }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [url, setUrl] = useState('');
-  return (
-    <div className="mt-4 border-t border-ink-800 pt-3">
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(kind, f); e.currentTarget.value = ''; }} />
-        <button onClick={() => fileRef.current?.click()} disabled={busy} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">{tr('Upload image')}</button>
-        <button onClick={() => onReset(kind)} disabled={busy} className="chip text-xs disabled:opacity-50">{tr('Reset to auto')}</button>
-      </div>
-      <div className="mt-2 flex gap-2">
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={tr('…or paste an image URL')} autoCapitalize="none" className={`${fld} flex-1`} />
-        <button onClick={() => { onSetUrl(kind, url); setUrl(''); }} disabled={busy || !url.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Set</button>
-      </div>
-    </div>
-  );
-}
-
-/** Komga's four directions, as the edit modal offers them: what the server stores, and the label for each. */
-const DIRECTION_LABELS = keys('Right to left', 'Left to right', 'Webtoon', 'Vertical');
-const DIRECTIONS = (['RIGHT_TO_LEFT', 'LEFT_TO_RIGHT', 'WEBTOON', 'VERTICAL'] as const).map((v, i) => [v, DIRECTION_LABELS[i]] as const);
-
-/**
- * The "Automatic" choice, saying what automatic currently means and what said so -- so an admin can see
- * whether the files, the source or AniList placed the series before deciding to overrule it.
- */
-function autoDirectionLabel(d: Series['detectedDirection']): string {
-  const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1];
-  if (!d || !label) return tr('Automatic — not known, reads as a webtoon');
-  const direction = tr(label);
-  if (d.from === 'comicinfo') return tr('Automatic — {direction}, from the chapter files', { direction });
-  if (d.from === 'anilist') return tr('Automatic — {direction}, from AniList', { direction });
-  return tr('Automatic — {direction}, from the source', { direction });
-}
-
-function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series: Series; onClose: () => void; onSaved: () => void }) {
-  // On the notices' layer stack (lib/layers.ts), as Modal is: this hand-rolled dialog toasts while open
-  // ("Could not save"), and a notice placed as if nothing were open would sit on its lower buttons.
-  useLayer('dialog');
-  const toast = useToast();
-  const [title, setTitle] = useState(series.metadata?.title || series.name || '');
-  const [summary, setSummary] = useState(series.metadata?.summary || series.booksMetadata?.summary || '');
-  // Seed from the OVERRIDE where one exists, falling back to the scanned value. Seeding from the scan alone
-  // would show the scanned author while an override was active, and saving would then overwrite the override
-  // with the very value it was created to replace.
-  const [author, setAuthor] = useState(series.overrides?.author ?? series.metadata?.author ?? '');
-  const [status, setStatus] = useState(series.overrides?.status ?? series.metadata?.status ?? '');
-  // A minimum age, or '' meaning "whatever the files said". Age caps on member accounts compare against
-  // this, and an unrated series stays visible to everyone -- so setting one is opting a title IN to being
-  // filtered, never opting the rest of the library out.
-  const [ageRating, setAgeRating] = useState<string>(
-    series.overrides?.ageRating != null ? String(series.overrides.ageRating)
-      : series.metadata?.ageRating != null ? String(series.metadata.ageRating) : '',
-  );
-  const [genres, setGenres] = useState<string[]>(series.overrides?.genres ?? series.metadata?.genres ?? []);
-  const [genreDraft, setGenreDraft] = useState('');
-  // "Always show": kept on the shelf while "Show 18+" is off, whatever makes it 18+ (its genres, its rating, its
-  // library). Surfacing only: who may open the series is still the age rating above.
-  const [adultExempt, setAdultExempt] = useState(series.overrides?.adultExempt === true);
-  // Which way the series reads (#102): what the reader's "Series default" direction follows. '' is automatic --
-  // the chapter files, then the source, then AniList (bff lib/readingDirection.ts), a webtoon when none says.
-  // Seeded from the OVERRIDE only, never from the effective value: seeding from that would turn whatever was
-  // detected into a hand-set override on the first unrelated save, and a later, better signal could never
-  // reach the series again.
-  const [direction, setDirection] = useState<string>(series.overrides?.readingDirection ?? '');
-  const [busy, setBusy] = useState(false);
-  const addGenre = (raw: string) => {
-    const t = raw.trim().replace(/,$/, '').trim();
-    if (!t || genres.some((g) => g.toLowerCase() === t.toLowerCase())) { setGenreDraft(''); return; }
-    setGenres([...genres, t]);
-    setGenreDraft('');
-  };
-  const dataUrlOf = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
-  const putArt = async (kind: 'cover' | 'banner', body: Record<string, unknown>) => { await api(`/api/admin/series/${id}/art`, { method: 'PUT', json: { kind, ...body } }); onSaved(); };
-  const onUpload = async (kind: 'cover' | 'banner', f: File) => {
-    if (f.size > 11 * 1024 * 1024) { toast('Image too large (max ~11 MB)', 'error'); return; }
-    setBusy(true);
-    try { await putArt(kind, { mode: 'upload', dataUrl: await dataUrlOf(f) }); toast(`${kind === 'cover' ? 'Cover' : 'Background'} updated`, 'success'); }
-    catch { toast('Upload failed', 'error'); }
-    setBusy(false);
-  };
-  const onSetUrl = async (kind: 'cover' | 'banner', url: string) => { if (!url.trim()) return; setBusy(true); try { await putArt(kind, { mode: 'url', url: url.trim() }); toast('Updated', 'success'); } catch { toast('Failed — check the URL', 'error'); } setBusy(false); };
-  const onReset = async (kind: 'cover' | 'banner') => { setBusy(true); try { await putArt(kind, { mode: 'reset' }); toast('Reset to automatic', 'success'); } catch { toast('Failed', 'error'); } setBusy(false); };
-  // Every field goes on every save. The route writes all five columns, so omitting one would silently
-  // clear its override rather than leave it alone.
-  const saveText = async () => {
-    setBusy(true);
-    try {
-      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating), adultExempt, readingDirection: direction || null } });
-      toast(tr('Saved'), 'success');
-      onSaved();
-    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
-    setBusy(false);
-  };
-
-  // The language the series is in (v0.52.0): what decides which sources may be followed for it automatically, and
-  // which edition of a work it is. '' is automatic -- what its source declares, else the server's unstated language --
-  // which an edition does not have: every edition of a work states its language. Saved as it is chosen, as the
-  // library is above.
-  const qc = useQueryClient();
-  const edition = (series.edition?.editions?.length ?? 0) > 1;
-  const [lang, setLang] = useState<string>(series.langStated ? series.lang ?? '' : '');
-  const langs = useMemo(() => languageChoices([series.lang, series.langAuto], languageName), [series.lang, series.langAuto]);
-  const saveLang = async (next: string) => {
-    const prev = lang;
-    setLang(next);
-    try { await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { lang: next || null } }); onSaved(); }
-    catch (e) { setLang(prev); toast(msgOf(e, tr('Could not change that')), 'error'); }
-  };
-
-  // "Mark caught up" (discussion #72): the floor of a "Nothing yet" add, set on a series already here -- what is out
-  // now is never fetched, what comes out next is. Asked first, in place, with what it does; then said, with Undo,
-  // which puts the floor the answer reported back.
-  const [caught, setCaught] = useState<null | 'asking' | { floor: number | null; previous: number | null }>(null);
-  const [caughtBusy, setCaughtBusy] = useState(false);
-  const floorTo = async (chapterFloor: 'caught_up' | number | null) => {
-    setCaughtBusy(true);
-    try {
-      const r = await api<{ chapterFloor: { floor: number | null; previous: number | null } }>(`/api/admin/series/${id}`, { method: 'PATCH', json: { chapterFloor } });
-      // The ghost rows read the floor ("older chapters"), so the list under the dialog follows at once.
-      for (const k of [['series-listing', id], ['series', id]]) qc.invalidateQueries({ queryKey: k });
-      setCaught(chapterFloor === 'caught_up' ? r.chapterFloor : null);
-      toast(chapterFloor === 'caught_up' ? tr('Marked caught up') : tr('Undone'), 'success');
-    } catch (e) {
-      toast(msgOf(e, tr('Could not change that')), 'error');
-      if (chapterFloor === 'caught_up') setCaught(null);
-    }
-    setCaughtBusy(false);
-  };
-  // The floor sits a hair above the newest chapter (bff: max + 0.001); the sentence names that chapter.
-  const caughtNewest = caught && typeof caught === 'object' && caught.floor != null ? numLabel(caught.floor - 0.001) : null;
-
-  // Which library this series is filed under. `''` means the folder rule decides, which is the default and
-  // what almost every series should stay on -- picking one explicitly is a decision that then survives
-  // rescans, new libraries, and re-pathing an existing one, which is the whole point and also the reason not
-  // to do it by accident.
-  const [lib, setLib] = useState<string>(series.libraryPinned ? series.libraryId : '');
-  const { data: libs } = useQuery({
-    queryKey: ['admin-libraries'],
-    queryFn: () => api<{ content: { id: string; name: string; age_rating: number | null }[] }>('/api/admin/libraries'),
-  });
-  const saveLib = async (next: string) => {
-    const prev = lib;
-    setLib(next);
-    try { await api(`/api/admin/series/${id}/library`, { method: 'POST', json: { libraryId: next || null } }); onSaved(); }
-    catch (e) { setLib(prev); toast(msgOf(e, tr('Could not move that')), 'error'); }
-  };
-
-  const [autoUpdate, setAutoUpdate] = useState(series.autoUpdate !== false);
-  const toggleAuto = async (next: boolean) => {
-    setAutoUpdate(next);
-    try { await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { autoUpdate: next } }); }
-    catch (e) { setAutoUpdate(!next); toast(msgOf(e, 'Could not change that'), 'error'); }
-  };
-
-  // The same Check now as the Sources & translations sheet's chip, so the two report alike.
-  const { checking, checkNow } = useCheckNow(id, onSaved);
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={tr('Edit series')} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
-        </div>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Library')}</label>
-        <select value={lib} onChange={(e) => saveLib(e.target.value)} className={fld}>
-          <option value="">{tr('Automatic — follow the folder')}</option>
-          {(libs?.content ?? []).map((l) => (
-            <option key={l.id} value={l.id}>{l.name}{l.age_rating != null ? ` (${l.age_rating}+)` : ''}</option>
-          ))}
-        </select>
-        <p className="mb-3 mt-1 text-[11px] text-fog-600">
-          {lib ? tr('Filed here by hand. Rescans and new libraries will leave it alone.')
-               : tr('Whichever library covers this folder, most specific first.')}
-        </p>
-        {/* Where it is on disk (#136): the folder as full paths, one per root its chapters are under, each copied with
-            one tap. LTR whatever the page's direction: a path is not a sentence. */}
-        {!!series.paths?.length && (
-          <div className="mb-3" data-series-paths>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folder on the server')}</p>
-            {series.paths.map((path) => (
-              <div key={path} className="mt-1 flex min-w-0 items-start gap-2">
-                <code dir="ltr" className="min-w-0 flex-1 select-all break-all rounded-md bg-ink-900/60 px-2 py-1 font-mono text-[11px] text-fog-200">{path}</code>
-                <button type="button" onClick={() => void copyPath(path, toast)} className="btn-key shrink-0">{tr('Copy')}</button>
-              </div>
-            ))}
-          </div>
-        )}
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Language')}</label>
-        <select value={lang} onChange={(e) => saveLang(e.target.value)} className={fld}>
-          {!edition && (
-            <option value="">{series.langAuto ? tr('Automatic ({language})', { language: languageName(series.langAuto) }) : tr('Automatic')}</option>
-          )}
-          {langs.map((l) => <option key={l} value={l}>{languageName(l)}</option>)}
-        </select>
-        <p className="mb-3 mt-1 text-[11px] text-fog-600">{tr('The language this series is in. Sources in another language are never followed for it automatically.')}</p>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Description')}</label>
-        <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={5} className={`${fld} resize-y`} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Author')}</label>
-        <input value={author} onChange={(e) => setAuthor(e.target.value)} className={fld} placeholder={tr('Leave blank to use what the files say')} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Status')}</label>
-        <select value={STATUSES.includes(status.toUpperCase()) ? status.toUpperCase() : (status ? '__other' : '')}
-          onChange={(e) => setStatus(e.target.value === '__other' ? status : e.target.value)} className={fld}>
-          <option value="">{tr('Use what the files say')}</option>
-          {STATUSES.map((v) => <option key={v} value={v}>{v.charAt(0) + v.slice(1).toLowerCase()}</option>)}
-          <option value="__other">{tr('Something else…')}</option>
-        </select>
-        {!!status && !STATUSES.includes(status.toUpperCase()) && (
-          <input value={status} onChange={(e) => setStatus(e.target.value)} className={`${fld} mt-2`} placeholder={tr('Status')} />
-        )}
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Age rating')}</label>
-        <select value={ageRating} onChange={(e) => setAgeRating(e.target.value)} className={fld}>
-          <option value="">{tr('Not rated — visible to everyone')}</option>
-          {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
-        </select>
-        <p className="mt-1 text-[11px] text-fog-500">
-          Members with an age limit below this will not see the series anywhere: not in the library, search,
-          the reader, or an external OPDS app.
-        </p>
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Reading direction')}</label>
-        <select value={direction} onChange={(e) => setDirection(e.target.value)} className={fld}>
-          <option value="">{autoDirectionLabel(series.detectedDirection)}</option>
-          {DIRECTIONS.map(([v, label]) => <option key={v} value={v}>{tr(label)}</option>)}
-        </select>
-        <p className="mt-1 text-[11px] text-fog-500">{tr('What “Series default” in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.')}</p>
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Genres')}</label>
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700 bg-ink-900/60 p-2">
-          {genres.map((g) => (
-            <span key={g} className="inline-flex items-center gap-1 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
-              {g}
-              <button type="button" onClick={() => setGenres(genres.filter((x) => x !== g))}
-                aria-label={`Remove ${g}`} className="text-fog-500 hover:text-rose-400">×</button>
-            </span>
-          ))}
-          <input
-            value={genreDraft}
-            onChange={(e) => (e.target.value.endsWith(',') ? addGenre(e.target.value) : setGenreDraft(e.target.value))}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGenre(genreDraft); }
-                                else if (e.key === 'Backspace' && !genreDraft && genres.length) setGenres(genres.slice(0, -1)); }}
-            onBlur={() => addGenre(genreDraft)}
-            placeholder={genres.length ? 'Add…' : 'Action, Fantasy…'}
-            className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-fog-50 outline-hidden"
-          />
-        </div>
-        <p className="mt-1 text-[11px] text-fog-500">Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.</p>
-        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 text-sm">
-          <span>
-            <span className="text-fog-100">{tr('Always show')}</span>
-            <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.')}</span>
-          </span>
-          <input type="checkbox" checked={adultExempt} onChange={(e) => setAdultExempt(e.target.checked)} className="size-4 shrink-0 accent-accent" />
-        </label>
-        <button onClick={saveText} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{tr('Save details')}</button>
-        <div className="mt-4 rounded-xl border border-ink-700 p-3">
-          <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
-            <span>
-              <span className="text-fog-100">{tr('Auto-update new chapters')}</span>
-              <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('The scheduled check fetches new chapters for this series.')}</span>
-            </span>
-            <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} className="size-4 shrink-0 accent-accent" />
-          </label>
-          <button onClick={checkNow} disabled={checking} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
-            {checking ? tr('Checking…') : tr('Check for new chapters now')}
-          </button>
-          {/* Mark caught up (v0.52.0): only for a series with a source to fetch from. */}
-          {!!series.sources?.length && (
-            <div className="mt-3 border-t border-ink-800 pt-3" data-caught-up={caught === null ? 'idle' : caught === 'asking' ? 'asking' : 'done'}>
-              {caught === null && (
-                <button type="button" onClick={() => setCaught('asking')} className="btn-key">{tr('Mark caught up')}</button>
-              )}
-              {caught === 'asking' && (
-                <>
-                  <p className="text-[11px] leading-relaxed text-fog-300">
-                    {tr('Chapters already out are not fetched; only new ones are, from the next check. Chapters already here stay, and older ones can still be fetched from the chapter list.')}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void floorTo('caught_up')} disabled={caughtBusy} className="btn-key btn-key-primary">{tr('Mark caught up')}</button>
-                    <button type="button" onClick={() => setCaught(null)} disabled={caughtBusy} className="btn-key">{tr('Cancel')}</button>
-                  </div>
-                </>
-              )}
-              {caught !== null && caught !== 'asking' && (
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed text-fog-300">
-                  <span>{caughtNewest ? tr('Caught up: only chapters after {number} are fetched.', { number: caughtNewest }) : tr('Marked caught up')}</span>
-                  <button type="button" onClick={() => void floorTo(caught.previous)} disabled={caughtBusy} className="btn-key">{tr('Undo')}</button>
-                </p>
-              )}
-            </div>
-          )}
-          {/* The sources (with their × to stop following one) and the Prefer / Block / patience controls live
-              in the Sources & translations sheet on the series page now, beside the statistics they are
-              decided from. One line here so an admin who learned them in this dialog is told where they
-              went rather than left to conclude they are gone. */}
-          <p className="mt-3 border-t border-ink-800 pt-3 text-[11px] text-fog-600">{tr('Translation groups are ranked in Sources & translations')}</p>
-        </div>
-        <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
-        <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
-        <p className="mt-4 text-[11px] leading-relaxed text-fog-500">Changes apply for everyone. “Reset to auto” restores the automatic source / AniList / first-page art.</p>
-      </div>
-    </div>
-  );
-}
 
 interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
 
@@ -995,7 +672,8 @@ function SeriesInner() {
   const toast = useToast();
   const { isAdmin, user } = useAuth();
   const [editChapter, setEditChapter] = useState<Book | null>(null);
-  const [editing, setEditing] = useState(false);
+  // Edit details, open on a tab: Details from its key, Reading from the Sources sheet's language Change.
+  const [editing, setEditing] = useState<EditTab | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [findingMissing, setFindingMissing] = useState(false);
   const [asc, setAsc] = useState(true);
@@ -1803,7 +1481,7 @@ function SeriesInner() {
       )}
       {isAdmin && (
         <>
-          <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+          <button onClick={() => setEditing('details')} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>{tr('Edit details')}</button>
           {/* Only while the hero is an automatic one: a real banner is changed in Edit details. */}
           {series?.autoHero && (
@@ -2099,7 +1777,7 @@ function SeriesInner() {
           // v0.52.0, the Languages section. Each closes the sheet first: a dialog opened under a Sheet cannot be tapped.
           onAddLanguage={addLanguage ? () => { setSourcesOpen(false); setAddingLang({}); } : undefined}
           onAddEdition={addEdition ? (o) => { setSourcesOpen(false); addEdition(o); } : undefined}
-          onChangeLanguage={isAdmin ? () => { setSourcesOpen(false); setEditing(true); } : undefined}
+          onChangeLanguage={isAdmin ? () => { setSourcesOpen(false); setEditing('reading'); } : undefined}
           onUnlink={isAdmin ? (e) => { setSourcesOpen(false); setUnlinking(e); } : undefined}
           onShowChapter={showChapter} />
       )}
@@ -2160,7 +1838,14 @@ function SeriesInner() {
           onSaved={() => { for (const k of [['series', id], ['series-books', id], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); }}
         />
       )}
-      {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }} />}
+      {editing && series && (
+        // Keyed by the series: its fields are seeded once, from the series it opened on.
+        <SeriesEditor key={id} id={id} series={series} tab={editing} onClose={() => setEditing(null)}
+          onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }}
+          // Its Sources & translations link closes it first: one at a time, as the sheets above.
+          onOpenSources={() => { setEditing(null); setSourcesOpen(true); }}
+          onNewBanner={newBanner} />
+      )}
       {editChapter && (
         <ChapterEditModal book={editChapter} onClose={() => setEditChapter(null)}
           onSaved={() => { for (const k of [['series-books', id], ['series', id], ['home']]) qc.invalidateQueries({ queryKey: k }); }} />

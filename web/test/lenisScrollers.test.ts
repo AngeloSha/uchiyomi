@@ -32,6 +32,7 @@ const OVERLAYS = [
   'components/ConfirmDialog.tsx',
   'components/ConsoleNav.tsx',
   'components/CommandPalette.tsx',
+  'components/SeriesEditor.tsx',       // Edit details (v0.53.0): its tabs' one scroller, and the tab row on a phone
 ];
 
 /** Source with comments removed: several of them quote the class names below. */

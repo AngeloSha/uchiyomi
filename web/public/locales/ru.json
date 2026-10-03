@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2750
+    "strings": 2777
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2753,5 +2753,32 @@
   "Turned on {name} — 1 source ready to search": "Расширение {name} включено — 1 источник готов к поиску",
   "Turned on {name} — {n} sources ready to search": "Расширение {name} включено — источников готово к поиску: {n}",
   "Turning on…": "Включаем…",
-  "Could not reach the repositories to check for updates.": "Не удалось связаться с репозиториями, чтобы проверить обновления."
+  "Could not reach the repositories to check for updates.": "Не удалось связаться с репозиториями, чтобы проверить обновления.",
+  "Add a genre…": "Добавить жанр…",
+  "Automatic · {direction}": "Автоматически · {direction}",
+  "Background": "Фон",
+  "Background reset to automatic": "Фон снова выбирается автоматически",
+  "Background updated": "Фон обновлён",
+  "Changes apply for everyone": "Изменения действуют для всех",
+  "Could not change the background": "Не удалось изменить фон",
+  "Could not change the cover": "Не удалось изменить обложку",
+  "Cover": "Обложка",
+  "Cover reset to automatic": "Обложка снова выбирается автоматически",
+  "Cover updated": "Обложка обновлена",
+  "Files": "Файлы",
+  "From a link": "По ссылке",
+  "From the files": "Из файлов",
+  "Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.": "Жанры определяют «Каталог» и ленты рекомендаций. Если убрать их все, у этой серии действительно не будет жанров.",
+  "Image link": "Ссылка на изображение",
+  "Images up to {n} MB. You can also drop one onto a preview.": "Изображения до {n} МБ. Картинку можно и перетащить на предпросмотр.",
+  "Members with an age limit below this will not see the series anywhere: not in the library, search, the reader, or an external OPDS app.": "Участники с возрастным ограничением ниже этого не увидят серию нигде: ни в библиотеке, ни в поиске, ни в читалке, ни во внешнем приложении OPDS.",
+  "More background options": "Другие действия с фоном",
+  "More cover options": "Другие действия с обложкой",
+  "Paste a full link to an image, starting with https://": "Вставьте полную ссылку на изображение, начинающуюся с https://",
+  "Reset to automatic": "Сбросить на авто",
+  "Set": "Применить",
+  "That file is not an image this server can read.": "Этот файл не похож на изображение, которое сервер может прочитать.",
+  "That image is over {n} MB. Pick a smaller one.": "Это изображение больше {n} МБ. Выберите поменьше.",
+  "Upload": "Загрузить",
+  "Where its chapters come from, and which translation groups come first.": "Откуда берутся главы и какие группы перевода идут первыми."
 }
