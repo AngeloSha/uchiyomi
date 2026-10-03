@@ -67,9 +67,10 @@ import { switchMainSource } from './mainSource';
 import { standingOf, standingRows, EXTENSION_OFF_BY } from './sourceStanding';
 import { currentFailures } from './sourceEvidence';
 import {
-  runHealthChecks, sourceTrouble, frozenSeries, duplicateSeries, savedTwiceGroups, impossibleLimit,
-  type HealthCheck, type HealthItem, type HealthReport,
+  runHealthChecks, sourceTrouble, frozenSeries, duplicateSeries, savedTwiceGroups, impossibleLimit, gapsAnswered, plausibleNumbers,
+  type HealthCheck, type HealthItem, type HealthReport, type StoredGaps,
 } from './health';
+import { gapsOf, splitAtFloor } from './fill';
 import { loadIgnores, noIgnores } from './healthIgnore';
 import { storeHealthSummary, scheduleHealthSummaryRefresh } from './healthSummary';
 import { mergeRefusal, mergeSeries, deleteChapterFiles, getSeriesRow } from './libraryAdmin';
@@ -861,6 +862,11 @@ type Target = { id: string; title: string; main: string | null; lang: string; ki
 /**
  * The series that still have no working source after the sources phase -- for a reason that is the source's own, not a
  * setting -- and the series with a gap nobody else lists ("asked, and nobody has it", fresh). Each with its language.
+ * ⚠️ A gap's answer counts only while it is about the series as it is now (health.ts gapsAnswered: nothing landed since)
+ * and the series still has a hole: an earlier run that filled the gap -- from an extension it installed -- left the
+ * answer "nobody has it" behind, and the next run installed another package for a series with nothing missing (and,
+ * under the source limit, told the admin to free a slot for it). Reintroduce by reading the stored answer alone: "a gap
+ * an earlier run filled is no reason to install" in autofixExtensions.int.test.ts finds a second install.
  */
 async function extensionTargets(a: Run): Promise<Target[]> {
   const out: Target[] = [];
@@ -868,11 +874,18 @@ async function extensionTargets(a: Run): Promise<Target[]> {
   const frozen = await frozenSeries(noIgnores(), a.engine === 'up' ? 'up' : 'unreachable', { all: true });
   const BROKEN = new Set(['frozen.uninstalled', 'frozen.failing', 'frozen.switchedOff', 'frozen.noSource']);
   const ids = frozen.items.filter((i) => !i.info && i.seriesId && BROKEN.has(i.detailSaid?.[0]?.code ?? '')).map((i) => i.seriesId!);
-  const gaps = await q<{ id: string }>(
-    `SELECT s.id FROM lib_series s
+  const answered = await q<{ id: string; gaps_result: StoredGaps | null; gaps_checked_at: Date | null; floor: number | null }>(
+    `SELECT s.id, s.gaps_result, s.gaps_checked_at, s.chapter_floor::float8 AS floor FROM lib_series s
       WHERE s.auto_update AND ${visibleToAll('s')} AND s.gaps_result->>'why' = 'no_candidate'
         AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL AND s.numbering IS DISTINCT FROM 'posting_order'
         AND COALESCE((s.gaps_result->>'at')::timestamptz, s.gaps_checked_at) > now() - interval '7 days'`).catch(() => []);
+  const gaps: Array<{ id: string }> = [];
+  for (const g of answered) {
+    const have = await haveNumbers(g.id).catch(() => [] as number[]);
+    if (!gapsAnswered(g.gaps_result, g.gaps_checked_at, have.length)) continue;
+    if (!splitAtFloor(gapsOf(plausibleNumbers(have)), g.floor).above.length) continue;
+    gaps.push({ id: g.id });
+  }
   const rows = await q<{ id: string; title: string; source_id: string | null }>(
     `SELECT s.id, s.title, s.source_id FROM lib_series s WHERE s.id = ANY($1::text[])`, [[...ids, ...gaps.map((g) => g.id)]]).catch(() => []);
   const byId = new Map(rows.map((r) => [r.id, r]));

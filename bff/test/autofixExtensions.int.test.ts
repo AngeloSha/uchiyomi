@@ -220,3 +220,49 @@ test('an install that would not fit under the source limit is not made, and it i
     env.SUWAYOMI_MAX_SOURCES = original;
   }
 });
+
+test('a gap an earlier run filled is no reason to install; the same answer about the series as it is, is', { skip }, async () => {
+  // v0.55.0 integration (lib/autofix.ts extensionTargets). A run that fills a gap from an extension it installed leaves
+  // the series' stored answer "asked, and nobody has it" behind; the next run read that answer alone, installed another
+  // package for a series with nothing missing -- and, under the source limit, told the admin to free a slot for it (the
+  // integration's autofix walk). The answer counts only while it is about the series as it is now (health.ts
+  // gapsAnswered: nothing landed since) and the series still has a hole. Reintroduce by reading the stored answer alone:
+  // "a gap an earlier run filled is no reason to install" finds Birch Reader installed.
+  const GAP = 's_afx_gapsong';
+  // The earlier tests' series are not this one's: paused, nothing of theirs is a target.
+  await q('UPDATE lib_series SET auto_update = false WHERE id = ANY($1)', [Object.values(SERIES)]);
+  await q('DELETE FROM lib_series WHERE id = $1', [GAP]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+           VALUES ($1,'T!afx','Gap Song','T!afx/Gap Song',5,$2,$3,'gap-song',true)`, [GAP, LIB, `sw:${ID.ball}`]);
+  for (const n of [1, 2, 3, 4, 5]) {
+    const file = `T!afx/Gap Song/Chapter ${n}.cbz`;
+    const z = new AdmZip();
+    for (let i = 0; i < 3; i++) z.addFile(`${i}.png`, Buffer.alloc(80, 1));
+    mkdirSync(join(DL, 'T!afx/Gap Song'), { recursive: true });
+    writeFileSync(join(DL, file), z.toBuffer());
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, pages_checked_at, root, source_id)
+             VALUES ($1,$2,'T!afx',$3,$4,$5,3,now(),$6,$7)`, [`b_${GAP}_${n}`, GAP, file, n, `Chapter ${n}`, DL, `sw:${ID.ball}`]);
+  }
+  const answer = (have: number) => JSON.stringify({
+    at: new Date().toISOString(), why: 'no_candidate', have_count: have, unfillable: ['3'], scanned: 1,
+    sweep: 0, capped: 0, landed: 0, fetched: 0, coverage: null, followed: null,
+  });
+  try {
+    // Whole: chapter 3 came in after the search that found nobody had it, for the four chapters there were then.
+    await q('UPDATE lib_series SET gaps_checked_at = now(), gaps_result = $2::jsonb WHERE id = $1', [GAP, answer(4)]);
+    const first = autofix.startAutofix(adminId);
+    assert.ok('runId' in first);
+    await autofix.autofixSettled();
+    assert.deepEqual(await installs(first.runId), [], 'a gap an earlier run filled is no reason to install');
+    // The premise: chapter 3 gone again, and the same answer about the series as it is now -- that is a reason to look.
+    await q('DELETE FROM lib_books WHERE id = $1', [`b_${GAP}_3`]);
+    rmSync(join(DL, 'T!afx/Gap Song/Chapter 3.cbz'), { force: true });
+    await q('UPDATE lib_series SET gaps_checked_at = now(), gaps_result = $2::jsonb WHERE id = $1', [GAP, answer(4)]);
+    const second = autofix.startAutofix(adminId);
+    assert.ok('runId' in second);
+    await autofix.autofixSettled();
+    assert.ok((await installs(second.runId)).length > 0, 'PREMISE: a fresh "nobody has it" about the series as it is sends the run looking');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [GAP]).catch(() => {});
+  }
+});
