@@ -11,8 +11,8 @@ import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
-import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
-import { editionFollowing, linkEdition, unlinkEdition, workRows } from '../lib/editions';
+import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
+import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
@@ -30,7 +30,7 @@ import { recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
-import { checkSourceLive, recordLiveResult } from '../lib/sourceCheck';
+import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
@@ -1651,23 +1651,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const b = z.object({ into: z.string().min(1).max(64) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it merge into?' });
-    if (b.data.into === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot merge into itself.' });
-
-    const from = await getSeriesRow(id);
-    const into = await getSeriesRow(b.data.into);
-    if (!from || !into) return reply.code(404).send({ error: 'not_found' });
-    for (const [row, which] of [[from, 'source'], [into, 'target']] as const) {
-      if (row.deleted_at) return reply.code(400).send({ error: 'deleted', message: `The ${which} series is hidden. Restore it first.` });
-      if (row.merged_into) return reply.code(400).send({ error: 'merged', message: `The ${which} series was already merged into another one.` });
-    }
+    // lib/libraryAdmin.ts mergeRefusal (v0.55.0): the checks in one place, which Fix everything's merges ask too.
     // Two language editions of one work are two languages' chapters (v0.52.0): merged, the list would hold both under
-    // one number each, in whichever language came first. Reintroduce by dropping this: "a merge inside one work is
-    // refused" in editions.int.test.ts answers 200 and moves the chapters.
-    const works = await q<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = ANY($1)', [[id, into.id]]);
-    if (works.length === 2 && works[0].work_id && works[0].work_id === works[1].work_id) {
-      return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
+    // one number each, in whichever language came first. Reintroduce by dropping that check: "a merge inside one work
+    // is refused" in editions.int.test.ts answers 200 and moves the chapters.
+    const no = await mergeRefusal(id, b.data.into);
+    if (no) {
+      switch (no.refused) {
+        case 'same_series': return reply.code(400).send({ error: 'same_series', message: 'A series cannot merge into itself.' });
+        case 'not_found': return reply.code(404).send({ error: 'not_found' });
+        case 'deleted': return reply.code(400).send({ error: 'deleted', message: `The ${no.which} series is hidden. Restore it first.` });
+        case 'merged': return reply.code(400).send({ error: 'merged', message: `The ${no.which} series was already merged into another one.` });
+        case 'same_work': return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
+      }
     }
-
+    const from = (await getSeriesRow(id))!;
+    const into = (await getSeriesRow(b.data.into))!;
     const r = await mergeSeries(id, into.id);
     await logAudit('series.merge', {
       userId: userIdOf(req),
@@ -1690,28 +1689,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       with: z.string().min(1).max(64), lang: z.string().min(1).max(35).optional(), withLang: z.string().min(1).max(35).optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it be linked with?' });
-    if (b.data.with === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot be an edition of itself.' });
-    const [mine, theirs] = await Promise.all([workRows(id), workRows(b.data.with)]);
-    const a = mine.find((r) => r.id === id);
-    const w = theirs.find((r) => r.id === b.data.with);
-    if (!a || !w) return reply.code(404).send({ error: 'not_found' });
-    if (a.hidden || w.hidden) return reply.code(400).send({ error: 'deleted', message: 'One of the two is removed from the library. Put it back first.' });
-    if (mine.length > 1 && theirs.length > 1) {
-      return mine.some((r) => r.id === w.id)
-        ? reply.code(409).send({ error: 'same_work', message: 'These two are already editions of one work.' })
-        : reply.code(409).send({ error: 'other_work', message: 'Each is already an edition of another work. Unlink one of them first.' });
+    // lib/editions.ts linkPair (v0.55.0): the rules in one place, which Fix everything's duplicates phase runs too.
+    const r = await linkPair(id, b.data.with, { lang: b.data.lang, withLang: b.data.withLang });
+    if ('refused' in r) {
+      switch (r.refused) {
+        case 'same_series': return reply.code(400).send({ error: 'same_series', message: 'A series cannot be an edition of itself.' });
+        case 'not_found': return reply.code(404).send({ error: 'not_found' });
+        case 'deleted': return reply.code(400).send({ error: 'deleted', message: 'One of the two is removed from the library. Put it back first.' });
+        case 'same_work': return reply.code(409).send({ error: 'same_work', message: 'These two are already editions of one work.' });
+        case 'other_work': return reply.code(409).send({ error: 'other_work', message: 'Each is already an edition of another work. Unlink one of them first.' });
+        case 'same_lang': return reply.code(409).send({ error: 'same_lang', message: 'Both are in the same language: merge them instead.' });
+        case 'edition_exists': return reply.code(409).send({ error: 'edition_exists', message: 'That language already has its edition in this work.' });
+      }
     }
-    // What each will state: the language asked for where the series states none, else its own.
-    const langA = a.stated ? a.lang : canonLang(b.data.lang) ?? a.lang;
-    const langW = w.stated ? w.lang : canonLang(b.data.withLang) ?? w.lang;
-    if (langA === langW) return reply.code(409).send({ error: 'same_lang', message: 'Both are in the same language: merge them instead.' });
-    // The one in a work stays where it is and the other joins it.
-    const [joiner, of, joinerLang, ofLang] = mine.length > 1 ? [w, a, langW, langA] : [a, w, langA, langW];
-    const taken = (mine.length > 1 ? mine : theirs).find((r) => r.id !== of.id && r.lang === joinerLang);
-    const r = taken ? 'taken' as const : await linkEdition(joiner.id, { of: of.id, lang: joinerLang, ofLang });
-    if (r === 'taken') return reply.code(409).send({ error: 'edition_exists', message: 'That language already has its edition in this work.' });
-    if (r === 'gone') return reply.code(404).send({ error: 'not_found' });
-    await logAudit('series.edition_link', { userId: userIdOf(req), detail: { id: joiner.id, title: joiner.title, of: of.id, ofTitle: of.title, lang: r.lang }, req });
+    await logAudit('series.edition_link', {
+      userId: userIdOf(req), detail: { id: r.joiner.id, title: r.joiner.title, of: r.of.id, ofTitle: r.of.title, lang: r.lang }, req,
+    });
     return { ok: true, workId: r.workId, lang: r.lang };
   });
 
@@ -1996,80 +1989,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    const ids = [...new Set(b.data.bookIds)];
-    const rows = new Map((await chapterRows(id, ids)).map((r) => [r.id, r]));
-    // The same veto the cleanup applies, for the same reason: a bookmark names a page number INSIDE the
-    // file, so deleting the pages turns it into a pointer at nothing. Progress survives a delete (it is a
-    // count); a bookmark does not, and the admin clicking Delete cannot see whose it is.
-    // Reintroduce by dropping this lookup: "a bookmarked chapter is skipped, and says so" in
-    // chapterActions.int.test.ts finds the file gone.
-    const bookmarked = new Set((await q<{ book_id: string }>(
-      'SELECT DISTINCT book_id FROM bookmarks WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id));
-
-    const skipped: Array<{ id: string; reason: string }> = [];
-    const todo: Array<{ id: string; abs: string }> = [];
-    const root = resolve(DL_ROOT);
-    for (const bid of ids) {
-      const r = rows.get(bid);
-      if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
-      // Reintroduce by dropping this check: "delete removes the file, keeps the row and the progress, skips
-      // the read library" in chapterActions.int.test.ts fails -- the read library's file is gone.
-      if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
-      if (r.pruned_at) { skipped.push({ id: bid, reason: 'already_pruned' }); continue; }
-      if (bookmarked.has(bid)) { skipped.push({ id: bid, reason: 'bookmarked' }); continue; }
-      const abs = containedPath(DL_ROOT, r.file);
-      // A path that escapes its root is refused, never "cleaned up" -- the health page can argue about it.
-      // So is the root ITSELF: containedPath accepts it, the rm below is recursive, and a row whose file
-      // resolves to `.` (a hand-edited row is the only way today) would take the whole download directory.
-      // Reintroduce by dropping the `abs === root` half: "the download root itself is never a chapter" in
-      // chapterActions.int.test.ts finds the directory gone.
-      if (!abs || abs === root) { skipped.push({ id: bid, reason: 'outside_root' }); continue; }
-      todo.push({ id: bid, abs });
-    }
-    if (todo.length) {
-      const w = await allWritable([DL_ROOT]);
-      if (!w.ok) return reply.code(409).send({ error: 'refused', message: w.reason, fix: w.fix });
-    }
-    let applied = 0;
-    let bytes = 0;
-    for (const t of todo) {
-      const st = await stat(t.abs).catch(() => null);
-      if (st) {
-        try { await rm(t.abs, { recursive: true, force: true }); }
-        catch { skipped.push({ id: t.id, reason: 'unlink_failed' }); continue; }
-        bytes += st.size;
-        // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside the landed file,
-        // which reapStaleTemp deliberately leaves alone) must not outlive a deliberate delete of the file:
-        // at the next boot the reaper would see a bak with no original, put it back, and the chapter the
-        // admin deleted would be on disk again, un-marked by the next scan, its space never reclaimed.
-        // Reintroduce by dropping this rm: "a stray set-aside copy goes with the file" in
-        // chapterActions.int.test.ts finds the bak still there.
-        await rm(`${t.abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
-      } else if (!(await stat(dirname(t.abs)).catch(() => null))) {
-        // ⚠️ The file is missing AND so is its folder: that is the volume not being there (an unmounted
-        // share whose empty mount point passed the preflight), not a chapter somebody removed by hand.
-        // Marking on that evidence would tombstone a chapter whose file is fine on the unmounted disk and
-        // throw away everything measured about it; the row is left as it is and the answer says why.
-        // Reintroduce by dropping this branch: "a missing download folder is not a deleted chapter" in
-        // chapterActions.int.test.ts finds pruned_at set.
-        skipped.push({ id: t.id, reason: 'unlink_failed' });
-        continue;
-      }
-      // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
-      // do not exist.
-      await tombstoneBooks([t.id]);
-      applied++;
-    }
-    // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every
-    // thumbnail falls back to the cover chapter's first page, and a tombstone has none.
-    if (applied) {
-      await q(
-        `UPDATE lib_series SET cover_book_id = (
-           SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
-         ) WHERE id = $1`, [id]);
-    }
-    await logAudit('series.chapters_delete', { userId: userIdOf(req), detail: { id, title: row.title, bookIds: ids, applied, bytes }, req });
-    return { ok: true, applied, bytes, skipped };
+    // lib/libraryAdmin.ts deleteChapterFiles (v0.55.0): the route's own rules, in one place, which Fix everything's files
+    // phase runs too -- the bookmark veto, the download folder only, the root itself never.
+    const r = await deleteChapterFiles(id, b.data.bookIds, { userId: userIdOf(req), req });
+    if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
+    return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
   });
 
   /**
@@ -3953,26 +3877,19 @@ export default async function adminRoutes(app: FastifyInstance) {
    */
   app.get('/api/admin/sources/overview', async () => sourcesOverview());
 
-  const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
     const { id } = req.params as { id: string };
     const src = getSource(id);
     if (!src) return reply.code(404).send({ error: 'not_found' });
-    if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
-    testing.add(id);
-    try {
-      // The same function the scheduled sweep runs, so the button and the schedule cannot disagree.
-      const r = await checkSourceLive(src, { by: 'test' });
-      await recordLiveResult(id, r, 'test');
-      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: r.smoke.ok, code: r.diagnosis.code, state: r.state, stage: r.stage }, req });
-      return reply.send({
-        ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
-        canClear: r.smoke.ok && r.blocked,
-        state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
-      });
-    } finally {
-      testing.delete(id);
-    }
+    // lib/sourceCheck.ts testSource: the check, recorded and audited, one Test of a source at a time -- Fix everything's
+    // Tests included (v0.55.0).
+    const r = await testSource(src, { userId: userIdOf(req), req });
+    if (r === 'busy') return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
+    return reply.send({
+      ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
+      canClear: r.smoke.ok && r.blocked,
+      state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
+    });
   });
 
   /**

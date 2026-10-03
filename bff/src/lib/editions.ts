@@ -225,3 +225,38 @@ export async function workRows(id: string, qq: Qq = q): Promise<WorkRow[]> {
   );
   return rows.map((r) => ({ id: r.id, title: r.title, lang: effectiveLang(r.lang, r.source_id), stated: canonLang(r.lang) !== null, hidden: r.hidden }));
 }
+
+/** Why two series could not be linked as editions (linkPair). The admin route answers each with its own status. */
+export type LinkPairRefusal = 'not_found' | 'deleted' | 'same_series' | 'same_work' | 'other_work' | 'same_lang' | 'edition_exists';
+
+/**
+ * Link two series already in the library as language editions of one work: POST /api/admin/series/:id/editions and, since
+ * v0.55.0, Fix everything's duplicates phase (lib/autofix.ts) on a duplicate pair in two languages. `lang` states `id`'s
+ * language and `withLang` `withId`'s, each where the series does not state one (otherwise what it is inferred to be). A
+ * series already in a work brings the work: the other joins it. Refused when both are in one language (merge them
+ * instead), when the language is taken in the work, and when each is already in a different work. `joiner` and `of` say
+ * which joined which, for the audit line.
+ */
+export async function linkPair(
+  id: string, withId: string, o: { lang?: string; withLang?: string } = {},
+): Promise<{ ok: true; workId: string; lang: string; joiner: WorkRow; of: WorkRow } | { refused: LinkPairRefusal }> {
+  if (withId === id) return { refused: 'same_series' };
+  const [mine, theirs] = await Promise.all([workRows(id), workRows(withId)]);
+  const a = mine.find((r) => r.id === id);
+  const w = theirs.find((r) => r.id === withId);
+  if (!a || !w) return { refused: 'not_found' };
+  if (a.hidden || w.hidden) return { refused: 'deleted' };
+  if (mine.length > 1 && theirs.length > 1) return { refused: mine.some((r) => r.id === w.id) ? 'same_work' : 'other_work' };
+  // What each will state: the language asked for where the series states none, else its own.
+  const langA = a.stated ? a.lang : canonLang(o.lang) ?? a.lang;
+  const langW = w.stated ? w.lang : canonLang(o.withLang) ?? w.lang;
+  if (langA === langW) return { refused: 'same_lang' };
+  // The one in a work stays where it is and the other joins it.
+  const [joiner, of, joinerLang, ofLang] = mine.length > 1 ? [w, a, langW, langA] : [a, w, langA, langW];
+  const taken = (mine.length > 1 ? mine : theirs).find((r) => r.id !== of.id && r.lang === joinerLang);
+  if (taken) return { refused: 'edition_exists' };
+  const r = await linkEdition(joiner.id, { of: of.id, lang: joinerLang, ofLang });
+  if (r === 'taken') return { refused: 'edition_exists' };
+  if (r === 'gone') return { refused: 'not_found' };
+  return { ok: true, workId: r.workId, lang: r.lang, joiner, of };
+}
