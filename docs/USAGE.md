@@ -1360,16 +1360,17 @@ With no engine — turned off (`EXTENSION_ENGINE=0`), not set up, or not answeri
 setup screen instead of your extensions (since v0.49.0): it says which of the three it is, shows the steps for your
 platform with each command ready to copy, and **Check again** asks the engine at once; the card turns into your
 extensions by itself when it answers. Uchiyomi also keeps asking on its own, every 5 minutes, so an engine started
-later needs no restart. With the engine there, the card at the top has two halves (since v0.53.0): the engine, with
-how many extensions are installed and how many sources are on of the 25 that can be, and its *Cloudflare helper*,
-with **Connect** when the engine's own helper is off or points at `localhost` (Health's *Extension engine* row offers
-the same **Connect**). **Turning it off**, in the engine's half, has the steps to switch it off safely (on a server;
-the desktop app has no switch).
+later needs no restart. With the engine there, the top of the tab is a slim strip of two cells (since v0.53.0): the
+engine, *Ready* with its version and how many sources are on of the 25 that can be, and its *Cloudflare helper*,
+*Connected*, or *Not connected* with **Connect** when the engine's own helper is off or points at `localhost` (Health's
+*Extension engine* row offers the same **Connect**). **Turning it off**, behind the engine's **⋯**, has the steps to
+switch it off safely (on a server; the desktop app has no switch).
 Never delete the engine's data: it holds the link from every series you added through an extension to its source,
 and Uchiyomi's nightly backup does not include it ([your engine's data](extensions.md#your-engines-data)).
 
 **An extension's own settings** (since v0.49.0). An installed extension's sheet in **Admin → Extensions** (press its
-row under **Installed**) has its languages, a switch each, and under **Settings** the screen Mihon shows for it:
+row under **Installed**) has its languages, a switch each, and under **Settings** (closed until you open it) the screen
+Mihon shows for it:
 switches, lists, choices and text, exactly as the extension offers them, saved to the engine as you change them (a
 text setting when you press **Save**). An extension that provides one source per language shows *Settings for* first,
 one choice per language, since each keeps its own settings; it only picks whose settings you see. They apply to every series from that source. A setting the extension has switched off in its
@@ -1650,7 +1651,7 @@ every 5 minutes by itself), or ready, with whether the engine's own Cloudflare h
 off, or points at `localhost` where no helper runs, turns the row amber while an extension source is seen behind
 Cloudflare, and is a greyed line otherwise. When Uchiyomi has a helper of its own to share (`FLARESOLVERR_URL`),
 the row has **Connect**: it points the engine at that helper and switches it on, with nothing restarted — the same
-key as in the card at the top of **Admin → Extensions**, where the row's **Open** leads, with the setup steps and
+key as in the strip at the top of **Admin → Extensions**, where the row's **Open** leads, with the setup steps and
 **Check again**. When the engine cannot say what its helper is set to (just now, or it is too old to report it)
 while a source fails with the engine's own *Cloudflare bypass currently disabled*, the row reads *It cannot use its
 Cloudflare helper*, with **Connect** wherever there is a setting to change. Series from extensions that cannot
@@ -2512,7 +2513,7 @@ and the Health page say the same, in these words: *The extension engine's own Cl
 the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and
 FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files),
 then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix
-there.* Since v0.49.0 **Admin → Extensions** says so (since v0.53.0 in its card's *Cloudflare helper* half), and
+there.* Since v0.49.0 **Admin → Extensions** says so (since v0.53.0 in the *Cloudflare helper* cell of its strip), and
 **Connect** there — or on Health's
 *Extension engine* row — points the engine at the solver Uchiyomi uses (`FLARESOLVERR_URL`) without restarting
 anything. Running the engine yourself? That works too, or set both on that container — see

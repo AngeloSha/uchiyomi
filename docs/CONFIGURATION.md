@@ -203,7 +203,7 @@ ever hit.
   (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
   Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect** —
   on the *Extension engine* row of **Admin → Health**, which says when it is needed, or in the *Cloudflare helper*
-  half of the card at the top of **Admin → Extensions** — sets the engine's own `flareSolverrEnabled` /
+  cell of the strip at the top of **Admin → Extensions** — sets the engine's own `flareSolverrEnabled` /
   `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API. Nothing restarts, and the engine keeps the value
   unless its container names another solver. It is only ever done on a press, and needs `FLARESOLVERR_URL` set on
   Uchiyomi. An engine too old to report the setting has to be given the two on its own container.
