@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Dependency-free HTTP source used only by the browser walks (v0.40 onwards).
 //
-//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49]
+//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49,v54]
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
 // (shorthand for walk-tale-N), a SERIES id (for `omit:`), "search" with page 0, or "site" with page 0 (for
@@ -66,6 +66,17 @@ async function istreveliaShaped() {
   return posts.map((p, i) => ({ k: i + 1, number: numbered[i].chapterNumber, title: numbered[i].name.trim(), publishedAt: new Date(p.uploadDate).toISOString() }));
 }
 const POSTS = EXTRA.has('v49') ? await istreveliaShaped() : null;
+// ⚠️ The `swap-*` series are opt-in too (`--extra v54`, on BOTH fakes): replaceWalk.mjs's (v0.54.0, Replace a source).
+// One set per pass (phone, wide, arabic), each of four series a pass moves off fake-a in its own way: one that follows
+// fake-b (moved at once), one moved by hand from its Sources sheet (Make main), one numbered by posting order (left
+// alone, and Make main refused), and one that follows nothing (searched for, and found on fake-b). Twelve chapters
+// each, as Walk Tale has: a primary listing ten or more numbers is judged one way (lib/autoFollow.ts), so fake-b's
+// copy lines up. Gated for the same reason as walk-quote: the older walks see exactly the series they always did.
+const SWAPS = EXTRA.has('v54')
+  ? ['phone', 'wide', 'arabic'].flatMap((pass) => ['follow', 'main', 'posting', 'search'].map((role) => ({
+    sourceId: `swap-${role}-${pass}`, title: `Swap ${role[0].toUpperCase()}${role.slice(1)} ${pass[0].toUpperCase()}${pass.slice(1)}`, first: 1, last: 12,
+  })))
+  : [];
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
@@ -73,6 +84,7 @@ const SERIES = [
   ...(EXTRA.has('v42') ? [{ sourceId: 'walk-quote', title: 'Ren’s Walk – Notes', first: 1, last: 3 }] : []),
   // first/last count POSTS here, which is what chapterFromId checks a post id against.
   ...(POSTS ? [{ sourceId: 'walk-istrevelia', title: 'Walk Istrevelia', first: 1, last: POSTS.length, posts: POSTS }] : []),
+  ...SWAPS,
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 

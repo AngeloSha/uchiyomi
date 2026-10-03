@@ -100,8 +100,16 @@
 //   and its closed Settings, Remove, Repositories and Languages (engineWalk.mjs). Needs up.sh with E2E_ENGINE=fake, and ENGINE=http://127.0.0.1:<the engine's port>; it takes the
 //   engine down and up itself.
 //
+//   replace -- v0.54.0, Replace a source: at 390, 1280 and 390 in Arabic, a fake source that is the main source of
+//   four series goes offline and is switched off; Needs attention and Health offer Replace, the dialog says the
+//   preview's numbers, the run moves the series (at once where a working follower exists, by searching where not) and
+//   is found again after Run in background and after a reload, Turn it off when done turns the source off only once
+//   nothing is left on it, Make main moves a series and is refused in words for one numbered by posting order, Turn
+//   off all asks first, a site in use cannot be removed, and the old Providers/Extensions addresses land on Sources
+//   (replaceWalk.mjs). Needs up.sh with E2E_ENGINE=fake and E2E_FAKE_EXTRA=v54, and E2E_NET (up.sh's network) here.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   engine. The engine phase resets the fake engine and takes it down, so nothing that needs it can follow; a
+//   replace, engine. The engine phase resets the fake engine and takes it down, so nothing that needs it can follow; a
 //   sources run that stops half-way leaves fake-a's search failing, which only the engine phase then meets, and it
 //   never searches.
 //
@@ -146,7 +154,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'engine'];
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'replace', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1380,6 +1388,12 @@ try {
       console.log(`\n  sources @${w}`);
       await sources(w);
     }
+  }
+  // v0.54.0: Replace a source, Make main, Turn off all and the old tabs' addresses (replaceWalk.mjs; up.sh with
+  // E2E_ENGINE=fake E2E_FAKE_EXTRA=v54, and E2E_NET on this command). Before engine, which takes the engine down.
+  if (PHASES.includes('replace')) {
+    const { replaceWalk } = await import('./replaceWalk.mjs');
+    await replaceWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.

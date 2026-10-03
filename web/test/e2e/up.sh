@@ -16,6 +16,7 @@
 #     app's archive timing, and a walk without it skips the archive checks that need that timing
 #   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
 #   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
+#   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v54 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # the stack for walk49's replace
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -64,6 +65,10 @@ DATA=$(mktemp -d)
 # The same walk needs one series whose title carries characters a keyboard cannot type (#66), and it is
 # served by fake-a alone so that adding it names one provider and no fold has to be resolved.
 if [ "${E2E_ADULT:-0}" = "1" ]; then ADULT_SOURCE="fake-b"; EXTRA_A="v42"; else ADULT_SOURCE=""; EXTRA_A="none"; fi
+# E2E_FAKE_EXTRA: more of fakeSource.mjs's opt-in series, on BOTH fakes (`v54`: replaceWalk.mjs's swap-* series, which a
+# Replace run moves from fake-a to fake-b). Unset: each fake serves what it always did.
+EXTRA_B="${E2E_FAKE_EXTRA:-none}"
+if [ -n "${E2E_FAKE_EXTRA:-}" ]; then EXTRA_A="$EXTRA_A,$E2E_FAKE_EXTRA"; fi
 # What the app is started with beyond the common set, for both database layouts.
 APP_ENV=()
 # E2E_ARCHIVE_FAST=1: the slow archive's test-only timing (#117; bff lib/archive.ts, lib/archivePace.ts). With the
@@ -101,7 +106,7 @@ docker run -d --name "$FAKE_A" --network "$NET" -p "127.0.0.1:$FAKE_A_PORT:$FAKE
   node web/test/e2e/fakeSource.mjs --name fake-a --port "$FAKE_A_PORT" --extra "$EXTRA_A" >/dev/null
 docker run -d --name "$FAKE_B" --network "$NET" -p "127.0.0.1:$FAKE_B_PORT:$FAKE_B_PORT" \
   -v "$REPO:/repo:ro" -w /repo node:24-alpine \
-  node web/test/e2e/fakeSource.mjs --name fake-b --port "$FAKE_B_PORT" >/dev/null
+  node web/test/e2e/fakeSource.mjs --name fake-b --port "$FAKE_B_PORT" --extra "$EXTRA_B" >/dev/null
 for stub in "http://127.0.0.1:$FAKE_A_PORT/__log" "http://127.0.0.1:$FAKE_B_PORT/__log"; do
   ready=0
   for _ in $(seq 1 50); do
