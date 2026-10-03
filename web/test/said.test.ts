@@ -360,7 +360,7 @@ test('a line is joined the reader\'s way, and a code this build does not know le
   // v0.53.0, Source health's summary: its two counts side by side, in every language. Reintroduce the join as a clause
   // ("; "): this reads "3 sources your series use need a look; 5 sources…".
   assert.equal(saidText([{ code: 'sources.affected', params: { n: 3 } }, { code: 'sources.failingUnused', params: { n: 5 }, join: 'dot' }]),
-    '3 sources your series use need a look · 5 sources nothing uses are failing');
+    '3 sources your series use need a look · 5 sources nothing uses are failing', 'Source health\'s two counts are not side by side');
   // In Japanese and Arabic, their own marks: "；" and "؛", "（…）", and no space between sentences.
   try {
     setActiveLocale('ja');

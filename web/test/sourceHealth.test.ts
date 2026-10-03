@@ -119,7 +119,7 @@ test('a row says its state in a word, why, and how many series use it', () => {
   assert.equal(tileTone(ROWS[7]), 'off');
   // The tile's letters: words, never a number or the language suffix ("L1" read as a code, not a name).
   assert.equal(tileLetters('Hentai Shelf (AR)'), 'HS');
-  assert.equal(tileLetters('Lantern 10 (FR)'), 'L');
+  assert.equal(tileLetters('Lantern 10 (FR)'), 'L', 'a number is a letter of the tile ("L1")');
   assert.equal(tileLetters('Kiri Comics 2 (FR)'), 'KC');
   assert.equal(tileLetters('fake-b'), 'FB');
   assert.equal(tileLetters('مانجا'), 'م');
@@ -155,9 +155,9 @@ test('Turn off all turns each source off in turn, never at once, and goes on pas
     if (id === 'b') throw new Error('500');
   };
   const r = await turnOffEach(['a', 'b', 'c'], post, (done, total) => steps.push([done, total]));
-  assert.deepEqual(seen, ['a', 'b', 'c'], 'every source, in the order of the list');
-  assert.equal(most, 1, 'two requests at once');
   assert.deepEqual(r, { off: ['a', 'c'], failed: ['b'] }, 'the ones after a failure are still turned off');
+  assert.equal(most, 1, 'two requests at once');
+  assert.deepEqual(seen, ['a', 'b', 'c'], 'every source, in the order of the list');
   assert.deepEqual(steps, [[0, 3], [1, 3], [2, 3], [3, 3]], 'the progress hears each step, and the end');
 });
 
@@ -168,11 +168,11 @@ test('the card: the series\' sources first, then the failing ones nothing uses; 
   // are folded away" fails -- thirty rows in the middle of the card again.
   const html = render(CHECK);
   const at = (needle: string) => html.indexOf(needle);
+  assert.ok(!html.includes('data-source-group="off"') && !html.includes('data-source-group="quiet"'), 'the switched-off sources are folded away');
   assert.ok(at('data-source-group="affected"') >= 0 && at('data-source-group="unused"') > at('data-source-group="affected"'),
     'the series\' sources come first, the failing ones nobody uses after them');
   assert.ok(at('data-source-fold="off"') > at('data-source-group="unused"') && at('data-source-fold="quiet"') > at('data-source-fold="off"'),
     'the folds come after the two groups');
-  assert.ok(!html.includes('data-source-group="off"') && !html.includes('data-source-group="quiet"'), 'the switched-off sources are folded away');
   for (const id of ['off', 'quiet']) {
     const fold = slice(html, `data-source-fold="${id}"`, '</section>');
     assert.match(fold, /aria-expanded="false"/, `the ${id} fold is closed until opened`);
