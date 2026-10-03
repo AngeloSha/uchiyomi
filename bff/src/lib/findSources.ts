@@ -324,6 +324,10 @@ export async function startFind(
     // Server task that does not turn the Library ring.
     card.downloads = false;
     card.followed = 0;
+    // The source it is about, named as its summary names it (namedSource). Reintroduce by leaving it off: "a Replace
+    // run names the source it replaces, on its card and in its summary" in findSources.int.test.ts finds a card with no
+    // source.
+    if ('sourceId' in scope) Object.assign(card, namedSource(scope.sourceId));
     if (mode === 'replace') Object.assign(card, { mode, promoted: 0, left: list.length });
     let signal!: () => void;
     const stopped = new Promise<void>((r) => { signal = r; });
@@ -1173,8 +1177,15 @@ type Row = {
   started_at: Date; finished_at: Date | null; scope: { sourceId?: string; review?: boolean; mode?: string } | null; results?: FindResult[];
 };
 const iso = (d: Date | string) => new Date(d).toISOString();
+/**
+ * The source a run over one source's series is about, by id and by name (its display name, or its id when it is not
+ * loaded): its summary and its card say the same, and the web finds a Replace run going for a source by it.
+ */
+function namedSource(id: string): { sourceId: string; sourceName: string } {
+  return { sourceId: id, sourceName: getSource(id)?.name ?? id };
+}
 const scopeOf = (scope: Row['scope'] | null | undefined) => ({
-  ...(scope?.sourceId ? { sourceId: scope.sourceId, sourceName: getSource(scope.sourceId)?.name ?? scope.sourceId } : {}),
+  ...(scope?.sourceId ? namedSource(scope.sourceId) : {}),
   ...(scope?.review === true ? { review: true as const } : {}),
 });
 const summaryOf = (r: Row): FindRunSummary => ({

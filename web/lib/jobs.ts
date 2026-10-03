@@ -67,6 +67,9 @@ export interface RunCard {
    */
   mode?: 'follow' | 'replace';
   promoted?: number;
+  /** v0.54.0: a `find_sources` run over one source's series (a Replace run always): that source, as its summary names it. */
+  sourceId?: string;
+  sourceName?: string;
   /**
    * A `find_sources` run that waits for a sweep, a repair or the daily source check before its next series (its
    * `current` still names the series it did last). Absent while it is not waiting.

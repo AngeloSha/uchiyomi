@@ -73,6 +73,13 @@ export interface RunCard {
   left?: number;
   turnedOff?: boolean;
   /**
+   * v0.54.0, a Find run over one source's series (Replace's always): that source, by id and by name, as the run's
+   * summary names it (lib/findSources.ts namedSource) -- so the card can say which source it replaces, and a Replace
+   * dialog opened again for that source finds the run going rather than offering to start one.
+   */
+  sourceId?: string;
+  sourceName?: string;
+  /**
    * v0.49.1, a Find other sources run: what it waits on before its next series, while it waits (a sweep, a repair,
    * the daily source check) -- so Server tasks says why it is paused rather than naming the series it last did.
    */

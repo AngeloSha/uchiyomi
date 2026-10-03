@@ -826,6 +826,35 @@ test("Replace promotes each series' best working follower without searching, dro
   }
 });
 
+test('a Replace run names the source it replaces, on its card and in its summary', { skip }, async () => {
+  // A Replace dialog opened again for a source while its run goes shows that run, not the offer to start one: the web
+  // finds it by the run's source (components/ReplaceDialog.tsx), on Admin → Sources, on Health, or after a reload.
+  // Reintroduce by leaving the source off the card (startFind): the card names no source. By dropping it from scopeOf:
+  // the summary does not.
+  await series('a', 'Alpha Tale');
+  gate = new Promise<void>((r) => { openGate = r; });
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  try {
+    await until(() => searches.length > 0, 'the run to reach its search');
+    const card = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: adminAuth })).json().runs
+      .find((x: any) => x.kind === 'find_sources');
+    assert.deepEqual([card.status, card.mode, card.sourceId, card.sourceName], ['running', 'replace', MAIN, 'Main Down'],
+      'the card names the source it replaces');
+    const going = await state();
+    assert.deepEqual([going.running, going.run.mode, going.run.sourceId, going.run.sourceName], [true, 'replace', MAIN, 'Main Down'],
+      'the running run names it');
+    assert.deepEqual([going.recent[0].sourceId, going.recent[0].sourceName], [MAIN, 'Main Down'], 'and so does its summary');
+  } finally {
+    openGate();
+    gate = null;
+  }
+  await fsLib.findSettled();
+  const ended = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: adminAuth })).json().runs
+    .find((x: any) => x.kind === 'find_sources');
+  assert.deepEqual([ended.status, ended.sourceId, ended.sourceName], ['done', MAIN, 'Main Down'], 'an ended card still names it');
+});
+
 test('a series with no working follower is searched, followed and promoted; one with nothing to follow says why', { skip }, async () => {
   // Reintroduce by not promoting after a follow: Alpha Tale stays on the replaced source. By counting its dead
   // followers against the cap: it is `full` and never searched.

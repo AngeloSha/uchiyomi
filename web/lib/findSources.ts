@@ -149,7 +149,10 @@ export interface FindRunSummary {
   left?: number;
   /** v0.54.0, Replace: the source was turned off at the end, nothing using it any more. */
   turnedOff?: boolean;
-  /** The source a source-wide run is about, where the server says (v0.54.0 asks it to). */
+  /**
+   * The source a run over one source's series is about, by id and by name (Health's button, Replace): how a Replace
+   * dialog opened again finds its source's run going (components/ReplaceDialog.tsx).
+   */
   sourceId?: string;
   sourceName?: string;
 }

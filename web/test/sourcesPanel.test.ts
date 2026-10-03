@@ -257,6 +257,28 @@ test('the run says how far it has got, three counts, and each series as it lands
   assert.match(html, /data-lenis-prevent="true" data-replace-rows="true"/, 'the rows scroll the page behind the dialog');
 });
 
+test('Replace opened again while its source\'s run goes shows that run, wherever it is opened from', () => {
+  // The server names a run's source in its summary and on its card (bff lib/findSources.ts namedSource). A dialog with
+  // no run of its own -- Health's other row, the page reloaded, Run in background and back -- finds the run going for its
+  // source by it, and shows it rather than the offer to start one. Reintroduce by matching any Replace run: Mangaread's
+  // dialog shows aqua's run. By dropping the match: aqua's dialog asks again.
+  const run: FindRun = {
+    id: 'r9', status: 'running', total: 195, done: 12, followed: 0, startedBy: null, startedAt: Date.now(), mode: 'replace', promoted: 12,
+    sourceId: 'aqua', sourceName: 'Aqua Manga', results: [],
+  };
+  const open = (fr: FindRunApi, sourceId: string) => withQueries(
+    createElement(ReplaceDialog, { sourceId, name: sourceId, fr, slot: `health:${sourceId}`, onClose: noop }), [[['replace-preview', sourceId], PREVIEW]]);
+  const going = FR({ status: { running: true, run, recent: [run] } });
+  const again = open(going, 'aqua');
+  assert.match(again, /data-replace-phase="run"/, 'Replace opened again offers to start a second run for the source');
+  assert.match(again, /data-replace-progress="true"><span>12 of 195 series<\/span>/, 'and does not show how far its run has got');
+  assert.match(open(going, 'mangaread'), /data-replace-phase="ask"/, 'another source\'s Replace shows this source\'s run');
+  // A Find run over the same source is not its Replace: the dialog asks, and says another run holds the server.
+  const find = open(FR({ status: { running: true, run: { ...run, mode: undefined }, recent: [] } }), 'aqua');
+  assert.match(find, /data-replace-phase="ask"/, 'a Find run reads as the source\'s Replace run');
+  assert.match(find, /data-replace-busy="true"/, 'and Start does not say why it waits');
+});
+
 // ---- the sheet -----------------------------------------------------------------------------------------------------
 
 test('the sheet\'s keys by state and kind: Replace only for a dead main source, Remove only for a site', () => {

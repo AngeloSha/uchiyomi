@@ -2896,6 +2896,8 @@ paths:
                         promoted: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: the series it has moved to another main source so far." }
                         left: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: the series still on the source it replaces, read again after each series." }
                         turnedOff: { type: boolean, description: "Since v0.54.0, a Replace run that has ended: whether that source is switched off." }
+                        sourceId: { type: string, description: "Since v0.54.0, a find_sources run over one source's series (a Replace run always): that source, as the run's summary names it (GET /api/admin/sources/find)." }
+                        sourceName: { type: string, description: "Since v0.54.0, with sourceId: that source's display name, or its id when it is not loaded." }
                         downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated

@@ -1856,7 +1856,9 @@ to, toName, via: follower|search, old: dropped|kept}` (and then no `why`), `skip
 failing|cooling|not_loaded|language|age}]` (the followers passed over) and `dropped: [{sourceId, name}]`. The run reads
 `mode: 'replace'` and `promoted` (counted from its results; in `recent` too), and in full `left` (the series on the
 source now) and `turnedOff` (whether it is switched off now); its card in `GET /api/sources/jobs` carries `mode`,
-`promoted`, `left` and, once ended, `turnedOff`. `turnOff: true` (Replace only, never with `review`: **400**) switches
+`promoted`, `left` and, once ended, `turnedOff`, and -- as the card of any run over one source's series does --
+`sourceId` and `sourceName`, the run's summary's: Admin → Sources and Health find a Replace run going for a source by
+them. `turnOff: true` (Replace only, never with `review`: **400**) switches
 the source off when the run ends done with no series left on it, and drops it from every series' followers with
 their listing rows (audited `source.retire`); a stopped run, or one that left a series behind, turns nothing off.
 Every switch is audited as `series.main_source` with `via: replace` and the run's id; `source.find` adds `mode`,
