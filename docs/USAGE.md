@@ -1894,8 +1894,13 @@ library* rather than being re-added via another source).
 **Libraries:** split one collection into several, then choose per member which ones they can open. This lives
 on **Content → Library**.
 
-A library is **a folder, plus any series you file into it by hand**. Give it a folder by browsing your
-library root or typing the path, and the count of what it would hold appears before you commit.
+A library is **one or more folders, plus any series you file into it by hand**. Give it its folders by
+ticking them as you browse your library root, or by typing a path and pressing **Add**; each chosen folder has
+its own key to take it out again. The count of what would move appears before you commit, summed over every
+folder, and saving moves exactly that. So one library can be "every source folder except the two I keep apart"
+without a library per folder: tick the ones it holds and leave the others to the default library or to
+libraries of their own. A folder belongs to one library at most: one another library holds says whose it is
+in the browser and cannot be ticked. A library's card shows its first folder and how many more it holds.
 
 Libraries are *declared*, not guessed. The obvious alternative -- treating every top-level folder as a
 library -- would be wrong on most existing installs, because that level usually holds the source names the
@@ -1903,7 +1908,8 @@ downloader wrote. Uchiyomi still suggests folders it can see, at any depth, with
 source names sorted last and flagged `source?`.
 
 **Libraries may sit inside one another.** With `Manga` and `Manga/Seinen` both declared, a series under
-`Manga/Seinen` belongs to the inner one: the most specific library wins. Removing the inner one hands its
+`Manga/Seinen` belongs to the inner one: the most specific folder wins, whichever library holds it and however
+many other folders either library holds. Removing the inner one, or taking `Manga/Seinen` out of it, hands its
 series back to `Manga`, not to the default.
 
 **Age rating.** A library can carry one, and everything in it inherits it, so marking a shelf 18+ is one
@@ -1954,8 +1960,8 @@ an explicit list -- so granting a library to an unrestricted member changes noth
 narrows them.
 
 **Filing a series by hand.** Edit any series and set **Library**, or select several on the Library page and
-use **Move to library**. A series filed by hand stays put: rescans, newly created libraries and re-pathing an
-existing one all leave it alone. Set it back to **Automatic** to hand it to the folder rule again.
+use **Move to library**. A series filed by hand stays put: rescans, newly created libraries and changing an
+existing one's folders all leave it alone. Set it back to **Automatic** to hand it to the folder rule again.
 
 Nothing changes until you declare something. A fresh install and an upgraded one both start with a single
 library covering the whole root, no reading progress moves, no files are touched, and removing a library
