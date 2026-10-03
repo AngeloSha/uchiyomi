@@ -1502,11 +1502,17 @@ without you pressing anything. Since v0.48.3:
 - **Fix everything** (since v0.55.0, where *Fix all issues* was), beside **Re-check**, is there whenever any card
   has a finding. It asks one question:
   - **Fix it for me** (the default) runs one background run that tries every remedy on every card: it replaces
-    broken sources, fetches missing and broken chapters, finds new sources (installing up to 3 extensions if it has
-    to, and keeping only those that found something), merges duplicate series, deletes chapters saved twice or
-    numbered impossibly, and applies the renumbering plans that are safe. A site that asked Uchiyomi to slow down is
-    not broken (since v0.55.1): the run never replaces it, never moves a series onto a source that cannot update it,
-    and leaves the chapters a rate limit holds back to clear by themselves. Merges and deletes cannot be undone. While it
+    broken sources, fetches missing and broken chapters, finds new sources (installing extensions if it has to, and
+    keeping only those that found something), merges duplicate series, deletes chapters saved twice or numbered
+    impossibly, and applies the renumbering plans that are safe. Since v0.55.1 it tries extensions one at a time, with
+    no limit of its own, until the series are found or its time is up — the next run carries on down the list — the
+    ones your series' translation groups name first, then the most downloaded (the download counts its extension
+    repository publishes on GitHub, read at most once a day), then the most recently updated; an 18+ extension only
+    for a series rated 18+, after the others. One that has none of the series is removed straight away, and is not
+    tried for the same series again for a month. The end says it in one line: *Tried 14 extensions and kept Ember
+    Pages*. A site that asked Uchiyomi to slow down is not broken (since v0.55.1): the run never replaces it, never
+    moves a series onto a source that cannot update it, and leaves the chapters a rate limit holds back to clear by
+    themselves. Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
     *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says how

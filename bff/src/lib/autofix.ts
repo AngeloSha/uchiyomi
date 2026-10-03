@@ -15,14 +15,16 @@
  *   every off or failing source some series reads through, and turn off failing sources nothing uses; link language
  *   editions; MERGE duplicate series whose AniList entry, language and titles or chapters agree; apply renumbering plans
  *   marked clean; DELETE the later copy of a chapter saved twice when the kept copy is complete, and chapters with an
- *   impossible number, with the delete route's own guards; install up to AUTOFIX_INSTALLS extensions a run, keeping only
- *   those that carry something.
+ *   impossible number, with the delete route's own guards; install extensions, the popular first, as long as its time
+ *   lasts (v0.55.1, the owner, 2026-10-04: no cap of three), keeping only those that carry something.
  * WHAT IT NEVER DOES
  *   ⚠️ Press Ignore: what it cannot fix is listed as Needs you, never hidden. ⚠️ Turn off a source some series reads as
- *   its main (it retires, which refuses). ⚠️ Clear a block without a passing Test. ⚠️ Apply a renumbering plan that is not
- *   clean (numbering.ts settleNumbering decides at the apply, from the listing it reads then). ⚠️ Delete outside the
- *   download folder, or a bookmarked chapter. ⚠️ Install more than AUTOFIX_INSTALLS a run. ⚠️ Touch a container: a
- *   solver or an engine that is down is the operator's.
+ *   its main (it retires, which refuses). ⚠️ Clear a block without a passing Test, or a rate limit's at all (v0.55.1). ⚠️
+ *   Replace a source that only asked for room, or move a series onto a source that cannot update it (v0.55.1). ⚠️ Apply
+ *   a renumbering plan that is not clean (numbering.ts settleNumbering decides at the apply, from the listing it reads
+ *   then). ⚠️ Delete outside the download folder, or a bookmarked chapter. ⚠️ Install more than AUTOFIX_INSTALLS a run
+ *   when it is set, or try a package twice for one series within a month. ⚠️ Touch a container: a solver or an engine
+ *   that is down is the operator's.
  *
  * HOW
  *   Ten phases, one after another (PHASES), each reusing the functions the Health page's own keys run -- never their
@@ -46,7 +48,7 @@ import { say, saidOf, type Part, type Said } from './said';
 import { SYSTEM_CTX, visibleToAll, type ViewCtx } from './visibility';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { repairState, repairForAutofix, type AutofixDrive, type RepairCurrent, type RepairResult, type RepairStep } from './repair';
-import { findRunning, findRunSettled, findState, startFind, stopFind } from './findSources';
+import { findRunning, findRunSettled, findState, startFind, stopFind, FIND_BUSY_WAIT_MS, type FindResult } from './findSources';
 import { persistScan, DL_ROOT } from './library';
 import { updateSeries, runsInside } from './updater';
 import { renumberRunning, folderBusy } from './numbering';
@@ -54,7 +56,9 @@ import { getSource, reloadAll, isSwAdapterId, SW_PREFIX } from './sources';
 import { mangadexLangOf } from './sources/mangadexLangs';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { suwayomiConfigured } from './sources/suwayomi/client';
-import { listExtensions, setExtensionState, sourcesOfExtension, type ExtensionInfo } from './sources/suwayomi/extensions';
+import { extensionFacts, listExtensions, setExtensionState, sourcesOfExtension, type ExtensionInfo } from './sources/suwayomi/extensions';
+import { downloadsPerDay, rankPackages } from './extensionRank';
+import { seriesIsAdult } from './sourceHunt';
 import { adoptExtensionSources, getHiddenLangs, setSourcesEnabled } from './sources/suwayomi/langs';
 import { wouldFit } from './sources/suwayomi/register';
 import { ourSolverUrl } from './sources/suwayomi/engineSolver';
@@ -64,7 +68,7 @@ import { testSource } from './sourceCheck';
 import { clearBlock, pruneOrphanedHealth } from './sourceHealth';
 import { retireSource } from './retireSource';
 import { switchMainSource } from './mainSource';
-import { standingOf, standingRows, EXTENSION_OFF, EXTENSION_OFF_BY, type StandingRow } from './sourceStanding';
+import { carries, standingOf, standingRows, standingsOf, EXTENSION_OFF, EXTENSION_OFF_BY, type StandingRow } from './sourceStanding';
 import { currentFailures } from './sourceEvidence';
 import {
   runHealthChecks, sourceTrouble, frozenSeries, duplicateSeries, savedTwiceGroups, impossibleLimit, gapsAnswered, plausibleNumbers,
@@ -138,8 +142,11 @@ function knob(name: string, def: number, lo: number, hi: number): number {
 export const AUTOFIX_MAX_MINUTES = knob('AUTOFIX_MAX_MINUTES', 90, 1, 24 * 60);
 /** Searches the whole run may start: the repair's hunts for short chapters and gaps share them. */
 export const AUTOFIX_SEARCHES = knob('AUTOFIX_SEARCHES', 60, 0, 1000);
-/** Extensions one run may install. 0 switches the extensions phase off. */
-export const AUTOFIX_INSTALLS = knob('AUTOFIX_INSTALLS', 3, 0, 10);
+/**
+ * Extensions one run may install: none by default (v0.55.1) -- the phase goes on until the run's time is spent, and the
+ * next run continues down the list. A number caps it; 0 switches the extensions phase off.
+ */
+export const AUTOFIX_INSTALLS = knob('AUTOFIX_INSTALLS', Number.POSITIVE_INFINITY, 0, 100_000);
 /** Sources one run Tests, one at a time: each is up to a minute of requests to a site. */
 const AUTOFIX_TESTS = 40;
 /** Lines the run's log keeps (the newest), and items a done line keeps. */
@@ -147,14 +154,15 @@ const LOG_MAX = 200;
 const ITEMS_MAX = 20;
 /** Done kinds the summary carries at most, the ones that matter most first (DONE_ORDER). */
 const DONE_MAX = 12;
-/** How long a package that was installed and carried nothing is not tried again for the same language. */
+/** How long a package that was searched for a series and did not carry it is not tried for that series again. */
 const TRIED_DAYS = 30;
 
 // ── the run ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 type Log = { info: (m: string) => void; warn: (m: string) => void; error: (m: unknown) => void };
 
-interface Installed { pkg: string; name: string; lang: string; sourceId: string; ids: string[] }
+/** A package this run installed: `settled` once it was kept or removed again (settle), which happens once. */
+interface Installed { pkg: string; name: string; lang: string; sourceId: string; ids: string[]; settled?: boolean }
 
 interface Run {
   id: string;
@@ -196,7 +204,7 @@ interface Run {
   installs: number;
   installed: Installed[];
   /** Packages installed and found to carry nothing, by language: not tried again for a while (TRIED_DAYS). */
-  tried: Array<{ pkg: string; lang: string }>;
+  tried: Array<{ pkg: string; lang: string; series?: string[] }>;
   /** What Health cannot show by itself: an extension that would carry series but found the source limit full. */
   noRoom: string[];
   lines: Said[];
@@ -222,10 +230,12 @@ let active: Run | null = null;
 /** The run going now, or the last one this process started: what the nightly and the tests await. */
 let lastRun: Promise<void> = Promise.resolve();
 let quietMs = 5_000;
+/** What the run's time is read from: the wall clock, but for a test that moves it (setAutofixTiming). */
+let clock: () => number = () => Date.now();
 
 const halted = (a: Run): boolean => a.stop || runtime.stopping || stopRequested(a.card);
 /** The network-heavy phases also stop when the run's time is spent. */
-const outOfTime = (a: Run): boolean => Date.now() > a.deadline;
+const outOfTime = (a: Run): boolean => clock() > a.deadline;
 /** A phase left work behind for a reason of the run's own -- its time, its Tests, its installs: it did not finish. */
 const cutShort = (a: Run, phase: AutofixPhase): void => { a.cut.add(phase); };
 const nap = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -306,9 +316,10 @@ export async function autofixSettled(): Promise<void> {
   await lastRun.catch(() => {});
 }
 
-/** Tests: a shorter wait between looks at a sweep the run waits out. */
-export function setAutofixTiming(t: { quietMs?: number } = {}): void {
+/** Tests: a shorter wait between looks at a sweep the run waits out, and a clock the run's time is read from. */
+export function setAutofixTiming(t: { quietMs?: number; clock?: () => number } = {}): void {
   quietMs = t.quietMs ?? 5_000;
+  clock = t.clock ?? (() => Date.now());
 }
 
 /** Wait, stop-aware, while a sweep runs: the run never works beside one. False when stopped meanwhile. */
@@ -422,8 +433,11 @@ async function recordStart(a: Run): Promise<void> {
     [a.id, a.startedAt, a.origin, a.by ?? '']).catch((e) => console.warn(`[autofix] could not record the start: ${(e as Error)?.message || e}`));
 }
 
-/** What a finished run keeps: its summary and its log, and the packages it found useless (TRIED_DAYS). */
-interface Stored { phaseIndex: number; summary?: AutofixSummary; log: Said[]; tried?: Array<{ pkg: string; lang: string }> }
+/**
+ * What a finished run keeps: its summary and its log, and the packages it searched in vain (TRIED_DAYS) -- since v0.55.1
+ * with the series each was searched for (`series`); v0.55.0 kept a package by language alone.
+ */
+interface Stored { phaseIndex: number; summary?: AutofixSummary; log: Said[]; tried?: Array<{ pkg: string; lang: string; series?: string[] }> }
 
 async function recordEnd(a: Run, status: AutofixStatus, summary: AutofixSummary | null): Promise<void> {
   const stored: Stored = { phaseIndex: a.phaseIndex, ...(summary ? { summary } : {}), log: a.lines, ...(a.tried.length ? { tried: a.tried } : {}) };
@@ -915,11 +929,12 @@ async function chapters(a: Run): Promise<void> {
 
 // ── 8. extensions ───────────────────────────────────────────────────────────────────────────────────────────────
 
-type Target = { id: string; title: string; main: string | null; lang: string; kind: 'frozen' | 'gap' };
+type Target = { id: string; title: string; main: string | null; lang: string; kind: 'frozen' | 'gap'; adult: boolean };
 
 /**
  * The series that still have no working source after the sources phase -- for a reason that is the source's own, not a
- * setting -- and the series with a gap nobody else lists ("asked, and nobody has it", fresh). Each with its language.
+ * setting -- and the series with a gap nobody else lists ("asked, and nobody has it", fresh). Each with its language,
+ * and whether it is rated 18+ (an 18+ package is tried for no other, v0.55.1).
  * ⚠️ A gap's answer counts only while it is about the series as it is now (health.ts gapsAnswered: nothing landed since)
  * and the series still has a hole: an earlier run that filled the gap -- from an extension it installed -- left the
  * answer "nobody has it" behind, and the next run installed another package for a series with nothing missing (and,
@@ -954,7 +969,7 @@ async function extensionTargets(a: Run): Promise<Target[]> {
       const lang = (await seriesLanguage(id).catch(() => null))?.lang;
       // A series in a language the admin hides is theirs to decide: switching one of its sources on would undo it.
       if (!lang || hidden.has(lang)) continue;
-      out.push({ id, title: r.title, main: r.source_id, lang, kind });
+      out.push({ id, title: r.title, main: r.source_id, lang, kind, adult: await seriesIsAdult(id).catch(() => false) });
     }
   }
   return out;
@@ -968,24 +983,25 @@ async function groupsOf(seriesId: string): Promise<Set<string>> {
   return new Set(rows.map((r) => normGroup(r.g)).filter((k) => k.length >= 3));
 }
 
-/** Packages some series reads through in another language: their sources are recorded under the package's name. */
-async function usedPackages(): Promise<Set<string>> {
-  const rows = await q<{ pkg: string }>(
-    `SELECT DISTINCT ss.pkg_name AS pkg FROM suwayomi_sources ss
-      WHERE ss.pkg_name IS NOT NULL
-        AND ('${SW_PREFIX}' || ss.source_id IN (SELECT s.source_id FROM lib_series s WHERE s.source_id IS NOT NULL AND ${visibleToAll('s')})
-          OR '${SW_PREFIX}' || ss.source_id IN (SELECT f.source_id FROM series_sources f JOIN lib_series s ON s.id = f.series_id AND ${visibleToAll('s')}))`,
-  ).catch(() => []);
-  return new Set(rows.map((r) => r.pkg));
-}
-
-/** Packages an earlier run installed for a language and found carrying nothing, within TRIED_DAYS: not tried again yet. */
-async function recentlyTried(): Promise<Set<string>> {
+/**
+ * Whether a package was searched for a target within TRIED_DAYS and did not carry it: it is not tried for that series
+ * again yet (v0.55.1, kept per package AND series -- one that missed X is still tried for a new target Y). A run kept by
+ * v0.55.0 recorded a package by language, for every series of that language it had then: honoured as that.
+ * Reintroduce by reading nothing: "no package is tried twice for the same series" in autofixExtensions.int.test.ts
+ * finds the second run installing again.
+ */
+async function recentlyTried(): Promise<(pkg: string, t: Target) => boolean> {
   const rows = await q<{ result: Stored | null }>(
     `SELECT result FROM repair_runs WHERE kind = 'autofix' AND started_at > now() - ($1 || ' days')::interval`, [String(TRIED_DAYS)]).catch(() => []);
-  const out = new Set<string>();
-  for (const r of rows) for (const t of r.result?.tried ?? []) out.add(`${t.pkg}\u0000${t.lang}`);
-  return out;
+  const pairs = new Set<string>();
+  const langs = new Set<string>();
+  for (const r of rows) {
+    for (const t of r.result?.tried ?? []) {
+      if (Array.isArray(t.series)) for (const id of t.series) pairs.add(`${t.pkg}\u0000${id}`);
+      else langs.add(`${t.pkg}\u0000${t.lang}`);
+    }
+  }
+  return (pkg, t) => pairs.has(`${pkg}\u0000${t.id}`) || langs.has(`${pkg}\u0000${t.lang}`);
 }
 
 /** A catalogue package's language fits a series': the same language, or a package that serves several. */
@@ -997,14 +1013,22 @@ const pkgFits = (e: ExtensionInfo, lang: string): boolean => {
 
 /**
  * For each language with targets: the catalogue's packages that are not installed, not obsolete, and in that language
- * (or several), ranked by what the library itself says -- first the packages whose name the targets' own translation
- * groups carry (a group's own site), then the packages some series already reads through in another language -- and
- * then the rest, never one an earlier run found carrying nothing (TRIED_DAYS). No site is named here. Up to
- * AUTOFIX_INSTALLS installs a run; each switches on only its source in the targets' language (the bulk switch), and is
- * kept only when it fits under the source limit (register.ts wouldFit, and registered after the reload). The targets are
- * then searched on that one source under Find's limits: a frozen series' main is Replaced by it, a gap's series follows
- * it and its missing chapters are fetched. Afterwards only packages this run installed that no series reads through are
- * removed again.
+ * (or several), tried one at a time in lib/extensionRank.ts's order -- the targets' own translation groups first (a
+ * group's own site), then the most downloaded a day, then the most updated, an 18+ package after the others of its
+ * rank -- each only for the targets it has not missed within TRIED_DAYS, and an 18+ package only for a series rated 18+.
+ * No site is named here.
+ *
+ * No cap of its own (v0.55.1). The owner: "searching other extensions unlimited and not 3 in the fix everything so it
+ * eventually find one with the series also … make sure it tries popular extensions first"; v0.55.0 tried three a run,
+ * the first three by name when no group named one. It goes on until every target is carried or the run's time is spent
+ * (AUTOFIX_MAX_MINUTES), and the next run continues down the list, past what this one tried; AUTOFIX_INSTALLS, when set,
+ * caps a run's installs, and 0 switches the phase off. Reintroduce a default of 3: "with no cap it goes past three until
+ * the series is found" in autofixExtensions.int.test.ts stops before Birch Reader.
+ *
+ * Each package switches on only its source in the targets' language (the bulk switch) and is kept only when it fits
+ * under the source limit (register.ts wouldFit, and registered after the reload); the targets are searched on that one
+ * source under Find's limits -- a frozen series' main is Replaced by it, a gap's series follows it and its missing
+ * chapters are fetched -- and a package that carries none is removed at once (settle), so a miss never holds a slot.
  */
 async function extensions(a: Run): Promise<void> {
   if (!AUTOFIX_INSTALLS) return;
@@ -1013,12 +1037,17 @@ async function extensions(a: Run): Promise<void> {
     return;
   }
   if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
-  let targets = await extensionTargets(a);
+  const targets = await extensionTargets(a);
   if (!targets.length) return;
   let catalogue: ExtensionInfo[];
   try { catalogue = await listExtensions(); } catch { return; }
-  const used = await usedPackages();
   const tried = await recentlyTried();
+  const open = catalogue.filter((e) => !e.installed && !e.obsolete);
+  const facts = await extensionFacts();
+  const perDay = await downloadsPerDay(open.map((e) => {
+    const f = facts.get(e.pkgName);
+    return { pkgName: e.pkgName, apkUrl: f?.apkUrl ?? null, jarUrl: f?.jarUrl ?? null, apkName: f?.apkName ?? null, index: f?.index ?? e.repo };
+  }));
   const langs = [...new Set(targets.map((t) => t.lang))]
     .sort((x, y) => targets.filter((t) => t.lang === y).length - targets.filter((t) => t.lang === x).length);
   try {
@@ -1026,33 +1055,41 @@ async function extensions(a: Run): Promise<void> {
       let mine = targets.filter((t) => t.lang === lang);
       const groups = new Map<string, Set<string>>();
       for (const t of mine) groups.set(t.id, await groupsOf(t.id));
-      const candidates = catalogue
-        .filter((e) => !e.installed && !e.obsolete && pkgFits(e, lang) && !tried.has(`${e.pkgName}\u0000${lang}`))
-        .map((e) => {
-          const key = normGroup(e.name);
-          const named = key.length >= 3 ? mine.filter((t) => [...groups.get(t.id)!].some((g) => g.includes(key) || key.includes(g))).length : 0;
-          return { e, named, used: used.has(e.pkgName) ? 1 : 0 };
-        })
-        .sort((x, y) => y.named - x.named || y.used - x.used || x.e.name.localeCompare(y.e.name));
-      for (const c of candidates) {
+      const ranked = rankPackages(open.filter((e) => pkgFits(e, lang)).map((e) => {
+        const key = normGroup(e.name);
+        const named = key.length >= 3 ? mine.filter((t) => [...groups.get(t.id)!].some((g) => g.includes(key) || key.includes(g))).length : 0;
+        return { e, pkgName: e.pkgName, name: e.name, nsfw: e.nsfw, named, perDay: perDay.get(e.pkgName) ?? null, versionCode: facts.get(e.pkgName)?.versionCode ?? null };
+      }));
+      for (const c of ranked) {
         if (!mine.length) break;
         if (halted(a)) return;
+        // Out of time with packages still to try: the next run continues down the list, so they are not Needs you yet.
         if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
-        // Series still without a source and a package not yet tried for them: the next run installs the next ones, so
-        // they are not Needs you yet.
         if (a.installs >= AUTOFIX_INSTALLS) { note(a, say('autofix.item.skipped', { why: 'installs' })); cutShort(a, 'extensions'); return; }
-        const found = await tryPackage(a, c.e, lang, mine);
-        if (found === 'full') return;
-        mine = mine.filter((t) => !found.has(t.id));
-        targets = targets.filter((t) => !found.has(t.id));
+        // Never a package for a series it was searched for in vain within the month, nor an 18+ package for a series
+        // that is not rated 18+. Reintroduce the 18+ rule's absence: "an 18+ package only for a series rated 18+" in
+        // autofixExtensions.int.test.ts finds Rose Velvet installed for the clean series.
+        const forIt = mine.filter((t) => !tried(c.e.pkgName, t) && (!c.e.nsfw || t.adult));
+        if (!forIt.length) continue;
+        const r = await tryPackage(a, c.e, lang, forIt);
+        if (r === 'full') return;
+        mine = mine.filter((t) => !r.has(t.id));
       }
     }
   } finally {
-    await keepOrRemove(a);
+    // What a stop or a throw left between an install and its settling.
+    for (const inst of a.installed) await settle(a, inst);
   }
 }
 
-/** One package: install it, switch on its source in `lang`, search the targets on it. The targets it now carries, or `full`. */
+/** A series' answer from a run over a package's source that says the package was asked and does not carry it. */
+const ASKED = new Set(['no_match', 'refused', 'no_answer', 'followed_already', 'no_source']);
+
+/**
+ * One package: install it, switch on its source in `lang`, search the targets on it, then settle it -- kept when a series
+ * now reads through it, else removed at once -- with the targets it was asked for and does not carry recorded, so no
+ * later run tries it for them within TRIED_DAYS. The targets it now carries, or `full`.
+ */
 async function tryPackage(a: Run, e: ExtensionInfo, lang: string, targets: Target[]): Promise<Set<string> | 'full'> {
   const carried = new Set<string>();
   // Room first: a source that would not register is a source that would push nothing useful -- or, before the used-first
@@ -1081,68 +1118,105 @@ async function tryPackage(a: Run, e: ExtensionInfo, lang: string, targets: Targe
     ?? provided.find((s) => !s.lang || s.lang === 'all');
   const entry: Installed = { pkg: e.pkgName, name: e.name, lang, sourceId: pick ? `${SW_PREFIX}${pick.id}` : '', ids: provided.map((x) => x.id) };
   a.installed.push(entry);
-  if (!pick) return carried;
-  await setSourcesEnabled({ ids: [pick.id], enabled: true });
-  await reloadAll();
-  if (!getSource(entry.sourceId)) {
-    if (!a.noRoom.includes(e.name)) a.noRoom.push(e.name);
-    note(a, say('autofix.item.noRoom', { name: e.name }));
-    return 'full';
-  }
-  now(a, say('autofix.now.searching', { name: e.name }));
-  // Frozen series, by the main source they are stuck on: Replace that source, asking only the new one.
-  const byMain = new Map<string, Target[]>();
-  const loose: Target[] = [];
-  for (const t of targets) {
-    if (t.kind === 'frozen' && t.main) byMain.set(t.main, [...(byMain.get(t.main) ?? []), t]);
-    else loose.push(t);
-  }
-  for (const [main, list] of byMain) {
-    if (halted(a)) break;
-    if (!(await waitSweep(a))) break;
-    const r = await startFind({ sourceId: main }, a.by, a.ctx, undefined,
-      { mode: 'replace', turnOff: true, autofix: a.id, only: [entry.sourceId], avoid: a.replacing });
-    if (!('runId' in r)) continue;
-    await findRunSettled();
-    const st = await findState({ runId: r.runId }).catch(() => null);
-    for (const res of st?.run?.results ?? []) {
-      if (res.promoted && list.some((t) => t.id === res.seriesId)) carried.add(res.seriesId);
+  /** The targets the package was asked about and does not carry: what settle records. */
+  const missed = new Set<string>();
+  try {
+    // No source in this language: it carries none of them, now or on the next run.
+    if (!pick) { for (const t of targets) missed.add(t.id); return carried; }
+    await setSourcesEnabled({ ids: [pick.id], enabled: true });
+    await reloadAll();
+    if (!getSource(entry.sourceId)) {
+      if (!a.noRoom.includes(e.name)) a.noRoom.push(e.name);
+      note(a, say('autofix.item.noRoom', { name: e.name }));
+      return 'full';
     }
-    const moved = (st?.run?.results ?? []).filter((x) => x.promoted).length;
-    if (moved) {
-      did(a, 'replaced', moved, say('autofix.item.replaced', { name: getSource(main)?.name ?? main, n: moved }));
-      const name = getSource(main)?.name ?? main;
-      if (!a.replacedNames.includes(name)) a.replacedNames.push(name);
+    now(a, say('autofix.now.searching', { name: e.name }));
+    const answered = (res: FindResult) => { if (res.why && ASKED.has(res.why)) missed.add(res.seriesId); };
+    // Frozen series, by the main source they are stuck on: Replace that source, asking only the new one, over these
+    // series alone (`within`: an 18+ package is not asked for the main's other series, nor one already tried for them).
+    const byMain = new Map<string, Target[]>();
+    const loose: Target[] = [];
+    for (const t of targets) {
+      if (t.kind === 'frozen' && t.main) byMain.set(t.main, [...(byMain.get(t.main) ?? []), t]);
+      else loose.push(t);
     }
-  }
-  // Series with a gap nobody had, and frozen series with no main to Replace: follow the new source, then a frozen one
-  // makes it its main, and a gap's missing chapters are fetched.
-  if (loose.length && !halted(a) && await waitSweep(a)) {
-    const r = await startFind({ seriesIds: loose.map((t) => t.id) }, a.by, a.ctx, undefined, { autofix: a.id, only: [entry.sourceId] });
-    if ('runId' in r) {
+    for (const [main, list] of byMain) {
+      if (halted(a)) break;
+      if (!(await waitSweep(a))) break;
+      const r = await startFind({ sourceId: main }, a.by, a.ctx, undefined,
+        { mode: 'replace', turnOff: true, autofix: a.id, only: [entry.sourceId], avoid: a.replacing, within: list.map((t) => t.id) });
+      if (!('runId' in r)) continue;
       await findRunSettled();
       const st = await findState({ runId: r.runId }).catch(() => null);
       for (const res of st?.run?.results ?? []) {
-        if (!res.followed.some((f) => f.sourceId === entry.sourceId)) continue;
-        carried.add(res.seriesId);
-        const t = loose.find((x) => x.id === res.seriesId);
-        if (t?.kind === 'frozen') {
-          await switchMainSource(t.id, entry.sourceId, { old: 'drop', ctx: a.ctx, userId: a.by, via: 'replace', runId: a.id }).catch(() => null);
-        } else if (t) {
-          await held(async () => {
-            const have = new Set(await haveNumbers(t.id).catch(() => [] as number[]));
-            const up = await updateSeries(t.id, 100, { hunt: false, cancelled: () => halted(a) }).catch(() => null);
-            if (up?.landed.length) {
-              const filled = up.landed.filter((l) => !have.has(l.number)).length;
-              did(a, 'fetched', filled);
-              await persistScan().catch(() => {});
+        if (res.promoted && list.some((t) => t.id === res.seriesId)) carried.add(res.seriesId);
+        else answered(res);
+      }
+      const moved = (st?.run?.results ?? []).filter((x) => x.promoted).length;
+      if (moved) {
+        did(a, 'replaced', moved, say('autofix.item.replaced', { name: getSource(main)?.name ?? main, n: moved }));
+        const name = getSource(main)?.name ?? main;
+        if (!a.replacedNames.includes(name)) a.replacedNames.push(name);
+      }
+    }
+    // Series with a gap nobody had, and frozen series with no main to Replace: follow the new source, then a frozen one
+    // makes it its main -- only while it can update the series (v0.55.1: a package installed before can bring back a
+    // source already failing; reintroduce by switching whatever it is: "a frozen series moves to a new source only
+    // while it can update it" in autofixExtensions.int.test.ts finds it moved) -- and a gap's missing chapters are
+    // fetched.
+    if (loose.length && !halted(a) && await waitSweep(a)) {
+      const r = await startFind({ seriesIds: loose.map((t) => t.id) }, a.by, a.ctx, undefined, { autofix: a.id, only: [entry.sourceId] });
+      if ('runId' in r) {
+        await findRunSettled();
+        const st = await findState({ runId: r.runId }).catch(() => null);
+        const takes = carries((await standingsOf([entry.sourceId])).get(entry.sourceId) ?? 'not_loaded');
+        for (const res of st?.run?.results ?? []) {
+          if (!res.followed.some((f) => f.sourceId === entry.sourceId)) { answered(res); continue; }
+          const t = loose.find((x) => x.id === res.seriesId);
+          if (t?.kind === 'frozen' && !takes) continue;
+          carried.add(res.seriesId);
+          if (t?.kind === 'frozen') {
+            // After the listing refresh the follow started (quietSeries): beside it the switch is refused `busy`.
+            // Reintroduce by switching at once: "a frozen series with no main moves to the new source that carries it"
+            // in autofixExtensions.int.test.ts finds Fir Lake still without one.
+            if (await quietSeries(a, t.id)) {
+              await switchMainSource(t.id, entry.sourceId, { old: 'drop', ctx: a.ctx, userId: a.by, via: 'replace', runId: a.id }).catch(() => null);
             }
-          });
+          } else if (t) {
+            await held(async () => {
+              const have = new Set(await haveNumbers(t.id).catch(() => [] as number[]));
+              const up = await updateSeries(t.id, 100, { hunt: false, cancelled: () => halted(a) }).catch(() => null);
+              if (up?.landed.length) {
+                const filled = up.landed.filter((l) => !have.has(l.number)).length;
+                did(a, 'fetched', filled);
+                await persistScan().catch(() => {});
+              }
+            });
+          }
         }
       }
     }
+    return carried;
+  } finally {
+    // Right after its searches (v0.55.1): a miss is removed before the next package is installed, and never holds a slot
+    // under the source limit. Reintroduce v0.55.0's removal at the phase's end (settle only in extensions' finally):
+    // "each miss is removed right after its searches" in autofixExtensions.int.test.ts finds two installed at once.
+    await settle(a, entry, [...missed].filter((id) => !carried.has(id)));
   }
-  return carried;
+}
+
+/**
+ * Wait, stop-aware and at most FIND_BUSY_WAIT_MS, until no run is inside the series. A Find run that ends with a series
+ * following a new source refreshes its listing (findSources.ts scheduleFindRefresh), and a switch beside that refresh is
+ * refused `busy` (lib/mainSource.ts): the frozen series with no main followed the new source and never moved.
+ */
+async function quietSeries(a: Run, seriesId: string): Promise<boolean> {
+  const until = Date.now() + FIND_BUSY_WAIT_MS;
+  while (runsInside(seriesId) > 0) {
+    if (halted(a) || Date.now() > until) return false;
+    await nap(100);
+  }
+  return true;
 }
 
 /** How many visible series read through any source of this package: as main, or as a follower. */
@@ -1158,33 +1232,35 @@ async function packageUse(pkg: string): Promise<number> {
 }
 
 /**
- * Keep what carries something, remove the rest -- of what THIS run installed, never anything else. Removal is the
- * uninstall route's: the engine's uninstall, then the package's rows and their orphaned health rows, then a reload.
+ * Keep a package this run installed when a series reads through it, else remove it -- the uninstall route's way: the
+ * engine's uninstall, then the package's rows and their orphaned health rows, then a reload. Never anything this run did
+ * not install, and each package once. `missed`: the targets it was asked about and does not carry, recorded with the
+ * run (Stored.tried) so no run tries it for them again within TRIED_DAYS.
  */
-async function keepOrRemove(a: Run): Promise<void> {
-  for (const inst of a.installed) {
-    // adoptExtensionSources records no package; the registration's own remember() does, from the engine's answer. Written
-    // here too, so whether a package is used never depends on the engine having said.
-    await q(`UPDATE suwayomi_sources SET pkg_name = $2 WHERE source_id = ANY($1::text[]) AND pkg_name IS NULL`,
-      [inst.ids, inst.pkg]).catch(() => {});
-    const n = inst.sourceId ? await packageUse(inst.pkg) : 0;
-    if (n > 0) {
-      a.keptPkgs.push({ name: inst.name, series: n });
-      did(a, 'installed', 1, say('autofix.item.installed', { name: inst.name, n }));
-      continue;
-    }
-    now(a, say('autofix.now.removing', { name: inst.name }));
-    const provided = await sourcesOfExtension(inst.pkg).catch(() => []);
-    try { await setExtensionState(inst.pkg, 'uninstall'); } catch { /* the engine's own; what is recorded goes regardless */ }
-    const ids = [...new Set([...provided.map((s) => s.id), ...inst.ids])];
-    await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [ids]).catch(() => {});
-    await pruneOrphanedHealth(ids.map((x) => `${SW_PREFIX}${x}`)).catch(() => 0);
-    await logAudit('extension.uninstall', { userId: a.by, detail: { pkgName: inst.pkg, via: 'autofix', runId: a.id } });
-    a.removedPkgs.push(inst.name);
-    a.tried.push({ pkg: inst.pkg, lang: inst.lang });
-    did(a, 'uninstalled', 1, say('autofix.item.uninstalled', { name: inst.name }));
+async function settle(a: Run, inst: Installed, missed: string[] = []): Promise<void> {
+  if (inst.settled) return;
+  inst.settled = true;
+  if (missed.length) a.tried.push({ pkg: inst.pkg, lang: inst.lang, series: missed });
+  // adoptExtensionSources records no package; the registration's own remember() does, from the engine's answer. Written
+  // here too, so whether a package is used never depends on the engine having said.
+  await q(`UPDATE suwayomi_sources SET pkg_name = $2 WHERE source_id = ANY($1::text[]) AND pkg_name IS NULL`,
+    [inst.ids, inst.pkg]).catch(() => {});
+  const n = inst.sourceId ? await packageUse(inst.pkg) : 0;
+  if (n > 0) {
+    a.keptPkgs.push({ name: inst.name, series: n });
+    did(a, 'installed', 1, say('autofix.item.installed', { name: inst.name, n }));
+    return;
   }
-  if (a.installed.length) await reloadAll().catch(() => null);
+  now(a, say('autofix.now.removing', { name: inst.name }));
+  const provided = await sourcesOfExtension(inst.pkg).catch(() => []);
+  try { await setExtensionState(inst.pkg, 'uninstall'); } catch { /* the engine's own; what is recorded goes regardless */ }
+  const ids = [...new Set([...provided.map((s) => s.id), ...inst.ids])];
+  await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [ids]).catch(() => {});
+  await pruneOrphanedHealth(ids.map((x) => `${SW_PREFIX}${x}`)).catch(() => 0);
+  await logAudit('extension.uninstall', { userId: a.by, detail: { pkgName: inst.pkg, via: 'autofix', runId: a.id } });
+  a.removedPkgs.push(inst.name);
+  did(a, 'uninstalled', 1, say('autofix.item.uninstalled', { name: inst.name }));
+  await reloadAll().catch(() => null);
 }
 
 // ── 9. files ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1271,12 +1347,15 @@ function doneLines(a: Run): AutofixSummary['done'] {
     const n = a.counts[kind] ?? 0;
     if (n <= 0) continue;
     const counted = a.counted;
-    const said: Part = kind === 'replaced' ? say('autofix.done.replaced', { n, ...named(a.replacedNames) })
-      : kind === 'installed' ? say('autofix.done.installed', { ...named(a.keptPkgs.map((p) => p.name)), n: a.keptPkgs.reduce((k, p) => k + p.series, 0) })
-      : kind === 'uninstalled' ? say('autofix.done.uninstalled', named(a.removedPkgs))
+    // v0.55.1: the extensions phase is one line however many it tried -- "Tried 14 extensions and kept Ember Pages" -- or,
+    // none kept, "Tried 14 extensions: none of them had the series"; what each one did is under Details.
+    const said: Part | null = kind === 'replaced' ? say('autofix.done.replaced', { n, ...named(a.replacedNames) })
+      : kind === 'installed' ? say('autofix.done.tried', { n: a.installs, ...named(a.keptPkgs.map((p) => p.name)) })
+      : kind === 'uninstalled' ? (a.counts.installed ? null : say('autofix.done.triedNone', { n: a.installs }))
       : kind === 'scanned' ? (counted ? say('autofix.done.counted', { n: counted }) : say('autofix.done.scanned'))
       : kind === 'engineConnected' ? say('autofix.done.engineConnected')
       : say(`autofix.done.${kind}` as 'autofix.done.merged', { n });
+    if (!said) continue;
     const items = a.items[kind];
     out.push({ kind, n, said: saidOf(said), ...(items?.length ? { items } : {}) });
     if (out.length >= DONE_MAX) break;

@@ -121,7 +121,7 @@ test('Fix it for me is the default, with its three lines; Let me choose is the s
   assert.doesNotMatch(radio('manual'), /\bchecked=""/, 'Let me choose is chosen by default');
   assert.match(html, />Fix it for me<\/span><span class="[^"]*">Recommended<\/span>/, 'Fix it for me is not marked recommended');
   for (const l of [
-    'Replaces broken sources, fetches missing and broken chapters, and finds new sources, installing up to 3 extensions if it has to.',
+    'Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.',
     'Merges duplicate series, deletes chapters saved twice or numbered impossibly, and applies safe renumbering. These can’t be undone.',
     'What only you can fix is listed at the end.',
   ]) assert.ok(html.includes(l), `Fix it for me does not say: ${l}`);

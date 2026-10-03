@@ -264,9 +264,12 @@ ever hit.
   stops at a safe point; what is left waits for the next run.
 - `AUTOFIX_SEARCHES` (default `60`, 0–1000): searches of other sites one Fix everything run may start for short
   chapters and gaps, shared like the repair's five.
-- `AUTOFIX_INSTALLS` (default `3`, 0–10): extensions one Fix everything run may install for series no source
-  carries; `0` switches its extensions phase off. A package it installed that carries no series is removed again
-  before the run ends, and is not tried again for a month.
+- `AUTOFIX_INSTALLS` (default: no cap; 0–100000): extensions one Fix everything run may install for series no source
+  carries. Since v0.55.1 there is no cap unless you set one: the run tries extensions one at a time, the ones the
+  series' translation groups name first, then the most downloaded, until the series are found or
+  `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
+  package that carries none of the series it was searched for is removed again at once, and is not tried for those
+  series again for a month.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 

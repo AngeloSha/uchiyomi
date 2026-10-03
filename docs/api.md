@@ -554,9 +554,15 @@ when their AniList entry, language and titles or chapter lists agree, keeping th
 and gap steps, uncapped but paced; since v0.55.1 it leaves alone every source cooling down or rate-limited when it
 begins -- `status` stays `rate_limited` until a download succeeds -- resetting none of its failed chapters and listing,
 fetching or searching nothing through it; what such a source holds back, and every chapter a rate limit failed, is
-`clears` (`autofix.clears.cooldown` {name}, `at` the cooldown's end while one runs), never `needsYou`), `extensions` (up to `AUTOFIX_INSTALLS` extensions installed in the series'
-language for series no source carries or gaps nobody had, only that language's source switched on, kept only when a
-series now reads through it), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
+`clears` (`autofix.clears.cooldown` {name}, `at` the cooldown's end while one runs), never `needsYou`), `extensions`
+(extensions installed in the series' language for series no source carries or gaps nobody had, only that language's
+source switched on, kept only when a series now reads through it; since v0.55.1 one at a time with no cap unless
+`AUTOFIX_INSTALLS` sets one, until every such series is carried or the run's time is spent -- the next run continues
+down the list -- in this order: the series' own translation groups naming the package, then its downloads a day (its
+apk and jar on the repository's GitHub releases, read at most once a day, the last answer kept while GitHub cannot be
+reached), then its version code, then its name; an 18+ package only for a series rated 18+, after the others; never a
+package already searched in vain for that series within 30 days; a package that carries none removed at once, before
+the next is installed), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
 impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
 `GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
 `GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
@@ -572,7 +578,10 @@ repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result
 admin who hides 18+, here and on the routes above, without the lines that name a series by title) and audited as
 `library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
 `done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly
-runs.
+runs. Since v0.55.1 the extensions phase says what it did in one `done` line, `autofix.done.tried` {n, names, more} (the
+packages tried, naming those kept) or, when it kept none, `autofix.done.triedNone` {n} (`autofix.done.installed` and
+`autofix.done.uninstalled` stay for runs kept from before), and a kept run's `result.tried` lists the packages it
+searched in vain as `{pkg, lang, series}`, the series each was searched for (`{pkg, lang}` before).
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's

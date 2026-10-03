@@ -1428,6 +1428,9 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
       isInstalled: !!e.installed, hasUpdate: !!e.hasUpdate, isObsolete: !!e.obsolete, isNsfw: !!e.isNsfw,
       contentWarning: e.isNsfw ? 'NSFW' : 'SAFE', repo: e.repo ?? null, storeIndexUrl: e.repo ?? null,
       versionCode: e.versionCode, versionCodeLong: String(e.versionCode), apkName: `tachiyomi-${e.pkgName.split('.').slice(-2).join('.')}-v${e.versionName}.apk`,
+      // Modelled, not measured (no network inside the measured container): the addresses a repository's index gives
+      // its files -- Keiyoushi's put them on GitHub Releases -- as seeded, else none.
+      apkUrl: e.apkUrl ?? null, jarUrl: e.jarUrl ?? null,
       source: () => connection(e.installed ? [...st.sources.values()].filter((s) => s.pkgName === e.pkgName).map(sourceView) : []),
     };
   }

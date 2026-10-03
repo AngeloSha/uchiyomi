@@ -311,11 +311,15 @@ export async function closeInterruptedFindRuns(): Promise<void> {
  * `review`: review first (v0.51.0) -- the same run, which keeps its candidates for an admin instead of following.
  * `mode: 'replace'` (v0.54.0, a source's scope only): move every series off that source; `turnOff` (never with review)
  * then turns it off once none is left on it. Replace and Find share the one run at a time. `avoid` (v0.55.1, Fix
- * everything's Replace runs): sources a Replace never makes a series' main source, nor searches.
+ * everything's Replace runs): sources a Replace never makes a series' main source, nor searches. `within` (v0.55.1, Fix
+ * everything's extensions phase): only these of the scope's series -- a source's other series are not this run's.
  */
 export async function startFind(
   scope: FindScope, userId: string | null, ctx: ViewCtx, from?: FastifyRequest,
-  o: { review?: boolean; mode?: FindMode; turnOff?: boolean; autofix?: string; only?: readonly string[]; avoid?: readonly string[] } = {},
+  o: {
+    review?: boolean; mode?: FindMode; turnOff?: boolean; autofix?: string; only?: readonly string[]; avoid?: readonly string[];
+    within?: readonly string[];
+  } = {},
 ): Promise<{ runId: string; total: number } | { busy: string } | { empty: true } | { autofix: true }> {
   const review = o.review === true;
   const mode: FindMode = o.mode === 'replace' && 'sourceId' in scope ? 'replace' : 'follow';
@@ -329,9 +333,10 @@ export async function startFind(
   const id = randomUUID();
   claimed = id;
   try {
-    const list = 'sourceId' in scope
+    const within = o.within ? new Set(o.within) : null;
+    const list = ('sourceId' in scope
       ? await seriesOfMainSource(scope.sourceId, ctx, { followersFirst: mode === 'replace' })
-      : await seriesByIds(scope.seriesIds, ctx);
+      : await seriesByIds(scope.seriesIds, ctx)).filter((s) => !within || within.has(s.id));
     if (!list.length) { claimed = null; return { empty: true }; }
     await closeInterruptedFindRuns();
     // The ids it resolved to, for either kind: what closeInterruptedFindRuns lists as not tried if the process goes

@@ -63,6 +63,43 @@ export async function listExtensions(run: Gql = defaultGql): Promise<ExtensionIn
   return Array.isArray(nodes) ? nodes.map(toInfo).filter((e): e is ExtensionInfo => !!e) : [];
 }
 
+/** What ranks a catalogue package for Fix everything (v0.55.1, lib/extensionRank.ts). */
+export interface ExtensionFacts {
+  versionCode: number | null;
+  /** Its apk and jar, where its repository's index points (GitHub release files for Keiyoushi's). */
+  apkUrl: string | null;
+  jarUrl: string | null;
+  /** The apk's file name, and the index it was read from: what finds its files when the engine gives no address. */
+  apkName: string | null;
+  index: string | null;
+}
+
+/**
+ * Each catalogue package's version code and its files -- the addresses of its apk and jar, the apk's name and its
+ * repository's index -- by package. Asked apart from listExtensions on purpose: these are the v2.3 engine's fields, and
+ * an engine that lacks them must not take the catalogue down with it -- it answers no facts, and the ranking falls back
+ * to names.
+ */
+export async function extensionFacts(run: Gql = defaultGql): Promise<Map<string, ExtensionFacts>> {
+  try {
+    const d = await run<{ extensions: { nodes: Array<{
+      pkgName: string; versionCodeLong?: string | null; apkUrl?: string | null; jarUrl?: string | null; apkName?: string | null; storeIndexUrl?: string | null;
+    }> } }>(`{ extensions { nodes { pkgName versionCodeLong apkUrl jarUrl apkName storeIndexUrl } } }`, {}, 30000);
+    const out = new Map<string, ExtensionFacts>();
+    for (const e of d?.extensions?.nodes ?? []) {
+      if (!e?.pkgName) continue;
+      const v = Number(e.versionCodeLong);
+      out.set(e.pkgName, {
+        versionCode: Number.isFinite(v) ? v : null, apkUrl: e.apkUrl || null, jarUrl: e.jarUrl || null,
+        apkName: e.apkName || null, index: e.storeIndexUrl || null,
+      });
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
 /**
  * Re-read the repositories. Slow (it downloads each repo index), so it runs when someone asks for it or on
  * the scheduled extension check -- never on every catalogue read.

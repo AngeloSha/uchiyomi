@@ -9160,9 +9160,14 @@ paths:
         updates; renumbering plans applied only when the plan built at the apply is clean; the repair's failures,
         short and gap steps uncapped but paced (since v0.55.1 leaving alone every source cooling down or rate-limited
         when they begin: none of its failed chapters reset, nothing listed, fetched or searched through it, and what
-        it holds back -- with every chapter a rate limit failed -- said under `clears`, never `needsYou`); up to AUTOFIX_INSTALLS extensions installed in a series' language for
-        series no source carries or gaps nobody had (only that language's source switched on, kept only when a series
-        now reads through it); the later copy of a chapter saved twice deleted when the kept copy is complete, and
+        it holds back -- with every chapter a rate limit failed -- said under `clears`, never `needsYou`); extensions
+        installed in a series' language for series no source carries or gaps nobody had (only that language's source
+        switched on, kept only when a series now reads through it; since v0.55.1 one at a time with no cap unless
+        AUTOFIX_INSTALLS sets one, until they are carried or the run's time is spent, the series' translation groups'
+        packages first, then the most downloaded a day on the repository's GitHub releases, then the most updated; an
+        18+ package only for a series rated 18+, after the others; never one searched in vain for the same series
+        within 30 days; a miss removed at once; said in one done line, `autofix.done.tried` or
+        `autofix.done.triedNone`); the later copy of a chapter saved twice deleted when the kept copy is complete, and
         impossible chapter numbers deleted, with the delete route's guards; then Health again and the summary. It
         never presses Ignore. Bounded by AUTOFIX_MAX_MINUTES and AUTOFIX_SEARCHES. Audited as `library.autofix`. 409
         `{error: busy, running}` beside another run (`autofix`), a repair (`repair`), a Find or Replace (`find`) or a

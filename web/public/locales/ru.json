@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3154
+    "strings": 3159
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3157,5 +3157,10 @@
   "Applying safe renumbering": "Применение безопасной перенумерации",
   "Fetching missing and broken chapters": "Загрузка недостающих и повреждённых глав",
   "Looking for new sources": "Поиск новых источников",
-  "Removing extra chapter files": "Удаление лишних файлов глав"
+  "Removing extra chapter files": "Удаление лишних файлов глав",
+  "Tried 1 extension and kept {names}": "Проверено 1 расширение, оставлено: {names}",
+  "Tried {n} extensions and kept {names}": "Проверено расширений: {n}, оставлено: {names}",
+  "Tried 1 extension: none of the series were there": "Проверено 1 расширение: ни одной из серий в нём не нашлось",
+  "Tried {n} extensions: none of the series were there": "Проверено расширений: {n}, ни одной из серий в них не нашлось",
+  "Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.": "Заменяет сломанные источники, загружает недостающие и повреждённые главы и находит новые источники, при необходимости сначала пробуя самые популярные расширения."
 }

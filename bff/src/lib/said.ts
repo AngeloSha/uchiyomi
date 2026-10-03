@@ -577,6 +577,11 @@ const EN = {
   // `n` the series the kept extensions carry now.
   'autofix.done.installed': ({ names: list, more, n }: { names: string[]; more: number; n: number }) => `Installed ${names(list, more)} (found ${n} series)`,
   'autofix.done.uninstalled': ({ names: list, more }: { names: string[]; more: number }) => `Tried and removed ${names(list, more)}: none of the series were there`,
+  // v0.55.1: the extensions phase in one line, however many it tried -- `n` the extensions tried, `names` those kept --
+  // or, when none had the series, how many it tried. v0.55.0's two lines above stay for the runs it kept.
+  'autofix.done.tried': ({ n, names: list, more }: { n: number; names: string[]; more: number }) =>
+    `Tried ${n} extension${s(n, '', 's')} and kept ${names(list, more)}`,
+  'autofix.done.triedNone': ({ n }: { n: number }) => `Tried ${n} extension${s(n, '', 's')}: none of the series were there`,
   'autofix.done.deletedTwice': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} saved twice`,
   'autofix.done.deletedOdd': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} numbered impossibly`,
 
