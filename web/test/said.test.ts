@@ -357,6 +357,10 @@ test('a line is joined the reader\'s way, and a code this build does not know le
   assert.equal(saidText([{ code: 'sources.turnedOff' }, { code: 'sources.uses', params: { n: 0 } }]), 'turned off by you; no series use it');
   assert.equal(saidText([{ code: 'sources.inconclusive', params: { stage: 'pages' } }, { code: 'sources.uses', params: { n: 0 }, join: 'dashCap' }]),
     'the last test ran out of time while listing pages — not proof it is broken — No series use it');
+  // v0.53.0, Source health's summary: its two counts side by side, in every language. Reintroduce the join as a clause
+  // ("; "): this reads "3 sources your series use need a look; 5 sources…".
+  assert.equal(saidText([{ code: 'sources.affected', params: { n: 3 } }, { code: 'sources.failingUnused', params: { n: 5 }, join: 'dot' }]),
+    '3 sources your series use need a look · 5 sources nothing uses are failing');
   // In Japanese and Arabic, their own marks: "；" and "؛", "（…）", and no space between sentences.
   try {
     setActiveLocale('ja');
@@ -364,8 +368,10 @@ test('a line is joined the reader\'s way, and a code this build does not know le
     assert.equal(joinPart('A。', 'B', 'sentence'), 'A。B');
     assert.equal(joinPart('A。', 'b', 'then'), 'A。b', 'in Japanese, a sentence that opens on a name is joined otherwise');
     assert.equal(joinPart('A', 'B', 'paren'), 'A（B）');
+    assert.equal(joinPart('A', 'B', 'dot'), 'A · B', 'two counts side by side are not a clause');
     setActiveLocale('ar');
     assert.equal(joinPart('أ', 'ب', 'clause'), 'أ؛ ب');
+    assert.equal(joinPart('أ', 'ب', 'dot'), 'أ · ب');
   } finally {
     setActiveLocale('en');
   }

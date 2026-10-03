@@ -155,9 +155,13 @@ test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with t
   assert.equal(it.diagnosis.code, 'extension_error');
   assert.equal(it.tested.by, 'test');
   assert.equal(it.series, 0);
+  // v0.53.0: its group on the card and its one state, as data -- a failed Test on a source nothing uses, at the search
+  // step -- and the extension's own logo.
+  assert.deepEqual([it.group, it.state, it.stage, it.icon], ['unused', 'failing', 'search', true]);
   assert.equal(it.key, `source:${BALL}`);
   assert.deepEqual(it.actions, ['test', 'disable', 'ignore']);
-  assert.doesNotMatch(c.summary, /All sources responding normally/);
+  assert.doesNotMatch(c.summary, /All sources (responding normally|are working)/);
+  assert.match(c.summary, /\d+ sources? nothing uses (is|are) failing/, 'the summary counts it among the failing sources nothing uses');
   assert.ok(c.testMs >= 1500, 'Health can say how long a Test may take');
 
   // GET /api/admin/sources carries it for the Providers card; the public status is untouched.

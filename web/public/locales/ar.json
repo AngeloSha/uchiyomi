@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2750
+    "strings": 2755
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2753,5 +2753,10 @@
   "Turned on {name} — 1 source ready to search": "فُعِّلت {name} — مصدر واحد جاهز للبحث",
   "Turned on {name} — {n} sources ready to search": "فُعِّلت {name} — {n} من المصادر جاهزة للبحث",
   "Turning on…": "جارٍ التفعيل…",
-  "Could not reach the repositories to check for updates.": "تعذّر الوصول إلى المستودعات للتحقق من التحديثات."
+  "Could not reach the repositories to check for updates.": "تعذّر الوصول إلى المستودعات للتحقق من التحديثات.",
+  "1 source your series use needs a look": "مصدر واحد تستخدمه سلاسلك يستحق نظرة",
+  "{n} sources your series use need a look": "مصادر تستخدمها سلاسلك وتستحق نظرة: {n}",
+  "1 source nothing uses is failing": "مصدر واحد لا يستخدمه شيء متعثّر",
+  "{n} sources nothing uses are failing": "مصادر متعثّرة لا يستخدمها شيء: {n}",
+  "All sources are working": "كل المصادر تعمل"
 }

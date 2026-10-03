@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2750
+    "strings": 2755
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2753,5 +2753,10 @@
   "Turned on {name} — 1 source ready to search": "{name} をオンにしました — 検索できるソース 1 件",
   "Turned on {name} — {n} sources ready to search": "{name} をオンにしました — 検索できるソース {n} 件",
   "Turning on…": "オンにしています…",
-  "Could not reach the repositories to check for updates.": "更新を確認するためにリポジトリへ接続できませんでした。"
+  "Could not reach the repositories to check for updates.": "更新を確認するためにリポジトリへ接続できませんでした。",
+  "1 source your series use needs a look": "シリーズで使っている 1 件のソースに確認が必要です",
+  "{n} sources your series use need a look": "シリーズで使っている {n} 件のソースに確認が必要です",
+  "1 source nothing uses is failing": "未使用の 1 件のソースが失敗中です",
+  "{n} sources nothing uses are failing": "未使用の {n} 件のソースが失敗中です",
+  "All sources are working": "すべてのソースが動作しています"
 }

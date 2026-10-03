@@ -21,7 +21,7 @@ import { isDesktop } from './desktop';
 import { SOURCE_STATUSES, sourceMark, type ProviderStatus } from './status';
 
 /** How a part joins the one before it (bff lib/said.ts Join). */
-export type Join = 'clause' | 'sentence' | 'then' | 'period' | 'dash' | 'dashCap' | 'paren' | 'colon';
+export type Join = 'clause' | 'sentence' | 'then' | 'period' | 'dash' | 'dashCap' | 'paren' | 'colon' | 'dot';
 
 /** A sentence as the server sends it: its code, what fills it, and how it joins the part before it. */
 export interface Said {
@@ -72,6 +72,8 @@ export function joinPart(a: string, b: string, how: Join | undefined): string {
     case 'dashCap': return `${a} — ${cap(b)}`;
     case 'paren': return cjk() ? `${a}（${b}）` : `${a} (${b})`;
     case 'colon': return `${a}${cjk() ? '：' : ': '}${b}`;
+    // v0.53.0: two counts side by side (Source health's summary), the separator the app writes between facts everywhere.
+    case 'dot': return `${a} · ${b}`;
   }
   return `${a} ${b}`;
 }
@@ -331,6 +333,11 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'frozen.following': (p) => tr('primary {source} gone; still following {names}', { source: p.source == null ? tr('(none)') : str(p, 'source'), names: strs(p, 'names').join(listSep()) }),
 
   // ---- Source health (#115)
+  // v0.53.0: the summary counts the card's two groups that need a look. 'sources.live', 'none', 'off', 'idle' and
+  // 'unfinished' are no longer sent, and keep their words for a summary an older server stored (bff lib/said.ts).
+  'sources.affected': (p) => (num(p, 'n') === 1 ? tr('1 source your series use needs a look') : tr('{n} sources your series use need a look', { n: num(p, 'n') })),
+  'sources.failingUnused': (p) => (num(p, 'n') === 1 ? tr('1 source nothing uses is failing') : tr('{n} sources nothing uses are failing', { n: num(p, 'n') })),
+  'sources.working': () => tr('All sources are working'),
   'sources.live': (p) => (num(p, 'n') === 1 ? tr('1 source is failing or blocked') : tr('{n} sources are failing or blocked', { n: num(p, 'n') })),
   'sources.unused': () => tr('Nothing is failing that your library uses'),
   'sources.none': () => tr('All sources responding normally'),
