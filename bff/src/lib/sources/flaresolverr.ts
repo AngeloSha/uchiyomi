@@ -140,21 +140,33 @@ export const solverUrl = (): string => FS;
  * failure against ITSELF. The operator sees four broken sites and no hint that one container explains all
  * four. This turns that into a single line on the health page.
  */
-export async function solverPing(timeoutMs = 5000): Promise<{ ok: boolean; version?: string; error?: string }> {
+export async function solverPing(timeoutMs = 5000): Promise<SolverPing> {
   try {
-    const r = await fetch(`${FS}/`, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
-    const j: any = await r.json().catch(() => ({}));
-    // The root endpoint answers with a readiness sentence rather than a status field.
-    return { ok: /ready/i.test(String(j?.msg || '')), version: j?.version, error: j?.msg ? undefined : 'unexpected response' };
+    // FlareSolverr greets at its root with a readiness sentence rather than a status field ("FlareSolverr is ready!").
+    // `redirect: 'manual'`: a solver that redirects its root (Byparr, #144: to its API docs) is not followed onto HTML.
+    const r = await fetch(`${FS}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+    const j: any = r.ok ? await r.json().catch(() => null) : null;
+    if (j && /ready/i.test(String(j.msg || ''))) return { ok: true, version: j.version, kind: 'flaresolverr' };
+    // Byparr (#144), a FlareSolverr-compatible solver: the same /v1 for solving, but it says it is up at /health. Its
+    // version is Byparr's, never compared with FlareSolverr's releases (`kind`, read by solverHealth). Reintroduce the
+    // root alone: "Byparr answering at /health is a working solver" in health.int.test.ts reads it as down.
+    const h = await fetch(`${FS}/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' }).catch(() => null);
+    if (h?.ok) {
+      const hj: any = await h.json().catch(() => null);
+      return { ok: true, version: typeof hj?.version === 'string' ? hj.version : undefined, kind: 'other' };
+    }
+    return { ok: false, error: !r.ok ? `HTTP ${r.status}` : j?.msg ? String(j.msg) : 'unexpected response' };
   } catch (e: any) {
     return { ok: false, error: String(e?.cause?.code || e?.name || e?.message || 'unreachable') };
   }
 }
 
+/** What a ping found: FlareSolverr itself, or another solver speaking its /v1 (Byparr, #144). */
+export interface SolverPing { ok: boolean; version?: string; error?: string; kind?: 'flaresolverr' | 'other' }
+
 /** How long one ping answers for everyone who asks. */
 export const PING_SHARED_MS = 10_000;
-let shared: { at: number; p: Promise<{ ok: boolean; version?: string; error?: string }> } | null = null;
+let shared: { at: number; p: Promise<SolverPing> } | null = null;
 
 /**
  * `solverPing`, asked once for everyone who asks within PING_SHARED_MS (concurrent callers share the one in flight).
@@ -164,7 +176,7 @@ let shared: { at: number; p: Promise<{ ok: boolean; version?: string; error?: st
  * the page said "can get past Cloudflare" in one row beside "not answering" in the other (v0.49.1). The repair's
  * solver step still pings for itself: it decides whether to clear anything, and that wants the answer of now.
  */
-export function solverPingShared(now: number = Date.now()): Promise<{ ok: boolean; version?: string; error?: string }> {
+export function solverPingShared(now: number = Date.now()): Promise<SolverPing> {
   if (shared && now - shared.at < PING_SHARED_MS) return shared.p;
   const p = solverPing();
   shared = { at: now, p };

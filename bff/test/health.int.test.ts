@@ -1350,6 +1350,51 @@ test("the solver's newer release is named with one v", { skip: DSN ? false : 'se
   }
 });
 
+/**
+ * #144: Byparr speaks FlareSolverr's /v1 but redirects its root to its docs and says it is up at /health. The solver row
+ * read it as not answering while it solved fine. Reintroduce the root alone in solverPing: the first assertion fails.
+ * Its version is Byparr's, so it is never compared with FlareSolverr's releases: compare every kind again in
+ * solverHealth, and "never behind" fails (1.0.0 against 3.5.2).
+ */
+test("Byparr answering at /health is a working solver, and never behind FlareSolverr's releases", { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { solverHealth } = await import('../src/lib/health');
+  const { resetSolverVersionCache } = await import('../src/lib/solverVersion');
+  const { forgetSolverPing, solverPing } = await import('../src/lib/sources/flaresolverr');
+  await migrate();
+  const realFetch = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (u: any, init?: any) => {
+    const url = String(u);
+    if (url.startsWith('https://api.github.com/')) {
+      return new Response(JSON.stringify({ tag_name: 'v3.5.2' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    asked.push(`${new URL(url).pathname} ${init?.redirect ?? 'follow'}`);
+    if (new URL(url).pathname === '/health') {
+      return new Response(JSON.stringify({ msg: 'Byparr is ready!', version: '1.0.0' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    // Byparr's root: a redirect to its API docs.
+    return new Response(null, { status: 307, headers: { location: '/docs' } });
+  }) as typeof fetch;
+  resetSolverVersionCache();
+  forgetSolverPing();
+  try {
+    const ping = await solverPing();
+    assert.equal(ping.ok, true, 'Byparr answering at /health reads as not answering');
+    assert.equal(ping.kind, 'other');
+    assert.deepEqual(asked, ['/ manual', '/health manual'], 'the root redirect is followed onto the docs page');
+    forgetSolverPing();
+    const row = await solverHealth();
+    assert.equal(row.status, 'ok');
+    assert.equal(row.summary, 'Ready (v1.0.0)', "Byparr's own version is never behind FlareSolverr's releases");
+    assert.equal(row.items.length, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetSolverVersionCache();
+    forgetSolverPing();
+  }
+});
+
 // ---- v0.54.0: Replace, where a main source is off or failing ---------------------------------------------------
 //
 // aqua went offline and was switched off while it stayed the main source of 195 series: Source health offered Find other

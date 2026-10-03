@@ -1520,7 +1520,9 @@ export async function solverHealth(): Promise<HealthCheck> {
   // The release's tag ('v3.5.2': githubRelease.ts reads tag_name), bare. The summary and the row's title put their
   // own "v" before it, and read "vv3.5.2". Reintroduce the tag as it is: "the solver's newer release is named with
   // one v" in health.int.test.ts fails.
-  const latest = (await latestSolverVersion())?.replace(/^v/i, '') ?? null;
+  // Compared only for FlareSolverr itself: another solver's version (Byparr, #144) is not FlareSolverr's, and would read as
+  // years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails.
+  const latest = ping.kind === 'other' ? null : (await latestSolverVersion())?.replace(/^v/i, '') ?? null;
   const behind = isBehind(ping.version, latest);
   return {
     id: 'solver',
