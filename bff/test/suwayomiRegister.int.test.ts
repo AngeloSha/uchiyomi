@@ -150,6 +150,49 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     }
   });
 
+  await t.test('the sources series use register first under the limit, and wouldFit counts what the next load would', async () => {
+    // v0.55.0: the limit took the engine's order alone, so a source switched on later could sort ahead of one a
+    // hundred series update from and push it out -- they froze as "over the source limit". Fix everything installs
+    // extensions by itself, so used sources go first. Reintroduce by registering in the engine's order (drop the
+    // used-first sort in load()): the two used sources, last in the engine's list, are the ones skipped.
+    reset();
+    const { env } = await import('../src/env');
+    const original = env.SUWAYOMI_MAX_SOURCES;
+    (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = 2;
+    const SERIES = ['s_reg_main', 's_reg_follow', 's_reg_hidden'];
+    try {
+      await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]);
+      await q('DELETE FROM suwayomi_sources');
+      await reg.loadSuwayomiSources(async () => remote(5));
+      await q('UPDATE suwayomi_sources SET enabled = true');
+      // One series reads source 4 as its main, another follows source 3; a removed series on source 0 counts for nothing.
+      await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, deleted_at) VALUES
+                 ('s_reg_main','t','s_reg_main','s_reg_main','sw:4','1',NULL),
+                 ('s_reg_follow','t','s_reg_follow','s_reg_follow','other','1',NULL),
+                 ('s_reg_hidden','t','s_reg_hidden','s_reg_hidden','sw:0','1',now())`);
+      await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ('s_reg_follow','sw:3','9')`);
+      const r = await reg.loadSuwayomiSources(async () => remote(5));
+      assert.equal(r.registered, 2);
+      assert.equal(r.skipped, 3);
+      assert.deepEqual(loader.sourceIds().sort(), ['sw:3', 'sw:4'], 'the two sources series read through, though the engine lists them last');
+
+      // wouldFit: the switched-on sources the engine offered at the last load, plus the ones asked about.
+      (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = 4;
+      await q(`UPDATE suwayomi_sources SET enabled = (source_id IN ('0','1','2'))`);
+      await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('gone','Gone','en',true)`);
+      await reg.loadSuwayomiSources(async () => remote(5));
+      // Reintroduce by counting every enabled row (drop the `offered` filter): the row for a source the engine no longer
+      // offers takes a slot it never uses, and this first answer reads false.
+      assert.equal(await reg.wouldFit(['3']), true, 'three on and one more is four, the limit; the row the engine no longer offers takes no slot');
+      assert.equal(await reg.wouldFit(['3', '4']), false, 'five would leave one out');
+      assert.equal(await reg.wouldFit(['1']), true, 'a source already on takes no new slot');
+    } finally {
+      (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = original;
+      await q('DELETE FROM series_sources WHERE series_id = ANY($1)', [SERIES]);
+      await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]);
+    }
+  });
+
   await t.test('an unreachable extension server registers nothing and does not throw', async () => {
     reset();
     const r = await reg.loadSuwayomiSources(async () => {

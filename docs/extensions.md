@@ -201,7 +201,8 @@ this standing choice alone; the sheet marks a language you hid here *Hidden in e
 one of them is searched together. The engine's strip counts them (*v2.3.2243 · 12 of 25 sources on*); when more are
 switched on than that, the count turns amber, a line under the strip says how many were left out and how to get under
 the limit, and **Content → Health** lists them under *Extension source limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
-the desktop app has no setting for it.
+the desktop app has no setting for it. Since v0.55.0 the sources your series read through (as their main source or one
+they follow) take their places first, so switching another source on never pushes one your library depends on out.
 
 ## An extension's own settings
 
