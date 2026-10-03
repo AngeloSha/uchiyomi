@@ -267,7 +267,8 @@ export function Attention({ overview, evidence, installed, actions, onOpen, onRe
         {replace.map((s) => {
           const [why, ...rest] = replaceLine(s, failingSince(evidence.get(s.id)));
           return (
-            <AttentionRow key={s.id} hook={{ 'data-sources-attention-row': 'replace', 'data-source-id': s.id }} onOpen={() => onOpen(s.id)}
+            <AttentionRow key={s.id} hook={{ 'data-sources-attention-row': 'replace', 'data-source-id': s.id, 'data-main': String(s.main), 'data-with-backup': String(s.withBackup) }}
+              onOpen={() => onOpen(s.id)}
               lead={<SourceTile id={s.id} name={s.name} icon={s.icon} tone="warn" size={40} />}
               title={<bdi dir="auto">{s.name}</bdi>} tag={kindLabel(s.kind)}
               line={<><span className="font-medium text-amber-300">{why}</span>{rest.map((r) => <span key={r}> · {r}</span>)}</>}>

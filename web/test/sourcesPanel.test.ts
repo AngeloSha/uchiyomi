@@ -21,7 +21,7 @@ import {
   type OverviewSource, type ReplacePreview, type SourcesOverview,
 } from '../lib/sourcesPanel';
 import { makeMainQuestion, mayMakeMain } from '../lib/mainSource';
-import type { FindRun } from '../lib/findSources';
+import { replaceRunOf, type FindRun } from '../lib/findSources';
 import type { FindRunApi } from '../lib/useFindRun';
 import type { SeriesSource } from '../lib/types';
 import { Attention, YourSources } from '../components/SourcesPanel';
@@ -248,7 +248,10 @@ test('Replace says what it will do in the preview\'s numbers, before anything mo
   // the two together).
   const ask = slice(code('components/ReplaceDialog.tsx'), 'function AskView(', 'function RunView(');
   assert.match(ask, /void fr\.start\(slot, \{ sourceId, mode: 'replace', \.\.\.\(review \? \{ review: true \} : \{ turnOff \}\) \}\);/, 'Start does not start the replace run');
-  assert.match(ask, /const lines = p \? replacePlan\(p, name, turnOff && !review\) : \[\];/, 'the plan does not follow the choices');
+  assert.match(ask, /const lines = p \? replacePlanLines\(p, name, turnOff && !review\) : \[\];/, 'the plan does not follow the choices');
+  // Each line carries the preview's count it says, for a walk to compare in any language ("1" is a word in Arabic).
+  assert.deepEqual([...html.matchAll(/data-replace-line="([a-z]+)"(?: data-n="(\d+)")?/g)].map((m) => [m[1], m[2] ? Number(m[2]) : null]),
+    [['backup', 184], ['search', 9], ['posting', 2], ['off', null]], 'the plan\'s lines do not carry the preview\'s counts');
   // Another run holds the server: Start waits, and says why.
   const busy = withQueries(createElement(ReplaceDialog, { sourceId: 'aqua', name: 'Aqua Manga', fr: FR(), slot: 's', onClose: noop }),
     [[['replace-preview', 'aqua'], { ...PREVIEW, busy: true }]]);
@@ -304,6 +307,19 @@ test('Replace opened again while its source\'s run goes shows that run, wherever
   const find = open(FR({ status: { running: true, run: { ...run, mode: undefined }, recent: [] } }), 'aqua');
   assert.match(find, /data-replace-phase="ask"/, 'a Find run reads as the source\'s Replace run');
   assert.match(find, /data-replace-busy="true"/, 'and Start does not say why it waits');
+
+  // Watched going, the run stays the dialog's once it ends: it says how it ended, where the dialog flipped to a fresh
+  // ask the moment the run stopped. Reintroduce by matching only a run going: "the run ended and the dialog asks again".
+  const ended: FindRun = { ...run, status: 'done', done: 195, promoted: 194, left: 1 };
+  const after = { running: false, run: ended, recent: [ended] };
+  const of = (o: Partial<Parameters<typeof replaceRunOf>[0]>) => replaceRunOf({ sourceId: 'aqua', status: after, mine: null, watched: null, aside: null, ...o });
+  assert.equal(of({ watched: 'r9' })?.id, 'r9', 'the run ended and the dialog asks again');
+  assert.equal(of({}), null, 'a dialog that never saw the run shows an ended run instead of asking');
+  assert.equal(of({ watched: 'r9', aside: 'r9' }), null, 'Replace again does not ask afresh');
+  assert.equal(replaceRunOf({ sourceId: 'aqua', status: { running: true, run, recent: [] }, mine: null, watched: null, aside: null })?.id, 'r9');
+  const dialog = code('components/ReplaceDialog.tsx');
+  assert.match(dialog, /const live: FindRun \| null = replaceRunOf\(\{ sourceId, status: fr\?\.status, mine, watched, aside: asideRun \}\);/);
+  assert.match(dialog, /if \(live\?\.status === 'running' && live\.id !== watched\) setWatched\(live\.id\);/, 'the dialog does not remember the run it watched');
 });
 
 // ---- the sheet -----------------------------------------------------------------------------------------------------

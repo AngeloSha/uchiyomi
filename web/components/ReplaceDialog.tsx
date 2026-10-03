@@ -24,10 +24,10 @@ import { numberText } from '@/lib/format';
 import { useReduceEffects } from '@/lib/effects';
 import { waitingText } from '@/lib/archive';
 import {
-  busyLine, findSlotState, findSummary, findWhyLine, isReplace, replaceCounts, type FindResult, type FindRun,
+  busyLine, findSlotState, findSummary, findWhyLine, replaceCounts, replaceRunOf, type FindResult, type FindRun,
 } from '@/lib/findSources';
 import type { FindRunApi } from '@/lib/useFindRun';
-import { OVERVIEW_KEY, OVERVIEW_URL, replacePlan, replaceSubtitle, type ReplacePreview, type SourcesOverview } from '@/lib/sourcesPanel';
+import { OVERVIEW_KEY, OVERVIEW_URL, replacePlanLines, replaceSubtitle, type ReplacePreview, type SourcesOverview } from '@/lib/sourcesPanel';
 import { ActionStatus } from '@/components/ActionList';
 import { Sheet } from '@/components/ui';
 
@@ -54,11 +54,13 @@ export function ReplaceDialog({ sourceId, name, fr, slot, onClose, onResults }: 
   const [asideRun, setAsideRun] = useState<string | null>(null);
   const slotted = fr?.slots[slot];
   const pressed = slotted && (!slotted.runId || slotted.runId !== asideRun) ? slotted : undefined;
-  // The run this dialog started; or, opened again while one replaces this very source, that one.
-  const running = fr?.status?.running ? fr.status.run : null;
+  // The run this dialog started; or, opened again while one replaces this very source, that one -- to its end
+  // (lib/findSources.ts replaceRunOf).
   const mine = fr?.runOf(slot) ?? null;
-  const live: FindRun | null = (mine && mine.id !== asideRun ? mine : null)
-    ?? (running && isReplace(running) && running.sourceId === sourceId ? running : null);
+  const [watched, setWatched] = useState<string | null>(null);
+  const live: FindRun | null = replaceRunOf({ sourceId, status: fr?.status, mine, watched, aside: asideRun });
+  // A run seen going here stays this dialog's once it ends: React's render-time update, settled before anything paints.
+  if (live?.status === 'running' && live.id !== watched) setWatched(live.id);
   // A start the server refused (another run, nothing to replace) is said where Start is, which stays to try again.
   const refusal = !live && pressed && (pressed.phase === 'refused' || pressed.phase === 'failed') ? pressed.reason ?? null : null;
   const phase = live || (pressed && !refusal) ? 'run' : 'ask';
@@ -85,7 +87,7 @@ function AskView({ sourceId, name, fr, slot, refusal, onClose }: {
   const ids = useId();
   // Another run of either kind holds the server: Start waits, and says why.
   const busy = !!p?.busy || !!fr?.status?.running;
-  const lines = p ? replacePlan(p, name, turnOff && !review) : [];
+  const lines = p ? replacePlanLines(p, name, turnOff && !review) : [];
   const start = () => {
     if (!fr || !p) return;
     void fr.start(slot, { sourceId, mode: 'replace', ...(review ? { review: true } : { turnOff }) });
@@ -111,12 +113,12 @@ function AskView({ sourceId, name, fr, slot, refusal, onClose }: {
         {p && p.main > 0 && (
           <ol className="space-y-2.5" data-replace-plan>
             {lines.map((l, i) => (
-              <li key={l} data-replace-line className="flex items-start gap-3 text-[13px] leading-snug text-fog-200">
+              <li key={l.kind} data-replace-line={l.kind} data-n={l.n ?? undefined} className="flex items-start gap-3 text-[13px] leading-snug text-fog-200">
                 {/* A circle, equal sides and no padding: a number, never a capsule. */}
                 <span aria-hidden className="mt-px grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent-soft text-[11px] font-semibold tabular-nums text-accent">
                   {numberText(i + 1)}
                 </span>
-                <span className="min-w-0">{l}</span>
+                <span className="min-w-0">{l.text}</span>
               </li>
             ))}
           </ol>

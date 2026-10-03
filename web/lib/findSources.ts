@@ -305,6 +305,24 @@ export const movedText = (n: number): string => (n === 1 ? tr('1 series moved') 
 export const isReplace = (run: Pick<FindRunSummary, 'mode'> | null | undefined): boolean => run?.mode === 'replace';
 
 /**
+ * The run a Replace dialog for `sourceId` shows, or null for its ask view:
+ * - the run it started (`mine`, its slot's);
+ * - else a Replace run going for this source, found by the run's source: the dialog opened again from another row, on
+ *   Health, or after a reload, which must not offer to start a second run;
+ * - and, once that run has ended, still that run if the dialog watched it go (`watched`): it says how the run ended,
+ *   where it flipped to a fresh ask the moment the run stopped going.
+ * `aside` is a run set aside by "Replace again", which asks afresh.
+ */
+export function replaceRunOf(o: {
+  sourceId: string; status: FindStatus | null | undefined; mine: FindRun | null; watched: string | null; aside: string | null;
+}): FindRun | null {
+  const keep = (r: FindRun | null | undefined) => (r && r.id !== o.aside ? r : null);
+  const run = o.status?.run ?? null;
+  const goingHere = o.status?.running && isReplace(run) && run?.sourceId === o.sourceId ? run : null;
+  return keep(o.mine) ?? keep(goingHere) ?? (run && run.id === o.watched ? keep(run) : null);
+}
+
+/**
  * The news a run has to tell about its series so far: a Replace run's moves -- a search's follow is how a series got
  * its new main source there, never news of its own -- and a Find run's follows.
  */

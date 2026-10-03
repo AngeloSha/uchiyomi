@@ -372,28 +372,35 @@ export interface ReplacePreview {
   busy: boolean;
 }
 
+/** One numbered line of the Replace dialog: what it is about, the preview's count it says, and its words. */
+export interface ReplaceLine { kind: 'backup' | 'search' | 'posting' | 'off'; n: number | null; text: string }
+
 /**
  * The numbered lines of the Replace dialog: the series that move at once, the ones searched for, the ones numbered by
- * posting order (which stay), and -- with "Turn it off when done" -- the source turned off at the end.
+ * posting order (which stay), and -- with "Turn it off when done" -- the source turned off at the end. Each keeps the
+ * count it says, for the dialog's hooks: a walk compares them with the preview in any language, where "1" is a word.
  */
-export function replacePlan(p: ReplacePreview, name: string, turnOff: boolean): string[] {
-  const lines: string[] = [];
+export function replacePlanLines(p: ReplacePreview, name: string, turnOff: boolean): ReplaceLine[] {
+  const lines: ReplaceLine[] = [];
   if (p.withBackup > 0) {
-    lines.push(p.withBackup === 1 ? tr('1 already follows a working source: it becomes its main source.')
-      : tr('{n} already follow a working source: it becomes their main source.', { n: numberText(p.withBackup) }));
+    lines.push({ kind: 'backup', n: p.withBackup, text: p.withBackup === 1 ? tr('1 already follows a working source: it becomes its main source.')
+      : tr('{n} already follow a working source: it becomes their main source.', { n: numberText(p.withBackup) }) });
   }
   if (p.toSearch > 0) {
-    lines.push(p.withBackup > 0
+    lines.push({ kind: 'search', n: p.toSearch, text: p.withBackup > 0
       ? (p.toSearch === 1 ? tr('The other 1 is searched for on your other sources.') : tr('The other {n} are searched for on your other sources.', { n: numberText(p.toSearch) }))
-      : (p.toSearch === 1 ? tr('It is searched for on your other sources.') : tr('All {n} are searched for on your other sources.', { n: numberText(p.toSearch) })));
+      : (p.toSearch === 1 ? tr('It is searched for on your other sources.') : tr('All {n} are searched for on your other sources.', { n: numberText(p.toSearch) })) });
   }
   if (p.postingOrder > 0) {
-    lines.push(p.postingOrder === 1 ? tr('1 numbered by posting order stays as it is.')
-      : tr('{n} numbered by posting order stay as they are.', { n: numberText(p.postingOrder) }));
+    lines.push({ kind: 'posting', n: p.postingOrder, text: p.postingOrder === 1 ? tr('1 numbered by posting order stays as it is.')
+      : tr('{n} numbered by posting order stay as they are.', { n: numberText(p.postingOrder) }) });
   }
-  if (turnOff) lines.push(tr('{name} is turned off once nothing uses it.', { name: `⁨${name}⁩` }));
+  if (turnOff) lines.push({ kind: 'off', n: null, text: tr('{name} is turned off once nothing uses it.', { name: `⁨${name}⁩` }) });
   return lines;
 }
+
+/** The plan's words alone. */
+export const replacePlan = (p: ReplacePreview, name: string, turnOff: boolean): string[] => replacePlanLines(p, name, turnOff).map((l) => l.text);
 
 /** "195 series use it as their main source", under the dialog's title. */
 export const replaceSubtitle = (main: number): string =>
