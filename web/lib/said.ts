@@ -789,7 +789,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.done.installed': (p) => (num(p, 'n') === 1
     ? tr('Installed {names} (found 1 series)', { names: namesText(p) })
     : tr('Installed {names} (found {n} series)', { n: num(p, 'n'), names: namesText(p) })),
-  'autofix.done.uninstalled': (p) => tr('Removed {names} again: nothing there carried a series', { names: namesText(p) }),
+  'autofix.done.uninstalled': (p) => tr('Tried and removed {names}: none of the series were there', { names: namesText(p) }),
   'autofix.done.deletedTwice': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter saved twice') : tr('Deleted {n} chapters saved twice', { n: num(p, 'n') })),
   'autofix.done.deletedOdd': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter numbered impossibly') : tr('Deleted {n} chapters numbered impossibly', { n: num(p, 'n') })),
 
@@ -811,7 +811,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.item.installed': (p) => (num(p, 'n') === 1
     ? tr('Installed {name}: it carries 1 series', { name: str(p, 'name') })
     : tr('Installed {name}: it carries {n} series', { n: num(p, 'n'), name: str(p, 'name') })),
-  'autofix.item.uninstalled': (p) => tr('Removed {name} again: it carried none of the series', { name: str(p, 'name') }),
+  'autofix.item.uninstalled': (p) => tr('Tried and removed {name}: none of the series were there', { name: str(p, 'name') }),
   'autofix.item.noRoom': (p) => tr('Did not keep {name}: the source limit is full', { name: str(p, 'name') }),
   'autofix.item.installFailed': (p) => tr('{name} could not be installed', { name: str(p, 'name') }),
   'autofix.item.deleted': (p) => (num(p, 'n') === 1

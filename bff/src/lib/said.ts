@@ -576,7 +576,7 @@ const EN = {
   'autofix.done.shortConfirmed': ({ n }: { n: number }) => `${n} short chapter${s(n, '', 's')} really ${s(n, 'is', 'are')} that short at every source`,
   // `n` the series the kept extensions carry now.
   'autofix.done.installed': ({ names: list, more, n }: { names: string[]; more: number; n: number }) => `Installed ${names(list, more)} (found ${n} series)`,
-  'autofix.done.uninstalled': ({ names: list, more }: { names: string[]; more: number }) => `Removed ${names(list, more)} again: nothing there carried a series`,
+  'autofix.done.uninstalled': ({ names: list, more }: { names: string[]; more: number }) => `Tried and removed ${names(list, more)}: none of the series were there`,
   'autofix.done.deletedTwice': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} saved twice`,
   'autofix.done.deletedOdd': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} numbered impossibly`,
 
@@ -593,7 +593,7 @@ const EN = {
   'autofix.item.renumbered': ({ title }: { title: string }) => `Renumbered “${title}”`,
   'autofix.item.notRenumbered': ({ title }: { title: string }) => `“${title}” waits for you: its renumbering plan is not a safe one`,
   'autofix.item.installed': ({ name, n }: { name: string; n: number }) => `Installed ${name}: it carries ${n} series`,
-  'autofix.item.uninstalled': ({ name }: { name: string }) => `Removed ${name} again: it carried none of the series`,
+  'autofix.item.uninstalled': ({ name }: { name: string }) => `Tried and removed ${name}: none of the series were there`,
   'autofix.item.noRoom': ({ name }: { name: string }) => `Did not keep ${name}: the source limit is full`,
   'autofix.item.installFailed': ({ name }: { name: string }) => `${name} could not be installed`,
   'autofix.item.deleted': ({ title, n }: { title: string; n: number }) => `Deleted ${n} chapter${s(n, '', 's')} of “${title}”`,
