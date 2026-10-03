@@ -22,16 +22,28 @@ export interface SeriesLang {
   sameBaseSibling: boolean;
 }
 
-async function readSeries(id: string, qq: Qq): Promise<SeriesLang & { sourceId: string | null }> {
-  // Every other edition counts, a removed one too: it keeps its language slot (Put back restores it), so it still
-  // decides whether codes must be exact. A series merged into another is no edition of anything any more.
-  const [s] = await qq<{ lang: string | null; work_id: string | null; source_id: string | null; siblings: string[] }>(
-    `SELECT s.lang, s.work_id, s.source_id,
+type LangRow = { id: string; lang: string | null; work_id: string | null; source_id: string | null; siblings: string[] };
+
+/**
+ * The facts of each of these series, in one read (v0.54.0: a Replace preview judges every follower of 195 series).
+ * Every other edition counts, a removed one too: it keeps its language slot (Put back restores it), so it still
+ * decides whether codes must be exact. A series merged into another is no edition of anything any more.
+ */
+async function readLangRows(ids: readonly string[], qq: Qq): Promise<LangRow[]> {
+  return qq<LangRow>(
+    `SELECT s.id, s.lang, s.work_id, s.source_id,
             ARRAY(SELECT o.lang FROM lib_series o
                    WHERE o.work_id = s.work_id AND o.id <> s.id AND o.merged_into IS NULL AND o.lang IS NOT NULL) AS siblings
-       FROM lib_series s WHERE s.id = $1`,
-    [id],
+       FROM lib_series s WHERE s.id = ANY($1::text[])`,
+    [[...ids]],
   );
+}
+
+async function readSeries(id: string, qq: Qq): Promise<SeriesLang & { sourceId: string | null }> {
+  return factsOf((await readLangRows([id], qq))[0]);
+}
+
+function factsOf(s: LangRow | undefined): SeriesLang & { sourceId: string | null } {
   const own = canonLang(s?.lang);
   // A main source in every language ("all") says nothing about which one THIS series is in: canonLang reads it as
   // null, and the series falls through to the unstated language.
@@ -90,8 +102,15 @@ export function languageFits(sourceId: string, series: Pick<SeriesLang, 'lang' |
  * fallback is stated Spanish and still follows that adapter.
  */
 export async function followGuard(seriesId: string): Promise<(sourceId: string) => boolean> {
-  const s = await readSeries(seriesId, q);
-  return (sourceId) => sourceId === s.sourceId || languageFits(sourceId, s);
+  return guardOf(await readSeries(seriesId, q));
+}
+
+const guardOf = (s: SeriesLang & { sourceId: string | null }) => (sourceId: string) => sourceId === s.sourceId || languageFits(sourceId, s);
+
+/** followGuard for many series at once, in one read: each series' guard by its id (absent: not a series). */
+export async function followGuards(seriesIds: readonly string[]): Promise<Map<string, (sourceId: string) => boolean>> {
+  if (!seriesIds.length) return new Map();
+  return new Map((await readLangRows(seriesIds, q)).map((r) => [r.id, guardOf(factsOf(r))]));
 }
 
 /**

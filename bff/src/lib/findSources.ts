@@ -49,12 +49,22 @@
 // eye -- TI caught a wrong match by its cover that the automatic judgement would have followed. A proposal is then
 // followed (decideProposal: checked again, then followJudged under the cap) or dismissed, one at a time, and says
 // which it was. The mode is kept in the run's `scope` (`review: true`): no column, so v0.50.0 boots on the same rows.
+//
+// Replace (v0.54.0): the same run over every series of one source, `mode: 'replace'`, MOVES them off it. The owner,
+// after a full Find run left all 195 aqua series on aqua: "i have to go one by one test and find replacement
+// sources". Per series (replaceFor): its best working follower becomes its main source at once (lib/replaceSource.ts
+// ranks them, lib/mainSource.ts switches), with no search; a series with none is searched for as above -- its dead
+// followers not counting against the cap, and dropped only as far as a follow needs the room -- and the source it
+// follows first becomes its main source. Series followers-first, so the instant promotions land first; paced only
+// after a series that searched. Review first proposes instead: each series' followers, or what its search found,
+// with the one it would promote marked, and promoteProposal applies one. `turnOff` turns the replaced source off once
+// the run ends with no series left on it (lib/retireSource.ts). The mode rides in the run's `scope` as `review` does.
 import { randomUUID } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { q, one, tx } from './db';
 import { getSource, listSources } from './sources';
 import type { SourceSeries } from './sources/types';
-import { healthAll } from './sourceHealth';
+import { healthAll, isDisabled } from './sourceHealth';
 import { scanOrder } from './scanOrder';
 import {
   judgeCandidate, followJudged, bounded, titleMatch, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts,
@@ -71,7 +81,7 @@ import { seriesByIds, seriesOfMainSource } from './findScope';
 import { runtime } from './runtime';
 import { checkRunning } from './sourceWatchdog';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
-import { say } from './said';
+import { say, type Part } from './said';
 import { updateSeries } from './updater';
 import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
@@ -79,6 +89,14 @@ import { logAudit } from './audit';
 import { seriesVisible, sourceAllowedFor, visibleToAll, type ViewCtx } from './visibility';
 import { followGuard, seriesLanguage, sourceLanguage } from './seriesLang';
 import { editionFollowing } from './editions';
+import { mainSourceCounts } from './findScope';
+import { renumberRunning } from './numbering';
+import { runsInside } from './updater';
+import { switchMainSource, type MainRefusal } from './mainSource';
+import { retireSource } from './retireSource';
+import { deadFollowers, rankFollowers, replaceCounts, replaceFacts, type RankedFollower, type SeriesFacts, type SkipWhy } from './replaceSource';
+import { MIN_COVERAGE } from './fill';
+import type { Standing } from './sourceStanding';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -92,6 +110,11 @@ const FIND_LOOKUP_MS = 20_000;
 export const FIND_KEEP = 20;
 /** How long a stop waits for the series in flight to finish writing a follow it has started. */
 const STOP_GRACE_MS = 1_000;
+/**
+ * How long a Replace run waits for a run inside a series -- the sweep, a check, a listing refresh -- before it says
+ * `busy`: such a run read the series' main pair at its start, and a switch under it would be undone by its writes.
+ */
+export const FIND_BUSY_WAIT_MS = 30_000;
 /**
  * How long a shutdown waits for the run to close its own row (server.ts): a stop is seen within a quarter of a
  * second and the series in flight gets STOP_GRACE_MS, so this is room to spare, and short enough for any shutdown.
@@ -119,7 +142,10 @@ export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupte
  */
 export type FindWhy =
   | 'posting_order' | 'full' | 'too_few' | 'no_source'
-  | 'refused' | 'no_answer' | 'followed_already' | 'no_match' | 'not_tried';
+  | 'refused' | 'no_answer' | 'followed_already' | 'no_match' | 'not_tried'
+  // v0.54.0, a Replace run: the series' main source is no longer the one replaced; a run stayed inside the series
+  // past FIND_BUSY_WAIT_MS; its chapters wait to be renumbered.
+  | 'moved' | 'busy' | 'renumber_pending';
 export interface FoundSource { sourceId: string; name: string; chapters: number }
 /**
  * A candidate a review-first run kept for an admin to confirm (v0.51.0), the best one per source -- the hunt's search
@@ -141,16 +167,48 @@ export interface FindProposal {
   theirs: { lined: number; of: number };
   coverage: number | null;
   verdict: 'green' | 'amber';
-  amber?: 'numbering' | 'other_name';
-  state?: 'followed' | 'dismissed';
+  /**
+   * Why a person should look first. A search's: the numbers do not line up though a name matches exactly, or it matched
+   * only under another name. A follower's (v0.54.0, Replace): it is cooling down, it lists under MIN_COVERAGE of the
+   * series' numbers, or it has not answered for its list within the week.
+   */
+  amber?: 'numbering' | 'other_name' | 'cooling' | 'coverage' | 'stale';
+  /** `promoted` (v0.54.0): made the series' main source. */
+  state?: 'followed' | 'dismissed' | 'promoted';
+  // ---- v0.54.0, a Replace run's review only.
+  /** A follower the series has (`follower`), or a source its search found (`search`). */
+  kind?: 'follower' | 'search';
+  /** The one the run would make the main source: the best follower, or the first green search match. */
+  promote?: true;
+  /** A follower's: chapters it lists past what the library holds, and its standing. */
+  newer?: number;
+  standing?: Standing;
+}
+/** v0.54.0, a Replace run: a series moved off the replaced source, and how. */
+export interface Promoted {
+  from: string; fromName: string; to: string; toName: string;
+  /** A follower it had (`follower`), or a source its search found and followed (`search`). */
+  via: 'follower' | 'search';
+  /** The replaced source: dropped from the series' followers, or kept (a review's switch keeps nothing else). */
+  old: 'dropped' | 'kept';
 }
 /**
  * `title` is left out for a series the viewer may not list (routes/findSources.ts), and for one a restart's close
  * could no longer find in the library. `proposals` only in a review-first run, for a series that has any: it then
  * carries no `why`, and `followed` gains each proposal an admin follows.
  */
-export interface FindResult { seriesId: string; title?: string; followed: FoundSource[]; why?: FindWhy; proposals?: FindProposal[] }
+export interface FindResult {
+  seriesId: string; title?: string; followed: FoundSource[]; why?: FindWhy; proposals?: FindProposal[];
+  // ---- v0.54.0, a Replace run. `why` is then set only when nothing was promoted.
+  promoted?: Promoted;
+  /** The followers passed over: switched off, failing, cooling down, not loaded, another language, beyond the age reach. */
+  skipped?: Array<{ sourceId: string; name: string; why: SkipWhy }>;
+  /** Dead followers dropped to make room for a source the search found. */
+  dropped?: Array<{ sourceId: string; name: string }>;
+}
 export type FindScope = { seriesIds: string[] } | { sourceId: string };
+/** `follow` (the default): add followers. `replace` (v0.54.0): move every series of one source off it. */
+export type FindMode = 'follow' | 'replace';
 
 interface ActiveRun {
   id: string;
@@ -159,8 +217,15 @@ interface ActiveRun {
   scope: FindScope;
   /** Review first: judge and keep the candidates, follow nothing. */
   review: boolean;
+  /** v0.54.0: Replace -- move each series off `scope.sourceId` -- and turn that source off once none is left on it. */
+  mode: FindMode;
+  turnOff: boolean;
+  /** Series moved to another main source. */
+  promoted: number;
   /** The starting admin's age cap (ViewCtx.maxAgeRating; null for an admin): which sources the run may ask. */
   maxAgeRating: number | null;
+  /** The starting admin's view: what a Replace run's switches act as (lib/mainSource.ts). */
+  ctx: ViewCtx;
   /** Main sources whose description read failed in this run: not asked again for the next series. */
   dead: Set<string>;
   total: number;
@@ -183,6 +248,7 @@ let claimed: string | null = null;
 let paceMs = PACE_MS;
 let wallMs = FIND_SERIES_WALL_MS;
 let quietMs = FIND_QUIET_POLL_MS;
+let busyMs = FIND_BUSY_WAIT_MS;
 /** The run that is going or was last started in this process, for a caller that must wait for it (tests). */
 let lastRun: Promise<void> = Promise.resolve();
 
@@ -224,24 +290,33 @@ export async function closeInterruptedFindRuns(): Promise<void> {
  * series this viewer may see, else the new run's id and how many series it will ask about -- with the run already
  * going in the background. `from` is the request's IP and user agent for the audit line written when it ends.
  * `review`: review first (v0.51.0) -- the same run, which keeps its candidates for an admin instead of following.
+ * `mode: 'replace'` (v0.54.0, a source's scope only): move every series off that source; `turnOff` (never with review)
+ * then turns it off once none is left on it. Replace and Find share the one run at a time.
  */
 export async function startFind(
-  scope: FindScope, userId: string, ctx: ViewCtx, from?: FastifyRequest, o: { review?: boolean } = {},
+  scope: FindScope, userId: string, ctx: ViewCtx, from?: FastifyRequest, o: { review?: boolean; mode?: FindMode; turnOff?: boolean } = {},
 ): Promise<{ runId: string; total: number } | { busy: string } | { empty: true }> {
   const review = o.review === true;
+  const mode: FindMode = o.mode === 'replace' && 'sourceId' in scope ? 'replace' : 'follow';
+  const turnOff = mode === 'replace' && !review && o.turnOff === true;
   const running = findRunning();
   if (running) return { busy: running };
   const id = randomUUID();
   claimed = id;
   try {
-    const list = 'sourceId' in scope ? await seriesOfMainSource(scope.sourceId, ctx) : await seriesByIds(scope.seriesIds, ctx);
+    const list = 'sourceId' in scope
+      ? await seriesOfMainSource(scope.sourceId, ctx, { followersFirst: mode === 'replace' })
+      : await seriesByIds(scope.seriesIds, ctx);
     if (!list.length) { claimed = null; return { empty: true }; }
     await closeInterruptedFindRuns();
     // The ids it resolved to, for either kind: what closeInterruptedFindRuns lists as not tried if the process goes
     // away under the run. Reintroduce by storing {sourceId} alone: "a restart lists every series the run never
     // reached as not tried" in findSources.int.test.ts finds no seriesIds in the scope.
     const ids = list.map((s) => s.id);
-    const stored = { ...('sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids }), ...(review ? { review } : {}) };
+    const stored = {
+      ...('sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids }), ...(review ? { review } : {}),
+      ...(mode === 'replace' ? { mode } : {}), ...(turnOff ? { turnOff } : {}),
+    };
     await q(`INSERT INTO source_find_runs (id, started_by, status, scope, total) VALUES ($1, $2, 'running', $3::jsonb, $4)`,
       [id, userId, JSON.stringify(stored), list.length]);
     const card = beginRun('find_sources', userId, list.length);
@@ -249,10 +324,11 @@ export async function startFind(
     // Server task that does not turn the Library ring.
     card.downloads = false;
     card.followed = 0;
+    if (mode === 'replace') Object.assign(card, { mode, promoted: 0, left: list.length });
     let signal!: () => void;
     const stopped = new Promise<void>((r) => { signal = r; });
     const a: ActiveRun = {
-      id, userId, startedAt: Date.now(), scope, review, maxAgeRating: ctx.maxAgeRating, dead: new Set(),
+      id, userId, startedAt: Date.now(), scope, review, mode, turnOff, promoted: 0, maxAgeRating: ctx.maxAgeRating, ctx, dead: new Set(),
       total: list.length, done: 0, followed: 0, results: [],
       current: null, waiting: null, stop: false, stopped, signal, card,
     };
@@ -306,9 +382,12 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       a.current = { seriesId: s.id, title: s.title };
       a.card.current = { id: s.id, title: s.title };
       const progress: FoundSource[] = [];
+      // What a Replace run's series has done before a stop could cut its answer short: its switch is one transaction,
+      // and the answer must say it happened.
+      const track: { promoted?: Promoted } = {};
       // One series failing outright (the database going away mid-series) is that series' `not_tried`, and the run
       // goes on: bulk Fetch newest's rule.
-      const work = findFor(s, a, progress).catch((e) => {
+      const work = (a.mode === 'replace' ? replaceFor(s, a, progress, track) : findFor(s, a, progress)).catch((e) => {
         console.warn(`[find] ${s.id}: ${(e as Error)?.message || e}`);
         return null;
       });
@@ -316,8 +395,11 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       // A stop does not wait for the searches in flight (up to the wall), but it does give a follow being written
       // a moment to land, so the answer reports every source the run followed.
       if (outcome === undefined) outcome = await Promise.race([work, new Promise<undefined>((r) => setTimeout(() => r(undefined), STOP_GRACE_MS))]);
-      // Stopped mid-series: whatever it followed before the stop stands, and the rest of it was not tried.
-      const result: FindResult = outcome?.result ?? { seriesId: s.id, title: s.title, followed: [...progress], ...(progress.length ? {} : { why: 'not_tried' as const }) };
+      // Stopped mid-series: whatever it followed (or promoted) before the stop stands, and the rest of it was not tried.
+      const result: FindResult = outcome?.result ?? {
+        seriesId: s.id, title: s.title, followed: [...progress],
+        ...(track.promoted ? { promoted: track.promoted } : progress.length ? {} : { why: 'not_tried' as const }),
+      };
       settled.add(s.id);
       a.results.push(result);
       // A series a stop cut short with nothing to show was not searched through: it is listed as not tried, and not
@@ -328,7 +410,13 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       a.followed += result.followed.length;
       a.card.done = a.done;
       a.card.followed = a.followed;
-      if (result.followed.length) refresh.push(s.id);
+      if (result.promoted) a.card.promoted = ++a.promoted;
+      // A new follower's chapters, or the new main's, show on the series page now: a series that followed a source, or
+      // whose dropped main took listing rows with it (the sweep re-lists the rest).
+      if (result.followed.length || (outcome as { refresh?: boolean } | null | undefined)?.refresh) refresh.push(s.id);
+      if (a.mode === 'replace' && 'sourceId' in a.scope) {
+        a.card.left = (await mainSourceCounts([a.scope.sourceId]).catch(() => null))?.get(a.scope.sourceId) ?? a.card.left;
+      }
       await q(`UPDATE source_find_runs SET done = $2, followed = $3, results = results || jsonb_build_array($4::jsonb) WHERE id = $1`,
         [a.id, a.done, a.followed, JSON.stringify(result)]).catch((e) => console.warn(`[find] could not record ${s.id}: ${(e as Error)?.message || e}`));
       if (isStopped(a)) break;
@@ -352,6 +440,22 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
       [a.id, status, a.done, a.followed, JSON.stringify(rest)]).catch((e) => console.warn(`[find] could not close the run: ${(e as Error)?.message || e}`));
     await q(`DELETE FROM source_find_runs WHERE id NOT IN (SELECT id FROM source_find_runs ORDER BY started_at DESC LIMIT $1)`, [FIND_KEEP])
       .catch(() => {});
+    // Replace (v0.54.0): what is left on the replaced source, and -- asked for, and the run done with nothing left on
+    // it -- the source turned off, its follows dropped with their listing rows (lib/retireSource.ts). A stopped or
+    // failed run, or one that left a series behind, turns nothing off; retireSource refuses a source some series still
+    // has as its main source as well. Reintroduce by dropping both checks: "turnOff turns the replaced source off only
+    // when no series is left on it" in findSources.int.test.ts finds it off with a series on it.
+    let replaced: { left: number; turnedOff: boolean } | null = null;
+    if (a.mode === 'replace' && 'sourceId' in a.scope) {
+      const X = a.scope.sourceId;
+      const left = (await mainSourceCounts([X]).catch(() => null))?.get(X) ?? 0;
+      if (a.turnOff && status === 'done' && left === 0) {
+        await retireSource(X, { how: 'off', userId: a.userId, via: 'replace', runId: a.id })
+          .catch((e) => console.warn(`[find] could not turn ${X} off: ${(e as Error)?.message || e}`));
+      }
+      replaced = { left, turnedOff: await isDisabled(X).catch(() => false) };
+      Object.assign(a.card, replaced);
+    }
     endRun(a.card, status === 'failed' ? 'error' : 'done', status === 'failed' ? say('run.failed') : undefined);
     await logAudit('source.find', {
       userId: a.userId,
@@ -360,6 +464,7 @@ async function runAll(a: ActiveRun, list: Array<{ id: string; title: string }>, 
         status, total: a.total, done: a.done, followed: a.followed,
         series: a.results.filter((r) => r.followed.length).length,
         ...(a.review ? { review: true, proposed: a.results.filter((r) => r.proposals?.length).length } : {}),
+        ...(replaced ? { mode: 'replace', promoted: a.promoted, ...replaced } : {}),
       },
       req: from,
     });
@@ -440,9 +545,15 @@ function proposalOf(j: Judgement, hit: SourceSeries | null, primary: PrimaryFact
 /**
  * One series: search, judge, follow. `progress` receives each follow the moment it is written, so a run stopped
  * part-way through a series still reports what it did. `asked` is whether any source was searched.
+ *
+ * For a Replace run's series that no follower can take over (v0.54.0), `dead` names its followers that carry
+ * nothing -- switched off, failing, not loaded -- which do not count against the follower cap, and before each follow
+ * as many of them as the cap needs are dropped (worst first) and reported in `dropped`; a review marks the first green
+ * match as the one it would promote.
  */
 async function findFor(
   s: { id: string; title: string }, a: ActiveRun, progress: FoundSource[],
+  replacing?: { dead: ReadonlyArray<{ sourceId: string; name: string }>; dropped: Array<{ sourceId: string; name: string }> },
 ): Promise<{ result: FindResult; asked: boolean }> {
   const end = (why: FindWhy | undefined, asked: boolean) =>
     ({ result: { seriesId: s.id, title: s.title, followed: [...progress], ...(why && !progress.length ? { why } : {}) }, asked });
@@ -454,7 +565,12 @@ async function findFor(
   if (row.numbering === 'posting_order') return end('posting_order', false);
   const followers = new Set((await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [s.id]))
     .map((r) => r.source_id).filter((id) => id !== row.source_id));
-  const free = MAX_FOLLOWERS - followers.size;
+  // The followers that count against the cap: for a Replace run, only the ones that still carry the series.
+  // Reintroduce by counting every follower: "a series with no working follower is searched" in findSources.int.test.ts
+  // reads full for the series whose two followers are switched off.
+  const dead = new Set((replacing?.dead ?? []).map((d) => d.sourceId));
+  const live = [...followers].filter((id) => !dead.has(id));
+  const free = MAX_FOLLOWERS - live.length;
   if (free <= 0) return end('full', false);
   const numbers = await numbersOf(s.id);
   // judgeCandidate refuses every candidate of a series listing under MIN_HAVE numbers before asking anything, so
@@ -555,6 +671,13 @@ async function findFor(
       const p = j ? proposalOf(j, hits[i], primary, prefs) : null;
       return p ? [p] : [];
     });
+    // Replace (v0.54.0): each is a source the search found, and the first green one is what the run would follow and
+    // make the main source.
+    if (replacing) {
+      for (const p of proposals) p.kind = 'search';
+      const green = proposals.find((p) => p.verdict === 'green');
+      if (green) green.promote = true;
+    }
     if (proposals.length) return { result: { seriesId: s.id, title: s.title, followed: [], proposals }, asked };
   }
 
@@ -567,6 +690,7 @@ async function findFor(
   for (const j of a.review ? [] : judged) {
     if (!j || j.why !== 'ok') continue;
     if (progress.length >= free || isStopped(a)) break;
+    if (replacing) await makeRoom(s.id, replacing.dead, replacing.dropped);
     const written = await followJudged(s.id, j, { addedBy: a.userId }).catch(() => 'gone' as const);
     if (written === 'cap') { capped = true; break; }
     // Deleted or merged away while its turn ran (or the write failed): nothing to follow onto, and a source that
@@ -579,7 +703,7 @@ async function findFor(
       userId: a.userId,
       detail: {
         id: s.id, title: row.title, source: j.source, sourceSeriesId: j.sourceSeriesId, coverage: j.coverage, theirTitle: j.theirTitle,
-        via: 'find_sources', runId: a.id,
+        via: replacing ? 'replace' : 'find_sources', runId: a.id,
       },
     });
   }
@@ -597,10 +721,171 @@ async function findFor(
   if (unjudged || !answered) return end('no_answer', asked);
   // Every source that answered was asked under every name and lists nothing that is this series. "No other source
   // lists it" would be false for a series that already follows one -- that source does -- so it says so instead.
+  // (Not for a follower that carries nothing: that one lists nothing a sweep can take.)
   // Reintroduce by dropping this line: "each series says why it gained nothing" reads no_match for the series that
   // follows a source already.
-  if (followers.size) return end('followed_already', asked);
+  if (live.length) return end('followed_already', asked);
   return end('no_match', asked);
+}
+
+// ---- Replace (v0.54.0) ------------------------------------------------------------------------------------------
+
+/**
+ * Room under the follower cap for one more follow: as many of the series' dead followers as it takes, worst first
+ * (failing, then not loaded, then switched off), each with its listing rows as an unfollow takes them, and each
+ * written into `dropped`. The cap is counted as followJudged counts it, every row. Nothing is dropped while there is
+ * room.
+ */
+async function makeRoom(
+  seriesId: string, dead: ReadonlyArray<{ sourceId: string; name: string }>, dropped: Array<{ sourceId: string; name: string }>,
+): Promise<void> {
+  const [{ n }] = await q<{ n: number }>('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [seriesId]);
+  let over = Number(n) - MAX_FOLLOWERS + 1;
+  for (const d of dead) {
+    if (over <= 0) break;
+    if (dropped.some((x) => x.sourceId === d.sourceId)) continue;
+    const gone = await q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [seriesId, d.sourceId]);
+    if (!gone.length) continue;
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [seriesId, d.sourceId]).catch(() => {});
+    dropped.push({ sourceId: d.sourceId, name: d.name });
+    over--;
+  }
+}
+
+/**
+ * Wait, stop-aware, until no run is inside the series -- the sweep, a check, a listing refresh: such a run read the main
+ * pair at its start and would write its listing and stamps from it after a switch (lib/mainSource.ts `busy`). Past
+ * FIND_BUSY_WAIT_MS the series is `busy`; a re-run picks it up.
+ */
+async function waitOut(a: ActiveRun, seriesId: string): Promise<'clear' | 'busy' | 'stopped'> {
+  const until = Date.now() + busyMs;
+  while (runsInside(seriesId) > 0) {
+    if (isStopped(a)) return 'stopped';
+    const left = until - Date.now();
+    if (left <= 0) return 'busy';
+    await nap(a, Math.min(250, left));
+  }
+  return isStopped(a) ? 'stopped' : 'clear';
+}
+
+/** A switch refused, as the series' answer. A follower made the main source meanwhile is a series that moved. */
+const whyOfRefusal = (r: MainRefusal): FindWhy =>
+  r === 'moved' || r === 'is_main' ? 'moved'
+    : r === 'busy' ? 'busy' : r === 'renumber_pending' ? 'renumber_pending' : r === 'posting_order' ? 'posting_order' : 'not_tried';
+
+/** A review's proposals for a series' followers, best first, the first marked as the one the run would promote. */
+function followerProposals(ranked: RankedFollower[], f: SeriesFacts): FindProposal[] {
+  const whole = (xs: readonly number[]) => new Set(xs.map((n) => Math.floor(n))).size;
+  return ranked.map((x, i) => {
+    const listed = x.listed ?? [];
+    const amber = x.standing === 'cooling' ? 'cooling' as const : x.cover < MIN_COVERAGE ? 'coverage' as const : x.tier === 1 ? 'stale' as const : undefined;
+    return {
+      kind: 'follower' as const, sourceId: x.sourceId, sourceName: x.name, sourceSeriesId: x.sourceSeriesId, title: x.title || x.name,
+      chapters: x.chapters ?? new Set(listed).size,
+      ours: { lined: assess(f.numbers, listed).matched, of: whole(f.numbers) },
+      theirs: { lined: assess(listed, f.numbers).matched, of: whole(listed) },
+      coverage: x.cover, newer: x.newer, standing: x.standing,
+      verdict: amber ? 'amber' as const : 'green' as const, ...(amber ? { amber } : {}),
+      ...(i === 0 ? { promote: true as const } : {}),
+    };
+  });
+}
+
+/**
+ * One series of a Replace run: move it off the replaced source (`scope.sourceId`), or say why not.
+ *   1. Said without anything written: hidden or merged since the run started (`not_tried`), no longer on that source
+ *      (`moved`), numbered by posting order (`posting_order`: the series reads its numbering source alone), a renumber
+ *      waiting (`renumber_pending`), or a run inside it past FIND_BUSY_WAIT_MS (`busy`).
+ *   2. Its best working follower becomes its main source (lib/replaceSource.ts ranks them), the replaced source
+ *      dropped from it. No search, no pacing: decided from the database.
+ *   3. None can: it is searched for as Find does (findFor), its dead followers not counting against the cap, and the
+ *      first source it follows becomes its main source. A search that finds nothing says so in Find's words.
+ * Review first proposes instead (nothing is written): its followers, or what the search found. `track` hears of a
+ * promotion the moment it is made, for an answer a stop cut short.
+ */
+async function replaceFor(
+  s: { id: string; title: string }, a: ActiveRun, progress: FoundSource[], track: { promoted?: Promoted },
+): Promise<{ result: FindResult; asked: boolean; refresh: boolean }> {
+  const X = (a.scope as { sourceId: string }).sourceId;
+  const fromName = getSource(X)?.name ?? X;
+  let skipped: NonNullable<FindResult['skipped']> = [];
+  const dropped: Array<{ sourceId: string; name: string }> = [];
+  const done = (o: { why?: FindWhy; asked?: boolean; refresh?: boolean; proposals?: FindProposal[] } = {}) => ({
+    result: {
+      seriesId: s.id, title: s.title, followed: [...progress],
+      ...(track.promoted ? { promoted: track.promoted } : o.why ? { why: o.why } : {}),
+      ...(o.proposals?.length ? { proposals: o.proposals } : {}),
+      // A dead follower dropped to make room is said once, as dropped.
+      ...(skipped.some((x) => !dropped.some((d) => d.sourceId === x.sourceId))
+        ? { skipped: skipped.filter((x) => !dropped.some((d) => d.sourceId === x.sourceId)) } : {}),
+      ...(dropped.length ? { dropped } : {}),
+    } as FindResult,
+    asked: !!o.asked, refresh: !!o.refresh,
+  });
+  const row = await one<{ source_id: string | null; numbering: string | null; pending: boolean }>(
+    `SELECT s.source_id, s.numbering, (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS pending
+       FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [s.id]);
+  if (!row) return done({ why: 'not_tried' });
+  // Before anything is read or searched for it: the switch would refuse it too (`expect`), but only after a series with
+  // no follower had been searched for and given followers it never asked for. Reintroduce by dropping it: "a series
+  // moved off the source after the run started" in findSources.int.test.ts is searched for.
+  if (row.source_id !== X) return done({ why: 'moved' });
+  // The switch refuses it too (lib/mainSource.ts); said here before anything is read for it.
+  if (row.numbering === 'posting_order') return done({ why: 'posting_order' });
+  if (row.pending || renumberRunning(s.id)) return done({ why: 'renumber_pending' });
+  const first = await waitOut(a, s.id);
+  if (first !== 'clear') return done({ why: first === 'busy' ? 'busy' : 'not_tried' });
+
+  const facts = (await replaceFacts([s.id], { maxAgeRating: a.maxAgeRating, numbers: true })).get(s.id);
+  if (!facts) return done({ why: 'not_tried' });
+  const { ranked, skipped: passed } = rankFollowers(facts.followers, { numbers: facts.numbers, held: facts.held });
+  skipped = passed;
+  // ---- 2: a follower takes over -----------------------------------------------------------------------------------
+  if (ranked.length) {
+    if (a.review) return done({ proposals: followerProposals(ranked, facts) });
+    for (const f of ranked) {
+      if (isStopped(a)) return done({ why: 'not_tried' });
+      const out = await switchMainSource(s.id, f.sourceId, { old: 'drop', ctx: a.ctx, userId: a.userId, via: 'replace', runId: a.id, expect: X });
+      if ('ok' in out) {
+        track.promoted = { from: X, fromName, to: f.sourceId, toName: f.name, via: 'follower', old: out.old };
+        // Passed over: the ones that could not, and a cooling one that was not the one taken.
+        skipped = [...passed, ...ranked.filter((x) => x !== f && x.standing === 'cooling').map((x) => ({ sourceId: x.sourceId, name: x.name, why: 'cooling' as const }))];
+        // The listing again, through the new main, only when the old main took rows with it: the sweep re-lists the rest.
+        return done({ refresh: out.listingDropped > 0 });
+      }
+      // The follower went between the ranking and the switch (switched off, unfollowed, another language now): the next
+      // may still take over. Anything else is the series' own answer.
+      if (out.refused === 'source_unavailable' || out.refused === 'not_followed' || out.refused === 'language_differs') continue;
+      return done({ why: whyOfRefusal(out.refused) });
+    }
+  }
+  // ---- 3: none can -- search, follow, promote ----------------------------------------------------------------------
+  const found = await findFor(s, a, progress, { dead: deadFollowers(facts), dropped });
+  if (a.review || !progress.length) {
+    const proposals = found.result.proposals;
+    return done(proposals?.length ? { proposals, asked: found.asked } : { why: found.result.why ?? 'no_match', asked: found.asked });
+  }
+  const again = await waitOut(a, s.id);
+  if (again !== 'clear') return done({ why: again === 'busy' ? 'busy' : 'not_tried', asked: found.asked, refresh: true });
+  const to = progress[0];
+  // Reintroduce by not promoting after a follow: "a series with no working follower is searched, followed and
+  // promoted" in findSources.int.test.ts finds it still on the replaced source.
+  const out = await switchMainSource(s.id, to.sourceId, { old: 'drop', ctx: a.ctx, userId: a.userId, via: 'replace', runId: a.id, expect: X });
+  if ('ok' in out) track.promoted = { from: X, fromName, to: to.sourceId, toName: to.name, via: 'search', old: out.old };
+  return done({ ...('ok' in out ? {} : { why: whyOfRefusal(out.refused) }), asked: found.asked, refresh: true });
+}
+
+/**
+ * GET /api/admin/sources/:id/replace-preview (v0.54.0): what a Replace run over this source would do, as the dialog
+ * says it before Start -- the series whose main source it is, those a follower would take over at once, those it would
+ * search for, those it leaves alone (posting order) -- and whether a run is going already (one at a time).
+ */
+export async function replacePreview(sourceId: string, ctx: ViewCtx): Promise<{
+  main: number; withBackup: number; toSearch: number; postingOrder: number; busy: boolean;
+}> {
+  const list = await seriesOfMainSource(sourceId, ctx);
+  const counts = await replaceCounts(list.map((x) => x.id), ctx.maxAgeRating);
+  return { main: list.length, ...counts, busy: !!findRunning() };
 }
 
 // ---- the refresh after a run --------------------------------------------------------------------------------
@@ -745,6 +1030,109 @@ async function decide(
   return result ? { result } : { refused: 'not_found' };
 }
 
+/** Why a Replace review's proposal was not made the main source (v0.54.0): a decision's refusals, and a switch's. */
+export type PromoteRefusal = DecideRefusal | 'moved' | 'busy' | 'renumber_pending' | 'not_followed' | 'is_main';
+export type PromoteRefused = Omit<DecideRefused, 'refused'> & { refused: PromoteRefusal; said?: Part };
+
+/**
+ * Make one proposal of a Replace review the series' main source (v0.54.0; POST /api/admin/sources/find/:runId/promote).
+ * As a decision: the run's own record of what is promoted, never the client's, in the same one-at-a-time chain.
+ *   - a follower's proposal is switched to (lib/mainSource.ts), the replaced source dropped from the series;
+ *   - a search's is checked again as a follow is (decide's checks), followed under the cap -- dead followers making
+ *     room as the run's own follows would -- and then switched to.
+ * Refused: `not_found`, `decided` (with `state`), the follow's refusals (`posting_order`, `source_unavailable`,
+ * `language_differs` with `edition`, `full`), and the switch's (`moved` -- the series is no longer on the replaced
+ * source -- `busy`, `renumber_pending`, `not_followed`, `is_main`), each with its said code where it has one.
+ * Promoted, the proposal reads `promoted` and the series' result carries `promoted`.
+ */
+export function promoteProposal(
+  runId: string, seriesId: string, sourceId: string, userId: string, ctx: ViewCtx,
+): Promise<{ result: FindResult } | PromoteRefused> {
+  const next = deciding.then(() => promote(runId, seriesId, sourceId, userId, ctx));
+  deciding = next.catch(() => {});
+  return next;
+}
+
+async function promote(
+  runId: string, seriesId: string, sourceId: string, userId: string, ctx: ViewCtx,
+): Promise<{ result: FindResult } | PromoteRefused> {
+  const find = (results: FindResult[] | undefined) => {
+    const r = results?.find((x) => x.seriesId === seriesId);
+    return { r, p: r?.proposals?.find((x) => x.sourceId === sourceId) };
+  };
+  const stored = await one<{ scope: { review?: boolean; mode?: string; sourceId?: string } | null; results: FindResult[] }>(
+    'SELECT scope, results FROM source_find_runs WHERE id::text = $1', [runId]);
+  const X = stored?.scope?.review && stored.scope.mode === 'replace' ? stored.scope.sourceId : undefined;
+  const { p } = find(X ? stored!.results : undefined);
+  if (!X || !p || !(await seriesVisible(seriesId, ctx))) return { refused: 'not_found' };
+  // Final, as a decision is: reintroduce by dropping it, and "promote does exactly that" promotes twice.
+  if (p.state) return { refused: 'decided', state: p.state };
+  if (p.kind === 'search') {
+    const series = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]);
+    if (!series) return { refused: 'not_found' };
+    if (series.source_id !== X) return { refused: 'moved', said: say('main.moved') };
+    if (await postingOrderSeries(seriesId)) return { refused: 'posting_order', said: say('numbering.postingRefusal') };
+    const h = await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]).catch(() => null);
+    const src = getSource(sourceId);
+    if (!src || h?.disabled || !sourceAllowedFor(src, ctx.maxAgeRating)) return { refused: 'source_unavailable', said: say('main.unavailable') };
+    if (!(await followGuard(seriesId))(sourceId)) {
+      const existing = await editionFollowing(seriesId, sourceId, ctx);
+      return { refused: 'language_differs', edition: { of: seriesId, lang: sourceLanguage(sourceId), ...(existing ? { existing } : {}) } };
+    }
+    if (!(await one('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId]))) {
+      const facts = (await replaceFacts([seriesId], { maxAgeRating: ctx.maxAgeRating })).get(seriesId);
+      const dropped: Array<{ sourceId: string; name: string }> = [];
+      if (facts) await makeRoom(seriesId, deadFollowers(facts), dropped);
+      const written = await followJudged(seriesId,
+        { source: sourceId, name: p.sourceName, sourceSeriesId: p.sourceSeriesId, theirTitle: p.title, coverage: p.coverage },
+        { addedBy: userId }).catch(() => 'gone' as const);
+      if (written === 'cap') return { refused: 'full' };
+      if (written !== 'inserted') return { refused: 'not_found' };
+      await logAudit('series.follow_source', {
+        userId,
+        detail: {
+          id: seriesId, source: sourceId, sourceSeriesId: p.sourceSeriesId, coverage: p.coverage, theirTitle: p.title,
+          via: 'replace_review', runId, verdict: p.verdict, ...(dropped.length ? { dropped: dropped.map((d) => d.sourceId) } : {}),
+        },
+      });
+    }
+  }
+  const out = await switchMainSource(seriesId, sourceId, { old: 'drop', ctx, userId, via: 'review', runId, expect: X });
+  if ('refused' in out) {
+    return out.refused === 'not_found' ? { refused: 'not_found' }
+      : { refused: out.refused, ...(out.said ? { said: out.said } : {}), ...(out.edition ? { edition: out.edition } : {}) };
+  }
+  const promoted: Promoted = {
+    from: X, fromName: getSource(X)?.name ?? X, to: sourceId, toName: p.sourceName, via: p.kind === 'search' ? 'search' : 'follower', old: out.old,
+  };
+  const mark = (r: FindResult, prop: FindProposal) => {
+    prop.state = 'promoted';
+    r.promoted = promoted;
+    delete r.why;
+    if (p.kind === 'search' && !r.followed.some((f) => f.sourceId === sourceId)) r.followed.push({ sourceId, name: p.sourceName, chapters: p.chapters });
+  };
+  // Marked under the run row's lock: the run itself may be appending the next series' result meanwhile.
+  const result = await tx(async (qq) => {
+    const row = (await qq<{ results: FindResult[] }>('SELECT results FROM source_find_runs WHERE id::text = $1 FOR UPDATE', [runId]))[0];
+    const { r, p: prop } = find(row?.results);
+    if (!row || !r || !prop) return null;
+    mark(r, prop);
+    await qq('UPDATE source_find_runs SET results = $2::jsonb, followed = followed + $3 WHERE id::text = $1',
+      [runId, JSON.stringify(row.results), p.kind === 'search' ? 1 : 0]);
+    return r;
+  });
+  const a = active;
+  if (a?.id === runId) {
+    const { r, p: prop } = find(a.results);
+    if (r && prop) mark(r, prop);
+    a.card.promoted = ++a.promoted;
+    if (p.kind === 'search') a.card.followed = ++a.followed;
+  }
+  scheduleFindRefresh([seriesId]);
+  scheduleHealthSummaryRefresh();
+  return result ? { result } : { refused: 'not_found' };
+}
+
 // ---- reading it back ----------------------------------------------------------------------------------------
 
 export interface FindRunSummary {
@@ -762,8 +1150,17 @@ export interface FindRunSummary {
   sourceName?: string;
   /** Review first (v0.51.0): it followed nothing itself, and its results carry `proposals`. */
   review?: true;
+  /** v0.54.0: a Replace run, and how many of its series it moved to another main source (counted from its results). */
+  mode?: 'replace';
+  promoted?: number;
 }
 export interface FindRun extends FindRunSummary {
+  /**
+   * v0.54.0, a Replace run read in full: how many series are on the replaced source now, and whether it is switched off
+   * now (source_health.disabled) -- whether this run's `turnOff` did it, or an admin before.
+   */
+  left?: number;
+  turnedOff?: boolean;
   current?: { seriesId: string; title: string };
   /** What a running run waits on before its next series. */
   waiting?: 'sweep' | 'repair' | 'check';
@@ -771,11 +1168,11 @@ export interface FindRun extends FindRunSummary {
 }
 
 type Row = {
-  id: string; status: FindStatus; total: number; done: number; followed: number; username: string | null;
-  started_at: Date; finished_at: Date | null; scope: { sourceId?: string; review?: boolean } | null; results?: FindResult[];
+  id: string; status: FindStatus; total: number; done: number; followed: number; promoted: number; username: string | null;
+  started_at: Date; finished_at: Date | null; scope: { sourceId?: string; review?: boolean; mode?: string } | null; results?: FindResult[];
 };
 const iso = (d: Date | string) => new Date(d).toISOString();
-const scopeOf = (scope: { sourceId?: string; review?: boolean } | null | undefined) => ({
+const scopeOf = (scope: Row['scope'] | null | undefined) => ({
   ...(scope?.sourceId ? { sourceId: scope.sourceId, sourceName: getSource(scope.sourceId)?.name ?? scope.sourceId } : {}),
   ...(scope?.review === true ? { review: true as const } : {}),
 });
@@ -783,6 +1180,7 @@ const summaryOf = (r: Row): FindRunSummary => ({
   id: r.id, status: r.status, total: Number(r.total), done: Number(r.done), followed: Number(r.followed),
   startedBy: r.username, startedAt: iso(r.started_at), ...(r.finished_at ? { finishedAt: iso(r.finished_at) } : {}),
   ...scopeOf(r.scope),
+  ...(r.scope?.mode === 'replace' ? { mode: 'replace' as const, promoted: Number(r.promoted) } : {}),
 });
 
 /**
@@ -796,12 +1194,15 @@ const summaryOf = (r: Row): FindRunSummary => ({
  */
 export async function findState(o: { runId?: string } = {}): Promise<{ running: boolean; run: FindRun | null; recent: FindRunSummary[] }> {
   await closeInterruptedFindRuns().catch(() => {});
+  // `promoted` from the results themselves (v0.54.0): no column, so v0.53.x boots on the same rows.
   const rows = await q<Row>(
-    `SELECT r.id, r.status, r.total, r.done, r.followed, u.username, r.started_at, r.finished_at, r.scope
+    `SELECT r.id, r.status, r.total, r.done, r.followed, u.username, r.started_at, r.finished_at, r.scope,
+            (SELECT count(*) FROM jsonb_array_elements(r.results) e WHERE e ? 'promoted')::int AS promoted
        FROM source_find_runs r LEFT JOIN users u ON u.id::text = r.started_by
       ORDER BY r.started_at DESC LIMIT $1`, [FIND_KEEP]);
   const a = active;
-  const recent = rows.map(summaryOf).map((r) => (a && r.id === a.id ? { ...r, done: a.done, followed: a.followed } : r));
+  const recent = rows.map(summaryOf).map((r) => (a && r.id === a.id
+    ? { ...r, done: a.done, followed: a.followed, ...(a.mode === 'replace' ? { promoted: a.promoted } : {}) } : r));
   let run: FindRun | null = null;
   const lead = o.runId !== undefined ? recent.find((r) => r.id === o.runId) : recent[0];
   if (a && lead?.id === a.id) {
@@ -814,16 +1215,23 @@ export async function findState(o: { runId?: string } = {}): Promise<{ running: 
     const full = await one<{ results: FindResult[] }>('SELECT results FROM source_find_runs WHERE id = $1', [lead.id]);
     run = { ...lead, results: full?.results ?? [] };
   }
+  // A Replace run's source as it is now: how many series are still on it, and whether it is switched off.
+  if (run?.mode === 'replace' && run.sourceId) {
+    const X = run.sourceId;
+    run.left = (await mainSourceCounts([X]).catch(() => null))?.get(X) ?? 0;
+    run.turnedOff = await isDisabled(X).catch(() => false);
+  }
   return { running: !!a, run, recent };
 }
 
 // ---- test seams ---------------------------------------------------------------------------------------------
 
-/** Tests: shorter pauses, wall and polling; pass nothing to put the defaults back. */
-export function setFindTiming(t: { paceMs?: number; wallMs?: number; quietMs?: number } = {}): void {
+/** Tests: shorter pauses, wall, polling and busy wait; pass nothing to put the defaults back. */
+export function setFindTiming(t: { paceMs?: number; wallMs?: number; quietMs?: number; busyMs?: number } = {}): void {
   paceMs = t.paceMs ?? PACE_MS;
   wallMs = t.wallMs ?? FIND_SERIES_WALL_MS;
   quietMs = t.quietMs ?? FIND_QUIET_POLL_MS;
+  busyMs = t.busyMs ?? FIND_BUSY_WAIT_MS;
 }
 /** Tests: the run in flight (or the last one) and the refresh queue behind it, settled. */
 export async function findSettled(): Promise<void> {

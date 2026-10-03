@@ -71,6 +71,9 @@ const searches: string[] = [];
 /** When set, fs-a's searches wait on it: a run that stays running while a test looks at it. */
 let gate: Promise<void> | null = null;
 let openGate: () => void = () => {};
+/** When set, fs-a's chapter lists wait on it: a check that stays inside its series (v0.54.0, Replace's `busy`). */
+let listGate: Promise<void> | null = null;
+let openList: () => void = () => {};
 
 function fake(id: string) {
   return {
@@ -85,6 +88,7 @@ function fake(id: string) {
     },
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid.split('|')[1] }; },
     async listChapters(sid: string) {
+      if (listGate && id === 'fs-a') await listGate;
       if (id === 'fs-nolist') throw new Error('fs-nolist: the chapter list did not load');
       if (id === 'fs-vanish') await q(`UPDATE lib_series SET deleted_at = now() WHERE title = 'Mu Vanishing'`);
       const c = CATALOGUE[id].find((x) => x.title === sid.split('|')[1]);
@@ -165,6 +169,7 @@ beforeEach(async () => {
   await fsLib.findSettled();
   searches.length = 0;
   gate = null;
+  listGate = null;
   runtime.updating = false;
   fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20 });
   await q('DELETE FROM lib_series WHERE library_id = ANY($1)', [[LIB, ADULT_LIB]]);
@@ -753,4 +758,297 @@ test("Health offers Find other sources on a failing source's row and on the seri
            VALUES ('fs-d', 'down', 3, 'boom', now(), now() + interval '1 hour')`);
   const idle = (await runHealthChecks()).checks.find((c) => c.id === 'sources')!.items.find((i) => i.sourceId === 'fs-d')!;
   assert.equal(idle.actions!.includes('find_sources'), false);
+});
+
+// ---- v0.54.0: Replace ------------------------------------------------------------------------------------------
+//
+// The owner, after a full Find run left all 195 aqua series on aqua: "i have to go one by one test and find replacement
+// sources". A Replace run moves every series of one source off it: its best working follower becomes its main source
+// with no search, and only a series with none is searched for, followed and then promoted.
+
+/** Follows for a series, in this order: `fresh` answered with 12 numbers just now; `coverage` the follow-time share. */
+async function follows(key: string, list: Array<[string, { fresh?: boolean; coverage?: number }?]>) {
+  for (const [i, [source, o]] of list.entries()) {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, coverage, checked_at, chapters, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, now() - interval '1 hour' + $7 * interval '1 minute')`,
+      [S(key), source, `${source}|${key}`, o?.coverage ?? null, o?.fresh ? new Date() : null, o?.fresh ? 12 : null, i]);
+  }
+}
+const mainOf = async (key: string) => (await q('SELECT source_id FROM lib_series WHERE id = $1', [S(key)]))[0]?.source_id;
+const followersOf = async (key: string) =>
+  (await q('SELECT source_id FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [S(key)])).map((r: any) => r.source_id);
+const promote = (runId: string, payload: unknown) =>
+  app.inject({ method: 'POST', url: `/api/admin/sources/find/${runId}/promote`, headers: adminAuth, payload });
+const resultsBy = (run: any) => Object.fromEntries(run.results.map((x: any) => [x.seriesId, x]));
+
+test("Replace promotes each series' best working follower without searching, drops the replaced source, and reports from and to", { skip }, async () => {
+  // Each series' `to` is the ranking's (lib/replaceSource.ts rankFollowers). Reintroduce by dropping the health tier:
+  // Rho Two takes the cooling fs-cool. The tenths of coverage: Rho Three takes fs-d. The source order: Rho Four takes fs-e.
+  const { invalidateSourcePrefs } = await import('../src/lib/sourcePrefs');
+  await series('r1', 'Rho One'); await follows('r1', [['fs-off', { fresh: true }], ['fs-a', { fresh: true }]]);
+  await series('r2', 'Rho Two'); await follows('r2', [['fs-cool', { fresh: true }], ['fs-b']]);
+  await series('r3', 'Rho Three'); await follows('r3', [['fs-d', { fresh: true, coverage: 0.5 }], ['fs-c', { fresh: true, coverage: 1 }]]);
+  await series('r4', 'Rho Four'); await follows('r4', [['fs-e', { fresh: true, coverage: 1 }], ['fs-f', { fresh: true, coverage: 1 }]]);
+  await series('r5', 'Rho Five', { numbering: 'posting_order' }); await follows('r5', [['fs-a', { fresh: true }]]);
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
+  await q(`INSERT INTO source_health (source_id, status, blocked_until) VALUES ('fs-cool', 'rate_limited', now() + interval '1 hour')`);
+  const [{ source_prefs: prefsWas }] = await q('SELECT source_prefs FROM server_settings WHERE id = 1');
+  await q(`UPDATE server_settings SET source_prefs = '{"priority":["fs-f"]}'::jsonb WHERE id = 1`);
+  invalidateSourcePrefs();
+  try {
+    const r = await post({ sourceId: MAIN, mode: 'replace' });
+    assert.equal(r.statusCode, 202, r.body);
+    assert.equal(r.json().total, 5);
+    await fsLib.findSettled();
+    const run = (await state()).run;
+    assert.deepEqual([run.mode, run.status, run.promoted, run.left, run.turnedOff], ['replace', 'done', 4, 1, false], 'the run says what it moved and what is left');
+    const by = resultsBy(run);
+    assert.deepEqual(['r1', 'r2', 'r3', 'r4'].map((k) => by[S(k)].promoted?.to), ['fs-a', 'fs-b', 'fs-c', 'fs-f'], "each series' best working follower");
+    assert.deepEqual(by[S('r1')].promoted, { from: MAIN, fromName: 'Main Down', to: 'fs-a', toName: 'Name fs-a', via: 'follower', old: 'dropped' });
+    assert.equal('why' in by[S('r1')], false, 'a promoted series says no why');
+    assert.deepEqual(by[S('r1')].skipped, [{ sourceId: 'fs-off', name: 'Name fs-off', why: 'off' }], 'the switched-off follower was passed over');
+    assert.deepEqual(by[S('r2')].skipped, [{ sourceId: 'fs-cool', name: 'Name fs-cool', why: 'cooling' }], 'and the cooling one, ranked last');
+    assert.equal(by[S('r5')].why, 'posting_order', 'a series numbered by posting order is left alone');
+    for (const [k, to] of [['r1', 'fs-a'], ['r2', 'fs-b'], ['r3', 'fs-c'], ['r4', 'fs-f'], ['r5', MAIN]]) assert.equal(await mainOf(k), to, `${k}'s main source`);
+    assert.deepEqual(await followersOf('r1'), ['fs-off'], 'the replaced source is dropped, the rest stay');
+    assert.deepEqual(await followersOf('r5'), ['fs-a'], 'the posting-order series is untouched');
+    assert.deepEqual(searches, [], 'nothing was searched: every series was decided from its followers');
+    const audits = await q(`SELECT detail FROM audit_log WHERE event = 'series.main_source' AND detail->>'runId' = $1`, [run.id]);
+    assert.equal(audits.length, 4, 'each switch audited');
+    assert.ok(audits.every((x: any) => x.detail.via === 'replace' && x.detail.from === MAIN));
+    const find = (await q(`SELECT detail FROM audit_log WHERE event = 'source.find' AND detail->>'runId' = $1`, [run.id]))[0].detail;
+    assert.deepEqual([find.mode, find.promoted, find.left, find.turnedOff], ['replace', 4, 1, false]);
+    // The recent list counts what each run promoted, from its results.
+    assert.deepEqual([(await state()).recent[0].mode, (await state()).recent[0].promoted], ['replace', 4]);
+  } finally {
+    await q('UPDATE server_settings SET source_prefs = $1::jsonb WHERE id = 1', [JSON.stringify(prefsWas)]);
+    invalidateSourcePrefs();
+  }
+});
+
+test('a series with no working follower is searched, followed and promoted; one with nothing to follow says why', { skip }, async () => {
+  // Reintroduce by not promoting after a follow: Alpha Tale stays on the replaced source. By counting its dead
+  // followers against the cap: it is `full` and never searched.
+  await series('a', 'Alpha Tale'); await follows('a', [['fs-nowhere'], ['fs-off']]);
+  await series('e', 'Epsilon Nothing');
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  const run = (await state()).run;
+  const by = resultsBy(run);
+  assert.deepEqual(by[S('a')].promoted, { from: MAIN, fromName: 'Main Down', to: 'fs-a', toName: 'Name fs-a', via: 'search', old: 'dropped' },
+    'a series with no working follower is searched, followed and promoted');
+  assert.deepEqual(by[S('a')].followed.map((f: any) => f.sourceId), ['fs-a', 'fs-b']);
+  assert.deepEqual(by[S('a')].dropped, [{ sourceId: 'fs-nowhere', name: 'fs-nowhere' }, { sourceId: 'fs-off', name: 'Name fs-off' }],
+    'its dead followers made room, the one not loaded first');
+  assert.equal(await mainOf('a'), 'fs-a');
+  assert.deepEqual(await followersOf('a'), ['fs-b'], 'the other source it followed stays a follower');
+  assert.ok(searches.includes('fs-a:Alpha Tale'));
+  assert.equal(by[S('e')].why, 'no_match', 'the search said why it found nothing');
+  assert.equal(await mainOf('e'), MAIN, 'and that series stays where it was');
+  assert.equal(run.promoted, 1);
+});
+
+test('review first moves nothing, proposes what it would promote, and promote does exactly that', { skip }, async () => {
+  // Reintroduce by dropping the review branch in replaceFor: Rho One moves during the run.
+  await series('r1', 'Rho One'); await follows('r1', [['fs-off', { fresh: true }], ['fs-a', { fresh: true, coverage: 1 }]]);
+  await series('a', 'Alpha Tale');
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
+  const both = await post({ sourceId: MAIN, mode: 'replace', review: true, turnOff: true });
+  assert.deepEqual([both.statusCode, both.json().error], [400, 'bad_request'], 'a review never turns a source off');
+  assert.equal((await post({ sourceId: MAIN, turnOff: true })).statusCode, 400, 'only Replace does');
+  assert.equal((await post({ seriesIds: [S('r1')], mode: 'replace' })).statusCode, 400, 'and Replace names its source');
+  const r = await post({ sourceId: MAIN, mode: 'replace', review: true });
+  assert.equal(r.statusCode, 202, r.body);
+  const runId = r.json().runId;
+  await fsLib.findSettled();
+  const run = (await state()).run;
+  assert.deepEqual([run.review, run.mode, run.promoted], [true, 'replace', 0], 'review first moves nothing');
+  assert.equal(await mainOf('r1'), MAIN, 'review first moves nothing');
+  assert.equal(await mainOf('a'), MAIN);
+  assert.deepEqual(await followersOf('a'), [], 'and follows nothing');
+  const by = resultsBy(run);
+  const fol = by[S('r1')].proposals;
+  assert.deepEqual(fol.map((p: any) => [p.kind, p.sourceId, p.promote ?? false, p.verdict, p.standing]), [['follower', 'fs-a', true, 'green', 'usable']],
+    'its working follower, marked as the one to promote');
+  assert.deepEqual(by[S('r1')].skipped, [{ sourceId: 'fs-off', name: 'Name fs-off', why: 'off' }]);
+  const found = by[S('a')].proposals;
+  assert.deepEqual(found.map((p: any) => [p.kind, p.sourceId, p.promote ?? false]), [['search', 'fs-a', true], ['search', 'fs-b', false]],
+    'what the search found, the first green one marked');
+
+  const one = await promote(runId, { seriesId: S('r1'), sourceId: 'fs-a' });
+  assert.equal(one.statusCode, 200, one.body);
+  assert.equal(one.json().result.promoted.to, 'fs-a');
+  assert.equal(one.json().result.proposals[0].state, 'promoted');
+  assert.equal(await mainOf('r1'), 'fs-a', 'promote does exactly that');
+  const again = await promote(runId, { seriesId: S('r1'), sourceId: 'fs-a' });
+  assert.deepEqual([again.statusCode, again.json().error, again.json().state], [409, 'decided', 'promoted'], 'and only once');
+  // A search's match is followed first, then made the main source.
+  const two = await promote(runId, { seriesId: S('a'), sourceId: 'fs-a' });
+  assert.equal(two.statusCode, 200, two.body);
+  assert.deepEqual([two.json().result.promoted.via, two.json().result.followed.map((f: any) => f.sourceId)], ['search', ['fs-a']]);
+  assert.equal(await mainOf('a'), 'fs-a');
+  assert.deepEqual(await followersOf('a'), [], 'the replaced source dropped, nothing else followed');
+  assert.equal((await promote(runId, { seriesId: S('a'), sourceId: 'fs-c' })).statusCode, 404, 'a source never proposed');
+  assert.equal((await state(`?runId=${runId}`)).run.promoted, 2, 'the run counts what was promoted from it');
+});
+
+test('turnOff turns the replaced source off only when no series is left on it, and drops its follows elsewhere', { skip }, async () => {
+  // Reintroduce by not checking `left` before turning it off: the first run turns it off with Rho Five still on it.
+  const { isDisabled } = await import('../src/lib/sourceHealth');
+  await series('r1', 'Rho One'); await follows('r1', [['fs-a', { fresh: true }]]);
+  await series('r5', 'Rho Five', { numbering: 'posting_order' }); await follows('r5', [['fs-b', { fresh: true }]]);
+  // A series that only follows the replaced source: that follow goes when it is turned off, with its listing rows.
+  await series('x', 'Xi Follower', { source: 'fs-c' });
+  await follows('x', [[MAIN]]);
+  await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1, 13, $2, '{}'::jsonb)`, [S('x'), MAIN]);
+  const first = await post({ sourceId: MAIN, mode: 'replace', turnOff: true });
+  assert.equal(first.statusCode, 202, first.body);
+  await fsLib.findSettled();
+  let run = (await state()).run;
+  assert.deepEqual([run.promoted, run.left, run.turnedOff], [1, 1, false], 'a series is left on it: it stays on');
+  assert.equal(await isDisabled(MAIN), false, 'turnOff turns the replaced source off only when no series is left on it');
+  assert.deepEqual(await followersOf('x'), [MAIN], 'and its follows stay');
+
+  await q('UPDATE lib_series SET numbering = NULL WHERE id = $1', [S('r5')]);
+  const second = await post({ sourceId: MAIN, mode: 'replace', turnOff: true });
+  assert.equal(second.statusCode, 202, second.body);
+  await fsLib.findSettled();
+  run = (await state()).run;
+  assert.deepEqual([run.promoted, run.left, run.turnedOff], [1, 0, true], 'nothing left: turned off');
+  assert.equal(await isDisabled(MAIN), true);
+  assert.deepEqual(await followersOf('x'), [], 'its follows elsewhere dropped');
+  assert.equal((await q('SELECT count(*)::int AS n FROM series_listing WHERE series_id = $1 AND source_id = $2', [S('x'), MAIN]))[0].n, 0,
+    'with their listing rows');
+  const retire = (await q(`SELECT detail FROM audit_log WHERE event = 'source.retire' AND detail->>'runId' = $1`, [run.id]))[0]?.detail;
+  assert.deepEqual([retire?.source, retire?.done, retire?.via], [MAIN, 'turned_off', 'replace']);
+});
+
+test('a series being checked is waited for; past the wait it is busy', { skip }, async () => {
+  // Reintroduce by not waiting (drop waitOut's loop): the series is switched under the check it waited for.
+  const { updateSeries, runsInside } = await import('../src/lib/updater');
+  fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20, busyMs: 300 });
+  await series('b1', 'Beta One'); await follows('b1', [['fs-a', { fresh: true }]]);
+  listGate = new Promise<void>((r) => { openList = r; });
+  let check = updateSeries(S('b1'), 0);
+  try {
+    await until(() => runsInside(S('b1')) > 0, 'the check to be inside the series');
+    assert.equal((await post({ sourceId: MAIN, mode: 'replace' })).statusCode, 202);
+    await fsLib.findSettled();
+    const busy = resultsBy((await state()).run)[S('b1')];
+    assert.equal(busy.why, 'busy', 'past the wait it is busy');
+    assert.equal(await mainOf('b1'), MAIN, 'and untouched');
+  } finally { openList(); listGate = null; await check; }
+
+  // The check ends within the wait: the series is replaced as soon as it has.
+  fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20, busyMs: 10_000 });
+  listGate = new Promise<void>((r) => { openList = r; });
+  check = updateSeries(S('b1'), 0);
+  try {
+    await until(() => runsInside(S('b1')) > 0, 'the second check');
+    assert.equal((await post({ sourceId: MAIN, mode: 'replace' })).statusCode, 202);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(await mainOf('b1'), MAIN, 'not while the check is inside it');
+    openList();
+    await fsLib.findSettled();
+    assert.equal(resultsBy((await state()).run)[S('b1')].promoted?.to, 'fs-a', 'a series being checked is waited for');
+  } finally { openList(); listGate = null; await check; }
+});
+
+test('a stop leaves every series either replaced or untouched', { skip }, async () => {
+  const { updateSeries, runsInside } = await import('../src/lib/updater');
+  fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20, busyMs: 10_000 });
+  for (const k of ['t1', 't2', 't3', 't4']) { await series(k, `Tau ${k}`); await follows(k, [['fs-a', { fresh: true }]]); }
+  // The third waits on a check inside it, and the stop comes while it waits.
+  listGate = new Promise<void>((r) => { openList = r; });
+  const check = updateSeries(S('t3'), 0);
+  try {
+    await until(() => runsInside(S('t3')) > 0, 'the check');
+    assert.equal((await post({ sourceId: MAIN, mode: 'replace' })).statusCode, 202);
+    await until(async () => (await state()).run?.current?.seriesId === S('t3'), 'the run to wait on the third series');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/admin/sources/find/stop', headers: adminAuth })).json().stopped, true);
+    // Let the check go once the run has ended: the listing refreshes after it list through fs-a too.
+    await until(async () => !(await state()).running, 'the run to end');
+    openList();
+    await fsLib.findSettled();
+  } finally { openList(); listGate = null; await check; }
+  const run = (await state()).run;
+  assert.equal(run.status, 'stopped');
+  const by = resultsBy(run);
+  for (const k of ['t1', 't2', 't3', 't4']) {
+    const main = await mainOf(k);
+    const fols = await followersOf(k);
+    if (by[S(k)].promoted) assert.deepEqual([main, fols], ['fs-a', []], `${k}: replaced, all of it`);
+    else assert.deepEqual([main, fols, by[S(k)].why], [MAIN, ['fs-a'], 'not_tried'], `${k}: untouched, and says so`);
+  }
+  assert.deepEqual(['t1', 't2', 't3', 't4'].map((k) => !!by[S(k)].promoted), [true, true, false, false], 'a stop leaves every series either replaced or untouched');
+});
+
+test('Find and Replace share one run; the preview says so', { skip }, async () => {
+  await series('a', 'Alpha Tale');
+  gate = new Promise<void>((r) => { openGate = r; });
+  try {
+    assert.equal((await post({ sourceId: MAIN })).statusCode, 202, 'a Find run');
+    const busy = await post({ sourceId: MAIN, mode: 'replace' });
+    assert.deepEqual([busy.statusCode, busy.json().error], [409, 'busy'], 'Find and Replace share one run');
+    const preview = await app.inject({ method: 'GET', url: `/api/admin/sources/${MAIN}/replace-preview`, headers: adminAuth });
+    assert.equal(preview.json().busy, true, 'and the preview says one is going');
+  } finally {
+    openGate(); gate = null;
+    await app.inject({ method: 'POST', url: '/api/admin/sources/find/stop', headers: adminAuth });
+    await fsLib.findSettled();
+  }
+});
+
+test("a live-shaped library: 195 series on a switched-off main, 184 with a working follower -- the preview says 184 and 11, and the run promotes the 184 without one search", { skip }, async () => {
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+           SELECT 's_fs_live' || i, 'T!fs', 'Live ' || lpad(i::text, 3, '0'), 's_fs_live' || i, 0, $1, $2::text, $2::text || '|live' || i, true
+             FROM generate_series(1, 195) i`, [LIB, MAIN]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, checked_at, chapters)
+           SELECT 's_fs_live' || i, 'fs-a', 'fs-a|live' || i, now(), 12 FROM generate_series(1, 184) i`);
+  // The eleven with nothing to follow list twelve numbers, so they are searched for (MIN_HAVE).
+  await q(`INSERT INTO series_listing (series_id, number, source_id, chosen)
+           SELECT 's_fs_live' || i, n, $1::text, '{}'::jsonb FROM generate_series(185, 195) i, generate_series(1, 12) n`, [MAIN]);
+  await setDisabled(MAIN, true);
+  const preview = await app.inject({ method: 'GET', url: `/api/admin/sources/${MAIN}/replace-preview`, headers: adminAuth });
+  assert.equal(preview.statusCode, 200, preview.body);
+  assert.deepEqual(preview.json(), { main: 195, withBackup: 184, toSearch: 11, postingOrder: 0, busy: false }, 'the preview says 184 and 11');
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  assert.equal(r.json().total, 195);
+  await fsLib.findSettled();
+  const run = (await state()).run;
+  assert.deepEqual([run.status, run.promoted, run.left], ['done', 184, 11]);
+  const searched = new Set(searches.map((x) => x.slice(x.indexOf(':') + 1)));
+  const lone = Array.from({ length: 11 }, (_, i) => `Live ${String(185 + i).padStart(3, '0')}`);
+  assert.deepEqual([...searched].sort(), lone, 'only the eleven with no working follower were searched for: the 184 without one search');
+  assert.equal((await q(`SELECT count(*)::int AS n FROM lib_series WHERE library_id = $1 AND source_id = 'fs-a'`, [LIB]))[0].n, 184);
+  // The run lists them followers-first: every promotion before the first search.
+  assert.ok(run.results.slice(0, 184).every((x: any) => x.promoted?.via === 'follower'), 'the instant promotions land first');
+});
+
+test('a series moved off the source after the run started is left alone, and says so', { skip }, async () => {
+  // Reintroduce by dropping the `moved` check at the top of replaceFor: Alpha Tale is searched for and follows two sources.
+  const { updateSeries, runsInside } = await import('../src/lib/updater');
+  fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20, busyMs: 10_000 });
+  await series('m1', 'Mu One'); await follows('m1', [['fs-a', { fresh: true }]]);
+  await series('m2', 'Alpha Tale');
+  listGate = new Promise<void>((r) => { openList = r; });
+  const check = updateSeries(S('m1'), 0);
+  try {
+    await until(() => runsInside(S('m1')) > 0, 'the check');
+    assert.equal((await post({ sourceId: MAIN, mode: 'replace' })).statusCode, 202);
+    await until(async () => (await state()).run?.current?.seriesId === S('m1'), 'the run to wait on the first series');
+    // Moved by hand while the run waits: Make main, or another run.
+    await q(`UPDATE lib_series SET source_id = 'fs-c', source_series_id = 'fs-c|m2' WHERE id = $1`, [S('m2')]);
+    openList();
+    await fsLib.findSettled();
+  } finally { openList(); listGate = null; await check; }
+  const by = resultsBy((await state()).run);
+  assert.equal(by[S('m1')].promoted?.to, 'fs-a');
+  assert.equal(by[S('m2')].why, 'moved', 'a series moved off the source after the run started is left alone');
+  assert.equal(searches.some((x) => x.endsWith(':Alpha Tale')), false, 'and not searched for');
+  assert.deepEqual(await followersOf('m2'), []);
 });

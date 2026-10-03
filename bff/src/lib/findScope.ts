@@ -11,16 +11,19 @@ import { visible, Params, SYSTEM_CTX, type ViewCtx } from './visibility';
 /**
  * The series whose main source is `sourceId`, as this viewer may see them (an admin sees every series that is not
  * hidden or merged away), with their titles. Ordered for the run: the series that follow nothing come first --
- * they are the ones the dead source has frozen -- then by title.
+ * they are the ones the dead source has frozen -- then by title. `followersFirst` (v0.54.0, a Replace run) turns the
+ * first key round: the series that follow other sources first, so the promotions that cost no search land at once.
  */
-export async function seriesOfMainSource(sourceId: string, ctx: ViewCtx = SYSTEM_CTX): Promise<Array<{ id: string; title: string }>> {
+export async function seriesOfMainSource(
+  sourceId: string, ctx: ViewCtx = SYSTEM_CTX, o: { followersFirst?: boolean } = {},
+): Promise<Array<{ id: string; title: string }>> {
   const p = new Params();
   const src = p.add(sourceId);
   return q<{ id: string; title: string }>(
     `SELECT s.id, COALESCE(o.title, s.title) AS title
        FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
       WHERE s.source_id = ${src} AND ${visible('s', ctx, p)}
-      ORDER BY (SELECT count(*) FROM series_sources ss WHERE ss.series_id = s.id AND ss.source_id <> s.source_id),
+      ORDER BY (SELECT count(*) FROM series_sources ss WHERE ss.series_id = s.id AND ss.source_id <> s.source_id) ${o.followersFirst ? 'DESC' : 'ASC'},
                lower(COALESCE(o.title, s.title)), s.id`,
     p.values as any[],
   );

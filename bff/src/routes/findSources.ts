@@ -16,8 +16,10 @@ import { browsableIds, hideAdult, seriesVisible, viewCtxFor } from '../lib/visib
 import { altTitleRows, recordAltTitles, refuseName, removeAltTitle, MAX_NAME_LEN } from '../lib/altTitles';
 import { normTitle } from '../lib/titleMatch';
 import { POSTING_ORDER_REFUSAL } from '../lib/numbering';
+import { saidOf } from '../lib/said';
 import {
-  decideProposal, findState, startFind, stopFind, type DecideRefusal, type FindProposal, type FindResult, type FindScope,
+  decideProposal, findState, promoteProposal, replacePreview, startFind, stopFind,
+  type DecideRefusal, type FindProposal, type FindResult, type FindScope, type PromoteRefusal,
 } from '../lib/findSources';
 
 const REFUSED: Record<string, string> = {
@@ -34,6 +36,19 @@ const DECLINED: Record<DecideRefusal, [number, string]> = {
   language_differs: [409, 'That source is in another language than this series.'],
   already_followed: [409, 'The series follows that source already.'],
   full: [409, 'The series already follows as many other sources as a series may.'],
+};
+
+/**
+ * A Replace review's promotion that did not happen (v0.54.0): a decision's refusals, and a switch's -- whose words
+ * come as said codes from lib/findSources.ts promoteProposal (`said`), where the English below is only the fallback.
+ */
+const NOT_PROMOTED: Record<PromoteRefusal, [number, string]> = {
+  ...DECLINED,
+  moved: [409, 'This series’ main source changed meanwhile. Look again.'],
+  busy: [409, 'This series is being checked right now. Try again when that ends.'],
+  renumber_pending: [409, 'This series’ chapters are waiting to be renumbered. Review that on the series page first.'],
+  not_followed: [409, 'This series does not follow that source. Only a source it follows can become its main source.'],
+  is_main: [409, 'That source is already this series’ main source.'],
 };
 
 /**
@@ -128,15 +143,25 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
    * down" case Health's button sends). One at a time: 409 `busy` with the running run's id. 400 `empty_scope` when
    * nothing named is a series this admin may see. 202 with the run's id and how many series it will ask about.
    * `review: true` (v0.51.0): review first -- the same run, which follows nothing and keeps its candidates.
+   * `mode: 'replace'` (v0.54.0, with `sourceId` only): Replace -- move every series off that source -- and `turnOff`
+   * (Replace only, never with review) to turn it off once no series is left on it; 400 otherwise.
    */
   app.post('/api/admin/sources/find', async (req, reply) => {
     const b = z.object({
       seriesIds: z.array(z.string().min(1).max(64)).max(500).optional(),
       sourceId: z.string().min(1).max(200).optional(),
       review: z.boolean().optional(),
+      mode: z.enum(['follow', 'replace']).optional(),
+      turnOff: z.boolean().optional(),
     }).strict().safeParse(req.body ?? {});
     if (!b.success || (b.data.seriesIds && b.data.sourceId)) {
       return reply.code(400).send({ error: 'bad_request', message: 'Name the series ({seriesIds}) or one source ({sourceId}).' });
+    }
+    const replace = b.data.mode === 'replace';
+    if (replace && !b.data.sourceId) return reply.code(400).send({ error: 'bad_request', message: 'Replace names the source it replaces ({sourceId}).' });
+    if (b.data.turnOff && !replace) return reply.code(400).send({ error: 'bad_request', message: 'Only Replace turns a source off ({mode: "replace"}).' });
+    if (b.data.turnOff && b.data.review) {
+      return reply.code(400).send({ error: 'bad_request', message: 'A review moves nothing by itself, so it cannot turn the source off when it ends.' });
     }
     const scope: FindScope = b.data.sourceId ? { sourceId: b.data.sourceId } : { seriesIds: b.data.seriesIds ?? [] };
     if ('seriesIds' in scope && !scope.seriesIds.length) return reply.code(400).send({ error: 'empty_scope', message: 'No series were named.' });
@@ -145,7 +170,9 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
     const h = req.headers;
     const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
     // The admin's own view, without the 18+ hide: that is a tidy screen, and the scope is what they asked for.
-    const r = await startFind(scope, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)), from, { review: b.data.review });
+    const r = await startFind(scope, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)), from, {
+      review: b.data.review, ...(replace ? { mode: 'replace' as const, turnOff: b.data.turnOff } : {}),
+    });
     if ('busy' in r) return reply.code(409).send({ error: 'busy', runId: r.busy, message: 'A Find other sources run is already going.' });
     if ('empty' in r) return reply.code(400).send({ error: 'empty_scope', message: 'None of those series can be searched for.' });
     return reply.code(202).send(r);
@@ -197,6 +224,38 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
   };
   app.post('/api/admin/sources/find/:runId/follow', decision('follow'));
   app.post('/api/admin/sources/find/:runId/dismiss', decision('dismiss'));
+
+  /**
+   * A Replace review's proposal made the series' main source (v0.54.0, lib/findSources.ts promoteProposal). Body
+   * `{seriesId, sourceId}`. 200 with the series' result as it now reads (`promoted` on it, the proposal `promoted`);
+   * 404 `not_found`; 409 `decided` (with `state`), `posting_order`, `source_unavailable`, `language_differs` (with
+   * `edition`), `full`, `moved`, `busy`, `renumber_pending`, `not_followed` or `is_main`, with `messageSaid` where the
+   * refusal has a code.
+   */
+  app.post('/api/admin/sources/find/:runId/promote', async (req, reply) => {
+    const { runId } = req.params as { runId: string };
+    const b = z.object({ seriesId: z.string().min(1).max(64), sourceId: z.string().min(1).max(200) }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Name the series and the source ({seriesId, sourceId}).' });
+    const out = await promoteProposal(runId, b.data.seriesId, b.data.sourceId, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)));
+    if ('refused' in out) {
+      const [code, message] = NOT_PROMOTED[out.refused];
+      return reply.code(code).send({
+        error: out.refused, message: out.said?.text ?? message, ...(out.said ? { messageSaid: saidOf(out.said) } : {}),
+        ...(out.state ? { state: out.state } : {}), ...(out.edition ? { edition: out.edition } : {}),
+      });
+    }
+    return { result: shown(out.result, await listable(req, [out.result.seriesId])) };
+  });
+
+  /**
+   * What a Replace run over this source would do (v0.54.0), as the dialog says it before Start: `main` (the series
+   * whose main source it is), `withBackup` (of those, the ones a working follower takes over at once), `toSearch` (the
+   * ones it searches for), `postingOrder` (the ones it leaves alone), and `busy` (a Find or Replace run is going).
+   */
+  app.get('/api/admin/sources/:id/replace-preview', async (req) => {
+    const { id } = req.params as { id: string };
+    return replacePreview(id, await viewCtxFor(userIdOf(req), roleOf(req)));
+  });
 
   /** Stop the running run at once. `stopped` is false when none was running. */
   app.post('/api/admin/sources/find/stop', async (req) => {

@@ -1171,6 +1171,8 @@ POST   /api/admin/sources/find    GET    /api/admin/sources/find
 POST   /api/admin/sources/find/stop
 POST   /api/admin/sources/find/:runId/follow
 POST   /api/admin/sources/find/:runId/dismiss
+POST   /api/admin/sources/find/:runId/promote
+GET    /api/admin/sources/:id/replace-preview
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
@@ -1816,6 +1818,39 @@ lang}` in it when the work already holds an edition that may follow the source, 
 `already_followed` or `full`. `POST
 /api/admin/sources/find/:runId/dismiss {seriesId, sourceId}` dismisses one for good. `state` is `followed` or
 `dismissed`. A series the viewer may not list keeps its proposals without `title`, `coverUrl` and `url`.
+
+**Replace** (since v0.54.0). `POST /api/admin/sources/find {sourceId, mode: 'replace', review?, turnOff?}` runs the
+same one-at-a-time job over every series whose main source is `sourceId`, and MOVES them off it: the series that
+follow other sources first. Per series, its best working follower becomes its main source at once -- no search, no
+pacing -- exactly as `POST /api/admin/series/:id/main-source` switches, the replaced source dropped from it. A follower
+may take over when it is usable or cooling down, in the series' language and within the starting admin's age reach;
+the best is the one that answered with its list within the week, then the one listing the most of the series'
+numbers (in tenths), then the admin's source order, then the one furthest ahead, then the follow order -- a cooling
+one only after every usable one. A series with none is searched for as Find does, its dead followers (failing, not
+loaded, switched off) not counting against the cap and dropped -- worst first, with their listing rows -- only as far
+as a follow needs the room; the first source it follows becomes its main source. A series numbered by posting order
+(`posting_order`), waiting for a renumber (`renumber_pending`), no longer on the source (`moved`), or with a sweep, a
+check or a listing refresh inside it for 30 s (`busy`) is left alone. Each result adds `promoted: {from, fromName,
+to, toName, via: follower|search, old: dropped|kept}` (and then no `why`), `skipped: [{sourceId, name, why: off|
+failing|cooling|not_loaded|language|age}]` (the followers passed over) and `dropped: [{sourceId, name}]`. The run reads
+`mode: 'replace'` and `promoted` (counted from its results; in `recent` too), and in full `left` (the series on the
+source now) and `turnedOff` (whether it is switched off now); its card in `GET /api/sources/jobs` carries `mode`,
+`promoted`, `left` and, once ended, `turnedOff`. `turnOff: true` (Replace only, never with `review`: **400**) switches
+the source off when the run ends done with no series left on it, and drops it from every series' followers with
+their listing rows (audited `source.retire`); a stopped run, or one that left a series behind, turns nothing off.
+Every switch is audited as `series.main_source` with `via: replace` and the run's id; `source.find` adds `mode`,
+`promoted`, `left` and `turnedOff`. With `review: true` nothing is written: a series with followers that could take
+over carries them as proposals with `kind: follower` (best first, `amber: cooling|coverage|stale` where one should be
+looked at, `newer`, `standing`), a series with none what its search found with `kind: search`, and the one the run
+would promote is marked `promote: true`. `POST /api/admin/sources/find/:runId/promote {seriesId, sourceId}` applies
+one: a follower's is switched to; a search's is checked as a follow, followed under the cap and switched to. It answers
+`{result}` (the proposal `promoted`, the result's `promoted`), **404** `not_found`, or **409** `decided` (with `state`),
+`posting_order`, `source_unavailable`, `language_differs` (with `edition`), `full`, `moved`, `busy`,
+`renumber_pending`, `not_followed` or `is_main`, with `messageSaid` where it has one. Find and Replace share the one
+run at a time (**409** `busy`). `GET /api/admin/sources/:id/replace-preview` answers what a Replace run over the
+source would do, counted as the run decides it: `{main, withBackup, toSearch, postingOrder, busy}` -- the series
+whose main source it is, those a working follower takes over at once, those it would search for, those numbered by
+posting order (left alone), and whether a run is going.
 
 ### Admin — extensions (Mihon / Tachiyomi)
 
