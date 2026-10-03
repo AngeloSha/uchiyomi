@@ -248,7 +248,7 @@ test('copy that explains a hidden feature has a desktop arm, and the server keep
   // Reintroduce by dropping the `desktopLibs ?` arm: "the Libraries line offers access control on desktop" fails.
   const admin = code(read('app/admin/page.tsx'));
   const libs = slice(admin, 'function LibrariesSection(', 'function LibraryAccessDialog(');
-  assert.match(libs, /\{desktopLibs\s*\? tr\('A library is a folder, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that\.'\)\s*: tr\('A library is a folder, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that, and choose who can open it\.'\)\}/, 'the Libraries line offers access control on desktop');
+  assert.match(libs, /\{desktopLibs\s*\? tr\('A library is one or more folders, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that\.'\)\s*: tr\('A library is one or more folders, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that, and choose who can open it\.'\)\}/, 'the Libraries line offers access control on desktop');
   // v0.54.0: Admin → Sources' empty state, in the reader's words on both arms (the server's was bare English).
   const empty = slice(code(read('components/SourcesPanel.tsx')), 'data-sources-empty', '</div>');
   assert.match(empty, /\{isDesktop\(\)\s*\? tr\('Add a site, or download the extension engine and add an extension, under Add sources\. With none, Uchiyomi reads only the library you already own\.'\)\s*: tr\('Add a site or an extension under Add sources, or mount a source pack at the server’s \{dir\}\. With none, Uchiyomi reads only the library you already own\.', \{ dir: 'SOURCES_DIR' \}\)\}/,

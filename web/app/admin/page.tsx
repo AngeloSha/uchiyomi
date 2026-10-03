@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabParam } from '@/lib/useTabParam';
 import { AdminSettings } from '@/components/AdminSettings';
@@ -13,7 +13,9 @@ import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '@/components/icons';
+import { LibraryFolders } from '@/components/LibraryFolders';
+import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, sameFolders, toggleFolder, typedFolder, wouldMoveText } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
 import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
@@ -876,6 +878,8 @@ const filesGone = (r: DeletedRow) => r.live_books === 0 && r.pruned_books > 0;
  *  always reversible -- the series keeps its id, and with it everyone's progress, favourites and ratings. */
 interface LibraryRow {
   id: string; name: string; path: string; n: number;
+  /** Every folder it holds, the first (`path`) first (v0.55.1, #148). The default library's is empty. */
+  paths?: string[];
   age_rating: number | null;
   /** How many of its series were placed here by hand rather than by the folder rule. */
   pinned: number;
@@ -1022,14 +1026,20 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
 }
 
 /**
- * Pick a folder: browse what is actually on disk, or type the path.
+ * Pick folders: browse what is actually on disk, and tick each one the library holds (v0.55.1, #148: several).
  *
  * The old dialog offered a fixed list of candidates and nothing else, and that list was computed from the
  * FIRST path segment only -- which on a real install holds the source names the downloader wrote. So the
  * only options offered were the ones not to pick, and the folder an admin actually wanted could not be
  * reached at all. The API always accepted any path; nothing ever asked for one.
+ *
+ * A row's name opens the folder; its box puts the folder in the library or takes it out (it was a "Use" key that
+ * replaced the one folder). A folder another library holds is shown as taken and cannot be ticked: a folder belongs to
+ * one library, though a folder inside it is free to be another's.
  */
-function FolderPicker({ value, onPick }: { value: string; onPick: (p: string) => void }) {
+function FolderPicker({ chosen, held, onToggle }: {
+  chosen: readonly string[]; held: Map<string, string>; onToggle: (p: string) => void;
+}) {
   const [at, setAt] = useState('');
   const { data, isFetching } = useQuery({
     queryKey: ['admin-folders', at],
@@ -1037,32 +1047,200 @@ function FolderPicker({ value, onPick }: { value: string; onPick: (p: string) =>
   });
 
   return (
-    <div className="rounded-lg border border-ink-700 bg-ink-900/40">
-      <div className="flex items-center gap-2 border-b border-ink-800 px-2.5 py-1.5">
-        <button type="button" disabled={data?.parent === null}
+    <div className="rounded-lg border border-ink-700 bg-ink-900/40" data-folder-picker>
+      <div className="flex min-w-0 items-center gap-2 border-b border-ink-800 px-2.5 py-1.5">
+        <button type="button" disabled={data?.parent === null} aria-label={tr('Back')}
           onClick={() => setAt(data?.parent ?? '')}
-          className="chip shrink-0 text-[11px] disabled:opacity-40">↑</button>
-        <p className="truncate font-mono text-[11px] text-fog-400">{at || tr('Library root')}</p>
+          className="btn-key h-7 w-7 px-0 text-[11px]">↑</button>
+        <p className={`min-w-0 truncate text-[11px] text-fog-400 ${at ? 'font-mono' : ''}`}><bdi>{at || tr('Library root')}</bdi></p>
       </div>
-      <div data-lenis-prevent className="max-h-44 overflow-y-auto p-1.5">
+      <div data-lenis-prevent className="max-h-52 overflow-y-auto p-1.5">
         {isFetching && !data ? (
           <p className="px-2 py-3 text-center text-[11px] text-fog-600">{tr('Loading…')}</p>
         ) : !data?.folders.length ? (
           <p className="px-2 py-3 text-center text-[11px] text-fog-600">{tr('No folders here')}</p>
-        ) : data.folders.map((f) => (
-          <div key={f.path} className="flex items-center gap-2">
-            <button type="button" onClick={() => setAt(f.path)}
-              className="min-w-0 flex-1 truncate rounded px-2 py-1 text-start text-xs text-fog-200 hover:bg-ink-800/70">
-              {f.name} <span className="text-fog-600">· {f.series}</span>
-            </button>
-            <button type="button" onClick={() => onPick(f.path)}
-              className={`chip shrink-0 text-[11px] ${value === f.path ? 'chip-active' : ''}`}>
-              {tr('Use')}
-            </button>
-          </div>
-        ))}
+        ) : data.folders.map((f) => {
+          const holder = held.get(f.path);
+          const on = chosen.includes(f.path);
+          return (
+            <div key={f.path} className="flex min-w-0 items-center gap-1" data-folder-row={f.path} data-folder-on={on ? '' : undefined}>
+              <label className={`grid size-8 shrink-0 place-items-center ${holder && !on ? '' : 'cursor-pointer'}`}>
+                <input type="checkbox" checked={on} disabled={!!holder && !on} onChange={() => onToggle(f.path)}
+                  aria-label={f.name} className="size-4 accent-accent disabled:opacity-40" />
+              </label>
+              <button type="button" onClick={() => setAt(f.path)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1.5 text-start text-xs text-fog-200 hover:bg-ink-800/70">
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <bdi className="min-w-0 truncate">{f.name}</bdi>
+                    <span className="shrink-0 text-fog-600">· {f.series}</span>
+                  </span>
+                  {/* Under the name, not beside it: a library's name is as long as anyone made it. */}
+                  {holder && <span className="block truncate text-[10px] text-fog-500" data-folder-held>{heldByText(holder)}</span>}
+                </span>
+                <IcChevronRight width={12} height={12} aria-hidden className="shrink-0 text-fog-600 rtl:-scale-x-100" />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+/**
+ * Create or edit one library: its name, its folders and its age rating (v0.55.1, #148: one or more folders).
+ *
+ * The folders are a list, each with its own key to take it out. Type one and Add it, or tick it in the browser below.
+ * A folder typed and never added is saved with the rest: typing a path and pressing Create is how a library was always
+ * made. The preview follows the list, so what the save would move -- over every folder -- is on screen before anyone
+ * presses it. A folder another library holds says whose it is, and Save waits until it is gone.
+ */
+function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
+  editing: LibraryRow | null;
+  start: { name: string; paths: string[] };
+  libs: LibraryRow[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(editing?.name ?? start.name);
+  const [paths, setPaths] = useState<string[]>(editing ? foldersOf(editing) : start.paths);
+  const [typed, setTyped] = useState('');
+  const [age, setAge] = useState<string>(editing?.age_rating == null ? '' : String(editing.age_rating));
+  const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isLib = editing?.id === 'lib';
+  const held = useMemo(() => heldByOthers(libs, editing?.id ?? null), [libs, editing]);
+  // What Save sends: the list, and a folder still in the box.
+  const folders = addFolder(paths, typed);
+  const unchanged = !!editing && sameFolders(folders, foldersOf(editing));
+  const taken = folders.find((p) => held.has(p));
+  const typedHeld = held.get(typedFolder(typed));
+
+  // Preview follows the list, so "what will this contain" is answered before committing.
+  const listKey = folders.join('\n');
+  useEffect(() => {
+    // Nothing to promise when the folders have not been touched: an unchanged list moves nothing, and "0 series would
+    // move" reads like a warning. Nor for a folder another library holds, which the save refuses.
+    if (isLib || !folders.length || unchanged || taken) { setPreview(null); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      api<{ series: number; sample: string[] }>(`/api/admin/libraries/preview?${previewQuery(editing?.id ?? null, folders)}`)
+        .then((r) => { if (alive) setPreview(r); })
+        .catch(() => { if (alive) setPreview(null); });
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `listKey` is `folders`, compared by value
+  }, [listKey, isLib, unchanged, taken, editing?.id]);
+
+  const nameFrom = (p: string) => { if (!name.trim()) setName(p.split('/').pop() || p); };
+  const toggle = (p: string) => {
+    if (!paths.includes(p)) nameFrom(p);
+    setPaths((cur) => toggleFolder(cur, p));
+  };
+  const add = () => {
+    const p = typedFolder(typed);
+    if (!p) return;
+    nameFrom(p);
+    setPaths((cur) => addFolder(cur, p));
+    setTyped('');
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const ageRating = age === '' ? null : Number(age);
+      if (editing) {
+        const body: Record<string, unknown> = { name: name.trim(), ageRating };
+        if (!isLib && !unchanged) body.paths = folders;
+        await api(`/api/admin/libraries/${editing.id}`, { method: 'PATCH', json: body });
+        toast(tr('Saved'), 'success');
+      } else {
+        // One request. This used to POST the library and then PATCH the rating separately, and skip the
+        // PATCH entirely when the rating was null -- so a failed second call created an unrated library
+        // under a "Created" toast, which is the one outcome nobody would check for.
+        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), paths: folders, ageRating } });
+        toast(tr('Created'), 'success');
+      }
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not save that library')), 'error');
+      setBusy(false);
+    }
+  };
+  const canSave = !!name.trim() && (isLib || (folders.length > 0 && !taken));
+
+  return (
+    <Modal title={editing ? tr('Edit library') : tr('New library')} onClose={onClose}>
+      <div data-library-dialog={editing?.id ?? 'new'}>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Name')}</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="field" />
+
+        {!isLib && (
+          <>
+            <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folders')}</label>
+            {paths.length > 0 && (
+              <ul className="mb-2 max-w-md space-y-1" data-library-folders-chosen>
+                {paths.map((p) => {
+                  const holder = held.get(p);
+                  return (
+                    <li key={p} data-library-folder={p}
+                      className={`flex min-w-0 items-center gap-2 rounded-lg border py-1 ps-2.5 pe-1 ${holder ? 'border-amber-500/40' : 'border-ink-700'} bg-ink-900/40`}>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-mono text-xs text-fog-200" title={p}><bdi>{p}</bdi></span>
+                        {holder && <span className="block truncate text-[10px] text-amber-300">{heldByText(holder)}</span>}
+                      </span>
+                      <button type="button" onClick={() => setPaths((cur) => cur.filter((x) => x !== p))}
+                        aria-label={tr('Remove {name}', { name: p })} className="btn-key h-7 w-7 px-0" data-library-folder-remove>
+                        <IcX width={13} height={13} aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="flex max-w-md gap-2">
+              <input value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} dir="auto"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+                placeholder={tr('e.g. Manga/Seinen')} className="field min-w-0 flex-1 font-mono" data-library-folder-input />
+              <button type="button" onClick={add} disabled={!typedFolder(typed)} className="btn-key h-auto self-stretch">{tr('Add')}</button>
+            </div>
+            {typedHeld && <p className="mt-1 text-[11px] text-amber-300">{heldByText(typedHeld)}</p>}
+            <p className="mb-2 mt-1 max-w-md text-[11px] text-fog-600">
+              {tr('Type a folder under your library root, or tick folders below. A library can hold several, and libraries may sit inside one another — the most specific folder wins.')}
+            </p>
+            <FolderPicker chosen={paths} held={held} onToggle={toggle} />
+          </>
+        )}
+
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Age rating')}</label>
+        <select value={age} onChange={(e) => setAge(e.target.value)} className="field">
+          <option value="">{tr('Not rated — visible to everyone')}</option>
+          {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
+        </select>
+        <p className="mt-1 text-[11px] text-fog-600">
+          {tr('Everything in this library inherits it. A single series can still be rated differently from its own page.')}
+        </p>
+
+        {preview && (
+          <p className="mt-3 text-[11px] leading-relaxed text-fog-500" data-library-preview={preview.series}>
+            {wouldMoveText(preview.series)}
+            {preview.sample.length > 0 && <>, {tr('including')} {preview.sample.slice(0, 3).map((s, i) => (
+              <span key={s}>{i > 0 && ', '}<bdi>{s}</bdi></span>))}{preview.sample.length > 3 ? '…' : ''}</>}
+            . {tr('No files are deleted.')}
+          </p>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-key">{tr('Cancel')}</button>
+          <button type="button" onClick={save} disabled={busy || !canSave} className="btn-key btn-key-primary" data-library-save>
+            {busy ? tr('Working…') : editing ? tr('Save') : tr('Create')}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1071,10 +1249,8 @@ function LibrariesSection() {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<LibraryRow | null>(null);
-  const [name, setName] = useState('');
-  const [path, setPath] = useState('');
-  const [age, setAge] = useState<string>('');
-  const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
+  // What a new library starts with: nothing, or a suggested folder and its name.
+  const [start, setStart] = useState<{ name: string; paths: string[] }>({ name: '', paths: [] });
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState<LibraryRow | null>(null);
   const [access, setAccess] = useState<LibraryRow | null>(null);
@@ -1096,48 +1272,9 @@ function LibrariesSection() {
   const desktopLibs = isDesktop();
   const refresh = () => { for (const k of [['admin-libraries'], ['admin-users'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
 
-  // Preview follows whatever is typed or clicked, so "what will this contain" is answered before committing.
-  useEffect(() => {
-    const p = path.trim();
-    // Nothing to promise when the path has not been touched: the handler claims only series a LESS specific
-    // library holds, so an unchanged path is always zero, and "0 series would move" reads like a warning.
-    if (!p || (editing && p === editing.path)) { setPreview(null); return; }
-    let alive = true;
-    const t = setTimeout(() => {
-      api<{ series: number; sample: string[] }>(`/api/admin/libraries/preview?path=${encodeURIComponent(p)}`)
-        .then((r) => { if (alive) setPreview(r); })
-        .catch(() => { if (alive) setPreview(null); });
-    }, 250);
-    return () => { alive = false; clearTimeout(t); };
-  }, [path, editing]);
-
-  const openNew = () => { setAdding(true); setEditing(null); setName(''); setPath(''); setAge(''); setPreview(null); };
-  const openEdit = (l: LibraryRow) => {
-    setEditing(l); setAdding(false);
-    setName(l.name); setPath(l.path); setAge(l.age_rating == null ? '' : String(l.age_rating)); setPreview(null);
-  };
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      const ageRating = age === '' ? null : Number(age);
-      if (editing) {
-        const body: Record<string, unknown> = { name: name.trim(), ageRating };
-        if (editing.id !== 'lib' && path.trim() !== editing.path) body.path = path.trim();
-        await api(`/api/admin/libraries/${editing.id}`, { method: 'PATCH', json: body });
-        toast(tr('Saved'), 'success');
-      } else {
-        // One request. This used to POST the library and then PATCH the rating separately, and skip the
-        // PATCH entirely when the rating was null -- so a failed second call created an unrated library
-        // under a "Created" toast, which is the one outcome nobody would check for.
-        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), path: path.trim(), ageRating } });
-        toast(tr('Created'), 'success');
-      }
-      setAdding(false); setEditing(null);
-      refresh();
-    } catch (e) { toast(msgOf(e, tr('Could not save that library')), 'error'); }
-    setBusy(false);
-  };
+  const openNew = (from = { name: '', paths: [] as string[] }) => { setStart(from); setAdding(true); setEditing(null); };
+  const openEdit = (l: LibraryRow) => { setEditing(l); setAdding(false); };
+  const close = () => { setAdding(false); setEditing(null); };
 
   const remove = async (l: LibraryRow) => {
     setBusy(true);
@@ -1150,31 +1287,27 @@ function LibrariesSection() {
     setBusy(false);
   };
 
-  const open = adding || editing;
-  const canSave = name.trim() && (editing?.id === 'lib' || path.trim());
-
   return (
     <section className="full">
       <div className="mb-1 flex items-center justify-between gap-3">
         <h3 className="font-display text-base font-semibold">{tr('Libraries')}</h3>
-        <button onClick={openNew} className="chip shrink-0 text-xs"><IcPlus width={13} height={13} />{tr('New library')}</button>
+        <button onClick={() => openNew()} className="chip shrink-0 text-xs"><IcPlus width={13} height={13} />{tr('New library')}</button>
       </div>
       <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
         {desktopLibs
-          ? tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that.')
-          : tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that, and choose who can open it.')}
+          ? tr('A library is one or more folders, plus any series you file into it by hand. Give it an age rating and everything in it inherits that.')
+          : tr('A library is one or more folders, plus any series you file into it by hand. Give it an age rating and everything in it inherits that, and choose who can open it.')}
       </p>
 
       {/* Cards rather than one divided list: at 1592px a row left a lake between a library's path and the
           buttons that act on it, and a library is a thing rather than an entry in a feed. */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {libs.map((l) => (
-          <div key={l.id} className="card grad-border p-3">
+          <div key={l.id} className="card grad-border min-w-0 p-3" data-library-card={l.id}>
             <div className="min-w-0">
               <p className="truncate text-sm text-fog-100">{l.name}</p>
-              <p className="truncate font-mono text-[11px] text-fog-500">
-                {l.path || tr('everything not in another library')}
-              </p>
+              {/* Its folders: the first, then how many more (v0.55.1, #148). */}
+              <LibraryFolders paths={foldersOf(l)} className="text-[11px] text-fog-500" />
               <p className="truncate text-[11px] text-fog-600">
                 {l.n} {tr('series')}
                 {l.pinned > 0 && <> · {l.pinned === 1 ? tr('1 filed by hand') : tr('{n} filed by hand', { n: l.pinned })}</>}
@@ -1207,9 +1340,9 @@ function LibrariesSection() {
           <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folders you could split out')}</p>
           <div className="flex flex-wrap gap-1.5">
             {candidates.slice(0, 12).map((c) => (
-              <button key={c.path} onClick={() => { openNew(); setPath(c.path); setName(c.path.split('/').pop() || c.path); }}
-                className={`chip text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}>
-                <span className="font-mono">{c.path}</span> <span className="text-fog-500">· {c.series}</span>
+              <button key={c.path} onClick={() => openNew({ name: c.path.split('/').pop() || c.path, paths: [c.path] })}
+                className={`chip max-w-full text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}>
+                <bdi className="min-w-0 truncate font-mono">{c.path}</bdi> <span className="text-fog-500">· {c.series}</span>
                 {c.looksLikeSource && <span className="ms-1 text-amber-400">{tr('source?')}</span>}
               </button>
             ))}
@@ -1217,47 +1350,8 @@ function LibrariesSection() {
         </>
       )}
 
-      {open && (
-        <Modal title={editing ? tr('Edit library') : tr('New library')} onClose={() => { setAdding(false); setEditing(null); }}>
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Name')}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="field" />
-
-          {editing?.id !== 'lib' && (
-            <>
-              <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folder')}</label>
-              <input value={path} onChange={(e) => setPath(e.target.value)} spellCheck={false}
-                placeholder={tr('e.g. Manga/Seinen')} className="field font-mono" />
-              <p className="mb-2 mt-1 text-[11px] text-fog-600">
-                {tr('Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.')}
-              </p>
-              <FolderPicker value={path} onPick={(p) => { setPath(p); if (!name.trim()) setName(p.split('/').pop() || p); }} />
-            </>
-          )}
-
-          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Age rating')}</label>
-          <select value={age} onChange={(e) => setAge(e.target.value)} className="field">
-            <option value="">{tr('Not rated — visible to everyone')}</option>
-            {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
-          </select>
-          <p className="mt-1 text-[11px] text-fog-600">
-            {tr('Everything in this library inherits it. A single series can still be rated differently from its own page.')}
-          </p>
-
-          {preview && (
-            <p className="mt-3 text-[11px] leading-relaxed text-fog-500">
-              {tr('{n} series would move', { n: preview.series })}
-              {preview.sample.length > 0 && <>, {tr('including')} {preview.sample.slice(0, 3).join(', ')}{preview.sample.length > 3 ? '…' : ''}</>}
-              . {tr('No files are deleted.')}
-            </p>
-          )}
-
-          <div className="mt-4 flex gap-2">
-            <button onClick={() => { setAdding(false); setEditing(null); }} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
-            <button onClick={save} disabled={busy || !canSave} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
-              {busy ? tr('Working…') : editing ? tr('Save') : tr('Create')}
-            </button>
-          </div>
-        </Modal>
+      {(adding || editing) && (
+        <LibraryDialog key={editing?.id ?? 'new'} editing={editing} start={start} libs={libs} onClose={close} onSaved={refresh} />
       )}
 
       {access && <LibraryAccessDialog lib={access} onClose={() => setAccess(null)} onSaved={refresh} />}
