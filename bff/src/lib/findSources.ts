@@ -1065,7 +1065,8 @@ async function promote(
   const X = stored?.scope?.review && stored.scope.mode === 'replace' ? stored.scope.sourceId : undefined;
   const { p } = find(X ? stored!.results : undefined);
   if (!X || !p || !(await seriesVisible(seriesId, ctx))) return { refused: 'not_found' };
-  // Final, as a decision is: reintroduce by dropping it, and "promote does exactly that" promotes twice.
+  // Final, as a decision is. Reintroduce by dropping it: the second promote in "review first moves nothing ... and
+  // promote does exactly that" (findSources.int.test.ts) is refused as is_main, not decided -- "and only once".
   if (p.state) return { refused: 'decided', state: p.state };
   if (p.kind === 'search') {
     const series = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]);

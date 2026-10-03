@@ -171,8 +171,8 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
     }
     await qq('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [seriesId, to, promoted.source_series_id]);
     // The promoted row, and a row older than the follow route's rule that names the old main itself.
-    // Reintroduce by dropping it: "a follower becomes the main source" in mainSource.int.test.ts finds the new main
-    // still followed.
+    // Reintroduce by dropping it: "a follower becomes the main source" in mainSource.int.test.ts finds the new main still
+    // followed -- its row fills the cap, so the old main is dropped rather than kept.
     await qq('DELETE FROM series_sources WHERE series_id = $1 AND source_id = ANY($2::text[])', [seriesId, [to, ...(from ? [from] : [])]]);
     // Kept as the last follower, under the cap: promotion freed a slot, so it fits unless the series follows more
     // sources than a series may (a row from before the cap). Reintroduce by dropping the count: "the demotion never
