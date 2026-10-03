@@ -228,14 +228,17 @@ function RunView({ af, run, onClose }: { af: AutofixApi | null; run: AutofixRun 
             <p className="mt-2 text-[12px] tabular-nums text-fog-400" data-fix-step>
               {[autofixStepOf(run), count].filter(Boolean).join(' · ')}
             </p>
-            {wait ? <p className="mt-0.5 text-[12px] leading-snug text-fog-300" data-fix-waiting>{wait}</p>
-              : run.current?.title && (
-                <p className="mt-0.5 flex min-w-0 max-w-full text-[12px] text-fog-400" data-fix-now>
-                  <span className="shrink-0 whitespace-pre">{nowBefore}</span>
-                  <bdi dir="auto" className="block min-w-0 truncate text-fog-200">{run.current.title}</bdi>
-                  {nowAfter && <span className="shrink-0 whitespace-pre">{nowAfter}</span>}
-                </p>
-              )}
+            {/* What it is doing ("Replacing fake-a", or what it waits for), and under it the series it is on. ⚠️ Both: the
+                server sends the sentence with every phase and the title only on a list, so the sentence alone in place
+                of the title (the merge's either-or) never showed a series at all. */}
+            {wait && <p className="mt-0.5 text-[12px] leading-snug text-fog-300" data-fix-waiting>{wait}</p>}
+            {run.current?.title && (
+              <p className="mt-0.5 flex min-w-0 max-w-full text-[12px] text-fog-400" data-fix-now>
+                <span className="shrink-0 whitespace-pre">{nowBefore}</span>
+                <bdi dir="auto" className="block min-w-0 truncate text-fog-200">{run.current.title}</bdi>
+                {nowAfter && <span className="shrink-0 whitespace-pre">{nowAfter}</span>}
+              </p>
+            )}
             {stopping && (
               <p className="mt-3 text-[12px] leading-snug text-fog-400">
                 {tr('It stops at the next safe point, never in the middle of a merge, a delete or a renumbering.')}

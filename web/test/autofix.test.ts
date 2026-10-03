@@ -179,6 +179,11 @@ test('the run is polled every 2 s while it goes, and the dialog opens on a live 
   assert.match(html, /data-fix-phase="sources">Testing and replacing sources</, 'the run does not say its phase');
   assert.match(html, /data-fix-step="true">Step 4 of 10 · 12 of 40</, 'the run does not say how far it has got');
   assert.match(html, /<bdi dir="auto" class="[^"]*">Solo Leveling<\/bdi>/, 'the run does not say what it is on');
+  // The server words every phase (`current.said`) and names the series only on a list: both show. Reintroduce the
+  // either-or (the sentence in place of the title): "the series it is on is not shown beside what it does" fails.
+  const both = dialog(api({ status: { run: { ...live, current: { said: { code: 'autofix.now.gaps' }, title: 'Solo Leveling', done: 2, of: 5 } }, last: null } }));
+  assert.match(both, /data-fix-waiting="true">Filling gaps<\/p>/, 'what the run does is not said');
+  assert.match(both, /data-fix-now="true">[\s\S]*?<bdi dir="auto" class="[^"]*">Solo Leveling<\/bdi>/, 'the series it is on is not shown beside what it does');
   assert.match(html, /role="progressbar"[^>]*aria-valuenow="33"/, 'the bar is not over the ten phases');
   assert.match(html, /data-fix-stop="true">Stop<\/button><button type="button" class="btn-key" data-fix-background="true">Run in background</, 'no Stop and Run in background');
   assert.equal(autofixProgress(live), (3 + 12 / 40) / 10);
