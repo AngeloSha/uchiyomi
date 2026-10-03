@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.54.1 — 2026-10-03
+
+### Byparr works as the Cloudflare solver
+
+- **@DannyDynamite39** runs Byparr, a FlareSolverr-compatible solver, and pointed `FLARESOLVERR_URL` at it
+  ([#144](https://github.com/AngeloSha/uchiyomi/discussions/144)). Solving already worked, since Byparr answers
+  FlareSolverr's own requests, but Uchiyomi checked that the solver was up by FlareSolverr's greeting at its address.
+  Byparr sends that address to its docs, so Health said the solver was not answering while it solved fine, and the
+  repair skipped its solver step. Uchiyomi now also accepts the solver's `/health` answer, and compares the version
+  with FlareSolverr's latest release only when it is FlareSolverr.
+- The extension engine has a Cloudflare helper of its own. **Connect** points it at the same address, but whether the
+  engine itself works with Byparr is up to the engine.
+
 ## v0.54.0 — 2026-10-03
 
 **Admin → Providers and Admin → Extensions are now one place, Admin → Sources, and a source that stopped working can
