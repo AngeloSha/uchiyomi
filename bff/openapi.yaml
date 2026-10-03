@@ -8145,7 +8145,12 @@ paths:
         - admin
       summary: Declare a library.
       operationId: postApiAdminLibraries
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.55.1 the
+        save moves, in its own transaction, every series that is not filed by hand and sits under the library's
+        folder: each goes to the library holding the longest folder its own folder is in, across every library's
+        folders (a series under a deeper library's folder stays there). `moved` counts the series that changed
+        library, removed ones included.
       requestBody:
         required: false
         content:
@@ -8163,13 +8168,24 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, id, moved]
+                properties:
+                  ok: { type: boolean }
+                  id: { type: string }
+                  moved: { type: integer, description: "Series that changed library (since v0.55.1)." }
         "400":
           description: Malformed body or parameter
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: duplicate -- another library already holds that folder; `message` names it.
   /api/admin/libraries/folders:
     get:
       tags:
@@ -8192,18 +8208,39 @@ paths:
         - admin
       summary: What a library declaration would contain.
       operationId: getApiAdminLibrariesPreview
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Runs the save's own
+        statement short of its update (since v0.55.1), so it counts exactly the series the save would move that an
+        admin can see; with `id` it is an edit of that library and counts what would leave it as well as what would
+        come in.
       parameters:
         - name: path
           in: query
           required: false
           schema:
             type: string
+        - name: id
+          in: query
+          required: false
+          description: The library being edited (since v0.55.1); without it, a new one.
+          schema:
+            type: string
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: The folder as it would be stored, how many series would move and up to 20 of their titles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, series, sample]
+                properties:
+                  path: { type: string }
+                  series: { type: integer }
+                  sample: { type: array, items: { type: string } }
+        "400":
+          description: bad_request -- no folder.
         "401":
           description: Not authenticated
         "403":
@@ -8212,9 +8249,12 @@ paths:
     patch:
       tags:
         - admin
-      summary: Rename a library or change its age rating.
+      summary: Rename a library, re-path it, change its age rating or who may open it.
       operationId: patchApiAdminLibrariesId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A new folder moves
+        series as a create does (since v0.55.1, also what the old folder held that the new one does not), in one
+        transaction; the default library `lib` keeps its empty path and ignores one sent.
       parameters:
         - name: id
           in: path
@@ -8230,13 +8270,20 @@ paths:
               properties:
                 name:
                   type: string
+                path:
+                  type: string
                 ageRating:
                   type: integer
+                members:
+                  type: array
+                  items: { type: string }
+                  description: Everyone who may open it; members left out are refused it.
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            Saved, with `moved`: the series that changed library (since v0.55.1; 0 when the folder was not sent).
         "400":
           description: Malformed body or parameter
         "401":
@@ -8245,12 +8292,17 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: duplicate -- another library already holds that folder; `message` names it.
     delete:
       tags:
         - admin
-      summary: Delete a library declaration (series move to the default).
+      summary: Delete a library declaration (its series go to whichever library still holds their folder).
       operationId: deleteApiAdminLibrariesId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Every series it
+        holds, filed by hand or not, goes to the library holding the longest folder its own folder is in, or to the
+        default; `moved` counts them (since v0.55.1). The default library cannot be removed (400 `cannot_delete`).
       parameters:
         - name: id
           in: path
@@ -8262,6 +8314,8 @@ paths:
       responses:
         "200":
           description: OK
+        "400":
+          description: cannot_delete -- the default library.
         "401":
           description: Not authenticated
         "403":
