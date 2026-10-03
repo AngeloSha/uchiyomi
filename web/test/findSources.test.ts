@@ -216,6 +216,10 @@ test('one run at a time: a key waits, saying why, while another goes; its own ru
   assert.equal(startRefusal(409, 'busy'), busy, 'another run going reads as a failure');
   assert.equal(startRefusal(400, 'empty_scope'), 'No series to search for', 'nothing to search for reads as a failure');
   assert.equal(startRefusal(500, null), null);
+  // v0.55.0: a Find or a Replace pressed while Health's Fix everything runs is 409 `autofix_running` -- which finds and
+  // replaces sources itself. Reintroduce the 409 read first: "beside Fix everything, another search is said" fails.
+  assert.equal(startRefusal(409, 'autofix_running'), 'Fix everything is running; it finds and replaces sources itself',
+    'beside Fix everything, another search is said');
 });
 
 /* ================================================================ the other names */

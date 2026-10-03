@@ -550,6 +550,8 @@ export const busyLine = (): string => tr('Another search for other sources is ru
 
 /**
  * A refused start in words, by the server's code:
+ * - 409 `autofix_running` (v0.55.0): Health's Fix everything is running, and finds and replaces sources itself -- read
+ *   before the status, or a Replace pressed beside it said another search was running;
  * - 409 `busy`: another run;
  * - 400 `empty_scope`: no series here the server may search for (none visible, or none whose main source this is);
  * - 400 `bad_request`: a scope the route will not take, which from this page means more than 500 series (bff
@@ -558,6 +560,7 @@ export const busyLine = (): string => tr('Another search for other sources is ru
  * Anything else is the caller's fallback.
  */
 export function startRefusal(status: number | null | undefined, code: string | null | undefined): string | null {
+  if (code === 'autofix_running') return tr('Fix everything is running; it finds and replaces sources itself');
   if (status === 409 || code === 'busy') return busyLine();
   if (code === 'empty_scope') return tr('No series to search for');
   if (code === 'bad_request') return tr('Too many series for one search: 500 at most');
