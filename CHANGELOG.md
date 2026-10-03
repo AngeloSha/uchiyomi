@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.55.0 — 2026-10-03
+
+**Health's Fix all is now Fix everything, and it can do the whole job by itself: Fix it for me works through every
+card until it is green, then says in a few lines what it did and what only you can fix.** Until now Fix all was only
+the repair's four steps. It skipped broken sources, series stuck on a dead source, duplicates, numbering, odd chapter
+numbers and chapters saved twice, and it disappeared when only those were left.
+
+### Fix everything
+
+- **Health** has a **Fix everything** key beside Re-check whenever any card has a finding. It asks one thing:
+  - **Fix it for me** (the default): replaces broken sources, fetches missing and broken chapters, and finds new
+    sources, installing up to 3 extensions if it has to. It also merges duplicate series, deletes chapters saved twice
+    or numbered impossibly, and applies safe renumbering. Those can't be undone, and the sheet says so before Start.
+  - **Let me choose:** the safe repair as before (retries, short chapters, gaps), and the rest card by card.
+- **The run** goes through ten steps, with the step, a progress bar and what it is doing now. **Run in background**
+  keeps it going; it shows on **Server tasks** as *Fixing everything*, and reopening Health's sheet shows the run.
+  **Stop** ends it at the next safe point, never inside a merge, a delete or a renumber.
+- **The end** is short: one headline (**All green**, or *2 need you* with *Everything else is green* under it), up to
+  six lines of what it did (*Moved 184 series off Aqua Manga*, *Fetched 37 missing chapters*, *Installed Asura Scans
+  (found 3 series)*), what only you can fix, each with its one key, and what clears by itself, with a time. The rest
+  is under **Details**. **Run again** shows only when a run could still change something.
+- **Every night** (Admin → Settings) can be the **Safe repair**, as before and still the default, or **Fix
+  everything**. Recent repairs lists Fix everything runs with their headline.
+
+### What it does, and what it never does
+
+- **Sources:** it tests the failing ones and clears a block only after a passing test, then **Replaces** each broken
+  source that some series use as their main source, and turns off the broken ones nothing uses. A cause in your
+  set-up (the engine, the source limit, a hidden language) is never "fixed" by replacing.
+- **Duplicates:** two copies of a series in different languages are linked as editions. Two copies in the same
+  language are merged only when the AniList id, the language and the titles (or most of the chapters) agree. It keeps
+  the copy on a working source, and that copy now follows the other one's main source too.
+- **Numbering:** only plans marked clean are applied. The rest wait for you.
+- **Extensions:** for series no source carries any more, and gaps nobody had, it tries extensions in the series'
+  language, the ones whose name matches the series' own translation groups first. It switches on only that language,
+  keeps a package that found something and removes one that didn't. At most 3 a run.
+- **Files:** it deletes the later copy of a chapter saved twice only when the copy kept is complete and at least as
+  long, and an impossible chapter number with the delete key's own checks. Nothing bookmarked and nothing outside the
+  download folder is ever deleted; those go to *Needs you*.
+- **Never Ignore.** What a run can't fix (the solver or the engine down, folders mounted twice, a chapter no site
+  has) is listed under *Needs you*, never hidden.
+- It refuses to start beside a repair, a Find or Replace, or the sweep, and says which. A Find pressed while it runs
+  says that Fix everything is already finding sources.
+
+### Fixed on the way
+
+- **The nightly gap step** searched the same five biggest gaps every night, so the rest were never looked at. It now
+  takes the least recently checked first, and skips the ones just found missing everywhere.
+- **Chapters before where a series starts** (*Latest N*) were filed as "the sweep will fetch it" and never were. They
+  are now an info line, *before where you started*, not a finding.
+- **Series stuck because of the source limit** offered Replace, which could not help. They now offer **Free a slot**,
+  which opens the source in Admin → Sources.
+- **A newly installed extension could push sources your series use past the engine's source limit**
+  (`SUWAYOMI_MAX_SOURCES`) and freeze them. The sources your series use now always register first.
+- **Merging two copies of a series** dropped the absorbed copy's main source. It is now kept as a source the
+  remaining copy follows.
+- **A chapter numbered impossibly** (a 2024 in a series of 80) showed as a gap of thousands of chapters on Health and
+  sent the gap step searching for them. It is the odd chapter numbers card's alone now.
+
+### Upgrading
+
+- **One new database column,** `server_settings.nightly_mode` (default `repair`), added by itself. v0.54.1 runs on the
+  same database, so going back is one line of your compose file. Nothing changes in compose files.
+- **Optional settings** ([CONFIGURATION.md](docs/CONFIGURATION.md)): `AUTOFIX_MAX_MINUTES` (90), `AUTOFIX_SEARCHES`
+  (60) and `AUTOFIX_INSTALLS` (3; `0` stops it installing extensions).
+- **For scripts** ([api.md](docs/api.md)):
+  - `POST /api/admin/health/autofix` starts a run (409 `busy` with what is running), `GET` answers the live run and
+    the last one, `GET …/:runId` one run, and `POST …/stop` stops it. The summary's lines are said codes.
+  - `GET` and `PATCH /api/admin/settings` carry `nightlyMode` (`repair` or `autofix`).
+  - `GET /api/admin/tasks/repair/runs` lists Fix everything runs as `kind: "autofix"`, and `GET /api/sources/jobs`
+    carries its run card. `POST /api/admin/sources/find` answers 409 `autofix_running` beside one.
+  - Health's stuck-series rows carry `free_slot` for the source limit, and a merge's answer carries `carried`.
+
 ## v0.54.1 — 2026-10-03
 
 ### Byparr works as the Cloudflare solver
