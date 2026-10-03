@@ -92,11 +92,11 @@ test('a field commits by saving the whole object, one save at a time, and a refu
   const second = saver.save({ title: 'Renamed' });
   await tick();
   assert.equal(sent.length, 1, 'the second save went out before the first answered');
-  assert.deepEqual(Object.keys(sent[0]).sort(), ['adultExempt', 'ageRating', 'author', 'genres', 'readingDirection', 'status', 'summary', 'title'],
+  assert.deepEqual(Object.keys(sent[0]).sort(), ['adultExempt', 'ageRating', 'author', 'genres', 'readingDirection', 'seriesType', 'status', 'summary', 'title'],
     'a save sends only the field it changed');
   assert.deepEqual(sent[0], {
     title: 'Renamed', summary: 'A tale.', author: 'Scanned Author', status: 'COMPLETED', genres: ['Action'],
-    ageRating: null, adultExempt: false, readingDirection: null,
+    ageRating: null, adultExempt: false, readingDirection: null, seriesType: null,
   }, 'the first save is not the whole object as it stands when it is sent');
   answers.shift()!();
   await first;
@@ -118,7 +118,7 @@ test('a field commits by saving the whole object, one save at a time, and a refu
   const src = read(EDITOR);
   assert.match(src, /metaSaver\(seedMeta\(series\), \(body\) => api\(`\/api\/admin\/series\/\$\{id\}\/meta`, \{ method: 'PUT', json: body \}\), setMeta\)/,
     'the dialog does not save through the whole-object saver');
-  for (const f of ['title', 'summary', 'author', 'status', 'genres', 'readingDirection', 'ageRating', 'adultExempt']) {
+  for (const f of ['title', 'summary', 'author', 'status', 'genres', 'readingDirection', 'ageRating', 'adultExempt', 'seriesType']) {
     assert.match(src, new RegExp(`\\(${f}\\) => save\\(\\{ ${f} \\}\\)`), `${f} does not commit through save()`);
   }
   assert.equal((src.match(/\/meta`/g) ?? []).length, 1, 'something in the dialog PUTs the meta route itself');
@@ -132,7 +132,7 @@ test('the fields seed from the override where one exists, exactly as the dialog 
   const plain = seedMeta(series());
   assert.deepEqual(plain, {
     title: 'Walk Tale', summary: 'A tale.', author: 'Scanned Author', status: 'Ongoing', ageRating: '', genres: ['Action'],
-    adultExempt: false, readingDirection: '',
+    adultExempt: false, readingDirection: '', seriesType: '',
   });
   const over = seedMeta(series({
     metadata: { title: 'Walk Tale', summary: 'A tale.', author: 'Scanned Author', status: 'Ongoing', genres: ['Action'], ageRating: 15, readingDirection: 'RIGHT_TO_LEFT' },
@@ -147,7 +147,7 @@ test('the fields seed from the override where one exists, exactly as the dialog 
   assert.equal(seedMeta(series({ metadata: { title: 'Walk Tale', ageRating: 15 } })).ageRating, '15', 'a scanned rating with no override is not shown');
   // A retitle sends the seeded object: the override author kept, the detected direction NOT made an override.
   assert.deepEqual(metaBody({ ...over, title: 'Renamed' }), {
-    title: 'Renamed', summary: 'A tale.', author: 'Hand Author', status: 'Ongoing', genres: [], ageRating: 13, adultExempt: true, readingDirection: null,
+    title: 'Renamed', summary: 'A tale.', author: 'Hand Author', status: 'Ongoing', genres: [], ageRating: 13, adultExempt: true, readingDirection: null, seriesType: null,
   });
   // And the fields show it.
   const html = render('details', series({ overrides: { ...OVERRIDES, author: 'Hand Author' } }));
