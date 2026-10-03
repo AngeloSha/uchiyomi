@@ -32,7 +32,7 @@ import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
 import { SourcesPanel } from '@/components/SourcesPanel';
-import { OVERVIEW_KEY, SOURCES_TAB_ALIASES, overviewUrl, splitSources, type SourcesOverview } from '@/lib/sourcesPanel';
+import { OVERVIEW_KEY, OVERVIEW_URL, SOURCES_TAB_ALIASES, splitSources, type SourcesOverview } from '@/lib/sourcesPanel';
 import { StatusEdge, StatusMark } from '@/components/StatusMark';
 import { TONE_SURFACE, healthMark } from '@/lib/status';
 import Link from 'next/link';
@@ -256,7 +256,7 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
   // Not asked on desktop, where the route answers 404: there is no Sessions tab for the tile to open.
   const desktop = isDesktop();
   const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions'), enabled: !desktop });
-  const { data: sources } = useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(overviewUrl()) });
+  const { data: sources } = useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(OVERVIEW_URL) });
 
   const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
   const activity: any[] = stats?.activity ?? [];

@@ -27,7 +27,7 @@ import {
   busyLine, findSlotState, findSummary, findWhyLine, isReplace, replaceCounts, type FindResult, type FindRun,
 } from '@/lib/findSources';
 import type { FindRunApi } from '@/lib/useFindRun';
-import { OVERVIEW_KEY, overviewUrl, replacePlan, replaceSubtitle, type ReplacePreview, type SourcesOverview } from '@/lib/sourcesPanel';
+import { OVERVIEW_KEY, OVERVIEW_URL, replacePlan, replaceSubtitle, type ReplacePreview, type SourcesOverview } from '@/lib/sourcesPanel';
 import { ActionStatus } from '@/components/ActionList';
 import { Sheet } from '@/components/ui';
 
@@ -47,7 +47,7 @@ export function ReplaceDialog({ sourceId, name, fr, slot, onClose, onResults }: 
   onResults?: () => void;
 }) {
   const { data: overview } = useQuery({
-    queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(overviewUrl()), enabled: !name, staleTime: 30_000,
+    queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(OVERVIEW_URL), enabled: !name, staleTime: 30_000,
   });
   const shown = name ?? overview?.sources.find((s) => s.id === sourceId)?.name ?? sourceId;
   // "Replace again" after a run has ended sets that run aside, and the dialog asks afresh.

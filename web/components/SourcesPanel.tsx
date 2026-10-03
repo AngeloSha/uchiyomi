@@ -37,7 +37,7 @@ import { TONE_TEXT } from '@/lib/status';
 import { installedList, type CatalogPage, type ExtSourcesAnswer, type ExtStatus } from '@/lib/extensions';
 import { useFindRuns } from '@/lib/useFindRun';
 import {
-  OVERVIEW_KEY, attentionRows, failingSince, failingUnusedTitle, initialView, kindLabel, namesSep, needsAttention, overviewUrl, replaceLine, rowAction,
+  OVERVIEW_KEY, OVERVIEW_URL, attentionRows, failingSince, failingUnusedTitle, initialView, kindLabel, namesSep, needsAttention, replaceLine, rowAction,
   rowFacts, settingsTarget, sourceSays, splitSources, turnOnRequest, updatesTitle,
   type OverviewSource, type SourceEvidenceRow, type SourcesOverview, type SourcesView,
 } from '@/lib/sourcesPanel';
@@ -97,7 +97,7 @@ export function SourcesPanel() {
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
   const ready = !!status?.configured && !!status?.reachable;
   const { data: overview, isError: overviewFailed, refetch: refetchOverview } = useQuery({
-    queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(overviewUrl()), refetchInterval: 15_000,
+    queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(OVERVIEW_URL), refetchInterval: 15_000,
   });
   // The stored evidence behind a sheet's Details, and since when a source has failed.
   const { data: adminRows } = useQuery({

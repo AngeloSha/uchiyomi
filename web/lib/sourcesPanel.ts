@@ -12,7 +12,6 @@
  */
 import { keys, t as tr } from './i18n';
 import { activeLocale, languageName, numberText } from './format';
-import { adultShown } from './adult';
 import { dayText } from './said';
 import { stateReason, stateWord } from './sourceHealth';
 import { extSourceIdOf } from './sourcePrefs';
@@ -96,11 +95,11 @@ export const OVERVIEW_KEY = ['sources', 'overview'] as const;
 
 /**
  * The admin's list is every source, the adult ones included, whatever the "Show 18+" reveal says: this is where a
- * source is tested, switched off or replaced, and nobody can act on a row that is not on the page. The parameter
- * only while the reveal is OFF (lib/api.ts adds its own when it is on; two copies read as "hidden"), the rule the
- * admin page's GET /api/sources has followed since #64.
+ * source is tested, switched off or replaced, and nobody can act on a row that is not on the page. The overview never
+ * reads `?adult=` -- an admin manages every source (bff sourcesOverview.int.test.ts holds it) -- so it is asked for
+ * plainly, where GET /api/sources needed `?adult=1` while the reveal was off (#64).
  */
-export const overviewUrl = (): string => (adultShown() ? '/api/admin/sources/overview' : '/api/admin/sources/overview?adult=1');
+export const OVERVIEW_URL = '/api/admin/sources/overview';
 
 /**
  * The names Admin's Sources tab went by before v0.54.0: both land on it. `card=mangadex`, `view=installed|browse` and

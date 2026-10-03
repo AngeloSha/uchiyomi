@@ -140,3 +140,40 @@ test('every source of every kind in one answer, each with its state, standing an
   assert.ok(firstOff > 0 && sources.slice(firstOff).every((s: any) => s.standing === 'off'), `switched off last: ${order.join(' ')}`);
   assert.ok(order.indexOf('ov-a') < order.indexOf('ov-used'), 'then by how many series use it');
 });
+
+test('an admin sees every 18+ source, and the 18+ series in its counts, with ?adult=1 or without', { skip }, async () => {
+  // Admins manage every source: one that flags itself adult, one the admin lists as adult, and the series of an 18+
+  // library are all in the overview whatever the "Show 18+" reveal says, so the web asks for it with no parameter
+  // (web lib/sourcesPanel.ts OVERVIEW_URL). Reintroduce GET /api/sources' rule here (hideAdult(req) leaving out the
+  // adult sources while the parameter is absent): "the overview hides 18+ sources without ?adult=1" fails.
+  const { registerAdapter } = await import('../src/lib/sources');
+  for (const [id, nsfw] of [['ov-nsfw', true], ['ov-listed', false]] as const) {
+    registerAdapter({ id, name: `Name ${id}`, ...(nsfw ? { isNsfw: true } : {}), search: async () => [], getSeries: async () => null, listChapters: async () => [], getPageUrls: async () => [] } as any);
+  }
+  const ADULT = 'lib_ov_adult';
+  const [{ adult_sources: listedWas }] = await q('SELECT adult_sources FROM server_settings WHERE id = 1');
+  await q(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,'Overview 18+',$1,18) ON CONFLICT (id) DO UPDATE SET age_rating = 18`, [ADULT]);
+  await q(`UPDATE server_settings SET adult_sources = '["ov-listed"]'::jsonb WHERE id = 1`);
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+             VALUES ($1,'T!ov',$1,$1,1,$2,'ov-nsfw','ov-nsfw|x')`, [S('x'), ADULT]);
+    await series('y', 'ov-listed');
+    const ask = async (url: string) => {
+      const r = await app.inject({ method: 'GET', url, headers: auth });
+      assert.equal(r.statusCode, 200, r.body);
+      return r.json();
+    };
+    const plain = await ask('/api/admin/sources/overview');
+    const revealed = await ask('/api/admin/sources/overview?adult=1');
+    for (const [answer, how] of [[plain, 'without ?adult=1'], [revealed, 'with ?adult=1']] as const) {
+      const by = Object.fromEntries(answer.sources.map((s: any) => [s.id, s]));
+      assert.deepEqual([by['ov-nsfw']?.main, by['ov-listed']?.main], [1, 1], `the overview hides 18+ sources ${how}`);
+    }
+    assert.deepEqual(plain, revealed, 'the parameter changes the answer');
+  } finally {
+    await q('DELETE FROM lib_series WHERE library_id = $1', [ADULT]);
+    await q('DELETE FROM libraries WHERE id = $1', [ADULT]);
+    await q('UPDATE server_settings SET adult_sources = $1::jsonb WHERE id = 1', [JSON.stringify(listedWas ?? [])]);
+    await clean();
+  }
+});

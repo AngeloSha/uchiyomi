@@ -66,24 +66,24 @@ test('AdultToggle renders for a second reason, and still for its first', () => {
 });
 
 test('the admin console lists every source, including the ones Discover hides', () => {
-  // Reintroduce by asking for the overview without `?adult=1` while the reveal is off: the Sources tab and its count
-  // tile drop to the non-adult sources and an admin can no longer test, unblock, switch off or replace the rest. Since
-  // v0.54.0 both read GET /api/admin/sources/overview (lib/sourcesPanel.ts), where the console read GET /api/sources.
+  // Since v0.54.0 the Sources tab and its count tile read GET /api/admin/sources/overview (lib/sourcesPanel.ts), where
+  // the console read GET /api/sources with `?adult=1` while the reveal was off. The overview lists every source to an
+  // admin and never reads the parameter (bff sourcesOverview.int.test.ts "an admin sees every 18+ source"), so it is
+  // asked for plainly: an admin can test, unblock, switch off or replace an adult source whatever the reveal says.
+  // Reintroduce the parameter (`adultShown() ? … : '…?adult=1'`): "the overview is asked for with a parameter it does
+  // not read" fails.
   const lib = code(read('lib/sourcesPanel.ts'));
-  assert.match(lib, /export const overviewUrl = \(\): string => \(adultShown\(\) \? '\/api\/admin\/sources\/overview' : '\/api\/admin\/sources\/overview\?adult=1'\);/,
-    'the admin console no longer asks for the full source list');
-  // ⚠️ Never an unconditional `?adult=1`: lib/api.ts appends its own when the reveal is on, and two copies
-  // of the parameter arrive as an array, which the server reads as "not 1" -- i.e. hidden.
+  assert.match(lib, /export const OVERVIEW_URL = '\/api\/admin\/sources\/overview';/, 'the overview is asked for with a parameter it does not read');
   const admin = code(read('app/admin/page.tsx'));
   const panel = code(read('components/SourcesPanel.tsx'));
-  for (const src of [admin, panel, lib]) {
-    assert.doesNotMatch(src, /api<[^>]*>\('\/api\/admin\/sources\/overview\?adult=1'\)/,
-      'the admin console hardcodes adult=1, which doubles the parameter once the reveal is on');
+  const dialog = code(read('components/ReplaceDialog.tsx'));
+  for (const src of [admin, panel, dialog, lib]) {
+    assert.doesNotMatch(src, /\/api\/admin\/sources\/overview\?|adultShown\(\)/, 'the overview is asked for with a parameter it does not read');
   }
   // Its own key, under ['sources'] so every change that asks the source lists again asks this too: the tab and its tile.
   assert.match(lib, /export const OVERVIEW_KEY = \['sources', 'overview'\] as const;/);
-  assert.equal((admin.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(overviewUrl\(\)\)/g) ?? []).length, 1, 'the tile does not read the overview');
-  assert.equal((panel.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(overviewUrl\(\)\)/g) ?? []).length, 1, 'the tab does not read the overview');
+  assert.equal((admin.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(OVERVIEW_URL\)/g) ?? []).length, 1, 'the tile does not read the overview');
+  assert.equal((panel.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(OVERVIEW_URL\)/g) ?? []).length, 1, 'the tab does not read the overview');
   assert.doesNotMatch(admin, /queryKey: \['sources'\], queryFn: \(\) => api<\{ content: any\[\] \}>\('\/api\/sources'\)/,
     'an admin source query is back on the shared browsing key');
 });
