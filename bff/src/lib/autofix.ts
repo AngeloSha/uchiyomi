@@ -453,6 +453,36 @@ async function liveView(a: Run): Promise<AutofixRun> {
   };
 }
 
+/**
+ * Said lines that name a series by its title: left out for an admin who hides 18+ (the repair history's rule for its
+ * notes -- they carry no id to hold each title to the listing rule).
+ */
+const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
+  'autofix.item.notRenumbered', 'autofix.item.deleted']);
+const untitled = (l: { code: string }) => !TITLED.has(l.code);
+type Scrubbable = { current?: AutofixRun['current']; log?: Said[]; summary?: AutofixSummary };
+function scrubbed<R extends Scrubbable>(r: R): R {
+  return {
+    ...r,
+    ...(r.current ? { current: { ...r.current, title: undefined } } : {}),
+    ...(r.log ? { log: r.log.filter(untitled) } : {}),
+    ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(untitled) } : d)) } } : {}),
+  };
+}
+/** A run as an admin who hides 18+ reads it (`hide`): no line that names a series, and no "Now:" title. */
+export function scrubAutofixRun(r: AutofixRun | null, hide: boolean): AutofixRun | null {
+  return r && hide ? scrubbed(r) : r;
+}
+/**
+ * A kept run's record (repair_runs.result: `{phaseIndex, summary?, log, tried?}`) the same way: what the repair history
+ * (GET /api/admin/tasks/repair/runs) sends for a Fix everything row, which Recent repairs reads without asking for the
+ * run by its id. Reintroduce by sending it as stored: "an admin who hides 18+ reads no adult title in the repair's
+ * answers" in repairRoutes.int.test.ts finds the merged title in the history.
+ */
+export function scrubAutofixRecord<R>(r: R, hide: boolean): R {
+  return r && hide && typeof r === 'object' ? scrubbed(r as Scrubbable) as R : r;
+}
+
 /** GET /api/admin/health/autofix: the run going now, and the newest finished one. */
 export async function autofixState(): Promise<{ run: AutofixRun | null; last: AutofixRun | null }> {
   await closeInterruptedAutofix().catch(() => {});

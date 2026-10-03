@@ -563,8 +563,9 @@ get to: stopped, or out of time, searches, Tests or installs -- `clears` says "t
 `done` one line per kind of thing done (at most twelve, with `items`), `clears` what ends by itself (with `at`),
 `needsYou` what only a person can do, each with its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or
 `{kind: 'settings', key}`), and only once every phase that works on that card ran to its end. Runs are kept in the
-repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
-audited as `library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
+repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`; for an
+admin who hides 18+, here and on the routes above, without the lines that name a series by title) and audited as
+`library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
 `done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly
 runs.
 

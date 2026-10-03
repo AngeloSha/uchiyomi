@@ -366,11 +366,19 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
   // `notes` name series by title alone: planted too, or the history's assertion below could not fail (the
   // integration-1 review's probe). Reintroduce by sending notes as stored in the runs route: 'the history' fails.
   const notes = { replaced: [`${TITLE} ch 3 (2 -> 20)`], confirmed: [], followed: [`${TITLE} -> rp-b`], upgraded: [] };
+  // A Fix everything run (v0.55.0) names series in its lines by title alone, as notes do, and Recent repairs reads its
+  // record from the history. Reintroduce by sending it as stored (admin.ts, the runs route): 'the history' fails.
+  const merged = { code: 'autofix.item.merged', params: { from: TITLE, into: `${TITLE} (copy)` } };
+  const autofixResult = {
+    phaseIndex: 9, log: [merged],
+    summary: { green: true, again: false, done: [{ kind: 'merged', n: 1, said: { code: 'autofix.done.merged', params: { n: 1 } }, items: [merged] }], clears: [], needsYou: [] },
+  };
   const planted = await q<{ id: string }>(
     `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result, notes) VALUES
        (gen_random_uuid(), now(), now(), 'nightly', 'full', '{}'::jsonb, 'done', 5, $1::jsonb, $3::jsonb),
-       (gen_random_uuid(), now(), now(), 'manual', 'fill', $2::jsonb, 'done', 5, $1::jsonb, $3::jsonb) RETURNING id`,
-    [JSON.stringify({ skips }), JSON.stringify({ seriesId: AS, label: TITLE }), JSON.stringify(notes)]);
+       (gen_random_uuid(), now(), now(), 'manual', 'fill', $2::jsonb, 'done', 5, $1::jsonb, $3::jsonb),
+       (gen_random_uuid(), now(), now(), 'manual', 'autofix', '{}'::jsonb, 'done', 5, $4::jsonb, NULL) RETURNING id`,
+    [JSON.stringify({ skips }), JSON.stringify({ seriesId: AS, label: TITLE }), JSON.stringify(notes), JSON.stringify(autofixResult)]);
   clearRunDigest();
   const was = { finishedAt: repairState.finishedAt, lastResult: repairState.lastResult };
   repairState.finishedAt = Date.now();
@@ -405,6 +413,12 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
     // with the notes dropped for everyone (integration-2 review).
     const revealed = (await runs('?adult=1')).json().content.find((r: any) => r.id === planted[1].id);
     assert.ok(String(revealed?.notes?.replaced?.[0] ?? '').includes(TITLE), 'the notes too, with the reveal on');
+    // The Fix everything row: its lines that name no series stay for both, the ones that do only with the reveal on.
+    const hiddenFix = (await runs(`?id=${planted[2].id}`)).json().content[0];
+    assert.equal(hiddenFix?.result?.summary?.done?.[0]?.said?.code, 'autofix.done.merged', 'PREMISE: the Fix everything row is in the history');
+    assert.deepEqual(hiddenFix.result.log, [], 'the history: a Fix everything run\'s log');
+    const shownFix = (await runs(`?adult=1&id=${planted[2].id}`)).json().content[0];
+    assert.deepEqual(shownFix?.result?.summary?.done?.[0]?.items, [merged], 'a Fix everything run\'s lines, with the reveal on');
   } finally {
     repairState.running = false;
     repairState.live = null;

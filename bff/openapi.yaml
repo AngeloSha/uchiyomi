@@ -129,7 +129,7 @@ components:
         each with its count, its line and up to 20 `items`), `clears` (what ends by itself, with `at` where there is a
         time) and `needsYou` (per check, each with its one action: `open` {href}, `health` {check} or `settings` {key};
         a card is listed there only once every phase that works on it ran to its end in this run). `log` is the detail,
-        newest last, at most 200 lines.
+        newest last, at most 200 lines. For an admin who hides 18+, the lines that name a series by title are left out.
       required: [id, status, startedAt, by, phase, phaseIndex]
       properties:
         id: { type: string }

@@ -73,7 +73,7 @@ import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
-import { autofixRun, autofixState, startAutofix, stopAutofix, type AutofixRun } from '../lib/autofix';
+import { autofixRun, autofixState, scrubAutofixRecord, scrubAutofixRun, startAutofix, stopAutofix } from '../lib/autofix';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
@@ -969,7 +969,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       content: content.map((r) => ({
         ...r,
         target: scrubTarget(r.target, ok),
-        result: scrubResult(r.result, ok),
+        // A Fix everything run's record (v0.55.0) names series in its lines, by title alone, as `notes` do: the same
+        // rule as its own routes (lib/autofix.ts scrubAutofixRecord), since Recent repairs reads it from here.
+        result: r.kind === 'autofix' ? scrubAutofixRecord(r.result, noNotes) : scrubResult(r.result, ok),
         ...(noNotes ? { notes: null } : {}),
       })),
     };
@@ -3209,23 +3211,6 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- Fix everything (v0.55.0, lib/autofix.ts) ----
 
   /**
-   * Said lines that name a series by its title: left out for an admin who hides 18+ (the repair history's rule for its
-   * notes -- they carry no id to hold each title to the listing rule).
-   */
-  const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
-    'autofix.item.notRenumbered', 'autofix.item.deleted']);
-  const scrubRun = (r: AutofixRun | null, hide: boolean): AutofixRun | null => {
-    if (!r || !hide) return r;
-    const keep = (l: { code: string }) => !TITLED.has(l.code);
-    return {
-      ...r,
-      ...(r.current ? { current: { ...r.current, title: undefined } } : {}),
-      ...(r.log ? { log: r.log.filter(keep) } : {}),
-      ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(keep) } : d)) } } : {}),
-    };
-  };
-
-  /**
    * Start Health's Fix everything: one background run, 202 with its id. 409 `busy` with what is going -- `autofix`,
    * `repair`, `find` or `sweep` -- beside another run, a repair, a Find or Replace, or a chapter sweep. It runs as the
    * admin who pressed it: their age reach is what its Replace and Find runs may ask, as theirs (#141).
@@ -3242,7 +3227,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/health/autofix', async (req) => {
     const st = await autofixState();
     const hide = hideAdult(req);
-    return { run: scrubRun(st.run, hide), last: scrubRun(st.last, hide) };
+    return { run: scrubAutofixRun(st.run, hide), last: scrubAutofixRun(st.last, hide) };
   });
   /** One run, live or kept (repair_runs keeps them as it keeps repairs); 404 when none has that id. */
   app.get('/api/admin/health/autofix/:runId', async (req, reply) => {
@@ -3250,7 +3235,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!runId || runId.length > 64) return reply.code(400).send({ error: 'bad_request' });
     const r = await autofixRun(runId);
     if (!r) return reply.code(404).send({ error: 'not_found' });
-    return scrubRun(r, hideAdult(req));
+    return scrubAutofixRun(r, hideAdult(req));
   });
   /**
    * Stop the run at its next safe point -- between series, steps, sources or pairs, never inside a merge, a delete or a
