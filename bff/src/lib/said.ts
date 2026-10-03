@@ -108,6 +108,12 @@ const EN = {
     'repair\'s gap search for one series: it looks for another source that carries our numbering on both sides of ' +
     'the hole, follows it and fetches. A series it has already asked about is greyed with what it found.',
   'gaps.detail': ({ n, ranges }: { n: number; ranges: string }) => `${n} missing — ${ranges}`,
+  // v0.55.0: holes below a series' "Latest N" start (lib_series.chapter_floor), which nothing fetches unasked. `start` is
+  // the first chapter the series was started from.
+  'gaps.belowFloor': ({ n, start, ranges }: { n: number; start: number; ranges: string }) =>
+    `${n} missing before where you started (chapter ${start}) — ${ranges}`,
+  'gaps.alsoBelowFloor': ({ n, start }: { n: number; start: number }) => `${n} more before where you started (chapter ${start})`,
+  'gaps.beforeStart': ({ n }: { n: number }) => `${n} before where you started`,
 
   // ---- Chapter numbering (#116). `name` null: the source could not be named at all.
   'numbering.live': ({ n }: { n: number }) => `${n} series ${s(n, 'waits', 'wait')} for a numbering review`,

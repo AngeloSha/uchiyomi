@@ -73,6 +73,31 @@ export function gapsOf(have: number[]): Gap[] {
 }
 
 /**
+ * Holes split at a series' "Latest N" start, lib_series.chapter_floor (v0.55.0): the part at or above it, which the
+ * sweep fetches and the repair's gap step works on, and the part below it, which nothing fetches unasked -- the series
+ * was added from there on purpose, and the sweep, Fill now and a follow's fetch all stop at the floor (lib/updater.ts).
+ * The gap step used to file such a hole as "listed: the next sweep fetches it" and Health greyed it for a week on that
+ * promise, which no sweep ever kept. A hole across the start is cut at the first whole number at or above it. No floor:
+ * every hole is above.
+ */
+export function splitAtFloor(gaps: Gap[], floor: number | null | undefined): { above: Gap[]; below: Gap[] } {
+  if (floor == null || !Number.isFinite(Number(floor))) return { above: gaps, below: [] };
+  const f = Number(floor);
+  const above: Gap[] = [];
+  const below: Gap[] = [];
+  for (const g of gaps) {
+    if (g.hi < f) below.push(g);
+    else if (g.lo >= f) above.push(g);
+    else {
+      const cut = Math.ceil(f);
+      below.push({ ...g, hi: cut - 1, count: cut - g.lo });
+      above.push({ ...g, lo: cut, count: g.hi - cut + 1 });
+    }
+  }
+  return { above, below };
+}
+
+/**
  * What a candidate could do for us.
  *
  * `coverage` is measured against the chapters we ALREADY HAVE, not against the gap. A source that carries our

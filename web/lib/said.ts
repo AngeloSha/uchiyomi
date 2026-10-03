@@ -239,6 +239,15 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'gaps.detail': (p) => (num(p, 'n') === 1
     ? tr('1 missing — {ranges}', { ranges: str(p, 'ranges') })
     : tr('{n} missing — {ranges}', { n: num(p, 'n'), ranges: str(p, 'ranges') })),
+  // v0.55.0: holes below a series' "Latest N" start, which nothing fetches unasked. `start` is the first chapter it was
+  // started from.
+  'gaps.belowFloor': (p) => (num(p, 'n') === 1
+    ? tr('1 missing before where you started (chapter {start}) — {ranges}', { start: num(p, 'start'), ranges: str(p, 'ranges') })
+    : tr('{n} missing before where you started (chapter {start}) — {ranges}', { n: num(p, 'n'), start: num(p, 'start'), ranges: str(p, 'ranges') })),
+  'gaps.alsoBelowFloor': (p) => (num(p, 'n') === 1
+    ? tr('1 more before where you started (chapter {start})', { start: num(p, 'start') })
+    : tr('{n} more before where you started (chapter {start})', { n: num(p, 'n'), start: num(p, 'start') })),
+  'gaps.beforeStart': (p) => (num(p, 'n') === 1 ? tr('1 before where you started') : tr('{n} before where you started', { n: num(p, 'n') })),
 
   // ---- Chapter numbering (#116). A source that could not be named at all is "Its source" where it opens the sentence,
   // "its source" inside one.

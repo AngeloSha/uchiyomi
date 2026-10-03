@@ -70,7 +70,7 @@ import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFo
 import { SOLVER_BUDGET_MS } from './sources/budget';
 import { canDownload, finishRunRecord, isFullRun, kindOf, startRunRecord, targetOf, type RunOrigin, type RunStatus, type RunTarget } from './repairRuns';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
-import { assess, gapsOf } from './fill';
+import { assess, gapsOf, splitAtFloor } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
 // question the page answers or the button and the page disagree about whether there is anything to do.
@@ -1362,8 +1362,8 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   // will ever fill, and the button said "Fill now" and did nothing. The nightly keeps both filters.
   // Reintroduce by putting `s.auto_update AND` back for a named series: "Fill now fetches a gap a followed
   // source already lists, even with updates paused" in repair.int.test.ts looks at no series at all.
-  const candidates = await q<{ id: string; title: string; folder: string; checked: Date | null; result: StoredGaps | null }>(
-    `SELECT s.id, s.title, s.folder, s.gaps_checked_at AS checked, s.gaps_result AS result FROM lib_series s
+  const candidates = await q<{ id: string; title: string; folder: string; checked: Date | null; result: StoredGaps | null; floor: number | null }>(
+    `SELECT s.id, s.title, s.folder, s.gaps_checked_at AS checked, s.gaps_result AS result, s.chapter_floor::float8 AS floor FROM lib_series s
       WHERE ${opts.seriesId ? '' : 's.auto_update AND '}${visibleToAll('s')}
         ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
@@ -1386,7 +1386,12 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   const ranked: Array<{ id: string; title: string; folder: string; have: number[]; missing: number; gapNums: number[]; checkedAt: number }> = [];
   for (const s of candidates) {
     const have = await haveNumbers(s.id);
-    const gaps = gapsOf(have);
+    // Only the holes at or above the series' "Latest N" start (v0.55.0, fill.ts splitAtFloor): below it nothing is
+    // fetched -- the sweep, Fill now and a follow's fetch all stop at the floor -- and this step used to file such a
+    // hole as "listed: the next sweep fetches it", a promise no sweep kept, or search other sites for chapters it then
+    // could not fetch. Reintroduce by taking every hole: "a hole below a series' Latest N start" in repair.int.test.ts
+    // finds it looked at and stored as the sweep's.
+    const gaps = splitAtFloor(gapsOf(have), s.floor).above;
     if (!gaps.length) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);

@@ -26,7 +26,7 @@ import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
-import { gapsOf } from './fill';
+import { gapsOf, splitAtFloor } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
@@ -342,6 +342,8 @@ interface HeldSeries {
   autoUpdate: boolean;
   /** What the series' slow archive (#117) is going to fetch of its holes, and whether it is paused; null for none. */
   archive: ArchiveHoles | null;
+  /** Its "Latest N" start (lib_series.chapter_floor), null for none: holes below it are nobody's to fetch (v0.55.0). */
+  floor: number | null;
 }
 
 /**
@@ -358,8 +360,8 @@ interface HeldSeries {
  * this one pass, so the cost is paid once per report, not twice.
  */
 async function heldBySeries(): Promise<HeldSeries[]> {
-  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null; auto_update: boolean }>(
-    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update
+  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null; auto_update: boolean; floor: number | null }>(
+    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update, ls.chapter_floor::float8 AS floor
        FROM lib_series ls WHERE ${visibleToAll('ls')} ORDER BY ls.title`,
   );
   // One read for every archive: a handful of rows, where a per-series query would double the page's cost.
@@ -374,6 +376,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       gapsResult: s.gaps_result ?? null,
       autoUpdate: s.auto_update !== false,
       archive: archiving.get(s.id) ?? null,
+      floor: s.floor == null ? null : Number(s.floor),
     });
   }
   return out;
@@ -460,15 +463,34 @@ export function gapsAnswered(
 async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
-      const gaps = gapsOf(s.numbers);
+      // v0.55.0: a hole below the series' "Latest N" start is nobody's to fetch -- the sweep, Fill now and a follow's
+      // fetch all stop there, because the series was added from there on purpose (fill.ts splitAtFloor). It was a
+      // finding the repair then greyed for a week as "the next sweep fetches it", which no sweep ever did; it is
+      // listed for reference now, and only the holes at or above the start are the finding. Reintroduce by counting
+      // every hole: "a hole below a series' Latest N start" in repair.int.test.ts finds a finding with Fill now on it.
+      const { above: gaps, below } = splitAtFloor(gapsOf(s.numbers), s.floor);
       const numbers: number[] = [];
       for (const g of gaps) for (let n = g.lo; n <= g.hi && numbers.length < MAX_NUMBERS; n++) numbers.push(n);
-      return { s, gaps, missing: gaps.reduce((n, g) => n + g.count, 0), numbers };
+      return { s, gaps, below, missing: gaps.reduce((n, g) => n + g.count, 0), before: below.reduce((n, g) => n + g.count, 0), numbers };
     })
-    .filter((r) => r.missing > 0)
-    .sort((a, b) => b.missing - a.missing);
+    .filter((r) => r.missing > 0 || r.before > 0)
+    .sort((a, b) => b.missing - a.missing || b.before - a.before);
+  /** The first chapter the series was started from: the first whole number at or above its floor. */
+  const startOf = (r: (typeof rows)[number]) => Math.ceil(Number(r.s.floor));
+  const short = (t: string) => (t.length > 90 ? t.slice(0, 90) + '…' : t);
 
-  const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
+  const items: Array<HealthItem & { members?: string[]; beforeStart?: true }> = rows.map((r) => {
+    if (!r.missing) {
+      // Every hole is below where the series was started: for reference, with nothing to press -- Fill now cannot
+      // fetch below the start either.
+      return {
+        seriesId: r.s.id,
+        title: r.s.title,
+        ...detailOf([say('gaps.belowFloor', { n: r.before, start: startOf(r), ranges: short(rangeText(r.below)) })]),
+        info: true,
+        beforeStart: true,
+      };
+    }
     const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
     // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped (gapsCheckedAt says why).
@@ -508,7 +530,10 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       title: r.s.title,
       // The conclusion is `outcome` now, rendered by the page in the reader's language; the detail is the
       // finding alone.
-      ...detailOf([say('gaps.detail', { n: r.missing, ranges: ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges })]),
+      ...detailOf([
+        say('gaps.detail', { n: r.missing, ranges: short(ranges) }),
+        r.before > 0 && say('gaps.alsoBelowFloor', { n: r.before, start: startOf(r) }),
+      ]),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
       ...(archived ? {
@@ -549,7 +574,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const { items: shown, hidden } = truncate(items);
   const live = items.filter((i) => !i.info).length;
   const archiving = items.filter((i) => i.info && !i.ignored && i.outcome?.kind === 'gaps' && i.outcome.why === 'archiving').length;
-  const quiet = items.length - live - ignored - archiving;
+  const beforeStart = items.filter((i) => i.beforeStart).length;
+  const quiet = items.length - live - ignored - archiving - beforeStart;
   return {
     id: 'chapter-gaps',
     title: 'Chapter gaps',
@@ -558,10 +584,11 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       live ? say('gaps.live', { n: live }) : say('gaps.none'),
       quiet > 0 && say('gaps.quiet', { n: quiet }),
       archiving > 0 && say('gaps.archiving', { n: archiving }),
+      beforeStart > 0 && say('gaps.beforeStart', { n: beforeStart }),
       ignoredPart(ignored),
     ]),
     ...noteOf([say('gaps.note'), hiddenPart(hidden)]),
-    items: shown,
+    items: shown.map(({ beforeStart: _b, ...it }) => it),
   };
 }
 

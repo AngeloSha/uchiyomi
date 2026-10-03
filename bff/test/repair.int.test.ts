@@ -779,6 +779,30 @@ test('the gaps rotate: least recently checked first, and a fresh "nobody lists t
   }
 });
 
+test("a hole below a series' Latest N start is nobody's: the gap step leaves it, and Health lists it for reference", { skip }, async () => {
+  // v0.55.0. The sweep, Fill now and a follow's fetch all stop at chapter_floor, yet the gap step filed a hole below it
+  // as "listed: the next sweep fetches it" and Health greyed it for a week on that promise. Reintroduce by taking every
+  // hole in stepGaps (drop splitAtFloor's `.above`): Repair Listed is looked at and stored as the sweep's. Reintroduce
+  // by counting every hole in health.ts chapterGaps: its row is a finding, with Fill now on it.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, LISTED]);
+  await q('UPDATE lib_series SET chapter_floor = 15 WHERE id = $1', [LISTED]);
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.series, 0, 'chapter 11 is below where the series was started from: nothing to look at');
+    assert.equal(r.gaps.sweep, 0, 'and nothing claims the sweep will fetch it');
+    assert.equal((await series(LISTED)).gaps_result, null);
+    const fill = await runRepair(undefined, { only: ['gaps'], seriesId: LISTED, userId: null });
+    assert.equal(fill.skips?.[0]?.why, 'no_gaps', 'Fill now says there is nothing it can fill');
+    const row = (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps').items.find((i: any) => i.seriesId === LISTED);
+    assert.equal(row?.info, true, 'listed for reference, not a finding');
+    assert.equal(row.detail, '1 missing before where you started (chapter 15) — 11');
+    assert.deepEqual(row.detailSaid, [{ code: 'gaps.belowFloor', params: { n: 1, start: 15, ranges: '11' } }]);
+    assert.equal(row.actions, undefined, 'nothing to press: Fill now cannot fetch below the start either');
+  } finally {
+    await q('UPDATE lib_series SET chapter_floor = NULL WHERE id = $1', [LISTED]);
+  }
+});
+
 test('a series the run has no search left for keeps its place in the queue instead of being stamped', { skip }, async () => {
   // Reintroduce by stamping gaps_checked_at before the budget is tested (moving that UPDATE back above
   // the listed/capped/unlisted split, or dropping the break): the last two assertions find a series
