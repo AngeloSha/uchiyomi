@@ -632,11 +632,12 @@ export function greenToPromote(run: Pick<FindRun, 'results'> | null | undefined)
 }
 
 /**
- * A Make main the server refused (POST …/find/:runId/promote) that its own words do not cover: a match decided already.
- * Every other refusal is the main-source switch's, which the server says itself (`messageSaid`, lib/mainSource.ts).
+ * A Make main the server refused (POST …/find/:runId/promote) that its own words do not cover: a match decided already,
+ * and a search's match on a series that follows as many sources as it may (`full`, the run's own sentence for it). Every
+ * other refusal is the main-source switch's, which the server says itself (`messageSaid`, lib/mainSource.ts).
  */
 export function promoteRefusal(code: string | null | undefined): string | null {
-  return code === 'decided' ? tr('Made main or skipped already') : null;
+  return code === 'decided' ? tr('Made main or skipped already') : code === 'full' ? findWhyLine('full') : null;
 }
 
 /** What Make all green main did, as its status line: the moves, and how many the server refused (amber). */
