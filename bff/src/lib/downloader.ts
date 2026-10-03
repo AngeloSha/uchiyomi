@@ -194,7 +194,17 @@ function blameFor(worst: number): SourceStatus {
   if (worst < 400) return 'down';
   return classify(null, worst) || 'blocked';
 }
-const worstLabel = (worst: number) => (worst >= 400 ? String(worst) : worst === EMPTY_BODY ? 'empty body' : 'error');
+/**
+ * The status a shortfall's stored error names. When the source refused, the refusal it was blamed for (v0.55.1): a
+ * 500 beside a 429 is still the 429 that put it in a cooldown, and the stored words are what Health, the diagnosis and
+ * the per-stage evidence read -- a 429 as a rate limit, which is a cooldown and never a failure (lib/sourceEvidence.ts
+ * isRateLimit; noteStage records the kind from these words). Named by the numerically worst page, a 403 refusal beside
+ * a 429 read as a rate limit, and a 429 beside a 500 as a broken source. Reintroduce `worstLabel(worst)`: "a refused
+ * chapter names the refusal it was blamed for" in downloadBlame.int.test.ts reads HTTP 500.
+ */
+const worstLabel = (worst: number, refusal?: Extract<SourceStatus, 'blocked' | 'rate_limited'>) =>
+  (refusal === 'blocked' ? '403' : refusal === 'rate_limited' ? '429'
+    : worst >= 400 ? String(worst) : worst === EMPTY_BODY ? 'empty body' : 'error');
 
 /**
  * Is this small body an image at all?
@@ -568,8 +578,9 @@ async function fetchChapter(
   const failedPages = evidenceOf(failed);
   if (!n) {
     const status = refusal ?? blameFor(worst);
-    await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})`);
-    void noteStage(input.sourceId, 'images', 'fail', { error: `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})` });
+    const said = `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst, refusal)})`;
+    await reportFail(input.sourceId, status, said);
+    void noteStage(input.sourceId, 'images', 'fail', { error: said });
     throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status, status, pages: 0, expected: urls.length, worst, failedPages });
   }
   // A PARTIAL chapter must not be written as a complete one.
@@ -606,8 +617,9 @@ async function fetchChapter(
     const blip = !refusing && ratio >= (soft ? EMPTY_TOLERANCE : NEAR_COMPLETE);
     const status = refusal ?? blameFor(worst);
     if (!blip) {
-      await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})`);
-      void noteStage(input.sourceId, 'images', 'fail', { error: `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})` });
+      const said = `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst, refusal)})`;
+      await reportFail(input.sourceId, status, said);
+      void noteStage(input.sourceId, 'images', 'fail', { error: said });
     }
     // The hold: enough of the chapter to be worth keeping with placeholders, and the site did not say no.
     // Offered, not written -- see PartialHold. ⚠️ `!refusing` is the whole point of the second clause:

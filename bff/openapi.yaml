@@ -457,7 +457,8 @@ components:
         switches, which also unloads it; `not_loaded`: no adapter by that id is loaded (uninstalled, a site removed,
         the extension engine away); `failing`: a confirmed, current failure at the chapter list, the page list or the
         images, or the site's own offline notice at any step (a search failure stops no update); `cooling`: inside a
-        cooldown, which ends by itself; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
+        cooldown, which ends by itself -- or, since v0.55.1, asked to slow down (HTTP 429) at the chapter list, the
+        page list or the images, a rate limit being a cooldown and never a failure; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
         main source, and only those count as still carrying a series.
     Ghost:
       type: object
@@ -8983,7 +8984,9 @@ paths:
         chapter saved with placeholder pages is offered confirm_short only.
         Since v0.49.0 (#115) the `sources` check reads per-stage evidence: each item adds `evidence` [{stage:
         search | chapters | pages | images, state: ok | fail | unknown, at, by: test | sweep | traffic, kind:
-        error | empty | unnumbered, error}], `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
+        error | empty | unnumbered | site_offline | rate_limited, error}] (since v0.55.1 a rate limit -- a failure
+        in the words of an HTTP 429, recorded as `rate_limited`, or as `error` before -- is never a failure: the row
+        is `blocked`, `cooldown.status` `rate_limited`, without `replace_source`), `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
         stage} (the last live check), `diagnosis` {code, reason, fix} and `series` (how many series use the
         source), and is titled by the source's name. A confirmed failure (a failed Test or daily check, or three
         traffic failures in a row at one stage) is a finding even for a source no series uses; a test that ran
@@ -9746,7 +9749,8 @@ paths:
       tags:
         - admin
       summary: Every source with its stored health, cooldown, the last live verdict (`live`), its open, confirmed
-        failures per stage (`failing`) and one line per stage (`evidence`); `testMs` is how long one Test may take.
+        failures per stage (`failing`; since v0.55.1 never a rate limit, which is a cooldown) and one line per stage
+        (`evidence`); `testMs` is how long one Test may take.
       operationId: getApiAdminSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:

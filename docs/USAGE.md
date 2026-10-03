@@ -1704,6 +1704,12 @@ server did not answer* means only that the engine could not be reached, timed ou
 while an extension that failed on its site, with the engine answering, reads *This source's extension reported an
 error*.
 
+**A rate limit is a cooldown, never a failure** (since v0.55.1). A site that answered *429* — *slow down* — at its
+chapter list, its page list or its images works; it asked Uchiyomi to wait. Its row reads *Rate limited* (until when,
+while the cooldown runs) and never offers **Replace**, its series still count as updating, and **Fix everything**
+never replaces it. Before, five refused image downloads in a row read as *Images failing*, and Fix everything moved
+the series off a source whose searches and chapter lists answered fine.
+
 **A site that says it is offline** (since v0.49.1). A site that answers with its own maintenance page — a small page
 whose title says *temporarily offline*, *maintenance* or *be back soon*, with none of the site's own markup — reads
 *The site says it is offline (its own page)*, with the fix *Wait for the site to come back, or find other sources

@@ -21,8 +21,26 @@ export type EvidenceBy = 'test' | 'sweep' | 'traffic';
 /**
  * How a stage failed. A live run that hit OUR deadline is not a failure at all and is never stored as one.
  * `site_offline` (v0.49.1): the site answered with its own offline or maintenance notice (lib/sources/offline.ts).
+ * `rate_limited` (v0.55.1): the site asked us to slow down (HTTP 429) -- a cooldown, never a failure (isRateLimit).
  */
-export type FailKind = 'error' | 'empty' | 'unnumbered' | 'site_offline';
+export type FailKind = 'error' | 'empty' | 'unnumbered' | 'site_offline' | 'rate_limited';
+
+/**
+ * The words that say a site asked us to slow down: the ones classify() (lib/sourceHealth.ts) files as `rate_limited`
+ * and the diagnosis reads the same way (lib/sourceDiagnosis.ts).
+ */
+export const RATE_LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|slow down/i;
+
+/**
+ * Is this failure the site asking for room (v0.55.1)? Recorded as `rate_limited` since v0.55.1; before that every
+ * failure was `error`, and the downloader's own words say it: "0/32 pages downloaded (HTTP 429)".
+ *
+ * A rate limit is a cooldown, never a failure: the site works and asked us to wait. Counted as a failure it made a
+ * source whose image server answered 429 -- Mangakakalot, whose searches and chapter lists answered fine -- a Replace
+ * target, and Fix everything moved 14 series off a source that works (the owner's first run, 2026-10-03).
+ */
+export const isRateLimit = (f: { kind?: FailKind | string | null; error?: string | null }): boolean =>
+  f.kind === 'rate_limited' || ((f.kind ?? 'error') === 'error' && RATE_LIMIT_WORDS.test(f.error ?? ''));
 
 export interface StageRecord {
   okAt?: string | null;
@@ -94,7 +112,7 @@ export function openFailures(stages: Stages | null | undefined, now = Date.now()
       since: r.since || at,
       at,
       error: r.error ?? null,
-      kind: r.kind === 'empty' || r.kind === 'unnumbered' || r.kind === 'site_offline' ? r.kind : 'error',
+      kind: r.kind === 'empty' || r.kind === 'unnumbered' || r.kind === 'site_offline' || r.kind === 'rate_limited' ? r.kind : 'error',
       by,
       streak,
       confirmed: by !== 'traffic' || streak >= TRAFFIC_CONFIRM,
@@ -104,9 +122,17 @@ export function openFailures(stages: Stages | null | undefined, now = Date.now()
   return out;
 }
 
-/** The failures Health, Providers and the push treat as real: confirmed and current. */
+/**
+ * The failures Health, Providers and the push treat as real: confirmed and current -- and never a rate limit (v0.55.1),
+ * which is a cooldown: currentRateLimits says those. Reintroduce by keeping them: "images failing with 429 are a
+ * cooldown" in sourceStanding.test.ts reads failing.
+ */
 export const currentFailures = (stages: Stages | null | undefined, now = Date.now()): OpenFailure[] =>
-  openFailures(stages, now).filter((f) => f.confirmed && !f.stale);
+  openFailures(stages, now).filter((f) => f.confirmed && !f.stale && !isRateLimit(f));
+
+/** The rate limits that are confirmed and current: what makes a source `cooling` (lib/sourceStanding.ts) after its cooldown. */
+export const currentRateLimits = (stages: Stages | null | undefined, now = Date.now()): OpenFailure[] =>
+  openFailures(stages, now).filter((f) => f.confirmed && !f.stale && isRateLimit(f));
 
 /** One line per stage for the admin surfaces: what was last seen there, whichever way it went. */
 export interface StageLine {

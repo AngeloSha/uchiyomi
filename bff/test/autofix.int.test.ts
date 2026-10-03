@@ -50,7 +50,10 @@ const AdmZip = require('adm-zip');
 const MAIN = 'af-main', GOOD = 'af-good', DEAD = 'af-dead', UNUSED = 'af-unused', COOL = 'af-cool', DOWN = 'af-down', WEB = 'af-web', CF = 'af-cf';
 // af-held: in a cooldown, and failing its Test.
 const HELD = 'af-held';
-const SOURCES = [MAIN, GOOD, DEAD, UNUSED, COOL, DOWN, WEB, CF, HELD];
+// v0.55.1: af-limit works, but its images answered 429 five times in a row -- the owner's Mangakakalot, as its row was
+// stored. af-err works but its images fail with a 500.
+const LIMIT = 'af-limit', ERR = 'af-err';
+const SOURCES = [MAIN, GOOD, DEAD, UNUSED, COOL, DOWN, WEB, CF, HELD, LIMIT, ERR];
 const BROKEN = new Set([DEAD, UNUSED, DOWN, CF, HELD]);
 /** source -> title -> numbers it lists. */
 const catalog = new Map<string, Map<string, number[]>>();
@@ -101,7 +104,7 @@ const LIB = 'lib_af';
 const S = {
   repl: 's_af_repl', cool: 's_af_cool', failOk: 's_af_failok', failBad: 's_af_failbad', short: 's_af_short', gap: 's_af_gap',
   oddGap: 's_af_oddgap', oddMark: 's_af_oddmark', twice: 's_af_twice', twiceShort: 's_af_twiceshort', twiceMark: 's_af_twicemark',
-  twicePartial: 's_af_twicepartial', held: 's_af_held',
+  twicePartial: 's_af_twicepartial', held: 's_af_held', limit: 's_af_limit', err: 's_af_err',
   dupA: 's_af_dupa', dupB: 's_af_dupb', dupC: 's_af_dupc', dupD: 's_af_dupd', edA: 's_af_eda', edB: 's_af_edb',
   numClean: 's_af_numclean', numTracker: 's_af_numtracker', paused: 's_af_paused', cf: 's_af_cf',
   againA: 's_af_againa', againB: 's_af_againb', againOdd: 's_af_againodd',
@@ -110,7 +113,7 @@ const ALL = Object.values(S);
 const T: Record<keyof typeof S, string> = {
   repl: 'Fix Replace', cool: 'Fix Cool', failOk: 'Fix Fail Ok', failBad: 'Fix Fail Bad', short: 'Fix Short', gap: 'Fix Gap',
   oddGap: 'Fix Odd Gap', oddMark: 'Fix Odd Mark', twice: 'Fix Twice', twiceShort: 'Fix Twice Short', twiceMark: 'Fix Twice Mark',
-  twicePartial: 'Fix Twice Partial', held: 'Fix Held',
+  twicePartial: 'Fix Twice Partial', held: 'Fix Held', limit: 'Fix Limit', err: 'Fix Err',
   dupA: 'Fix Twin', dupB: 'Fix Twin', dupC: 'Fix Alpha', dupD: 'Totally Unrelated', edA: 'Fix Edition', edB: 'Fix Edicion',
   numClean: 'Istrevelia', numTracker: 'Istrevelia', paused: 'Fix Paused', cf: 'Fix Cloudflare',
   againA: 'Fix Again', againB: 'Fix Again', againOdd: 'Fix Again Odd',
@@ -142,6 +145,9 @@ async function seedBook(k: keyof typeof S, n: number, o: { pages?: number; src?:
     [`b_${S[k]}_${n}`, S[k], file, n, `Chapter ${n}`, o.pages ?? 3, DL, o.src === undefined ? MAIN : o.src, o.mtime ?? 1000]);
 }
 const failedAt = (stage: string) => JSON.stringify({ [stage]: { failAt: new Date().toISOString(), failBy: 'test', kind: 'error', error: 'HTTP 500' } });
+/** The downloader's own record of a chapter whose images were refused, five in a row (before v0.55.1: kind error). */
+const imagesFailed = (status: number) =>
+  JSON.stringify({ images: { failAt: new Date().toISOString(), failBy: 'traffic', streak: 5, kind: 'error', error: `0/32 pages downloaded (HTTP ${status})` } });
 const range = (lo: number, hi: number) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
 /** series_listing rows as the sweep writes them: what the gap step sorts a hole's numbers by. */
 async function seedListing(k: keyof typeof S, src: string, nums: number[]) {
@@ -227,6 +233,18 @@ test('Fix everything: one run over a library with something wrong on every card'
   for (const n of [1, 2]) await seedBook('cool', n, { src: COOL });
   await seedSeries('held', { source: HELD, auto: false });
   for (const n of [1, 2]) await seedBook('held', n, { src: HELD });
+  // v0.55.1: a series on a source whose images answered 429, and one on a source whose images fail -- each following
+  // the working source, which Replace would make its main.
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error, stages) VALUES
+             ($1, 'rate_limited', 5, NULL, '0/32 pages downloaded (HTTP 429)', $2::jsonb),
+             ($3, 'blocked', 5, NULL, '0/32 pages downloaded (HTTP 500)', $4::jsonb)`, [LIMIT, imagesFailed(429), ERR, imagesFailed(500)]);
+  for (const [k, src] of [['limit', LIMIT], ['err', ERR]] as const) {
+    catalog.get(src)!.set(T[k], range(1, 3));
+    catalog.get(GOOD)!.set(T[k], range(1, 3));
+    await seedSeries(k, { source: src });
+    for (const n of [1, 2, 3]) await seedBook(k, n, { src });
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,$3,$4)`, [S[k], GOOD, `${GOOD}::${T[k]}`, T[k]]);
+  }
   // A failed chapter on a source that can be asked: reset and fetched. One on a source failing at its page lists: left.
   await seedSeries('failOk');
   for (const n of [1, 2]) await seedBook('failOk', n);
@@ -332,6 +350,16 @@ test('Fix everything: one run over a library with something wrong on every card'
     assert.equal((await health(UNUSED)).disabled, true, 'a failing source no series uses is retired');
     const done = run.summary.done.find((d: any) => d.kind === 'replaced');
     assert.ok(done && done.n >= 1, 'and the summary says what moved');
+  });
+
+  await t.test('sources: images failing with 429 are a cooldown, never Replaced; images failing with a 500 are', async () => {
+    // v0.55.1, the owner's first run: Mangakakalot's image server answered 429, the source read failing, and 14 series
+    // were moved off a source whose searches and chapter lists answer fine. Reintroduce by counting a rate limit as a
+    // failure (currentFailures in lib/sourceEvidence.ts, or standingOf in lib/sourceStanding.ts): af-limit is Replaced.
+    assert.equal((await seriesRow(S.limit)).source_id, LIMIT, 'a source that only asked for room keeps its series');
+    assert.equal((await health(LIMIT)).disabled, false, 'and is not turned off');
+    assert.equal((await seriesRow(S.err)).source_id, GOOD, 'a source whose images fail is Replaced');
+    assert.equal((await health(ERR)).disabled, true);
   });
 
   await t.test('sources: a block is cleared only after a passing Test', async () => {

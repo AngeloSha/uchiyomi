@@ -620,7 +620,7 @@ the two destructive ones, `delete` and `merge`, are the two the nightly repair n
 **Source health and the extension engine** (since v0.49.0). The `sources` check reads the per-stage evidence
 (#115): each of its items adds `evidence` (one line per stage, `search`, `chapters`, `pages`, `images`, each
 `{stage, state: 'ok' | 'fail' | 'unknown', at, by: 'test' | 'sweep' | 'traffic', kind: 'error' | 'empty' |
-'unnumbered', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' | 'inconclusive',
+'unnumbered' | 'site_offline' | 'rate_limited', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' | 'inconclusive',
 stage}`), `diagnosis` (`{code, reason, fix}`, the admin half) and `series` (how many series use the source), and
 its `title` is the source's name (its id only when no name is known). A confirmed failure — a failed live check, or
 three failures in a row at one stage from traffic — is a finding whether or not a series uses the source, and an
@@ -653,6 +653,15 @@ source has an extension's logo, which `GET /img/sources/icon/:id` serves. The su
 *Nothing is failing that your library uses* while quiet rows are listed. The status is decided as before: `warn`
 while any finding remains.
 
+**A rate limit is a cooldown, never a failure** (since v0.55.1). A stage failure in the words of an HTTP 429 (*0/32
+pages downloaded (HTTP 429)*, *too many requests*, the words `classify` files as `rate_limited`) is recorded with
+`kind: 'rate_limited'` in the per-stage evidence, and one recorded before as `error` is read the same way. It is
+never a current failure: its `sources` row is `blocked` with `cooldown.status: 'rate_limited'` (`until` null once the
+cooldown ran out or a passing Test cleared it, while the evidence stays open until a download succeeds), it never
+offers `replace_source`, the source's `standing` is `cooling` (so it still carries its series and is never a
+`frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
+refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
+
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
 source, `sw:<id>` for an extension). Findings: a numbering change waiting for review — the detector's proposal
@@ -674,7 +683,8 @@ sources the series follows), instead of leaving them to the archive.
 
 `GET /api/admin/sources` (admin) is every source's stored health, and since v0.49.0 adds, per source, `live`
 (the last Test or daily check: `{at, by, state, stage, code, checks}`, or `null`), `failing` (the stages whose
-failure is open, confirmed and not stale: `{stage, since, at, error, kind, by, streak}`) and `evidence` (the
+failure is open, confirmed and not stale: `{stage, since, at, error, kind, by, streak}`; since v0.55.1 never a rate
+limit, which is a cooldown) and `evidence` (the
 same stage lines as Health), plus a top-level `testMs`. The public `status` it carries is unchanged: Admin →
 Providers shows *Failing* by overlaying `failing` on it, while `GET /api/sources` stays one answer for every
 account.
@@ -1785,8 +1795,9 @@ takes its chapters from its numbering source alone), `renumber_pending`, `busy` 
 refresh is inside the series), `source_unavailable` (not loaded, switched off, or beyond the admin's age reach),
 `moved` (the main changed meanwhile) or `language_differs` (with `edition`, as the follow route answers it). Audited
 as `series.main_source` with `via: manual`. Each entry of `sources` (here, in the follow and unfollow answers and in
-`GET /api/series/:id`) carries `standing`: `usable`, `cooling`, `failing` (a confirmed failure at the chapter list,
-the pages or the images, or the site's own offline notice), `off` (switched off) or `not_loaded`.
+`GET /api/series/:id`) carries `standing`: `usable`, `cooling` (a cooldown, or since v0.55.1 a rate limit at the
+chapter list, the pages or the images), `failing` (a confirmed failure at the chapter list, the pages or the images,
+or the site's own offline notice), `off` (switched off) or `not_loaded`.
 `GET /api/admin/series/:id/check` now reports `waiting` alongside `added`: the number of missing chapters
 held back for a ranked group (omitted when none). The `frozen-series` health check lists a series whose
 primary is gone but which still follows a live source as information rather than a warning.

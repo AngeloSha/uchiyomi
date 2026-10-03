@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  openFailures, currentFailures, liveStagesPatch, stageLines, TRAFFIC_CONFIRM, LIVE_STALE_MS, type Stages,
+  openFailures, currentFailures, currentRateLimits, isRateLimit, liveStagesPatch, stageLines, TRAFFIC_CONFIRM, LIVE_STALE_MS, type Stages,
 } from '../src/lib/sourceEvidence';
 
 const NOW = Date.parse('2026-09-27T12:00:00.000Z');
@@ -98,4 +98,31 @@ test('a site that says it is offline keeps that kind through the evidence (v0.49
   assert.equal(openFailures(s, NOW)[0].kind, 'site_offline');
   assert.deepEqual(liveStagesPatch({ passed: [], failure: { stage: 'search', kind: 'site_offline', error: 'e' } }, 'test', ago(0)),
     { search: { failAt: ago(0), failBy: 'test', error: 'e', kind: 'site_offline' } });
+});
+
+test('a site asking us to slow down is a rate limit, never a current failure (v0.55.1)', () => {
+  // The owner's first Fix everything run: Mangakakalot's image server answered 429, its images stage read failing, and
+  // the run moved 14 series off a source whose searches and chapter lists answered fine. Reintroduce by dropping
+  // `!isRateLimit(f)` from currentFailures: the 429 below is a current failure. By dropping 'rate_limited' from
+  // openFailures' kind list: the recorded kind reads 'error'.
+  const owners: Stages = { images: { failAt: ago(MIN), failBy: 'traffic', streak: 5, kind: 'error', error: '0/32 pages downloaded (HTTP 429)' } };
+  assert.deepEqual(currentFailures(owners, NOW), [], 'a 429 recorded before v0.55.1, by its words, is no failure');
+  assert.deepEqual(currentRateLimits(owners, NOW).map((f) => f.stage), ['images'], 'it is a rate limit');
+  const recorded: Stages = { pages: { failAt: ago(MIN), failBy: 'traffic', streak: 3, kind: 'rate_limited', error: 'suwayomi: HTTP error 429' } };
+  assert.equal(openFailures(recorded, NOW)[0].kind, 'rate_limited', 'the kind is kept through the evidence');
+  assert.deepEqual(currentFailures(recorded, NOW), []);
+  assert.equal(currentRateLimits(recorded, NOW).length, 1);
+  const real: Stages = { images: { failAt: ago(MIN), failBy: 'traffic', streak: 5, kind: 'error', error: '0/32 pages downloaded (HTTP 500)' } };
+  assert.deepEqual(currentFailures(real, NOW).map((f) => f.stage), ['images'], 'a 500 is still a failure');
+  assert.deepEqual(currentRateLimits(real, NOW), []);
+  // One in ordinary use is noise either way, and a week-old one is stale either way.
+  assert.deepEqual(currentRateLimits({ images: { ...owners.images, streak: 1 } }, NOW), [], 'one 429 is not a finding yet');
+  assert.deepEqual(currentRateLimits({ images: { ...owners.images, failAt: ago(8 * DAY) } }, NOW), []);
+  // The words are classify()'s, and only a failure that says nothing more specific is read by them.
+  for (const error of ['HTTP 429', 'Too Many Requests', 'rate limited by the CDN', 'MangaDex asked Uchiyomi to slow down.']) {
+    assert.equal(isRateLimit({ kind: 'error', error }), true, error);
+  }
+  assert.equal(isRateLimit({ kind: 'site_offline', error: 'site_offline: 429' }), false, "the site's own offline notice stays one");
+  assert.equal(isRateLimit({ kind: 'error', error: 'HTTP 403' }), false);
+  assert.equal(isRateLimit({ kind: 'rate_limited', error: null }), true);
 });

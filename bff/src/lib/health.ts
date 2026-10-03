@@ -29,7 +29,7 @@ import { env } from '../env';
 import { gapsOf, splitAtFloor } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
-import { currentFailures, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
+import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
@@ -1100,15 +1100,23 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
   const traffic = (r: typeof rows[number]) => r.status !== 'ok' || r.empty_streak >= 3 || r.slow_streak >= 3;
   const WEEK = 7 * DAY_MS;
   const items: Array<HealthItem & { members?: string[] }> = [];
-  for (const r of rows) {
+  for (const row of rows) {
     // Evidence counts only for a source that is loaded: an uninstalled extension's series are the frozen-series
     // check's business, and its last test is about something that no longer exists here.
-    const src = getSource(r.source_id);
+    const src = getSource(row.source_id);
     const loaded = !!src;
-    const open = loaded ? openFailures(r.stages, now).filter((f) => f.confirmed) : [];
-    const failing = open.filter((f) => !f.stale);
+    const open = loaded ? openFailures(row.stages, now).filter((f) => f.confirmed) : [];
+    // v0.55.1: a site asking us to slow down (HTTP 429) is a cooldown, never a failure (lib/sourceEvidence.ts
+    // isRateLimit). Its row is the cooldown's, `rate_limited`, as it is while the cooldown runs -- also once the cooldown
+    // ran out, or a passing Test cleared it, with the evidence still open (a Test fetches no image). Read as a failure,
+    // Mangakakalot's image server answering 429 made it "failing" here, and a Replace target for Fix everything.
+    // Reintroduce by counting it among `failing`: "images failing with 429 are a cooldown" in health.int.test.ts reads
+    // failing, with Replace offered.
+    const limited = open.some((f) => !f.stale && isRateLimit(f));
+    const r = limited && row.status === 'ok' ? { ...row, status: 'rate_limited' } : row;
+    const failing = open.filter((f) => !f.stale && !isRateLimit(f));
     const inconclusive = loaded && r.live_state === 'inconclusive' && !!r.live_at && now - new Date(r.live_at).getTime() < WEEK;
-    const stale = open.length > 0 && !failing.length;
+    const stale = open.length > 0 && !failing.length && !limited;
     if (!r.disabled && !failing.length && !traffic(r) && !inconclusive && !stale) continue; // nothing to say
 
     const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
