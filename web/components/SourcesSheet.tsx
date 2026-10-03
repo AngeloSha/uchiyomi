@@ -29,6 +29,7 @@ import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
 import { preferFirst } from '@/lib/sourceOrder';
+import { seriesTypeKey } from '@/lib/seriesTypes';
 import { ActionKeys, ActionStatus, type ActionSpec } from '@/components/ActionList';
 import type { ActionState } from '@/lib/actionState';
 import {
@@ -658,6 +659,20 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
     setBorrowing(false);
   };
+  // Notice chapters for this series (bff lib/noticeChapters.ts): the box shows what APPLIES -- its type's switch in
+  // Settings included -- and a tap writes this series' own choice; `null` puts it back under its type's switch. The
+  // chapter list, the counts and Mihon follow on the next request, so the series' queries are refetched at once.
+  const [hidingNotices, setHidingNotices] = useState(false);
+  const setHideNotices = async (on: boolean | null) => {
+    setHidingNotices(true);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(id)}`, { method: 'PATCH', json: { hideNotices: on } });
+      onSaved();
+      for (const k of ['series-books', 'series-listing', 'series-groups', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] });
+      toast(on === null ? tr('Back to the server default') : on ? tr('Notice chapters hidden') : tr('Notice chapters shown'), 'success');
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
+    setHidingNotices(false);
+  };
   const { checking, checkNow } = useCheckNow(id, () => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] }); });
 
   // `getElementById`, not `querySelector('#ch-12.5')`: a chapter number with a decimal point is not a valid
@@ -791,6 +806,25 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               <button type="button" disabled={borrowing} onClick={() => setBorrow(null)}
                 className="mt-1 ms-6 text-[11px] text-fog-500 underline disabled:opacity-50">{tr('Use the server default')}</button>
             )}
+          </div>
+        )}
+        {isAdmin && series?.hideNoticesEffective !== undefined && (
+          <div className="mt-3" data-hide-notices>
+            <label className="flex items-start gap-2 text-[11px] leading-relaxed text-fog-500">
+              <input type="checkbox" className="mt-0.5 accent-[rgb(var(--accent))]"
+                checked={series.hideNoticesEffective} disabled={hidingNotices}
+                onChange={(e) => setHideNotices(e.target.checked)} />
+              <span>
+                {tr('Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.')}
+                {series.hideNoticesEffective && (
+                  <span className="text-fog-400"> {tr('{n} hidden now.', { n: series.hiddenNotices ?? 0 })}</span>
+                )}
+              </span>
+            </label>
+            {series.hideNotices !== null && series.hideNotices !== undefined
+              ? <button type="button" disabled={hidingNotices} onClick={() => setHideNotices(null)}
+                  className="mt-1 ms-6 text-[11px] text-fog-500 underline disabled:opacity-50">{tr('Use the server default')}</button>
+              : <p className="mt-1 ms-6 text-[11px] text-fog-600">{tr('Following the switch for {type} in Settings.', { type: tr(seriesTypeKey(series.seriesType ?? 'unknown')) })}</p>}
           </div>
         )}
       </section>

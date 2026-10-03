@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3154
+    "strings": 3172
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3157,5 +3157,23 @@
   "Applying safe renumbering": "正在应用安全的重新编号",
   "Fetching missing and broken chapters": "正在获取缺失和损坏的章节",
   "Looking for new sources": "正在寻找新来源",
-  "Removing extra chapter files": "正在删除多余的章节文件"
+  "Removing extra chapter files": "正在删除多余的章节文件",
+  "Manga": "日漫",
+  "Manhwa": "韩漫",
+  "Manhua": "国漫",
+  "Comic": "美漫",
+  "Unknown / other": "未知 / 其他",
+  "Automatic — not known": "自动 — 未知",
+  "Automatic — {type}, from the genres": "自动 — {type}（来自类型标签）",
+  "Automatic — {type}, from AniList": "自动 — {type}（来自 AniList）",
+  "Automatic — {type}, from the source": "自动 — {type}（来自来源）",
+  "Series type": "系列类型",
+  "What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.": "设置中的公告章节开关按此判断。自动时依次取自类型标签、来源、AniList。",
+  "Notice chapters hidden": "已隐藏公告章节",
+  "Notice chapters shown": "已显示公告章节",
+  "Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.": "在此处、Mihon 及其他所有地方隐藏公告章节（编号如 100.1 或 100.5），且不下载。关闭后会重新显示。",
+  "{n} hidden now.": "当前已隐藏 {n} 章。",
+  "Following the switch for {type} in Settings.": "跟随设置中 {type} 的开关。",
+  "Notice chapters": "公告章节",
+  "Sources often post notices for readers as a chapter numbered after the latest one, like 100.1 or 100.5. For each type switched on, every chapter numbered with a fraction is hidden from the library, the reader, OPDS and Mihon, and is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "来源常把给读者的公告发成编号在最新章节之后的章节，例如 100.1 或 100.5。对每个已开启的类型，所有带小数编号的章节都会在书库、阅读器、OPDS 和 Mihon 中隐藏，且不会下载。不会删除任何内容：关闭该类型即可重新显示。单个系列可在其“来源与翻译”面板中覆盖此设置。"
 }
