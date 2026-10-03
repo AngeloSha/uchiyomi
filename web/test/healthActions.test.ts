@@ -215,10 +215,10 @@ test('#115: the Test key holds no verdict of its own, its status line says the l
   assert.match(arm, /\}, testStep\(check\.testMs\)\),/, 'the running Test does not say its limit');
   assert.match(row, /setSync\(\{ action: a, at, state: \{ kind: 'working', startedAt: at, step \} \}\);/, 'act ignores the step it is given');
   // Through healthRowEvidence, which drops the fix a row's detail already says and the one under a row listed for
-  // reference (lib/sourceEvidence.ts; its rules are held in sourceEvidence.test.ts).
-  const page = code(read(PAGE));
-  const health = page.slice(page.indexOf('function Health()'), page.indexOf('function DesktopUpdateNote('));
-  assert.match(health, /\{c\.id === 'sources' && <SourceEvidence \{\.\.\.healthRowEvidence\(it\)\} \/>\}\n\s*<\/HealthRow>/,
+  // reference (lib/sourceEvidence.ts; its rules are held in sourceEvidence.test.ts). v0.53.0: Source health draws its
+  // own rows (components/SourceHealthBody.tsx), and the stage lines wait behind each row's Details.
+  const body = code(read('components/SourceHealthBody.tsx'));
+  assert.match(body, /details: [^\n]*\(\s*<div data-source-details[^>]*>[\s\S]*?<SourceEvidence \{\.\.\.healthRowEvidence\(it\)\} \/>\s*<\/div>\s*\),/,
     'Health\'s source rows do not show the stage lines');
 });
 

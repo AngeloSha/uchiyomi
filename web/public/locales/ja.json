@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2755
+    "strings": 2780
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2758,5 +2758,30 @@
   "{n} sources your series use need a look": "シリーズで使っている {n} 件のソースに確認が必要です",
   "1 source nothing uses is failing": "未使用の 1 件のソースが失敗中です",
   "{n} sources nothing uses are failing": "未使用の {n} 件のソースが失敗中です",
-  "All sources are working": "すべてのソースが動作しています"
+  "All sources are working": "すべてのソースが動作しています",
+  "Used by your series": "シリーズで使用中",
+  "Failing, used by no series": "失敗中・どのシリーズでも未使用",
+  "Switched off by you": "あなたが無効化",
+  "Nothing to fix right now": "今は対応不要",
+  "How a source counts as failing": "ソースが失敗中とみなされる条件",
+  "What the buttons do": "ボタンの働き",
+  "Turn off all {n}": "{n} 件すべて無効にする",
+  "Turn off this source? No series uses it. You can turn it back on in Providers.": "このソースを無効にしますか？ 使っているシリーズはありません。「プロバイダー」でいつでもオンに戻せます。",
+  "Turn off these {n} sources? No series uses them. You can turn them back on in Providers.": "これら {n} 件のソースを無効にしますか？ 使っているシリーズはありません。「プロバイダー」でいつでもオンに戻せます。",
+  "Turning off {done} of {total}…": "{total} 件中 {done} 件目を無効化中…",
+  "1 source turned off": "1 件のソースを無効にしました",
+  "{n} sources turned off": "{n} 件のソースを無効にしました",
+  "1 source could not be turned off": "1 件のソースを無効にできませんでした",
+  "{n} sources could not be turned off": "{n} 件のソースを無効にできませんでした",
+  "Slow lately": "最近遅い",
+  "Test didn’t finish": "テストが完了せず",
+  "Not checked since it failed": "失敗以降未確認",
+  "Hidden language": "非表示の言語",
+  "trying again {when}": "{when}に再試行",
+  "trying again on next use": "次に使うときに再試行",
+  "answers take longer than the limit": "応答が制限時間を超えています",
+  "the site may have changed": "サイトが変わった可能性があります",
+  "Turn sources on in Providers": "「プロバイダー」でソースをオンにする",
+  "Ignored": "無視中",
+  "Turn sources on in Extensions": "「拡張機能」でソースをオンにする"
 }

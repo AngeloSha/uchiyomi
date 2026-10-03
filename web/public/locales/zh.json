@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2755
+    "strings": 2780
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2758,5 +2758,30 @@
   "{n} sources your series use need a look": "你的作品所用的 {n} 个来源需要查看",
   "1 source nothing uses is failing": "1 个无人使用的来源出现故障",
   "{n} sources nothing uses are failing": "{n} 个无人使用的来源出现故障",
-  "All sources are working": "所有来源都在正常工作"
+  "All sources are working": "所有来源都在正常工作",
+  "Used by your series": "你的作品在用",
+  "Failing, used by no series": "出现故障，没有作品在用",
+  "Switched off by you": "已被你关闭",
+  "Nothing to fix right now": "目前无需处理",
+  "How a source counts as failing": "来源何时算作故障",
+  "What the buttons do": "各按钮的作用",
+  "Turn off all {n}": "全部关闭（{n} 个）",
+  "Turn off this source? No series uses it. You can turn it back on in Providers.": "关闭此来源？没有作品使用它。你可以在“提供方”中重新开启。",
+  "Turn off these {n} sources? No series uses them. You can turn them back on in Providers.": "关闭这 {n} 个来源？没有作品使用它们。你可以在“提供方”中重新开启。",
+  "Turning off {done} of {total}…": "正在关闭第 {done} 个，共 {total} 个…",
+  "1 source turned off": "已关闭 1 个来源",
+  "{n} sources turned off": "已关闭 {n} 个来源",
+  "1 source could not be turned off": "1 个来源无法关闭",
+  "{n} sources could not be turned off": "{n} 个来源无法关闭",
+  "Slow lately": "最近较慢",
+  "Test didn’t finish": "测试未完成",
+  "Not checked since it failed": "失败后未再检查",
+  "Hidden language": "语言已隐藏",
+  "trying again {when}": "{when}重试",
+  "trying again on next use": "下次使用时重试",
+  "answers take longer than the limit": "响应超出时限",
+  "the site may have changed": "网站可能已改版",
+  "Turn sources on in Providers": "在“提供方”中开启来源",
+  "Ignored": "已忽略",
+  "Turn sources on in Extensions": "在“扩展”中开启来源"
 }

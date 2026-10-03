@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2755
+    "strings": 2780
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2758,5 +2758,30 @@
   "{n} sources your series use need a look": "Стоит проверить источники ваших серий: {n}",
   "1 source nothing uses is failing": "1 неиспользуемый источник сбоит",
   "{n} sources nothing uses are failing": "Неиспользуемых источников со сбоями: {n}",
-  "All sources are working": "Все источники работают"
+  "All sources are working": "Все источники работают",
+  "Used by your series": "Используются вашими сериями",
+  "Failing, used by no series": "Сбоят, не используются ни в одной серии",
+  "Switched off by you": "Отключены вами",
+  "Nothing to fix right now": "Сейчас исправлять нечего",
+  "How a source counts as failing": "Когда источник считается сбоящим",
+  "What the buttons do": "Что делают кнопки",
+  "Turn off all {n}": "Отключить все ({n})",
+  "Turn off this source? No series uses it. You can turn it back on in Providers.": "Отключить этот источник? Ни одна серия его не использует. Его можно снова включить в «Источниках данных».",
+  "Turn off these {n} sources? No series uses them. You can turn them back on in Providers.": "Отключить эти источники ({n})? Ни одна серия их не использует. Их можно снова включить в «Источниках данных».",
+  "Turning off {done} of {total}…": "Отключаем {done} из {total}…",
+  "1 source turned off": "1 источник отключён",
+  "{n} sources turned off": "Отключено источников: {n}",
+  "1 source could not be turned off": "1 источник не удалось отключить",
+  "{n} sources could not be turned off": "Не удалось отключить источников: {n}",
+  "Slow lately": "В последнее время медленный",
+  "Test didn’t finish": "Проверка не завершилась",
+  "Not checked since it failed": "Не проверялся после сбоя",
+  "Hidden language": "Скрытый язык",
+  "trying again {when}": "новая попытка {when}",
+  "trying again on next use": "новая попытка при следующем обращении",
+  "answers take longer than the limit": "ответы не укладываются в отведённое время",
+  "the site may have changed": "возможно, сайт изменился",
+  "Turn sources on in Providers": "Включить источники в «Источниках данных»",
+  "Ignored": "Игнорируется",
+  "Turn sources on in Extensions": "Включить источники в «Расширениях»"
 }

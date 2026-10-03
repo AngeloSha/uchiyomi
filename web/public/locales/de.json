@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2755
+    "strings": 2780
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -2758,5 +2758,30 @@
   "{n} sources your series use need a look": "{n} von deinen Serien genutzte Quellen sollten geprüft werden",
   "1 source nothing uses is failing": "1 ungenutzte Quelle schlägt fehl",
   "{n} sources nothing uses are failing": "{n} ungenutzte Quellen schlagen fehl",
-  "All sources are working": "Alle Quellen funktionieren"
+  "All sources are working": "Alle Quellen funktionieren",
+  "Used by your series": "Von deinen Serien genutzt",
+  "Failing, used by no series": "Fehlerhaft, von keiner Serie genutzt",
+  "Switched off by you": "Von dir abgeschaltet",
+  "Nothing to fix right now": "Gerade nichts zu beheben",
+  "How a source counts as failing": "Wann eine Quelle als fehlerhaft gilt",
+  "What the buttons do": "Was die Schaltflächen tun",
+  "Turn off all {n}": "Alle {n} abschalten",
+  "Turn off this source? No series uses it. You can turn it back on in Providers.": "Diese Quelle abschalten? Keine Serie nutzt sie. Unter Anbieter kannst du sie wieder einschalten.",
+  "Turn off these {n} sources? No series uses them. You can turn them back on in Providers.": "Diese {n} Quellen abschalten? Keine Serie nutzt sie. Unter Anbieter kannst du sie wieder einschalten.",
+  "Turning off {done} of {total}…": "Wird abgeschaltet: {done} von {total}…",
+  "1 source turned off": "1 Quelle abgeschaltet",
+  "{n} sources turned off": "{n} Quellen abgeschaltet",
+  "1 source could not be turned off": "1 Quelle konnte nicht abgeschaltet werden",
+  "{n} sources could not be turned off": "{n} Quellen konnten nicht abgeschaltet werden",
+  "Slow lately": "Zuletzt langsam",
+  "Test didn’t finish": "Test nicht abgeschlossen",
+  "Not checked since it failed": "Seit dem Fehler nicht geprüft",
+  "Hidden language": "Ausgeblendete Sprache",
+  "trying again {when}": "neuer Versuch {when}",
+  "trying again on next use": "neuer Versuch bei der nächsten Nutzung",
+  "answers take longer than the limit": "Antworten dauern länger als erlaubt",
+  "the site may have changed": "die Website hat sich vielleicht geändert",
+  "Turn sources on in Providers": "Quellen unter Anbieter einschalten",
+  "Ignored": "Ignoriert",
+  "Turn sources on in Extensions": "Quellen unter Erweiterungen einschalten"
 }

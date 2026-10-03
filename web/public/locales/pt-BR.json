@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2755
+    "strings": 2780
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -2758,5 +2758,30 @@
   "{n} sources your series use need a look": "{n} fontes usadas pelas suas séries precisam de uma olhada",
   "1 source nothing uses is failing": "1 fonte sem uso está falhando",
   "{n} sources nothing uses are failing": "{n} fontes sem uso estão falhando",
-  "All sources are working": "Todas as fontes estão funcionando"
+  "All sources are working": "Todas as fontes estão funcionando",
+  "Used by your series": "Usadas pelas suas séries",
+  "Failing, used by no series": "Com falhas, nenhuma série as usa",
+  "Switched off by you": "Desativadas por você",
+  "Nothing to fix right now": "Nada a corrigir agora",
+  "How a source counts as failing": "Quando uma fonte é considerada com falhas",
+  "What the buttons do": "O que os botões fazem",
+  "Turn off all {n}": "Desativar as {n}",
+  "Turn off this source? No series uses it. You can turn it back on in Providers.": "Desativar esta fonte? Nenhuma série a usa. Você pode reativá-la em Provedores.",
+  "Turn off these {n} sources? No series uses them. You can turn them back on in Providers.": "Desativar estas {n} fontes? Nenhuma série as usa. Você pode reativá-las em Provedores.",
+  "Turning off {done} of {total}…": "Desativando {done} de {total}…",
+  "1 source turned off": "1 fonte desativada",
+  "{n} sources turned off": "{n} fontes desativadas",
+  "1 source could not be turned off": "1 fonte não pôde ser desativada",
+  "{n} sources could not be turned off": "{n} fontes não puderam ser desativadas",
+  "Slow lately": "Lenta ultimamente",
+  "Test didn’t finish": "O teste não terminou",
+  "Not checked since it failed": "Não verificada desde a falha",
+  "Hidden language": "Idioma oculto",
+  "trying again {when}": "nova tentativa {when}",
+  "trying again on next use": "nova tentativa no próximo uso",
+  "answers take longer than the limit": "as respostas demoram mais que o limite",
+  "the site may have changed": "o site pode ter mudado",
+  "Turn sources on in Providers": "Ativar fontes em Provedores",
+  "Ignored": "Ignorada",
+  "Turn sources on in Extensions": "Ativar fontes em Extensões"
 }

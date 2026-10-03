@@ -25,6 +25,8 @@ import { api } from '@/lib/api';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
+import { useContextMenu, type MenuItem } from '@/components/ContextMenu';
+import { Disclosure } from '@/components/settings';
 import { StatusMark } from '@/components/StatusMark';
 import { OnBody } from '@/components/ui';
 import { NumberingSheet } from '@/components/NumberingSheet';
@@ -33,7 +35,7 @@ import { t as tr } from '@/lib/i18n';
 import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { isDesktop } from '@/lib/desktop';
 import { languageName } from '@/lib/format';
-import { IDLE, type ActionState } from '@/lib/actionState';
+import { IDLE, actionButton, isBusy, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
   ACTION_COPY, actionCopy, caveatLine, caveatTone, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
@@ -95,6 +97,32 @@ export function scanState(r: RefreshAnswer, startedAt: number): ActionState {
 }
 
 /**
+ * Turn off: the one request behind a row's Turn off and Source health's Turn off all (v0.53.0), which makes it for
+ * each source in turn (lib/sourceHealth.ts turnOffEach).
+ */
+export const disableSource = (sourceId: string) =>
+  api(`/api/admin/sources/${encodeURIComponent(sourceId)}/disable`, { method: 'POST' });
+
+/**
+ * v0.53.0, Source health's compact row (components/SourceHealthBody.tsx): the row on one line -- `lead` before its
+ * words, ONE key, and every other action in a ⋯ menu -- with `details` behind a Details disclosure.
+ */
+export interface CompactRow {
+  /** Before the words: the source's tile. */
+  lead: ReactNode;
+  /** The row's one line, under its name (the row's children). */
+  line: ReactNode;
+  /** The one key the row shows, or none (lib/sourceHealth.ts primaryOf). Every other action is in its menu. */
+  primary: HealthAction | null;
+  /** Behind Details, closed until opened. */
+  details?: ReactNode;
+  /** What the row is about, for its menu's name and its ⋯ key's. */
+  name: string;
+  /** More hooks on the row, for the browser walks. */
+  hooks?: Record<`data-${string}`, string>;
+}
+
+/**
  * One finding's row: its words (the caller's children -- title, detail, and #115's evidence), what the last
  * attempt found, what an action will not be able to do, the keys, and the status line.
  *
@@ -102,12 +130,14 @@ export function scanState(r: RefreshAnswer, startedAt: number): ActionState {
  * lib/healthKeys.ts: its state -- a Fix working, a Test's verdict -- must follow the finding when a re-check
  * removes the row above it.
  */
-export function HealthRow({ check, item, rowKey, links, children }: {
+export function HealthRow({ check, item, rowKey, links, children, compact }: {
   check: HealthCheck;
   item: HealthItem;
   rowKey: string;
   links?: ReactNode;
   children: ReactNode;
+  /** v0.53.0: Source health's compact row. The actions, their states and their confirmations are this row's own either way. */
+  compact?: CompactRow;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -174,6 +204,9 @@ export function HealthRow({ check, item, rowKey, links, children }: {
       await rr.recheck().catch(() => {});
       if (err) { setSync({ action: a, at, state: { kind: 'failed', finishedAt: Date.now(), reason: err } }); toast(err, 'error'); return; }
       if (!out) { setSync(null); return; }
+      // v0.53.0, Source health: Turn off and Ignore move a compact row into a fold that is closed, and this line goes with
+      // it -- so it is said in a notice too, as a delete's and a merge's are.
+      if (compact && out.ok !== false && (a === 'disable' || a === 'ignore' || a === 'unignore')) toast(out.text, 'success');
       setSync({ action: a, at, state: out.ok === false
         ? { kind: 'failed', finishedAt: Date.now(), reason: out.text }
         : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: out.text, ...(out.partial ? { partial: true } : {}) } });
@@ -251,7 +284,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
 
   const doDisable = async (): Promise<{ text: string }> => {
     setAsking(null);
-    await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/disable`, { method: 'POST' });
+    await disableSource(item.sourceId || '');
     return { text: tr('That source is switched off') };
   };
 
@@ -374,25 +407,9 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   const caveats = (item.caveats ?? []).filter((c) => actions.includes(c.action))
     .map((c) => ({ text: caveatLine(c), tone: caveatTone(c) })).filter((c) => c.text);
 
-  return (
-    <div data-health-item={rowKey} data-repair-state={rowNow.kind} className={`px-4 py-2.5 ${item.info ? 'opacity-60' : ''}`}>
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="min-w-0 flex-1">{children}</div>
-        {links && <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">{links}</div>}
-      </div>
-      {outcome && <p data-health-outcome className="mt-1 text-[11px] leading-relaxed text-fog-400">{outcome}</p>}
-      {caveats.map((c) => (
-        <p key={c.text} data-health-caveat={c.tone} className={`mt-1 text-[11px] leading-relaxed ${c.tone === 'calm' ? 'text-fog-400' : 'text-amber-300/90'}`}>{c.text}</p>
-      ))}
-      {(specs.length > 0 || finds.length > 0) && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {specs.length > 0 && <ActionKeys actions={specs} />}
-          {finds.length > 0 && <ActionKeys actions={finds} />}
-        </div>
-      )}
-      <ActionStatus state={rowNow} />
-      {finds.length > 0 && <ActionStatus state={findNow} />}
-
+  // The plan a numbering key opens and every confirmation, wherever the row draws its keys.
+  const dialogs = (
+    <>
       {/* #116: the plan a numbering key opened (on <body>, itself). Its Confirm is this row's press. */}
       {plan && item.seriesId && (
         <NumberingSheet seriesId={item.seriesId} mode={plan.mode} onClose={() => setPlan(null)}
@@ -489,6 +506,100 @@ export function HealthRow({ check, item, rowKey, links, children }: {
           />
         </OnBody>
       )}
+    </>
+  );
+
+  // v0.53.0, Source health: the same keys, one shown and the rest in a ⋯ menu. An item there runs exactly what its key
+  // would -- the same press, the same state line under the row, the same confirmation -- and is disabled as the key
+  // would be: while another key of its group works (a running Find other sources keeps its own group), or Stop while
+  // that run goes.
+  const main = compact?.primary ? specs.find((sp) => sp.id === compact.primary) ?? null : null;
+  const specsBusy = specs.some((sp) => isBusy(sp.state));
+  const findBusy = finds.some((sp) => isBusy(sp.state));
+  const menu = useContextMenu(() => all
+    // A running search shows its Stop as a key beside the row's own, so it is not in the menu twice.
+    .filter((sp) => sp !== main && !(findBusy && sp.id === 'find_sources'))
+    .map((sp): MenuItem => {
+      const st = sp.state ?? IDLE;
+      const btn = actionButton(st, sp.runLabel ?? sp.label);
+      const groupBusy = sp.id === 'find_sources' ? findBusy : specsBusy;
+      return {
+        label: btn.stop ? btn.label : (sp.runLabel ?? sp.label),
+        hook: sp.id,
+        danger: sp.danger,
+        divider: sp.id === 'ignore' || sp.id === 'unignore',
+        disabled: !!sp.disabled || (st.kind === 'working' && !!st.stopping) || (groupBusy && !btn.stop),
+        onSelect: () => { if (btn.stop && st.kind === 'working') st.onStop?.(); else sp.onRun?.(); },
+      };
+    }), { label: compact?.name ?? '' });
+
+  if (compact) {
+    // The name, the key and the ⋯ share the first line, and the row's line runs under them: on a phone across the
+    // row's whole width, so neither the key nor a long name squeezes it; from `sm` under the name alone, the tile, the
+    // key and the ⋯ centred beside the two lines. ⚠️ Start and end lines only, never `sm:col-span-*` / `sm:row-span-*`:
+    // a span utility is the `grid-column` shorthand, which resets the start, and every cell fell back to auto-placement.
+    return (
+      <div data-health-item={rowKey} data-repair-state={rowNow.kind} {...compact.hooks} {...menu.bind}
+        className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-x-3 px-4 py-2.5">
+        <div className="col-start-1 row-start-1 sm:row-end-3">{compact.lead}</div>
+        <div className="col-start-2 row-start-1 min-w-0">{children}</div>
+        <div className="col-start-2 col-end-5 row-start-2 min-w-0 sm:col-end-3">{compact.line}</div>
+        {(main || findBusy) && (
+          <div className="col-start-3 row-start-1 flex items-center gap-1.5 sm:row-end-3">
+            {main && (
+              <ActionKeys actions={[{
+                ...main,
+                disabled: main.disabled || (specsBusy && !isBusy(main.state)),
+                buttonProps: { ...main.buttonProps, 'data-health-primary': '' } as ActionSpec['buttonProps'],
+              }]} />
+            )}
+            {findBusy && <ActionKeys actions={finds} />}
+          </div>
+        )}
+        <button type="button" data-health-more onClick={(e) => menu.openFrom(e.currentTarget)}
+          aria-haspopup="menu" aria-expanded={menu.open} aria-label={`${tr('More')}: ${compact.name}`}
+          className="btn-key col-start-4 row-start-1 w-8 px-0 text-fog-400 sm:row-end-3">
+          <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+        </button>
+        <div className="col-start-2 col-end-5 row-start-3 min-w-0">
+          {outcome && <p data-health-outcome className="mt-1 text-[11px] leading-relaxed text-fog-400">{outcome}</p>}
+          {caveats.map((c) => (
+            <p key={c.text} data-health-caveat={c.tone} className={`mt-1 text-[11px] leading-relaxed ${c.tone === 'calm' ? 'text-fog-400' : 'text-amber-300/90'}`}>{c.text}</p>
+          ))}
+          <ActionStatus state={rowNow} />
+          {finds.length > 0 && <ActionStatus state={findNow} />}
+          {compact.details && (
+            <div data-health-details>
+              <Disclosure label={tr('Details')}>{compact.details}</Disclosure>
+            </div>
+          )}
+        </div>
+        {menu.element}
+        {dialogs}
+      </div>
+    );
+  }
+
+  return (
+    <div data-health-item={rowKey} data-repair-state={rowNow.kind} className={`px-4 py-2.5 ${item.info ? 'opacity-60' : ''}`}>
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">{children}</div>
+        {links && <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">{links}</div>}
+      </div>
+      {outcome && <p data-health-outcome className="mt-1 text-[11px] leading-relaxed text-fog-400">{outcome}</p>}
+      {caveats.map((c) => (
+        <p key={c.text} data-health-caveat={c.tone} className={`mt-1 text-[11px] leading-relaxed ${c.tone === 'calm' ? 'text-fog-400' : 'text-amber-300/90'}`}>{c.text}</p>
+      ))}
+      {(specs.length > 0 || finds.length > 0) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {specs.length > 0 && <ActionKeys actions={specs} />}
+          {finds.length > 0 && <ActionKeys actions={finds} />}
+        </div>
+      )}
+      <ActionStatus state={rowNow} />
+      {finds.length > 0 && <ActionStatus state={findNow} />}
+
+      {dialogs}
     </div>
   );
 }
@@ -516,7 +627,11 @@ const laterCopies = (check: HealthCheck): HealthItem[] =>
  * long), then the card-wide actions as full rows with their own status -- Fix all (the card's one repair
  * step), Reset the solver, Merge all, Scan the library now.
  */
-export function HealthCardActions({ check }: { check: HealthCheck }) {
+export function HealthCardActions({ check, className = 'border-b border-ink-800/70 px-4 pt-2' }: {
+  check: HealthCheck;
+  /** Where it sits: above a card's rows by default; Source health opens it at the card's foot (v0.53.0). */
+  className?: string;
+}) {
   const toast = useToast();
   const rr = useRepairRun();
   const { status, slots } = rr;
@@ -656,7 +771,7 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
   };
 
   return (
-    <div data-health-legend={check.id} className="border-b border-ink-800/70 px-4 pt-2">
+    <div data-health-legend={check.id} className={className}>
       <ActionList actions={rows} aria-label={tr('What you can do here')} />
       {asking && (
         <OnBody>
