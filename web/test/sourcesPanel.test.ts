@@ -434,3 +434,18 @@ test('Make main is offered on a follower that works, asks first in one line, and
   assert.match(sheet, /setRefused\(\{ id: s\.sourceId, why: msgOf\(e, tr\('Could not change the main source'\)\) \}\);/, 'a refusal is said in the server\'s English');
   assert.match(code('components/SourcesSheet.tsx'), /makeMain=\{adminAccount && mayMakeMain\(s\) \? \{/, 'Make main is offered where mayMakeMain says no');
 });
+
+test('a Replace run is named for its source, and offers Replace again only while series are left on it', async () => {
+  // Server tasks and the results sheet read "Source replacement" for any source; the run card carries the source since
+  // the integration. Reintroduce replaceRunTitle() without the name: the first two fail.
+  const { replaceRunTitle } = await import('../lib/jobs');
+  const { runName } = await import('../lib/serverDownloads');
+  assert.equal(replaceRunTitle('Aqua Manga'), 'Replacing ⁨Aqua Manga⁩');
+  assert.equal(runName({ kind: 'find_sources', mode: 'replace', sourceName: 'Aqua Manga', repairKind: undefined, label: undefined, number: undefined } as never),
+    'Replacing ⁨Aqua Manga⁩', 'Server tasks does not say which source is being replaced');
+  assert.equal(replaceRunTitle(), 'Source replacement', 'a run from an older server, with no source, has no name');
+  // A run that moved every series has nothing to do again. Reintroduce the key without `run.left`: this fails.
+  const dialog = readFileSync(join(__dirname, '..', 'components/ReplaceDialog.tsx'), 'utf8');
+  assert.match(dialog, /\{ended && onAgain && !!run\?\.left && <button type="button" onClick=\{onAgain\}[^>]*data-replace-again>/,
+    'Replace again is offered after a run that left nothing on the source');
+});

@@ -128,8 +128,8 @@ export const turnOffAllLabel = (n: number): string => (n === 1 ? tr('Turn off') 
 
 /** What Turn off all asks before it does anything (Health's card, and Admin → Sources' Needs attention since v0.54.0). */
 export const turnOffQuestion = (n: number): string => (n === 1
-  ? tr('Turn off this source? No series uses it. You can turn it back on in Admin → Sources.')
-  : tr('Turn off these {n} sources? No series uses them. You can turn them back on in Admin → Sources.', { n }));
+  ? tr('Turn off this source? No series uses it. You can turn it back on any time.')
+  : tr('Turn off these {n} sources? No series uses them. You can turn them back on any time.', { n }));
 
 /**
  * Turn off all: the row's own Turn off (`post`, the request HealthActions.tsx's `disableSource` makes), for each source

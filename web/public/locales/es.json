@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2971
+    "strings": 2974
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -2974,5 +2974,8 @@
   "Replace again": "Reemplazar de nuevo",
   "Source packs": "Paquetes de fuentes",
   "Mount a compiled source pack at the server’s {dir}, then reload: it is picked up with no restart.": "Monta un paquete de fuentes compilado en {dir} del servidor y recarga: se usa sin reiniciar.",
-  "That doesn’t look like a web address. It starts with https://": "Eso no parece una dirección web. Empieza por https://"
+  "That doesn’t look like a web address. It starts with https://": "Eso no parece una dirección web. Empieza por https://",
+  "Turn off this source? No series uses it. You can turn it back on any time.": "¿Desactivar esta fuente? Ninguna serie la usa. Puedes volver a activarla cuando quieras.",
+  "Turn off these {n} sources? No series uses them. You can turn them back on any time.": "¿Desactivar estas {n} fuentes? Ninguna serie las usa. Puedes volver a activarlas cuando quieras.",
+  "Replacing {name}": "Reemplazo de {name}"
 }

@@ -234,10 +234,10 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     'the library still marks these {n} deleted, and no scan has read the files since',
   // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
   'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
-  // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources" (v0.54.0: the
-  // place it names is Admin → Sources).
-  'Turn off this source? No series uses it. You can turn it back on in Admin → Sources.':
-    'Turn off these {n} sources? No series uses them. You can turn them back on in Admin → Sources.',
+  // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources". It names no
+  // place (v0.54.0): it is asked on Admin → Sources itself as well as on Health.
+  'Turn off this source? No series uses it. You can turn it back on any time.':
+    'Turn off these {n} sources? No series uses them. You can turn them back on any time.',
   // v0.54.0, Admin → Sources: a source's Turn off, and the Replace dialog's head and plan, where "it" and "its" agree too.
   '1 series uses it. It stops getting new chapters from this source until you turn it back on. Nothing is deleted.':
     '{n} series use it. They stop getting new chapters from this source until you turn it back on. Nothing is deleted.',

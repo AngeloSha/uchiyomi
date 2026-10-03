@@ -183,7 +183,8 @@ function RunView({ sourceId, name, fr, slot, live, onClose, onResults, onAgain }
           ) : (
             <>
               {ended && onResults && <button type="button" onClick={onResults} className="btn-key" data-replace-results>{tr('Show results')}</button>}
-              {ended && onAgain && <button type="button" onClick={onAgain} className="btn-key" data-replace-again>{tr('Replace again')}</button>}
+              {/* Only while series are still on the source: a run that moved them all has nothing to do again. */}
+              {ended && onAgain && !!run?.left && <button type="button" onClick={onAgain} className="btn-key" data-replace-again>{tr('Replace again')}</button>}
               <button type="button" onClick={onClose} className="btn-key" data-replace-close>{tr('Close')}</button>
             </>
           )}

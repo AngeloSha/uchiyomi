@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2971
+    "strings": 2974
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2974,5 +2974,8 @@
   "Replace again": "استبدال مرة أخرى",
   "Source packs": "حزم المصادر",
   "Mount a compiled source pack at the server’s {dir}, then reload: it is picked up with no restart.": "ركّب حزمة مصادر مُجمَّعة في {dir} على الخادم، ثم أعد التحميل: تُلتقط من دون إعادة تشغيل.",
-  "That doesn’t look like a web address. It starts with https://": "لا يبدو هذا عنوان موقع. يبدأ بـ https://"
+  "That doesn’t look like a web address. It starts with https://": "لا يبدو هذا عنوان موقع. يبدأ بـ https://",
+  "Turn off this source? No series uses it. You can turn it back on any time.": "هل تريد تعطيل هذا المصدر؟ لا تستخدمه أي سلسلة. يمكنك إعادة تفعيله في أي وقت.",
+  "Turn off these {n} sources? No series uses them. You can turn them back on any time.": "هل تريد تعطيل هذه المصادر الـ {n}؟ لا تستخدمها أي سلسلة. يمكنك إعادة تفعيلها في أي وقت.",
+  "Replacing {name}": "استبدال {name}"
 }

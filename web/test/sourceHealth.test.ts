@@ -163,10 +163,10 @@ test('Turn off all asks about the failing sources nothing uses, in words that ag
   assert.deepEqual(bulkTargets([{ ...ROWS[4], actions: ['test'] }]), [], 'only a row that can still be turned off');
   assert.equal(turnOffAllLabel(5), 'Turn off all 5');
   assert.equal(turnOffAllLabel(1), 'Turn off', 'one source: the row\'s own verb, never "Turn off all 1"');
-  // v0.54.0: they come back on in Admin → Sources, whatever switched them off (Providers before, which could not turn
-  // an extension's source back on).
-  assert.equal(turnOffQuestion(5), 'Turn off these 5 sources? No series uses them. You can turn them back on in Admin → Sources.');
-  assert.equal(turnOffQuestion(1), 'Turn off this source? No series uses it. You can turn it back on in Admin → Sources.');
+  // v0.54.0: it names no place -- it is asked on Admin → Sources itself, where "in Admin → Sources" read as somewhere else.
+  // Reintroduce the old words: these two fail.
+  assert.equal(turnOffQuestion(5), 'Turn off these 5 sources? No series uses them. You can turn them back on any time.');
+  assert.equal(turnOffQuestion(1), 'Turn off this source? No series uses it. You can turn it back on any time.');
   assert.equal(turnOffOutcome(5, 0), '5 sources turned off');
   assert.equal(turnOffOutcome(1, 0), '1 source turned off');
   assert.equal(turnOffOutcome(3, 2), '3 sources turned off · 2 sources could not be turned off');

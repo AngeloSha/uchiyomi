@@ -131,8 +131,12 @@ export function runTitle(kind: RunKind): string {
     : tr('Fetch newest');
 }
 
-/** v0.54.0: a Replace run's name, the noun for "Replace" as "Other-source search" is Find other sources'. */
-export const replaceRunTitle = (): string => tr('Source replacement');
+/**
+ * v0.54.0: a Replace run's name, the noun for "Replace" as "Other-source search" is Find other sources'. With the source
+ * the run carries (since the integration, `sourceName`), it says which: Server tasks read "Source replacement" for any.
+ */
+export const replaceRunTitle = (name?: string): string =>
+  (name ? tr('Replacing {name}', { name: `\u2068${name}\u2069` }) : tr('Source replacement'));
 
 /**
  * The line under a run's name: how far it has got and what it has saved. The repair counts steps, the other

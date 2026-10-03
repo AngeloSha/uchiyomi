@@ -472,7 +472,7 @@ test('the results open on <body>, whatever card opened them, and each group is i
   // `fixed` sheet inside it (the slow archive's s14 MAJOR). Reintroduce `return (<Sheet` without OnBody: this names it.
   const src = code(read('components/FindSources.tsx'));
   const sheet = slice(src, 'export function FindResultsSheet(', 'export function FindRunCard(');
-  assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{run && isReplace\(run\) \? replaceRunTitle\(\) : tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
+  assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{run && isReplace\(run\) \? replaceRunTitle\(run\.sourceName\) : tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
   // The skipped group has a key of its own (v0.52.0): the shared "Skipped" is also a match's state and an import row's,
   // and the heading is about series, which es, fr and pt agree it with. Reintroduce the shared key: this fails.
   for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped series'], ['not-tried', 'Not tried']]) {

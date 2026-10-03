@@ -62,7 +62,7 @@ export function FindRunRow({ run, onStop, stopping, label }: { run: FindRun; onS
   const spec: ActionSpec = {
     id: 'find-run',
     // v0.54.0: a Replace run is named for what it does.
-    label: label ?? (isReplace(run) ? replaceRunTitle() : tr('Other-source search')),
+    label: label ?? (isReplace(run) ? replaceRunTitle(run.sourceName) : tr('Other-source search')),
     what: whenLine(run),
     state: findRunState(run, { onStop, stopping, status: label === undefined }),
     ...(running && onStop ? { onRun: onStop, buttonProps: { 'data-find-stop': '' } as ActionSpec['buttonProps'] } : {}),
@@ -192,7 +192,7 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
   }
   return (
     <OnBody>
-      <Sheet title={run && isReplace(run) ? replaceRunTitle() : tr('Other-source search')} onClose={onClose} overBottomNav>
+      <Sheet title={run && isReplace(run) ? replaceRunTitle(run.sourceName) : tr('Other-source search')} onClose={onClose} overBottomNav>
         <div data-find-results ref={top} className="pb-2">
           {openId && (
             <div className="mb-2">
