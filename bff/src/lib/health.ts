@@ -866,7 +866,11 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
  * the main source of 195 series while this card read "Every series has a working source": only a source that was not
  * loaded counted. A main that is only cooling down is not listed: that ends by itself.
  */
-export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState()): Promise<HealthCheck> {
+export async function frozenSeries(
+  ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState(),
+  /** v0.55.0: every row, not the first twenty -- Fix everything's extensions phase reads them all (lib/autofix.ts). */
+  o: { all?: boolean } = {},
+): Promise<HealthCheck> {
   let readFailed = false;
   const now = Date.now();
   // The loaded main sources that cannot update a series now, and how: `off` or `failing`.
@@ -977,8 +981,8 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
   });
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
-  const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
-  for (const r of covered.slice(0, 20)) {
+  const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, o.all ? undefined : 20);
+  for (const r of covered.slice(0, o.all ? undefined : 20)) {
     const stall = stalled(r);
     items.push({
       seriesId: r.id,
@@ -1262,7 +1266,7 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
  * editions instead of Merge. Reintroduce by grouping by series again: "two editions of one work are no duplicate" in
  * editions.int.test.ts finds the pair.
  */
-async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const found = await q<{ external_id: string; members: Array<{ id: string; title: string; work: string; lang: string | null; source_id: string | null }> }>(
     `SELECT t.external_id,
             json_agg(json_build_object('id', ls.id, 'title', ls.title, 'work', COALESCE(ls.work_id::text, ls.id),
@@ -1349,19 +1353,30 @@ function median(sorted: number[]): number {
   return (sorted[Math.floor(mid)] + sorted[Math.ceil(mid)]) / 2;
 }
 
+/**
+ * The impossible-number rule over a series' held numbers: the limit a chapter number may not pass -- four times the
+ * median, or the median plus 500, whichever is more -- when one does, else null. Exported (v0.55.0) for the repair's
+ * gap step under Fix everything, which leaves such a series to the files phase: one chapter numbered 9001 is a
+ * 9000-chapter "gap".
+ */
+export function impossibleLimit(numbers: readonly number[]): number | null {
+  // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
+  // including it would drag the median down towards nothing.
+  const nums = numbers.filter((n) => n > 0).sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const med = median(nums);
+  const limit = Math.max(med * 4, med + 500);
+  return nums[nums.length - 1] > limit ? limit : null;
+}
+
 /** Chapter numbers far beyond the rest of the series: the sidebar-widget scraping bug's signature. */
 async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
-      // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
-      // including it would drag the median down towards nothing.
+      const limit = impossibleLimit(s.numbers);
+      if (limit === null) return null;
       const nums = s.numbers.filter((n) => n > 0).sort((a, b) => a - b);
-      if (!nums.length) return null;
-      const med = median(nums);
-      const hi = nums[nums.length - 1];
-      const limit = Math.max(med * 4, med + 500);
-      if (!(hi > limit)) return null;
-      return { s, med, hi, limit };
+      return { s, med: median(nums), hi: nums[nums.length - 1], limit };
     })
     .filter((r): r is NonNullable<typeof r> => !!r)
     .sort((a, b) => b.hi - a.hi);
@@ -1431,8 +1446,17 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
  * Reintroduce by dropping the listing test: "the chip names the later files, and only them" in health.int.test.ts
  * finds the fallback's 336.5 among them.
  */
-async function savedTwice(): Promise<HealthCheck> {
-  const rows = await q<{ series_id: string; title: string; id: string; number: number; source_id: string; mtime: string | number }>(
+/** One chapter file of a saved-twice group: its row, its number (the override's when there is one) and where it came from. */
+export interface TwiceBook { series_id: string; title: string; id: string; number: number; source_id: string; mtime: string | number }
+
+/**
+ * Every series with a chapter saved twice, and per whole number the group that arrived first (`earlier`, which stays)
+ * and the later group in another split (`later`, which the row offers for deletion): savedTwice's finding, whole --
+ * Health lists it, and Fix everything's files phase (v0.55.0, lib/autofix.ts) deletes the later copy only where the
+ * earlier one is complete.
+ */
+export async function savedTwiceGroups(): Promise<Array<{ seriesId: string; title: string; groups: Array<{ whole: number; earlier: TwiceBook[]; later: TwiceBook[] }> }>> {
+  const rows = await q<TwiceBook>(
     `WITH mixed AS (
        SELECT series_id FROM lib_books WHERE pruned_at IS NULL AND source_id IS NOT NULL
         GROUP BY series_id HAVING count(DISTINCT source_id) > 1)
@@ -1450,7 +1474,7 @@ async function savedTwice(): Promise<HealthCheck> {
     if (list) list.push(r);
     else bySeries.set(r.series_id, [r]);
   }
-  const items: HealthItem[] = [];
+  const out: Array<{ seriesId: string; title: string; groups: Array<{ whole: number; earlier: TwiceBook[]; later: TwiceBook[] }> }> = [];
   for (const [seriesId, books] of bySeries) {
     // Per whole number, per source: which group came first, and which came after it.
     const wholes = new Map<number, Map<string, Book[]>>();
@@ -1462,14 +1486,16 @@ async function savedTwice(): Promise<HealthCheck> {
       if (g) g.push(b);
       else groups.set(b.source_id, [b]);
     }
-    const later: Array<{ from: string; source: string; books: Book[] }> = [];
-    for (const groups of wholes.values()) {
+    const later: Array<{ whole: number; from: string; first: Book[]; source: string; books: Book[] }> = [];
+    for (const [whole, groups] of wholes) {
       if (groups.size < 2) continue;
       const spans = [...groups].map(([source, list]) => {
         const times = list.map((b) => Number(b.mtime));
         return { source, list, first: Math.min(...times), last: Math.max(...times) };
       }).sort((a, b) => a.first - b.first);
-      for (const g of spans.slice(1)) if (g.first > spans[0].last) later.push({ from: spans[0].source, source: g.source, books: g.list });
+      for (const g of spans.slice(1)) {
+        if (g.first > spans[0].last) later.push({ whole, from: spans[0].source, first: spans[0].list, source: g.source, books: g.list });
+      }
     }
     if (!later.length) continue;
     const listing = await q<{ number: number; source_id: string; copies: ListingCopy[] | null }>(
@@ -1479,15 +1505,24 @@ async function savedTwice(): Promise<HealthCheck> {
       const who = new Set([l.source_id, ...(l.copies ?? []).map((c) => c.source)]);
       listers.set(numKey(Number(l.number)), who);
     }
-    const twice = later
-      .filter((g) => !g.books.some((b) => listers.get(numKey(Number(b.number)))?.has(g.from)))
-      .flatMap((g) => g.books.map((b) => ({ ...b, n: numKey(Number(b.number)) })))
+    const kept = later.filter((g) => !g.books.some((b) => listers.get(numKey(Number(b.number)))?.has(g.from)));
+    if (!kept.length) continue;
+    out.push({ seriesId, title: books[0].title, groups: kept.map((g) => ({ whole: g.whole, earlier: g.first, later: g.books })) });
+  }
+  return out;
+}
+
+async function savedTwice(): Promise<HealthCheck> {
+  const items: HealthItem[] = [];
+  for (const { seriesId, title, groups } of await savedTwiceGroups()) {
+    const twice = groups
+      .flatMap((g) => g.later.map((b) => ({ ...b, n: numKey(Number(b.number)) })))
       .sort((a, b) => a.n - b.n);
     if (!twice.length) continue;
     const sources = [...new Set(twice.map((b) => b.source_id))].map((id) => getSource(id)?.name ?? id);
     items.push({
       seriesId,
-      title: books[0].title,
+      title,
       ...detailOf([say('twice.detail', {
         n: twice.length, numbers: twice.slice(0, 5).map((b) => b.n), more: Math.max(0, twice.length - 5), source: sources.join(', '),
       })]),

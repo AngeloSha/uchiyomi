@@ -257,7 +257,16 @@ ever hit.
 - `REPAIR_DIRECTIONS_MAX` (default `500`, 1–5000): series one run asks each service — MangaDex, then AniList —
   about their reading direction (step 8 below): at most five and ten requests a night at the default.
 - `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
-  re-checks. `0` is a legitimate value and means no pause at all.
+  re-checks. `0` is a legitimate value and means no pause at all. Fix everything paces every series of its
+  failures, short and gap steps by it too.
+- `AUTOFIX_MAX_MINUTES` (default `90`, 1–1440): how long one run of Health's **Fix everything** (since v0.55.0)
+  may work through the network-heavy part -- Replace, the failures, short and gap steps, extensions -- before it
+  stops at a safe point; what is left waits for the next run.
+- `AUTOFIX_SEARCHES` (default `60`, 0–1000): searches of other sites one Fix everything run may start for short
+  chapters and gaps, shared like the repair's five.
+- `AUTOFIX_INSTALLS` (default `3`, 0–10): extensions one Fix everything run may install for series no source
+  carries; `0` switches its extensions phase off. A package it installed that carries no series is removed again
+  before the run ends, and is not tried again for a month.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
@@ -328,7 +337,10 @@ provable on their own, and two more only when you switch them on, in this order:
    zero-page chapter. The copies come from the chapter listing the step refreshes before it asks anything,
    so a source that is in a cooldown at that moment offers no copy at all rather than one that stays
    silent; either way it is not part of a proof.
-5. **Gaps.** `REPAIR_GAPS_MAX` series with the largest holes, at most once a day each: a hole a followed
+5. **Gaps.** `REPAIR_GAPS_MAX` series, the least recently checked first (since v0.55.0; before, the largest holes
+   first, which searched the same unfillable ones every night), at most once a day each, and never one whose last
+   search found nobody has its chapters while that answer is under a week old and nothing has landed since. Holes
+   below a series' "Latest N" start are left alone: nothing fetches below it. A hole a followed
    source already lists is left to the chapter sweep, and only a hole nobody lists starts a search. A
    source is followed only under the same 90%-numbering rule as every other automatic follow, and at most
    20 chapters are fetched per series. A series the run has no searches left for is not marked as checked:

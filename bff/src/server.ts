@@ -22,6 +22,7 @@ import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
 import { notifyAdmins } from './lib/push';
+import { closeInterruptedAutofix } from './lib/autofix';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
@@ -64,6 +65,8 @@ async function main() {
   await loadUnstatedLang().catch((e) => console.warn(`[lang] could not read the unstated language: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
+  // v0.55.0: a Fix everything run the last process was in the middle of (lib/autofix.ts) reads `interrupted`, not running.
+  await closeInterruptedAutofix(null).catch((e) => console.warn(`[autofix] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
   // What finished downloading in the last day, back into the Downloads view, and every chapter from here on

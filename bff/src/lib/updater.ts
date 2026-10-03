@@ -179,8 +179,11 @@ export interface UpdateOpts {
    * An admin has seen the plan of this series' pending numbering change and confirmed it (lib/numbering.ts
    * requestNumbering): the run applies it even though files are renamed. Nothing else passes it -- a series in
    * a library is never renumbered unattended.
+   * `'clean'` (v0.55.0): Fix everything, which the owner allowed to apply a plan only when the plan built at the apply
+   * is marked `clean` (lib/postingOrder.ts: nothing parked, no guess, no collision, no tracker push, no download
+   * running); any other plan stays held for an admin.
    */
-  confirmRenumber?: boolean;
+  confirmRenumber?: boolean | 'clean';
 }
 
 /**
@@ -335,7 +338,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       return { ...nothing(s.title, 'renumber_pending'), asked: true, ...(r ? { renumber: r } : {}) };
     };
     if (!rawNumbering?.length || !numberingSource) return held();
-    renumber = await settleNumbering(s, numberingSource, rawNumbering, { confirm: !!opts.confirmRenumber });
+    renumber = await settleNumbering(s, numberingSource, rawNumbering, { confirm: opts.confirmRenumber === 'clean' ? 'clean' : !!opts.confirmRenumber });
     if (renumber.state !== 'applied' && renumber.state !== 'none') return held(renumber);
     // The apply moved chapter_floor and the slow archive's boundary into the new numbers (numbering.ts commit):
     // both are read again, or this run's floor would hold a source number against posting numbers.

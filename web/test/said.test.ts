@@ -50,6 +50,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   offline: (c) => c === 1, state: (c) => (c === 1 ? 'off' : 'failing'),
   // v0.55.0, gaps.belowFloor: the first chapter a "Latest N" series was started from.
   start: () => 176,
+  // v0.55.0, Fix everything (bff lib/autofix.ts): a Test's verdict, the series a copy merged into, why a part was skipped.
+  ok: (c) => c === 1, into: () => 'Walk Tale', why: () => 'time',
 };
 
 /**

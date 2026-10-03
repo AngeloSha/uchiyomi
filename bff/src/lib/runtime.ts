@@ -83,6 +83,12 @@ export const runtime: {
    */
   repairing: boolean;
   /**
+   * Fix everything is running (v0.55.0, lib/autofix.ts). A repair and a Find or Replace run refuse to start beside it --
+   * it drives those itself, one after another -- and it holds `repairing` while it runs the repair's steps, scans,
+   * merges, renumbers or deletes, so a chapter sweep stands down meanwhile as it does for a repair.
+   */
+  autofixing: boolean;
+  /**
    * Re-arms the nightly backup timer, installed by server.ts once the scheduler exists.
    *
    * The scheduler arms ONE timer per run and re-reads `backup_hour` only when that timer fires, so before
@@ -106,5 +112,6 @@ export const runtime: {
   lastCleanupResult: null,
   cleaning: false,
   repairing: false,
+  autofixing: false,
   rearmBackup: null,
 };

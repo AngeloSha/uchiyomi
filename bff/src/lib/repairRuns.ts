@@ -140,8 +140,10 @@ export async function startRunRecord(run: {
   id: string; startedAt: number; origin: RunOrigin; kind: string; only: RepairStep[] | null; target: RunTarget; by: string | null;
 }): Promise<RunTarget> {
   const target = await labelled(run.target).catch(() => run.target);
+  // A Fix everything run (v0.55.0, kind `autofix`) is closed by lib/autofix.ts: it drives the repair's steps itself
+  // and may be running right now, which no repair is beside.
   await q(`UPDATE repair_runs SET status = 'interrupted', finished_at = COALESCE(finished_at, now())
-            WHERE status = 'running' AND id <> $1`, [run.id]).catch(warn('closing an interrupted run'));
+            WHERE status = 'running' AND id <> $1 AND kind <> 'autofix'`, [run.id]).catch(warn('closing an interrupted run'));
   // by_user through a sub-select: an id that names no account (a deleted one, or a test's) stores NULL
   // rather than failing the foreign key -- and the insert with it.
   await q(`INSERT INTO repair_runs (id, started_at, origin, kind, only_steps, target, by_user, status)
@@ -260,8 +262,9 @@ export async function runDigest(now = Date.now()): Promise<RunDigest> {
              WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 5`).catch(() => [] as Row[]),
     q<Row>(`SELECT id, finished_at, ms, origin, result FROM repair_runs
              WHERE kind = 'full' AND finished_at IS NOT NULL AND status <> 'interrupted' ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
+    // Not a Fix everything run (v0.55.0): the Tasks row's "Latest one-off fix" is a repair's.
     q<Row>(`SELECT id, kind, target, finished_at, status, result FROM repair_runs
-             WHERE kind <> 'full' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
+             WHERE kind <> 'full' AND kind <> 'autofix' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
     q<{ kind: string; ms: number; step_ms: RepairRunRecord['stepMs']; target: RunTarget | null }>(
       `SELECT kind, ms, step_ms, target FROM (
          SELECT kind, ms, step_ms, target, row_number() OVER (PARTITION BY kind ORDER BY finished_at DESC) AS rn
@@ -277,6 +280,8 @@ export async function runDigest(now = Date.now()): Promise<RunDigest> {
     // the whole-library step read seconds. Only untargeted runs teach what a step costs.
     const t = r.target ?? {};
     if (t.seriesId || t.bookId || t.sourceId) continue;
+    // A Fix everything run's times are its phases', not the repair's steps (v0.55.0).
+    if (r.kind === 'autofix') continue;
     for (const [step, ms] of Object.entries(r.step_ms ?? {})) {
       if (typeof ms !== 'number') continue;
       if (!bySteps.has(step)) bySteps.set(step, []);

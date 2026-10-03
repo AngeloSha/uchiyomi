@@ -537,6 +537,33 @@ ignoring it: the finding is then reported greyed (`ignored`, `info`), stays quie
 missing runs, a folder's files) is part of what was ignored, and its ignore is forgotten once it has been gone
 for a week. Short chapters use confirm-short, which already records the same judgement.
 
+**Fix everything** (since v0.55.0). `POST /api/admin/health/autofix` (`{}`) starts one background run that drives
+every Health card it can to green -- 202 `{ok, runId}`, or 409 `{error: 'busy', running}` beside another run
+(`autofix`), a repair (`repair`), a Find or Replace (`find`) or a chapter sweep (`sweep`); a repair and a Find started
+beside it are refused in turn (`POST /api/admin/sources/find` answers 409 `autofix_running`). Its ten phases, in
+order, reuse what Health's own keys run: `preflight` (the engine and the solver), `scan` (the library scan and the
+page count), `solver` (the repair's solver step, interrupted renumbers finished, the engine's Cloudflare helper
+connected when Health's engine row offers it and `FLARESOLVERR_URL` is set), `sources` (failing, inconclusive and
+blocked sources Tested, a block cleared only after a passing Test; Replace with turnOff for every source some series
+has as its main that is off, failing or uninstalled -- never for a setting or behind a solver that is down; failing
+sources nothing uses retired), `duplicates` (two-language pairs linked as editions; same-language copies merged only
+when their AniList entry, language and titles or chapter lists agree, keeping the copy that still updates), `numbering`
+(a renumbering plan applied only when the plan built at the apply is clean), `chapters` (the repair's failures, short
+and gap steps, uncapped but paced), `extensions` (up to `AUTOFIX_INSTALLS` extensions installed in the series'
+language for series no source carries or gaps nobody had, only that language's source switched on, kept only when a
+series now reads through it), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
+impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
+`GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
+`GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
+(`{ok, stopping}`), never inside a merge, a delete or a renumber. A run is `{id, status, startedAt, finishedAt?, by,
+phase, phaseIndex, current?, summary?, log?}`, every sentence a `Said` (`autofix.*` codes): `summary` is `{green,
+done, clears, needsYou}` -- `green` when nothing but Needs you is left, `done` one line per kind of thing done (at
+most twelve, with `items`), `clears` what ends by itself (with `at`), `needsYou` what only a person can do, each with
+its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or `{kind: 'settings', key}`). Runs are kept in the
+repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
+audited as `library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
+`done`/`total` its phases, `step` the phase).
+
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
 own six-hourly run stored, never by running the checks. `key` changes only when *which* checks found something
@@ -1168,6 +1195,8 @@ DELETE /api/downloads/:bookId     GET    /api/books/:id/download-manifest
 ```
 GET    /api/admin/stats           GET    /api/admin/health
 GET    /api/admin/health/summary  POST   /api/admin/health/ignore
+POST   /api/admin/health/autofix  GET    /api/admin/health/autofix
+GET    /api/admin/health/autofix/:runId POST /api/admin/health/autofix/stop
 GET    /api/admin/settings        PATCH  /api/admin/settings
 GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id

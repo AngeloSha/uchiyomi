@@ -35,7 +35,7 @@ export async function mainUses(sourceId: string): Promise<number> {
 
 export async function retireSource(
   sourceId: string,
-  o: { how: RetireHow; userId: string | null; req?: FastifyRequest; via?: 'admin' | 'replace'; runId?: string },
+  o: { how: RetireHow; userId: string | null; req?: FastifyRequest; via?: 'admin' | 'replace' | 'autofix'; runId?: string },
 ): Promise<Retired> {
   // Reintroduce by dropping it: "refuses while it is some series' main source" in retireSource.int.test.ts retires it.
   const main = await mainUses(sourceId);

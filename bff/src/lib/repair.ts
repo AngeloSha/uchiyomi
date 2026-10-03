@@ -74,10 +74,11 @@ import { assess, gapsOf, splitAtFloor } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
 // question the page answers or the button and the page disagree about whether there is anything to do.
-import { solverBlaming, gapsAnswered, type StoredGaps } from './health';
+import { solverBlaming, gapsAnswered, impossibleLimit, type StoredGaps } from './health';
 import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
 import { withOrigin } from './downloadActivity';
+import { standingsOf } from './sourceStanding';
 
 /**
  * Which of the eight steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
@@ -209,6 +210,19 @@ export const REPAIR_LIMITS = Object.freeze({
 /** Skip reasons one run keeps: enough to say why a press did nothing, bounded like the audit's lists. */
 const MAX_SKIPS = 20;
 
+/**
+ * Fix everything's bounds on the steps it drives (v0.55.0, lib/autofix.ts, `RepairOpts.autofix`): the steps are
+ * "uncapped but paced" there -- every short chapter, every series with a gap, every failed chapter of a source that
+ * can be asked -- and what bounds them is that run's own time and search budget (AutofixDrive), REPAIR_PACE_MS
+ * between series, and these per-target ceilings: files one count step opens, chapters one gap fetch or one re-check
+ * downloads per series.
+ */
+const AUTOFIX_COUNT_MAX = 100_000;
+const AUTOFIX_GAP_CHAPTERS = 100;
+const AUTOFIX_RECHECK_CHAPTERS = 50;
+/** No cap on targets in a driven step: the run's own budget ends it. */
+const UNCAPPED = 1_000_000;
+
 export interface RepairOpts {
   /** Run only these steps. Absent (or empty) means all five, in REPAIR_STEPS order. */
   only?: RepairStep[];
@@ -234,6 +248,15 @@ export interface RepairOpts {
    * anything, so refusing a deliberate press would be a puzzle with no upside.
    */
   userId?: string | null;
+  /**
+   * v0.55.0: Fix everything is driving this pass (lib/autofix.ts, through repairForAutofix -- never the route, whose body
+   * schema has no such field). The short and gap steps take every target, paced, with the run's own search budget;
+   * the gap step also fetches the gap chapters a followed source lists (as Fill now does), skips a series with an
+   * impossible chapter number or a renumber waiting, and keeps no once-a-day stamp of its own (the hunt keeps its
+   * 24-hour stamp); the failures step resets the rows of every source that can be asked now -- never one that is
+   * failing, switched off or cooling down -- and re-checks their series; nothing is audited as a repair.
+   */
+  autofix?: true;
 }
 
 export interface RepairResult {
@@ -437,11 +460,25 @@ export function setRepairNext(at: number | null): void {
  * obeyed everywhere a shutdown is: between series, between chapters, between steps -- never mid-write.
  */
 let activeCard: RunCard | null = null;
-/** Why the run must stop now, if it must: the server going down, or someone pressing Cancel. */
+
+/**
+ * Fix everything's hold on the steps it drives (v0.55.0, lib/autofix.ts): when to stop -- its Stop, or its time budget
+ * -- the searches its whole run may start, and a listener for what the step is on, for the run's "Now: …". Set by
+ * repairForAutofix for one pass, never beside a repair of its own (each refuses the other).
+ */
+export interface AutofixDrive {
+  halt: () => boolean;
+  budget: { left: number };
+  onCurrent?: (cur: RepairCurrent | null, step: RepairStep | null) => void;
+}
+let driven: AutofixDrive | null = null;
+let drivenStep: RepairStep | null = null;
+
+/** Why the run must stop now, if it must: the server going down, someone pressing Cancel, or Fix everything's own stop. */
 const halted = (): 'shutdown' | 'cancelled' | null =>
-  runtime.stopping ? 'shutdown' : stopRequested(activeCard) ? 'cancelled' : null;
+  runtime.stopping ? 'shutdown' : stopRequested(activeCard) || !!driven?.halt() ? 'cancelled' : null;
 /** For updateSeries: the chapter loop's own between-chapters check. */
-const cancelled = () => stopRequested(activeCard);
+const cancelled = () => stopRequested(activeCard) || !!driven?.halt();
 
 /**
  * THE writer of "what the run is on now": the live object, and the run's card beside it (its `current` is a
@@ -452,6 +489,7 @@ function here(cur: RepairCurrent | null): RepairCurrent | null {
   const live = repairState.live;
   if (live) live.current = cur;
   if (activeCard) activeCard.current = cur?.seriesId && cur.title ? { id: cur.seriesId, title: cur.title } : undefined;
+  driven?.onCurrent?.(cur, drivenStep);
   return cur;
 }
 
@@ -464,6 +502,7 @@ function enterStep(step: RepairStep, index: number): void {
     live.stepStartedAt = Date.now();
   }
   if (activeCard) activeCard.step = step;
+  drivenStep = step;
   here(null);
 }
 
@@ -574,11 +613,11 @@ async function stepSolver(r: RepairResult, log?: Log): Promise<void> {
  * does not measure; writing it from a page count would tell the reader a 40-page chapter is 40 pages of
  * unknown size and take out every layout decision the reader makes.
  */
-async function stepCount(r: RepairResult, log?: Log): Promise<void> {
+async function stepCount(r: RepairResult, opts: RepairOpts, log?: Log): Promise<void> {
   const rows = await q<{ id: string; root: string; file: string }>(
     `SELECT id, root, file FROM lib_books
       WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL
-      ORDER BY mtime DESC LIMIT $1`, [REPAIR_COUNT_MAX],
+      ORDER BY mtime DESC LIMIT $1`, [opts.autofix ? AUTOFIX_COUNT_MAX : REPAIR_COUNT_MAX],
   );
   planned('count', rows.length);
   const cur = here({ kind: 'files', phase: 'counting', done: 0, of: rows.length })!;
@@ -618,6 +657,7 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
  * retry would be a guaranteed second refusal and a second strike with it.
  */
 async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: number }, pending: Dated[], log?: Log): Promise<RepairResult['stopped']> {
+  if (opts.autofix) return failuresDriven(r, pending, log);
   // "Fix all issues": every source's rows, as each source's Retry now would (see RepairOpts.now).
   const wide = !!opts.now && !opts.sourceId;
   // ⚠️ `first_at = COALESCE(first_at, at)` in all three (v0.49.0). `at` is the LAST attempt -- the ledger
@@ -730,6 +770,56 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
   return stopped;
 }
 
+/**
+ * The failures step as Fix everything drives it (v0.55.0): the rows of every source that can be asked now -- usable:
+ * loaded, switched on, not cooling down, and not failing at the chapter list, the pages or the images (a source
+ * failing there was Replaced in that run's sources phase, and a reset would only send three more requests per
+ * chapter to a site that is refusing) -- go back to zero attempts, and every series behind them is re-checked, paced,
+ * downloading up to AUTOFIX_RECHECK_CHAPTERS, never hunting (the run's searches are the gap step's). The rest wait:
+ * their rows clear when their chapter lands, by the sweep or by a source a later run finds.
+ * Reintroduce by resetting every source's rows: "the failures step resets only the sources that can be asked" in
+ * autofix.int.test.ts finds the failing source's row reset.
+ */
+async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Promise<RepairResult['stopped']> {
+  const ledger = await q<{ source_id: string }>('SELECT DISTINCT source_id FROM chapter_failures').catch(() => []);
+  const standing = await standingsOf(ledger.map((x) => x.source_id)).catch(() => new Map());
+  const askable = ledger.map((x) => x.source_id).filter((id) => standing.get(id) === 'usable');
+  if (!askable.length) return undefined;
+  const reset = await q<{ series_id: string }>(
+    `UPDATE chapter_failures SET attempts = 0, first_at = COALESCE(first_at, at), at = now()
+      WHERE source_id = ANY($1::text[]) RETURNING series_id`, [askable]);
+  r.failures.reset = reset.length;
+  const ids = [...new Set(reset.map((x) => x.series_id))];
+  const rows = await q<{ id: string; folder: string; title: string }>(
+    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')} ORDER BY s.title`, [ids],
+  ).catch(() => []);
+  planned('failures', rows.length);
+  let series = 0, added = 0, failed = 0;
+  let stopped: RepairResult['stopped'];
+  for (const [i, s] of rows.entries()) {
+    { const h = halted(); if (h) { stopped = h; break; } }
+    if (busyFolders.has(s.folder)) continue;
+    here({ kind: 'series', seriesId: s.id, title: s.title, phase: 'rechecking', done: i, of: rows.length });
+    series++;
+    busyFolders.add(s.folder);
+    try {
+      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled });
+      added += up.added;
+      failed += up.failed;
+      if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
+      if (up.diskFull) { stopped = 'disk'; break; }
+    } catch (e: any) {
+      if (e?.diskFull) { stopped = 'disk'; break; }
+      log?.warn(`repair: re-checking ${s.id} after the reset threw: ${(e as Error)?.message || e}`);
+    } finally {
+      busyFolders.delete(s.folder);
+    }
+    if (REPAIR_PACE_MS) await sleep(REPAIR_PACE_MS);
+  }
+  r.failures.retried = { series, added, failed };
+  return stopped;
+}
+
 /** One short chapter's row, joined to what the download needs. */
 type ShortBook = {
   id: string; series_id: string; number: number; pages: number; root: string; file: string; source_id: string | null;
@@ -810,7 +900,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         AND b.root = $1 AND b.file = s.folder || '/Chapter ' || (b.number::int)::text || '.cbz'
         ${opts.bookId ? 'AND b.id = $3' : ''}
       ORDER BY b.mtime DESC LIMIT $2`,
-    opts.bookId ? [DL_ROOT, REPAIR_SHORT_MAX, opts.bookId] : [DL_ROOT, REPAIR_SHORT_MAX],
+    opts.bookId ? [DL_ROOT, REPAIR_SHORT_MAX, opts.bookId] : [DL_ROOT, opts.autofix ? UNCAPPED : REPAIR_SHORT_MAX],
   );
   // And then asked again in TypeScript, of the real function. The SQL above is the bound (it is what makes
   // the LIMIT mean "twenty candidates"); this is the answer. If the two ever disagree -- a rename of the
@@ -989,6 +1079,8 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
     } finally {
       busyFolders.delete(folder);
     }
+    // Uncapped when Fix everything drives it, so paced between series as the failures step is.
+    if (opts.autofix && REPAIR_PACE_MS) await sleep(REPAIR_PACE_MS);
   }
   return stopped;
 }
@@ -1365,7 +1457,12 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   const candidates = await q<{ id: string; title: string; folder: string; checked: Date | null; result: StoredGaps | null; floor: number | null }>(
     `SELECT s.id, s.title, s.folder, s.gaps_checked_at AS checked, s.gaps_result AS result, s.chapter_floor::float8 AS floor FROM lib_series s
       WHERE ${opts.seriesId ? '' : 's.auto_update AND '}${visibleToAll('s')}
-        ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
+        ${opts.seriesId ? 'AND s.id = $1'
+          // Fix everything (v0.55.0) keeps no once-a-day stamp of its own -- the hunt's 24-hour stamp still holds for
+          // every series -- and leaves alone a series whose renumber waits: its downloads are held, and its numbers
+          // are about to change.
+          : opts.autofix ? 'AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL'
+          : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
   );
   // A series whose every missing number its slow archive (#117) is going to fetch -- listed below its boundary,
@@ -1393,6 +1490,11 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     // finds it looked at and stored as the sweep's.
     const gaps = splitAtFloor(gapsOf(have), s.floor).above;
     if (!gaps.length) continue;
+    // Fix everything (v0.55.0) leaves a series with an impossible chapter number to its files phase: one chapter
+    // numbered 9001 is a 9000-chapter "gap", and a search for it would follow whatever lists the most chapters.
+    // Reintroduce by dropping it: "the gaps step leaves a series with an impossible number alone" in autofix.int.test.ts
+    // finds it searched.
+    if (opts.autofix && impossibleLimit(have) !== null) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
     const archive = archiving.get(s.id);
@@ -1410,7 +1512,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   // was never reached. Reintroduce by sorting by `missing` alone: "the gaps rotate" in repair.int.test.ts finds the
   // most recently checked series taken ahead of one never checked.
   ranked.sort((a, b) => a.checkedAt - b.checkedAt || b.missing - a.missing);
-  const take = ranked.slice(0, REPAIR_GAPS_MAX);
+  const take = opts.autofix ? ranked : ranked.slice(0, REPAIR_GAPS_MAX);
   planned('gaps', take.length);
   if (opts.seriesId && !take.length) {
     // Fill now on a series with nothing to fill (the hole closed since the page loaded), or one that is no
@@ -1451,6 +1553,18 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     // run had no search for, and they are still the emptiest ones tomorrow.
     if (unlisted.size && budget.left <= 0) {
       skip(r, { step: 'gaps', target: { seriesId: s.id, title: s.title }, why: 'no_searches_left' });
+      // Fix everything (v0.55.0) goes on: a series behind this one may need no search, and what a followed source lists
+      // is fetched for this one all the same -- still with no stamp and no verdict, as above.
+      if (opts.autofix) {
+        if (sweepable.length) {
+          at('fetching');
+          const got = await fetchGaps(s, gapSet, null, log);
+          r.gaps.fetched += got.fetched;
+          if (got.pending) pending.push(got.pending);
+          if (got.disk) { stopped = 'disk'; break; }
+        }
+        continue;
+      }
       log?.info(`repair: no searches left this run -- "${s.title}" and any series behind it keep their place in the queue`);
       break;
     }
@@ -1505,39 +1619,15 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     // Reintroduce by dropping `opts.seriesId && sweepable.length`: "Fill now fetches a gap a followed source
     // already lists" in repair.int.test.ts finds nothing fetched.
     let sweepLeft = sweepable.length;
-    if (out.followed || (opts.seriesId && sweepable.length)) {
+    // Fix everything (v0.55.0) fetches what a followed source lists as Fill now does: it is there to turn the card
+    // green, and "the next sweep fetches it" is a promise it can keep now.
+    if (out.followed || ((opts.seriesId || opts.autofix) && sweepable.length)) {
       at('fetching');
-      busyFolders.add(s.folder);
-      try {
-        // Fill now fetches below an active slow archive's boundary too (#117): the person asked for these
-        // chapters now, at normal pace, rather than at the archive's turn -- and without it the sweep's floor
-        // rises to the boundary and this fetches nothing while the row reads "listed". The nightly keeps the
-        // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
-        // below an active archive's boundary" in repair.int.test.ts fetches nothing.
-        const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId });
-        const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
-        out.fetched = fetched.length;
-        // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
-        // series, oldest missing chapter first up to REPAIR_GAP_CHAPTERS -- so following a source with a
-        // longer catalogue can land twenty chapters of which three were the gap. `fetched` answers "was
-        // the hole filled"; `landed` answers "what did the night cost", and a line that reported only the
-        // first would understate the download by an order.
-        out.landed = up.landed.length;
-        r.gaps.fetched += fetched.length;
-        const got = new Set(fetched.map((l) => Math.floor(l.number)));
-        sweepLeft = sweepable.filter((n) => !got.has(n)).length;
-        if (up.landed.length) {
-          log?.info(`repair: "${s.title}": ${up.landed.length} chapter(s) landed from ${out.followed ?? 'the sources it follows'}, `
-            + `${fetched.length} of them inside the gap`);
-        }
-        if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
-        if (up.diskFull) stopped = 'disk';
-      } catch (e: any) {
-        if (e?.diskFull) stopped = 'disk';
-        else log?.warn(`repair: fetching "${s.title}"'s gaps threw: ${(e as Error)?.message || e}`);
-      } finally {
-        busyFolders.delete(s.folder);
-      }
+      const got = await fetchGaps(s, gapSet, out, log);
+      r.gaps.fetched += got.fetched;
+      sweepLeft = sweepable.filter((n) => !got.numbers.has(n)).length;
+      if (got.pending) pending.push(got.pending);
+      if (got.disk) stopped = 'disk';
     }
     // What the sweep still has to fetch: the listed gap chapters, less any this run just fetched.
     out.sweep = sweepLeft;
@@ -1548,8 +1638,50 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     r.gaps.unfillable += unfillable.length;
     await q('UPDATE lib_series SET gaps_result = $2::jsonb WHERE id = $1', [s.id, JSON.stringify(out)]).catch(() => {});
     if (stopped) break;
+    if (opts.autofix && REPAIR_PACE_MS) await sleep(REPAIR_PACE_MS);
   }
   return stopped;
+
+  /**
+   * The gap fetch: the ordinary sweep of the series, oldest missing chapter first, up to REPAIR_GAP_CHAPTERS (or
+   * AUTOFIX_GAP_CHAPTERS when Fix everything drives it). `out`, the verdict being written, learns what landed.
+   */
+  async function fetchGaps(
+    s: { id: string; title: string; folder: string }, gapSet: Set<number>, out: GapsResult | null, log?: Log,
+  ): Promise<{ fetched: number; numbers: Set<number>; pending: Dated | null; disk: boolean }> {
+    busyFolders.add(s.folder);
+    try {
+      // Fill now fetches below an active slow archive's boundary too (#117): the person asked for these
+      // chapters now, at normal pace, rather than at the archive's turn -- and without it the sweep's floor
+      // rises to the boundary and this fetches nothing while the row reads "listed". The nightly keeps the
+      // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
+      // below an active archive's boundary" in repair.int.test.ts fetches nothing.
+      const up = await updateSeries(s.id, opts.autofix ? AUTOFIX_GAP_CHAPTERS : REPAIR_GAP_CHAPTERS, {
+        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId,
+      });
+      const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
+      // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
+      // series, oldest missing chapter first up to REPAIR_GAP_CHAPTERS -- so following a source with a
+      // longer catalogue can land twenty chapters of which three were the gap. `fetched` answers "was
+      // the hole filled"; `landed` answers "what did the night cost", and a line that reported only the
+      // first would understate the download by an order.
+      if (out) { out.fetched = fetched.length; out.landed = up.landed.length; }
+      if (up.landed.length) {
+        log?.info(`repair: "${s.title}": ${up.landed.length} chapter(s) landed from ${out?.followed ?? 'the sources it follows'}, `
+          + `${fetched.length} of them inside the gap`);
+      }
+      return {
+        fetched: fetched.length, numbers: new Set(fetched.map((l) => Math.floor(l.number))),
+        pending: up.added && up.folder && up.chapters?.length ? { folder: up.folder, chapters: up.chapters, landed: up.landed } : null,
+        disk: !!up.diskFull,
+      };
+    } catch (e: any) {
+      if (!e?.diskFull) log?.warn(`repair: fetching "${s.title}"'s gaps threw: ${(e as Error)?.message || e}`);
+      return { fetched: 0, numbers: new Set(), pending: null, disk: !!e?.diskFull };
+    } finally {
+      busyFolders.delete(s.folder);
+    }
+  }
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1591,7 +1723,8 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   }
 
   const want = (s: RepairStep) => !opts.only?.length || opts.only.includes(s);
-  const budget = { left: REPAIR_HUNT_BUDGET };
+  // Fix everything's pass searches out of that run's own budget (AUTOFIX_SEARCHES), shared by every step it drives.
+  const budget = opts.autofix && driven ? driven.budget : { left: REPAIR_HUNT_BUDGET };
   const pending: Dated[] = [];
   const notes: Notes = { replaced: [], confirmed: [], followed: [], upgraded: [] };
   let stopped: RepairResult['stopped'];
@@ -1609,14 +1742,15 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     enterStep(step, steps.indexOf(step));
     const t = Date.now();
     if (step === 'solver') await stepSolver(r, log);
-    else if (step === 'count') await stepCount(r, log);
+    else if (step === 'count') await stepCount(r, opts, log);
     else if (step === 'failures') stopped = await stepFailures(r, opts, budget, pending, log);
     else if (step === 'short') {
       // A RESERVE, not a second budget: the short step is handed a view of the shared pot capped at
       // REPAIR_SHORT_HUNT_MAX, and whatever it spent out of that view is charged to the pot when it
       // returns. The run's total is still REPAIR_HUNT_BUDGET searches; only the share one step can take
       // in a night is bounded, so the gap step below always has some left to spend.
-      const reserve = { left: Math.min(budget.left, REPAIR_SHORT_HUNT_MAX) };
+      // Fix everything's pass gives the short step half of what is left, so the gap step after it keeps the rest.
+      const reserve = { left: opts.autofix ? Math.ceil(budget.left / 2) : Math.min(budget.left, REPAIR_SHORT_HUNT_MAX) };
       const had = reserve.left;
       if (live) live.shortReserve = Object.assign(reserve, { of: had });
       stopped = await stepShort(r, opts, reserve, notes, log);
@@ -1649,6 +1783,8 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   here(null);
   const out: RepairResult = { ...r, ms: Date.now() - t0, ...(stopped ? { stopped } : {}) };
   if (live) live.notes = notes;
+  // Fix everything audits its own run (`library.autofix`): its passes through these steps are parts of it.
+  if (opts.autofix) return out;
   await logAudit('library.repair', {
     userId: opts.userId ?? null,
     detail: {
@@ -1671,6 +1807,25 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
 }
 
 /**
+ * One pass of the given steps for Fix everything (v0.55.0, lib/autofix.ts), driven by its `drive`: its stop and time
+ * budget end the pass at the steps' own safe points (between series, between chapters, never mid-write), its search
+ * budget is the hunts', and what the pass is on is told to `drive.onCurrent`. No history row, no run card and no audit
+ * of its own -- the autofix run has those -- and no `repairState.live`, so Health's repair strip says nothing about it.
+ * The caller holds the cross-job lock (`runtime.repairing`) around it, as runRepair does around a repair. Throws `busy`
+ * beside a repair, which never starts beside Fix everything either (runRepair, `runtime.autofixing`).
+ */
+export async function repairForAutofix(log: Log | undefined, opts: Omit<RepairOpts, 'autofix'>, drive: AutofixDrive): Promise<RepairResult> {
+  if (driven || repairState.running) throw new Error('busy');
+  driven = drive;
+  try {
+    return await repairLibrary(log, { ...opts, autofix: true });
+  } finally {
+    driven = null;
+    drivenStep = null;
+  }
+}
+
+/**
  * Run it the way the Tasks panel runs it: one at a time, never beside a sweep, result kept and persisted.
  *
  * Same contract as runSweep, runChapterCleanup and runVerify -- `false`, synchronously, when it must not
@@ -1685,7 +1840,10 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
  * `last` and `recent`. Every run is recorded in repair_runs; only a full one moves the Tasks line.
  */
 export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResult> | false {
-  if (repairState.running || runtime.updating) return false;
+  // v0.55.0: never beside Fix everything either, which drives these very steps itself (repairForAutofix). Reintroduce by
+  // dropping `runtime.autofixing`: "one Fix everything at a time, and never beside a repair" in autofix.int.test.ts
+  // starts a repair under it.
+  if (repairState.running || runtime.updating || runtime.autofixing || driven) return false;
   repairState.running = true;
   runtime.repairing = true;
   const full = isFullRun(opts);

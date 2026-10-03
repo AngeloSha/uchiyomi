@@ -142,10 +142,11 @@ test('THE DROPPED VERDICT: both the sweep and the Test button hand diagnose() th
     'lib/sourceCheck.ts builds the Probe only when a bare probe ran, which drops adapterOk for every extension source');
   assert.ok(!/httpStatus: 0, \.\.\.bare/.test(check),
     'lib/sourceCheck.ts encodes "no request was made" as httpStatus 0, which the Probe type reserves for "no answer came back"');
-  // Since v0.55.0 the Test button runs testSource (lib/sourceCheck.ts: the check, recorded and audited); testSource is
-  // read for the shared check, the route for testSource. Reintroduce by inlining a smokeTest + diagnose in either
-  // caller, or by testSource checking some other way: the assertion names the file.
-  const callers: Array<[string, string]> = [['lib/sourceWatchdog.ts', 'checkSourceLive('], ['routes/admin.ts', 'testSource(']];
+  // Since v0.55.0 the Test button runs testSource (lib/sourceCheck.ts: the check, recorded and audited), which Fix
+  // everything's sources phase (lib/autofix.ts) runs too; testSource is read for the shared check, the route and the
+  // run for testSource. Reintroduce by inlining a smokeTest + diagnose in any of them, or by testSource checking some
+  // other way: the assertion names the file.
+  const callers: Array<[string, string]> = [['lib/sourceWatchdog.ts', 'checkSourceLive('], ['routes/admin.ts', 'testSource('], ['lib/autofix.ts', 'testSource(']];
   for (const [file, call] of callers) {
     const src = code(file);
     assert.ok(src.includes(call), `${file} no longer runs the shared live check -- it can disagree with the other caller`);

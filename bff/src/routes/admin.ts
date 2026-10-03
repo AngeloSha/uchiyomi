@@ -73,6 +73,7 @@ import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
+import { autofixRun, autofixState, startAutofix, stopAutofix, type AutofixRun } from '../lib/autofix';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
@@ -3192,6 +3193,62 @@ export default async function adminRoutes(app: FastifyInstance) {
       await logAudit('health.unignore', { userId: userIdOf(req), detail: { check, key }, req });
     }
     return { ok: true };
+  });
+
+  // ---- Fix everything (v0.55.0, lib/autofix.ts) ----
+
+  /**
+   * Said lines that name a series by its title: left out for an admin who hides 18+ (the repair history's rule for its
+   * notes -- they carry no id to hold each title to the listing rule).
+   */
+  const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
+    'autofix.item.notRenumbered', 'autofix.item.deleted']);
+  const scrubRun = (r: AutofixRun | null, hide: boolean): AutofixRun | null => {
+    if (!r || !hide) return r;
+    const keep = (l: { code: string }) => !TITLED.has(l.code);
+    return {
+      ...r,
+      ...(r.current ? { current: { ...r.current, title: undefined } } : {}),
+      ...(r.log ? { log: r.log.filter(keep) } : {}),
+      ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(keep) } : d)) } } : {}),
+    };
+  };
+
+  /**
+   * Start Health's Fix everything: one background run, 202 with its id. 409 `busy` with what is going -- `autofix`,
+   * `repair`, `find` or `sweep` -- beside another run, a repair, a Find or Replace, or a chapter sweep. It runs as the
+   * admin who pressed it: their age reach is what its Replace and Find runs may ask, as theirs (#141).
+   */
+  app.post('/api/admin/health/autofix', async (req, reply) => {
+    const b = z.object({}).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Fix everything takes no options.' });
+    const ctx = await viewCtxFor(userIdOf(req), roleOf(req));
+    const r = startAutofix(userIdOf(req) ?? null, { ctx, origin: 'manual', log: app.log, req });
+    if ('busy' in r) return reply.code(409).send({ error: 'busy', running: r.busy });
+    return reply.code(202).send({ ok: true, runId: r.runId });
+  });
+  /** The run going now, and the newest finished one: what the Health page polls every two seconds while one runs. */
+  app.get('/api/admin/health/autofix', async (req) => {
+    const st = await autofixState();
+    const hide = hideAdult(req);
+    return { run: scrubRun(st.run, hide), last: scrubRun(st.last, hide) };
+  });
+  /** One run, live or kept (repair_runs keeps them as it keeps repairs); 404 when none has that id. */
+  app.get('/api/admin/health/autofix/:runId', async (req, reply) => {
+    const { runId } = req.params as { runId: string };
+    if (!runId || runId.length > 64) return reply.code(400).send({ error: 'bad_request' });
+    const r = await autofixRun(runId);
+    if (!r) return reply.code(404).send({ error: 'not_found' });
+    return scrubRun(r, hideAdult(req));
+  });
+  /**
+   * Stop the run at its next safe point -- between series, steps, sources or pairs, never inside a merge, a delete or a
+   * renumber; its Find or Replace run in flight stops at once. `stopping: false` when nothing is running.
+   */
+  app.post('/api/admin/health/autofix/stop', async (req) => {
+    const stopping = stopAutofix();
+    if (stopping) await logAudit('library.autofix_stop', { userId: userIdOf(req), detail: {}, req });
+    return { ok: stopping, stopping };
   });
 
   // ---- link existing series to AniList entries so tracker sync has an anchor ----
