@@ -6522,7 +6522,10 @@ paths:
         - admin
       summary: Remove a custom site.
       operationId: deleteApiAdminSourcesCustomId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.54.0
+        refused while the site is some series' main source (409 `in_use`): removing it froze every series from it.
+        POST /api/admin/sources/{id}/retire {how: remove} also drops its follows.
       parameters:
         - name: id
           in: path
@@ -6540,6 +6543,8 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`in_use` (since v0.54.0) with `main`, how many series have it as their main source, and `message`/`messageSaid` (Said, retire.inUse): replace it first."
   /api/admin/series/{id}:
     patch:
       tags:
@@ -9914,6 +9919,57 @@ paths:
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
           description: "`decided` (with `state`): followed or dismissed already"
+  /api/admin/sources/{id}/retire:
+    post:
+      tags:
+        - admin
+      summary: "Retire a source no series has as its main source: turn it off, or remove it (since v0.54.0)."
+      operationId: postApiAdminSourcesIdRetire
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused (409
+        `in_use`) while the source is some series' main source: Replace it first (POST /api/admin/sources/find {sourceId,
+        mode: replace}). Otherwise every series' follow of it is dropped with its listing rows, and then `how: off` (the
+        default) switches it off (as POST .../{id}/disable does), and `how: remove` takes a site added by address out of
+        the site list and the registry (`done: removed`), switches an extension's source off in its extension, which
+        unloads it (`done: switched_off`; the extension stays installed -- one package carries every language), and
+        turns anything else -- MangaDex, a built-in, a source pack's -- off, saying so (`done: turned_off`). Audited as
+        `source.retire` {source, how, done, followsDropped}.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                how: { type: string, enum: [off, remove], description: "`off` when left out." }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Retired.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, done, followsDropped]
+                properties:
+                  ok: { type: boolean }
+                  done: { type: string, enum: [turned_off, removed, switched_off] }
+                  followsDropped: { type: integer, minimum: 0, description: Series that followed it and no longer do. }
+        "400":
+          description: "`bad_request`: a `how` it does not know"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "`in_use` with `main` (how many series have it as their main source) and `message`/`messageSaid` (Said, retire.inUse)"
   /api/admin/sources/{id}/test:
     post:
       tags:

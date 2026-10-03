@@ -717,6 +717,10 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'main.renumberPending': () => tr('This series’ chapters are waiting to be renumbered. Review that on the series page first.'),
   'main.unavailable': () => tr('That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.'),
   'main.moved': () => tr('This series’ main source changed meanwhile. Look again.'),
+  // A source retired, or a site removed, while some series still has it as its main source (bff lib/retireSource.ts).
+  'retire.inUse': (p) => (num(p, 'n') === 1
+    ? tr('It is the main source of 1 series. Replace it first.')
+    : tr('It is the main source of {n} series. Replace it first.', { n: num(p, 'n') })),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

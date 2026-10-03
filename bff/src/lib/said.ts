@@ -526,6 +526,8 @@ const EN = {
   'main.renumberPending': () => 'This series’ chapters are waiting to be renumbered. Review that on the series page first.',
   'main.unavailable': () => 'That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.',
   'main.moved': () => 'This series’ main source changed meanwhile. Look again.',
+  // A source retired, or a site removed, while some series still has it as its main source (v0.54.0, lib/retireSource.ts).
+  'retire.inUse': ({ n }: { n: number }) => `It is the main source of ${n} series. Replace it first.`,
 };
 
 export type SaidCode = keyof typeof EN;

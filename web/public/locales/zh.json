@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2849
+    "strings": 2851
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2852,5 +2852,7 @@
   "Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.": "通常是网站发生了变化或拒绝了该扩展：请更新扩展（管理 → 来源）、检查它的设置，或在浏览器中打开该网站。引擎自己的消息会随测试一起显示。",
   "Turn it back on in Admin → Sources.": "请在 管理 → 来源 中重新开启它。",
   "The site now redirects to {host}. Update its address in Admin → Sources.": "该网站现在会重定向到 {host}。请在 管理 → 来源 中更新它的地址。",
-  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "扩展列出了该来源的章节，但没有一个带有章节编号，因此没有可排序、命名或下载的内容。请在扩展自身的设置（管理 → 来源）中寻找编号选项，或在这里“忽略”它。"
+  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "扩展列出了该来源的章节，但没有一个带有章节编号，因此没有可排序、命名或下载的内容。请在扩展自身的设置（管理 → 来源）中寻找编号选项，或在这里“忽略”它。",
+  "It is the main source of 1 series. Replace it first.": "它是 1 部作品的主来源。请先替换它。",
+  "It is the main source of {n} series. Replace it first.": "它是 {n} 部作品的主来源。请先替换它。"
 }

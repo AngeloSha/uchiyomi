@@ -66,6 +66,7 @@ import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
+import { mainUses, retireSource } from '../lib/retireSource';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
@@ -1083,6 +1084,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   // a JSON file; the source pack's custom plugin instantiates the adapters from it on reload. ----
   // readSites/writeSites moved to lib/sources/customSites so the watchdog can follow a moved site too.
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
+  /** A source some series still has as its main source cannot be retired or removed (v0.54.0): how many, in words. */
+  const inUse = (main: number) => {
+    const said = say('retire.inUse', { n: main });
+    return { error: 'in_use', main, message: said.text, messageSaid: saidOf(said) };
+  };
 
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
   app.post('/api/admin/sources/custom', async (req, reply) => {
@@ -1141,8 +1147,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const src = getSource(id);
     return reply.send({ ok: true, id, base: site.base, smoke: src ? await smokeTest(src) : null });
   });
-  app.delete('/api/admin/sources/custom/:id', async (req) => {
+  // Refused while the site is some series' main source (v0.54.0): it was removed at once, with no check, and every series
+  // from it froze -- "no longer installed". Replace moves them first. Reintroduce by dropping the guard: "the custom
+  // site's delete is refused while it is in use" in retireSource.int.test.ts removes it.
+  app.delete('/api/admin/sources/custom/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const main = await mainUses(id);
+    if (main > 0) return reply.code(409).send(inUse(main));
     await writeSites((await readSites()).filter((s) => s.id !== id));
     await reloadAll();
     await logAudit('source.custom_remove', { userId: userIdOf(req), detail: { id }, req });
@@ -3954,6 +3965,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     } finally {
       testing.delete(id);
     }
+  });
+
+  /**
+   * Retire a source no series has as its main source (v0.54.0, lib/retireSource.ts): its follows are dropped with their
+   * listing rows, then `how: 'off'` (the default) switches it off, and `remove` takes a site added by address out of
+   * the list, switches an extension's source off in the extension, and turns anything else (MangaDex, a built-in, a
+   * pack) off -- `done` says which: `turned_off`, `removed` or `switched_off`. 409 `in_use` {main} while it is some
+   * series' main source: Replace it first. Its own route, which Fastify ranks above `/:id/:action` as it ranks `/test`.
+   */
+  app.post('/api/admin/sources/:id/retire', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ how: z.enum(['off', 'remove']).optional() }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'How to retire it: {how: "off" | "remove"}.' });
+    const r = await retireSource(id, { how: b.data.how ?? 'off', userId: userIdOf(req), req });
+    if ('inUse' in r) return reply.code(409).send(inUse(r.inUse));
+    return r;
   });
 
   app.post('/api/admin/sources/:id/:action', async (req, reply) => {

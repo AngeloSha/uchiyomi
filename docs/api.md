@@ -234,6 +234,14 @@ for what is new. Answers **409** while a sweep is running (since v0.49.0 with it
 follow that one instead). It no longer touches extensions -- that is its own scheduled task,
 below, because the engine has to re-read its repositories before "an update is available" means anything.
 
+`POST /api/admin/sources/:id/retire {how?: 'off'|'remove'}` (admin, since v0.54.0) retires a source no series has as
+its main source -- **409** `in_use` with `main` and `messageSaid` (`retire.inUse`) while one does: Replace it first.
+Every series' follow of it is dropped with its listing rows; then `off` (the default) switches it off, and `remove`
+takes a site added by address out of the site list (`done: removed`), switches an extension's source off in its
+extension (`done: switched_off`; the extension stays installed), and only turns anything else off (`done:
+turned_off`). It answers `{ok, done, followsDropped}`, audited `source.retire`. `DELETE /api/admin/sources/custom/:id`
+answers the same **409** `in_use` while the site is some series' main source.
+
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
 source id is derived from its name and the library is keyed on that id, so editing in place is the only way
 to follow a site to a new domain without orphaning every series that came from it.
@@ -1166,6 +1174,7 @@ POST   /api/sources/runs/:kind/cancel
 DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
+POST   /api/admin/sources/:id/retire
 POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/find    GET    /api/admin/sources/find
 POST   /api/admin/sources/find/stop
