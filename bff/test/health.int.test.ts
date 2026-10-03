@@ -297,6 +297,14 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
     const up = await detail('up', 'Engine Fixture');
     assert.match(up.detail, /sw:health-engine is over the source limit \(SUWAYOMI_MAX_SOURCES\)/, 'with the engine up, the limit is the reason');
     assert.doesNotMatch(up.note, /wait for the extension engine/);
+    // v0.55.0: the limit is a slot to free, not a source to replace -- the source works. Reintroduce by offering Replace
+    // there (keysFor -> sourceKeys): the over-limit row reads replace_source.
+    const actions = async (engine: 'off' | 'up', title: string) => (await frozenSeries(noIgnores(), engine)).items.find((i) => i.title === title)!;
+    const slot = await actions('up', 'Engine Fixture');
+    assert.deepEqual(slot.actions, ['free_slot', 'ignore'], 'the over-limit row offers a slot to free, never Replace');
+    assert.equal(slot.sourceId, 'sw:health-engine', 'naming the source Admin → Sources opens on');
+    assert.deepEqual((await actions('off', 'Engine Fixture')).actions, ['ignore'], 'with the engine away there is no slot to free either: the engine is the fix');
+    assert.deepEqual((await actions('up', 'Gone Fixture')).actions, ['replace_source', 'find_sources', 'ignore'], 'a source that is gone still offers Replace');
     // A source that is not an extension's is not the engine's to explain.
     for (const engine of ['off', 'switched_off', 'unreachable', 'up'] as const) {
       assert.match((await detail(engine, 'Gone Fixture')).detail, /gone-pack-source is no longer installed$/, `a non-extension source (${engine})`);

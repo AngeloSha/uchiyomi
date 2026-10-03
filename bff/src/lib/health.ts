@@ -76,7 +76,10 @@ export type HealthAction =
   | 'replace_source'
   // v0.52.0 (#72): the duplicates check's pair in two languages -- link them as editions of one work (POST
   // /api/admin/series/{id}/editions {with}) rather than merge one into the other.
-  | 'link_editions';
+  | 'link_editions'
+  // v0.55.0: a frozen row whose source is dropped by SUWAYOMI_MAX_SOURCES -- open Admin → Sources on `sourceId` to free
+  // a slot (no server action). Offered in place of Replace there: the source works, the limit is the cause.
+  | 'free_slot';
 
 export interface HealthItem {
   seriesId?: string;
@@ -949,6 +952,15 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
     (r.source_id && !engineWhy(r) && bySource.get(r.source_id)
       ? { sourceId: r.source_id, actions, findSeries: bySource.get(r.source_id) }
       : {});
+  // v0.55.0: dropped by SUWAYOMI_MAX_SOURCES -- an extension's source, switched on, the engine answering, and still not
+  // registered -- is a slot to free, not a source to replace: the source works, and Replace would move every series off
+  // it for a setting. `free_slot` opens Admin → Sources on it (no server action), where an unused source can be
+  // switched off. Reintroduce by offering Replace again: "the engine being off is the reason" in health.int.test.ts
+  // finds replace_source on the over-limit row.
+  const overLimit = (r: typeof rows[number]): boolean =>
+    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled;
+  const keysFor = (r: typeof rows[number], actions: HealthAction[]) =>
+    (overLimit(r) && r.source_id ? { sourceId: r.source_id, actions: ['free_slot'] as HealthAction[] } : sourceKeys(r, actions));
   const found: HealthItem[] = frozen.map((r) => {
     const p = { n: r.books_count, source: r.source_id ?? '' };
     return {
@@ -960,7 +972,7 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
         : engineWhy(r)
           ? say(engine === 'unreachable' ? 'frozen.engineDown' : 'frozen.engineOff', p)
           : why(r, p)]),
-      ...sourceKeys(r, ['replace_source', 'find_sources']),
+      ...keysFor(r, ['replace_source', 'find_sources']),
     };
   });
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
@@ -975,7 +987,7 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
         ? say('frozen.followingDown', { source: r.source_id!, state: stall, names: followed.get(r.id)! })
         : say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
       info: true,
-      ...sourceKeys(r, ['replace_source']),
+      ...keysFor(r, ['replace_source']),
     });
   }
   return {

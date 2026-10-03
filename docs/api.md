@@ -1817,7 +1817,9 @@ site's own offline notice; not a cooldown, not a failure at search alone): the r
 (`frozen.failing` {n, source, offline}) and that follows nothing that can update it -- a follower counts only while
 it is usable or cooling down -- with `replace_source` and `find_sources`; a series that still has such a follower is
 `info` (`frozen.followingDown` {source, state, names}) with `replace_source`. A main that is only cooling down is not
-listed.
+listed. Since v0.55.0 a row whose source is dropped by `SUWAYOMI_MAX_SOURCES` (`frozen.overLimit`) carries `free_slot`
+in their place, with `sourceId`: the client opens Admin → Sources on it to free a slot (no server action), since the
+source itself works.
 
 **Review first** (since v0.51.0, #132; @TIGamingTV's idea from PR #133). `POST /api/admin/sources/find` with
 `review: true` runs the same search and the same judgement, follows nothing, and keeps what it found: the run

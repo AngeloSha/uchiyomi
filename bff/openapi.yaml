@@ -8963,6 +8963,15 @@ paths:
         `frozen.followingDown` {source, state: off|failing, names} (or `frozen.following` for a main that is not
         loaded) and the action `replace_source`, which makes that follower its main source. A main that is only
         cooling down is not listed.
+        Since v0.55.0 a `frozen-series` row whose source is dropped by SUWAYOMI_MAX_SOURCES (`frozen.overLimit`: an
+        extension's source, switched on, the engine answering, and not registered) carries the action `free_slot` in
+        place of `replace_source` and `find_sources`, with `sourceId` and no `findSeries`: the client opens Admin ->
+        Sources on that source, where a slot can be freed (no server action). A `chapter-gaps` row is about the holes
+        at or above the series' "Latest N" start (lib_series.chapter_floor) alone -- `numbers` and the count are
+        theirs, and `gaps.alsoBelowFloor` {n, start} says how many more lie before it -- and a series whose every hole
+        lies before its start is an `info` row with no actions and the detail `gaps.belowFloor` {n, start, ranges}
+        (`start` is the first chapter it was started from), counted in the summary by `gaps.beforeStart` {n}: nothing
+        fetches below the start unasked, so neither the repair's gap step nor Fill now works on those holes.
       security:
         - bearer: []
       responses:
