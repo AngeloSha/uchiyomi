@@ -303,7 +303,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   [/^suwayomi: /i, (c) =>
     D('extension_error', "This source's extension reported an error.",
       fixed('fix.extensionFailed',
-        `The extension engine answered, but the extension itself failed${whileStage(c)}. Usually the site changed or refused the extension: update the extension (Admin → Extensions), check its settings, or open the site in a browser. The engine's own message is shown with the test.`,
+        `The extension engine answered, but the extension itself failed${whileStage(c)}. Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.`,
         { stage: c.stage ?? null }),
       'admin')],
 
@@ -360,7 +360,7 @@ export const REASONS: Readonly<Record<DiagnosisCode, string>> = {
  */
 export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagnosis {
   if (f.disabled) {
-    return D('disabled', 'This source is switched off.', fixed('fix.disabled', 'Turn it back on in Admin, Sources, Providers.'), 'admin');
+    return D('disabled', 'This source is switched off.', fixed('fix.disabled', 'Turn it back on in Admin → Sources.'), 'admin');
   }
 
   const err = f.lastError || '';
@@ -375,7 +375,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
     const now = hostOf(probe.finalUrl);
     if (base && now && base !== now) {
       return D('moved', "This source's website moved. An admin needs to point it at the new address.",
-        fixed('fix.moved', `The site now redirects to ${now}. Update its address in Admin, Sources, Providers.`, { host: now }), 'admin');
+        fixed('fix.moved', `The site now redirects to ${now}. Update its address in Admin → Sources.`, { host: now }), 'admin');
     }
     if (probe.transport && /enotfound|eai_again|econnrefused/i.test(probe.transport)) {
       return D('unreachable', 'This source is not answering right now.',
@@ -434,7 +434,7 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       }
       if (fl.kind === 'unnumbered') {
         return D('unnumbered', 'This source lists chapters without numbers Uchiyomi can use.',
-          fixed('fix.unnumbered', "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Extensions), or Ignore it here."),
+          fixed('fix.unnumbered', "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here."),
           'admin');
       }
       if (fl.kind === 'empty') {

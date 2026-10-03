@@ -118,7 +118,7 @@ const EN = {
     'to). A new series from such a source is numbered by posting order; one already in your library is renumbered only ' +
     'when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays ' +
     'with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "Use sequential chapter numbering" ' +
-    'setting, under Admin → Extensions, is the other way out.',
+    'setting, under Admin → Sources, is the other way out.',
   'numbering.shared': ({ name, extras, posts }: { name: string | null; extras: number; posts: number }) =>
     `${name ?? 'Its source'} gives ${extras} of ${posts} posts a number another post has`,
   'numbering.sharedMost': ({ name, extras, posts, most, number }: { name: string | null; extras: number; posts: number; most: number; number: number }) =>
@@ -171,7 +171,7 @@ const EN = {
   'frozen.live': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} no working source`,
   'frozen.none': () => 'Every series has a working source',
   'frozen.covered': ({ n }: { n: number }) => `${n} lost ${s(n, 'its', 'their')} primary but still follow${s(n, 's', '')} another`,
-  'frozen.engineNote': () => 'Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back.',
+  'frozen.engineNote': () => 'Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back.',
   'frozen.note': () =>
     'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
     'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.',
@@ -187,7 +187,7 @@ const EN = {
   'frozen.uninstalled': ({ n, source }: { n: number; source: string }) => `${n} chapters; its source ${source} is no longer installed`,
   // v0.52.0 (#123): its source is MangaDex in a language an admin switched off. `lang` is the app code (es-419).
   'frozen.mangadexOff': ({ n, lang }: { n: number; lang: string }) =>
-    `${n} chapter${s(n, '', 's')}; MangaDex in ${langName(lang)} is switched off in Admin → Providers`,
+    `${n} chapter${s(n, '', 's')}; MangaDex in ${langName(lang)} is switched off in Admin → Sources`,
   'frozen.following': ({ source, names: followed }: { source: string | null; names: string[] }) =>
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
   // v0.54.0: a main source that is loaded and failing at a step an update needs; `offline` when the failure is the
@@ -410,12 +410,12 @@ const EN = {
   // source's gender ("Désactivée", "Desactivada"; the v0.49.1 translation review).
   'engine.switchedOff': () => 'Switched off',
   'engine.notSetUp': () => 'Not set up',
-  'engine.offNote': () => 'Admin → Extensions shows how to bring it back. Its data is kept while it is off.',
+  'engine.offNote': () => 'Admin → Sources shows how to bring it back. Its data is kept while it is off.',
   'engine.fromExtensions': () => 'Series from extensions',
   'engine.notAnswering': ({ error }: { error: string | null }) => `Not answering${error ? ` (${error})` : ''}`,
   'engine.retries': () => 'Uchiyomi asks again every 5 minutes by itself, and its extensions come back without a restart.',
   'engine.reopen': () => 'If it stays this way, quit and reopen Uchiyomi, which starts its extension engine again.',
-  'engine.checkAgain': () => 'Admin → Extensions shows what to check for your setup, and Check again there asks at once.',
+  'engine.checkAgain': () => 'Admin → Sources shows what to check for your setup, and Check again there asks at once.',
   'engine.notAnsweringTitle': () => 'Not answering',
   'engine.asked': ({ n }: { n: number }) => `asked ${n} ${s(n, 'time', 'times')} since it stopped answering`,
   'engine.noAnswer': () => 'no answer at the last try',

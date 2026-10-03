@@ -307,7 +307,7 @@ test('THE BLAMED CONTAINER (#115): the engine answering with the extension\'s er
   assert.doesNotMatch(d.fix, /Check that container/);
   assert.doesNotMatch(d.reason, /did not answer/);
   assert.match(d.fix, /while searching/, 'the fix names the stage');
-  assert.match(d.fix, /Admin → Extensions/);
+  assert.match(d.fix, /Admin → Sources/);
   // The same words stored by traffic diagnose the same way.
   assert.equal(diagnose(facts({ lastError: MANGA_BALL })).code, 'extension_error');
 });

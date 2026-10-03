@@ -291,7 +291,7 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
       const r = await detail(engine, 'Engine Fixture');
       assert.match(r.detail, /^12 chapters; its source sw:health-engine can’t be reached because the extension engine is off$/, `the engine is the reason (${engine})`);
       assert.doesNotMatch(r.detail, /source limit/);
-      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back\. /);
+      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back\. /);
     }
     assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
     const up = await detail('up', 'Engine Fixture');

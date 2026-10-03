@@ -76,7 +76,7 @@ test('the engine switched off on purpose', { skip: DSN ? false : 'set TEST_DATAB
       assert.ok(row, 'a series from a switched-off engine is still listed as waiting');
       assert.match(row!.detail, /because the extension engine is off$/);
       assert.doesNotMatch(row!.detail, /source limit/);
-      assert.match(frozen.note ?? '', /wait for the extension engine; Admin → Extensions shows how to bring it back/);
+      assert.match(frozen.note ?? '', /wait for the extension engine; Admin → Sources shows how to bring it back/);
     });
   } finally {
     await app.close();

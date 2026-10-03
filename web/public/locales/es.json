@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2839
+    "strings": 2849
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -2842,5 +2842,15 @@
   "1 chapter; its source {source} says it is offline": "1 capítulo; su fuente {source} dice que está fuera de línea",
   "{n} chapters; its source {source} says it is offline": "{n} capítulos; su fuente {source} dice que está fuera de línea",
   "primary {source} switched off; still following {names}": "la fuente principal {source} está desactivada; aún sigue {names}",
-  "primary {source} failing; still following {names}": "la fuente principal {source} tiene fallos; aún sigue {names}"
+  "primary {source} failing; still following {names}": "la fuente principal {source} tiene fallos; aún sigue {names}",
+  "Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. \"Keep the source's numbers\" records your choice; the source's own \"Use sequential chapter numbering\" setting, under Admin → Sources, is the other way out.": "Algunas fuentes dan el mismo número de capítulo a muchas publicaciones distintas (Webtoons numera cada publicación según el episodio al que pertenece). Una serie nueva de una fuente así se numera por orden de publicación; una que ya está en tu biblioteca solo se renumera cuando confirmas su plan, y no descarga nada hasta entonces. Al renombrar se conservan todos los archivos, y el progreso de lectura se queda con su capítulo. «Mantener los números de la fuente» guarda tu elección; el ajuste «Use sequential chapter numbering» de la propia fuente, en Administración → Fuentes, es la otra salida.",
+  "Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back.": "Las series que vinieron de extensiones esperan al motor de extensiones; Administración → Fuentes muestra cómo recuperarlo.",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Sources": "1 capítulo; MangaDex en {language} está desactivado en Administración → Fuentes",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Sources": "{n} capítulos; MangaDex en {language} está desactivado en Administración → Fuentes",
+  "Admin → Sources shows how to bring it back. Its data is kept while it is off.": "Administración → Fuentes muestra cómo recuperarlo. Sus datos se conservan mientras está desactivado.",
+  "Admin → Sources shows what to check for your setup, and Check again there asks at once.": "Administración → Fuentes muestra qué revisar según tu instalación, y «Comprobar de nuevo», allí, pregunta al momento.",
+  "Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.": "Normalmente el sitio cambió o rechazó la extensión: actualiza la extensión (Administración → Fuentes), revisa sus ajustes o abre el sitio en un navegador. El mensaje del propio motor se muestra con la prueba.",
+  "Turn it back on in Admin → Sources.": "Vuelve a activarla en Administración → Fuentes.",
+  "The site now redirects to {host}. Update its address in Admin → Sources.": "El sitio ahora redirige a {host}. Actualiza su dirección en Administración → Fuentes.",
+  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "La extensión lista los capítulos de esta fuente, pero ninguno con número de capítulo, así que no hay nada que ordenar, nombrar ni descargar. Busca una opción de numeración en los ajustes propios de la extensión (Administración → Fuentes), o usa «Ignorar» aquí."
 }

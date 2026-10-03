@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2839
+    "strings": 2849
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2842,5 +2842,15 @@
   "1 chapter; its source {source} says it is offline": "1 глава; источник {source} сообщает, что он недоступен",
   "{n} chapters; its source {source} says it is offline": "Глав: {n}; источник {source} сообщает, что он недоступен",
   "primary {source} switched off; still following {names}": "основной источник {source} отключён; по-прежнему отслеживаются: {names}",
-  "primary {source} failing; still following {names}": "основной источник {source} сбоит; по-прежнему отслеживаются: {names}"
+  "primary {source} failing; still following {names}": "основной источник {source} сбоит; по-прежнему отслеживаются: {names}",
+  "Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. \"Keep the source's numbers\" records your choice; the source's own \"Use sequential chapter numbering\" setting, under Admin → Sources, is the other way out.": "Некоторые источники дают один и тот же номер главы множеству разных публикаций (Webtoons нумерует публикацию по эпизоду, к которому она относится). Новая серия из такого источника нумеруется по порядку публикации; серия, которая уже есть в вашей библиотеке, перенумеровывается только после того, как вы подтвердите её план, и до тех пор ничего не загружает. Переименование сохраняет все файлы, а прогресс чтения остаётся при своей главе. «Оставить номера источника» запоминает ваш выбор; другой выход — собственная настройка источника «Use sequential chapter numbering» в разделе Администрирование → Источники.",
+  "Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back.": "Серии из расширений ждут возвращения движка расширений; в разделе Администрирование → Источники показано, как его вернуть.",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Sources": "1 глава; MangaDex ({language}) отключён в разделе «Администрирование → Источники»",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Sources": "Глав: {n}; MangaDex ({language}) отключён в разделе «Администрирование → Источники»",
+  "Admin → Sources shows how to bring it back. Its data is kept while it is off.": "В разделе Администрирование → Источники показано, как его вернуть. Пока он выключен, его данные сохраняются.",
+  "Admin → Sources shows what to check for your setup, and Check again there asks at once.": "В разделе Администрирование → Источники показано, что проверить для вашей установки, а «Проверить снова» там сразу повторит запрос.",
+  "Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.": "Обычно это значит, что сайт изменился или отказал расширению: обновите расширение (Администрирование → Источники), проверьте его настройки или откройте сайт в браузере. Собственное сообщение движка показано в результатах проверки.",
+  "Turn it back on in Admin → Sources.": "Снова включите его в разделе Администрирование → Источники.",
+  "The site now redirects to {host}. Update its address in Admin → Sources.": "Теперь сайт перенаправляет на {host}. Обновите его адрес в разделе Администрирование → Источники.",
+  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "Расширение показывает главы этого источника, но ни у одной нет номера главы, поэтому упорядочивать, называть и загружать нечего. Поищите параметр нумерации в собственных настройках расширения (Администрирование → Источники) или нажмите здесь «Игнорировать»."
 }
