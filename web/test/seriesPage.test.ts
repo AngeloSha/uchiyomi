@@ -298,7 +298,7 @@ test('the chapter select bar says it removes chapters, and where the series\' ow
 test('Mark caught up floors the series where Auto-update is, and its Undo puts the old floor back (v0.52.0)', () => {
   // Discussion #72. Reintroduce by undoing with `null` instead of the answer's `previous`: "Undo does not put back
   // the floor the answer reported" fails, and a series added as Latest 25 loses its floor to an Undo. Edit details
-  // is components/SeriesEditor.tsx since v0.53.0 (its Updates tab).
+  // is components/SeriesEditor.tsx since v0.53.0 (its New chapters tab).
   const page = code(read('components/SeriesEditor.tsx'));
   assert.match(page, /onClick=\{\(\) => void floorTo\('caught_up'\)\}/, 'the confirmation does not mark it caught up');
   assert.match(page, /json: \{ chapterFloor \}/, 'the floor is not what is sent');

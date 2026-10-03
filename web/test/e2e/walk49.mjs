@@ -35,7 +35,7 @@
 //        constant), and above the library's, which wraps to two;
 //     3. a Modal over that bar (Delete from server): one card docked in the nav band, clear of the title --
 //        and from lg up clear of the whole panel;
-//     4. Edit details (a dialog of its own, a bottom sheet on a phone since v0.53.0; Check now on its Updates tab)
+//     4. Edit details (a dialog of its own, a bottom sheet on a phone since v0.53.0; Check now on its New chapters tab)
 //        and a Sheet (Sources & translations, Check now), the same;
 //     5. the reader: above the chapter sheet and the settings sheet, which run to the bottom edge;
 //     6. under the system's reduced motion: no turning ring (a still one), no draining hairline -- and the
@@ -431,12 +431,12 @@ async function notices(width) {
   await releaseMouse();
   await sleep(300);
 
-  // 4. Edit details (a dialog of its own; Check now is on its Updates tab) and Sources & translations (a Sheet), each
+  // 4. Edit details (a dialog of its own; Check now is on its New chapters tab) and Sources & translations (a Sheet), each
   // with Check now
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
-  await press('Updates', '[role="dialog"]');
+  await press('New chapters', '[role="dialog"]');
   await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.length > 0, 5000);
@@ -517,7 +517,7 @@ async function notices(width) {
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
-  await press('Updates', '[role="dialog"]');
+  await press('New chapters', '[role="dialog"]');
   await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.some((c) => c.busy), 5000);
@@ -529,7 +529,7 @@ async function notices(width) {
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
-  await press('Updates', '[role="dialog"]');
+  await press('New chapters', '[role="dialog"]');
   await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.some((c) => c.busy), 5000);

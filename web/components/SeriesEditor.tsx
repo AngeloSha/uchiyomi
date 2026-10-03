@@ -54,7 +54,7 @@ export async function copyPath(path: string, toast: ReturnType<typeof useToast>)
 export type EditTab = 'details' | 'art' | 'reading' | 'updates' | 'files';
 /** The tabs in order. Art is a tab below md only: from md up it is the column at the start of every tab. */
 const TABS: readonly EditTab[] = ['details', 'art', 'reading', 'updates', 'files'];
-const TAB_LABELS = keys('Details', 'Art', 'Reading', 'Updates', 'Files');
+const TAB_LABELS = keys('Details', 'Art', 'Reading', 'New chapters', 'Files');
 /** Where the dialog becomes a centred panel with the art in a column (Tailwind's md). */
 const WIDE = '(min-width: 768px)';
 
