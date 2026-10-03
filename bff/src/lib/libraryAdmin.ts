@@ -11,6 +11,7 @@
 // read_progress rows into one, and getting that wrong silently marks chapters unread -- which then syncs
 // outward to the user's AniList account and cannot be undone. Duplicate chapter numbers are a tidiness
 // problem the health page can surface; lost reading progress is not recoverable.
+import type { FastifyRequest } from 'fastify';
 import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
@@ -23,6 +24,11 @@ import { dissolveLoneWork } from './editions';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
 import { toStoredRel, dirnameRel } from './relPath';
+import { REFETCH_BAK } from './fsAtomic';
+import { logAudit } from './audit';
+import { carries, standingsOf } from './sourceStanding';
+import { followGuard } from './seriesLang';
+import { MAX_FOLLOWERS } from './autoFollow';
 
 export interface SeriesRow {
   id: string;
@@ -67,12 +73,58 @@ export async function restoreSeries(id: string): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+/** Why one series cannot be merged into another (mergeRefusal). The admin route answers each with its own status. */
+export type MergeRefusal =
+  | { refused: 'same_series' | 'not_found' | 'same_work' }
+  | { refused: 'deleted' | 'merged'; which: 'source' | 'target' };
+
+/**
+ * The merge route's checks, before anything moves: POST /api/admin/series/:id/merge and, since v0.55.0, Fix everything's
+ * duplicates phase (lib/autofix.ts) both ask them. Null when `fromId` may be merged into `intoId`: two different series,
+ * both there, neither hidden nor merged away, and not two language editions of one work (their chapters are two
+ * languages: merged, the list would hold both under one number each).
+ */
+export async function mergeRefusal(fromId: string, intoId: string): Promise<MergeRefusal | null> {
+  if (fromId === intoId) return { refused: 'same_series' };
+  const from = await getSeriesRow(fromId);
+  const into = await getSeriesRow(intoId);
+  if (!from || !into) return { refused: 'not_found' };
+  for (const [row, which] of [[from, 'source'], [into, 'target']] as const) {
+    if (row.deleted_at) return { refused: 'deleted', which };
+    if (row.merged_into) return { refused: 'merged', which };
+  }
+  const works = await q<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = ANY($1)', [[fromId, intoId]]);
+  if (works.length === 2 && works[0].work_id && works[0].work_id === works[1].work_id) return { refused: 'same_work' };
+  return null;
+}
+
 export interface MergeResult {
   ok: true;
   moved: number;
   favorites: number;
   ratings: number;
   collections: number;
+  /** v0.55.0: the absorbed copy's main source, now a source the survivor follows; null when it was not carried. */
+  carried: string | null;
+}
+
+/**
+ * The absorbed copy's main source, when the survivor can follow it (v0.55.0): it still carries a series -- usable, or
+ * only cooling down (lib/sourceStanding.ts) -- it is not the survivor's own main source, it is in the survivor's
+ * language (the follow guard every automatic follow passes), and the survivor is not numbered by posting order, whose
+ * followers are never merged. Null otherwise. The follower cap is the INSERT's own, inside the merge.
+ */
+async function carryable(fromId: string, intoId: string): Promise<{ sourceId: string; ref: string; title: string } | null> {
+  const rows = await q<{ id: string; title: string; source_id: string | null; source_series_id: string | null; numbering: string | null }>(
+    'SELECT id, title, source_id, source_series_id, numbering FROM lib_series WHERE id = ANY($1::text[])', [[fromId, intoId]]);
+  const from = rows.find((r) => r.id === fromId);
+  const into = rows.find((r) => r.id === intoId);
+  if (!from?.source_id || !from.source_series_id || !into) return null;
+  if (from.source_id === into.source_id || into.numbering === 'posting_order') return null;
+  const standing = (await standingsOf([from.source_id])).get(from.source_id);
+  if (!standing || !carries(standing)) return null;
+  if (!(await followGuard(intoId))(from.source_id)) return null;
+  return { sourceId: from.source_id, ref: from.source_series_id, title: from.title };
 }
 
 /**
@@ -84,6 +136,7 @@ export interface MergeResult {
  * everyone a phantom NEW badge, or hide one.
  */
 export async function mergeSeries(fromId: string, intoId: string): Promise<MergeResult> {
+  const carry = await carryable(fromId, intoId).catch(() => null);
   return tx(async (qq) => {
     const moved = await qq<{ id: string }>(
       `UPDATE lib_books SET series_id = $2 WHERE series_id = $1 RETURNING id`,
@@ -197,6 +250,23 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     // still reads owned by the final survivor" in importBatch.int.test.ts finds m still pointing at t.
     await qq(`UPDATE lib_series SET merged_into = $2 WHERE merged_into = $1`, [fromId, intoId]);
     await qq(`DELETE FROM series_trackers WHERE series_id = $1`, [fromId]);
+    // v0.55.0: the absorbed copy's working main source becomes a source the survivor follows, under the follower cap
+    // (the count autoFollow.ts followJudged writes under, the survivor's row locked). The merge used to leave it on the
+    // absorbed row, which nothing updates any more: a duplicate merged into the copy on a dead source took the one
+    // source that worked with it. A source the survivor follows already is left as it is. Reintroduce by dropping it:
+    // "merge: the absorbed copy's working main source" in libraryAdmin.int.test.ts finds the survivor following nothing.
+    let carried: string | null = null;
+    if (carry) {
+      await qq('SELECT id FROM lib_series WHERE id = $1 FOR UPDATE', [intoId]);
+      const got = await qq<{ source_id: string }>(
+        `INSERT INTO series_sources (series_id, source_id, source_series_id, title)
+         SELECT $1::text, $2::text, $3::text, $4::text
+          WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $5::int
+         ON CONFLICT (series_id, source_id) DO NOTHING
+         RETURNING source_id`,
+        [intoId, carry.sourceId, carry.ref, carry.title, MAX_FOLLOWERS]);
+      carried = got[0]?.source_id ?? null;
+    }
 
     // The survivor's rollups are now wrong
     await qq(
@@ -220,12 +290,111 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
       favorites: favs.length,
       ratings: rates.length,
       collections: cols.length,
+      carried,
     };
   }).then(async (r) => {
     // outside the transaction: filesystem work must not hold it open
     await dropArt(fromId);
     return r;
   });
+}
+
+/** What deleteChapterFiles answers: what it did, what it passed over and why, or the folder refusing writes. */
+export type DeletedChapters =
+  | { applied: number; bytes: number; skipped: Array<{ id: string; reason: string }> }
+  | { refused: { reason: string; fix?: string } };
+
+/**
+ * Delete the files of chosen chapters of one series and keep their rows as tombstones, so reading history survives and
+ * the updater's have-set still contains the number (the same reasoning as the cleanup's, on the column's note in
+ * lib/migrate.ts). Delete-then-mark per file, so a failed unlink leaves an honest row. POST
+ * /api/admin/series/:id/chapters/delete, and since v0.55.0 Fix everything's files phase (lib/autofix.ts, `via:
+ * 'autofix'`), both run it: a bookmarked chapter, a file outside the download folder and the root itself are never
+ * touched, whoever asks. Audited as `series.chapters_delete`.
+ */
+export async function deleteChapterFiles(
+  id: string, bookIds: readonly string[], o: { userId: string | null; req?: FastifyRequest; via?: 'autofix'; runId?: string },
+): Promise<DeletedChapters> {
+  const row = await getSeriesRow(id);
+  const ids = [...new Set(bookIds)];
+  const rows = new Map((await q<{ id: string; root: string | null; file: string; number: number; pruned_at: string | null }>(
+    'SELECT id, root, file, number, pruned_at FROM lib_books WHERE series_id = $1 AND id = ANY($2)', [id, ids])).map((r) => [r.id, r]));
+  // The same veto the cleanup applies, for the same reason: a bookmark names a page number INSIDE the
+  // file, so deleting the pages turns it into a pointer at nothing. Progress survives a delete (it is a
+  // count); a bookmark does not, and the admin clicking Delete cannot see whose it is.
+  // Reintroduce by dropping this lookup: "a bookmarked chapter is skipped, and says so" in
+  // chapterActions.int.test.ts finds the file gone.
+  const bookmarked = new Set((await q<{ book_id: string }>(
+    'SELECT DISTINCT book_id FROM bookmarks WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id));
+
+  const skipped: Array<{ id: string; reason: string }> = [];
+  const todo: Array<{ id: string; abs: string }> = [];
+  const root = resolve(DL_ROOT);
+  for (const bid of ids) {
+    const r = rows.get(bid);
+    if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
+    // Reintroduce by dropping this check: "delete removes the file, keeps the row and the progress, skips
+    // the read library" in chapterActions.int.test.ts fails -- the read library's file is gone.
+    if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
+    if (r.pruned_at) { skipped.push({ id: bid, reason: 'already_pruned' }); continue; }
+    if (bookmarked.has(bid)) { skipped.push({ id: bid, reason: 'bookmarked' }); continue; }
+    const abs = containedPath(DL_ROOT, r.file);
+    // A path that escapes its root is refused, never "cleaned up" -- the health page can argue about it.
+    // So is the root ITSELF: containedPath accepts it, the rm below is recursive, and a row whose file
+    // resolves to `.` (a hand-edited row is the only way today) would take the whole download directory.
+    // Reintroduce by dropping the `abs === root` half: "the download root itself is never a chapter" in
+    // chapterActions.int.test.ts finds the directory gone.
+    if (!abs || abs === root) { skipped.push({ id: bid, reason: 'outside_root' }); continue; }
+    todo.push({ id: bid, abs });
+  }
+  if (todo.length) {
+    const w = await allWritable([DL_ROOT]);
+    if (!w.ok) return { refused: { reason: w.reason, fix: w.fix } };
+  }
+  let applied = 0;
+  let bytes = 0;
+  for (const t of todo) {
+    const st = await stat(t.abs).catch(() => null);
+    if (st) {
+      try { await rm(t.abs, { recursive: true, force: true }); }
+      catch { skipped.push({ id: t.id, reason: 'unlink_failed' }); continue; }
+      bytes += st.size;
+      // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside the landed file,
+      // which reapStaleTemp deliberately leaves alone) must not outlive a deliberate delete of the file:
+      // at the next boot the reaper would see a bak with no original, put it back, and the chapter the
+      // admin deleted would be on disk again, un-marked by the next scan, its space never reclaimed.
+      // Reintroduce by dropping this rm: "a stray set-aside copy goes with the file" in
+      // chapterActions.int.test.ts finds the bak still there.
+      await rm(`${t.abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
+    } else if (!(await stat(dirname(t.abs)).catch(() => null))) {
+      // ⚠️ The file is missing AND so is its folder: that is the volume not being there (an unmounted
+      // share whose empty mount point passed the preflight), not a chapter somebody removed by hand.
+      // Marking on that evidence would tombstone a chapter whose file is fine on the unmounted disk and
+      // throw away everything measured about it; the row is left as it is and the answer says why.
+      // Reintroduce by dropping this branch: "a missing download folder is not a deleted chapter" in
+      // chapterActions.int.test.ts finds pruned_at set.
+      skipped.push({ id: t.id, reason: 'unlink_failed' });
+      continue;
+    }
+    // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
+    // do not exist.
+    await tombstoneBooks([t.id]);
+    applied++;
+  }
+  // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every
+  // thumbnail falls back to the cover chapter's first page, and a tombstone has none.
+  if (applied) {
+    await q(
+      `UPDATE lib_series SET cover_book_id = (
+         SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
+       ) WHERE id = $1`, [id]);
+  }
+  await logAudit('series.chapters_delete', {
+    userId: o.userId,
+    detail: { id, title: row?.title ?? null, bookIds: ids, applied, bytes, ...(o.via ? { via: o.via, runId: o.runId } : {}) },
+    req: o.req,
+  });
+  return { applied, bytes, skipped };
 }
 
 // ---- forget ----

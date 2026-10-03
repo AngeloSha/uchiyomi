@@ -142,12 +142,20 @@ test('THE DROPPED VERDICT: both the sweep and the Test button hand diagnose() th
     'lib/sourceCheck.ts builds the Probe only when a bare probe ran, which drops adapterOk for every extension source');
   assert.ok(!/httpStatus: 0, \.\.\.bare/.test(check),
     'lib/sourceCheck.ts encodes "no request was made" as httpStatus 0, which the Probe type reserves for "no answer came back"');
-  for (const file of ['lib/sourceWatchdog.ts', 'routes/admin.ts']) {
+  // Since v0.55.0 the Test button runs testSource (lib/sourceCheck.ts: the check, recorded and audited), which Fix
+  // everything's sources phase (lib/autofix.ts) runs too; testSource is read for the shared check, the route and the
+  // run for testSource. Reintroduce by inlining a smokeTest + diagnose in any of them, or by testSource checking some
+  // other way: the assertion names the file.
+  const callers: Array<[string, string]> = [['lib/sourceWatchdog.ts', 'checkSourceLive('], ['routes/admin.ts', 'testSource('], ['lib/autofix.ts', 'testSource(']];
+  for (const [file, call] of callers) {
     const src = code(file);
-    assert.ok(src.includes('checkSourceLive('), `${file} no longer runs the shared live check -- it can disagree with the other caller`);
+    assert.ok(src.includes(call), `${file} no longer runs the shared live check -- it can disagree with the other caller`);
     // (smokeTest itself stays legal in admin.ts: adding a custom site verifies it before saving.)
     assert.ok(!/\bdiagnose\(/.test(src), `${file} diagnoses a source itself, beside the shared live check`);
   }
+  const tested = check.slice(check.indexOf('export async function testSource('));
+  assert.ok(check.includes('export async function testSource(') && tested.includes("checkSourceLive(src, { by: 'test' })"),
+    'lib/sourceCheck.ts testSource no longer runs the shared live check -- the Test button can disagree with the sweep');
 });
 
 test('the Test button can see a slow streak', () => {

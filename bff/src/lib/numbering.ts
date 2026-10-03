@@ -745,7 +745,7 @@ export const CHECKING_NOW = 'This series is being checked right now. Try again w
  * chapter row to move at all. Otherwise the plan is answered and nothing changes.
  */
 export async function settleNumbering(
-  s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], opts: { confirm?: boolean } = {},
+  s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], opts: { confirm?: boolean | 'clean' } = {},
 ): Promise<Settled> {
   const mode = s.numbering_pending;
   if (!mode) return { state: 'none', numbering: s };
@@ -779,7 +779,11 @@ export async function settleNumbering(
     // itself" in numberingRoutes.int.test.ts reads renumber_pending.
     const noop = mode === 'remap' && built.plan.reasons.every((r) => r === 'tracker')
       && !built.plan.parked.length && built.plan.moves.every((m) => m.via === 'none');
-    if (rows > 0 && !opts.confirm && !noop) return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker };
+    // v0.55.0: Fix everything confirms only a plan marked clean HERE, from the listing this apply reads -- never one an
+    // earlier look found clean. Reintroduce by treating 'clean' as a confirmation: "only a clean plan is applied" in
+    // autofix.int.test.ts renames the files of a plan that would push numbers to a tracker.
+    const confirmed = opts.confirm === 'clean' ? built.plan.clean : !!opts.confirm;
+    if (rows > 0 && !confirmed && !noop) return { state: 'needs_review', numbering: s, plan: built.plan, tracker: built.tracker };
     try {
       await applyRenumber(s, built);
     } catch (e) {

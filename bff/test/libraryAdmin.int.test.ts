@@ -198,3 +198,43 @@ test('merge: duplicate chapter numbers are kept, not silently dropped', { skip }
   const ones = await q(`SELECT id FROM lib_books WHERE series_id = $1 AND number = 1`, [A]);
   assert.equal(ones.length, 2, 'a duplicate chapter was dropped during the merge');
 });
+
+test("merge: the absorbed copy's working main source becomes a source the survivor follows, under the cap", { skip }, async () => {
+  // v0.55.0. A merge left the absorbed copy's main source on the absorbed row, which nothing updates any more: a duplicate
+  // merged into the copy on a dead source took the one source that worked with it. Reintroduce by dropping the carry in
+  // mergeSeries: the survivor follows nothing, and `carried` is null.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const stub = (id: string) => ({ id, name: id, lang: 'en', search: async () => [], getSeries: async () => null,
+    listChapters: async () => [], getPageUrls: async () => [], latest: async () => [] }) as any;
+  registerAdapter(stub('la-works'));
+  registerAdapter(stub('la-kept'));
+  registerAdapter(stub('la-other'));
+  await q(`DELETE FROM source_health WHERE source_id LIKE 'la-%'`);
+  await q(`DELETE FROM series_sources WHERE series_id = ANY($1)`, [[A, B]]);
+  try {
+    await q(`UPDATE lib_series SET source_id = 'la-kept', source_series_id = 'k1' WHERE id = $1`, [A]);
+    await q(`UPDATE lib_series SET source_id = 'la-works', source_series_id = 'w1' WHERE id = $1`, [B]);
+    const r = await admin.mergeSeries(B, A);
+    assert.equal(r.carried, 'la-works', "the absorbed copy's working main source is carried to the survivor");
+    assert.deepEqual(await q(`SELECT source_id, source_series_id, title FROM series_sources WHERE series_id = $1`, [A]),
+      [{ source_id: 'la-works', source_series_id: 'w1', title: 'Absorbed' }], "the survivor follows the absorbed copy's source, by its own id there");
+
+    // A source switched off carries nothing; nor does one the survivor already follows two others beside.
+    await wipe(); await seed();
+    await q(`UPDATE lib_series SET source_id = 'la-kept', source_series_id = 'k1' WHERE id = $1`, [A]);
+    await q(`UPDATE lib_series SET source_id = 'la-works', source_series_id = 'w1' WHERE id = $1`, [B]);
+    await q(`INSERT INTO source_health (source_id, status, disabled) VALUES ('la-works','ok',true)`);
+    assert.equal((await admin.mergeSeries(B, A)).carried, null, 'a switched-off source is not carried');
+    await q(`DELETE FROM source_health WHERE source_id = 'la-works'`);
+
+    await wipe(); await seed();
+    await q(`UPDATE lib_series SET source_id = 'la-kept', source_series_id = 'k1' WHERE id = $1`, [A]);
+    await q(`UPDATE lib_series SET source_id = 'la-works', source_series_id = 'w1' WHERE id = $1`, [B]);
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,'la-other','o1'), ($1,'la-gone','g1')`, [A]);
+    assert.equal((await admin.mergeSeries(B, A)).carried, null, 'two followers already: the cap holds');
+    assert.equal((await q(`SELECT 1 FROM series_sources WHERE series_id = $1`, [A])).length, 2);
+  } finally {
+    await q(`DELETE FROM series_sources WHERE series_id = ANY($1)`, [[A, B]]);
+    await q(`DELETE FROM source_health WHERE source_id LIKE 'la-%'`);
+  }
+});

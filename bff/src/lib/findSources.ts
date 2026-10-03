@@ -212,7 +212,8 @@ export type FindMode = 'follow' | 'replace';
 
 interface ActiveRun {
   id: string;
-  userId: string;
+  /** The admin who started it; null for Fix everything's nightly run (v0.55.0), which nobody pressed. */
+  userId: string | null;
   startedAt: number;
   scope: FindScope;
   /** Review first: judge and keep the candidates, follow nothing. */
@@ -226,6 +227,11 @@ interface ActiveRun {
   maxAgeRating: number | null;
   /** The starting admin's view: what a Replace run's switches act as (lib/mainSource.ts). */
   ctx: ViewCtx;
+  /**
+   * v0.55.0, Fix everything's extensions phase: the only sources this run may search -- the one an extension it just
+   * installed provides -- so a run over series every other source was asked about already asks the new one alone.
+   */
+  only: ReadonlySet<string> | null;
   /** Main sources whose description read failed in this run: not asked again for the next series. */
   dead: Set<string>;
   total: number;
@@ -294,11 +300,16 @@ export async function closeInterruptedFindRuns(): Promise<void> {
  * then turns it off once none is left on it. Replace and Find share the one run at a time.
  */
 export async function startFind(
-  scope: FindScope, userId: string, ctx: ViewCtx, from?: FastifyRequest, o: { review?: boolean; mode?: FindMode; turnOff?: boolean } = {},
-): Promise<{ runId: string; total: number } | { busy: string } | { empty: true }> {
+  scope: FindScope, userId: string | null, ctx: ViewCtx, from?: FastifyRequest,
+  o: { review?: boolean; mode?: FindMode; turnOff?: boolean; autofix?: string; only?: readonly string[] } = {},
+): Promise<{ runId: string; total: number } | { busy: string } | { empty: true } | { autofix: true }> {
   const review = o.review === true;
   const mode: FindMode = o.mode === 'replace' && 'sourceId' in scope ? 'replace' : 'follow';
   const turnOff = mode === 'replace' && !review && o.turnOff === true;
+  // v0.55.0: Fix everything runs Find and Replace itself, one run after another (lib/autofix.ts): a run started beside
+  // it would take the one slot it waits on, and work the same series. Its own runs pass its id. Reintroduce by dropping
+  // it: "one Fix everything at a time, and never beside a repair, a Find or a sweep" in autofix.int.test.ts starts one.
+  if (runtime.autofixing && !o.autofix) return { autofix: true };
   const running = findRunning();
   if (running) return { busy: running };
   const id = randomUUID();
@@ -313,9 +324,12 @@ export async function startFind(
     // away under the run. Reintroduce by storing {sourceId} alone: "a restart lists every series the run never
     // reached as not tried" in findSources.int.test.ts finds no seriesIds in the scope.
     const ids = list.map((s) => s.id);
+    const only = o.only?.length ? new Set(o.only) : null;
     const stored = {
       ...('sourceId' in scope ? { sourceId: scope.sourceId, seriesIds: ids } : { seriesIds: ids }), ...(review ? { review } : {}),
       ...(mode === 'replace' ? { mode } : {}), ...(turnOff ? { turnOff } : {}),
+      // v0.55.0: Fix everything's own run, and the sources it may search; no column, so v0.54.x boots on the same rows.
+      ...(o.autofix ? { autofix: o.autofix } : {}), ...(only ? { only: [...only] } : {}),
     };
     await q(`INSERT INTO source_find_runs (id, started_by, status, scope, total) VALUES ($1, $2, 'running', $3::jsonb, $4)`,
       [id, userId, JSON.stringify(stored), list.length]);
@@ -332,7 +346,7 @@ export async function startFind(
     let signal!: () => void;
     const stopped = new Promise<void>((r) => { signal = r; });
     const a: ActiveRun = {
-      id, userId, startedAt: Date.now(), scope, review, mode, turnOff, promoted: 0, maxAgeRating: ctx.maxAgeRating, ctx, dead: new Set(),
+      id, userId, startedAt: Date.now(), scope, review, mode, turnOff, promoted: 0, maxAgeRating: ctx.maxAgeRating, ctx, only, dead: new Set(),
       total: list.length, done: 0, followed: 0, results: [],
       current: null, waiting: null, stop: false, stopped, signal, card,
     };
@@ -609,6 +623,8 @@ async function findFor(
       // The main source ALWAYS: it is the one this run is working around.
       if (id === row.source_id || followers.has(id)) return false;
       if (resting(id)) return false;
+      // Fix everything's run asks only the source its new extension provides (v0.55.0).
+      if (a.only && !a.only.has(id)) return false;
       return !!getSource(id);
     });
   // Nothing left to ask: `no_source`, never `not_tried`, which is only what a stop, the wall or a restart cut short.
@@ -1245,6 +1261,14 @@ export function setFindTiming(t: { paceMs?: number; wallMs?: number; quietMs?: n
   quietMs = t.quietMs ?? FIND_QUIET_POLL_MS;
   busyMs = t.busyMs ?? FIND_BUSY_WAIT_MS;
 }
+/**
+ * The run going now (or the last one started in this process), ended: what Fix everything awaits after each Replace or
+ * Find it starts (v0.55.0). Not the listing refreshes queued behind it, which go on in the background as they always do.
+ */
+export async function findRunSettled(): Promise<void> {
+  await lastRun.catch(() => {});
+}
+
 /** Tests: the run in flight (or the last one) and the refresh queue behind it, settled. */
 export async function findSettled(): Promise<void> {
   await lastRun.catch(() => {});

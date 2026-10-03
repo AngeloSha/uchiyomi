@@ -174,6 +174,8 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
       review: b.data.review, ...(replace ? { mode: 'replace' as const, turnOff: b.data.turnOff } : {}),
     });
     if ('busy' in r) return reply.code(409).send({ error: 'busy', runId: r.busy, message: 'A Find other sources run is already going.' });
+    // v0.55.0: Fix everything finds and replaces sources itself, one run after another (lib/autofix.ts).
+    if ('autofix' in r) return reply.code(409).send({ error: 'autofix_running', message: 'Fix everything is running; it finds and replaces sources itself.' });
     if ('empty' in r) return reply.code(400).send({ error: 'empty_scope', message: 'None of those series can be searched for.' });
     return reply.code(202).send(r);
   });

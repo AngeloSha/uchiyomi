@@ -7,7 +7,9 @@
 //
 // What recording may touch is the whole design: the live_* columns and the per-stage evidence, never the cooldown
 // (status, consecutive, blocked_until, last_error) and never checked_at -- see sourceHealth.ts recordLive.
+import type { FastifyRequest } from 'fastify';
 import { one } from './db';
+import { logAudit } from './audit';
 import { env } from '../env';
 import type { SourceAdapter } from './sources/types';
 import { smokeTest, probeBase, buildProbe, type SmokeResult } from './sourceProbe';
@@ -108,4 +110,33 @@ export async function recordLiveResult(
   // During a sweep this asks nothing: the sweep holds the summary and refreshes it once, at its end
   // (sourceWatchdog.ts runSourceCheck; lib/healthSummary.ts has the rules, the repair's included).
   scheduleHealthSummaryRefresh();
+}
+
+/** Sources being Tested right now, by id: one Test of a source at a time, whoever asks. */
+const testing = new Set<string>();
+
+/**
+ * Test one source now: the live check, recorded, and audited as `source.test`. POST /api/admin/sources/:id/test and
+ * Fix everything's sources phase (v0.55.0, lib/autofix.ts, `via: 'autofix'`) both run it, so the two can never test
+ * a source two ways -- and never at once: `busy` while a Test of that source is going. Clearing a block stays the
+ * caller's decision (the route's `canClear`: it passed, and it is blocked).
+ */
+export async function testSource(
+  src: SourceAdapter, o: { userId: string | null; req?: FastifyRequest; via?: 'autofix'; runId?: string },
+): Promise<LiveCheck | 'busy'> {
+  if (testing.has(src.id)) return 'busy';
+  testing.add(src.id);
+  try {
+    // The same function the scheduled sweep runs, so the button and the schedule cannot disagree.
+    const r = await checkSourceLive(src, { by: 'test' });
+    await recordLiveResult(src.id, r, 'test');
+    await logAudit('source.test', {
+      userId: o.userId,
+      detail: { source: src.id, ok: r.smoke.ok, code: r.diagnosis.code, state: r.state, stage: r.stage, ...(o.via ? { via: o.via, runId: o.runId } : {}) },
+      req: o.req,
+    });
+    return r;
+  } finally {
+    testing.delete(src.id);
+  }
 }

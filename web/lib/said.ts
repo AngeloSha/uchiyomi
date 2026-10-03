@@ -144,6 +144,12 @@ const namesText = (p: P): string => {
   return more > 0 ? `${first} ${tr('and {n} more', { n: more })}` : first;
 };
 
+/**
+ * A series title inside a sentence (v0.55.0, Fix everything): isolated in right-to-left text with U+2068/U+2069, so a
+ * Latin title -- "Solo Leveling (2)" -- keeps its own order inside Arabic; as it is everywhere else.
+ */
+const titled = (p: P, k: string): string => (arabic() ? `\u2068${str(p, k)}\u2069` : str(p, k));
+
 /** Where a census reason found the walk's trouble: this folder, or one above it ('' the downloads folder). */
 const whereText = (p: P): string =>
   p.above == null ? tr('this folder')
@@ -239,6 +245,15 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'gaps.detail': (p) => (num(p, 'n') === 1
     ? tr('1 missing — {ranges}', { ranges: str(p, 'ranges') })
     : tr('{n} missing — {ranges}', { n: num(p, 'n'), ranges: str(p, 'ranges') })),
+  // v0.55.0: holes below a series' "Latest N" start, which nothing fetches unasked. `start` is the first chapter it was
+  // started from.
+  'gaps.belowFloor': (p) => (num(p, 'n') === 1
+    ? tr('1 missing before where you started (chapter {start}) — {ranges}', { start: num(p, 'start'), ranges: str(p, 'ranges') })
+    : tr('{n} missing before where you started (chapter {start}) — {ranges}', { n: num(p, 'n'), start: num(p, 'start'), ranges: str(p, 'ranges') })),
+  'gaps.alsoBelowFloor': (p) => (num(p, 'n') === 1
+    ? tr('1 more before where you started (chapter {start})', { start: num(p, 'start') })
+    : tr('{n} more before where you started (chapter {start})', { n: num(p, 'n'), start: num(p, 'start') })),
+  'gaps.beforeStart': (p) => (num(p, 'n') === 1 ? tr('1 before where you started') : tr('{n} before where you started', { n: num(p, 'n') })),
 
   // ---- Chapter numbering (#116). A source that could not be named at all is "Its source" where it opens the sentence,
   // "its source" inside one.
@@ -721,6 +736,162 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'retire.inUse': (p) => (num(p, 'n') === 1
     ? tr('It is the main source of 1 series. Replace it first.')
     : tr('It is the main source of {n} series. Replace it first.', { n: num(p, 'n') })),
+
+  // ---- Fix everything (v0.55.0, bff lib/autofix.ts): what the run is on, what it did, what clears by itself and what
+  // only a person can do. A series title is isolated in right-to-left text (titled), so a Latin one keeps its order.
+  'autofix.now.checking': () => tr('Checking the extension engine and the Cloudflare solver'),
+  'autofix.now.scanning': () => tr('Scanning the library and counting pages'),
+  'autofix.now.solver': () => tr('Resetting the Cloudflare solver and finishing interrupted renumbers'),
+  'autofix.now.testing': (p) => tr('Testing {name}', { name: str(p, 'name') }),
+  'autofix.now.replacing': (p) => tr('Replacing {name}', { name: str(p, 'name') }),
+  'autofix.now.retiring': (p) => tr('Turning off {name}', { name: str(p, 'name') }),
+  'autofix.now.duplicates': () => tr('Merging duplicates and linking language editions'),
+  'autofix.now.renumbering': () => tr('Applying safe renumbering plans'),
+  'autofix.now.failures': () => tr('Retrying chapters that would not download'),
+  'autofix.now.short': () => tr('Looking for longer copies of short chapters'),
+  'autofix.now.gaps': () => tr('Filling gaps'),
+  'autofix.now.installing': (p) => tr('Installing {name}', { name: str(p, 'name') }),
+  'autofix.now.searching': (p) => tr('Searching {name}', { name: str(p, 'name') }),
+  'autofix.now.removing': (p) => tr('Removing {name}', { name: str(p, 'name') }),
+  'autofix.now.files': () => tr('Deleting chapters saved twice or numbered impossibly'),
+  'autofix.now.rechecking': () => tr('Checking Health again'),
+  'autofix.now.waitSweep': () => tr('Waiting for the chapter sweep to finish'),
+
+  'autofix.done.scanned': () => tr('Scanned the library'),
+  'autofix.done.counted': (p) => (num(p, 'n') === 1
+    ? tr('Scanned the library and counted the pages of 1 chapter')
+    : tr('Scanned the library and counted the pages of {n} chapters', { n: num(p, 'n') })),
+  'autofix.done.solverReset': (p) => (num(p, 'n') === 1
+    ? tr('Reset the Cloudflare solver and cleared 1 source that blamed it')
+    : tr('Reset the Cloudflare solver and cleared {n} sources that blamed it', { n: num(p, 'n') })),
+  'autofix.done.engineConnected': () => tr('Connected the extension engine’s Cloudflare helper'),
+  'autofix.done.resumedRenumber': (p) => (num(p, 'n') === 1 ? tr('Finished 1 interrupted renumber') : tr('Finished {n} interrupted renumbers', { n: num(p, 'n') })),
+  'autofix.done.tested': (p) => (num(p, 'n') === 1 ? tr('Tested 1 source') : tr('Tested {n} sources', { n: num(p, 'n') })),
+  'autofix.done.unblocked': (p) => (num(p, 'n') === 1
+    ? tr('Cleared the block on 1 source that passed its test')
+    : tr('Cleared the block on {n} sources that passed their test', { n: num(p, 'n') })),
+  'autofix.done.replaced': (p) => (num(p, 'n') === 1
+    ? tr('Moved 1 series off {names}', { names: namesText(p) })
+    : tr('Moved {n} series off {names}', { n: num(p, 'n'), names: namesText(p) })),
+  'autofix.done.retired': (p) => (num(p, 'n') === 1
+    ? tr('Turned off 1 failing source no series uses')
+    : tr('Turned off {n} failing sources no series uses', { n: num(p, 'n') })),
+  'autofix.done.linked': (p) => (num(p, 'n') === 1 ? tr('Linked 1 pair as language editions') : tr('Linked {n} pairs as language editions', { n: num(p, 'n') })),
+  'autofix.done.merged': (p) => (num(p, 'n') === 1 ? tr('Merged 1 duplicate') : tr('Merged {n} duplicates', { n: num(p, 'n') })),
+  'autofix.done.renumbered': (p) => (num(p, 'n') === 1 ? tr('Renumbered 1 series by a safe plan') : tr('Renumbered {n} series by a safe plan', { n: num(p, 'n') })),
+  'autofix.done.fetched': (p) => (num(p, 'n') === 1 ? tr('Fetched 1 missing chapter') : tr('Fetched {n} missing chapters', { n: num(p, 'n') })),
+  'autofix.done.refetched': (p) => (num(p, 'n') === 1 ? tr('Downloaded 1 chapter that had failed') : tr('Downloaded {n} chapters that had failed', { n: num(p, 'n') })),
+  'autofix.done.failuresCleared': (p) => (num(p, 'n') === 1 ? tr('Gave 1 failed chapter another try') : tr('Gave {n} failed chapters another try', { n: num(p, 'n') })),
+  'autofix.done.shortFixed': (p) => (num(p, 'n') === 1 ? tr('Found a longer copy of 1 short chapter') : tr('Found a longer copy of {n} short chapters', { n: num(p, 'n') })),
+  'autofix.done.shortConfirmed': (p) => (num(p, 'n') === 1
+    ? tr('1 short chapter really is that short at every source')
+    : tr('{n} short chapters really are that short at every source', { n: num(p, 'n') })),
+  'autofix.done.installed': (p) => (num(p, 'n') === 1
+    ? tr('Installed {names} (found 1 series)', { names: namesText(p) })
+    : tr('Installed {names} (found {n} series)', { n: num(p, 'n'), names: namesText(p) })),
+  'autofix.done.uninstalled': (p) => tr('Removed {names} again: nothing there carried a series', { names: namesText(p) }),
+  'autofix.done.deletedTwice': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter saved twice') : tr('Deleted {n} chapters saved twice', { n: num(p, 'n') })),
+  'autofix.done.deletedOdd': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter numbered impossibly') : tr('Deleted {n} chapters numbered impossibly', { n: num(p, 'n') })),
+
+  'autofix.item.tested': (p) => (p.ok ? tr('{name} passed its test', { name: str(p, 'name') }) : tr('{name} failed its test again', { name: str(p, 'name') })),
+  'autofix.item.unblocked': (p) => tr('Cleared the block on {name}', { name: str(p, 'name') }),
+  'autofix.item.replaced': (p) => (num(p, 'n') === 1
+    ? tr('Moved 1 series off {name}', { name: str(p, 'name') })
+    : tr('Moved {n} series off {name}', { n: num(p, 'n'), name: str(p, 'name') })),
+  'autofix.item.stillOn': (p) => (num(p, 'n') === 1
+    ? tr('1 series is still on {name}', { name: str(p, 'name') })
+    : tr('{n} series are still on {name}', { n: num(p, 'n'), name: str(p, 'name') })),
+  'autofix.item.kept': (p) => tr('Left {name} alone: a setting turned it off, not the site', { name: str(p, 'name') }),
+  'autofix.item.retired': (p) => tr('Turned off {name}: it is failing and no series uses it', { name: str(p, 'name') }),
+  'autofix.item.linked': (p) => tr('Linked “{a}” and “{b}” as language editions', { a: titled(p, 'a'), b: titled(p, 'b') }),
+  'autofix.item.merged': (p) => tr('Merged “{from}” into “{into}”', { from: titled(p, 'from'), into: titled(p, 'into') }),
+  'autofix.item.notMerged': (p) => tr('Left “{a}” and “{b}” apart: neither their titles nor their chapters agree', { a: titled(p, 'a'), b: titled(p, 'b') }),
+  'autofix.item.renumbered': (p) => tr('Renumbered “{title}”', { title: titled(p, 'title') }),
+  'autofix.item.notRenumbered': (p) => tr('“{title}” waits for you: its renumbering plan is not a safe one', { title: titled(p, 'title') }),
+  'autofix.item.installed': (p) => (num(p, 'n') === 1
+    ? tr('Installed {name}: it carries 1 series', { name: str(p, 'name') })
+    : tr('Installed {name}: it carries {n} series', { n: num(p, 'n'), name: str(p, 'name') })),
+  'autofix.item.uninstalled': (p) => tr('Removed {name} again: it carried none of the series', { name: str(p, 'name') }),
+  'autofix.item.noRoom': (p) => tr('Did not keep {name}: the source limit is full', { name: str(p, 'name') }),
+  'autofix.item.installFailed': (p) => tr('{name} could not be installed', { name: str(p, 'name') }),
+  'autofix.item.deleted': (p) => (num(p, 'n') === 1
+    ? tr('Deleted 1 chapter of “{title}”', { title: titled(p, 'title') })
+    : tr('Deleted {n} chapters of “{title}”', { n: num(p, 'n'), title: titled(p, 'title') })),
+  // Why a part of the run was passed over; a reason this build does not know leaves the line in the server's English.
+  'autofix.item.skipped': (p) => {
+    switch (p.why) {
+      case 'solver_down': return tr('The Cloudflare solver is not answering: the sources behind it were left alone');
+      case 'engine_down': return tr('The extension engine is not answering: its sources were left alone');
+      case 'no_engine': return tr('There is no extension engine, so nothing was installed');
+      case 'time': return tr('The run’s time ran out; the next Fix everything continues');
+      case 'stopped': return tr('Stopped');
+      case 'installs': return tr('No more installs this run');
+      default: return null;
+    }
+  },
+
+  'autofix.needs.solverDown': () => (isDesktop()
+    ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
+    : tr('The Cloudflare solver is not answering: check that its container is running')),
+  'autofix.needs.solverFailing': () => (isDesktop()
+    ? tr('Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi')
+    : tr('The Cloudflare solver answers but keeps failing: restart its container')),
+  'autofix.needs.engine': () => tr('The extension engine needs a look'),
+  'autofix.needs.foldersTwice': () => (isDesktop()
+    ? tr('Uchiyomi’s library folder and the manga folder you added are inside each other: keep them side by side')
+    : tr('The library and the downloads folder are inside each other: mount them side by side')),
+  'autofix.needs.sourceLimit': (p) => {
+    const n = num(p, 'n');
+    if (isDesktop()) {
+      return n === 1 ? tr('1 extension source is over the source limit: hide languages you do not read')
+        : tr('{n} extension sources are over the source limit: hide languages you do not read', { n });
+    }
+    return n === 1 ? tr('1 extension source is over the source limit: raise SUWAYOMI_MAX_SOURCES or hide languages you do not read')
+      : tr('{n} extension sources are over the source limit: raise SUWAYOMI_MAX_SOURCES or hide languages you do not read', { n });
+  },
+  'autofix.needs.freeSlot': (p) => (num(p, 'n') === 1
+    ? tr('1 series waits for a free slot under the source limit')
+    : tr('{n} series wait for a free slot under the source limit', { n: num(p, 'n') })),
+  'autofix.needs.frozen': (p) => (num(p, 'n') === 1 ? tr('1 series has no working source anywhere') : tr('{n} series have no working source anywhere', { n: num(p, 'n') })),
+  'autofix.needs.sourceFailing': (p) => (num(p, 'n') === 1
+    ? tr('1 source your series use is still failing')
+    : tr('{n} sources your series use are still failing', { n: num(p, 'n') })),
+  'autofix.needs.duplicates': (p) => (num(p, 'n') === 1 ? tr('1 duplicate needs your decision') : tr('{n} duplicates need your decision', { n: num(p, 'n') })),
+  'autofix.needs.numbering': (p) => (num(p, 'n') === 1
+    ? tr('1 series waits for your numbering review')
+    : tr('{n} series wait for your numbering review', { n: num(p, 'n') })),
+  'autofix.needs.short': (p) => (num(p, 'n') === 1 ? tr('1 short chapter needs your decision') : tr('{n} short chapters need your decision', { n: num(p, 'n') })),
+  'autofix.needs.failures': (p) => (num(p, 'n') === 1 ? tr('1 chapter no source can download') : tr('{n} chapters no source can download', { n: num(p, 'n') })),
+  'autofix.needs.outliers': (p) => (num(p, 'n') === 1
+    ? tr('1 chapter numbered impossibly is bookmarked or in your own library')
+    : tr('{n} chapters numbered impossibly are bookmarked or in your own library', { n: num(p, 'n') })),
+  'autofix.needs.twice': (p) => (num(p, 'n') === 1
+    ? tr('1 chapter saved twice needs you to choose the copy to keep')
+    : tr('{n} chapters saved twice need you to choose the copy to keep', { n: num(p, 'n') })),
+  'autofix.needs.gapsPaused': (p) => (num(p, 'n') === 1
+    ? tr('1 series with missing chapters has updates paused')
+    : tr('{n} series with missing chapters have updates paused', { n: num(p, 'n') })),
+  'autofix.needs.gaps': (p) => (num(p, 'n') === 1 ? tr('1 series has chapters no source lists') : tr('{n} series have chapters no source lists', { n: num(p, 'n') })),
+  'autofix.needs.scan': (p) => (num(p, 'n') === 1 ? tr('The library scan could not read 1 folder') : tr('The library scan could not read {n} folders', { n: num(p, 'n') })),
+  'autofix.needs.downloadsMissing': (p) => (num(p, 'n') === 1
+    ? tr('1 downloaded chapter is where the library scan never looks')
+    : tr('{n} downloaded chapters are where the library scan never looks', { n: num(p, 'n') })),
+  'autofix.needs.noRoom': (p) => tr('{name} may carry your series, but the source limit is full: free a slot', { name: str(p, 'name') }),
+
+  'autofix.clears.cooldown': (p) => tr('{name} is cooling down', { name: str(p, 'name') }),
+  'autofix.clears.sweep': (p) => (num(p, 'n') === 1
+    ? tr('The next chapter sweep tries 1 chapter again')
+    : tr('The next chapter sweep tries {n} chapters again', { n: num(p, 'n') })),
+  'autofix.clears.tomorrow': (p) => (num(p, 'n') === 1
+    ? tr('1 series can be searched again tomorrow')
+    : tr('{n} series can be searched again tomorrow', { n: num(p, 'n') })),
+  'autofix.clears.nextRun': (p) => tr('{n} more to do: the next Fix everything continues', { n: num(p, 'n') }),
+  'autofix.clears.partial': (p) => (num(p, 'n') === 1
+    ? tr('1 chapter with missing pages is completed by the sweep')
+    : tr('{n} chapters with missing pages are completed by the sweep', { n: num(p, 'n') })),
+  'autofix.clears.slow': (p) => (num(p, 'n') === 1
+    ? tr('1 source answered slowly or empty lately')
+    : tr('{n} sources answered slowly or empty lately', { n: num(p, 'n') })),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

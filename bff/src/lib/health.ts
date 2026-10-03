@@ -26,7 +26,7 @@ import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
-import { gapsOf } from './fill';
+import { gapsOf, splitAtFloor } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
@@ -76,7 +76,10 @@ export type HealthAction =
   | 'replace_source'
   // v0.52.0 (#72): the duplicates check's pair in two languages -- link them as editions of one work (POST
   // /api/admin/series/{id}/editions {with}) rather than merge one into the other.
-  | 'link_editions';
+  | 'link_editions'
+  // v0.55.0: a frozen row whose source is dropped by SUWAYOMI_MAX_SOURCES -- open Admin → Sources on `sourceId` to free
+  // a slot (no server action). Offered in place of Replace there: the source works, the limit is the cause.
+  | 'free_slot';
 
 export interface HealthItem {
   seriesId?: string;
@@ -317,7 +320,7 @@ const hiddenPart = (n: number): Part | null => (n > 0 ? joined('sentence', say('
  * release, and a health page that can throw because a stored row predates a field is a health page that
  * disappears exactly when something is wrong. Nothing here is trusted beyond being read.
  */
-interface StoredGaps {
+export interface StoredGaps {
   at?: string;
   have_count?: number;
   scanned?: number;
@@ -342,6 +345,8 @@ interface HeldSeries {
   autoUpdate: boolean;
   /** What the series' slow archive (#117) is going to fetch of its holes, and whether it is paused; null for none. */
   archive: ArchiveHoles | null;
+  /** Its "Latest N" start (lib_series.chapter_floor), null for none: holes below it are nobody's to fetch (v0.55.0). */
+  floor: number | null;
 }
 
 /**
@@ -358,8 +363,8 @@ interface HeldSeries {
  * this one pass, so the cost is paid once per report, not twice.
  */
 async function heldBySeries(): Promise<HeldSeries[]> {
-  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null; auto_update: boolean }>(
-    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update
+  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null; auto_update: boolean; floor: number | null }>(
+    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update, ls.chapter_floor::float8 AS floor
        FROM lib_series ls WHERE ${visibleToAll('ls')} ORDER BY ls.title`,
   );
   // One read for every archive: a handful of rows, where a per-series query would double the page's cost.
@@ -374,6 +379,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       gapsResult: s.gaps_result ?? null,
       autoUpdate: s.auto_update !== false,
       archive: archiving.get(s.id) ?? null,
+      floor: s.floor == null ? null : Number(s.floor),
     });
   }
   return out;
@@ -427,6 +433,28 @@ function gapConclusion(g: StoredGaps): string {
 const ANSWERED = new Set(['no_candidate', 'cap', 'off', 'posting_order']);
 
 /**
+ * When a series' stored gap conclusion was reached: gaps_result.at, else the stamp for a result that predates `at`.
+ * ⚠️ Not the stamp first: it is written before the search (lib/repair.ts stepGaps), so while a run is on the series it
+ * is new and the stored result is still the previous run's -- last week's answer read as tonight's.
+ */
+export function gapsCheckedAt(g: StoredGaps | null | undefined, stamp: string | Date | null | undefined): Date | null {
+  if (g?.at && Number.isFinite(Date.parse(g.at))) return new Date(g.at);
+  return stamp ? new Date(stamp) : null;
+}
+
+/**
+ * "Asked, and the answer was no", and still the answer: one of the ANSWERED verdicts, reached under GAPS_FRESH_MS ago,
+ * with nothing landed since (`haveCount`, what the series holds now). Health greys such a row; the repair's gap step
+ * (v0.55.0) does not ask again until it is no longer fresh -- it used to, every night, for the same few series.
+ */
+export function gapsAnswered(
+  g: StoredGaps | null | undefined, stamp: string | Date | null | undefined, haveCount: number, now = Date.now(),
+): boolean {
+  const checked = gapsCheckedAt(g, stamp);
+  return !!g && !!checked && now - checked.getTime() < GAPS_FRESH_MS && ANSWERED.has(String(g.why)) && g.have_count === haveCount;
+}
+
+/**
  * Missing runs of chapter numbers: either the source never had them, or a download failed.
  *
  * Computed by `gapsOf`, the same function the fill dialog uses, and nothing else. There used to be a second
@@ -438,30 +466,44 @@ const ANSWERED = new Set(['no_candidate', 'cap', 'off', 'posting_order']);
 async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
-      const gaps = gapsOf(s.numbers);
+      // v0.55.0: a hole below the series' "Latest N" start is nobody's to fetch -- the sweep, Fill now and a follow's
+      // fetch all stop there, because the series was added from there on purpose (fill.ts splitAtFloor). It was a
+      // finding the repair then greyed for a week as "the next sweep fetches it", which no sweep ever did; it is
+      // listed for reference now, and only the holes at or above the start are the finding. Reintroduce by counting
+      // every hole: "a hole below a series' Latest N start" in repair.int.test.ts finds a finding with Fill now on it.
+      const { above: gaps, below } = splitAtFloor(gapsOf(s.numbers), s.floor);
       const numbers: number[] = [];
       for (const g of gaps) for (let n = g.lo; n <= g.hi && numbers.length < MAX_NUMBERS; n++) numbers.push(n);
-      return { s, gaps, missing: gaps.reduce((n, g) => n + g.count, 0), numbers };
+      return { s, gaps, below, missing: gaps.reduce((n, g) => n + g.count, 0), before: below.reduce((n, g) => n + g.count, 0), numbers };
     })
-    .filter((r) => r.missing > 0)
-    .sort((a, b) => b.missing - a.missing);
+    .filter((r) => r.missing > 0 || r.before > 0)
+    .sort((a, b) => b.missing - a.missing || b.before - a.before);
+  /** The first chapter the series was started from: the first whole number at or above its floor. */
+  const startOf = (r: (typeof rows)[number]) => Math.ceil(Number(r.s.floor));
+  const short = (t: string) => (t.length > 90 ? t.slice(0, 90) + '…' : t);
 
-  const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
+  const items: Array<HealthItem & { members?: string[]; beforeStart?: true }> = rows.map((r) => {
+    if (!r.missing) {
+      // Every hole is below where the series was started: for reference, with nothing to press -- Fill now cannot
+      // fetch below the start either.
+      return {
+        seriesId: r.s.id,
+        title: r.s.title,
+        ...detailOf([say('gaps.belowFloor', { n: r.before, start: startOf(r), ranges: short(rangeText(r.below)) })]),
+        info: true,
+        beforeStart: true,
+      };
+    }
     const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
-    // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped: the stamp is
-    // written before the search (lib/repair.ts stepGaps), so while a run is on this series the stamp is
-    // new and the stored result is still the previous run's -- and greyed "fresh" on the stamp, last
-    // week's answer read as tonight's. The stamp is the fallback for a result that predates `at`.
-    const checked = g?.at && Number.isFinite(Date.parse(g.at)) ? new Date(g.at)
-      : r.s.gapsCheckedAt ? new Date(r.s.gapsCheckedAt) : null;
+    // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped (gapsCheckedAt says why).
+    const checked = gapsCheckedAt(g, r.s.gapsCheckedAt);
     const fresh = !!checked && Date.now() - checked.getTime() < GAPS_FRESH_MS;
-    // A conclusion is about the library as it was when the search ran. One more chapter has landed since,
-    // so the hole may have moved: ask again rather than keep showing last night's answer.
-    const unchanged = !!g && g.have_count === r.s.numbers.length;
-    // "Asked, and the answer was no." A cooldown is NOT in the list (ANSWERED), deliberately and for the same
-    // reason the repair will not confirm a short chapter on one: not having asked is not an answer.
-    const answered = !!g && ANSWERED.has(String(g.why));
+    // "Asked, and the answer was no", still fresh, and nothing landed since -- a conclusion is about the library as it
+    // was when the search ran, and one more chapter may have moved the hole (gapsAnswered, which the repair's gap step
+    // reads too). A cooldown is NOT an answer (ANSWERED), for the same reason the repair will not confirm a short
+    // chapter on one: not having asked is not an answer.
+    const answeredFresh = gapsAnswered(g, r.s.gapsCheckedAt, r.s.numbers.length);
     // Every missing chapter is already listed on a source we follow, so this is the chapter sweep's job.
     // ⚠️ Still only while the conclusion is fresh: a hole the sweep was going to fetch a fortnight ago and
     // still has not is a finding again, not a promise.
@@ -477,7 +519,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // below the boundary, or a paused archive, its "not listed" and "paused" assertions read archiving.
     const takes = r.gaps.map((x) => archiveTakes(r.s.archive ?? undefined, x.lo, x.hi));
     const archived = !!r.s.archive && !r.s.archive.paused && r.gaps.every((x, i) => takes[i] === x.count);
-    const info = archived || (fresh && ((answered && unchanged) || sweepsIt));
+    const info = archived || answeredFresh || (fresh && sweepsIt);
     const what = g ? gapConclusion(g) : null;
     // What Fill now will do that the row would not otherwise say: fetch at once, at normal pace, numbers the
     // archive was going to fetch slowly (it passes ignoreArchiveBoundary, lib/repair.ts), and fetch a paused
@@ -491,7 +533,10 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       title: r.s.title,
       // The conclusion is `outcome` now, rendered by the page in the reader's language; the detail is the
       // finding alone.
-      ...detailOf([say('gaps.detail', { n: r.missing, ranges: ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges })]),
+      ...detailOf([
+        say('gaps.detail', { n: r.missing, ranges: short(ranges) }),
+        r.before > 0 && say('gaps.alsoBelowFloor', { n: r.before, start: startOf(r) }),
+      ]),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
       ...(archived ? {
@@ -532,7 +577,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const { items: shown, hidden } = truncate(items);
   const live = items.filter((i) => !i.info).length;
   const archiving = items.filter((i) => i.info && !i.ignored && i.outcome?.kind === 'gaps' && i.outcome.why === 'archiving').length;
-  const quiet = items.length - live - ignored - archiving;
+  const beforeStart = items.filter((i) => i.beforeStart).length;
+  const quiet = items.length - live - ignored - archiving - beforeStart;
   return {
     id: 'chapter-gaps',
     title: 'Chapter gaps',
@@ -541,10 +587,11 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       live ? say('gaps.live', { n: live }) : say('gaps.none'),
       quiet > 0 && say('gaps.quiet', { n: quiet }),
       archiving > 0 && say('gaps.archiving', { n: archiving }),
+      beforeStart > 0 && say('gaps.beforeStart', { n: beforeStart }),
       ignoredPart(ignored),
     ]),
     ...noteOf([say('gaps.note'), hiddenPart(hidden)]),
-    items: shown,
+    items: shown.map(({ beforeStart: _b, ...it }) => it),
   };
 }
 
@@ -819,7 +866,11 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
  * the main source of 195 series while this card read "Every series has a working source": only a source that was not
  * loaded counted. A main that is only cooling down is not listed: that ends by itself.
  */
-export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState()): Promise<HealthCheck> {
+export async function frozenSeries(
+  ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState(),
+  /** v0.55.0: every row, not the first twenty -- Fix everything's extensions phase reads them all (lib/autofix.ts). */
+  o: { all?: boolean } = {},
+): Promise<HealthCheck> {
   let readFailed = false;
   const now = Date.now();
   // The loaded main sources that cannot update a series now, and how: `off` or `failing`.
@@ -905,6 +956,15 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
     (r.source_id && !engineWhy(r) && bySource.get(r.source_id)
       ? { sourceId: r.source_id, actions, findSeries: bySource.get(r.source_id) }
       : {});
+  // v0.55.0: dropped by SUWAYOMI_MAX_SOURCES -- an extension's source, switched on, the engine answering, and still not
+  // registered -- is a slot to free, not a source to replace: the source works, and Replace would move every series off
+  // it for a setting. `free_slot` opens Admin → Sources on it (no server action), where an unused source can be
+  // switched off. Reintroduce by offering Replace again: "the engine being off is the reason" in health.int.test.ts
+  // finds replace_source on the over-limit row.
+  const overLimit = (r: typeof rows[number]): boolean =>
+    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled;
+  const keysFor = (r: typeof rows[number], actions: HealthAction[]) =>
+    (overLimit(r) && r.source_id ? { sourceId: r.source_id, actions: ['free_slot'] as HealthAction[] } : sourceKeys(r, actions));
   const found: HealthItem[] = frozen.map((r) => {
     const p = { n: r.books_count, source: r.source_id ?? '' };
     return {
@@ -916,13 +976,13 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
         : engineWhy(r)
           ? say(engine === 'unreachable' ? 'frozen.engineDown' : 'frozen.engineOff', p)
           : why(r, p)]),
-      ...sourceKeys(r, ['replace_source', 'find_sources']),
+      ...keysFor(r, ['replace_source', 'find_sources']),
     };
   });
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
-  const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
-  for (const r of covered.slice(0, 20)) {
+  const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, o.all ? undefined : 20);
+  for (const r of covered.slice(0, o.all ? undefined : 20)) {
     const stall = stalled(r);
     items.push({
       seriesId: r.id,
@@ -931,7 +991,7 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
         ? say('frozen.followingDown', { source: r.source_id!, state: stall, names: followed.get(r.id)! })
         : say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
       info: true,
-      ...sourceKeys(r, ['replace_source']),
+      ...keysFor(r, ['replace_source']),
     });
   }
   return {
@@ -1206,7 +1266,7 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
  * editions instead of Merge. Reintroduce by grouping by series again: "two editions of one work are no duplicate" in
  * editions.int.test.ts finds the pair.
  */
-async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const found = await q<{ external_id: string; members: Array<{ id: string; title: string; work: string; lang: string | null; source_id: string | null }> }>(
     `SELECT t.external_id,
             json_agg(json_build_object('id', ls.id, 'title', ls.title, 'work', COALESCE(ls.work_id::text, ls.id),
@@ -1293,19 +1353,30 @@ function median(sorted: number[]): number {
   return (sorted[Math.floor(mid)] + sorted[Math.ceil(mid)]) / 2;
 }
 
+/**
+ * The impossible-number rule over a series' held numbers: the limit a chapter number may not pass -- four times the
+ * median, or the median plus 500, whichever is more -- when one does, else null. Exported (v0.55.0) for the repair's
+ * gap step under Fix everything, which leaves such a series to the files phase: one chapter numbered 9001 is a
+ * 9000-chapter "gap".
+ */
+export function impossibleLimit(numbers: readonly number[]): number | null {
+  // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
+  // including it would drag the median down towards nothing.
+  const nums = numbers.filter((n) => n > 0).sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const med = median(nums);
+  const limit = Math.max(med * 4, med + 500);
+  return nums[nums.length - 1] > limit ? limit : null;
+}
+
 /** Chapter numbers far beyond the rest of the series: the sidebar-widget scraping bug's signature. */
 async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
-      // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
-      // including it would drag the median down towards nothing.
+      const limit = impossibleLimit(s.numbers);
+      if (limit === null) return null;
       const nums = s.numbers.filter((n) => n > 0).sort((a, b) => a - b);
-      if (!nums.length) return null;
-      const med = median(nums);
-      const hi = nums[nums.length - 1];
-      const limit = Math.max(med * 4, med + 500);
-      if (!(hi > limit)) return null;
-      return { s, med, hi, limit };
+      return { s, med: median(nums), hi: nums[nums.length - 1], limit };
     })
     .filter((r): r is NonNullable<typeof r> => !!r)
     .sort((a, b) => b.hi - a.hi);
@@ -1375,8 +1446,17 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
  * Reintroduce by dropping the listing test: "the chip names the later files, and only them" in health.int.test.ts
  * finds the fallback's 336.5 among them.
  */
-async function savedTwice(): Promise<HealthCheck> {
-  const rows = await q<{ series_id: string; title: string; id: string; number: number; source_id: string; mtime: string | number }>(
+/** One chapter file of a saved-twice group: its row, its number (the override's when there is one) and where it came from. */
+export interface TwiceBook { series_id: string; title: string; id: string; number: number; source_id: string; mtime: string | number }
+
+/**
+ * Every series with a chapter saved twice, and per whole number the group that arrived first (`earlier`, which stays)
+ * and the later group in another split (`later`, which the row offers for deletion): savedTwice's finding, whole --
+ * Health lists it, and Fix everything's files phase (v0.55.0, lib/autofix.ts) deletes the later copy only where the
+ * earlier one is complete.
+ */
+export async function savedTwiceGroups(): Promise<Array<{ seriesId: string; title: string; groups: Array<{ whole: number; earlier: TwiceBook[]; later: TwiceBook[] }> }>> {
+  const rows = await q<TwiceBook>(
     `WITH mixed AS (
        SELECT series_id FROM lib_books WHERE pruned_at IS NULL AND source_id IS NOT NULL
         GROUP BY series_id HAVING count(DISTINCT source_id) > 1)
@@ -1394,7 +1474,7 @@ async function savedTwice(): Promise<HealthCheck> {
     if (list) list.push(r);
     else bySeries.set(r.series_id, [r]);
   }
-  const items: HealthItem[] = [];
+  const out: Array<{ seriesId: string; title: string; groups: Array<{ whole: number; earlier: TwiceBook[]; later: TwiceBook[] }> }> = [];
   for (const [seriesId, books] of bySeries) {
     // Per whole number, per source: which group came first, and which came after it.
     const wholes = new Map<number, Map<string, Book[]>>();
@@ -1406,14 +1486,16 @@ async function savedTwice(): Promise<HealthCheck> {
       if (g) g.push(b);
       else groups.set(b.source_id, [b]);
     }
-    const later: Array<{ from: string; source: string; books: Book[] }> = [];
-    for (const groups of wholes.values()) {
+    const later: Array<{ whole: number; from: string; first: Book[]; source: string; books: Book[] }> = [];
+    for (const [whole, groups] of wholes) {
       if (groups.size < 2) continue;
       const spans = [...groups].map(([source, list]) => {
         const times = list.map((b) => Number(b.mtime));
         return { source, list, first: Math.min(...times), last: Math.max(...times) };
       }).sort((a, b) => a.first - b.first);
-      for (const g of spans.slice(1)) if (g.first > spans[0].last) later.push({ from: spans[0].source, source: g.source, books: g.list });
+      for (const g of spans.slice(1)) {
+        if (g.first > spans[0].last) later.push({ whole, from: spans[0].source, first: spans[0].list, source: g.source, books: g.list });
+      }
     }
     if (!later.length) continue;
     const listing = await q<{ number: number; source_id: string; copies: ListingCopy[] | null }>(
@@ -1423,15 +1505,24 @@ async function savedTwice(): Promise<HealthCheck> {
       const who = new Set([l.source_id, ...(l.copies ?? []).map((c) => c.source)]);
       listers.set(numKey(Number(l.number)), who);
     }
-    const twice = later
-      .filter((g) => !g.books.some((b) => listers.get(numKey(Number(b.number)))?.has(g.from)))
-      .flatMap((g) => g.books.map((b) => ({ ...b, n: numKey(Number(b.number)) })))
+    const kept = later.filter((g) => !g.books.some((b) => listers.get(numKey(Number(b.number)))?.has(g.from)));
+    if (!kept.length) continue;
+    out.push({ seriesId, title: books[0].title, groups: kept.map((g) => ({ whole: g.whole, earlier: g.first, later: g.books })) });
+  }
+  return out;
+}
+
+async function savedTwice(): Promise<HealthCheck> {
+  const items: HealthItem[] = [];
+  for (const { seriesId, title, groups } of await savedTwiceGroups()) {
+    const twice = groups
+      .flatMap((g) => g.later.map((b) => ({ ...b, n: numKey(Number(b.number)) })))
       .sort((a, b) => a.n - b.n);
     if (!twice.length) continue;
     const sources = [...new Set(twice.map((b) => b.source_id))].map((id) => getSource(id)?.name ?? id);
     items.push({
       seriesId,
-      title: books[0].title,
+      title,
       ...detailOf([say('twice.detail', {
         n: twice.length, numbers: twice.slice(0, 5).map((b) => b.n), more: Math.max(0, twice.length - 5), source: sources.join(', '),
       })]),

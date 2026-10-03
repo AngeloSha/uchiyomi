@@ -297,6 +297,14 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
     const up = await detail('up', 'Engine Fixture');
     assert.match(up.detail, /sw:health-engine is over the source limit \(SUWAYOMI_MAX_SOURCES\)/, 'with the engine up, the limit is the reason');
     assert.doesNotMatch(up.note, /wait for the extension engine/);
+    // v0.55.0: the limit is a slot to free, not a source to replace -- the source works. Reintroduce by offering Replace
+    // there (keysFor -> sourceKeys): the over-limit row reads replace_source.
+    const actions = async (engine: 'off' | 'up', title: string) => (await frozenSeries(noIgnores(), engine)).items.find((i) => i.title === title)!;
+    const slot = await actions('up', 'Engine Fixture');
+    assert.deepEqual(slot.actions, ['free_slot', 'ignore'], 'the over-limit row offers a slot to free, never Replace');
+    assert.equal(slot.sourceId, 'sw:health-engine', 'naming the source Admin → Sources opens on');
+    assert.deepEqual((await actions('off', 'Engine Fixture')).actions, ['ignore'], 'with the engine away there is no slot to free either: the engine is the fix');
+    assert.deepEqual((await actions('up', 'Gone Fixture')).actions, ['replace_source', 'find_sources', 'ignore'], 'a source that is gone still offers Replace');
     // A source that is not an extension's is not the engine's to explain.
     for (const engine of ['off', 'switched_off', 'unreachable', 'up'] as const) {
       assert.match((await detail(engine, 'Gone Fixture')).detail, /gone-pack-source is no longer installed$/, `a non-extension source (${engine})`);
@@ -997,6 +1005,44 @@ test('a gap the repair has already looked into is greyed until its answer goes s
     assert.deepEqual((await item()).caveats, [{ action: 'fill', code: 'updates_paused' }]);
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_GR]);
+  }
+});
+
+test('holes below a series\' "Latest N" start are listed for reference; the holes above it are still the finding', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // v0.55.0. Reintroduce by counting every hole in chapterGaps (drop splitAtFloor): the first row counts six missing
+  // with 4-6 and 9 among them, and the second is a finding with Fill now on it.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const S = 's_health_floor';
+  await q('DELETE FROM lib_series WHERE id = $1', [S]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, chapter_floor) VALUES ($1,'test','Floor Fixture',$1,10)`, [S]);
+  for (const n of [1, 2, 3, 7, 8, 12, 13]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages) VALUES ($1,$2,'test',$3,$4,$5,20)`,
+      [`b_${S}_${n}`, S, `/test/${S}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  const check = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
+    await assertSaid([c]);
+    return { c, row: c.items.find((i: any) => i.seriesId === S) };
+  };
+  try {
+    // Holes 4-6 and 9-11 with the series started at chapter 10: 4-6 and 9 are before the start, 10-11 is the finding.
+    const mixed = (await check()).row;
+    assert.notEqual(mixed.info, true, 'a hole at or above the start is still a finding');
+    assert.deepEqual(mixed.numbers, [10, 11], 'and only it is what Fill now is about');
+    assert.equal(mixed.detail, '2 missing — 10-11; 4 more before where you started (chapter 10)');
+    assert.ok(mixed.actions.includes('fill'));
+
+    await q('UPDATE lib_series SET chapter_floor = 13 WHERE id = $1', [S]);
+    const { c, row } = await check();
+    assert.equal(row.info, true, 'every hole before the start: listed for reference');
+    assert.equal(row.detail, '6 missing before where you started (chapter 13) — 4-6, 9-11');
+    assert.equal(row.actions, undefined, 'with nothing to press');
+    assert.ok(c.summarySaid.some((p: any) => p.code === 'gaps.beforeStart'), 'and the summary counts it apart from "already looked into"');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S]);
   }
 });
 

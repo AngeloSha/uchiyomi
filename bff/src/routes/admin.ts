@@ -11,8 +11,8 @@ import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
-import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
-import { editionFollowing, linkEdition, unlinkEdition, workRows } from '../lib/editions';
+import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
+import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
@@ -30,7 +30,7 @@ import { recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
-import { checkSourceLive, recordLiveResult } from '../lib/sourceCheck';
+import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
@@ -73,6 +73,7 @@ import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
+import { autofixRun, autofixState, startAutofix, stopAutofix, type AutofixRun } from '../lib/autofix';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
@@ -512,8 +513,12 @@ export default async function adminRoutes(app: FastifyInstance) {
   // controls for a job that can never run.
   const settingsRow = async () => {
     const row = await one<any>(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`);
+    // v0.55.0: what the nightly runs, `repair` (the safe repair) or `autofix` (Fix everything). Read apart from the
+    // columns above and said as the contract names it; an unknown value reads as the default.
+    const mode = await one<{ m: string | null }>('SELECT nightly_mode AS m FROM server_settings WHERE id = 1').catch(() => null);
     return {
       ...row,
+      nightlyMode: mode?.m === 'autofix' ? 'autofix' : 'repair',
       extensions_configured: suwayomiConfigured(),
       // How many chapters the read-chapter cleanup would delete if it ran now, at the CURRENT day setting.
       // Computed here rather than only in the tasks list because the tasks list does not show the job until
@@ -597,6 +602,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       // renumbers anything. The tick re-reads this column every time, so switching it off takes effect
       // without a restart.
       repairEnabled: z.boolean().optional(),
+      /**
+       * v0.55.0: what the nightly runs -- `repair`, the safe repair (the default, as before), or `autofix`, Health's Fix
+       * everything (lib/autofix.ts). `repairEnabled` still switches the nightly off entirely; the scheduler reads this
+       * every tick, so a change applies to the next run without a restart.
+       */
+      nightlyMode: z.enum(['repair', 'autofix']).optional(),
       // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
@@ -664,6 +675,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
     if (b.repairEnabled !== undefined) await q('UPDATE server_settings SET repair_enabled = $1, updated_at = now() WHERE id = 1', [b.repairEnabled]);
+    if (b.nightlyMode !== undefined) await q('UPDATE server_settings SET nightly_mode = $1, updated_at = now() WHERE id = 1', [b.nightlyMode]);
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
@@ -1651,23 +1663,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const b = z.object({ into: z.string().min(1).max(64) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it merge into?' });
-    if (b.data.into === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot merge into itself.' });
-
-    const from = await getSeriesRow(id);
-    const into = await getSeriesRow(b.data.into);
-    if (!from || !into) return reply.code(404).send({ error: 'not_found' });
-    for (const [row, which] of [[from, 'source'], [into, 'target']] as const) {
-      if (row.deleted_at) return reply.code(400).send({ error: 'deleted', message: `The ${which} series is hidden. Restore it first.` });
-      if (row.merged_into) return reply.code(400).send({ error: 'merged', message: `The ${which} series was already merged into another one.` });
-    }
+    // lib/libraryAdmin.ts mergeRefusal (v0.55.0): the checks in one place, which Fix everything's merges ask too.
     // Two language editions of one work are two languages' chapters (v0.52.0): merged, the list would hold both under
-    // one number each, in whichever language came first. Reintroduce by dropping this: "a merge inside one work is
-    // refused" in editions.int.test.ts answers 200 and moves the chapters.
-    const works = await q<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = ANY($1)', [[id, into.id]]);
-    if (works.length === 2 && works[0].work_id && works[0].work_id === works[1].work_id) {
-      return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
+    // one number each, in whichever language came first. Reintroduce by dropping that check: "a merge inside one work
+    // is refused" in editions.int.test.ts answers 200 and moves the chapters.
+    const no = await mergeRefusal(id, b.data.into);
+    if (no) {
+      switch (no.refused) {
+        case 'same_series': return reply.code(400).send({ error: 'same_series', message: 'A series cannot merge into itself.' });
+        case 'not_found': return reply.code(404).send({ error: 'not_found' });
+        case 'deleted': return reply.code(400).send({ error: 'deleted', message: `The ${no.which} series is hidden. Restore it first.` });
+        case 'merged': return reply.code(400).send({ error: 'merged', message: `The ${no.which} series was already merged into another one.` });
+        case 'same_work': return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
+      }
     }
-
+    const from = (await getSeriesRow(id))!;
+    const into = (await getSeriesRow(b.data.into))!;
     const r = await mergeSeries(id, into.id);
     await logAudit('series.merge', {
       userId: userIdOf(req),
@@ -1690,28 +1701,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       with: z.string().min(1).max(64), lang: z.string().min(1).max(35).optional(), withLang: z.string().min(1).max(35).optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it be linked with?' });
-    if (b.data.with === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot be an edition of itself.' });
-    const [mine, theirs] = await Promise.all([workRows(id), workRows(b.data.with)]);
-    const a = mine.find((r) => r.id === id);
-    const w = theirs.find((r) => r.id === b.data.with);
-    if (!a || !w) return reply.code(404).send({ error: 'not_found' });
-    if (a.hidden || w.hidden) return reply.code(400).send({ error: 'deleted', message: 'One of the two is removed from the library. Put it back first.' });
-    if (mine.length > 1 && theirs.length > 1) {
-      return mine.some((r) => r.id === w.id)
-        ? reply.code(409).send({ error: 'same_work', message: 'These two are already editions of one work.' })
-        : reply.code(409).send({ error: 'other_work', message: 'Each is already an edition of another work. Unlink one of them first.' });
+    // lib/editions.ts linkPair (v0.55.0): the rules in one place, which Fix everything's duplicates phase runs too.
+    const r = await linkPair(id, b.data.with, { lang: b.data.lang, withLang: b.data.withLang });
+    if ('refused' in r) {
+      switch (r.refused) {
+        case 'same_series': return reply.code(400).send({ error: 'same_series', message: 'A series cannot be an edition of itself.' });
+        case 'not_found': return reply.code(404).send({ error: 'not_found' });
+        case 'deleted': return reply.code(400).send({ error: 'deleted', message: 'One of the two is removed from the library. Put it back first.' });
+        case 'same_work': return reply.code(409).send({ error: 'same_work', message: 'These two are already editions of one work.' });
+        case 'other_work': return reply.code(409).send({ error: 'other_work', message: 'Each is already an edition of another work. Unlink one of them first.' });
+        case 'same_lang': return reply.code(409).send({ error: 'same_lang', message: 'Both are in the same language: merge them instead.' });
+        case 'edition_exists': return reply.code(409).send({ error: 'edition_exists', message: 'That language already has its edition in this work.' });
+      }
     }
-    // What each will state: the language asked for where the series states none, else its own.
-    const langA = a.stated ? a.lang : canonLang(b.data.lang) ?? a.lang;
-    const langW = w.stated ? w.lang : canonLang(b.data.withLang) ?? w.lang;
-    if (langA === langW) return reply.code(409).send({ error: 'same_lang', message: 'Both are in the same language: merge them instead.' });
-    // The one in a work stays where it is and the other joins it.
-    const [joiner, of, joinerLang, ofLang] = mine.length > 1 ? [w, a, langW, langA] : [a, w, langA, langW];
-    const taken = (mine.length > 1 ? mine : theirs).find((r) => r.id !== of.id && r.lang === joinerLang);
-    const r = taken ? 'taken' as const : await linkEdition(joiner.id, { of: of.id, lang: joinerLang, ofLang });
-    if (r === 'taken') return reply.code(409).send({ error: 'edition_exists', message: 'That language already has its edition in this work.' });
-    if (r === 'gone') return reply.code(404).send({ error: 'not_found' });
-    await logAudit('series.edition_link', { userId: userIdOf(req), detail: { id: joiner.id, title: joiner.title, of: of.id, ofTitle: of.title, lang: r.lang }, req });
+    await logAudit('series.edition_link', {
+      userId: userIdOf(req), detail: { id: r.joiner.id, title: r.joiner.title, of: r.of.id, ofTitle: r.of.title, lang: r.lang }, req,
+    });
     return { ok: true, workId: r.workId, lang: r.lang };
   });
 
@@ -1996,80 +2001,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    const ids = [...new Set(b.data.bookIds)];
-    const rows = new Map((await chapterRows(id, ids)).map((r) => [r.id, r]));
-    // The same veto the cleanup applies, for the same reason: a bookmark names a page number INSIDE the
-    // file, so deleting the pages turns it into a pointer at nothing. Progress survives a delete (it is a
-    // count); a bookmark does not, and the admin clicking Delete cannot see whose it is.
-    // Reintroduce by dropping this lookup: "a bookmarked chapter is skipped, and says so" in
-    // chapterActions.int.test.ts finds the file gone.
-    const bookmarked = new Set((await q<{ book_id: string }>(
-      'SELECT DISTINCT book_id FROM bookmarks WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id));
-
-    const skipped: Array<{ id: string; reason: string }> = [];
-    const todo: Array<{ id: string; abs: string }> = [];
-    const root = resolve(DL_ROOT);
-    for (const bid of ids) {
-      const r = rows.get(bid);
-      if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
-      // Reintroduce by dropping this check: "delete removes the file, keeps the row and the progress, skips
-      // the read library" in chapterActions.int.test.ts fails -- the read library's file is gone.
-      if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
-      if (r.pruned_at) { skipped.push({ id: bid, reason: 'already_pruned' }); continue; }
-      if (bookmarked.has(bid)) { skipped.push({ id: bid, reason: 'bookmarked' }); continue; }
-      const abs = containedPath(DL_ROOT, r.file);
-      // A path that escapes its root is refused, never "cleaned up" -- the health page can argue about it.
-      // So is the root ITSELF: containedPath accepts it, the rm below is recursive, and a row whose file
-      // resolves to `.` (a hand-edited row is the only way today) would take the whole download directory.
-      // Reintroduce by dropping the `abs === root` half: "the download root itself is never a chapter" in
-      // chapterActions.int.test.ts finds the directory gone.
-      if (!abs || abs === root) { skipped.push({ id: bid, reason: 'outside_root' }); continue; }
-      todo.push({ id: bid, abs });
-    }
-    if (todo.length) {
-      const w = await allWritable([DL_ROOT]);
-      if (!w.ok) return reply.code(409).send({ error: 'refused', message: w.reason, fix: w.fix });
-    }
-    let applied = 0;
-    let bytes = 0;
-    for (const t of todo) {
-      const st = await stat(t.abs).catch(() => null);
-      if (st) {
-        try { await rm(t.abs, { recursive: true, force: true }); }
-        catch { skipped.push({ id: t.id, reason: 'unlink_failed' }); continue; }
-        bytes += st.size;
-        // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside the landed file,
-        // which reapStaleTemp deliberately leaves alone) must not outlive a deliberate delete of the file:
-        // at the next boot the reaper would see a bak with no original, put it back, and the chapter the
-        // admin deleted would be on disk again, un-marked by the next scan, its space never reclaimed.
-        // Reintroduce by dropping this rm: "a stray set-aside copy goes with the file" in
-        // chapterActions.int.test.ts finds the bak still there.
-        await rm(`${t.abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
-      } else if (!(await stat(dirname(t.abs)).catch(() => null))) {
-        // ⚠️ The file is missing AND so is its folder: that is the volume not being there (an unmounted
-        // share whose empty mount point passed the preflight), not a chapter somebody removed by hand.
-        // Marking on that evidence would tombstone a chapter whose file is fine on the unmounted disk and
-        // throw away everything measured about it; the row is left as it is and the answer says why.
-        // Reintroduce by dropping this branch: "a missing download folder is not a deleted chapter" in
-        // chapterActions.int.test.ts finds pruned_at set.
-        skipped.push({ id: t.id, reason: 'unlink_failed' });
-        continue;
-      }
-      // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
-      // do not exist.
-      await tombstoneBooks([t.id]);
-      applied++;
-    }
-    // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every
-    // thumbnail falls back to the cover chapter's first page, and a tombstone has none.
-    if (applied) {
-      await q(
-        `UPDATE lib_series SET cover_book_id = (
-           SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
-         ) WHERE id = $1`, [id]);
-    }
-    await logAudit('series.chapters_delete', { userId: userIdOf(req), detail: { id, title: row.title, bookIds: ids, applied, bytes }, req });
-    return { ok: true, applied, bytes, skipped };
+    // lib/libraryAdmin.ts deleteChapterFiles (v0.55.0): the route's own rules, in one place, which Fix everything's files
+    // phase runs too -- the bookmark veto, the download folder only, the root itself never.
+    const r = await deleteChapterFiles(id, b.data.bookIds, { userId: userIdOf(req), req });
+    if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
+    return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
   });
 
   /**
@@ -3270,6 +3206,62 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // ---- Fix everything (v0.55.0, lib/autofix.ts) ----
+
+  /**
+   * Said lines that name a series by its title: left out for an admin who hides 18+ (the repair history's rule for its
+   * notes -- they carry no id to hold each title to the listing rule).
+   */
+  const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
+    'autofix.item.notRenumbered', 'autofix.item.deleted']);
+  const scrubRun = (r: AutofixRun | null, hide: boolean): AutofixRun | null => {
+    if (!r || !hide) return r;
+    const keep = (l: { code: string }) => !TITLED.has(l.code);
+    return {
+      ...r,
+      ...(r.current ? { current: { ...r.current, title: undefined } } : {}),
+      ...(r.log ? { log: r.log.filter(keep) } : {}),
+      ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(keep) } : d)) } } : {}),
+    };
+  };
+
+  /**
+   * Start Health's Fix everything: one background run, 202 with its id. 409 `busy` with what is going -- `autofix`,
+   * `repair`, `find` or `sweep` -- beside another run, a repair, a Find or Replace, or a chapter sweep. It runs as the
+   * admin who pressed it: their age reach is what its Replace and Find runs may ask, as theirs (#141).
+   */
+  app.post('/api/admin/health/autofix', async (req, reply) => {
+    const b = z.object({}).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Fix everything takes no options.' });
+    const ctx = await viewCtxFor(userIdOf(req), roleOf(req));
+    const r = startAutofix(userIdOf(req) ?? null, { ctx, origin: 'manual', log: app.log, req });
+    if ('busy' in r) return reply.code(409).send({ error: 'busy', running: r.busy });
+    return reply.code(202).send({ ok: true, runId: r.runId });
+  });
+  /** The run going now, and the newest finished one: what the Health page polls every two seconds while one runs. */
+  app.get('/api/admin/health/autofix', async (req) => {
+    const st = await autofixState();
+    const hide = hideAdult(req);
+    return { run: scrubRun(st.run, hide), last: scrubRun(st.last, hide) };
+  });
+  /** One run, live or kept (repair_runs keeps them as it keeps repairs); 404 when none has that id. */
+  app.get('/api/admin/health/autofix/:runId', async (req, reply) => {
+    const { runId } = req.params as { runId: string };
+    if (!runId || runId.length > 64) return reply.code(400).send({ error: 'bad_request' });
+    const r = await autofixRun(runId);
+    if (!r) return reply.code(404).send({ error: 'not_found' });
+    return scrubRun(r, hideAdult(req));
+  });
+  /**
+   * Stop the run at its next safe point -- between series, steps, sources or pairs, never inside a merge, a delete or a
+   * renumber; its Find or Replace run in flight stops at once. `stopping: false` when nothing is running.
+   */
+  app.post('/api/admin/health/autofix/stop', async (req) => {
+    const stopping = stopAutofix();
+    if (stopping) await logAudit('library.autofix_stop', { userId: userIdOf(req), detail: {}, req });
+    return { ok: stopping, stopping };
+  });
+
   // ---- link existing series to AniList entries so tracker sync has an anchor ----
   // Art was matched long before trackers existed, so those series have cached art but no link. This
   // re-resolves only what's missing, paced for AniList's ~30 req/min limit.
@@ -3953,26 +3945,19 @@ export default async function adminRoutes(app: FastifyInstance) {
    */
   app.get('/api/admin/sources/overview', async () => sourcesOverview());
 
-  const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
     const { id } = req.params as { id: string };
     const src = getSource(id);
     if (!src) return reply.code(404).send({ error: 'not_found' });
-    if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
-    testing.add(id);
-    try {
-      // The same function the scheduled sweep runs, so the button and the schedule cannot disagree.
-      const r = await checkSourceLive(src, { by: 'test' });
-      await recordLiveResult(id, r, 'test');
-      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: r.smoke.ok, code: r.diagnosis.code, state: r.state, stage: r.stage }, req });
-      return reply.send({
-        ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
-        canClear: r.smoke.ok && r.blocked,
-        state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
-      });
-    } finally {
-      testing.delete(id);
-    }
+    // lib/sourceCheck.ts testSource: the check, recorded and audited, one Test of a source at a time -- Fix everything's
+    // Tests included (v0.55.0).
+    const r = await testSource(src, { userId: userIdOf(req), req });
+    if (r === 'busy') return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
+    return reply.send({
+      ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
+      canClear: r.smoke.ok && r.blocked,
+      state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
+    });
   });
 
   /**

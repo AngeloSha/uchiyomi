@@ -2809,8 +2809,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
     // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
     // else's: the series a sweep is on may be in a library this viewer cannot open.
-    // A Find other sources run (v0.49.1) is an admin's alone, whoever started it.
-    const runs = listRuns().filter((r) => admin || (r.kind !== 'find_sources' && r.by !== null && r.by === me));
+    // A Find other sources run (v0.49.1) and a Fix everything run (v0.55.0) are an admin's alone, whoever started them.
+    const runs = listRuns().filter((r) => admin || (r.kind !== 'find_sources' && r.kind !== 'autofix' && r.by !== null && r.by === me));
     const activity = listActivity();
     // The slow archive's rows (#117), every viewer's from one shared read (lib/archive.ts, ten seconds).
     const archived = await archiveSeriesIds().catch(() => [] as string[]);

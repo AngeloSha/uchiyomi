@@ -19,8 +19,12 @@
 
 import { saidOf, type Part, type Said } from './said';
 
-/** `find_sources` (v0.49.1): a Find other sources run (lib/findSources.ts). Admins only; it downloads nothing. */
-export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources';
+/**
+ * `find_sources` (v0.49.1): a Find other sources run (lib/findSources.ts). Admins only; it downloads nothing.
+ * `autofix` (v0.55.0): Health's Fix everything (lib/autofix.ts). Admins only: `done`/`total` are its phases, `step` the
+ * phase it is in, `current` the series it is on.
+ */
+export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources' | 'autofix';
 
 export interface RunCard {
   kind: RunKind;

@@ -746,6 +746,63 @@ test('at most five series a night, the emptiest first, and a series checked toda
   assert.equal(forced.gaps.series, 1, 'naming a series is a person asking now, so the daily stamp does not apply');
 });
 
+test('the gaps rotate: least recently checked first, and a fresh "nobody lists them" is not asked again', { skip }, async () => {
+  // v0.55.0. The step took the biggest holes first every night among series not checked for a day, so five holes
+  // nobody can fill were searched again night after night and a smaller one was never reached.
+  // Reintroduce by dropping the gapsAnswered skip in stepGaps: Repair Nofill (asked six days ago, nobody had it, nothing
+  // landed since) is the least recently checked and is searched again. Reintroduce by sorting by `missing` alone:
+  // Repair Rotate, the biggest hole but checked three days ago, takes a place ahead of a series never checked.
+  const EXTRA = 's_rep_rot';
+  const title = 'Repair Rotate';
+  await seedSeries(EXTRA, title, { source: A, auto: true });
+  for (const n of [...range(1, 10), 20]) await seedBook(`b_rot_${n}`, EXTRA, title, n, { pages: 3 });
+  const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+  const stored = (days: number, why: string, have: number) =>
+    JSON.stringify({ at: ago(days), have_count: have, scanned: 3, followed: null, coverage: null, fetched: 0, sweep: 0, capped: 0, unfillable: [], landed: 0, why });
+  try {
+    await q('UPDATE lib_series SET gaps_checked_at = $2, gaps_result = $3::jsonb WHERE id = $1', [NOFILL, ago(6), stored(6, 'no_candidate', GAP_HAVE.length)]);
+    await q('UPDATE lib_series SET gaps_checked_at = $2, gaps_result = $3::jsonb WHERE id = $1', [GAP, ago(4), stored(4, 'listed', GAP_HAVE.length)]);
+    await q('UPDATE lib_series SET gaps_checked_at = $2, gaps_result = $3::jsonb WHERE id = $1', [EXTRA, ago(3), stored(3, 'listed', 11)]);
+    const before = Date.now();
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.series, 5, 'REPAIR_GAPS_MAX of the six that may be asked');
+    const stamped = (await q('SELECT id FROM lib_series WHERE id = ANY($1) AND gaps_checked_at >= $2', [[...MINE, EXTRA], new Date(before - 1000)]))
+      .map((x: any) => x.id);
+    assert.equal(stamped.includes(NOFILL), false, 'a fresh "nobody lists them" is not asked again');
+    assert.equal(stamped.includes(EXTRA), false, 'the most recently checked waits its turn, however big its hole');
+    assert.ok(stamped.includes(LISTED) && stamped.includes(GAP), 'the smallest hole, never checked, and the one checked longest ago have theirs');
+    assert.deepEqual(searches.filter((s) => s.endsWith(':Repair Nofill')), [], 'and nothing was searched for it');
+  } finally {
+    await q('DELETE FROM lib_books WHERE series_id = $1', [EXTRA]);
+    await q('DELETE FROM lib_series WHERE id = $1', [EXTRA]);
+    rmSync(join(DL, folderOf(title)), { recursive: true, force: true });
+  }
+});
+
+test("a hole below a series' Latest N start is nobody's: the gap step leaves it, and Health lists it for reference", { skip }, async () => {
+  // v0.55.0. The sweep, Fill now and a follow's fetch all stop at chapter_floor, yet the gap step filed a hole below it
+  // as "listed: the next sweep fetches it" and Health greyed it for a week on that promise. Reintroduce by taking every
+  // hole in stepGaps (drop splitAtFloor's `.above`): Repair Listed is looked at and stored as the sweep's. Reintroduce
+  // by counting every hole in health.ts chapterGaps: its row is a finding, with Fill now on it.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, LISTED]);
+  await q('UPDATE lib_series SET chapter_floor = 15 WHERE id = $1', [LISTED]);
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.series, 0, 'chapter 11 is below where the series was started from: nothing to look at');
+    assert.equal(r.gaps.sweep, 0, 'and nothing claims the sweep will fetch it');
+    assert.equal((await series(LISTED)).gaps_result, null);
+    const fill = await runRepair(undefined, { only: ['gaps'], seriesId: LISTED, userId: null });
+    assert.equal(fill.skips?.[0]?.why, 'no_gaps', 'Fill now says there is nothing it can fill');
+    const row = (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps').items.find((i: any) => i.seriesId === LISTED);
+    assert.equal(row?.info, true, 'listed for reference, not a finding');
+    assert.equal(row.detail, '1 missing before where you started (chapter 15) — 11');
+    assert.deepEqual(row.detailSaid, [{ code: 'gaps.belowFloor', params: { n: 1, start: 15, ranges: '11' } }]);
+    assert.equal(row.actions, undefined, 'nothing to press: Fill now cannot fetch below the start either');
+  } finally {
+    await q('UPDATE lib_series SET chapter_floor = NULL WHERE id = $1', [LISTED]);
+  }
+});
+
 test('a series the run has no search left for keeps its place in the queue instead of being stamped', { skip }, async () => {
   // Reintroduce by stamping gaps_checked_at before the budget is tested (moving that UPDATE back above
   // the listed/capped/unlisted split, or dropping the break): the last two assertions find a series

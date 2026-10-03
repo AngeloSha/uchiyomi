@@ -108,6 +108,12 @@ const EN = {
     'repair\'s gap search for one series: it looks for another source that carries our numbering on both sides of ' +
     'the hole, follows it and fetches. A series it has already asked about is greyed with what it found.',
   'gaps.detail': ({ n, ranges }: { n: number; ranges: string }) => `${n} missing — ${ranges}`,
+  // v0.55.0: holes below a series' "Latest N" start (lib_series.chapter_floor), which nothing fetches unasked. `start` is
+  // the first chapter the series was started from.
+  'gaps.belowFloor': ({ n, start, ranges }: { n: number; start: number; ranges: string }) =>
+    `${n} missing before where you started (chapter ${start}) — ${ranges}`,
+  'gaps.alsoBelowFloor': ({ n, start }: { n: number; start: number }) => `${n} more before where you started (chapter ${start})`,
+  'gaps.beforeStart': ({ n }: { n: number }) => `${n} before where you started`,
 
   // ---- Chapter numbering (#116). `name` null: the source could not be named at all.
   'numbering.live': ({ n }: { n: number }) => `${n} series ${s(n, 'waits', 'wait')} for a numbering review`,
@@ -528,6 +534,123 @@ const EN = {
   'main.moved': () => 'This series’ main source changed meanwhile. Look again.',
   // A source retired, or a site removed, while some series still has it as its main source (v0.54.0, lib/retireSource.ts).
   'retire.inUse': ({ n }: { n: number }) => `It is the main source of ${n} series. Replace it first.`,
+
+  // ---- Fix everything (v0.55.0, lib/autofix.ts): what the run is on now, what it did, what clears by itself and what
+  // only a person can do. `name` is a source's or an extension's name; `title`, `a`, `b`, `from` and `into` are series
+  // titles, which the web isolates in right-to-left text.
+  'autofix.now.checking': () => 'Checking the extension engine and the Cloudflare solver',
+  'autofix.now.scanning': () => 'Scanning the library and counting pages',
+  'autofix.now.solver': () => 'Resetting the Cloudflare solver and finishing interrupted renumbers',
+  'autofix.now.testing': ({ name }: { name: string }) => `Testing ${name}`,
+  'autofix.now.replacing': ({ name }: { name: string }) => `Replacing ${name}`,
+  'autofix.now.retiring': ({ name }: { name: string }) => `Turning off ${name}`,
+  'autofix.now.duplicates': () => 'Merging duplicates and linking language editions',
+  'autofix.now.renumbering': () => 'Applying safe renumbering plans',
+  'autofix.now.failures': () => 'Retrying chapters that would not download',
+  'autofix.now.short': () => 'Looking for longer copies of short chapters',
+  'autofix.now.gaps': () => 'Filling gaps',
+  'autofix.now.installing': ({ name }: { name: string }) => `Installing ${name}`,
+  'autofix.now.searching': ({ name }: { name: string }) => `Searching ${name}`,
+  'autofix.now.removing': ({ name }: { name: string }) => `Removing ${name}`,
+  'autofix.now.files': () => 'Deleting chapters saved twice or numbered impossibly',
+  'autofix.now.rechecking': () => 'Checking Health again',
+  'autofix.now.waitSweep': () => 'Waiting for the chapter sweep to finish',
+
+  // What it did, one line per kind (AutofixRun.summary.done).
+  'autofix.done.scanned': () => 'Scanned the library',
+  'autofix.done.counted': ({ n }: { n: number }) => `Scanned the library and counted the pages of ${n} chapter${s(n, '', 's')}`,
+  'autofix.done.solverReset': ({ n }: { n: number }) => `Reset the Cloudflare solver and cleared ${n} source${s(n, '', 's')} that blamed it`,
+  'autofix.done.engineConnected': () => 'Connected the extension engine’s Cloudflare helper',
+  'autofix.done.resumedRenumber': ({ n }: { n: number }) => `Finished ${n} interrupted renumber${s(n, '', 's')}`,
+  'autofix.done.tested': ({ n }: { n: number }) => `Tested ${n} source${s(n, '', 's')}`,
+  'autofix.done.unblocked': ({ n }: { n: number }) => `Cleared the block on ${n} source${s(n, '', 's')} that passed ${s(n, 'its', 'their')} test`,
+  'autofix.done.replaced': ({ n, names: list, more }: { n: number; names: string[]; more: number }) => `Moved ${n} series off ${names(list, more)}`,
+  'autofix.done.retired': ({ n }: { n: number }) => `Turned off ${n} failing source${s(n, '', 's')} no series uses`,
+  'autofix.done.linked': ({ n }: { n: number }) => `Linked ${n} pair${s(n, '', 's')} as language editions`,
+  'autofix.done.merged': ({ n }: { n: number }) => `Merged ${n} duplicate${s(n, '', 's')}`,
+  'autofix.done.renumbered': ({ n }: { n: number }) => `Renumbered ${n} series by a safe plan`,
+  'autofix.done.fetched': ({ n }: { n: number }) => `Fetched ${n} missing chapter${s(n, '', 's')}`,
+  'autofix.done.refetched': ({ n }: { n: number }) => `Downloaded ${n} chapter${s(n, '', 's')} that had failed`,
+  'autofix.done.failuresCleared': ({ n }: { n: number }) => `Gave ${n} failed chapter${s(n, '', 's')} another try`,
+  'autofix.done.shortFixed': ({ n }: { n: number }) => `Found a longer copy of ${n} short chapter${s(n, '', 's')}`,
+  'autofix.done.shortConfirmed': ({ n }: { n: number }) => `${n} short chapter${s(n, '', 's')} really ${s(n, 'is', 'are')} that short at every source`,
+  // `n` the series the kept extensions carry now.
+  'autofix.done.installed': ({ names: list, more, n }: { names: string[]; more: number; n: number }) => `Installed ${names(list, more)} (found ${n} series)`,
+  'autofix.done.uninstalled': ({ names: list, more }: { names: string[]; more: number }) => `Removed ${names(list, more)} again: nothing there carried a series`,
+  'autofix.done.deletedTwice': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} saved twice`,
+  'autofix.done.deletedOdd': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} numbered impossibly`,
+
+  // One thing it did or met, for Details (the done lines' `items`, and the run's log).
+  'autofix.item.tested': ({ name, ok }: { name: string; ok: boolean }) => (ok ? `${name} passed its test` : `${name} failed its test again`),
+  'autofix.item.unblocked': ({ name }: { name: string }) => `Cleared the block on ${name}`,
+  'autofix.item.replaced': ({ name, n }: { name: string; n: number }) => `Moved ${n} series off ${name}`,
+  'autofix.item.stillOn': ({ name, n }: { name: string; n: number }) => `${n} series ${s(n, 'is', 'are')} still on ${name}`,
+  'autofix.item.kept': ({ name }: { name: string }) => `Left ${name} alone: a setting turned it off, not the site`,
+  'autofix.item.retired': ({ name }: { name: string }) => `Turned off ${name}: it is failing and no series uses it`,
+  'autofix.item.linked': ({ a, b }: { a: string; b: string }) => `Linked “${a}” and “${b}” as language editions`,
+  'autofix.item.merged': ({ from, into }: { from: string; into: string }) => `Merged “${from}” into “${into}”`,
+  'autofix.item.notMerged': ({ a, b }: { a: string; b: string }) => `Left “${a}” and “${b}” apart: neither their titles nor their chapters agree`,
+  'autofix.item.renumbered': ({ title }: { title: string }) => `Renumbered “${title}”`,
+  'autofix.item.notRenumbered': ({ title }: { title: string }) => `“${title}” waits for you: its renumbering plan is not a safe one`,
+  'autofix.item.installed': ({ name, n }: { name: string; n: number }) => `Installed ${name}: it carries ${n} series`,
+  'autofix.item.uninstalled': ({ name }: { name: string }) => `Removed ${name} again: it carried none of the series`,
+  'autofix.item.noRoom': ({ name }: { name: string }) => `Did not keep ${name}: the source limit is full`,
+  'autofix.item.installFailed': ({ name }: { name: string }) => `${name} could not be installed`,
+  'autofix.item.deleted': ({ title, n }: { title: string; n: number }) => `Deleted ${n} chapter${s(n, '', 's')} of “${title}”`,
+  // Why a part of the run was passed over: solver_down | engine_down | no_engine | time | stopped | installs.
+  'autofix.item.skipped': ({ why }: { why: string }) => AUTOFIX_SKIPPED[why] ?? why,
+
+  // What only a person can do (summary.needsYou), each with its one key.
+  'autofix.needs.solverDown': () => forDesktop(
+    'The Cloudflare solver is not answering: check that its container is running',
+    'Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi',
+  ),
+  'autofix.needs.solverFailing': () => forDesktop(
+    'The Cloudflare solver answers but keeps failing: restart its container',
+    'Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi',
+  ),
+  'autofix.needs.engine': () => 'The extension engine needs a look',
+  'autofix.needs.foldersTwice': () => forDesktop(
+    'The library and the downloads folder are inside each other: mount them side by side',
+    // The desktop app's own words, as nested.note's: its library folder and the manga folder they added.
+    'Uchiyomi’s library folder and the manga folder you added are inside each other: keep them side by side',
+  ),
+  'autofix.needs.sourceLimit': ({ n }: { n: number }) => forDesktop(
+    `${n} extension source${s(n, '', 's')} ${s(n, 'is', 'are')} over the source limit: raise SUWAYOMI_MAX_SOURCES or hide languages you do not read`,
+    `${n} extension source${s(n, '', 's')} ${s(n, 'is', 'are')} over the source limit: hide languages you do not read`,
+  ),
+  'autofix.needs.freeSlot': ({ n }: { n: number }) => `${n} series ${s(n, 'waits', 'wait')} for a free slot under the source limit`,
+  'autofix.needs.frozen': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} no working source anywhere`,
+  'autofix.needs.sourceFailing': ({ n }: { n: number }) => `${n} source${s(n, '', 's')} your series use ${s(n, 'is', 'are')} still failing`,
+  'autofix.needs.duplicates': ({ n }: { n: number }) => `${n} duplicate${s(n, '', 's')} ${s(n, 'needs', 'need')} your decision`,
+  'autofix.needs.numbering': ({ n }: { n: number }) => `${n} series ${s(n, 'waits', 'wait')} for your numbering review`,
+  'autofix.needs.short': ({ n }: { n: number }) => `${n} short chapter${s(n, '', 's')} ${s(n, 'needs', 'need')} your decision`,
+  'autofix.needs.failures': ({ n }: { n: number }) => `${n} chapter${s(n, '', 's')} no source can download`,
+  'autofix.needs.outliers': ({ n }: { n: number }) => `${n} chapter${s(n, '', 's')} numbered impossibly ${s(n, 'is', 'are')} bookmarked or in your own library`,
+  'autofix.needs.twice': ({ n }: { n: number }) => `${n} chapter${s(n, '', 's')} saved twice ${s(n, 'needs', 'need')} you to choose the copy to keep`,
+  'autofix.needs.gapsPaused': ({ n }: { n: number }) => `${n} series with missing chapters ${s(n, 'has', 'have')} updates paused`,
+  'autofix.needs.gaps': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} chapters no source lists`,
+  'autofix.needs.scan': ({ n }: { n: number }) => `The library scan could not read ${n} folder${s(n, '', 's')}`,
+  'autofix.needs.downloadsMissing': ({ n }: { n: number }) => `${n} downloaded chapter${s(n, '', 's')} ${s(n, 'is', 'are')} where the library scan never looks`,
+  'autofix.needs.noRoom': ({ name }: { name: string }) => `${name} may carry your series, but the source limit is full: free a slot`,
+
+  // What clears by itself (summary.clears), with when where there is a time.
+  'autofix.clears.cooldown': ({ name }: { name: string }) => `${name} is cooling down`,
+  'autofix.clears.sweep': ({ n }: { n: number }) => `The next chapter sweep tries ${n} chapter${s(n, '', 's')} again`,
+  'autofix.clears.tomorrow': ({ n }: { n: number }) => `${n} series can be searched again tomorrow`,
+  'autofix.clears.nextRun': ({ n }: { n: number }) => `${n} more to do: the next Fix everything continues`,
+  'autofix.clears.partial': ({ n }: { n: number }) => `${n} chapter${s(n, '', 's')} with missing pages ${s(n, 'is', 'are')} completed by the sweep`,
+  'autofix.clears.slow': ({ n }: { n: number }) => `${n} source${s(n, '', 's')} answered slowly or empty lately`,
+};
+
+/** Why Fix everything passed a part of its run over (`autofix.item.skipped`). */
+const AUTOFIX_SKIPPED: Record<string, string> = {
+  solver_down: 'The Cloudflare solver is not answering: the sources behind it were left alone',
+  engine_down: 'The extension engine is not answering: its sources were left alone',
+  no_engine: 'There is no extension engine, so nothing was installed',
+  time: 'The run’s time ran out; the next Fix everything continues',
+  stopped: 'Stopped',
+  installs: 'No more installs this run',
 };
 
 export type SaidCode = keyof typeof EN;
