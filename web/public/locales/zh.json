@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2820
+    "strings": 2827
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2823,5 +2823,12 @@
   "No source on": "没有开启的来源",
   "1 repository": "1 个仓库",
   "{n} repositories": "{n} 个仓库",
-  "for {language}": "适用于{language}"
+  "for {language}": "适用于{language}",
+  "Genres drive the Library’s genre filters and the recommendation rails. Clearing them all means this series genuinely has none.": "类型决定书库的按类型筛选和推荐栏的内容。全部清除表示这部作品确实没有任何类型。",
+  "Banner": "横幅",
+  "Banner updated": "横幅已更新",
+  "Banner reset to automatic": "横幅已恢复为自动",
+  "Could not change the banner": "无法更改横幅",
+  "More banner options": "更多横幅选项",
+  "Because you read {title}": "因为你读过《{title}》"
 }

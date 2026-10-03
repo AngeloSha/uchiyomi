@@ -60,12 +60,13 @@ on Discussion [#121](https://github.com/AngeloSha/uchiyomi/discussions/121).
 - A series' **Edit details** was one long column where some fields saved at once and the rest only with a *Save
   details* key halfway down, easy to miss. It is now a dialog with tabs, **Details**, **Reading**, **New chapters**
   and **Files**, and every field saves itself, said once at the top (*Saved*), as Profile and Admin → Settings do.
-- **The art is in view while you edit:** the cover and the background as the page shows them, with **Upload** (or
+- **The art is in view while you edit:** the cover and the banner as the page shows them, with **Upload** (or
   drop an image on the preview), **From a link**, **New banner** while the banner is an automatic one, and **Reset to
   automatic**. Images up to 11 MB, as it says: a picture over about 9 MB used to fail as too large.
 - Status, reading direction and age rating are one-tap choices; *Always show* and *Auto-update* are switches. The
   folder paths and **Mark caught up** keep their place, under Files and New chapters. On a phone it is a sheet with
-  **Art** as a tab of its own. Its words that were still English in every language are translated.
+  **Art** as a tab of its own. Its words that were still English in every language are translated, and so are
+  Content → Art's notices and the home page's *Because you read*.
 
 ### The series page shows its banner sharp
 

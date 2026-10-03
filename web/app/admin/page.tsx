@@ -1070,16 +1070,16 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
     setBusy(true);
     try {
       await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'url', url } });
-      toast(`${kind === 'banner' ? 'Banner' : 'Cover'} updated`, 'success');
+      toast(kind === 'banner' ? tr('Banner updated') : tr('Cover updated'), 'success');
       onApplied();
-    } catch { toast('Failed to apply', 'error'); }
+    } catch { toast(kind === 'banner' ? tr('Could not change the banner') : tr('Could not change the cover'), 'error'); }
     setBusy(false);
   };
   const reset = async (kind: 'cover' | 'banner') => {
     if (busy) return;
     setBusy(true);
-    try { await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'reset' } }); toast('Reset to automatic', 'success'); onApplied(); }
-    catch { toast('Failed', 'error'); }
+    try { await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'reset' } }); toast(kind === 'banner' ? tr('Banner reset to automatic') : tr('Cover reset to automatic'), 'success'); onApplied(); }
+    catch { toast(tr('Failed'), 'error'); }
     setBusy(false);
   };
   return (

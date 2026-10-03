@@ -419,7 +419,7 @@ function GenresRow({ genres, onSave }: { genres: string[]; onSave: (g: string[])
   };
   return (
     <Row label={tr('Genres')} htmlFor={fid} stacked
-      help={tr('Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.')}>
+      help={tr('Genres drive the Library’s genre filters and the recommendation rails. Clearing them all means this series genuinely has none.')}>
       <div className="flex w-full flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1.5 transition-colors focus-within:border-accent">
         {genres.map((g) => (
           <span key={g} className="inline-flex min-w-0 items-center gap-0.5 rounded-md bg-ink-700/80 py-0.5 pe-0.5 ps-2 text-xs text-fog-100">
@@ -691,7 +691,7 @@ function artRefusal(e: unknown, kind: ArtKind): string {
   if (code === 'bad_image') return tr('That file is not an image this server can read.');
   if (code === 'no_url' || code === 'bad_request') return tr('Paste a full link to an image, starting with https://');
   if (e instanceof ApiError && e.status === 413) return tr('That image is over {n} MB. Pick a smaller one.', { n: ART_MAX_MB });
-  return kind === 'cover' ? tr('Could not change the cover') : tr('Could not change the background');
+  return kind === 'cover' ? tr('Could not change the cover') : tr('Could not change the banner');
 }
 
 const IcUpload = () => (
@@ -751,14 +751,14 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
     setBusy(kind);
     let dataUrl: string;
     try { dataUrl = await dataUrlOf(f); } catch { setBusy(null); toast(tr('That file is not an image this server can read.'), 'error'); return; }
-    await change(kind, { mode: 'upload', dataUrl }, word(kind, tr('Cover updated'), tr('Background updated')));
+    await change(kind, { mode: 'upload', dataUrl }, word(kind, tr('Cover updated'), tr('Banner updated')));
   };
   const fromLink = async (kind: ArtKind, raw: string) => {
     const url = raw.trim();
     if (!webLink(url)) { toast(tr('Paste a full link to an image, starting with https://'), 'error'); return; }
-    if (await change(kind, { mode: 'url', url }, word(kind, tr('Cover updated'), tr('Background updated')))) setLinkFor(null);
+    if (await change(kind, { mode: 'url', url }, word(kind, tr('Cover updated'), tr('Banner updated')))) setLinkFor(null);
   };
-  const reset = (kind: ArtKind) => change(kind, { mode: 'reset' }, word(kind, tr('Cover reset to automatic'), tr('Background reset to automatic')));
+  const reset = (kind: ArtKind) => change(kind, { mode: 'reset' }, word(kind, tr('Cover reset to automatic'), tr('Banner reset to automatic')));
   const shuffle = async () => {
     if (!onNewBanner || busy) return;
     setBusy('banner');
@@ -774,7 +774,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
   const bannerMenu = useContextMenu(() => [
     { label: tr('From a link'), onSelect: () => setLinkFor('banner') },
     { label: tr('Reset to automatic'), onSelect: () => void reset('banner'), disabled: !ov?.banner },
-  ], { label: tr('More background options') });
+  ], { label: tr('More banner options') });
 
   return (
     <div className="space-y-5">
@@ -798,7 +798,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm text-fog-100">{tr('Background')}</h3>
+        <h3 className="mb-2 text-sm text-fog-100">{tr('Banner')}</h3>
         <ArtPreview kind="banner" busy={busy === 'banner'} onFile={(f) => void upload('banner', f)} className="aspect-[8/3] w-full rounded-xl">
           <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} autoHero={series.autoHero} banner className="absolute inset-0" />
         </ArtPreview>
@@ -808,7 +808,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
           {series.autoHero && onNewBanner && (
             <button type="button" data-art-new-banner disabled={!!busy} onClick={() => void shuffle()} className="btn-key">{tr('New banner')}</button>
           )}
-          <button type="button" data-art-more="banner" aria-label={tr('More background options')} aria-haspopup="menu" aria-expanded={bannerMenu.open}
+          <button type="button" data-art-more="banner" aria-label={tr('More banner options')} aria-haspopup="menu" aria-expanded={bannerMenu.open}
             disabled={!!busy} onClick={(e) => bannerMenu.openFrom(e.currentTarget)} className="btn-key w-8 px-0"><IcMore /></button>
         </div>
         {linkFor === 'banner' && <LinkField kind="banner" busy={busy === 'banner'} onSet={(u) => void fromLink('banner', u)} onCancel={() => setLinkFor(null)} />}

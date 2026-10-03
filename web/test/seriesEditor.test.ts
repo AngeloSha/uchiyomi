@@ -264,3 +264,22 @@ test('what moves stands still under Reduce effects as under reduced motion, and 
   assert.match(src, /if \(e\.defaultPrevented\) return;\s*if \(e\.key === 'Escape'\) closeRef\.current\(\);/, 'the dialog closes on an Escape a field used');
   assert.match(kit, /if \(draft !== last\.current\) e\.preventDefault\(\);\s*setDraft\(last\.current\);/, 'TextRow does not mark the Escape that puts an edit back');
 });
+
+test('the picture over the page is called a banner everywhere, and its words are translated', () => {
+  // The panel said "Background" over a key reading "New banner": every language has two words for those (Hintergrund /
+  // Banner, Фон / баннер), so it read as two pictures. Reintroduce tr('Background') or a "background" notice: this fails.
+  const editor = read('components/SeriesEditor.tsx');
+  assert.doesNotMatch(editor, /tr\('[^']*[Bb]ackground[^']*'\)/, 'the banner is called a background in Edit details again');
+  for (const k of ['Banner', 'Banner updated', 'Banner reset to automatic', 'Could not change the banner', 'More banner options']) {
+    assert.ok(editor.includes(`tr('${k}')`), `Edit details does not say "${k}"`);
+  }
+  // The genres help named a Browse page that the Library replaced (v0.27.0); translators took it for the extension catalogue.
+  assert.doesNotMatch(editor, /Genres drive Browse/, 'the genres help points at a page that is gone');
+  // Content → Art's notices and the home page's "Because you read" were English in every language.
+  const admin = read('app/admin/page.tsx');
+  assert.doesNotMatch(admin, /toast\(`\$\{kind === 'banner' \? 'Banner' : 'Cover'\} updated`/, 'Content → Art says "updated" in English');
+  assert.doesNotMatch(admin, /toast\('Failed to apply'/, 'Content → Art fails in English');
+  assert.doesNotMatch(read('app/page.tsx'), /<SectionTitle>Because you read \{/, 'the home page says "Because you read" in English');
+  // Arabic letters are joined: letter-spacing pulls them apart (the Source health group head already says so).
+  assert.match(read('components/ExtensionsPanel.tsx'), /tracking-wider text-fog-500 rtl:tracking-normal">\{title\}<\/h3>/, 'the Extensions group head spaces Arabic letters apart');
+});

@@ -379,7 +379,7 @@ function InstalledView({ list, loading, failed, actions, onOpen, onBrowse }: {
 function GroupHead({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-0.5" data-ext-group-head>
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{title}</h3>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{title}</h3>
       {children && <div className="flex flex-wrap gap-2">{children}</div>}
     </div>
   );

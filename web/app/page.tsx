@@ -168,7 +168,7 @@ export default function HomePage() {
       {/* Because you read X */}
       {seed && (because?.content?.length ?? 0) > 0 && (
         <section className="pt-8">
-          <SectionTitle>Because you read {seed.name}</SectionTitle>
+          <SectionTitle>{tr('Because you read {title}', { title: `⁨${seed.name}⁩` })}</SectionTitle>
           <Rail>
             {because!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
           </Rail>
