@@ -564,11 +564,13 @@ get to: stopped, or out of time, searches, Tests or installs -- `clears` says "t
 `done` one line per kind of thing done (at most twelve, with `items`), `clears` what ends by itself (with `at`),
 `needsYou` what only a person can do, each with its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or
 `{kind: 'settings', key}`), and only once every phase that works on that card ran to its end. Runs are kept in the
-repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`; for an
-admin who hides 18+, here and on the routes above, without the lines that name a series by title) and audited as
-`library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
-`done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly
-runs.
+repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
+audited as `library.autofix`. A line that names a series by title carries `params.seriesIds`, the series it names, and
+`current` carries `seriesIds` beside its `title` (since v0.55.1): for an admin who hides 18+, here and on the routes
+above, a line or a title naming a series their 18+ switch hides is left out -- judged on the series as it stands, a
+merged-away one included -- and so is one written before v0.55.1, with no ids, whatever it names. While one runs,
+`GET /api/sources/jobs` carries its card to admins (kind `autofix`, `done`/`total` its phases, `step` the phase).
+Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly runs.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's

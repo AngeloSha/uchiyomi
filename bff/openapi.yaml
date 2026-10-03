@@ -112,7 +112,10 @@ components:
   schemas:
     AutofixSaid:
       type: object
-      description: A sentence as a code the client words (bff lib/said.ts `autofix.*`), never English from the server.
+      description: >-
+        A sentence as a code the client words (bff lib/said.ts `autofix.*`), never English from the server. Since v0.55.1
+        a line that names a series by title (`autofix.item.linked`, `merged`, `notMerged`, `renumbered`, `notRenumbered`,
+        `deleted`) also carries `params.seriesIds`, the series it names.
       required: [code]
       properties:
         code: { type: string }
@@ -129,7 +132,10 @@ components:
         each with its count, its line and up to 20 `items`), `clears` (what ends by itself, with `at` where there is a
         time) and `needsYou` (per check, each with its one action: `open` {href}, `health` {check} or `settings` {key};
         a card is listed there only once every phase that works on it ran to its end in this run). `log` is the detail,
-        newest last, at most 200 lines. For an admin who hides 18+, the lines that name a series by title are left out.
+        newest last, at most 200 lines. For an admin who hides 18+, a line naming a series by title is left out when
+        their 18+ switch hides one of the series it names (`params.seriesIds`, since v0.55.1, judged on the series as it
+        stands, a merged-away one included), and `current.title` the same way by `current.seriesIds`; a line written
+        before v0.55.1, with no ids, is left out whatever it names.
       required: [id, status, startedAt, by, phase, phaseIndex]
       properties:
         id: { type: string }
@@ -147,6 +153,7 @@ components:
           type: object
           properties:
             title: { type: string }
+            seriesIds: { type: array, items: { type: string }, description: "Since v0.55.1: the series `title` names." }
             done: { type: integer }
             of: { type: integer }
             said: { $ref: '#/components/schemas/AutofixSaid' }
@@ -6344,7 +6351,9 @@ paths:
         mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
         {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
         dropped when this viewer may not list that series. `notes` names series by title alone, with no id to
-        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1.
+        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1. A Fix everything run
+        (kind `autofix`, since v0.55.0) keeps `result` {phaseIndex, summary, log}, held to the 18+ hide line by
+        line as GET /api/admin/health/autofix holds it (AutofixRun).
       parameters:
         - name: limit
           in: query
@@ -9202,8 +9211,9 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `{run, last}`:
         `run` the live run (null when none), `last` the newest finished one, both AutofixRun. A run still recorded as
-        running after a restart reads `interrupted`. For an admin who hides 18+, lines naming a series by title are
-        left out of `log` and of the done lines' `items`, and `current.title` with them.
+        running after a restart reads `interrupted`. For an admin who hides 18+, a line naming a series their 18+
+        switch hides is left out of `log` and of the done lines' `items`, and `current.title` with it (since v0.55.1
+        by the series each names, `seriesIds`; a line from before v0.55.1, with none, is left out whatever it names).
       security:
         - bearer: []
       responses:

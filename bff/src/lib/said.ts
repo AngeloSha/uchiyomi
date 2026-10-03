@@ -587,16 +587,19 @@ const EN = {
   'autofix.item.stillOn': ({ name, n }: { name: string; n: number }) => `${n} series ${s(n, 'is', 'are')} still on ${name}`,
   'autofix.item.kept': ({ name }: { name: string }) => `Left ${name} alone: a setting turned it off, not the site`,
   'autofix.item.retired': ({ name }: { name: string }) => `Turned off ${name}: it is failing and no series uses it`,
-  'autofix.item.linked': ({ a, b }: { a: string; b: string }) => `Linked “${a}” and “${b}” as language editions`,
-  'autofix.item.merged': ({ from, into }: { from: string; into: string }) => `Merged “${from}” into “${into}”`,
-  'autofix.item.notMerged': ({ a, b }: { a: string; b: string }) => `Left “${a}” and “${b}” apart: neither their titles nor their chapters agree`,
-  'autofix.item.renumbered': ({ title }: { title: string }) => `Renumbered “${title}”`,
-  'autofix.item.notRenumbered': ({ title }: { title: string }) => `“${title}” waits for you: its renumbering plan is not a safe one`,
+  // The six that name a series by its title also carry `seriesIds`, the series they name (since v0.55.1): what an admin who
+  // hides 18+ is held to, line by line (lib/autofix.ts scrubbed). Not words, so the English never reads them.
+  'autofix.item.linked': ({ a, b }: { a: string; b: string; seriesIds?: string[] }) => `Linked “${a}” and “${b}” as language editions`,
+  'autofix.item.merged': ({ from, into }: { from: string; into: string; seriesIds?: string[] }) => `Merged “${from}” into “${into}”`,
+  'autofix.item.notMerged': ({ a, b }: { a: string; b: string; seriesIds?: string[] }) =>
+    `Left “${a}” and “${b}” apart: neither their titles nor their chapters agree`,
+  'autofix.item.renumbered': ({ title }: { title: string; seriesIds?: string[] }) => `Renumbered “${title}”`,
+  'autofix.item.notRenumbered': ({ title }: { title: string; seriesIds?: string[] }) => `“${title}” waits for you: its renumbering plan is not a safe one`,
   'autofix.item.installed': ({ name, n }: { name: string; n: number }) => `Installed ${name}: it carries ${n} series`,
   'autofix.item.uninstalled': ({ name }: { name: string }) => `Tried and removed ${name}: none of the series were there`,
   'autofix.item.noRoom': ({ name }: { name: string }) => `Did not keep ${name}: the source limit is full`,
   'autofix.item.installFailed': ({ name }: { name: string }) => `${name} could not be installed`,
-  'autofix.item.deleted': ({ title, n }: { title: string; n: number }) => `Deleted ${n} chapter${s(n, '', 's')} of “${title}”`,
+  'autofix.item.deleted': ({ title, n }: { title: string; n: number; seriesIds?: string[] }) => `Deleted ${n} chapter${s(n, '', 's')} of “${title}”`,
   // Why a part of the run was passed over: solver_down | engine_down | no_engine | time | stopped | installs.
   'autofix.item.skipped': ({ why }: { why: string }) => AUTOFIX_SKIPPED[why] ?? why,
 
