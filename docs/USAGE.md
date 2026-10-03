@@ -483,8 +483,10 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
 - **What a run does.** One run at a time on the server, in the background: one series at a time, 1.5 seconds
   apart, waiting while a chapter sweep, a library repair or the daily source check runs. For each series it
   searches under the title and up to three other names, in your source order, and never asks the series' main
-  source (the one that is down), a source it already follows, or one that is switched off or cooling down; a
-  series that is not 18+ never asks an 18+ source. A candidate must pass the same check as any second source
+  source (the one that is down), a source it already follows, or one that is switched off or cooling down. It asks
+  every other source you as an admin can reach, including extensions that mark themselves 18+ (most manhwa
+  extensions do), as Discover and **Follow** on a series page do. A series with no other names stored is first given
+  the ones its source's description lists. A candidate must pass the same check as any second source
   (*Following a second source*): its title, then its chapter numbers. A series follows at most two other sources,
   the run stops looking once three sources carry the series, and it gives each series at most 90 seconds. A series
   numbered by posting order is skipped: it follows no other source.

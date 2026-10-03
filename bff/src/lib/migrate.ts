@@ -1315,6 +1315,40 @@ CREATE TABLE IF NOT EXISTS source_find_runs (
 CREATE INDEX IF NOT EXISTS source_find_runs_started ON source_find_runs (started_at DESC);
 -- (Both tables are new and nothing older writes to them: v0.49.0 starts on this schema and ignores them.)
 
+-- An install that ran the fork build of PR #119 before v0.49.1 has a series_alt_titles of another shape, which the
+-- CREATE TABLE IF NOT EXISTS above leaves as it is: no removed_at, added_by a uuid referencing users, a source_id
+-- column, and origins 'confirmed' and 'merged'. Every read of the other names filters on removed_at, so on such an
+-- install each read failed, altTitlesFor answered nothing, the Sources sheet listed no other names and Find other
+-- sources searched under the series' own title alone. Brought to v0.49.1's shape here, each step only when it is
+-- needed, so a v0.49.1 table is untouched: the column added, the reference dropped and the id kept as text, the two
+-- origins read as an admin's (a person confirmed both), the extra column dropped and the origin CHECK added.
+ALTER TABLE series_alt_titles ADD COLUMN IF NOT EXISTS removed_at timestamptz;
+DO $$
+DECLARE c record;
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'series_alt_titles'
+                AND column_name = 'added_by' AND data_type = 'uuid') THEN
+    FOR c IN SELECT conname FROM pg_constraint
+              WHERE conrelid = 'series_alt_titles'::regclass AND contype = 'f'
+                AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                                     WHERE attrelid = 'series_alt_titles'::regclass AND attname = 'added_by')]::smallint[]
+    LOOP
+      EXECUTE format('ALTER TABLE series_alt_titles DROP CONSTRAINT %I', c.conname);
+    END LOOP;
+    ALTER TABLE series_alt_titles ALTER COLUMN added_by TYPE text USING added_by::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = current_schema() AND table_name = 'series_alt_titles' AND column_name = 'source_id') THEN
+    ALTER TABLE series_alt_titles DROP COLUMN source_id;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'series_alt_titles'::regclass AND contype = 'c') THEN
+    UPDATE series_alt_titles SET origin = 'admin' WHERE origin NOT IN ('description', 'admin', 'import');
+    ALTER TABLE series_alt_titles ADD CONSTRAINT series_alt_titles_origin_check
+      CHECK (origin IN ('description', 'admin', 'import'));
+  END IF;
+END $$;
+
 -- v0.51.0: automatic hero banners, made from a series' own pages (lib/autoHero.ts). One row per series that has had
 -- one made or tried. seed picks its chapters and pages (Shuffle sets a new one; 0 until then); made_at is when the
 -- current one was made; failed_at and fail_reason are the last try that made none, which is not repeated for a week.

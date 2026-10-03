@@ -1726,9 +1726,10 @@ given) or `{sourceId}` (every series whose **main** source that is -- the "this 
 background run and answers **202** `{runId, total}`; **409** `{error: 'busy', runId}` while another is going,
 **400** `empty_scope` when nothing named is a series this admin may see (or `bad_request`). Per series it skips a
 series numbered by posting order (`why: posting_order`) or already following two sources (`full`); otherwise it
-searches the sources the series may reach (an adult source only for an adult series) in scan order -- never its
-main source, never one it follows, never one disabled or cooling down -- under its title and up to three other
-names, stops once the free follower slots are filled or three sources carried the title, judges each candidate as
+searches the sources the starting admin may reach (their own age cap, as Discover and the manual follow route read
+it: an admin reaches every source, including extensions flagged adult) in scan order -- never its main source,
+never one it follows, never one disabled or cooling down -- under its title and up to three other names (a series
+with none stored is first given the ones its stored description, or else its main source's, lists), stops once the free follower slots are filled or three sources carried the title, judges each candidate as
 the add's auto-follow does, and follows the ones that qualify with the admin as their author. It waits while a
 sweep, a repair or the daily source check runs, paces 1.5 s between series that searched, gives a series 90 s, and
 its searches report nothing to source health (a site that fails one is neither put in a cooldown nor marked
