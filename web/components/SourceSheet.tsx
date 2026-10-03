@@ -19,14 +19,13 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { diagnosisReason } from '@/lib/said';
 import { useTicker } from '@/lib/ticker';
 import { testClock, type TestAnswer } from '@/lib/sourceEvidence';
-import { codeOf } from '@/lib/useFindRun';
 import {
-  failingSince, libraryHref, retireRefusal, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
+  failingSince, libraryHref, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
   usedBy, usedByLink, type OverviewSource, type SheetKey, type SourceEvidenceRow, type SourcesOverview,
 } from '@/lib/sourcesPanel';
 import { extSourceIdOf } from '@/lib/sourcePrefs';
@@ -103,7 +102,11 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
   const offByAdmin = new Set((overview?.sources ?? []).filter((x) => x.kind === 'extension' && x.offBy === 'admin')
     .map((x) => extSourceIdOf(x.id)).filter((x): x is string => !!x));
 
-  /** One request, then the lists again; a refusal is said on the sheet, in the reader's words where the code is known. */
+  /**
+   * One request, then the lists again; a refusal is said on the sheet, in the server's words by its code (`messageSaid`)
+   * in the reader's language. Remove's 409 `in_use` is `retire.inUse` ("It is the main source of n series. Replace it
+   * first."): one wording, the server's, never a second one of the web's own.
+   */
   const run = async (key: SheetKey | 'address', go: () => Promise<string | null>) => {
     setBusy(key);
     setRefusal(null);
@@ -111,8 +114,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
       const done = await go();
       if (done) toast(done, 'success');
     } catch (e) {
-      const why = (key === 'remove' ? retireRefusal(codeOf(e), mainOf(e)) : null) ?? msgOf(e, tr('Could not save that'));
-      setRefusal({ key, text: why });
+      setRefusal({ key, text: msgOf(e, tr('Could not save that')) });
     }
     await onChanged();
     setBusy(null);
@@ -296,9 +298,4 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
       </div>
     </Sheet>
   );
-}
-
-/** A 409 `in_use`'s count of series (`{ error, main }`), when it carries one. */
-function mainOf(e: unknown): number | undefined {
-  try { return e instanceof ApiError ? Number(JSON.parse(e.body)?.main ?? NaN) || undefined : undefined; } catch { return undefined; }
 }

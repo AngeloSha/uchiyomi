@@ -353,15 +353,6 @@ export function sheetFacts(s: OverviewSource): string[] {
   ].filter(Boolean);
 }
 
-/** A refused Remove (retire `{how: 'remove'}`, or the custom-site DELETE), in words: 409 `in_use` names how many. */
-export function retireRefusal(code: string | null | undefined, main?: number): string | null {
-  if (code !== 'in_use') return null;
-  const n = Number(main ?? 0);
-  return n === 1 ? tr('It is still the main source of 1 series. Replace it first.')
-    : n > 1 ? tr('It is still the main source of {n} series. Replace it first.', { n: numberText(n) })
-    : tr('Series still use it as their main source. Replace it first.');
-}
-
 // ---- Replace -------------------------------------------------------------------------------------------------------
 
 /** GET /api/admin/sources/:id/replace-preview: what Replace would do, before Start. */

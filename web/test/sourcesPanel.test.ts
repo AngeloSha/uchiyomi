@@ -8,13 +8,14 @@
 // Replace dialog and its run, the sheet's keys, Make main's question), and read where only a press would show it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setActiveLocale } from '../lib/format';
+import { setActiveDict } from '../lib/i18n';
 import {
   attentionRows, initialView, needsAttention, replaceLine, replacePlan, rowAction, settingsTarget, sheetKeys, splitSources, turnOffQuestion,
   type OverviewSource, type ReplacePreview, type SourcesOverview,
@@ -329,7 +330,29 @@ test('Turn off asks first inside the sheet when series use the source, with word
   assert.equal(turnOffQuestion({ main: 120, followed: 5 }), '125 series use it. They stop getting new chapters from this source until you turn it back on. Nothing is deleted.');
   // Remove is a site's, through retire: a source some series still use as their main source is refused, in words.
   assert.match(sheet, /await api\(`\/api\/admin\/sources\/\$\{encodeURIComponent\(s\.id\)\}\/retire`, \{ json: \{ how: 'remove' \} \}\);/);
-  assert.match(sheet, /const why = \(key === 'remove' \? retireRefusal\(codeOf\(e\), mainOf\(e\)\) : null\) \?\? msgOf\(e, tr\('Could not save that'\)\);/, 'a refused Remove is not said in words');
+  assert.match(sheet, /setRefusal\(\{ key, text: msgOf\(e, tr\('Could not save that'\)\) \}\);/, 'a refused Remove is not said in the server\'s words');
+});
+
+test('"in use" has one wording, the server\'s: a refused Remove says retire.inUse in the reader\'s language', () => {
+  // The retire route's 409 (bff routes/admin.ts inUse) carries its code, `retire.inUse`, and the sheet words it as it
+  // words every refusal with a code (msgOf, lib/said.ts). Reintroduce the sheet's own sentence for it (the lane's
+  // retireRefusal, "It is still the main source of 3 series. Replace it first."): "the web says in use in words of its
+  // own" names the file.
+  const err = { status: 409, body: JSON.stringify({ error: 'in_use', main: 3, message: 'It is the main source of 3 series. Replace it first.', messageSaid: { code: 'retire.inUse', params: { n: 3 } } }) };
+  assert.equal(msgOf(err, 'fallback'), 'It is the main source of 3 series. Replace it first.');
+  const de = JSON.parse(readFileSync(join(ROOT, 'public/locales/de.json'), 'utf8')) as Record<string, string>;
+  try {
+    setActiveDict(de);
+    assert.equal(msgOf(err, 'fallback'), de['It is the main source of {n} series. Replace it first.'].replace('{n}', '3'),
+      'a refused Remove is said in the server\'s English, not the reader\'s language');
+  } finally {
+    setActiveDict({});
+  }
+  // No second sentence for the same refusal anywhere in the web: lib/said.ts holds the server's words for it.
+  const dirs = ['components', 'lib', 'app/admin'];
+  const own = dirs.flatMap((d) => readdirSync(join(ROOT, d)).filter((f) => /\.tsx?$/.test(f)).map((f) => `${d}/${f}`))
+    .filter((f) => f !== 'lib/said.ts' && /Replace it first/.test(code(f)));
+  assert.deepEqual(own, [], 'the web says in use in words of its own');
 });
 
 // ---- Make main -----------------------------------------------------------------------------------------------------

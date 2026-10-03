@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2974
+    "strings": 2971
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2957,9 +2957,6 @@
   "Followed by {n} series": "{n} シリーズがフォロー",
   "followed by 1 series": "1 シリーズがフォロー",
   "followed by {n} series": "{n} シリーズがフォロー",
-  "It is still the main source of 1 series. Replace it first.": "まだ 1 シリーズのメインソースです。先に置き換えてください。",
-  "It is still the main source of {n} series. Replace it first.": "まだ {n} シリーズのメインソースです。先に置き換えてください。",
-  "Series still use it as their main source. Replace it first.": "まだメインソースとして使っているシリーズがあります。先に置き換えてください。",
   "1 already follows a working source: it becomes its main source.": "1 件はすでに動いているソースをフォロー済みです。そのソースがメインソースになります。",
   "{n} already follow a working source: it becomes their main source.": "{n} 件はすでに動いているソースをフォロー済みです。そのソースがメインソースになります。",
   "The other 1 is searched for on your other sources.": "残りの 1 件は他のソースで検索します。",

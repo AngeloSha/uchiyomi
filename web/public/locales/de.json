@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2974
+    "strings": 2971
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -2957,9 +2957,6 @@
   "Followed by {n} series": "Von {n} Serien verfolgt",
   "followed by 1 series": "von 1 Serie verfolgt",
   "followed by {n} series": "von {n} Serien verfolgt",
-  "It is still the main source of 1 series. Replace it first.": "Sie ist noch die Hauptquelle von 1 Serie. Ersetze sie zuerst.",
-  "It is still the main source of {n} series. Replace it first.": "Sie ist noch die Hauptquelle von {n} Serien. Ersetze sie zuerst.",
-  "Series still use it as their main source. Replace it first.": "Serien nutzen sie noch als Hauptquelle. Ersetze sie zuerst.",
   "1 already follows a working source: it becomes its main source.": "1 folgt schon einer funktionierenden Quelle: Sie wird ihre Hauptquelle.",
   "{n} already follow a working source: it becomes their main source.": "{n} folgen schon einer funktionierenden Quelle: Sie wird ihre Hauptquelle.",
   "The other 1 is searched for on your other sources.": "Die übrige wird in deinen anderen Quellen gesucht.",
