@@ -38,7 +38,7 @@ import { installedList, type CatalogPage, type ExtSourcesAnswer, type ExtStatus 
 import { useFindRuns } from '@/lib/useFindRun';
 import {
   OVERVIEW_KEY, OVERVIEW_URL, attentionRows, failingSince, failingUnusedTitle, initialView, kindLabel, namesSep, needsAttention, replaceLine, rowAction,
-  rowFacts, settingsTarget, sourceSays, splitSources, turnOnRequest, updatesTitle,
+  rowFacts, settingsTarget, sourceSays, sourceTarget, splitSources, turnOnRequest, updatesTitle,
   type OverviewSource, type SourceEvidenceRow, type SourcesOverview, type SourcesView,
 } from '@/lib/sourcesPanel';
 import { msgOf } from '@/components/ConfirmDialog';
@@ -73,11 +73,12 @@ function useViewParam(): [SourcesView, (v: SourcesView) => void] {
   return [view, set];
 }
 
-/** Takes `settings=` off the address once its sheet is closed, so a reload does not open it again. */
+/** Takes `settings=` (and v0.55.0's `source=`) off the address once its sheet is closed, so a reload does not open it again. */
 function dropSettingsParam() {
   const u = new URL(window.location.href);
-  if (!u.searchParams.has('settings')) return;
+  if (!u.searchParams.has('settings') && !u.searchParams.has('source')) return;
   u.searchParams.delete('settings');
+  u.searchParams.delete('source');
   window.history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
 }
 
@@ -86,10 +87,13 @@ export function SourcesPanel() {
   const params = useSearchParams();
   const [view, setView] = useViewParam();
   // The deep link to an extension source's settings (`?settings=<id>`, v0.53.0's Extensions link): its sheet, on its
-  // settings. Read once, in the initialiser, as every address the console reads is.
+  // settings. v0.55.0: `?source=<id>`, Health's Free a slot, is any source's sheet. Read once, in the initialiser, as
+  // every address the console reads is.
+  const [arrived] = useState(() => (settingsTarget(params) ? null : sourceTarget(params)));
   const [sheet, setSheet] = useState<SheetTarget | null>(() => {
     const id = settingsTarget(params);
-    return id ? { id, settings: true } : null;
+    if (id) return { id, settings: true };
+    return arrived ? { id: arrived } : null;
   });
   const [replacing, setReplacing] = useState<{ id: string; name: string } | null>(null);
   const [aside, setAside] = useState<'langs' | 'repos' | 'results' | null>(null);
@@ -129,8 +133,10 @@ export function SourcesPanel() {
   const closeSheet = () => { setSheet(null); dropSettingsParam(); };
   const openReplace = (s: OverviewSource) => { setSheet(null); setReplacing({ id: s.id, name: s.name }); };
   // A settings link to a source the overview does not hold (an extension's source the engine lists but Uchiyomi does
-  // not know yet): its settings alone, as before.
-  const lostSettings = !!sheet && 'id' in sheet && sheet.settings && !!overview && !overview.sources.some((s) => s.id === sheet.id);
+  // not know yet): its settings alone, as before. A `source=` link to one (v0.55.0): no sheet -- the list is the place.
+  const unknown = !!sheet && 'id' in sheet && !!overview && !overview.sources.some((s) => s.id === sheet.id);
+  const lostSettings = unknown && !!sheet && 'id' in sheet && !!sheet.settings;
+  const lostSource = unknown && !!sheet && 'id' in sheet && !sheet.settings && sheet.id === arrived;
 
   return (
     <div className="space-y-6" data-sources-panel>
@@ -171,7 +177,7 @@ export function SourcesPanel() {
         )}
       </section>
 
-      {sheet && !lostSettings && (
+      {sheet && !lostSettings && !lostSource && (
         <OnBody>
           <SourceSheet target={sheet} overview={overview} evidence={evidence} testMs={adminRows?.testMs} status={status} actions={actions}
             installed={installed} hiddenLangs={srcs?.hiddenLangs ?? []} onClose={closeSheet} onReplace={openReplace}

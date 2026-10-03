@@ -24,7 +24,8 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Switch } from '@/components/Switch';
 import { IcFilter, IcRefresh, IcSettings, IcSliders, IcTrash } from '@/components/icons';
-import { Disclosure, NumberRow, Row, SETTINGS_GRID, SaveState, Section, SwitchRow, TextRow, useAutosave } from '@/components/settings';
+import { Disclosure, NumberRow, Row, SETTINGS_GRID, SaveState, Section, Segmented, SwitchRow, TextRow, useAutosave } from '@/components/settings';
+import { nightlyModeOf, type NightlyMode } from '@/lib/autofix';
 import { t as tr } from '@/lib/i18n';
 import type { KnownGroup, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
@@ -418,6 +419,45 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
 }
 
 /**
+ * What the nightly runs (v0.55.0): the safe repair it always ran, or Health's whole Fix everything -- which may merge,
+ * delete, renumber and install extensions, as pressing it on Health does. Saved as it is picked, with the row's own
+ * Saved ✓; the choice moves at once and goes back if the save is refused (SwitchRow's rule). Greyed while the switch
+ * above has the nightly off, which turns it off whatever it would run.
+ */
+export function NightlyModeRow({ mode, off, onPick }: { mode: NightlyMode; off: boolean; onPick: (m: NightlyMode) => Promise<unknown> }) {
+  const { status, run } = useAutosave();
+  const [local, setLocal] = useState<NightlyMode>(mode);
+  // The prop catching up is adopted during render, never in an effect (SwitchRow's "previous prop" pattern).
+  const [seen, setSeen] = useState<NightlyMode>(mode);
+  if (mode !== seen) { setSeen(mode); setLocal(mode); }
+  const pick = async (m: NightlyMode) => {
+    setLocal(m);
+    if (!(await run(() => onPick(m)))) setLocal(mode);
+  };
+  const label = tr('Every night');
+  // Stacked, as Edit details' choices are: beside the control, the two lines of help wrapped to eight in a narrow column.
+  return (
+    <Row label={label} status={status} stacked
+      help={(
+        <>
+          <span className={`block ${local === 'repair' ? 'text-fog-300' : ''}`} data-nightly-help="repair">
+            {tr('Safe repair: retries, short chapters, gaps and the solver; nothing is deleted or merged.')}
+          </span>
+          <span className={`block ${local === 'autofix' ? 'text-fog-300' : ''}`} data-nightly-help="autofix">
+            {tr('Fix everything: also replaces sources, merges, deletes and installs extensions, as Health’s Fix everything does.')}
+          </span>
+        </>
+      )}>
+      <div data-nightly-mode={local}>
+        <Segmented square label={label} value={local} disabled={off}
+          options={[{ value: 'repair', label: tr('Safe repair') }, { value: 'autofix', label: tr('Fix everything') }]}
+          onChange={(m) => { void pick(m); }} />
+      </div>
+    </Row>
+  );
+}
+
+/**
  * Library housekeeping: the opt-in read-chapter cleanup.
  *
  * ⚠️ THE ONLY SWITCH ON THIS TAB THAT DELETES FILES, so it is the only one that does not simply toggle.
@@ -490,9 +530,14 @@ function HousekeepingSection({ data, save: patch }: { data: any; save: Save }) {
             takes a success sentence as its second argument and a switch has no sentence to give it.
             It sits in housekeeping rather than under schedules because it is library maintenance, and
             below the delete switch because it is the one that never deletes anything. */}
+        {/* v0.55.0: what the nightly runs, the safe repair or a whole Fix everything (NightlyModeRow below). The safe
+            repair's sentence ends "Nothing is deleted or merged without you", which a nightly Fix everything is not. */}
         <SwitchRow label={tr('Repair the library nightly')}
-          help={tr('Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.')}
+          help={nightlyModeOf(data) === 'autofix'
+            ? tr('Once a day, Fix everything runs by itself, as if you had pressed it on Health. What it did is under Health → Recent repairs.')
+            : tr('Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.')}
           on={data.repair_enabled !== false} onChange={(next) => patch({ repairEnabled: next })} />
+        <NightlyModeRow mode={nightlyModeOf(data)} off={data.repair_enabled === false} onPick={(m) => patch({ nightlyMode: m })} />
         {/* The reveal for the cleanup above, and for a followed series nobody has fetched: without it Mihon
             counted a pruned or never-downloaded chapter as zero chapters, and told the trackers so. No
             confirmation — nothing here is deleted or written, and turning it off is exactly as reversible

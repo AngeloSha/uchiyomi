@@ -14,7 +14,9 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
-import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
+import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
+import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
+import { AutofixRunProvider } from '@/lib/useAutofixRun';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
@@ -24,7 +26,7 @@ import { checkTitle } from '@/lib/healthCopy';
 import { checkNote, checkSummary, itemDetail, itemTitle } from '@/lib/said';
 import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
-import { Backdrop, Img } from '@/components/ui';
+import { Backdrop, Img, OnBody } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -1515,6 +1517,8 @@ function LibraryPanel() {
 
 function Health() {
   const [open, setOpen] = useState<string | null>(null);
+  // v0.55.0: Fix everything's dialog -- the question, the run, or how the run ended.
+  const [fixing, setFixing] = useState(false);
   const { data, isFetching, refetch } = useQuery({
     queryKey: ['admin-health'],
     queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
@@ -1525,16 +1529,24 @@ function Health() {
   // again, and the header's mark with it: the refetch stores a new summary, and the header reads that summary.
   const qc = useQueryClient();
   const recheck = () => refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] }));
+  // A Needs-you item's card key, in Fix everything's end: the dialog closes, and that card opens where it is.
+  const showCheck = (id: string) => {
+    setFixing(false);
+    setOpen(id);
+    requestAnimationFrame(() => document.querySelector(`[data-health-check="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' }));
+  };
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
   // overview uses, so the shape of the panel is the verdict. The repair provider holds the live run and its
-  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx); the find provider
-  // (v0.49.1) follows a "Find other sources" run for the rows that offer it and for its card under the checks.
+  // history for every row, card and Fix everything's safe repair (lib/useRepairRun.tsx); the find provider
+  // (v0.49.1) follows a "Find other sources" run for the rows that offer it and for its card under the checks; the
+  // autofix provider (v0.55.0) follows Fix everything's run (lib/useAutofixRun.tsx).
   return (
     <RepairRunProvider onEnded={recheck}>
     <FindRunProvider onEnded={recheck}>
+    <AutofixRunProvider onEnded={recheck}>
       <div className="board">
-        {/* Wraps: at phone width the sentence and the key do not fit on one line (v0.48.3). */}
+        {/* Wraps: at phone width the sentence and the keys do not fit on one line (v0.48.3). */}
         <div className="full flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-fog-500">
             {!data ? tr('Checking your library…')
@@ -1542,13 +1554,18 @@ function Health() {
               : tr('Everything looks healthy')}
             {data && <> · {tr('checked {when}', { when: relativeTime(data.generatedAt) })}</>}
           </p>
-          <button type="button" onClick={() => refetch()} disabled={isFetching} className="btn-key">
-            <IcRefresh aria-hidden width={14} height={14} />{isFetching ? tr('Checking…') : tr('Re-check')}
-          </button>
+          <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+            <button type="button" onClick={() => refetch()} disabled={isFetching} className="btn-key">
+              <IcRefresh aria-hidden width={14} height={14} />{isFetching ? tr('Checking…') : tr('Re-check')}
+            </button>
+            {/* v0.55.0: whenever any card has a finding -- where Fix all issues' row was, which only the repair's four
+                steps could summon. */}
+            <FixEverythingKey checks={checks} onOpen={() => setFixing(true)} />
+          </div>
         </div>
 
+        <SafeRepairLine checks={checks} />
         <RepairLiveStrip />
-        <FixAllIssues checks={checks} />
 
         {checks.map((c) => {
           const isOpen = open === c.id;
@@ -1560,7 +1577,8 @@ function Health() {
           const mark = healthMark(c.status);
           const rowKeys = keysFor(c.id, c.items);
           return (
-            <div key={c.id} data-health-check={c.id} className={`card grad-border relative overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
+            // `scroll-mt-*`: Fix everything's "Show the card" scrolls a card to the top, clear of the desktop's top bar.
+            <div key={c.id} data-health-check={c.id} className={`card grad-border relative scroll-mt-4 overflow-hidden lg:scroll-mt-20 ${c.status !== 'ok' ? 'full' : ''}`}>
               <StatusEdge tone={mark.tone} />
               {/* ⚠️ The disclosure is the FIRST button in the card: the end-to-end walks open a card by
                   clicking the first button inside `[data-health-check="…"]`. Every action lives in the body. */}
@@ -1635,6 +1653,12 @@ function Health() {
         <FindRunCard />
         <RepairHistory />
       </div>
+      {fixing && (
+        <OnBody>
+          <FixEverythingDialog checks={checks} onClose={() => setFixing(false)} onShowCheck={showCheck} />
+        </OnBody>
+      )}
+    </AutofixRunProvider>
     </FindRunProvider>
     </RepairRunProvider>
   );

@@ -14,17 +14,21 @@
 // (a still dashed arc); the clock and the step text still say it is moving.
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { ActionList, type ActionSpec } from '@/components/ActionList';
-import { StatusMark } from '@/components/StatusMark';
+import { StatusGlyph, StatusMark } from '@/components/StatusMark';
 import { IcChevronRight } from '@/components/icons';
+import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { durationText, formatClock, relativeTime } from '@/lib/format';
 import { repairStepLabel } from '@/lib/jobs';
 import { currentText, kindLabel, nextRunLine, phaseLine, recordLine, runStatusWord, skipLine, whoLine } from '@/lib/healthCopy';
 import { useRepairRun, useRepairStatus } from '@/lib/useRepairRun';
 import { useTicker } from '@/lib/ticker';
+import { HISTORY_DONE, autofixHeadline, autofixOfRecord, doneLines, type AutofixRun } from '@/lib/autofix';
+import { AUTOFIX_URL } from '@/lib/useAutofixRun';
 import type { RepairLiveRun, RepairRunRecord, RunStatus, RunTarget } from '@/lib/repairRun';
-import type { Tone } from '@/lib/status';
+import { TONE_TEXT, type Tone } from '@/lib/status';
 
 /** What the running run is doing, as one line: "Step 2 of 4 · Filling gaps · Searching other sources". */
 function runStep(run: RepairLiveRun): string {
@@ -79,9 +83,39 @@ const STATUS_TONE: Record<RunStatus, Tone> = {
   running: 'accent', done: 'accent', stopped: 'warn', failed: 'problem', skipped: 'off', interrupted: 'warn',
 };
 
+/**
+ * v0.55.0: a Fix everything run among the kept runs -- its headline ("All green", "2 need you") and the first two lines
+ * of what it did, where a repair's row has its result line. The run's own record carries them when the history sends it
+ * (lib/autofix.ts autofixOfRecord); otherwise it is read by its id (GET /api/admin/health/autofix/:runId).
+ */
+function AutofixLines({ r }: { r: RepairRunRecord }) {
+  const inline = autofixOfRecord(r);
+  const { data } = useQuery({
+    queryKey: ['autofix-run', r.id],
+    queryFn: () => api<AutofixRun>(`${AUTOFIX_URL}/${encodeURIComponent(r.id)}`),
+    enabled: !inline && r.status !== 'running',
+    staleTime: Infinity,
+    retry: false,
+  });
+  const run = inline ?? data;
+  if (!run) return null;
+  const head = autofixHeadline(run);
+  const first = doneLines(run.summary).shown.slice(0, HISTORY_DONE);
+  return (
+    <>
+      <p className={`mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] ${TONE_TEXT[head.tone]}`} data-fix-history-headline={head.kind}>
+        <StatusGlyph tone={head.tone} size={10} /><span className="min-w-0">{head.text}</span>
+      </p>
+      {/* Sentences in the reader's language: the page's direction (FixEverythingDialog.tsx EndView says why). */}
+      {first.map((d) => <p key={d.kind} className="mt-0.5 break-words text-[11px] leading-relaxed text-fog-400">{d.text}</p>)}
+    </>
+  );
+}
+
 /** One kept run as a line of the history. */
 function HistoryRow({ r }: { r: RepairRunRecord }) {
-  const skips = (r.result?.skips ?? []).slice(0, 3);
+  const fix = r.kind === 'autofix';
+  const skips = fix ? [] : (r.result?.skips ?? []).slice(0, 3);
   return (
     <li data-repair-run={r.id} className="py-2.5">
       <div className="flex min-w-0 items-start gap-2">
@@ -93,7 +127,7 @@ function HistoryRow({ r }: { r: RepairRunRecord }) {
             {[whoLine(r), r.finishedAt ? relativeTime(new Date(r.finishedAt).toISOString()) : '',
               r.ms != null ? tr('took {d}', { d: durationText(r.ms) }) : ''].filter(Boolean).join(' · ')}
           </p>
-          <p className="mt-0.5 break-words text-[11px] leading-relaxed text-fog-400">{recordLine(r)}</p>
+          {fix ? <AutofixLines r={r} /> : <p className="mt-0.5 break-words text-[11px] leading-relaxed text-fog-400">{recordLine(r)}</p>}
           {skips.map((k: any, i: number) => <p key={i} className="mt-0.5 text-[11px] text-amber-300/90">{skipLine(k)}</p>)}
         </div>
       </div>
@@ -148,6 +182,13 @@ export function RepairHistory() {
 /** The latest one-off fix, as the Tasks row carries it (`latestOther`). */
 interface LatestOther { id: string; kind: string; target: RunTarget; finishedAt: number | null; status: RunStatus; result: any }
 
+/** What it did: a repair's result line, or a Fix everything run's headline (v0.55.0), whose result is not a repair's. */
+function latestLine(o: LatestOther): string {
+  if (o.kind !== 'autofix') return recordLine(o);
+  const run = autofixOfRecord(o);
+  return run ? autofixHeadline(run).text : runStatusWord(o.status);
+}
+
 /**
  * Under the Tasks tab's repair row: when the nightly runs next, what a running repair is doing (with its clock),
  * and the latest one-off fix -- which no longer replaces the line above, and links to the history.
@@ -173,7 +214,7 @@ export function RepairTaskLines({ nextAt, latestOther, running }: { nextAt?: num
             {tr('Latest one-off fix: {what}', { what: kindLabel(latestOther.kind, latestOther.target) })}
           </Link>
           {latestOther.finishedAt ? ` · ${relativeTime(new Date(latestOther.finishedAt).toISOString())}` : ''}
-          {` · ${recordLine(latestOther)}`}
+          {` · ${latestLine(latestOther)}`}
         </p>
       )}
     </div>

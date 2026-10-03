@@ -78,6 +78,9 @@ const SURFACES = [
   'components/ReplaceDialog.tsx',
   'lib/sourcesPanel.ts',
   'lib/mainSource.ts',
+  // v0.55.0, Health's Fix everything: its key, its dialog (the question, the run, the end) and the words they say.
+  'components/FixEverythingDialog.tsx',
+  'lib/autofix.ts',
 ];
 
 /**

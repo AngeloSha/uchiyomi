@@ -83,6 +83,9 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // v0.54.0: a dead main source's series move in one run (POST /api/admin/sources/find, mode 'replace'). The press opens
   // the Replace dialog (components/ReplaceDialog.tsx), the one Admin → Sources opens; its Start posts the source.
   { action: 'replace_source', labels: ["tr('Replace')"], wants: /onRun: \(\) => setAsking\('replace'\)/ },
+  // v0.55.0: a series frozen because its source is over the source limit -- Admin → Sources on that source, a whole page
+  // load (the console reads its tab from the address once), where one nothing uses can be switched off to make room.
+  { action: 'free_slot', labels: ["tr('Free a slot')"], wants: /onRun: \(\) => \{ window\.location\.assign\(freeSlotHref\(item\)\); \}/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {
@@ -128,7 +131,7 @@ test('the solver reset is one card-wide action, gated on a finding that offers i
   assert.match(run, /return step === 'failures' \? \{ only: \[step\], now: true \} : \{ only: \[step\] \};/, 'the failures card does not send now');
 });
 
-test('every repair-backed key, card Fix all and Fix all issues waits while a sweep or another repair runs', () => {
+test('every repair-backed key, card Fix all and Fix everything\'s safe repair waits while a sweep or another repair runs', () => {
   // No queue this release (design decision 6): each is disabled, saying why, until the running one ends. The rule
   // is healthCopy.ts repairGate (healthCopy.test.ts); this holds every key to it. Reintroduce `const gate = {};` in
   // HealthRow, or the old `disabled: !!rr.blocked` without a title on a card: the matching assertion fails.
@@ -139,9 +142,12 @@ test('every repair-backed key, card Fix all and Fix all issues waits while a swe
   for (const a of ['fix_short', 'fill', 'retry']) assert.match(arm(row, a), /\.\.\.base, \.\.\.gate,/, `the '${a}' key ignores the gate`);
   const card = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
   assert.match(card, /\.\.\.repairGate\(rr\.blocked, status\?\.run, busy\),/, 'a card\'s Fix all is not gated');
-  const page = src.slice(src.indexOf('export function FixAllIssues'));
-  assert.match(page, /const gate = repairGate\(rr\.blocked, status\?\.run, busy\);/, 'Fix all issues is not gated');
-  assert.match(page, /disabled: !plan\.length \|\| !!gate\.disabled,\s*disabledWhy: gate\.disabledWhy,/, 'Fix all issues does not say why it waits');
+  // v0.55.0: Fix all issues' row went; its safe repair is Fix everything's Let me choose, whose Start waits the same way
+  // and says why where Start is.
+  const ask = code(read('components/FixEverythingDialog.tsx'));
+  const view = ask.slice(ask.indexOf('function AskView('), ask.indexOf('function RunView('));
+  assert.match(view, /const gate = repairGate\(rr\.blocked, rr\.status\?\.run, false\);/, 'Let me choose is not gated');
+  assert.match(view, /: \(gate\.disabledWhy \?\? \(plan\.length \?/, 'Let me choose does not say why it waits');
 });
 
 test('#72: Connect on the Extension engine row answers on the row and refreshes the Extensions tab', () => {
@@ -403,19 +409,20 @@ test('the survivor of a merge is named in one sentence, not a verb glued to a ti
   assert.match(dialog, /\{keepBefore\}<strong className="text-fog-100">\{t\}<\/strong>\{keepAfter\}/, 'the title is not wrapped by both halves of the sentence');
 });
 
-test('Fix all issues runs ONE repair with every step that has findings, its plan visible before the press', () => {
-  // v0.48.3, the owner: "there is no button to fix all issues at once". v0.49.0: its plan, with each step's
-  // caps and what it never does, is on the row BEFORE the press. Reintroduce the old footer ("no source is
-  // unblocked"): healthCopy.test.ts fails; drop pageBody: the run loses `now`.
-  const src = code(read(KEYS));
-  const block = src.slice(src.indexOf('export function FixAllIssues'));
-  assert.match(block, /const plan = pagePlan\(checks\);/);
-  assert.match(block, /const body = pageBody\(plan\);/, 'Fix all issues does not send the plan\'s steps, with `now` for the failures');
-  assert.match(block, /how: \[\.\.\.lines, caps, planFooter\(plan\.map\(\(p\) => p\.step\)\)\]\.join\('\\n'\)/, 'the plan is not shown before the press');
-  assert.match(block, /'data-health-fix-all-page': ''/, 'the button is not tagged for the walk-through');
-  assert.match(block, /onRun: \(\) => \{ void rr\.start\('page', 'fix_all_issues', body\); \}/);
+test('Fix everything\'s Let me choose runs ONE repair with every step that has findings; the live strip and history stay', () => {
+  // v0.48.3, the owner: "there is no button to fix all issues at once". v0.55.0: that button is Fix everything, beside
+  // Re-check, and its repair -- every page step some finding offers, `now` with the failures -- is the Let me choose
+  // half of its dialog (test/autofix.test.ts holds the dialog). Drop pageBody: the run loses `now`.
+  const dialog = code(read('components/FixEverythingDialog.tsx'));
+  const ask = dialog.slice(dialog.indexOf('function AskView('), dialog.indexOf('function RunView('));
+  assert.match(ask, /const plan = pagePlan\(checks\);/);
+  assert.match(ask, /void rr\.start\('page', 'safe_repair', pageBody\(plan\)\);/, 'Let me choose does not send the plan\'s steps, with `now` for the failures');
+  // What it did stays on the page, where Fix all issues' row said it: its line once pressed, until the next press.
+  const line = dialog.slice(dialog.indexOf('export function SafeRepairLine('));
+  assert.match(line, /const slot = rr\.slots\.page;\s*if \(!slot\) return null;/, 'the safe repair\'s line shows before any press');
+  assert.match(line, /<ActionStatus state=\{state\} \/>/, 'the safe repair says nothing of what it did');
   const page = code(read(PAGE));
-  assert.match(page, /<FixAllIssues checks=\{checks\} \/>/, 'the button is not on the Health page');
+  assert.match(page, /<SafeRepairLine checks=\{checks\} \/>/, 'the safe repair\'s line is not on the Health page');
   assert.match(page, /<RepairLiveStrip \/>/, 'the live strip (and its Stop) is not on the Health page');
   assert.match(page, /<RepairHistory \/>/, 'Recent repairs is not on the Health page');
   // Stop reaches the running run through the one cancel route the Downloads view uses too.
@@ -472,7 +479,8 @@ test('the nightly repair has one switch, under Library housekeeping, on unless t
   // sentence as its second argument and would toast `undefined`. Reintroduce by `save({ repairEnabled: next })`.
   const src = code(read(SETTINGS));
   assert.equal((src.match(/repairEnabled/g) ?? []).length, 1, 'the repair switch is saved from more or fewer than one place');
-  assert.match(src, /<SwitchRow label=\{tr\('Repair the library nightly'\)\}\s*help=\{tr\('Once a day: counts pages in files never opened[^']*'\)\}\s*on=\{data\.repair_enabled !== false\} onChange=\{\(next\) => patch\(\{ repairEnabled: next \}\)\} \/>/, 'the repair switch is not one SwitchRow with these words, is not on by default, or saves through the wrong function');
+  // v0.55.0: the help follows what the nightly runs (Every night, below it): the safe repair's words, or Fix everything's.
+  assert.match(src, /<SwitchRow label=\{tr\('Repair the library nightly'\)\}\s*help=\{nightlyModeOf\(data\) === 'autofix'\s*\? tr\('Once a day, Fix everything runs by itself[^']*'\)\s*: tr\('Once a day: counts pages in files never opened[^']*'\)\}\s*on=\{data\.repair_enabled !== false\} onChange=\{\(next\) => patch\(\{ repairEnabled: next \}\)\} \/>/, 'the repair switch is not one SwitchRow with these words, is not on by default, or saves through the wrong function');
   const house = src.slice(src.indexOf('function HousekeepingSection('));
   assert.ok(house.includes("tr('Repair the library nightly')"), 'the repair switch is not in Library housekeeping');
   // The help has to name what runs unattended AND what never does, or an admin cannot decide anything.

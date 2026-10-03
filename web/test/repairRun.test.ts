@@ -47,7 +47,7 @@ test('a run kind is named the way the server files its estimates', () => {
   assert.equal(kindOfBody({ only: [] }), 'full');
 });
 
-test('Fix all issues plans only the steps some finding offers, and asks for now with the failures', () => {
+test('the safe repair (Fix everything\'s Let me choose) plans only the steps some finding offers, and asks for now with the failures', () => {
   const checks: HealthCheck[] = [
     { id: 'solver', title: '', status: 'warn', summary: '', items: [{ title: 'a', detail: '', sourceId: 'a', actions: ['solver_reset'] }] },
     // Down: no reset offered, so no solver step.

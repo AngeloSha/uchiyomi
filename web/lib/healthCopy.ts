@@ -124,9 +124,9 @@ const repairEta = (c: CopyCtx) => timeLine(c.est) || tr('A few minutes at most')
 const RENUMBER_MAX_MS = 20_000 + 60_000;
 
 /**
- * The words of every action on the page, keyed by the HealthAction it answers, plus the card-level and
- * page-level actions that have no HealthAction of their own (`fixall:<step>`, `merge_all`, `scan`,
- * `fix_all_issues`).
+ * The words of every action on the page, keyed by the HealthAction it answers, plus the card-level actions that have
+ * no HealthAction of their own (`fixall:<step>`, `merge_all`, `scan`). The page's own Fix everything (v0.55.0) says
+ * what it does in its dialog (components/FixEverythingDialog.tsx), where Fix all issues' row was.
  */
 export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   fix_short: {
@@ -185,6 +185,14 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     label: () => tr('Turn off'),
     // True since v0.54.0, when a switched-off source stopped being asked by the sweep too.
     what: () => tr('Stops asking this source for anything until you turn it back on in Admin → Sources. Nothing is deleted.'),
+    eta: moment,
+  },
+  // v0.55.0: a series frozen because its source is over the extension engine's source limit. Replace was the wrong fix --
+  // the source works, it is just not loaded -- so the row offers a place to make room instead: Admin → Sources, on the
+  // source, where a source nothing uses can be switched off. The key opens the page; nothing is changed by the press.
+  free_slot: {
+    label: () => tr('Free a slot'),
+    what: () => tr('Opens this source in Admin → Sources. Switch off a source no series uses, and this one fits under the source limit again.'),
     eta: moment,
   },
   // v0.54.0: every series whose main source is this one, moved in ONE Replace run (POST /api/admin/sources/find {mode:
@@ -307,13 +315,6 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: () => tr('Walks the library folders now and indexes what it finds, then checks Health again. A scan can start once a minute.'),
     eta: () => tr('A minute or two on a large library'),
   },
-  fix_all_issues: {
-    label: () => tr('Fix all issues'),
-    // With the plan's size, FixAllIssues says fixAllWhat(n) instead: one whole sentence per count.
-    what: () => tr('One repair run with every step below that has something to do.'),
-    eta: repairEta,
-    lasting: (rec) => recordOutcome(rec),
-  },
 };
 
 /**
@@ -323,34 +324,6 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
  */
 export function actionCopy(a: string, check?: Pick<HealthCheck, 'id'> | null): ActionCopy | undefined {
   return (check ? ACTION_COPY[`${a}:${check.id}`] : undefined) ?? ACTION_COPY[a];
-}
-
-/**
- * What Fix all issues does, counted: ONE sentence per count, never a translated sentence with a count glued on --
- * "…1回で修復します。 3 ステップ." read a Latin full stop after the Japanese one. Without a plan, the plain line.
- */
-export function fixAllWhat(n: number, c: CopyCtx = {}): string {
-  if (n === 1) return tr('One repair run with the 1 step below that has something to do.');
-  if (n > 1) return tr('One repair run with the {n} steps below that have something to do.', { n });
-  return ACTION_COPY.fix_all_issues.what(c);
-}
-
-/** The words of one step inside Fix all issues, with its caps. */
-export function planLine(step: string, c: CopyCtx): string {
-  const key = step === 'solver' ? 'solver_reset' : `fixall:${step}`;
-  const copy = ACTION_COPY[key];
-  if (!copy) return repairStepLabel(step);
-  return `${step === 'solver' ? tr('Reset the solver') : copy.label(c)}: ${copy.what(c)}`;
-}
-
-/**
- * What Fix all issues never does, and -- when its plan holds the solver step -- what it does that its old
- * confirmation denied: "no source is unblocked" was false, because the solver step ends the cooldowns of the
- * sources that blame the solver.
- */
-export function planFooter(steps: readonly string[]): string {
-  const base = tr('Nothing is deleted, merged or switched off.');
-  return steps.includes('solver') ? `${base} ${tr('The solver step ends the cooldowns of the sources that blame the solver.')}` : base;
 }
 
 // ---- lasting outcomes ------------------------------------------------------------------------------------
@@ -485,6 +458,8 @@ const ONE_STEP: Record<string, () => string> = {
 export function kindLabel(kind: string, target?: RunTarget | null): string {
   const name = kind === 'full' ? tr(KIND_KEYS[0]) : kind === 'fix_short' ? tr(KIND_KEYS[1]) : kind === 'fill' ? tr(KIND_KEYS[2])
     : kind === 'retry' ? tr(KIND_KEYS[3])
+    // v0.55.0: Health's Fix everything, kept with the repair's runs -- its name, never its key's "Fix everything".
+    : kind === 'autofix' ? tr('Fixing everything')
     : ONE_STEP[kind] ? ONE_STEP[kind]()
     : (/^steps:([a-z+]+)/.exec(kind)?.[1] ?? '').split('+')
       .sort((a, b) => REPAIR_STEP_KEYS.indexOf(a as any) - REPAIR_STEP_KEYS.indexOf(b as any))

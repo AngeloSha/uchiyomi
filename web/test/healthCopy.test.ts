@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ACTION_COPY, CHECK_TITLES, actionCopy, caveatLine, caveatTone, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
+  ACTION_COPY, CHECK_TITLES, actionCopy, caveatLine, caveatTone, kindLabel, outcomeLine, recordLine, repairGate, rowState,
   runStatusWord, skipLine, solverDownLine, timeLine,
 } from '../lib/healthCopy';
 import type { RepairLiveRun, RepairRunRecord } from '../lib/repairRun';
@@ -19,15 +19,16 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
 const LIMITS = { shortMax: 20, gapsMax: 5, huntBudget: 5, shortHuntMax: 2, gapChapters: 20, retrySeries: 10, shortCopies: 3 };
 
-test('every HealthAction, every card action and the page action has what, and when, before the press', () => {
+test('every HealthAction and every card action has what, and when, before the press', () => {
   // A later step that adds a HealthAction adds its words here in the same commit. Reintroduce by deleting the
-  // `fill` entry: "fill has no copy" fails.
+  // `fill` entry: "fill has no copy" fails. (v0.55.0: the page's Fix all issues went; Fix everything says what it does in
+  // its own dialog, test/autofix.test.ts.)
   const types = read('lib/types.ts');
   const decl = types.slice(types.indexOf('export type HealthAction'));
   const actions = [...decl.slice(0, decl.indexOf(';')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   assert.ok(actions.length >= 12, 'the HealthAction union was not read');
   const ctx = { limits: LIMITS, est: { typicalMs: 40_000, runs: 3, worstMs: 180_000, downloads: 20 }, n: 3 };
-  for (const a of [...actions, 'fixall:short', 'fixall:gaps', 'fixall:failures', 'merge_all', 'scan', 'fix_all_issues']) {
+  for (const a of [...actions, 'fixall:short', 'fixall:gaps', 'fixall:failures', 'merge_all', 'scan']) {
     const c = ACTION_COPY[a];
     assert.ok(c, `${a} has no copy`);
     assert.ok(c.label(ctx).trim(), `${a} has no label`);
@@ -35,7 +36,7 @@ test('every HealthAction, every card action and the page action has what, and wh
     assert.ok(c.eta(ctx).trim(), `${a} does not say how long`);
   }
   // A repair-backed action keeps a lasting line from its run; the ones that answer at once need none.
-  for (const a of ['fix_short', 'fill', 'retry', 'solver_reset', 'fixall:short', 'fixall:gaps', 'fixall:failures', 'fix_all_issues']) {
+  for (const a of ['fix_short', 'fill', 'retry', 'solver_reset', 'fixall:short', 'fixall:gaps', 'fixall:failures']) {
     assert.ok(ACTION_COPY[a].lasting, `${a} leaves nothing on its row when its run ends`);
   }
 });
@@ -72,16 +73,13 @@ test('the words match what the press does', () => {
   assert.match(ACTION_COPY.fill.how!(ctx), /even when updates are paused/);
 });
 
-test('with the solver in the plan, Fix all issues says it ends cooldowns, and never that nothing is unblocked', () => {
-  // The old confirmation said "no source is unblocked" while its solver step unblocked every source that
-  // blamed the solver. Reintroduce that sentence as the footer: the first assertion fails.
-  const withSolver = planFooter(['solver', 'failures']);
-  assert.doesNotMatch(withSolver, /no source is unblocked/i);
-  assert.match(withSolver, /ends the cooldowns of the sources that blame the solver/);
-  assert.match(withSolver, /Nothing is deleted, merged or switched off/);
-  assert.doesNotMatch(planFooter(['short']), /solver/, 'the solver sentence appears without the solver step');
-  // And nothing in the source still says it.
-  assert.doesNotMatch(read('components/HealthActions.tsx'), /no source is unblocked/);
+test('nothing on Health says no source is unblocked: the safe repair\'s solver step unblocks them', () => {
+  // The old confirmation said "no source is unblocked" while its solver step unblocked every source that blamed the
+  // solver. v0.55.0: Fix all issues' plan and its footer went with its row; Fix everything's Let me choose runs the same
+  // repair, and neither its words nor the keys' may say it again. Reintroduce the sentence: this fails.
+  for (const f of ['components/HealthActions.tsx', 'components/FixEverythingDialog.tsx', 'lib/autofix.ts']) {
+    assert.doesNotMatch(read(f), /no source is unblocked/i, f);
+  }
 });
 
 test('how long: usually from history, at most from the constants, downloads as a count', () => {
@@ -288,9 +286,10 @@ test('a run\'s name is never a key\'s label: a label is an order, a name is a no
   for (const l of ['Fill now', 'Retry now', 'Fill gaps', 'Find longer copies', 'Try every failed chapter again']) {
     assert.ok(labels.has(l), `"${l}" is no longer a key's label -- this test reads the wrong registry`);
   }
-  for (const kind of ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now']) {
+  for (const kind of ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now', 'autofix']) {
     const name = kindLabel(kind);
-    assert.ok(name && !labels.has(name) && name !== 'Reset the solver', `${kind} is named by a key's label: "${name}"`);
+    // v0.55.0: Fix everything's run, kept with the repair's, is "Fixing everything" -- never its key's "Fix everything".
+    assert.ok(name && !labels.has(name) && name !== 'Reset the solver' && name !== 'Fix everything', `${kind} is named by a key's label: "${name}"`);
   }
   // The row's lasting line on a Fix that could not replace: "no longer copy" read as "could no longer".
   const left = ACTION_COPY.fix_short.lasting!({ status: 'done', result: { counted: 0, short: { left: 1 } } } as RepairRunRecord);
@@ -337,15 +336,12 @@ test('the solver card says what to do while the solver is down, the desktop way 
   assert.match(read('components/HealthActions.tsx'), /what: solverDownLine\(isDesktop\(\)\)/, 'the solver-down row does not pick its words by platform');
 });
 
-test('Fix all issues says its size in one whole sentence per count', () => {
-  // It glued a separate "{n} steps" and an ASCII full stop onto a translated sentence: "…1回で修復します。 3 ステップ."
-  // Reintroduce the glued form in FixAllIssues: the source assertion fails; drop the singular: "1 step" fails.
-  assert.equal(fixAllWhat(1), 'One repair run with the 1 step below that has something to do.');
-  assert.equal(fixAllWhat(3), 'One repair run with the 3 steps below that have something to do.');
-  assert.equal(fixAllWhat(0), ACTION_COPY.fix_all_issues.what({}), 'with no plan it is the plain line');
-  const keys = read('components/HealthActions.tsx');
-  assert.match(keys, /what: fixAllWhat\(plan\.length, ctx\),/, 'Fix all issues does not say its size through fixAllWhat');
-  assert.doesNotMatch(keys, /tr\('\{n\} steps'/, 'a count is glued onto the Fix all issues sentence again');
+test('Fix everything says how many cards need a look in one whole sentence per count', () => {
+  // Fix all issues glued a separate "{n} steps" and an ASCII full stop onto a translated sentence: "…1回で修復します。
+  // 3 ステップ." Its successor's count is one sentence per count. Reintroduce a glued count: this fails.
+  const dialog = read('components/FixEverythingDialog.tsx');
+  assert.match(dialog, /n === 1 \? tr\('1 card needs a look'\) : tr\('\{n\} cards need a look', \{ n \}\)/);
+  assert.doesNotMatch(dialog, /tr\('\{n\} (steps|cards)'/, 'a count is glued onto a sentence again');
 });
 
 test('Connect on the Extension engine row says what it changes, and that nothing restarts', () => {
