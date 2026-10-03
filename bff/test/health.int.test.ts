@@ -258,7 +258,7 @@ test('a dead primary with a live follower is reference, not a warning; with a de
   }
 });
 
-const S_ENGINE = 's_health_engine', S_GONE = 's_health_gone';
+const S_ENGINE = 's_health_engine', S_GONE = 's_health_gone', S_ROOM = 's_health_room';
 
 /**
  * #72: with no extension engine answering, EVERY extension series is unrouted, and an enabled source then read
@@ -273,15 +273,22 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
   const { q } = await import('../src/lib/db');
   const { frozenSeries } = await import('../src/lib/health');
   const { noIgnores } = await import('../src/lib/healthIgnore');
+  const { env } = await import('../src/env');
+  const reg = await import('../src/lib/sources/suwayomi/register');
+  const { unregisterAdapter } = await import('../src/lib/sources');
   await migrate();
-  for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
-  await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
+  for (const id of [S_ENGINE, S_GONE, S_ROOM]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`DELETE FROM suwayomi_sources WHERE source_id IN ('health-engine', 'health-room')`);
   // Enabled and remembered, but not registered: exactly what every extension source is while the engine is away.
-  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('health-engine', 'Engine Source', 'en', true)`);
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('health-engine', 'Engine Source', 'en', true),
+             ('health-room', 'Room Source', 'en', true)`);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
            VALUES ($1, 'test', 'Engine Fixture', $1, 12, 'sw:health-engine', '1')`, [S_ENGINE]);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
            VALUES ($1, 'test', 'Gone Fixture', $1, 3, 'gone-pack-source', '1')`, [S_GONE]);
+  // A series on the source that takes the one slot below.
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Room Fixture', $1, 2, 'sw:health-room', '1')`, [S_ROOM]);
   try {
     const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'up', title: string) => {
       const c = await frozenSeries(noIgnores(), engine);
@@ -295,6 +302,25 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
       assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back\. /);
     }
     assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
+    const actions = async (engine: 'off' | 'up', title: string) => (await frozenSeries(noIgnores(), engine)).items.find((i) => i.title === title)!;
+    // v0.55.1: switched on and not loaded is over the limit only when the last load says it left the source out
+    // (register.ts leftOutByLimit, which the sources overview reads too). Before any such load, an extension the engine
+    // no longer offers is not over any limit: it is gone, and Replace is its fix. Reintroduce `r.still_enabled` alone in
+    // frozenSeries: "switched on but not left out by the limit is not over it" fails, and its Free a slot would land on
+    // a sheet offering Replace.
+    assert.match((await detail('up', 'Engine Fixture')).detail, /its source Engine Source is no longer installed$/,
+      'switched on but not left out by the limit is not over it');
+    assert.deepEqual((await actions('up', 'Engine Fixture')).actions, ['replace_source', 'find_sources', 'ignore']);
+    // Left out by the limit as a load leaves it: an engine that answered, a limit of one, and a source some series reads
+    // through ahead of it in the engine's order.
+    const was = { url: env.SUWAYOMI_URL, cap: env.SUWAYOMI_MAX_SOURCES };
+    Object.assign(env, { SUWAYOMI_URL: 'http://engine.test:4567', SUWAYOMI_MAX_SOURCES: 1 });
+    try {
+      await reg.loadSuwayomiSources(async () => [{ id: 'health-room', name: 'Room Source', lang: 'en' }, { id: 'health-engine', name: 'Engine Source', lang: 'en' }] as any);
+    } finally {
+      Object.assign(env, was);
+    }
+    assert.ok(reg.leftOutByLimit('sw:health-engine') && !reg.leftOutByLimit('sw:health-room'), 'PREMISE: the load left the engine fixture out');
     const up = await detail('up', 'Engine Fixture');
     assert.match(up.detail, /is over the source limit \(SUWAYOMI_MAX_SOURCES\)$/, 'with the engine up, the limit is the reason');
     // v0.55.1: by the name the engine gave it, as the rest of Health names a source (sourceLabel), never `sw:…`.
@@ -303,7 +329,6 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
     assert.doesNotMatch(up.note, /wait for the extension engine/);
     // v0.55.0: the limit is a slot to free, not a source to replace -- the source works. Reintroduce by offering Replace
     // there (keysFor -> sourceKeys): the over-limit row reads replace_source.
-    const actions = async (engine: 'off' | 'up', title: string) => (await frozenSeries(noIgnores(), engine)).items.find((i) => i.title === title)!;
     const slot = await actions('up', 'Engine Fixture');
     assert.deepEqual(slot.actions, ['free_slot', 'ignore'], 'the over-limit row offers a slot to free, never Replace');
     assert.equal(slot.sourceId, 'sw:health-engine', 'naming the source Admin → Sources opens on');
@@ -314,8 +339,11 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
       assert.match((await detail(engine, 'Gone Fixture')).detail, /gone-pack-source is no longer installed$/, `a non-extension source (${engine})`);
     }
   } finally {
-    for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
-    await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
+    for (const id of [S_ENGINE, S_GONE, S_ROOM]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+    await q(`DELETE FROM suwayomi_sources WHERE source_id IN ('health-engine', 'health-room')`);
+    unregisterAdapter('sw:health-room');
+    // With no engine configured again, a load registers nothing and forgets what the last one left out.
+    await reg.loadSuwayomiSources(async () => []);
   }
 });
 

@@ -237,10 +237,13 @@ below, because the engine has to re-read its repositories before "an update is a
 `GET /api/admin/sources/overview` (admin, since v0.54.0) is every source the server knows, of every kind, in one
 answer -- the one Sources section's list: `{sources, attention}`. Each source is `{id, name, kind: builtin|mangadex|
 site|extension|pack, lang, pkgName? (extensions), standing, offBy, state, stage, cooldown, offline, main, followed,
-withBackup, lastTestedAt, icon, address? (sites)}`: `state`, `stage`, `cooldown` and `offBy` are Source health's own
-(`ok` when Health has nothing to say), `standing` the series' Sources sheet's, `main` the series whose main source it
+withBackup, lastTestedAt, icon, address? (sites), overLimit?}`: `state`, `stage`, `cooldown` and `offBy` are Source
+health's own (`ok` when Health has nothing to say), `standing` the series' Sources sheet's, `main` the series whose main source it
 is, `followed` the series that follow it without it being their main, `withBackup` of `main` the series a working
-follower would take over (the Replace preview's count), `offline` a confirmed site-offline notice. `attention` is
+follower would take over (the Replace preview's count), `offline` a confirmed site-offline notice, and `overLimit`
+(since v0.55.1) `{limit}` on an extension's source the last registration left out because `SUWAYOMI_MAX_SOURCES` was
+full -- switched on, offered by the engine, not loaded: not broken, and nothing Replace fixes (Health's frozen row for
+its series offers `free_slot` by the same record, and the web's sheet says so with no Replace). `attention` is
 `{replace, failingUnused, updates}`: the sources off or failing that are some series' main source, the findings on
 sources no series uses (Health's `unused` group), and installed extensions with an update waiting. The sources in
 `attention` come first, then by `main + followed`, then by name; switched-off sources last. The engine's own state
@@ -1861,7 +1864,8 @@ it is usable or cooling down -- with `replace_source` and `find_sources`; a seri
 `info` (`frozen.followingDown` {source, state, names}) with `replace_source`. A main that is only cooling down is not
 listed. Since v0.55.0 a row whose source is dropped by `SUWAYOMI_MAX_SOURCES` (`frozen.overLimit`) carries `free_slot`
 in their place, with `sourceId`: the client opens Admin → Sources on it to free a slot (no server action), since the
-source itself works. Since v0.55.1 the `source` of every `frozen.*` sentence names the source as the rest of Health
+source itself works. Since v0.55.1 that is a source the last registration left out for want of room, the record the
+sources overview's `overLimit` reads; one switched on that the engine no longer offers reads `frozen.uninstalled`. Since v0.55.1 the `source` of every `frozen.*` sentence names the source as the rest of Health
 does -- the loaded source's name, else the name the extension engine gave it, else its id -- where it was the id
 (`sw:2522…` for a source over the limit); `sourceId` stays the key every action uses.
 

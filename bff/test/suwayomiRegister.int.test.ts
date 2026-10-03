@@ -134,6 +134,12 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
       assert.equal(r.registered, 2);
       assert.equal(r.skipped, 3, 'over-cap sources must be counted, not silently dropped');
       assert.equal(loader.listSources().length, 2);
+      // v0.55.1: and which, by id -- what Health's frozen row and the sources overview read (leftOutByLimit), where both
+      // took "switched on and not loaded" for it. Reintroduce by not recording them in load(): "the sources the limit
+      // left out are known by id" fails.
+      assert.deepEqual(['0', '1', '2', '3', '4'].filter((id) => reg.leftOutByLimit(`sw:${id}`)), ['2', '3', '4'],
+        'the sources the limit left out are known by id');
+      assert.ok(!reg.leftOutByLimit('2') && !reg.leftOutByLimit(null), 'by their adapter id alone');
 
       // ...and reported somewhere a person looks. The count above went to one console.warn at boot and
       // nowhere else, so search quietly reached fewer sources than the panel said were on.
@@ -195,6 +201,19 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
 
   await t.test('an unreachable extension server registers nothing and does not throw', async () => {
     reset();
+    // A load that left something out first: an engine that does not answer leaves nothing out after it -- no extension
+    // source is loaded at all then, and the reason is the engine's, never the limit's (v0.55.1).
+    const { env } = await import('../src/env');
+    const original = env.SUWAYOMI_MAX_SOURCES;
+    (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = 1;
+    try {
+      await q('UPDATE suwayomi_sources SET enabled = true');
+      await reg.loadSuwayomiSources(async () => remote(3));
+      assert.ok(reg.leftOutByLimit('sw:2'), 'PREMISE: the limit left a source out');
+    } finally {
+      (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = original;
+    }
+    reset();
     const r = await reg.loadSuwayomiSources(async () => {
       throw new Error('fetch failed');
     });
@@ -203,6 +222,7 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     assert.equal(r.registered, 0);
     assert.match(r.error || '', /fetch failed/);
     assert.equal(loader.listSources().length, 0);
+    assert.equal(reg.leftOutByLimit('sw:2'), false, 'an engine that does not answer leaves nothing out');
   });
 
   await q('DELETE FROM suwayomi_sources');

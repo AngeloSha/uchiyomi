@@ -16,7 +16,9 @@
 // and how many extensions have an update waiting.
 // The extension engine's own state stays GET /api/admin/extensions/status's: it asks the engine, and this asks nothing.
 import { q } from './db';
+import { env } from '../env';
 import { getSource, listSources, isPackSource, isSwAdapterId, SW_PREFIX, suwayomiConfigured, withTimeout } from './sources';
+import { leftOutByLimit } from './sources/suwayomi/register';
 import { MANGADEX_GROUP } from './sources/mangadex';
 import { readSites } from './sources/customSites';
 import { extensionsGeneration, listExtensions } from './sources/suwayomi/extensions';
@@ -53,6 +55,12 @@ export interface OverviewSource {
   icon: boolean;
   /** A site added by address: its address. */
   address?: string;
+  /**
+   * v0.55.1: not loaded because the engine's source limit is full -- switched on, offered, and left out by the last load
+   * (register.ts leftOutByLimit), with the limit it is over. Not broken, and Replace is not its fix: room under the limit
+   * is. Absent for every other source.
+   */
+  overLimit?: { limit: number };
 }
 
 export interface SourcesOverview {
@@ -166,6 +174,10 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
       lastTestedAt: o?.live_at ? new Date(o.live_at).toISOString() : null,
       icon: !!src?.iconUrl,
       ...(site?.base ? { address: site.base } : {}),
+      // Health's frozen row for its series offers Free a slot by the same record (lib/health.ts frozenSeries), and lands
+      // here: the sheet says why it is not loaded instead of offering Replace. Reintroduce by leaving it out: "a source
+      // the limit left out says so" in sourcesOverview.int.test.ts finds nothing.
+      ...(st === 'not_loaded' && leftOutByLimit(id) ? { overLimit: { limit: env.SUWAYOMI_MAX_SOURCES } } : {}),
     };
   });
 

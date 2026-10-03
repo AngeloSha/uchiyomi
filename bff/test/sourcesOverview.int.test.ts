@@ -177,3 +177,43 @@ test('an admin sees every 18+ source, and the 18+ series in its counts, with ?ad
     await clean();
   }
 });
+
+test('a source the limit left out says so, and is nothing to replace (v0.55.1)', { skip }, async () => {
+  // Health's Free a slot, on a series whose source is over the engine's source limit, opens that source's sheet -- which
+  // offered Replace, the one fix that is wrong there: the source works and is only not loaded. The overview says so, from
+  // the record Health's row reads (register.ts leftOutByLimit), with the limit it is over. Reintroduce by leaving
+  // `overLimit` out: "a source the limit left out says so" fails; flag every source switched on and not loaded instead:
+  // "a source the engine no longer offers is not over the limit" fails.
+  const { env } = await import('../src/env');
+  const reg = await import('../src/lib/sources/suwayomi/register');
+  const { unregisterAdapter } = await import('../src/lib/sources');
+  const IDS = ['9990021', '9990022', '9990023'];
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled, pkg_name) VALUES
+             ('9990021', 'Ext Room', 'en', true, 'eu.kanade.ovl'), ('9990022', 'Ext Full', 'en', true, 'eu.kanade.ovl'),
+             ('9990023', 'Ext Gone', 'en', true, 'eu.kanade.ovl')`);
+  for (const [key, id] of [['l1', IDS[0]], ['l2', IDS[1]], ['l3', IDS[2]]]) await series(key, `sw:${id}`);
+  const was = { url: env.SUWAYOMI_URL, cap: env.SUWAYOMI_MAX_SOURCES };
+  try {
+    // A limit of one, and an engine that offers two of the three: 9990023 is switched on, and the engine no longer has it.
+    Object.assign(env, { SUWAYOMI_URL: 'http://engine.test:4567', SUWAYOMI_MAX_SOURCES: 1 });
+    await reg.loadSuwayomiSources(async () => [{ id: IDS[0], name: 'Ext Room', lang: 'en' }, { id: IDS[1], name: 'Ext Full', lang: 'en' }] as any);
+    Object.assign(env, was);
+    const r = await app.inject({ method: 'GET', url: '/api/admin/sources/overview', headers: auth });
+    assert.equal(r.statusCode, 200, r.body);
+    const { sources, attention } = r.json();
+    const by = Object.fromEntries(sources.map((s: any) => [s.id, s]));
+    assert.deepEqual([by['sw:9990022']?.standing, by['sw:9990022']?.overLimit], ['not_loaded', { limit: 1 }], 'a source the limit left out says so');
+    assert.equal(by['sw:9990023']?.standing, 'not_loaded', 'PREMISE: the one the engine no longer offers is not loaded either');
+    assert.equal('overLimit' in by['sw:9990023'], false, 'a source the engine no longer offers is not over the limit');
+    assert.equal(by['sw:9990021']?.standing, 'usable', 'PREMISE: the used source ahead of it took the slot');
+    assert.equal('overLimit' in by['sw:9990021'], false);
+    assert.equal(attention.replace.includes('sw:9990022'), false, 'nothing to replace');
+  } finally {
+    Object.assign(env, was);
+    unregisterAdapter('sw:9990021');
+    // With no engine configured again, a load registers nothing and forgets what the last one left out.
+    await reg.loadSuwayomiSources(async () => []);
+    await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1::text[])', [IDS]);
+    await clean();
+  }
+});

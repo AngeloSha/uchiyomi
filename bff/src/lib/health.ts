@@ -22,7 +22,7 @@ import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { mangadexLangOf } from './sources/mangadexLangs';
-import { lastSuwayomiLoad } from './sources/suwayomi/register';
+import { lastSuwayomiLoad, leftOutByLimit } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
@@ -936,7 +936,10 @@ export async function frozenSeries(
   const frozen = affected.filter((r) => !followed.has(r.id));
   const covered = affected.filter((r) => followed.has(r.id));
   // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
-  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see. A MangaDex language comes first
+  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see -- since v0.55.1 only when the last
+  // load says it left that source out (register.ts leftOutByLimit), which the sources overview reads too: switched on
+  // and unregistered alone also reads an extension the engine no longer offers as over the limit, and its Free a slot
+  // then landed on a sheet that offered Replace. A MangaDex language comes first
   // (v0.52.0): its adapter is unregistered only by switching the language off, so "no longer installed" was wrong
   // and sent the admin looking for an extension; the reason names the language and where it is switched back on.
   // A loaded main that is switched off says so as one that is unloaded does; one that is failing says whether it is
@@ -950,7 +953,9 @@ export async function frozenSeries(
     }
     const mdOff = mangadexLangOf(r.source_id);
     if (mdOff) return say('frozen.mangadexOff', { n: p.n, lang: mdOff });
-    return r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+    return r.switched_off ? say('frozen.switchedOff', p)
+      : r.still_enabled && leftOutByLimit(r.source_id) ? say('frozen.overLimit', p)
+      : say('frozen.uninstalled', p);
   };
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
@@ -971,7 +976,7 @@ export async function frozenSeries(
   // switched off. Reintroduce by offering Replace again: "the engine being off is the reason" in health.int.test.ts
   // finds replace_source on the over-limit row.
   const overLimit = (r: typeof rows[number]): boolean =>
-    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled;
+    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled && leftOutByLimit(r.source_id);
   const keysFor = (r: typeof rows[number], actions: HealthAction[]) =>
     (overLimit(r) && r.source_id ? { sourceId: r.source_id, actions: ['free_slot'] as HealthAction[] } : sourceKeys(r, actions));
   // v0.55.1: the source by name, as the rest of Health names it (sourceLabel): the row of a source over the limit read

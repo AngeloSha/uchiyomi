@@ -1686,7 +1686,10 @@ When an extension server is configured there is one more check, *Extension sourc
 more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register. Since v0.55.0 a series under *Series
 that can no longer update* whose source is over that limit offers **Free a slot** instead of *Replace* — the source
 works, it is only not loaded — which opens that source in **Admin → Sources**, where switching off a source no
-series uses makes room for it.
+series uses makes room for it. Since v0.55.1 the row names the source as the rest of Health does (the extension's own
+name, not `sw:2522…`), and the source's sheet says why it is not loaded — *The engine’s limit of 25 sources is full.
+Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES.* — with no *Replace*. A source switched on that the
+engine no longer offers at all reads *no longer installed*, with *Replace*, rather than over the limit.
 
 **Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
 Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote

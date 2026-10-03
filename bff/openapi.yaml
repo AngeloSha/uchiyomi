@@ -9066,7 +9066,9 @@ paths:
         loaded) and the action `replace_source`, which makes that follower its main source. A main that is only
         cooling down is not listed.
         Since v0.55.0 a `frozen-series` row whose source is dropped by SUWAYOMI_MAX_SOURCES (`frozen.overLimit`: an
-        extension's source, switched on, the engine answering, and not registered) carries the action `free_slot` in
+        extension's source, switched on, the engine answering, and not registered -- since v0.55.1 only one the last
+        registration left out for want of room, as the sources overview's `overLimit` says; one the engine no longer
+        offers reads `frozen.uninstalled`) carries the action `free_slot` in
         place of `replace_source` and `find_sources`, with `sourceId` and no `findSeries`: the client opens Admin ->
         Sources on that source, where a slot can be freed (no server action). Since v0.55.1 the `source` of every
         `frozen.*` sentence names the source as the rest of Health does (the loaded source's name, else the name the
@@ -10179,7 +10181,8 @@ paths:
         nothing to say about it. `standing` is lib/sourceStanding.ts's (SeriesSource.standing). `main` counts the series
         whose main source it is, `followed` the series that follow it without it being their main source, and
         `withBackup`, of `main`, the series a working follower would take over -- the Replace preview's own count.
-        `offline`: a confirmed failure that is the site's own offline notice. `attention` is what the section leads
+        `offline`: a confirmed failure that is the site's own offline notice. `overLimit` (since v0.55.1): `{limit}` on
+        a source the extension engine's source limit left out. `attention` is what the section leads
         with: `replace` (off or failing, and some series' main source -- Health's replace_source rule), `failingUnused`
         (Health's `unused` group: a finding on a source no series uses) and `updates` (installed extensions with an
         update waiting: the engine asked briefly and kept 30 s, else the last extension check's). Ordered: the
@@ -10227,6 +10230,16 @@ paths:
                         lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
                         icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
                         address: { type: string, description: A site added by address only. }
+                        overLimit:
+                          type: object
+                          required: [limit]
+                          properties:
+                            limit: { type: integer, minimum: 1, description: SUWAYOMI_MAX_SOURCES. }
+                          description: >-
+                            Since v0.55.1, only on an extension's source the last registration left out because
+                            SUWAYOMI_MAX_SOURCES was full: switched on, offered by the engine, and not loaded. Not broken,
+                            and nothing Replace fixes -- Health's frozen-series row for its series offers `free_slot` by the
+                            same record.
                   attention:
                     type: object
                     required: [replace, failingUnused, updates]

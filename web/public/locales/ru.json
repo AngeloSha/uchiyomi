@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3155
+    "strings": 3159
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3158,5 +3158,9 @@
   "Fetching missing and broken chapters": "Загрузка недостающих и повреждённых глав",
   "Looking for new sources": "Поиск новых источников",
   "Removing extra chapter files": "Удаление лишних файлов глав",
-  "No source": "Без источника"
+  "No source": "Без источника",
+  "The engine’s limit of 1 source is full.": "Лимит источников движка (1) исчерпан.",
+  "The engine’s limit of {n} sources is full.": "Лимит источников движка ({n}) исчерпан.",
+  "Turn off a source you don’t use, or raise {name}.": "Отключите источник, которым вы не пользуетесь, или увеличьте {name}.",
+  "Turn off a source you don’t use.": "Отключите источник, которым вы не пользуетесь."
 }
