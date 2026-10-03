@@ -173,7 +173,8 @@ const EN = {
     `${capped ? `, ${capped} left alone after ${cap}` : ''}; ` +
     `latest: "${title}" ch ${number} (${status}${reason ? `: ${reason}` : ''})`,
 
-  // ---- Series that can no longer update. `source` is the series' source id, as the English always printed it.
+  // ---- Series that can no longer update. `source` is the series' main source as the rest of Health names it (since
+  // v0.55.1, lib/health.ts sourceLabel: the loaded source's name, else the engine's, else the id); its id before.
   'frozen.live': ({ n }: { n: number }) => `${n} series ${s(n, 'has', 'have')} no working source`,
   'frozen.none': () => 'Every series has a working source',
   'frozen.covered': ({ n }: { n: number }) => `${n} lost ${s(n, 'its', 'their')} primary but still follow${s(n, 's', '')} another`,

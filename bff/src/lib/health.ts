@@ -887,12 +887,18 @@ export async function frozenSeries(
     const st = standingOf(id, mainRows.get(id), now);
     if (st === 'off' || st === 'failing') down.set(id, st);
   }
-  const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
+  const rows = await q<{
+    id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean;
+    engine_name: string | null;
+  }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
     // finding from one that is gone: the fix is a button, not a reinstall.
     `SELECT ls.id, ls.title, ls.source_id, ls.books_count,
             EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND NOT ss.enabled) AS switched_off,
-            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND ss.enabled) AS still_enabled
+            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND ss.enabled) AS still_enabled,
+            -- The engine's name for an extension source that is not registered now (sourceLabel): over the limit, switched
+            -- off, or waiting for the engine -- the sources of this check that read as sw:2522… otherwise.
+            (SELECT sn.name FROM suwayomi_sources sn WHERE 'sw:' || sn.source_id = ls.source_id LIMIT 1) AS engine_name
        FROM lib_series ls
       WHERE ls.auto_update AND ${visibleToAll('ls')}
         AND (ls.source_id IS NULL OR ls.source_series_id IS NULL OR ls.source_id NOT IN (SELECT source_id FROM suwayomi_sources WHERE enabled)
@@ -968,8 +974,13 @@ export async function frozenSeries(
     unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled;
   const keysFor = (r: typeof rows[number], actions: HealthAction[]) =>
     (overLimit(r) && r.source_id ? { sourceId: r.source_id, actions: ['free_slot'] as HealthAction[] } : sourceKeys(r, actions));
+  // v0.55.1: the source by name, as the rest of Health names it (sourceLabel): the row of a source over the limit read
+  // "its source sw:2522… is over the source limit", and a switched-off one "its source sw:4709… is switched off".
+  // Reintroduce `source: r.source_id`: "a switched-off source is said to be switched off" and "the engine is the
+  // reason" in health.int.test.ts read the id.
+  const named = (r: typeof rows[number]): string => (r.source_id ? sourceLabel(r.source_id, r.engine_name) : '');
   const found: HealthItem[] = frozen.map((r) => {
-    const p = { n: r.books_count, source: r.source_id ?? '' };
+    const p = { n: r.books_count, source: named(r) };
     return {
       seriesId: r.id,
       title: r.title,
@@ -991,8 +1002,8 @@ export async function frozenSeries(
       seriesId: r.id,
       title: r.title,
       ...detailOf([stall
-        ? say('frozen.followingDown', { source: r.source_id!, state: stall, names: followed.get(r.id)! })
-        : say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
+        ? say('frozen.followingDown', { source: named(r), state: stall, names: followed.get(r.id)! })
+        : say('frozen.following', { source: r.source_id ? named(r) : null, names: followed.get(r.id)! })]),
       info: true,
       ...keysFor(r, ['replace_source']),
     });

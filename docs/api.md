@@ -1861,7 +1861,9 @@ it is usable or cooling down -- with `replace_source` and `find_sources`; a seri
 `info` (`frozen.followingDown` {source, state, names}) with `replace_source`. A main that is only cooling down is not
 listed. Since v0.55.0 a row whose source is dropped by `SUWAYOMI_MAX_SOURCES` (`frozen.overLimit`) carries `free_slot`
 in their place, with `sourceId`: the client opens Admin → Sources on it to free a slot (no server action), since the
-source itself works.
+source itself works. Since v0.55.1 the `source` of every `frozen.*` sentence names the source as the rest of Health
+does -- the loaded source's name, else the name the extension engine gave it, else its id -- where it was the id
+(`sw:2522…` for a source over the limit); `sourceId` stays the key every action uses.
 
 **Review first** (since v0.51.0, #132; @TIGamingTV's idea from PR #133). `POST /api/admin/sources/find` with
 `review: true` runs the same search and the same judgement, follows nothing, and keeps what it found: the run
