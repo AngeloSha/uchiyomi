@@ -1274,7 +1274,8 @@ automatically.
 
 **Your sources** lists every source Uchiyomi has, of every kind — the built-in engines, MangaDex in each language
 you have on, the sites you added, each language of each extension, and source packs — one row each: its kind beside
-its name, and one line under it with its state, how many series use it and its language. The state is a word, amber
+its name, and one line under it with its state, how many series use it and its language. The sources your series use
+come first, the most used first, then the rest by name. The state is a word, amber
 only when something is wrong: *Healthy*, *Rate-limited* (and when it tries again), *Blocked by the site*, *Failing
 since 23 Sep* (and the step that fails), *Offline since 23 Sep* for a site that answers with its own "we are offline"
 page, *Turned off*, *Hidden language*; *Failing* means a step failed its last Test or daily check, or three times in
