@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3153
+    "strings": 3154
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -2878,6 +2878,7 @@
   "It stops at the next safe point, never in the middle of a merge, a delete or a renumbering.": "Se detiene en el siguiente punto seguro, nunca a mitad de una fusión, un borrado o una renumeración.",
   "All green": "Todo en verde",
   "1 needs you": "1 te necesita",
+  "Everything else is green": "Todo lo demás está en verde",
   "{n} need you": "{n} te necesitan",
   "Nothing needs you": "Nada te necesita",
   "Needs you": "Te necesita",

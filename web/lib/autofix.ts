@@ -10,9 +10,9 @@
  * (components/FixEverythingDialog.tsx), so a test can hold each one:
  * - the key shows whenever any card has a finding, or a run is going, or one this page saw has not been read;
  * - the run polls every 2 s, and the dialog opens on the run while one goes, never on the question;
- * - the end is ONE headline -- "All green" exactly when the server says so -- at most six lines of what it did, and
- *   each Needs-you item with its one key; everything else is behind Details;
- * - Run again only while something a run could still change is left.
+ * - the end is ONE headline -- what needs you first, else "All green" exactly when the server says so -- at most six
+ *   lines of what it did, and each Needs-you item with its one key; everything else is behind Details;
+ * - Run again only while something a run could still change is left (the server's `again`).
  *
  * Every sentence of the summary is a said code worded by lib/said.ts (the server's English never reaches the page). A
  * line this build cannot word is left out rather than shown half in English -- except a Needs-you item, which is never
@@ -22,7 +22,6 @@ import { keys, t as tr } from './i18n';
 import { untilText } from './format';
 import { saidWords, type Said } from './said';
 import { checkTitle } from './healthCopy';
-import type { RunCard } from './jobs';
 import type { RepairStatus } from './repairRun';
 import type { FindStatus } from './findSources';
 import type { Tone } from './status';
@@ -49,8 +48,16 @@ export type DoneKind =
 export type NeedsYouAction = { kind: 'open'; href: string } | { kind: 'health'; check: string } | { kind: 'settings'; key: string };
 
 export interface AutofixSummary {
-  /** Nothing but Needs you is left (Version's info row does not count). */
+  /**
+   * Nothing but Needs you is left (Version's info row does not count). ⚠️ Not "nothing is left": with the solver down it
+   * is true beside that Needs-you item (the contract's "Changed by S" 1), so the headline reads Needs you first.
+   */
   green: boolean;
+  /**
+   * Something a run could still change is left -- what this one did not get to -- never a cooldown, the sweep or Needs
+   * you alone (the integration's contract change): Run again is offered on it.
+   */
+  again: boolean;
   /** What it did, one entry per kind, most telling first; `items` names what it installed, merged or deleted. */
   done: Array<{ kind: DoneKind; n: number; said: Said; items?: Said[] }>;
   /** What clears by itself: a cooldown until `at`, a retry tomorrow, what the next run continues. */
@@ -70,6 +77,8 @@ export interface AutofixRun {
   phase: AutofixPhase | null;
   /** 0-based, of AUTOFIX_PHASES.length. */
   phaseIndex: number;
+  /** Stop was asked, and the run is winding down to its next safe point: every viewer's "Stopping…". */
+  stopping?: boolean;
   /** "Now: …": the series it is on, how far into the phase, or what it waits for. */
   current?: { title?: string; done?: number; of?: number; said?: Said };
   summary?: AutofixSummary;
@@ -207,21 +216,29 @@ export function fixView(o: {
 export type HeadlineKind = 'green' | 'needs' | 'calm' | 'stopped' | 'failed' | 'interrupted';
 
 /**
- * The one line the end opens with:
- * - "All green" with the emerald mark exactly when the server says nothing but Needs you is left;
- * - "2 need you" (the pair: "1 needs you") with the amber mark, when something only a person can do is left;
- * - "Nothing needs you" when what is left clears by itself (a cooldown, the next run), in the finished mark: amber is
- *   for real problems only;
- * - a run that stopped, failed or was cut short by a restart says so.
- * A failed or interrupted run says that before anything else: its summary, if it has one, is not the whole story.
+ * The one line the end opens with, and the line under it:
+ * - a run that failed or was cut short by a restart says so first: its summary, if it has one, is not the whole story;
+ * - "2 need you" (the pair: "1 needs you") with the amber mark whenever something only a person can do is left -- with
+ *   "Everything else is green" under it when the server says nothing else is left (`green`), as the sketch the owner
+ *   saw has it. ⚠️ `green` is true beside Needs-you items (the solver down is one), so it is never read first: "All
+ *   green" over "1 needs you" was the merge's bug;
+ * - otherwise "All green", with the emerald mark, exactly when the server says so;
+ * - otherwise a stopped run says it stopped, and a finished one "Nothing needs you": what is left clears by itself, and
+ *   the clears lines say when. Amber is for real problems only.
+ * Reintroduce `if (s?.green)` before the Needs-you branch: "the solver down reads All green" in autofix.test.ts fails.
  */
-export function autofixHeadline(run: Pick<AutofixRun, 'status' | 'summary'>): { kind: HeadlineKind; tone: Tone; text: string } {
+export function autofixHeadline(run: Pick<AutofixRun, 'status' | 'summary'>): { kind: HeadlineKind; tone: Tone; text: string; sub?: string } {
   if (run.status === 'failed') return { kind: 'failed', tone: 'problem', text: tr('The run failed. The server log has the details.') };
   if (run.status === 'interrupted') return { kind: 'interrupted', tone: 'warn', text: tr('Interrupted by a restart') };
   const s = run.summary;
-  if (s?.green) return { kind: 'green', tone: 'ok', text: tr('All green') };
   const n = s?.needsYou.length ?? 0;
-  if (n > 0) return { kind: 'needs', tone: 'warn', text: n === 1 ? tr('1 needs you') : tr('{n} need you', { n }) };
+  if (n > 0) {
+    return {
+      kind: 'needs', tone: 'warn', text: n === 1 ? tr('1 needs you') : tr('{n} need you', { n }),
+      ...(s?.green ? { sub: tr('Everything else is green') } : {}),
+    };
+  }
+  if (s?.green) return { kind: 'green', tone: 'ok', text: tr('All green') };
   if (run.status === 'stopped') return { kind: 'stopped', tone: 'info', text: tr('Stopped before it finished') };
   return { kind: 'calm', tone: 'accent', text: tr('Nothing needs you') };
 }
@@ -299,12 +316,14 @@ export function logLines(run: Pick<AutofixRun, 'log'>): string[] {
 }
 
 /**
- * Run again, only while something a run could still change is left: not after an all-green run (only Needs you is left
- * then, by the server's definition of green), and not while one runs. A run that stopped or failed before the end left
- * the rest. Reintroduce `return true` for an ended run: "Run again after all green" in autofix.test.ts fails.
+ * Run again, only while something a run could still change is left: the server's `again` -- what this run did not get
+ * to -- never `!green`, which is also true of a cooldown or the sweep alone, where a second run changes nothing. A run
+ * that failed or was cut short before its summary left everything it did not reach. Never while one runs. Reintroduce
+ * `!run.summary.green`: "Run again for a cooldown alone" in autofix.test.ts fails.
  */
 export function canRunAgain(run: Pick<AutofixRun, 'status' | 'summary'> | null | undefined): boolean {
-  return !!run && run.status !== 'running' && !run.summary?.green;
+  if (!run || run.status === 'running') return false;
+  return run.summary ? run.summary.again === true : true;
 }
 
 // ---- Recent repairs ---------------------------------------------------------------------------------------------------
@@ -316,8 +335,8 @@ const STATUSES: readonly AutofixStatusWord[] = ['running', 'done', 'stopped', 'f
 
 /**
  * A Fix everything run as Recent repairs holds it (it is kept with the repair's runs, kind `autofix`): its status and,
- * when the record carries them, its summary and log. Null when the record has no summary -- the row then reads the run
- * by its id (GET /api/admin/health/autofix/:runId).
+ * when the record carries them, its summary and log -- the history sends both, so a row never asks for its run. Null when
+ * the record has no summary (a run that failed, or one cut short by a restart, before it said what was left).
  */
 export function autofixOfRecord(r: { kind: string; status: string; result?: any }): Pick<AutofixRun, 'status' | 'summary' | 'log'> | null {
   if (r.kind !== 'autofix') return null;
@@ -327,6 +346,7 @@ export function autofixOfRecord(r: { kind: string; status: string; result?: any 
     status: (STATUSES as readonly string[]).includes(r.status) ? r.status as AutofixStatusWord : 'done',
     summary: {
       green: !!sum.green,
+      again: sum.again === true,
       done: sum.done,
       clears: Array.isArray(sum.clears) ? sum.clears : [],
       needsYou: Array.isArray(sum.needsYou) ? sum.needsYou : [],
@@ -355,11 +375,12 @@ export function showFixEverything(checks: readonly Pick<HealthCheck, 'status'>[]
 export type NightlyMode = 'repair' | 'autofix';
 
 /**
- * The nightly's mode from GET /api/admin/settings: `nightlyMode` (the contract's name; read as `nightly_mode` too, the
- * column names the rest of that answer goes by). Anything else is the safe repair, the default.
+ * The nightly's mode from GET /api/admin/settings: `nightlyMode`, the contract's name and the one the server sends (in
+ * camelCase, unlike the snake_case columns beside it). ONE name, read one way: anything else is the safe repair, the
+ * default. Reintroduce a read of `nightly_mode` too: "the column's name is read" in autofix.test.ts fails.
  */
-export function nightlyModeOf(settings: { nightlyMode?: unknown; nightly_mode?: unknown } | null | undefined): NightlyMode {
-  return settings?.nightlyMode === 'autofix' || settings?.nightly_mode === 'autofix' ? 'autofix' : 'repair';
+export function nightlyModeOf(settings: { nightlyMode?: unknown } | null | undefined): NightlyMode {
+  return settings?.nightlyMode === 'autofix' ? 'autofix' : 'repair';
 }
 
 // ---- refusals --------------------------------------------------------------------------------------------------------
@@ -386,35 +407,4 @@ export function autofixBlocked(repair: Pick<RepairStatus, 'running' | 'sweepRunn
   if (repair?.running) return 'repair';
   if (find?.running) return 'find';
   return null;
-}
-
-// ---- Server tasks ----------------------------------------------------------------------------------------------------
-
-/**
- * The run as a Server tasks card (lib/jobs.ts RunCard), while it goes. The server keeps no card of its own for it (the
- * contract has none), so Library → Downloads builds one from GET /api/admin/health/autofix -- an admin's alone, as that
- * route is: "Fixing everything", step 4 of 10, its phase, and what it is on.
- */
-export function autofixRunCard(s: AutofixStatus | null | undefined, stopping = false): RunCard | null {
-  const r = s?.run;
-  if (!r || r.status !== 'running') return null;
-  const at = Date.parse(r.startedAt);
-  return {
-    kind: 'autofix',
-    startedAt: Number.isFinite(at) ? at : Date.now(),
-    status: 'running',
-    done: Math.max(0, r.phaseIndex ?? 0),
-    total: AUTOFIX_PHASES.length,
-    fetched: 0,
-    failed: 0,
-    ...(r.phase ? { step: r.phase } : {}),
-    ...(r.current?.title ? { current: { id: '', title: r.current.title } } : {}),
-    ...(stopping ? { cancelRequested: true } : {}),
-  };
-}
-
-/** The jobs answer with the autofix card among its runs -- unless the server already sent one of that kind. */
-export function withAutofixCard<D extends { runs?: RunCard[] }>(d: D | undefined, card: RunCard | null): D | undefined {
-  if (!d || !card || (d.runs ?? []).some((r) => r.kind === 'autofix')) return d;
-  return { ...d, runs: [...(d.runs ?? []), card] };
 }

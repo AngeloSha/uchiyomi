@@ -17,9 +17,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setActiveLocale } from '../lib/format';
 import {
-  AUTOFIX_PHASES, AUTOFIX_POLL_MS, DONE_SHOWN, autofixEndedIds, autofixHeadline, autofixOfRecord, autofixPollMs, autofixProgress,
-  autofixRunCard, autofixStepLine, canRunAgain, cardsToLook, clearsLines, doneLines, fixView, needsYouKey, needsYouLines,
-  nightlyModeOf, showFixEverything, withAutofixCard,
+  AUTOFIX_PHASES, AUTOFIX_POLL_MS, DONE_SHOWN, autofixEndedIds, autofixHeadline, autofixOfRecord, autofixPhaseLabel, autofixPollMs,
+  autofixProgress, autofixStepLine, canRunAgain, cardsToLook, clearsLines, doneLines, fixView, needsYouKey, needsYouLines,
+  nightlyModeOf, showFixEverything,
   type AutofixRun, type AutofixStatus, type AutofixSummary,
 } from '../lib/autofix';
 import { pageBody, pagePlan } from '../lib/repairRun';
@@ -50,7 +50,7 @@ const noop = () => {};
 const said = (text: string) => ({ code: 'text', params: { text } });
 const check = (id: string, status: HealthCheck['status'], items: HealthCheck['items'] = []): HealthCheck => ({ id, title: id, status, summary: '', items });
 
-const summary = (o: Partial<AutofixSummary> = {}): AutofixSummary => ({ green: false, done: [], clears: [], needsYou: [], ...o });
+const summary = (o: Partial<AutofixSummary> = {}): AutofixSummary => ({ green: false, again: false, done: [], clears: [], needsYou: [], ...o });
 const run = (o: Partial<AutofixRun> = {}): AutofixRun => ({
   id: 'af1', status: 'done', startedAt: '2026-10-03T10:00:00.000Z', finishedAt: '2026-10-03T10:40:00.000Z', by: 'admin', phase: null, phaseIndex: 10, ...o,
 });
@@ -189,6 +189,12 @@ test('the run is polled every 2 s while it goes, and the dialog opens on a live 
   const stopping = dialog(api({ status: { run: live, last: null }, stopping: 'af2' }));
   assert.match(stopping, /disabled="" class="btn-key btn-key-danger" data-fix-stop="true">Stopping…</);
   assert.ok(stopping.includes('It stops at the next safe point, never in the middle of a merge, a delete or a renumbering.'));
+  // Stop pressed by another admin, by the run card, or on this page before a reload: the server says `stopping`, and
+  // every viewer reads it (the integration's answer to W's question 5). Reintroduce this page's press alone: "another
+  // admin's Stop reads Stopping" fails.
+  const theirs = dialog(api({ status: { run: { ...live, stopping: true }, last: null } }));
+  assert.match(theirs, /disabled="" class="btn-key btn-key-danger" data-fix-stop="true">Stopping…</, 'another admin\'s Stop reads Stopping');
+  assert.match(dialog(api({ status: { run: live, last: null } })), /class="btn-key btn-key-danger" data-fix-stop="true">Stop</, 'a run nobody stopped reads Stopping');
 });
 
 test('a run seen to end is followed up once, Health asked again; its end shows until it is set aside', () => {
@@ -213,26 +219,51 @@ test('a run seen to end is followed up once, Health asked again; its end shows u
 
 /* ================================================================ the end */
 
-test('the headline is "All green" exactly when the server says so; otherwise who needs you, in pairs', () => {
-  // Reintroduce `s?.green || !s?.needsYou.length` as the green rule: "nothing left but a cooldown reads all green" fails.
+test('the headline: who needs you first, "Everything else is green" under it when so; "All green" only with nobody needed', () => {
+  // The integration's rule. `green` is "nothing but Needs you is left" -- true beside a Needs-you item (the solver down) --
+  // so the headline reads Needs you first. Reintroduce `if (s?.green)` before the Needs-you branch (the merge's headline):
+  // "the solver down reads All green" fails. Reintroduce `s?.green || !s?.needsYou.length` as the green rule: "nothing
+  // left but a cooldown reads all green" fails.
+  const needs = (n: number, o: Partial<AutofixSummary> = {}) =>
+    summary({ needsYou: Array.from({ length: n }, (_, i) => ({ check: `c${i}`, said: said(`x${i}`) })), ...o });
+  // The solver down, nothing else left: the server's green, and one item for a person.
+  const solverDown = run({ summary: summary({ green: true, needsYou: [{ check: 'solver', said: said('The Cloudflare solver is not answering') }] }) });
+  const head = autofixHeadline(solverDown);
+  assert.notEqual(head.text, 'All green', 'the solver down reads All green');
+  assert.equal(head.text, '1 needs you');
+  assert.equal(head.tone, 'warn');
+  assert.equal(head.sub, 'Everything else is green', 'what is not the solver is not said to be green');
+  assert.equal(autofixHeadline(run({ summary: needs(2, { green: true }) })).text, '2 need you');
+  // Something left that clears by itself as well: who needs you, and nothing said about the rest being green.
+  const mixed = autofixHeadline(run({ summary: needs(2, { clears: [{ said: said('Natomanga is cooling down') }] }) }));
+  assert.equal(mixed.text, '2 need you');
+  assert.equal(mixed.sub, undefined, 'a cooldown left reads as everything else green');
+  assert.equal(autofixHeadline(run({ summary: needs(1) })).text, '1 needs you', 'one item is not said in the singular');
+  // Nobody needed: All green exactly when the server says so, else "Nothing needs you" over what clears by itself.
   assert.equal(autofixHeadline(run({ summary: summary({ green: true }) })).text, 'All green');
   assert.equal(autofixHeadline(run({ summary: summary({ green: true }) })).tone, 'ok', 'all green is not the emerald mark');
-  const needs = (n: number) => summary({ needsYou: Array.from({ length: n }, (_, i) => ({ check: `c${i}`, said: said(`x${i}`) })) });
-  assert.equal(autofixHeadline(run({ summary: needs(2) })).text, '2 need you');
-  assert.equal(autofixHeadline(run({ summary: needs(1) })).text, '1 needs you', 'one item is not said in the singular');
-  assert.equal(autofixHeadline(run({ summary: needs(2) })).tone, 'warn', 'what needs you is not amber');
+  assert.equal(autofixHeadline(run({ summary: summary({ green: true }) })).sub, undefined);
   const calm = autofixHeadline(run({ summary: summary({ clears: [{ said: said('Natomanga is cooling down') }] }) }));
   assert.notEqual(calm.text, 'All green', 'nothing left but a cooldown reads all green');
   assert.equal(calm.text, 'Nothing needs you');
   assert.notEqual(calm.tone, 'warn', 'nothing for a person to do is amber');
   assert.equal(autofixHeadline(run({ status: 'stopped', summary: summary({ green: true }) })).text, 'All green', 'a stopped run that left all green says otherwise');
+  assert.equal(autofixHeadline(run({ status: 'stopped', summary: summary({ clears: [{ said: said('3 more to do') }] }) })).kind, 'stopped');
   assert.equal(autofixHeadline(run({ status: 'failed' })).kind, 'failed');
   assert.equal(autofixHeadline(run({ status: 'interrupted', summary: summary({ green: true }) })).kind, 'interrupted', 'a run cut short reads all green');
+  // Drawn: the headline in its tone, the line under it muted (the sketch the owner saw).
   const green = dialog(ended(run({ summary: summary({ green: true, done: EIGHT.slice(0, 2) }) })));
   assert.match(green, /text-emerald-300[^"]*" data-fix-headline="green">/, 'all green is not drawn emerald');
   assert.ok(green.includes('>All green</span>'));
+  assert.doesNotMatch(green, /data-fix-headline-sub/);
   const two = dialog(ended(run({ summary: needs(2) })));
   assert.match(two, /text-amber-300[^"]*" data-fix-headline="needs">/, 'what needs you is not drawn amber');
+  assert.doesNotMatch(two, /Everything else is green/);
+  const down = dialog(ended(solverDown));
+  assert.match(down, /data-fix-headline="needs">[\s\S]*?>1 needs you<\/span><\/p><p class="mt-1 text-\[12px\] text-fog-400" data-fix-headline-sub="true">Everything else is green<\/p>/,
+    'the solver down is not "1 needs you" over "Everything else is green"');
+  // Recent repairs and the key read the same headline.
+  assert.equal(autofixHeadline(autofixOfRecord({ kind: 'autofix', status: 'done', result: { summary: solverDown.summary } })!).text, '1 needs you');
 });
 
 test('the end shows at most six lines of what it did; the rest, and what each named, are under Details', () => {
@@ -294,17 +325,25 @@ test('each Needs-you item has its one key: its page, its card, or Admin → Sett
   assert.deepEqual(clearsLines(summary({ clears: [{ said: said('Natomanga is cooling down'), at }] })), [{ text: 'Natomanga is cooling down', when: 'in 3 hours' }]);
 });
 
-test('Run again only while something a run could still change is left', () => {
-  // Reintroduce `return run.status !== 'running'` in canRunAgain: "Run again after all green" fails.
+test('Run again only while something a run could still change is left: the server\'s `again`, never `!green`', () => {
+  // Reintroduce `!run.summary.green` (W's rule before the contract had `again`): "Run again for a cooldown alone" fails.
   assert.equal(canRunAgain(run({ summary: summary({ green: true }) })), false, 'Run again after all green');
-  assert.equal(canRunAgain(run({ summary: summary({ green: false }) })), true, 'no Run again with something left');
-  assert.equal(canRunAgain(run({ status: 'stopped', summary: summary({ green: false }) })), true);
-  assert.equal(canRunAgain(run({ status: 'failed' })), true);
+  assert.equal(canRunAgain(run({ summary: summary({ green: false, again: false, clears: [{ said: said('Natomanga is cooling down') }] }) })), false,
+    'Run again for a cooldown alone');
+  assert.equal(canRunAgain(run({ summary: summary({ green: false, again: true }) })), true, 'no Run again with the next run\'s work left');
+  assert.equal(canRunAgain(run({ summary: summary({ green: true, again: false, needsYou: [{ check: 'solver', said: said('x') }] }) })), false,
+    'Run again for Needs you alone');
+  assert.equal(canRunAgain(run({ status: 'stopped', summary: summary({ again: true }) })), true);
+  assert.equal(canRunAgain(run({ status: 'failed' })), true, 'a run that ended before its summary left everything');
   assert.equal(canRunAgain(run({ status: 'running', finishedAt: undefined })), false);
   assert.equal(canRunAgain(null), false);
   assert.doesNotMatch(dialog(ended(run({ summary: summary({ green: true }) }))), /data-fix-again/, 'all green offers Run again');
-  assert.match(dialog(ended(run({ summary: summary({ needsYou: [{ check: 'solver', said: said('x') }], clears: [{ said: said('y') }] }) }))),
+  assert.doesNotMatch(dialog(ended(run({ summary: summary({ needsYou: [{ check: 'solver', said: said('x') }], clears: [{ said: said('y') }] }) }))),
+    /data-fix-again/, 'a cooldown and Needs you offer Run again');
+  assert.match(dialog(ended(run({ summary: summary({ again: true, needsYou: [{ check: 'solver', said: said('x') }], clears: [{ said: said('y') }] }) }))),
     /data-fix-again="true">Run again<\/button><button type="button" class="btn-key" data-fix-close="true">Close<\/button>/);
+  // The history's record carries it too.
+  assert.equal(autofixOfRecord({ kind: 'autofix', status: 'done', result: { summary: { green: false, again: true, done: [] } } })!.summary!.again, true);
 });
 
 /* ================================================================ the nightly */
@@ -322,9 +361,11 @@ test('the nightly choice: Safe repair or Fix everything, saved as it is picked',
   assert.match(html, /aria-checked="true"[^>]*>(?:<span[^>]*><\/span>)?<span class="relative text-accent">Fix everything</, 'the stored choice is not the checked one');
   assert.ok(html.includes('Safe repair: retries, short chapters, gaps and the solver; nothing is deleted or merged.'));
   assert.match(renderToStaticMarkup(createElement(NightlyModeRow, { mode: 'repair', off: true, onPick: async () => {} })), /disabled=""/, 'the choice is live while the nightly is off');
-  // The answer's name is the contract's `nightlyMode`; the column name works too, and anything else is the safe repair.
+  // The answer's name is the contract's `nightlyMode`, the one the server sends, and the only one read (the
+  // integration's answer to W's question 3); anything else is the safe repair. Reintroduce a read of `nightly_mode`:
+  // "the column's name is read" fails.
   assert.equal(nightlyModeOf({ nightlyMode: 'autofix' }), 'autofix');
-  assert.equal(nightlyModeOf({ nightly_mode: 'autofix' }), 'autofix');
+  assert.equal(nightlyModeOf({ nightly_mode: 'autofix' } as { nightlyMode?: unknown }), 'repair', 'the column\'s name is read');
   assert.equal(nightlyModeOf({ nightlyMode: 'bogus' }), 'repair');
   assert.equal(nightlyModeOf(undefined), 'repair');
   // The switch above no longer says "nothing is deleted or merged" over a nightly Fix everything.
@@ -354,30 +395,30 @@ test('Free a slot opens Admin → Sources on the frozen series\' source, as a wh
 
 /* ================================================================ Server tasks and Recent repairs */
 
-test('Server tasks shows the run as "Fixing everything" with its phase, and stops it through its own route', () => {
-  // Reintroduce the jobs answer as it came (no withAutofixCard): "the run is not on Server tasks" fails.
-  const live = run({ status: 'running', phase: 'chapters', phaseIndex: 6, current: { title: 'Nano Machine' }, finishedAt: undefined });
-  const card = autofixRunCard({ run: live, last: null })!;
-  assert.ok(card, 'the run is not on Server tasks');
-  assert.equal(card.kind, 'autofix');
+test('Server tasks shows the server\'s own card as "Fixing everything" with its phase, and stops it through its own route', () => {
+  // The integration's answer to W's question 1: the server lists the run among its own (GET /api/sources/jobs `runs`,
+  // kind `autofix`, an admin's), with `cancelRequested` once anybody asks it to stop -- so every admin's Server tasks
+  // reads the same card. The web no longer builds one from the autofix status (a second poll of an admin route on every
+  // Downloads view). Reintroduce that card: "Server tasks builds a card of its own" fails.
+  const card = {
+    kind: 'autofix' as const, startedAt: 1, status: 'running' as const, done: 6, total: 10, fetched: 0, failed: 0,
+    step: 'chapters', current: { id: 's1', title: 'Nano Machine' },
+  };
   assert.equal(runName(card), 'Fixing everything');
   assert.equal(runTitle('autofix'), 'Fixing everything');
   assert.equal(runProgress(card), 'step 7 of 10');
-  assert.deepEqual(card.current, { id: '', title: 'Nano Machine' });
-  assert.equal(autofixRunCard({ run: null, last: run() }), null, 'a finished run stays on Server tasks with no way to dismiss it');
-  assert.equal(autofixRunCard({ run: live, last: null }, true)!.cancelRequested, true);
-  const jobs = { content: [], runs: [] };
-  assert.equal(withAutofixCard(jobs, card)!.runs!.length, 1);
-  assert.equal(withAutofixCard({ content: [], runs: [{ ...card, startedAt: 1 }] }, card)!.runs!.length, 1, 'a server that sends its own card shows it twice');
-  assert.equal(withAutofixCard(undefined, card), undefined);
+  assert.equal(autofixPhaseLabel(card.step), 'Fetching missing and broken chapters', 'the card\'s step is not the phase in words');
   // The Library ring does not turn for it: what it downloads turns it through the repair's card and the chapters.
   assert.equal(navRing({ content: [], runs: [card] }).show, false, 'the Library ring turns for Fix everything');
   const view = code('components/ServerDownloadsView.tsx');
-  assert.match(view, /const data = withAutofixCard\(raw as SourceJobs<Job> \| undefined, autofixRunCard\(autofix\.data, !!fixRun && stoppingFix === fixRun\.id\)\);/,
-    'the run is not on Server tasks');
-  assert.match(view, /const autofix = useAutofixStatus\(isAdmin\);/, 'a member asks the admin-only route');
+  assert.doesNotMatch(view, /useAutofixStatus|withAutofixCard|autofixRunCard/, 'Server tasks builds a card of its own');
+  assert.match(view, /const data = raw as SourceJobs<Job> \| undefined;/);
+  // Stop on the card is Fix everything's own route (a safe point), never the sweep's Cancel; the card says Stopping…
+  // from the server's `cancelRequested`, whoever pressed.
   assert.match(view, /if \(kind !== 'autofix'\) return call\(/, 'Stop on the card is the sweep\'s Cancel');
   assert.match(view, /try \{ await stopAutofix\(\); \}/);
+  assert.match(view, /const stops = find \|\| r\.kind === 'autofix';/);
+  assert.match(view, /\{running && r\.cancelRequested && <p className="[^"]*">\{stops \? tr\('Stopping…'\) : tr\('Stopping after this chapter…'\)\}<\/p>\}/);
   assert.match(code('lib/useAutofixRun.tsx'), /export const stopAutofix = \(\) => api\(`\$\{AUTOFIX_URL\}\/stop`, \{ method: 'POST' \}\);/);
 });
 
@@ -390,9 +431,14 @@ test('Recent repairs lists a Fix everything run with its headline and its first 
   assert.equal(autofixHeadline(inline).text, '1 needs you');
   assert.deepEqual(doneLines(inline.summary).shown.slice(0, 2).map((d) => d.text), ['Moved 184 series off Aqua Manga', 'Fetched 37 missing chapters']);
   assert.equal(autofixOfRecord({ kind: 'full', status: 'done', result: { counted: 3 } }), null);
-  assert.equal(autofixOfRecord({ kind: 'autofix', status: 'done', result: null }), null, 'a record without its summary is not read by its id');
+  assert.equal(autofixOfRecord({ kind: 'autofix', status: 'done', result: null }), null);
   const live = code('components/RepairLive.tsx');
   assert.match(live, /\{fix \? <AutofixLines r=\{r\} \/> : <p className="[^"]*">\{recordLine\(r\)\}<\/p>\}/, 'a Fix everything run reads as a repair');
   assert.match(live, /const first = doneLines\(run\.summary\)\.shown\.slice\(0, HISTORY_DONE\);/);
-  assert.match(live, /queryFn: \(\) => api<AutofixRun>\(`\$\{AUTOFIX_URL\}\/\$\{encodeURIComponent\(r\.id\)\}`\),/, 'a run whose record holds no summary is not read by its id');
+  // The integration's answer to W's question 2: the history sends each run's summary, so no row asks for its run (twenty
+  // rows were twenty requests). Reintroduce the read by id: "Recent repairs asks for nothing per row" fails.
+  const lines = slice(live, 'function AutofixLines(', 'function HistoryRow(');
+  assert.doesNotMatch(lines, /useQuery|AUTOFIX_URL|api</, 'Recent repairs asks for nothing per row');
+  assert.match(lines, /if \(!run\) return r\.status === 'running' \? null : <p className="[^"]*">\{runStatusWord\(r\.status\)\}<\/p>;/,
+    'a run that ended before its summary says nothing');
 });

@@ -31,8 +31,8 @@ export interface JobCard {
 
 /**
  * `find_sources` (v0.49.1): a "Find other sources" run, admins only. It follows sources and downloads nothing.
- * `autofix` (v0.55.0): Health's Fix everything, admins only -- built by the Downloads view from GET
- * /api/admin/health/autofix (lib/autofix.ts autofixRunCard), since the server keeps no card of its own for it.
+ * `autofix` (v0.55.0): Health's Fix everything, admins only: `done`/`total` its ten phases, `step` the phase it is in,
+ * `current` the series it is on (bff lib/autofix.ts). It stops through POST /api/admin/health/autofix/stop.
  */
 export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources' | 'autofix';
 

@@ -14,19 +14,16 @@
 // (a still dashed arc); the clock and the step text still say it is moving.
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
 import { ActionList, type ActionSpec } from '@/components/ActionList';
 import { StatusGlyph, StatusMark } from '@/components/StatusMark';
 import { IcChevronRight } from '@/components/icons';
-import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { durationText, formatClock, relativeTime } from '@/lib/format';
 import { repairStepLabel } from '@/lib/jobs';
 import { currentText, kindLabel, nextRunLine, phaseLine, recordLine, runStatusWord, skipLine, whoLine } from '@/lib/healthCopy';
 import { useRepairRun, useRepairStatus } from '@/lib/useRepairRun';
 import { useTicker } from '@/lib/ticker';
-import { HISTORY_DONE, autofixHeadline, autofixOfRecord, doneLines, type AutofixRun } from '@/lib/autofix';
-import { AUTOFIX_URL } from '@/lib/useAutofixRun';
+import { HISTORY_DONE, autofixHeadline, autofixOfRecord, doneLines } from '@/lib/autofix';
 import type { RepairLiveRun, RepairRunRecord, RunStatus, RunTarget } from '@/lib/repairRun';
 import { TONE_TEXT, type Tone } from '@/lib/status';
 
@@ -85,20 +82,14 @@ const STATUS_TONE: Record<RunStatus, Tone> = {
 
 /**
  * v0.55.0: a Fix everything run among the kept runs -- its headline ("All green", "2 need you") and the first two lines
- * of what it did, where a repair's row has its result line. The run's own record carries them when the history sends it
- * (lib/autofix.ts autofixOfRecord); otherwise it is read by its id (GET /api/admin/health/autofix/:runId).
+ * of what it did, where a repair's row has its result line. The history sends the run's record with its summary
+ * (lib/autofix.ts autofixOfRecord), so no row asks for its run: twenty rows were twenty requests. A run that ended
+ * before it said what was left (it failed, or a restart cut it short) has its status line alone. Reintroduce the read by
+ * id: "Recent repairs asks for nothing per row" in autofix.test.ts fails.
  */
 function AutofixLines({ r }: { r: RepairRunRecord }) {
-  const inline = autofixOfRecord(r);
-  const { data } = useQuery({
-    queryKey: ['autofix-run', r.id],
-    queryFn: () => api<AutofixRun>(`${AUTOFIX_URL}/${encodeURIComponent(r.id)}`),
-    enabled: !inline && r.status !== 'running',
-    staleTime: Infinity,
-    retry: false,
-  });
-  const run = inline ?? data;
-  if (!run) return null;
+  const run = autofixOfRecord(r);
+  if (!run) return r.status === 'running' ? null : <p className="mt-0.5 text-[11px] text-fog-400">{runStatusWord(r.status)}</p>;
   const head = autofixHeadline(run);
   const first = doneLines(run.summary).shown.slice(0, HISTORY_DONE);
   return (

@@ -192,7 +192,9 @@ function AskView({ af, checks, onClose }: { af: AutofixApi | null; checks: Healt
 /** After Start: the phase, a bar over the ten phases, and what it is on -- with Stop and Run in background. */
 function RunView({ af, run, onClose }: { af: AutofixApi | null; run: AutofixRun | null; onClose: () => void }) {
   const plain = useReduceEffects();
-  const stopping = !!run && af?.stopping === run.id;
+  // Stop pressed here, or anywhere: the server says so to every viewer (`stopping`) until the run reaches its safe point.
+  // Reintroduce this page's press alone: "another admin's Stop reads Stopping" in autofix.test.ts fails.
+  const stopping = !!run && (run.stopping === true || af?.stopping === run.id);
   const progress = autofixProgress(run);
   const count = run ? autofixCount(run) : '';
   const wait = run ? autofixWait(run) : '';
@@ -316,6 +318,9 @@ function EndView({ af, run, onClose, onShowCheck }: {
           <StatusGlyph tone={head.tone} size={18} />
           <span className="min-w-0">{head.text}</span>
         </p>
+        {/* "Everything else is green" under "1 needs you" -- the solver down, and nothing else left -- muted, as in the
+            sketch the owner saw: the headline is the amber line. */}
+        {head.sub && <p className="mt-1 text-[12px] text-fog-400" data-fix-headline-sub>{head.sub}</p>}
         {run.status === 'stopped' && head.kind !== 'stopped' && (
           <p className="mt-1 text-[12px] text-fog-400">{tr('Stopped before it finished')}</p>
         )}

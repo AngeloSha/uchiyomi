@@ -27,8 +27,8 @@ import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { archiveProgressText } from '@/lib/archive';
 import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
 import { FindResultsSheet } from '@/components/FindSources';
-import { autofixPhaseLabel, autofixRunCard, withAutofixCard } from '@/lib/autofix';
-import { AUTOFIX_KEY, stopAutofix, useAutofixStatus } from '@/lib/useAutofixRun';
+import { autofixPhaseLabel } from '@/lib/autofix';
+import { AUTOFIX_KEY, stopAutofix } from '@/lib/useAutofixRun';
 
 // lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
 // notes pin (partialSurfaces.test.ts) reads.
@@ -73,12 +73,9 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   const qc = useQueryClient();
   const toast = useToast();
   const { data: raw, isLoading, isError, refetch } = useServerDownloads({ fresh: true });
-  // v0.55.0: Health's Fix everything, an admin's, under Server tasks while it runs. The server keeps no run card for it,
-  // so its card is built from the run's own status (lib/autofix.ts) -- unless a server that does sends one.
-  const autofix = useAutofixStatus(isAdmin);
-  const [stoppingFix, setStoppingFix] = useState<string | null>(null);
-  const fixRun = autofix.data?.run?.status === 'running' ? autofix.data.run : null;
-  const data = withAutofixCard(raw as SourceJobs<Job> | undefined, autofixRunCard(autofix.data, !!fixRun && stoppingFix === fixRun.id));
+  // v0.55.0: Health's Fix everything is among the server's own runs (`runs`, kind `autofix`, an admin's), with its phase
+  // and, once Stop is asked anywhere, `cancelRequested` -- every admin's Server tasks reads the same card.
+  const data = raw as SourceJobs<Job> | undefined;
   const jobs = data?.content ?? [];
   const s = downloadSections(data, { admin: isAdmin });
   const [allCameIn, setAllCameIn] = useState(false);
@@ -102,9 +99,10 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   // at its next safe point -- never inside a merge, a delete or a renumbering.
   const cancelRun = (kind: string) => {
     if (kind !== 'autofix') return call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
-    setStoppingFix(fixRun?.id ?? null);
     return (async () => {
-      try { await stopAutofix(); } catch (e) { setStoppingFix(null); toast(msgOf(e, tr('Could not stop Fix everything')), 'error'); }
+      try { await stopAutofix(); } catch (e) { toast(msgOf(e, tr('Could not stop Fix everything')), 'error'); }
+      // The card says "Stopping…" from the server's answer; Health's dialog, if it is open elsewhere, too.
+      void kickDownloads(qc);
       void qc.invalidateQueries({ queryKey: AUTOFIX_KEY });
     })();
   };

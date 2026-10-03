@@ -39,20 +39,6 @@ export const busyOf = (e: unknown): string | null => {
   } catch { return null; }
 };
 
-/**
- * The status on its own, for a page without the provider (Library → Downloads' Server tasks, an admin's): every 2 s
- * while a run goes, every `idleMs` otherwise so a run started elsewhere is noticed.
- */
-export function useAutofixStatus(enabled: boolean, idleMs: number | false = 30_000) {
-  return useQuery({
-    queryKey: AUTOFIX_KEY,
-    queryFn: fetchAutofix,
-    enabled,
-    retry: false,
-    refetchInterval: (q) => autofixPollMs(q.state.data, false, idleMs),
-  });
-}
-
 /** Ask the running run to stop at its next safe point. */
 export const stopAutofix = () => api(`${AUTOFIX_URL}/stop`, { method: 'POST' });
 

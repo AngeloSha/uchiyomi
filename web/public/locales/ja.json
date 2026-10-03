@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3153
+    "strings": 3154
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2878,6 +2878,7 @@
   "It stops at the next safe point, never in the middle of a merge, a delete or a renumbering.": "次の安全な地点で停止します。統合・削除・番号の振り直しの途中で止まることはありません。",
   "All green": "すべて正常",
   "1 needs you": "対応が必要：1 件",
+  "Everything else is green": "それ以外はすべて正常",
   "{n} need you": "対応が必要：{n} 件",
   "Nothing needs you": "対応が必要なものはありません",
   "Needs you": "対応が必要",

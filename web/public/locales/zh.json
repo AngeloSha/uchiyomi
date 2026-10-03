@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3153
+    "strings": 3154
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2878,6 +2878,7 @@
   "It stops at the next safe point, never in the middle of a merge, a delete or a renumbering.": "它会在下一个安全点停止，绝不会在合并、删除或重新编号的中途停下。",
   "All green": "全部正常",
   "1 needs you": "1 项需要你处理",
+  "Everything else is green": "其余全部正常",
   "{n} need you": "{n} 项需要你处理",
   "Nothing needs you": "没有需要你处理的事项",
   "Needs you": "需要你处理",
