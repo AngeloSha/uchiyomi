@@ -10,6 +10,17 @@ export const ART_DIR = join(env.CONFIG_DIR, 'series-art');
 const safeId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
 export const artFile = (id: string, kind: 'cover' | 'banner') => join(ART_DIR, `${safeId(id)}-${kind}.webp`);
 
+/**
+ * The largest picture an upload takes, and the request body that carries one (v0.53.0).
+ *
+ * Edit details says the limit in words ("Images up to 11 MB", web components/SeriesEditor.tsx ART_MAX_MB) and turns a
+ * larger file away itself. The picture travels as a base64 data URL inside JSON -- four bytes for every three -- so
+ * the art route's body limit is the encoded size plus room for the rest of the body. It was a flat 12 MB, which
+ * answered 413 to every picture between 9 and 11 MB that the dialog had just said it would take.
+ */
+export const ART_MAX_BYTES = 11 * 1024 * 1024;
+export const ART_BODY_LIMIT = Math.ceil(ART_MAX_BYTES / 3) * 4 + 64 * 1024;
+
 export interface ArtOverviewRow {
   id: string;
   title: string;
