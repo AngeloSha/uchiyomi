@@ -22,6 +22,8 @@ export interface SeriesMeta {
   adultExempt: boolean;
   /** One of Komga's four, or '' for automatic. */
   readingDirection: string;
+  /** What kind of comic it is (bff lib/seriesType.ts), or '' for automatic: what the notice-chapter switches go by. */
+  seriesType: string;
 }
 
 /**
@@ -50,6 +52,8 @@ export function seedMeta(series: Series): SeriesMeta {
     genres: o?.genres ?? m?.genres ?? [],
     adultExempt: o?.adultExempt === true,
     readingDirection: o?.readingDirection ?? '',
+    // The override only, for the reason the direction is: the detected type must stay free to improve.
+    seriesType: o?.seriesType ?? '',
   };
 }
 
@@ -65,6 +69,7 @@ export function metaBody(m: SeriesMeta) {
     adultExempt: m.adultExempt,
     // '' is automatic and goes up as null, which the route reads as "clear the override".
     readingDirection: m.readingDirection || null,
+    seriesType: m.seriesType || null,
   };
 }
 
