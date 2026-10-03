@@ -788,6 +788,40 @@ and the genres and sources an admin named, appear in `/api/v1/libraries` and the
 pages and progress resolve by id whatever it says, and the age cap is a permission and is unaffected. The
 flag changes nothing on `/api/*` proper, where `?adult=1` remains the reveal.
 
+## Notice chapters
+
+Many sources post announcements for readers as a chapter numbered after the latest with a fraction: 100.1,
+100.5. An admin can hide them per series type. `PATCH /api/admin/settings {hideNoticeTypes: [...]}` takes any of
+`manga`, `manhwa`, `manhua`, `webtoon`, `comic` and `unknown`, replaced whole. It is read back as
+`hide_notice_types`, and an empty list (the default) is off. A single series overrides its type's switch with
+`PATCH /api/admin/series/:id {hideNotices: true | false | null}`, where `null` follows the type. The answer
+carries `hideNotices`, `hideNoticesEffective` and `hiddenNotices`: how many notice chapters that hides now, downloaded
+or only listed.
+
+A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` when nothing is known), with
+`detectedType {type, from}` naming the evidence. Most trusted first, the evidence is:
+
+1. `genre`: a genre naming the origin.
+2. `source`: MangaDex's original language.
+3. `anilist`: the country of origin.
+4. `webtoon`: a Webtoon genre with nothing better.
+
+`PUT /api/admin/series/:id/meta {seriesType}` overrides the type, and `null` goes back to automatic.
+
+For a series that hides them, every chapter whose effective number (the admin's renumber when there is one) is
+not a whole number is left out of everything:
+
+- **Chapter reads:** the chapter list, `GET /api/books/:id` (404), next and previous, pages, the offline manifest,
+  Continue Reading, Updates, history and bookmarks.
+- **Counts:** `booksCount` and the unread, read and new counts.
+- **Listings:** the series page's missing-chapter rows, groups and versions.
+- **External surfaces:** OPDS, the Komga-compatible API and the tracker push.
+- **Downloads:** the updater, the slow archive and `source_missing`. Neither the updater nor the slow archive
+  downloads one.
+
+Nothing is deleted, and the listing keeps every number. Turning a switch off applies on the next request, and
+the next check downloads what it no longer hides.
+
 ## Rate limiting
 
 The API isn't rate-limited for authenticated users; the limits are on getting in. `POST /auth/login` takes
@@ -1338,6 +1372,7 @@ backup — the pending timer is re-armed at once, so the change applies to the n
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
 `scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
+`hideNoticeTypes` (notice chapters, below),
 `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Since v0.52.0 it also takes `mangadexLangs` and `unstatedLang`: `mangadexLangs` is the MangaDex
@@ -1492,7 +1527,7 @@ compared case-insensitively with spaces and punctuation ignored. The server-wide
 `scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
 {scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
 `null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
-`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?, lang?, chapterFloor?}` — at least one, no other
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?, lang?, chapterFloor?, hideNotices?}` — at least one, no other
 fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
 **blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
 `null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the
@@ -2333,6 +2368,13 @@ first real sync (n ≥ 1) marks a number-0 chapter read on both sides, as Komga 
 ignored. No
 reading event is written, so a sync from the phone does not count towards streaks, the leaderboard or
 Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
+
+**Notice chapters** (opt-in, *Settings → Notice chapters*, `hideNoticeTypes`, off by default). Many sources post
+announcements as a chapter numbered after the latest with a fraction (100.1, 100.5). For a series that hides them,
+every chapter whose effective number is not whole is absent from this API: not in `/api/v1/series/:id/books`, a
+404 by id, not counted in `booksCount` or the read counts, and not a ghost. `readProgressV2`'s run skips them,
+so an unread 100.5 does not stop `lastReadContinuousNumberSort` at 100. Switching it off lists them again on the
+next request. See *Notice chapters* below.
 
 **Ghost chapters** (opt-in, *Settings → Show missing chapters in Mihon*, `komgaGhostChapters`, off by
 default). Mihon takes a series' chapter total from the list this API answers, so a library running the
