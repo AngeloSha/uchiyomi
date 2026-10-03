@@ -29,7 +29,7 @@ import { env } from '../env';
 import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
-import { openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
+import { currentFailures, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
@@ -40,6 +40,7 @@ import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundari
 import { renumberRunning, type NumberingNote } from './numbering';
 import { detailOf, joined, noteOf, own, say, saidOf, summaryOf, type Part, type Said } from './said';
 import { mainSourceCounts } from './findScope';
+import { carries, EXTENSION_OFF, EXTENSION_OFF_BY, standingOf, standingRows, type Standing, type StandingRow } from './sourceStanding';
 import { numKey } from './postingOrder';
 import type { ListingCopy } from './seriesListing';
 
@@ -68,6 +69,11 @@ export type HealthAction =
   // v0.49.1: Find other sources for every series whose MAIN source is the row's `sourceId` (POST
   // /api/admin/sources/find {sourceId}); `findSeries` is how many series that run would search for.
   | 'find_sources'
+  // v0.54.0: Replace the row's `sourceId` as the main source of its series -- the Find run in replace mode (POST
+  // /api/admin/sources/find {sourceId, mode: 'replace'}): each series' best working follower becomes its main source,
+  // and the series with none are searched for first. Offered where the source is off or failing and is some series'
+  // main source, before `find_sources`, over the same `findSeries`.
+  | 'replace_source'
   // v0.52.0 (#72): the duplicates check's pair in two languages -- link them as editions of one work (POST
   // /api/admin/series/{id}/editions {with}) rather than merge one into the other.
   | 'link_editions';
@@ -807,9 +813,26 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
  * Their chapters read fine, their health row (if any) says `ok` because nothing ever failed -- nothing was
  * ever asked -- and the fill scan never even pins them. Live: one series, 31 chapters, frozen since its
  * extension was uninstalled twelve days earlier, and no surface anywhere said so.
+ *
+ * v0.54.0: and series whose main source is loaded but cannot update them either -- switched off, or failing at a step
+ * an update needs (lib/sourceStanding.ts) -- with no follower that can. aqua went offline, was switched off, and stayed
+ * the main source of 195 series while this card read "Every series has a working source": only a source that was not
+ * loaded counted. A main that is only cooling down is not listed: that ends by itself.
  */
 export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState()): Promise<HealthCheck> {
   let readFailed = false;
+  const now = Date.now();
+  // The loaded main sources that cannot update a series now, and how: `off` or `failing`.
+  const mains = await q<{ source_id: string }>(
+    `SELECT DISTINCT ls.source_id FROM lib_series ls WHERE ls.auto_update AND ls.source_id IS NOT NULL AND ${visibleToAll('ls')}`,
+  ).catch(() => { readFailed = true; return [] as { source_id: string }[]; });
+  const loadedMains = mains.map((r) => r.source_id).filter((id) => getSource(id));
+  const mainRows = await standingRows(loadedMains).catch(() => { readFailed = true; return new Map<string, StandingRow>(); });
+  const down = new Map<string, Standing>();
+  for (const id of loadedMains) {
+    const st = standingOf(id, mainRows.get(id), now);
+    if (st === 'off' || st === 'failing') down.set(id, st);
+  }
   const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
     // finding from one that is gone: the fix is a button, not a reinstall.
@@ -822,44 +845,66 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
              OR ls.source_id LIKE 'sw:%')
       ORDER BY ls.books_count DESC`,
   ).catch(() => { readFailed = true; return [] as any[]; });
-  // The SQL over-selects on purpose (it cannot know which adapters are loaded); the loaded registry decides.
-  const unrouted = rows.filter((r) => !r.source_id || !getSource(r.source_id));
-  // A series whose primary is gone but which follows another source that IS loaded still updates: the
-  // updater merges the followers' lists, so a dead primary costs it nothing but that one listing. Reported
-  // as reference, not as a fault -- the fix (re-point the primary, or leave it) is a tidy-up, not a repair.
-  // Reintroduce by dropping this read (every row of `unrouted` frozen): "a dead primary with a live follower
-  // is not frozen" in health.int.test.ts fails -- the fixture is listed as a warning.
+  // The SQL over-selects on purpose (it cannot know which adapters are loaded); the loaded registry decides. It selects
+  // every series a loaded source that is off or failing could be the main source of, too: those are told apart here.
+  const unrouted = (r: typeof rows[number]) => !r.source_id || !getSource(r.source_id);
+  // v0.54.0: the main is loaded, and off or failing. Reintroduce by keeping the unrouted rows alone (dropping
+  // `|| stalled(r)`): "a series whose loaded main is off or failing" in health.int.test.ts finds the series on the
+  // switched-off main absent.
+  const stalled = (r: typeof rows[number]): Standing | undefined => (r.source_id && !unrouted(r) ? down.get(r.source_id) : undefined);
+  const affected = rows.filter((r) => unrouted(r) || stalled(r));
+  // A series whose primary cannot update it but which follows another source that CAN still updates: the updater
+  // merges the followers' lists, so a dead primary costs it nothing but that one listing. Reported as reference, not as
+  // a fault -- and since v0.54.0 with Replace, which makes that follower the main source. A follower counts only while
+  // it carries the series itself (usable, or cooling down): one switched off, failing or not loaded updates nothing.
+  // Reintroduce by dropping this read (every row frozen): "a dead primary with a live follower is not frozen" in
+  // health.int.test.ts fails -- the fixture is listed as a warning. Reintroduce "any loaded follower counts": "a
+  // series whose loaded main is off or failing" reads the series whose follower is switched off as covered.
   const followed = new Map<string, string[]>();
-  if (unrouted.length) {
+  if (affected.length) {
     const extra = await q<{ series_id: string; source_id: string }>(
       'SELECT series_id, source_id FROM series_sources WHERE series_id = ANY($1::text[]) ORDER BY created_at',
-      [unrouted.map((r) => r.id)],
+      [affected.map((r) => r.id)],
     ).catch(() => [] as { series_id: string; source_id: string }[]);
+    const fols = await standingRows(extra.map((e) => e.source_id)).catch(() => new Map<string, StandingRow>());
     for (const e of extra) {
       const src = getSource(e.source_id);
-      if (!src) continue;
+      if (!src || !carries(standingOf(e.source_id, fols.get(e.source_id), now))) continue;
       followed.set(e.series_id, [...(followed.get(e.series_id) ?? []), src.name]);
     }
   }
-  const frozen = unrouted.filter((r) => !followed.has(r.id));
-  const covered = unrouted.filter((r) => followed.has(r.id));
+  const frozen = affected.filter((r) => !followed.has(r.id));
+  const covered = affected.filter((r) => followed.has(r.id));
   // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
   // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see. A MangaDex language comes first
   // (v0.52.0): its adapter is unregistered only by switching the language off, so "no longer installed" was wrong
   // and sent the admin looking for an extension; the reason names the language and where it is switched back on.
+  // A loaded main that is switched off says so as one that is unloaded does; one that is failing says whether it is
+  // the site's own offline notice (v0.54.0).
   const why = (r: typeof rows[number], p: { n: number; source: string }): Part => {
+    const stall = stalled(r);
+    if (stall === 'off') return say('frozen.switchedOff', p);
+    if (stall === 'failing') {
+      const offline = currentFailures(mainRows.get(r.source_id!)?.stages, now).some((f) => f.kind === 'site_offline');
+      return say('frozen.failing', { ...p, offline });
+    }
     const mdOff = mangadexLangOf(r.source_id);
     if (mdOff) return say('frozen.mangadexOff', { n: p.n, lang: mdOff });
     return r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
   };
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
-  // engine: its own row (engineHealth.ts) and Admin → Extensions say how to bring it back.
-  const engineWhy = (r: typeof rows[number]): boolean => !!r.source_id?.startsWith('sw:') && engine !== 'up';
-  // v0.49.1: when the reason is the source itself (uninstalled, switched off, over the limit) -- not the engine, whose
-  // fix is the engine -- the row offers Find other sources for every series of that source, with the count.
-  const bySource = await mainSourceCounts(frozen.filter((r) => r.source_id && !engineWhy(r)).map((r) => r.source_id!))
+  // engine: its own row (engineHealth.ts) and Admin → Sources say how to bring it back.
+  const engineWhy = (r: typeof rows[number]): boolean => !!r.source_id?.startsWith('sw:') && engine !== 'up' && unrouted(r);
+  // v0.49.1: when the reason is the source itself (uninstalled, switched off, over the limit, and since v0.54.0
+  // failing) -- not the engine, whose fix is the engine -- the row offers Replace and Find other sources for every
+  // series of that source, with the count. A covered row offers Replace: its follower can be made the main source.
+  const bySource = await mainSourceCounts(affected.filter((r) => r.source_id && !engineWhy(r)).map((r) => r.source_id!))
     .catch(() => new Map<string, number>());
+  const sourceKeys = (r: typeof rows[number], actions: HealthAction[]) =>
+    (r.source_id && !engineWhy(r) && bySource.get(r.source_id)
+      ? { sourceId: r.source_id, actions, findSeries: bySource.get(r.source_id) }
+      : {});
   const found: HealthItem[] = frozen.map((r) => {
     const p = { n: r.books_count, source: r.source_id ?? '' };
     return {
@@ -871,20 +916,22 @@ export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineS
         : engineWhy(r)
           ? say(engine === 'unreachable' ? 'frozen.engineDown' : 'frozen.engineOff', p)
           : why(r, p)]),
-      ...(r.source_id && !engineWhy(r) && bySource.get(r.source_id)
-        ? { sourceId: r.source_id, actions: ['find_sources' as const], findSeries: bySource.get(r.source_id) }
-        : {}),
+      ...sourceKeys(r, ['replace_source', 'find_sources']),
     };
   });
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
   const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
   for (const r of covered.slice(0, 20)) {
+    const stall = stalled(r);
     items.push({
       seriesId: r.id,
       title: r.title,
-      ...detailOf([say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
+      ...detailOf([stall
+        ? say('frozen.followingDown', { source: r.source_id!, state: stall, names: followed.get(r.id)! })
+        : say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
       info: true,
+      ...sourceKeys(r, ['replace_source']),
     });
   }
   return {
@@ -935,14 +982,11 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
             -- Two ways a source is off on purpose: the Providers button (source_health.disabled) and a hidden
             -- language (suwayomi_sources.enabled = false, which also unregisters it, so nothing ever probes
             -- it again and a stale 'down' row would otherwise keep this check amber for good).
-            (sh.disabled OR EXISTS (SELECT 1 FROM suwayomi_sources ss
-                                      WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)) AS disabled,
+            (sh.disabled OR ${EXTENSION_OFF('sh.source_id')}) AS disabled,
             -- v0.53.0: where an extension's source was switched off, for the row's words and the way back: its language
             -- hidden in every extension, or the source itself switched off in Admin -> Extensions. NULL: neither, so it
-            -- was turned off under Providers.
-            (SELECT CASE WHEN st.hidden_langs ? ss.lang THEN 'language' ELSE 'extension' END
-               FROM suwayomi_sources ss LEFT JOIN server_settings st ON st.id = 1
-              WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled LIMIT 1) AS off_in,
+            -- was turned off under Providers. (lib/sourceStanding.ts, v0.54.0: the sources overview says it the same way.)
+            ${EXTENSION_OFF_BY('sh.source_id')} AS off_in,
             sh.blocked_until, sh.last_error,
             sh.empty_streak, sh.last_ok_at,
             -- When the stored error was written, so a success that came AFTER it can be told apart from one
@@ -1077,6 +1121,12 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       : sourceState === 'untested' ? open[0].stage
       : null;
     const findHere = (r.disabled || !info) && (mainCounts.get(r.source_id) ?? 0) > 0;
+    // v0.54.0: off or failing, and some series' main source: Replace moves those series to a source that works -- the
+    // usable follower most already have, a search for the rest. Not for a cooldown (minutes, and it clears itself), nor
+    // a failure only at search, which stops no update (lib/sourceStanding.ts). Reintroduce by dropping it: "a source
+    // that is off or failing and is some series' main offers Replace" in health.int.test.ts finds no chip.
+    const standing = standingOf(r.source_id, r, now);
+    const replaceHere = (standing === 'off' || standing === 'failing') && (mainCounts.get(r.source_id) ?? 0) > 0;
     items.push({
       title: sourceLabel(r.source_id, r.engine_name),
       sourceId: r.source_id,
@@ -1091,9 +1141,10 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
         ...(r.disabled ? [] : ['disable' as const]),
         // v0.49.1: its series need another source while it fails -- or while it is off, which is the same for them.
         // Not on a quiet row (untested, inconclusive, used by nothing): nothing there is failing its series.
+        ...(replaceHere ? ['replace_source' as const] : []),
         ...(findHere ? ['find_sources' as const] : []),
       ] as HealthAction[],
-      ...(findHere ? { findSeries: mainCounts.get(r.source_id) } : {}),
+      ...(findHere || replaceHere ? { findSeries: mainCounts.get(r.source_id) } : {}),
       // Only a real finding can be ignored: a source switched off, used by nothing, or merely untested is quiet.
       ...(info ? { info: true } : { key: `source:${r.source_id}`, members }),
       evidence: stageLines(r.stages),

@@ -8894,6 +8894,19 @@ paths:
         `sources.affected` and `sources.failingUnused` with the new join `dot` (" · ") -- and with neither says
         "All sources are working" (`sources.working`), or "Nothing is failing that your library uses" while quiet
         rows are listed. The status is decided as before.
+        Since v0.54.0 a `sources` item whose source is switched off or failing -- a confirmed failure at the chapter
+        list, the page list or the images, or the site's own offline notice at any step; not a cooldown, and not a
+        failure at search alone -- and is the MAIN source of at least one series carries the action `replace_source`
+        before `find_sources`, over the same `findSeries`: the Find run in replace mode (POST
+        /api/admin/sources/find {sourceId, mode: replace}). `frozen-series` now also lists a series whose main source
+        is loaded but switched off (`frozen.switchedOff`) or failing (`frozen.failing` {n, source, offline}: offline
+        when it is the site's own offline notice) and that follows no source that can update it; a follower counts
+        only while it is usable or cooling down, where before any loaded one did, a switched-off one included. Those
+        rows, and every row whose reason is its source, carry `sourceId`, `findSeries` and the actions
+        `replace_source` and `find_sources`; a series that still has such a follower is listed as `info` with
+        `frozen.followingDown` {source, state: off|failing, names} (or `frozen.following` for a main that is not
+        loaded) and the action `replace_source`, which makes that follower its main source. A main that is only
+        cooling down is not listed.
       security:
         - bearer: []
       responses:

@@ -46,6 +46,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   a: () => 'en', b: () => 'es-419',
   theirs: () => 'es-419', ours: () => 'en', lib: () => '/library', dl: () => '/library-dl', edition: () => 'es-419',
   lang: () => 'es-419',
+  // v0.54.0, frozen.failing and frozen.followingDown: each branch of the sentence, one per count.
+  offline: (c) => c === 1, state: (c) => (c === 1 ? 'off' : 'failing'),
 };
 
 /**

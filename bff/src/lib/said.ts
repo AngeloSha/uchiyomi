@@ -190,6 +190,14 @@ const EN = {
     `${n} chapter${s(n, '', 's')}; MangaDex in ${langName(lang)} is switched off in Admin → Providers`,
   'frozen.following': ({ source, names: followed }: { source: string | null; names: string[] }) =>
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
+  // v0.54.0: a main source that is loaded and failing at a step an update needs; `offline` when the failure is the
+  // site's own offline notice (lib/sources/offline.ts).
+  'frozen.failing': ({ n, source, offline }: { n: number; source: string; offline: boolean }) =>
+    `${n} chapter${s(n, '', 's')}; its source ${source} ${offline ? 'says it is offline' : 'is failing'}`,
+  // v0.54.0: the main source is loaded but switched off or failing (`state`: off | failing), and a follower carries
+  // the series.
+  'frozen.followingDown': ({ source, state, names: followed }: { source: string; state: string; names: string[] }) =>
+    `primary ${source} ${state === 'off' ? 'switched off' : 'failing'}; still following ${followed.join(', ')}`,
 
   // ---- Source health (#115). `status` is a SourceStatus code; `stage` a Stage.
   // v0.53.0: the summary counts the card's two groups that need a look, joined by 'dot'; with neither, `sources.unused`

@@ -331,6 +331,17 @@ const WORDS: Record<string, (p: P) => string | null> = {
       : tr('{n} chapters; MangaDex in {language} is switched off in Admin → Providers', v);
   },
   'frozen.following': (p) => tr('primary {source} gone; still following {names}', { source: p.source == null ? tr('(none)') : str(p, 'source'), names: strs(p, 'names').join(listSep()) }),
+  // v0.54.0: a loaded main source that is failing, or says it is offline; and one switched off or failing that a
+  // follower covers.
+  'frozen.failing': (p) => {
+    const v = { n: num(p, 'n'), source: str(p, 'source') };
+    if (p.offline) return v.n === 1 ? tr('1 chapter; its source {source} says it is offline', v) : tr('{n} chapters; its source {source} says it is offline', v);
+    return v.n === 1 ? tr('1 chapter; its source {source} is failing', v) : tr('{n} chapters; its source {source} is failing', v);
+  },
+  'frozen.followingDown': (p) => {
+    const v = { source: str(p, 'source'), names: strs(p, 'names').join(listSep()) };
+    return p.state === 'off' ? tr('primary {source} switched off; still following {names}', v) : tr('primary {source} failing; still following {names}', v);
+  },
 
   // ---- Source health (#115)
   // v0.53.0: the summary counts the card's two groups that need a look. 'sources.live', 'none', 'off', 'idle' and

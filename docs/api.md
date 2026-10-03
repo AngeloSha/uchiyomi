@@ -1787,7 +1787,14 @@ and the counts (each follow as `series.follow_source` with `via: find_sources`).
 `current` (hidden like any run's), `downloads: false`, and `waiting` (`sweep`, `repair` or `check`, as the run's
 own `waiting`) while it waits for one of those. On Health, a failing (or turned-off) source that is some
 series' main source carries the action `find_sources` with `findSeries`, and so does a "Series that can no longer
-update" row whose reason is its source.
+update" row whose reason is its source. Since v0.54.0 such a source row carries `replace_source` before it, when the
+source is switched off or failing at a step an update needs (the chapter list, the pages or the images, or the
+site's own offline notice; not a cooldown, not a failure at search alone): the replace mode below. The
+`frozen-series` check also lists a series whose main source is loaded but switched off or failing
+(`frozen.failing` {n, source, offline}) and that follows nothing that can update it -- a follower counts only while
+it is usable or cooling down -- with `replace_source` and `find_sources`; a series that still has such a follower is
+`info` (`frozen.followingDown` {source, state, names}) with `replace_source`. A main that is only cooling down is not
+listed.
 
 **Review first** (since v0.51.0, #132; @TIGamingTV's idea from PR #133). `POST /api/admin/sources/find` with
 `review: true` runs the same search and the same judgement, follows nothing, and keeps what it found: the run
