@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2827
+    "strings": 2851
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2830,5 +2830,29 @@
   "Banner reset to automatic": "バナーを自動に戻しました",
   "Could not change the banner": "バナーを変更できませんでした",
   "More banner options": "バナーのその他のオプション",
-  "Because you read {title}": "「{title}」を読んだあなたへ"
+  "Because you read {title}": "「{title}」を読んだあなたへ",
+  "This series is numbered by posting order, so another source’s chapter numbers do not line up with it.": "このシリーズは投稿順で番号付けされているため、他のソースの話数とは対応しません。",
+  "That source is already this series’ main source.": "そのソースはすでにこのシリーズのメインソースです。",
+  "This series does not follow that source. Only a source it follows can become its main source.": "このシリーズはそのソースをフォローしていません。メインソースにできるのはフォロー中のソースだけです。",
+  "This series’ chapters are waiting to be renumbered. Review that on the series page first.": "このシリーズの話は番号の振り直しを待っています。先にシリーズページで確認してください。",
+  "That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.": "そのソースは今は使えません。インストールされていないか、無効になっているか、このアカウントでは利用できません。",
+  "This series’ main source changed meanwhile. Look again.": "このシリーズのメインソースがその間に変わりました。もう一度確認してください。",
+  "1 chapter; its source {source} is failing": "1 話；ソース {source} は失敗中です",
+  "{n} chapters; its source {source} is failing": "{n} 話；ソース {source} は失敗中です",
+  "1 chapter; its source {source} says it is offline": "1 話；ソース {source} はオフラインだと表示しています",
+  "{n} chapters; its source {source} says it is offline": "{n} 話；ソース {source} はオフラインだと表示しています",
+  "primary {source} switched off; still following {names}": "メインのソース {source} は無効；引き続き {names} をフォロー中",
+  "primary {source} failing; still following {names}": "メインのソース {source} は失敗中；引き続き {names} をフォロー中",
+  "Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. \"Keep the source's numbers\" records your choice; the source's own \"Use sequential chapter numbering\" setting, under Admin → Sources, is the other way out.": "一部のソースは、多くの異なる投稿に同じ話数を付けます（Webtoons は投稿に、それが属するエピソードの番号を付けます）。そのようなソースの新しいシリーズは投稿順で番号付けされます。すでにライブラリにあるシリーズは、計画を確定したときだけ番号が振り直され、それまでは何もダウンロードしません。名前を変えてもファイルはすべて残り、読書の進捗はそれぞれの話に残ります。「ソースの番号のままにする」はあなたの選択を記録します。もう一つの方法は、「管理 → ソース」にあるソース自身の「Use sequential chapter numbering」設定です。",
+  "Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back.": "拡張機能から追加したシリーズは拡張機能エンジンを待っています。「管理 → ソース」に復旧の方法があります。",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Sources": "1 話；MangaDex（{language}）は「管理 → ソース」で無効になっています",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Sources": "{n} 話；MangaDex（{language}）は「管理 → ソース」で無効になっています",
+  "Admin → Sources shows how to bring it back. Its data is kept while it is off.": "「管理 → ソース」に戻す方法があります。オフの間もデータは保持されます。",
+  "Admin → Sources shows what to check for your setup, and Check again there asks at once.": "「管理 → ソース」にお使いの環境で確認すべき点が表示され、そこにある「もう一度確認」ですぐに問い合わせられます。",
+  "Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.": "たいていはサイトが変わったか、拡張機能を拒否しています：拡張機能を更新する（「管理 → ソース」）か、設定を確認するか、ブラウザーでサイトを開いてみてください。エンジン自身のメッセージはテスト結果と一緒に表示されます。",
+  "Turn it back on in Admin → Sources.": "「管理 → ソース」で再び有効にしてください。",
+  "The site now redirects to {host}. Update its address in Admin → Sources.": "サイトは現在 {host} にリダイレクトしています。「管理 → ソース」でアドレスを更新してください。",
+  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "拡張機能はこのソースの話を一覧にしますが、どれにも話数が付いていないため、並べることも、名前を付けることも、ダウンロードすることもできません。拡張機能自身の設定（「管理 → ソース」）で番号付けのオプションを探すか、ここで「無視」を選んでください。",
+  "It is the main source of 1 series. Replace it first.": "1 シリーズのメインソースです。先に置き換えてください。",
+  "It is the main source of {n} series. Replace it first.": "{n} シリーズのメインソースです。先に置き換えてください。"
 }

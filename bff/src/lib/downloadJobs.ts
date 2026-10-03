@@ -64,6 +64,15 @@ export interface RunCard {
   /** v0.49.1, a Find other sources run: how many sources it has followed so far, across its series. */
   followed?: number;
   /**
+   * v0.54.0, a Find run in replace mode (`mode: 'replace'`): how many series it has moved to another main source so far,
+   * how many are still on the source it replaces (`left`, read again after each series), and, once it has ended,
+   * whether that source is switched off (`turnedOff`).
+   */
+  mode?: 'replace';
+  promoted?: number;
+  left?: number;
+  turnedOff?: boolean;
+  /**
    * v0.49.1, a Find other sources run: what it waits on before its next series, while it waits (a sweep, a repair,
    * the daily source check) -- so Server tasks says why it is paused rather than naming the series it last did.
    */

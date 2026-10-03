@@ -11,7 +11,8 @@
 //
 // The order, and why it is this order:
 //   1. The chosen copy. Skipped outright when its source has already refused this run (`refusing`): a
-//      site that answered 403 or 429 minutes ago is not asked again, and the cooldown is the answer.
+//      site that answered 403 or 429 minutes ago is not asked again, and the cooldown is the answer. And
+//      when an admin has switched its source off (v0.54.0): switched off means off.
 //   2. The same number from another followed source, at most MAX_ALTERNATES of them, ranked as the
 //      release rules rank copies (lib/releases.ts copiesOf), minus the sources that are refusing, disabled,
 //      in a cooldown, or outside the viewer's age cap. Never for a PINNED copy: a person who tapped one
@@ -152,14 +153,20 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
     f.onAsked?.(src, undefined);
     return done;
   };
-  const switched = () => ({ from: via, why: first ? whyOf(first.err) : 'refusing' });
+  // The chosen copy's source switched off since its listing was read (v0.54.0): the run that chose it filtered
+  // switched-off sources before listing (lib/updater.ts), so only an admin's Turn off mid-run reaches this -- and
+  // switched off means off, for a chapter too. The same number from another followed source is still taken; never a
+  // hunt, which only follows a real failure of the chosen copy. Reintroduce by asking the chosen copy whatever its
+  // source: "a copy on a source switched off mid-run is never asked" in chapterFallback.int.test.ts finds it asked.
+  const off = !f.refusing.has(via) && await isDisabled(via).catch(() => false);
+  const switched = () => ({ from: via, why: first ? whyOf(first.err) : off ? 'off' : 'refusing' });
   const tookFrom = (to: string, missing: number[]) => console.log(
     `[download] ${label}: took from ${to} after ${via} failed (${switched().why})${missing.length ? `, saved with ${missing.length} page${missing.length === 1 ? '' : 's'} missing` : ''}`,
   );
 
   // ── 1 + 2. the chosen copy ────────────────────────────────────────────────────────────────────────
   let asked = 0;
-  if (!f.refusing.has(via)) {
+  if (!f.refusing.has(via) && !off) {
     asked++;
     const r = await attempt(f.chapter, via, true);
     if (r === null) return { kind: 'skipped', why: 'on_disk' };

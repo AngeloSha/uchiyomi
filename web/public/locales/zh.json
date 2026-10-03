@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2827
+    "strings": 2851
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2830,5 +2830,29 @@
   "Banner reset to automatic": "横幅已恢复为自动",
   "Could not change the banner": "无法更改横幅",
   "More banner options": "更多横幅选项",
-  "Because you read {title}": "因为你读过《{title}》"
+  "Because you read {title}": "因为你读过《{title}》",
+  "This series is numbered by posting order, so another source’s chapter numbers do not line up with it.": "此作品按发布顺序编号，其他来源的章节编号与它对不上。",
+  "That source is already this series’ main source.": "该来源已经是此作品的主来源。",
+  "This series does not follow that source. Only a source it follows can become its main source.": "此作品没有关注该来源。只有已关注的来源才能成为它的主来源。",
+  "This series’ chapters are waiting to be renumbered. Review that on the series page first.": "此作品的章节正在等待重新编号。请先在作品页面审核。",
+  "That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.": "该来源目前无法使用：它未安装、已关闭，或此账户无法使用。",
+  "This series’ main source changed meanwhile. Look again.": "此作品的主来源在此期间已更改。请重新查看。",
+  "1 chapter; its source {source} is failing": "1 章；其来源 {source} 出现故障",
+  "{n} chapters; its source {source} is failing": "{n} 章；其来源 {source} 出现故障",
+  "1 chapter; its source {source} says it is offline": "1 章；其来源 {source} 显示自己已下线",
+  "{n} chapters; its source {source} says it is offline": "{n} 章；其来源 {source} 显示自己已下线",
+  "primary {source} switched off; still following {names}": "主来源 {source} 已关闭；仍在关注 {names}",
+  "primary {source} failing; still following {names}": "主来源 {source} 出现故障；仍在关注 {names}",
+  "Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs to). A new series from such a source is numbered by posting order; one already in your library is renumbered only when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays with its chapter. \"Keep the source's numbers\" records your choice; the source's own \"Use sequential chapter numbering\" setting, under Admin → Sources, is the other way out.": "有些来源会给许多不同的帖子标上相同的章节编号（Webtoons 按帖子所属的那一话来编号）。来自这类来源的新作品会按发布顺序编号；已在你书库中的作品只有在你确认其计划后才会重新编号，在此之前不会下载任何内容。重命名会保留每个文件，阅读进度也会跟随各自的章节。“保留来源的编号”会记录你的选择；另一个办法是该来源自身的“Use sequential chapter numbering”设置，位于 管理 → 来源 中。",
+  "Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back.": "来自扩展的作品正在等待扩展引擎；管理 → 来源 中说明了如何让它恢复。",
+  "1 chapter; MangaDex in {language} is switched off in Admin → Sources": "1 章；{language}版 MangaDex 已在“管理 → 来源”中关闭",
+  "{n} chapters; MangaDex in {language} is switched off in Admin → Sources": "{n} 章；{language}版 MangaDex 已在“管理 → 来源”中关闭",
+  "Admin → Sources shows how to bring it back. Its data is kept while it is off.": "管理 → 来源 中说明了如何让它恢复。关闭期间它的数据会保留。",
+  "Admin → Sources shows what to check for your setup, and Check again there asks at once.": "管理 → 来源 中说明了你的部署需要检查哪些地方，那里的“再检查一次”会立即询问。",
+  "Usually the site changed or refused the extension: update the extension (Admin → Sources), check its settings, or open the site in a browser. The engine's own message is shown with the test.": "通常是网站发生了变化或拒绝了该扩展：请更新扩展（管理 → 来源）、检查它的设置，或在浏览器中打开该网站。引擎自己的消息会随测试一起显示。",
+  "Turn it back on in Admin → Sources.": "请在 管理 → 来源 中重新开启它。",
+  "The site now redirects to {host}. Update its address in Admin → Sources.": "该网站现在会重定向到 {host}。请在 管理 → 来源 中更新它的地址。",
+  "The extension lists this source's chapters, but none of them with a chapter number, so there is nothing to order, name or download. Look for a numbering option in the extension's own settings (Admin → Sources), or Ignore it here.": "扩展列出了该来源的章节，但没有一个带有章节编号，因此没有可排序、命名或下载的内容。请在扩展自身的设置（管理 → 来源）中寻找编号选项，或在这里“忽略”它。",
+  "It is the main source of 1 series. Replace it first.": "它是 1 部作品的主来源。请先替换它。",
+  "It is the main source of {n} series. Replace it first.": "它是 {n} 部作品的主来源。请先替换它。"
 }

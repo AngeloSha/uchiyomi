@@ -9,6 +9,8 @@ import { cfGet, cfPost, cfSession } from './flaresolverr';
 import { learnImageHosts } from './imageHosts';
 
 const registry = new Map<string, SourceAdapter>();
+/** The ids a source pack in SOURCES_DIR registered (v0.54.0): what the sources overview calls a pack's source. */
+const fromPack = new Set<string>();
 // host services injected into a plugin's register(host) so plugins never import core internals by path.
 const host: SourceHost = { cfGet, cfPost, cfSession };
 
@@ -61,7 +63,7 @@ export function loadSources(dir = process.env.SOURCES_DIR || '/sources'): { load
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const mod = require(join(dir, f));
       let any = false;
-      for (const a of collect(mod)) if (registerAdapter(a)) { loaded++; any = true; }
+      for (const a of collect(mod)) if (registerAdapter(a)) { loaded++; any = true; fromPack.add(a.id); }
       if (!any) console.warn(`[sources] ${f}: no valid SourceAdapter export`);
     } catch (e) { console.warn(`[sources] failed to load ${f}: ${(e as Error)?.message}`); }
   }
@@ -71,6 +73,7 @@ export function loadSources(dir = process.env.SOURCES_DIR || '/sources'): { load
 /** Drop everything and rescan (admin "reload" after dropping a new plugin into SOURCES_DIR). */
 export function reloadSources(dir = process.env.SOURCES_DIR || '/sources'): { loaded: number; files: number } {
   registry.clear();
+  fromPack.clear();
   for (const k of Object.keys(require.cache)) if (k.startsWith(dir)) delete require.cache[k];
   return loadSources(dir);
 }
@@ -78,3 +81,5 @@ export function reloadSources(dir = process.env.SOURCES_DIR || '/sources'): { lo
 export function getSource(id: string): SourceAdapter | null { return registry.get(id) ?? null; }
 export function listSources(): SourceAdapter[] { return [...registry.values()]; }
 export function sourceIds(): string[] { return [...registry.keys()]; }
+/** Whether a loaded source came from a source pack (SOURCES_DIR), not the core or the admin's settings. */
+export function isPackSource(id: string): boolean { return fromPack.has(id) && registry.has(id); }

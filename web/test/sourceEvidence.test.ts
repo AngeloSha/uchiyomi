@@ -52,7 +52,7 @@ test('a failed Test leads with its reason, names the failing stage, and never sa
   // v0.49.1: the fix by its own code when it has one (lib/said.ts), in the reader's language, not as the server wrote it.
   // Reintroduce `d?.fix` in answerView: this reads the English.
   const coded = answerView(ballTest({ diagnosis: { code: 'moved', reason: 'x', fix: 'English', fixSaid: { code: 'fix.moved', params: { host: 'new.example' } } } }));
-  assert.equal(coded.fix, 'The site now redirects to new.example. Update its address in Admin, Sources, Providers.', 'a coded fix is said as the server wrote it');
+  assert.equal(coded.fix, 'The site now redirects to new.example. Update its address in Admin → Sources.', 'a coded fix is said as the server wrote it');
 });
 
 test('#115 itself: a failed Test whose diagnosis has no reason is still not "Working normally."', () => {
@@ -115,7 +115,7 @@ test('stored evidence: one line per stage, with when and by what', () => {
 
 const nothing: StageLine[] = (['search', 'chapters', 'pages', 'images'] as const)
   .map((stage) => ({ stage, state: 'unknown', at: null, by: null, kind: null, error: null }));
-const TURN_ON = 'Turn it back on in Admin, Sources, Providers.';
+const TURN_ON = 'Turn it back on in Admin → Sources.';
 const row = (over: Record<string, unknown>) => createElement(SourceEvidence, { ...healthRowEvidence(over as any), className: 'order-last basis-full' });
 
 test('Health: a source with nothing recorded, and one switched off on purpose, get no lines and no fix', () => {

@@ -363,7 +363,7 @@ components:
     SeriesSource:
       type: object
       description: One place a series' chapters come from. The primary is the pair the series was added with; the rest were followed later.
-      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto]
+      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto, standing]
       properties:
         sourceId: { type: string, description: The adapter id. }
         name: { type: string, description: The adapter's display name, or the id when the adapter is not loaded. }
@@ -373,6 +373,19 @@ components:
         chapters: { type: [integer, "null"], description: "For a follower, the distinct chapter numbers it listed then; for the primary, the merged count across every followed source after the release preferences (the same figure as the series' source.chapters)." }
         registered: { type: boolean, description: Whether the adapter is loaded right now; a follower whose extension was removed keeps its row so it can still be unfollowed. }
         auto: { type: boolean, description: "Followed by the add-time auto-follow (POST /api/sources/add alsoFollow) rather than by a person: the row has no author. Always false for the primary. A person confirming the same source through a fill-scan plan turns it false." }
+        standing:
+          $ref: "#/components/schemas/SourceStanding"
+    SourceStanding:
+      type: string
+      enum: [usable, cooling, failing, off, not_loaded]
+      description: >-
+        Since v0.54.0 (bff lib/sourceStanding.ts): whether a series can be updated through the source right now.
+        `off`: switched off -- under Sources (POST /api/admin/sources/{id}/disable) or in the extension's own
+        switches, which also unloads it; `not_loaded`: no adapter by that id is loaded (uninstalled, a site removed,
+        the extension engine away); `failing`: a confirmed, current failure at the chapter list, the page list or the
+        images, or the site's own offline notice at any step (a search failure stops no update); `cooling`: inside a
+        cooldown, which ends by itself; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
+        main source, and only those count as still carrying a series.
     Ghost:
       type: object
       description: A chapter number the sources listed at the last check that this server has no row for.
@@ -697,9 +710,12 @@ components:
               chapters: { type: integer, minimum: 0, description: The distinct chapter numbers that source lists. }
         why:
           type: string
-          enum: [posting_order, full, too_few, no_source, refused, no_answer, followed_already, no_match, not_tried]
+          enum: [posting_order, full, too_few, no_source, refused, no_answer, followed_already, no_match, not_tried, moved, busy, renumber_pending]
           description: >-
-            Only when nothing was followed, and exactly what happened. `posting_order`: numbered by posting order, so
+            Only when nothing was followed (in a Replace run: when nothing was promoted), and exactly what happened.
+            Since v0.54.0, a Replace run: `moved` (the series' main source is no longer the one replaced), `busy` (a
+            sweep, a check or a listing refresh stayed inside the series for 30 s), `renumber_pending` (its chapters
+            wait to be renumbered). `posting_order`: numbered by posting order, so
             no follower is ever merged (not searched). `full`: the series already follows two sources (not searched),
             or another search filled the last slot meanwhile. `too_few`: it lists fewer than three chapter numbers,
             which no candidate can be measured against (not searched). `no_source`: no other source could be asked --
@@ -714,9 +730,39 @@ components:
             or during its turn) -- never "not found".
         proposals:
           type: array
-          description: "Since v0.51.0, a review-first run only, for a series it found candidates for: each, in scan order, for an admin to follow or dismiss. Such a series carries no `why`, and `followed` gains each proposal an admin follows."
+          description: "Since v0.51.0, a review-first run only, for a series it found candidates for: each, in scan order, for an admin to follow or dismiss. Such a series carries no `why`, and `followed` gains each proposal an admin follows. In a Replace review (v0.54.0): the series' followers that could take over, best first (`kind: follower`), or what its search found (`kind: search`), the one it would make the main source marked `promote`."
           items:
             $ref: "#/components/schemas/FindProposal"
+        promoted:
+          type: object
+          description: "Since v0.54.0, a Replace run: the series was moved off the replaced source. `via`: a follower it had, or a source its search found and followed. `old`: the replaced source dropped from its followers (always, in a run)."
+          required: [from, fromName, to, toName, via, old]
+          properties:
+            from: { type: string }
+            fromName: { type: string }
+            to: { type: string }
+            toName: { type: string }
+            via: { type: string, enum: [follower, search] }
+            old: { type: string, enum: [dropped, kept] }
+        skipped:
+          type: array
+          description: "Since v0.54.0, a Replace run: the followers passed over, each with why -- off, failing, not_loaded (standing), language (another language than the series), age (beyond the starting admin's age reach), or cooling (a follower in a cooldown that was not the one promoted)."
+          items:
+            type: object
+            required: [sourceId, name, why]
+            properties:
+              sourceId: { type: string }
+              name: { type: string }
+              why: { type: string, enum: [off, failing, cooling, not_loaded, language, age] }
+        dropped:
+          type: array
+          description: "Since v0.54.0, a Replace run: dead followers (failing, not loaded, switched off, worst first) dropped, with their listing rows, to make room under the follower cap for a source the search found."
+          items:
+            type: object
+            required: [sourceId, name]
+            properties:
+              sourceId: { type: string }
+              name: { type: string }
     FindProposal:
       type: object
       description: "A candidate a review-first Find other sources run kept for an admin to confirm, the best one per source (since v0.51.0). For a series the viewer may not list, `title`, `coverUrl` and `url` are left out."
@@ -746,12 +792,20 @@ components:
           description: "`green`: an automatic run would have followed it (title and chapter numbers). `amber`: for a person to look at first, `amber` says why."
         amber:
           type: string
-          enum: [numbering, other_name]
-          description: "`numbering`: a name matches exactly and the chapter numbers do not line up (a title that merely contains the series' with numbers that do not line up -- a sequel's shape -- is never proposed). `other_name`: it lines up, but matched only under another name of the series, not its title."
+          enum: [numbering, other_name, cooling, coverage, stale]
+          description: "`numbering`: a name matches exactly and the chapter numbers do not line up (a title that merely contains the series' with numbers that do not line up -- a sequel's shape -- is never proposed). `other_name`: it lines up, but matched only under another name of the series, not its title. Since v0.54.0, a Replace review's follower: `cooling` (in a cooldown), `coverage` (it lists under 90% of the series' numbers), `stale` (it has not answered for its list within the week)."
         state:
           type: string
-          enum: [followed, dismissed]
-          description: Set once an admin decided; final.
+          enum: [followed, dismissed, promoted]
+          description: "Set once an admin decided; final. `promoted` (since v0.54.0): made the series' main source by POST .../find/{runId}/promote."
+        kind:
+          type: string
+          enum: [follower, search]
+          description: "Since v0.54.0, a Replace review: a follower the series has, or a source its search found."
+        promote: { type: boolean, enum: [true], description: "Since v0.54.0, a Replace review: the one the run would make the main source -- the best follower, or the first green match." }
+        newer: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace review's follower: chapters it lists past what the library holds." }
+        standing:
+          $ref: "#/components/schemas/SourceStanding"
     FindRunSummary:
       type: object
       description: One Find other sources run, without its per-series results (since v0.49.1).
@@ -771,6 +825,8 @@ components:
         sourceId: { type: string, description: The source whose series it was about, when the scope was a source. }
         sourceName: { type: string, description: That source's display name, or its id when it is not loaded. }
         review: { type: boolean, enum: [true], description: "Since v0.51.0: a review-first run, which followed nothing itself; its results carry `proposals`. Absent for an automatic run." }
+        mode: { type: string, enum: [replace], description: "Since v0.54.0: a Replace run, which moved the series of `sourceId` off it. Absent for Find other sources." }
+        promoted: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: how many of its series were moved to another main source (counted from its results)." }
     FindRun:
       description: A Find other sources run in full (since v0.49.1).
       allOf:
@@ -789,6 +845,8 @@ components:
               type: string
               enum: [sweep, repair, check]
               description: While it runs, what it is waiting on before its next series.
+            left: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: the series whose main source the replaced source is now." }
+            turnedOff: { type: boolean, description: "Since v0.54.0, a Replace run: whether the replaced source is switched off now -- by this run's turnOff, or before." }
             results:
               type: array
               description: "One entry per series settled, in the order they were asked about; after the run ends -- done, stopped or interrupted -- one for every series in its scope, those it never reached as `not_tried`."
@@ -2834,6 +2892,10 @@ paths:
                         seriesId: { type: string, description: "Since v0.49.0, a repair: the series `label` names, when it names one." }
                         followed: { type: integer, minimum: 0, description: "Since v0.49.1, a find_sources run: the sources it has followed so far, across its series." }
                         waiting: { type: string, enum: [sweep, repair, check], description: "Since v0.49.1, a find_sources run: what it waits on before its next series while it waits -- a chapter sweep, a library repair or the daily source check (GET /api/admin/sources/find's run.waiting). Absent otherwise; `current` is then still the series it did last." }
+                        mode: { type: string, enum: [replace], description: "Since v0.54.0, a find_sources run in replace mode." }
+                        promoted: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: the series it has moved to another main source so far." }
+                        left: { type: integer, minimum: 0, description: "Since v0.54.0, a Replace run: the series still on the source it replaces, read again after each series." }
+                        turnedOff: { type: boolean, description: "Since v0.54.0, a Replace run that has ended: whether that source is switched off." }
                         downloads: { type: boolean, enum: [false], description: "Since v0.49.0: a run that cannot download a chapter (a solver reset, a page count, names, directions, or a reset of failed chapters that names no source and is not `now`). It stays a server task but does not turn the Library ring. Absent: it may download." }
         "401":
           description: Not authenticated
@@ -6460,7 +6522,10 @@ paths:
         - admin
       summary: Remove a custom site.
       operationId: deleteApiAdminSourcesCustomId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.54.0
+        refused while the site is some series' main source (409 `in_use`): removing it froze every series from it.
+        POST /api/admin/sources/{id}/retire {how: remove} also drops its follows.
       parameters:
         - name: id
           in: path
@@ -6478,6 +6543,8 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`in_use` (since v0.54.0) with `main`, how many series have it as their main source, and `message`/`messageSaid` (Said, retire.inUse): replace it first."
   /api/admin/series/{id}:
     patch:
       tags:
@@ -6830,7 +6897,8 @@ paths:
         "409":
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
-            own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
+            own source -- since v0.54.0 also when it became the main source after the plan was made, by
+            POST /api/admin/series/{id}/main-source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
             posting_order (the series is numbered by posting order, so a follower would never be merged); since
             v0.52.0 (#123) language_differs (the source is in another language than the series: the scan never
             offers one, so only a plan from before the series' language changed meets this. `message` and
@@ -6839,6 +6907,85 @@ paths:
             holds an edition that may follow the source, `edition` also carries `existing: {id, lang}`, that
             edition's series id and language, and the sentence is `follow.languageDiffersEdition` (params `theirs`,
             `ours` and `edition`): follow it on that edition instead).
+  /api/admin/series/{id}/main-source:
+    post:
+      tags:
+        - admin
+      summary: Make a source the series follows its main source (since v0.54.0).
+      operationId: postApiAdminSeriesIdMainSource
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Only a source the
+        series already follows can be promoted: its follow is the "same series?" judgement already made, and the
+        sweep already merges its chapters, so the switch changes which source wins a tie and the label, not which
+        chapters arrive. The pair (`source_id`, `source_series_id`) moves under the series row's lock and the promoted
+        row leaves the followers. The old main stays as the last follower (`old: kept`) when it still carries the
+        series -- standing usable or cooling -- and the follower cap has room; otherwise it is dropped with its listing
+        rows, and the chapters capped against it get their tries back for the new main. A series whose language was
+        only inferred from its main source is pinned to it when the new main would say otherwise (`langPinned`).
+        The series' last-check figures, folder, cover, reading direction and floor stay. Audited as
+        `series.main_source` {id, title, from, fromRef, to, toRef, old, coverage, addedBy, langPinned?, via:
+        manual}. The answer's `sources` is read before the listing refresh the switch starts (through the new main).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceId]
+              additionalProperties: false
+              properties:
+                sourceId:
+                  type: string
+                  description: A source the series follows.
+                old:
+                  type: string
+                  enum: [auto, keep, drop]
+                  description: >-
+                    What becomes of the old main: `auto` (the default) keeps it while it still carries the series;
+                    `keep` and `drop` decide whatever its standing.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Switched. The series' full source list, the new main first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, from, to, old, sources]
+                properties:
+                  ok: { type: boolean }
+                  from: { type: [string, "null"], description: The old main source. }
+                  to: { type: string }
+                  old: { type: string, enum: [kept, dropped] }
+                  langPinned: { type: string, description: "The language the series was pinned to, when the switch would otherwise have changed it." }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "400":
+          description: bad_request (no sourceId, or an `old` it does not know).
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: not_found -- not a series this admin may see.
+        "409":
+          description: >-
+            Refused, with `message` and `messageSaid` (Said): is_main (main.isMain); not_followed (main.notFollowed);
+            posting_order (numbering.postingRefusal: the series takes its chapters from its numbering source alone);
+            renumber_pending (main.renumberPending: a renumber waits for a review, or is being applied); busy
+            (renumber.checking: a check, the sweep or a listing refresh is inside the series right now);
+            source_unavailable (main.unavailable: not loaded, switched off, or beyond the admin's age reach);
+            moved (main.moved: the main source changed meanwhile); language_differs (the follow route's refusal:
+            follow.languageDiffers or follow.languageDiffersEdition, with `edition: {of, lang, existing?}`).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -8801,6 +8948,19 @@ paths:
         `sources.affected` and `sources.failingUnused` with the new join `dot` (" · ") -- and with neither says
         "All sources are working" (`sources.working`), or "Nothing is failing that your library uses" while quiet
         rows are listed. The status is decided as before.
+        Since v0.54.0 a `sources` item whose source is switched off or failing -- a confirmed failure at the chapter
+        list, the page list or the images, or the site's own offline notice at any step; not a cooldown, and not a
+        failure at search alone -- and is the MAIN source of at least one series carries the action `replace_source`
+        before `find_sources`, over the same `findSeries`: the Find run in replace mode (POST
+        /api/admin/sources/find {sourceId, mode: replace}). `frozen-series` now also lists a series whose main source
+        is loaded but switched off (`frozen.switchedOff`) or failing (`frozen.failing` {n, source, offline}: offline
+        when it is the site's own offline notice) and that follows no source that can update it; a follower counts
+        only while it is usable or cooling down, where before any loaded one did, a switched-off one included. Those
+        rows, and every row whose reason is its source, carry `sourceId`, `findSeries` and the actions
+        `replace_source` and `find_sources`; a series that still has such a follower is listed as `info` with
+        `frozen.followingDown` {source, state: off|failing, names} (or `frozen.following` for a main that is not
+        loaded) and the action `replace_source`, which makes that follower its main source. A main that is only
+        cooling down is not listed.
       security:
         - bearer: []
       responses:
@@ -9489,6 +9649,19 @@ paths:
         `review: true` (since v0.51.0, #132, @TIGamingTV's idea from PR #133): review first -- the same run, which
         follows nothing and keeps each series' candidates as `proposals` in its result (POST
         .../find/{runId}/follow or .../dismiss decides each); audited with `review` and `proposed` (series with any).
+        `mode: replace` (since v0.54.0, with `sourceId` only): Replace -- move every series of that source off it, the
+        series that follow other sources first. Per series: its best working follower (usable, then cooling down;
+        in its language and the admin's reach; ranked by how lately it answered, how much of the series it lists, the
+        source order, how far ahead it is, the follow order) becomes its main source at once, with no search and no
+        pacing (as POST /api/admin/series/{id}/main-source does, the replaced source dropped from it); a series with
+        none is searched for as above -- its dead followers not counting against the cap, and dropped only as far as a
+        follow needs the room -- and the first source it follows becomes its main source. A series numbered by
+        posting order, waiting for a renumber, moved off the source, or with a run inside it for 30 s is left alone
+        and says so. `turnOff: true` (Replace only, never with `review`): when the run ends done with no series left
+        on the source, it is switched off and dropped from every series' followers with their listing rows (audited
+        `source.retire`). Review first proposes instead: POST .../find/{runId}/promote applies one. Each switch is
+        audited as `series.main_source` with `via: replace` and the run's id; `source.find` adds `mode`, `promoted`,
+        `left` and `turnedOff`. Find and Replace share the one run at a time.
       requestBody:
         required: true
         content:
@@ -9506,6 +9679,8 @@ paths:
                   properties:
                     sourceId: { type: string }
                     review: { type: boolean }
+                    mode: { type: string, enum: [follow, replace], description: "Since v0.54.0: `replace` moves every series of the source off it." }
+                    turnOff: { type: boolean, description: "Since v0.54.0, Replace only and never with review: switch the source off once no series is left on it." }
       security:
         - bearer: []
       responses:
@@ -9520,7 +9695,7 @@ paths:
                   runId: { type: string, format: uuid }
                   total: { type: integer, minimum: 1, description: The series it will ask about. }
         "400":
-          description: "`bad_request` (a malformed body, or both scopes at once) or `empty_scope` (nothing named is a series this admin may see)"
+          description: "`bad_request` (a malformed body, both scopes at once, Replace without `sourceId`, or `turnOff` outside Replace or with `review`) or `empty_scope` (nothing named is a series this admin may see)"
         "401":
           description: Not authenticated
         "403":
@@ -9607,6 +9782,95 @@ paths:
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
           description: "`decided` (with `state`): followed or dismissed already; `posting_order`; `source_unavailable`; `language_differs` (since v0.52.0: the source is in another language than the series, with `edition: {of, lang}`, the add route's edition to add instead, plus `existing: {id, lang}` when the work already holds an edition that may follow the source -- the follow belongs there); `already_followed`; `full` (the series follows two other sources)"
+  /api/admin/sources/find/{runId}/promote:
+    post:
+      tags:
+        - admin
+      summary: "Make one proposal of a Replace review the series' main source (since v0.54.0)."
+      operationId: postApiAdminSourcesFindRunIdPromote
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body {seriesId,
+        sourceId}; what is promoted is the run's own record. A follower's proposal is switched to as POST
+        /api/admin/series/{id}/main-source switches (the replaced source dropped); a search's is checked again as a
+        follow is, followed under the cap -- dead followers making room -- and then switched to. The proposal reads
+        `promoted`, and the series' result carries `promoted` (and, for a search's, `followed` gains it). Audited as
+        `series.main_source` with `via: review` (and the follow as `series.follow_source` with `via: replace_review`).
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seriesId, sourceId]
+              properties:
+                seriesId: { type: string }
+                sourceId: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The series' result as it now reads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result:
+                    $ref: "#/components/schemas/FindResult"
+        "400":
+          description: "`bad_request`: a malformed body"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "`not_found`: no such Replace review, proposal or series, or a series this admin may not see"
+        "409":
+          description: "`decided` (with `state`); a follow's refusals: `posting_order`, `source_unavailable`, `language_differs` (with `edition`), `full`; a switch's: `moved` (the series is no longer on the replaced source), `busy`, `renumber_pending`, `not_followed`, `is_main`. With `messageSaid` (Said, as the main-source route's) where the refusal has a code."
+  /api/admin/sources/{id}/replace-preview:
+    get:
+      tags:
+        - admin
+      summary: "What a Replace run over this source would do, before it starts (since v0.54.0)."
+      operationId: getApiAdminSourcesIdReplacePreview
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The numbers the
+        Replace dialog says before Start, counted as the run decides them: `main` (the series whose main source it
+        is), `withBackup` (of those, the ones a working follower takes over at once), `toSearch` (the ones it searches
+        for), `postingOrder` (numbered by posting order: left alone), and `busy` (a Find or Replace run is going, and
+        Start would answer 409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [main, withBackup, toSearch, postingOrder, busy]
+                properties:
+                  main: { type: integer, minimum: 0 }
+                  withBackup: { type: integer, minimum: 0 }
+                  toSearch: { type: integer, minimum: 0 }
+                  postingOrder: { type: integer, minimum: 0 }
+                  busy: { type: boolean }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/find/{runId}/dismiss:
     post:
       tags:
@@ -9655,6 +9919,130 @@ paths:
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
           description: "`decided` (with `state`): followed or dismissed already"
+  /api/admin/sources/overview:
+    get:
+      tags:
+        - admin
+      summary: "Every source the server knows, of every kind, in one answer (since v0.54.0)."
+      operationId: getApiAdminSourcesOverview
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The one Sources
+        section's list: every source loaded, every extension source the engine ever registered (switched on, off, or not
+        loaded now), every source a series still names, and every source Health lists. Each row's `state`, `stage`,
+        `cooldown` and `offBy` are Source health's own (GET /api/admin/health, check `sources`); `ok` when Health has
+        nothing to say about it. `standing` is lib/sourceStanding.ts's (SeriesSource.standing). `main` counts the series
+        whose main source it is, `followed` the series that follow it without it being their main source, and
+        `withBackup`, of `main`, the series a working follower would take over -- the Replace preview's own count.
+        `offline`: a confirmed failure that is the site's own offline notice. `attention` is what the section leads
+        with: `replace` (off or failing, and some series' main source -- Health's replace_source rule), `failingUnused`
+        (Health's `unused` group: a finding on a source no series uses) and `updates` (installed extensions with an
+        update waiting: the engine asked briefly and kept 30 s, else the last extension check's). Ordered: the
+        sources in `attention` first, then by main + followed, most first, then by name; switched-off sources last.
+        The extension engine's own state stays GET /api/admin/extensions/status's.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources, attention]
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, kind, lang, standing, offBy, state, stage, cooldown, offline, main, followed, withBackup, lastTestedAt, icon]
+                      properties:
+                        id: { type: string, description: "'sw:<id>' for an extension source, 'mangadex' or 'mangadex-<code>', a site's slug, a pack's or a built-in's id." }
+                        name: { type: string }
+                        kind: { type: string, enum: [builtin, mangadex, site, extension, pack] }
+                        lang: { type: [string, "null"], description: "What it declares ('all' for an extension in every language); null when it declares none." }
+                        pkgName: { type: [string, "null"], description: Extension sources only. }
+                        standing:
+                          $ref: "#/components/schemas/SourceStanding"
+                        offBy: { type: [string, "null"], enum: [admin, extension, language, null], description: "Where it was switched off: under Sources, in its extension, or by hiding its language." }
+                        state: { type: string, enum: [blocked, failing, slow, empty, inconclusive, untested, off, ok] }
+                        stage: { type: [string, "null"], enum: [search, chapters, pages, images, null] }
+                        cooldown:
+                          oneOf:
+                            - type: object
+                              required: [status, until]
+                              properties:
+                                status: { type: string }
+                                until: { type: [string, "null"], format: date-time }
+                            - type: "null"
+                        offline: { type: boolean }
+                        main: { type: integer, minimum: 0 }
+                        followed: { type: integer, minimum: 0 }
+                        withBackup: { type: integer, minimum: 0 }
+                        lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
+                        icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
+                        address: { type: string, description: A site added by address only. }
+                  attention:
+                    type: object
+                    required: [replace, failingUnused, updates]
+                    properties:
+                      replace: { type: array, items: { type: string } }
+                      failingUnused: { type: array, items: { type: string } }
+                      updates: { type: integer, minimum: 0 }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/sources/{id}/retire:
+    post:
+      tags:
+        - admin
+      summary: "Retire a source no series has as its main source: turn it off, or remove it (since v0.54.0)."
+      operationId: postApiAdminSourcesIdRetire
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused (409
+        `in_use`) while the source is some series' main source: Replace it first (POST /api/admin/sources/find {sourceId,
+        mode: replace}). Otherwise every series' follow of it is dropped with its listing rows, and then `how: off` (the
+        default) switches it off (as POST .../{id}/disable does), and `how: remove` takes a site added by address out of
+        the site list and the registry (`done: removed`), switches an extension's source off in its extension, which
+        unloads it (`done: switched_off`; the extension stays installed -- one package carries every language), and
+        turns anything else -- MangaDex, a built-in, a source pack's -- off, saying so (`done: turned_off`). Audited as
+        `source.retire` {source, how, done, followsDropped}.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                how: { type: string, enum: [off, remove], description: "`off` when left out." }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Retired.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, done, followsDropped]
+                properties:
+                  ok: { type: boolean }
+                  done: { type: string, enum: [turned_off, removed, switched_off] }
+                  followsDropped: { type: integer, minimum: 0, description: Series that followed it and no longer do. }
+        "400":
+          description: "`bad_request`: a `how` it does not know"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "`in_use` with `main` (how many series have it as their main source) and `message`/`messageSaid` (Said, retire.inUse)"
   /api/admin/sources/{id}/test:
     post:
       tags:

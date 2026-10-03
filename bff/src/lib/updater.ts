@@ -6,6 +6,7 @@ import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { persistScan, setBookDates, setBookMeta, DL_ROOT } from './library';
 import { blockedNow, isDisabled, noteStage } from './sourceHealth';
+import { switchedOff } from './sourceStanding';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
@@ -40,7 +41,8 @@ export type UpdateOutcome =
   | 'unrouted'      // no source installed, or the row was never stamped with one
   | 'blocked'       // the source is inside a back-off window
   | 'source_error'  // threw or timed out: the one that used to look like good news
-  | 'renumber_pending'; // held until an admin confirms a renumber (lib/numbering.ts): nothing listed, nothing fetched
+  | 'renumber_pending' // held until an admin confirms a renumber (lib/numbering.ts): nothing listed, nothing fetched
+  | 'off';          // v0.54.0: every source it follows is switched off, so none was asked (not a failure: a choice)
 
 /**
  * The same bound the add path uses (routes/sources.ts). Unbounded, one hung site held the whole sweep -- the
@@ -254,21 +256,25 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   if (s.numbering === 'posting_order') followed = followed.filter((f) => f.source === numberingSource);
   if (!followed.length) return nothing(s.title, 'unrouted');
 
-  // "Fetch newest" does not ask a source the admin has switched off, for anything. The verdict below
-  // gates only the DOWNLOAD on isDisabled, which for the sweep is the right place (a disabled adapter
-  // stays loaded, and the sweep's listing keeps the series page's ghost rows current); but a bulk button
-  // over 500 series on one disabled source would ask that source for 500 listings, 1.5 s apiece, to say
-  // "disabled" 500 times. Filtered out of `followed` here so the listing loop, the source ranks and the
-  // refusal set below all see only sources that may be asked; a series with nothing left is its verdict
-  // with no network call (`asked: false`, so bulkNewest does not pace for it either). A source disabled
-  // between this filter and the verdict still meets the check below.
-  // Reintroduce by dropping this filter: "a disabled source is never asked for its listing" in
-  // updater.int.test.ts counts one listing call.
-  if (opts.newestOnly) {
-    const askable: typeof followed = [];
-    for (const f of followed) if (!(await isDisabled(f.source).catch(() => false))) askable.push(f);
-    if (!askable.length) return { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } };
-    followed = askable;
+  // A source the admin switched off is never asked, by any run, for anything: not for its listing, and not for a
+  // chapter (v0.54.0). Until then only "Fetch newest" filtered it here, and the sweep and Check asked it on every
+  // visit and downloaded its chosen copies -- while Health, the Turn off confirmation and the Sources page all said
+  // it was no longer asked. The ghost-rows reason that kept it did not hold: a listing nobody answered is kept
+  // anyway (stale beats empty, below), its rows cannot be fetched while it is off (the fetch route refuses a
+  // switched-off source), and asking an offline site behind the Cloudflare solver costs up to 90 s a series -- for
+  // aqua's 195 series, hours a sweep, each ending `source_error`, so every night read unhealthy. Filtered out of
+  // `followed` here so the listing loop, the source ranks, the refusal set and the parts rules below all see only
+  // sources that may be asked. A series with nothing left is said so with no network call (`asked: false`, no
+  // stamp, its listing standing): "Fetch newest"'s `disabled` verdict, and the sweep's own outcome `off`. A source
+  // switched off after this filter is not downloaded from either (lib/chapterFallback.ts, the chosen copy).
+  // Reintroduce the newestOnly-only filter: "the sweep never asks a switched-off main" in updater.int.test.ts finds
+  // the main listed. Reintroduce by keeping an all-off series' sources: "a series whose every source is off" reads
+  // source_error after one listing call.
+  const off = await switchedOff(followed.map((f) => f.source));
+  if (off.size) {
+    const on = followed.filter((f) => !off.has(f.source));
+    if (!on.length) return opts.newestOnly ? { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } } : nothing(s.title, 'off');
+    followed = on;
   }
 
   // A throw and an empty list are NOT the same answer, and collapsing them is what made a broken source
@@ -634,16 +640,31 @@ export async function runUpdateAll(opts: {
   const sweepMax = opts.sweepMax ?? SWEEP_MAX;
   // Rows never checked sort first, so the first sweep after this change visits in the old order.
   const order = 'ORDER BY s.source_checked_at ASC NULLS FIRST, s.latest_mtime DESC';
+  // What each series is asked through, for its queue below: its followers in follow order, and its numbering.
+  const routing = `ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id ORDER BY ss.created_at, ss.source_id) AS extra,
+    s.numbering, s.numbering_source`;
+  type SweepRow = { id: string; source_id: string | null; title: string; extra: string[] | null; numbering: string | null; numbering_source: string | null };
   const rows = opts.onlyFavorites
-      ? await q<{ id: string; source_id: string | null; title: string }>(`SELECT DISTINCT s.id, s.source_id, s.title, s.source_checked_at, s.latest_mtime FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
-      : await q<{ id: string; source_id: string | null; title: string }>(`SELECT s.id, s.source_id, s.title FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.source_checked_at, s.latest_mtime, ${routing} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
+      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, ${routing} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
   const card = opts.card;
   const titles = new Map(rows.map((r) => [r.id, r.title] as const));
   if (card) card.total = rows.length;
 
+  // One queue per source the series is ASKED through: the first it follows that is loaded and not switched off, in
+  // updateSeries's own order (the main source, then the followers; the numbering source alone under posting order).
+  // Keyed on the main source alone, a main that is never asked -- switched off, or gone -- still decided its series'
+  // parking and un-parking by its own cooldown, and one series blocked on its follower parked every series of the
+  // dead main behind it (v0.54.0: aqua off, 195 series). Reintroduce by keying on `source_id`: "queues follow the
+  // source a series is asked through" in updater.int.test.ts finds the series on the fine follower skipped.
+  const offNow = await switchedOff(rows.flatMap((r) => [r.source_id ?? '', ...(r.extra ?? [])]));
+  const askedThrough = (r: SweepRow): string => {
+    const route = r.numbering === 'posting_order' ? [r.numbering_source ?? r.source_id] : [r.source_id, ...(r.extra ?? [])];
+    return route.find((id): id is string => !!id && !!getSource(id) && !offNow.has(id)) ?? (r.source_id || '');
+  };
   const queues = new Map<string, string[]>();
   for (const r of rows) {
-    const k = r.source_id || '';
+    const k = askedThrough(r);
     if (!queues.has(k)) queues.set(k, []);
     queues.get(k)!.push(r.id);
   }
@@ -664,7 +685,7 @@ export async function runUpdateAll(opts: {
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
-  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, threw: 0, skipped: 0 };
+  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 
@@ -697,7 +718,9 @@ export async function runUpdateAll(opts: {
       if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
       if (r.diskFull) { stopped = 'disk'; break sweep; }
       if (r.outcome === 'blocked') parked.add(src);
-      await new Promise((res) => setTimeout(res, 1500));
+      // The pause is for the sources' sake: a series no source was asked about (gone, unrouted, every source in a
+      // cooldown or switched off) cost them nothing, as bulk Fetch newest already reads it. A throw counts as asked.
+      if ((r as { asked?: boolean }).asked !== false) await new Promise((res) => setTimeout(res, 1500));
     }
     if (!progressed) {
       // Only parked queues remain. Ask once whether any cooldown has lapsed; if none has, the sweep is over.

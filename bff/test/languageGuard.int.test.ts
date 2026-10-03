@@ -295,3 +295,21 @@ test('names are borrowed in the series\' own language, stated, not its main sour
   assert.deepEqual([b3.chapter_name, b3.chapter_name_source], ['Nombre 3', ES]);
   assert.equal(searches[EN2] ?? 0, 0, 'an English source was asked for a Spanish series\' names');
 });
+
+test('Replace never promotes a follower in another language: it is passed over, and the series is searched for', { skip }, async () => {
+  // v0.54.0: an English series that somehow follows the Spanish source (a follow from before the guard) whose main source
+  // is replaced. Reintroduce by dropping the language test in lib/replaceSource.ts rankFollowers: the Spanish follower
+  // becomes the series' main source.
+  await series('rep');
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [S('rep'), ES, `${ES}|s`]);
+  // The series' own source is switched off; the other English one carries it.
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ($1, true), ($2, true)`, [EN, SITE]);
+  const r = await app.inject({ method: 'POST', url: '/api/admin/sources/find', headers: auth, payload: { sourceId: EN, mode: 'replace' } });
+  assert.equal(r.statusCode, 202, r.body);
+  await findLib.findSettled();
+  const res = (await app.inject({ method: 'GET', url: '/api/admin/sources/find', headers: auth })).json().run.results[0];
+  assert.deepEqual(res.skipped, [{ sourceId: ES, name: `Name ${ES}`, why: 'language' }], 'the Spanish follower is passed over');
+  assert.deepEqual([res.promoted?.to, res.promoted?.via], [EN2, 'search'], 'and the series is searched for, and moved to the English source');
+  assert.equal((await q('SELECT source_id FROM lib_series WHERE id = $1', [S('rep')]))[0].source_id, EN2);
+  assert.equal(searches[ES] ?? 0, 0, 'the Spanish source was never searched');
+});

@@ -155,7 +155,7 @@ test("Health says a series' MangaDex language is switched off, and where to swit
   const off = (await frozenSeries()).items.find((i: any) => i.seriesId === SERIES);
   assert.ok(off, 'a series whose language is off is not listed as frozen');
   assert.deepEqual(off.detailSaid, [{ code: 'frozen.mangadexOff', params: { n: 3, lang: 'es-419' } }]);
-  assert.equal(off.detail, '3 chapters; MangaDex in Latin American Spanish is switched off in Admin → Providers');
+  assert.equal(off.detail, '3 chapters; MangaDex in Latin American Spanish is switched off in Admin → Sources');
   // Switched back on, it updates again: nothing frozen.
   await patch({ mangadexLangs: ['es-419'] });
   assert.equal((await frozenSeries()).items.some((i: any) => i.seriesId === SERIES), false, 'switched back on, it is still frozen');

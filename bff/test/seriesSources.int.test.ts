@@ -263,3 +263,31 @@ test('unfollowing removes the row, and a second unfollow is 404', { skip }, asyn
   assert.equal((await unfollow(RICH)).statusCode, 404);
   assert.equal((await q('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [SERIES]))[0].n, 0);
 });
+
+test("a fill plan made before a switch cannot follow the series' own main source", { skip }, async () => {
+  // v0.54.0: Make main (lib/mainSource.ts) can make a candidate of a plan the series' main source while the plan lives
+  // (five minutes). The plan only marks the main it saw, so its old candidate passed. Reintroduce by checking
+  // `cand.pinned` alone in the follow route: 200, and a follower row naming the main source.
+  const first = await scan();
+  const rich = first.candidates.find((c: any) => c.source === RICH);
+  assert.equal((await follow({ planId: first.planId, source: RICH, sourceSeriesId: rich.sourceSeriesId })).statusCode, 200);
+  const stale = await scan();
+  // The follow's own listing refresh is a run inside the series, which a switch waits for (`busy`).
+  const { runsInside } = await import('../src/lib/updater');
+  const quiet = async () => { for (let i = 0; i < 500 && runsInside(SERIES) > 0; i++) await new Promise((r) => setTimeout(r, 10)); };
+  await quiet();
+  const switched = await app.inject({ method: 'POST', url: `/api/admin/series/${SERIES}/main-source`, headers: auth, payload: { sourceId: RICH } });
+  assert.equal(switched.statusCode, 200, switched.body);
+  assert.deepEqual(brief(switched.json().sources), [[RICH, true], [POOR, false]], 'PREMISE: the follower is the main source now');
+  try {
+    const r = await follow({ planId: stale.planId, source: RICH, sourceSeriesId: rich.sourceSeriesId });
+    assert.equal(r.statusCode, 409, r.body);
+    assert.equal(r.json().error, 'is_primary');
+    assert.equal((await q('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1 AND source_id = $2', [SERIES, RICH]))[0].n, 0,
+      'no follower row names the main source');
+  } finally {
+    // Back as it was, for whatever runs after.
+    await quiet();
+    await app.inject({ method: 'POST', url: `/api/admin/series/${SERIES}/main-source`, headers: auth, payload: { sourceId: POOR } });
+  }
+});

@@ -65,6 +65,9 @@ import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
+import { switchMainSource } from '../lib/mainSource';
+import { mainUses, retireSource } from '../lib/retireSource';
+import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
@@ -1082,6 +1085,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   // a JSON file; the source pack's custom plugin instantiates the adapters from it on reload. ----
   // readSites/writeSites moved to lib/sources/customSites so the watchdog can follow a moved site too.
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
+  /** A source some series still has as its main source cannot be retired or removed (v0.54.0): how many, in words. */
+  const inUse = (main: number) => {
+    const said = say('retire.inUse', { n: main });
+    return { error: 'in_use', main, message: said.text, messageSaid: saidOf(said) };
+  };
 
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
   app.post('/api/admin/sources/custom', async (req, reply) => {
@@ -1140,8 +1148,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const src = getSource(id);
     return reply.send({ ok: true, id, base: site.base, smoke: src ? await smokeTest(src) : null });
   });
-  app.delete('/api/admin/sources/custom/:id', async (req) => {
+  // Refused while the site is some series' main source (v0.54.0): it was removed at once, with no check, and every series
+  // from it froze -- "no longer installed". Replace moves them first. Reintroduce by dropping the guard: "the custom
+  // site's delete is refused while it is in use" in retireSource.int.test.ts removes it.
+  app.delete('/api/admin/sources/custom/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const main = await mainUses(id);
+    if (main > 0) return reply.code(409).send(inUse(main));
     await writeSites((await readSites()).filter((s) => s.id !== id));
     await reloadAll();
     await logAudit('source.custom_remove', { userId: userIdOf(req), detail: { id }, req });
@@ -1397,7 +1410,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });
     const cand = plan.candidates.find((c) => c.source === source && c.sourceSeriesId === sourceSeriesId);
     if (!cand) return reply.code(400).send({ error: 'not_in_plan', message: 'That source was not one of the options.' });
-    if (cand.pinned) return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    // The plan's own mark, and the series' main source NOW (v0.54.0): a plan lives five minutes, and a Make main in
+    // between can make one of its candidates the main source -- following that would list every chapter twice.
+    // Reintroduce by checking `cand.pinned` alone: "a fill plan made before a switch cannot follow the series' own
+    // main source" in seriesSources.int.test.ts is answered 200, with a row naming the main.
+    if (cand.pinned || source === (await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]))?.source_id) {
+      return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    }
     // The one rule, shared with the add-time auto-follow (lib/fill.ts followable(): coverage at or over
     // MIN_COVERAGE with a verdict that says the numbering lines up), so the two paths cannot disagree
     // about what may be followed.
@@ -1466,6 +1485,34 @@ export default async function adminRoutes(app: FastifyInstance) {
     // refreshes the listing itself before it picks a copy.
     void updateSeries(id, 0).catch(() => {});
     return { ok: true, sources: list };
+  });
+
+  /**
+   * Make a source the series follows its main source (v0.54.0, lib/mainSource.ts): the Sources sheet's Make main.
+   * Body `{sourceId, old?}`: `old` is what becomes of the old main -- `auto` (the default) keeps it as the last
+   * follower while it still carries the series (usable or cooling), `keep` and `drop` decide. 200 `{ok, from, to, old:
+   * kept|dropped, langPinned?, sources}`; 404 `not_found`; 409 with the refusal's code, its English and its said code
+   * (`is_main`, `not_followed`, `posting_order`, `renumber_pending`, `busy`, `source_unavailable`, `moved`, and
+   * `language_differs` with `edition {of, lang, existing?}`, as the follow route answers it).
+   */
+  app.post('/api/admin/series/:id/main-source', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ sourceId: z.string().min(1).max(200), old: z.enum(['auto', 'keep', 'drop']).optional() }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Name the source ({sourceId}), and optionally what becomes of the old main ({old}).' });
+    const out = await switchMainSource(id, b.data.sourceId, {
+      old: b.data.old ?? 'auto', ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), via: 'manual', req,
+    });
+    if ('refused' in out) {
+      if (out.refused === 'not_found' || !out.said) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(409).send({
+        error: out.refused, message: out.said.text, messageSaid: saidOf(out.said), ...(out.edition ? { edition: out.edition } : {}),
+      });
+    }
+    // Read before the refresh starts, as the follow's answer is (above): the switch is not a check.
+    const list = await seriesSourcesFor(id);
+    // The listing again, through the new main: its chapters show on the series page now, not at the next sweep.
+    void updateSeries(id, 0).catch(() => {});
+    return { ok: true, from: out.from, to: out.to, old: out.old, ...(out.langPinned ? { langPinned: out.langPinned } : {}), sources: list };
   });
 
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
@@ -3899,6 +3946,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
   app.get('/api/admin/sources/check', async () => checkProgress());
 
+  /**
+   * Every source the server knows, of every kind, in one answer (v0.54.0, lib/sourcesOverview.ts): the one Sources
+   * section reads it. `attention` is what it leads with: the sources to Replace, the failing ones nothing uses, and how
+   * many extensions have an update waiting. The extension engine's own state stays GET /api/admin/extensions/status's.
+   */
+  app.get('/api/admin/sources/overview', async () => sourcesOverview());
+
   const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -3919,6 +3973,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     } finally {
       testing.delete(id);
     }
+  });
+
+  /**
+   * Retire a source no series has as its main source (v0.54.0, lib/retireSource.ts): its follows are dropped with their
+   * listing rows, then `how: 'off'` (the default) switches it off, and `remove` takes a site added by address out of
+   * the list, switches an extension's source off in the extension, and turns anything else (MangaDex, a built-in, a
+   * pack) off -- `done` says which: `turned_off`, `removed` or `switched_off`. 409 `in_use` {main} while it is some
+   * series' main source: Replace it first. Its own route, which Fastify ranks above `/:id/:action` as it ranks `/test`.
+   */
+  app.post('/api/admin/sources/:id/retire', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ how: z.enum(['off', 'remove']).optional() }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'How to retire it: {how: "off" | "remove"}.' });
+    const r = await retireSource(id, { how: b.data.how ?? 'off', userId: userIdOf(req), req });
+    if ('inUse' in r) return reply.code(409).send(inUse(r.inUse));
+    return r;
   });
 
   app.post('/api/admin/sources/:id/:action', async (req, reply) => {

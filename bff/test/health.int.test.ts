@@ -291,7 +291,7 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
       const r = await detail(engine, 'Engine Fixture');
       assert.match(r.detail, /^12 chapters; its source sw:health-engine can’t be reached because the extension engine is off$/, `the engine is the reason (${engine})`);
       assert.doesNotMatch(r.detail, /source limit/);
-      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back\. /);
+      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back\. /);
     }
     assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
     const up = await detail('up', 'Engine Fixture');
@@ -1347,5 +1347,117 @@ test("the solver's newer release is named with one v", { skip: DSN ? false : 'se
     globalThis.fetch = realFetch;
     resetSolverVersionCache();
     forgetSolverPing();
+  }
+});
+
+// ---- v0.54.0: Replace, where a main source is off or failing ---------------------------------------------------
+//
+// aqua went offline and was switched off while it stayed the main source of 195 series: Source health offered Find other
+// sources, which adds followers and never moves a main source, and "Series that can no longer update" read "Every series
+// has a working source" -- only a source that was not loaded counted.
+
+/** A loaded stub source for these tests, a failure record at one stage, and a series on a main with followers. */
+const stubSource = (id: string) => ({ id, name: `Name ${id}`, search: async () => [], getSeries: async () => null,
+  listChapters: async () => [], getPageUrls: async () => [], latest: async () => [] });
+const failedAt = (stage: string, kind = 'error') =>
+  JSON.stringify({ [stage]: { failAt: new Date().toISOString(), failBy: 'test', kind, error: kind === 'site_offline' ? 'site_offline: the site says it is offline' : 'HTTP 500' } });
+
+test("a source that is off or failing and is some series' main offers Replace; a cooldown or a search-only failure does not", { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // Reintroduce by dropping `replaceHere` from sourceTrouble: the chip is missing on the off and the failing rows.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { registerAdapter } = await import('../src/lib/sources');
+  await migrate();
+  const IDS = ['hr-off', 'hr-fail', 'hr-cool', 'hr-search', 'hr-folonly'];
+  for (const id of IDS) registerAdapter(stubSource(id) as any);
+  const SERIES = ['s_hr_off', 's_hr_fail', 's_hr_cool', 's_hr_search'];
+  const clean = async () => {
+    await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [SERIES]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
+  };
+  await clean();
+  for (const id of SERIES) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id) VALUES ($1, 'test', $1, $1, 3, $2, 'x')`,
+      [id, id.replace('s_hr_', 'hr-')]);
+  }
+  // A failing source that is only ever a follower: its series do not need a new main source.
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ('s_hr_off', 'hr-folonly', 'x')`);
+  await q(`INSERT INTO source_health (source_id, status, disabled, blocked_until, stages) VALUES
+             ('hr-off', 'ok', true, NULL, '{}'::jsonb),
+             ('hr-fail', 'ok', false, NULL, $1::jsonb),
+             ('hr-cool', 'rate_limited', false, now() + interval '1 hour', '{}'::jsonb),
+             ('hr-search', 'ok', false, NULL, $2::jsonb),
+             ('hr-folonly', 'ok', false, NULL, $3::jsonb)`, [failedAt('chapters'), failedAt('search'), failedAt('pages')]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
+    const row = (id: string) => c.items.find((i: any) => i.sourceId === id);
+    assert.deepEqual(row('hr-off').actions, ['test', 'replace_source', 'find_sources'], 'a switched-off main source offers Replace');
+    assert.deepEqual(row('hr-fail').actions, ['test', 'disable', 'replace_source', 'find_sources', 'ignore'], 'a failing main source offers Replace');
+    assert.equal(row('hr-fail').findSeries, 1, 'over the series whose main source it is');
+    assert.deepEqual(row('hr-cool').actions, ['test', 'unblock', 'disable', 'find_sources', 'ignore'], 'a cooldown does not offer Replace: it ends by itself');
+    assert.deepEqual(row('hr-search').actions, ['test', 'disable', 'find_sources', 'ignore'], 'a search failure stops no update: no Replace');
+    assert.equal(row('hr-search').state, 'failing', 'PREMISE: it reads failing');
+    assert.deepEqual(row('hr-folonly').actions, ['test', 'disable', 'ignore'], 'a source no series has as its main source has nothing to replace');
+  } finally {
+    await clean();
+  }
+});
+
+test('a series whose loaded main is off or failing, with no working follower, can no longer update; one with a working follower is reference; a cooling main is not listed', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // Reintroduce by dropping the `OR ls.source_id = ANY($1)` clause from frozenSeries: the series on the switched-off main
+  // is absent. Reintroduce "any loaded follower counts" (drop the standing test on followers): the series whose follower
+  // is switched off reads as covered.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
+  const { registerAdapter } = await import('../src/lib/sources');
+  await migrate();
+  const IDS = ['fz-off', 'fz-fail', 'fz-cool', 'fz-ok', 'fz-offfol', 'fz-offline'];
+  for (const id of IDS) registerAdapter(stubSource(id) as any);
+  const SERIES: Array<[string, string, string[]]> = [
+    ['s_fz_off', 'fz-off', []], ['s_fz_failoff', 'fz-fail', ['fz-offfol']], ['s_fz_failok', 'fz-fail', ['fz-ok']],
+    ['s_fz_cool', 'fz-cool', []], ['s_fz_offline', 'fz-offline', []], ['s_fz_offcool', 'fz-off', ['fz-cool']],
+  ];
+  const clean = async () => {
+    await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [SERIES.map(([id]) => id)]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
+  };
+  await clean();
+  for (const [id, main, fols] of SERIES) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id, auto_update)
+             VALUES ($1, 'test', $1, $1, 4, $2, 'x', true)`, [id, main]);
+    for (const f of fols) await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'y')`, [id, f]);
+  }
+  await q(`INSERT INTO source_health (source_id, status, disabled, blocked_until, stages) VALUES
+             ('fz-off', 'ok', true, NULL, '{}'::jsonb),
+             ('fz-fail', 'ok', false, NULL, $1::jsonb),
+             ('fz-cool', 'rate_limited', false, now() + interval '1 hour', '{}'::jsonb),
+             ('fz-offfol', 'ok', true, NULL, '{}'::jsonb),
+             ('fz-offline', 'ok', false, NULL, $2::jsonb)`, [failedAt('pages'), failedAt('search', 'site_offline')]);
+  try {
+    const c = await frozenSeries(noIgnores(), 'up');
+    await assertSaid([c]);
+    const item = (id: string) => c.items.find((i: any) => i.seriesId === id);
+    assert.ok(item('s_fz_off'), 'the series on the switched-off main is listed');
+    assert.equal(item('s_fz_off').info, undefined, 'and it is a finding');
+    assert.equal(item('s_fz_off').detail, '4 chapters; its source fz-off is switched off');
+    assert.deepEqual([item('s_fz_off').sourceId, item('s_fz_off').actions, item('s_fz_off').findSeries],
+      ['fz-off', ['replace_source', 'find_sources', 'ignore'], 2], 'Replace first, over every series whose main source it is');
+    assert.ok(item('s_fz_failoff'), 'a series whose only follower is switched off');
+    assert.equal(item('s_fz_failoff').info, undefined, 'a switched-off follower carries nothing: still a finding');
+    assert.equal(item('s_fz_failoff').detail, '4 chapters; its source fz-fail is failing');
+    assert.equal(item('s_fz_offline').detail, '4 chapters; its source fz-offline says it is offline', "the site's own offline notice, said so");
+    assert.equal(item('s_fz_failok').info, true, 'a working follower carries it: reference');
+    assert.equal(item('s_fz_failok').detail, 'primary fz-fail failing; still following Name fz-ok');
+    assert.deepEqual([item('s_fz_failok').sourceId, item('s_fz_failok').actions], ['fz-fail', ['replace_source']], 'its follower can be made the main source');
+    assert.equal(item('s_fz_offcool').info, true, 'a follower in a cooldown still carries a series');
+    assert.equal(item('s_fz_offcool').detail, 'primary fz-off switched off; still following Name fz-cool');
+    assert.equal(item('s_fz_cool'), undefined, 'a main that is only cooling down is not listed');
+    assert.equal(c.status, 'warn');
+  } finally {
+    await clean();
   }
 });

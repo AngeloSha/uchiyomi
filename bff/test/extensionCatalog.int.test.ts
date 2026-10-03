@@ -129,6 +129,37 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
     });
 
     /**
+     * v0.54.0: the sources overview (GET /api/admin/sources/overview) leads with the extensions that have an update
+     * waiting -- installed ones only, the engine's own word kept half a minute (an open section polls), and with the
+     * engine away what the last extension check left waiting. Reintroduce by counting every extension with an update
+     * (dropping `e.installed`): it reads 2. By not falling back: with the engine away it reads 0.
+     */
+    await t.test('the sources overview counts the installed extensions with an update waiting', async () => {
+      const { forgetUpdates } = await import('../src/lib/sourcesOverview');
+      const [{ last: lastWas }] = await q<{ last: unknown }>('SELECT extension_last_result AS last FROM server_settings WHERE id = 1');
+      assert.equal(fake.extension(made.extensions[3].pkgName).installed, false, 'PREMISE: one of the two is not installed');
+      fake.extension(PKG.mangaBall).hasUpdate = true;
+      fake.extension(made.extensions[3].pkgName).hasUpdate = true;
+      forgetUpdates();
+      try {
+        assert.equal((await get('/api/admin/sources/overview')).attention.updates, 1, 'installed extensions with an update waiting');
+        fake.extension(PKG.mangaBall).hasUpdate = false;
+        assert.equal((await get('/api/admin/sources/overview')).attention.updates, 1, 'the engine\'s answer is kept half a minute');
+        forgetUpdates();
+        await q('UPDATE server_settings SET extension_last_result = $1::jsonb WHERE id = 1',
+          [JSON.stringify({ updatesAvailable: ['Alpha', 'Beta', 'Gamma'], updated: [{ name: 'Beta', from: '1', to: '2' }] })]);
+        await fake.stop();
+        assert.equal((await get('/api/admin/sources/overview')).attention.updates, 2, 'with the engine away, what the last check left waiting');
+      } finally {
+        await fake.start();
+        fake.extension(PKG.mangaBall).hasUpdate = false;
+        fake.extension(made.extensions[3].pkgName).hasUpdate = false;
+        forgetUpdates();
+        await q('UPDATE server_settings SET extension_last_result = $1::jsonb WHERE id = 1', [lastWas == null ? null : JSON.stringify(lastWas)]);
+      }
+    });
+
+    /**
      * Reintroduce the whole catalogue's count (`all.filter(...)` for hiddenAdult): a search that matches one 18+
      * extension says every 18+ extension in the repository is hidden, and "counts the 18+ extensions the search found"
      * fails.

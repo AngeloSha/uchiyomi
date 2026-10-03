@@ -205,10 +205,10 @@ export async function postingOrderSeries(seriesId: string): Promise<boolean> {
 /**
  * The sentence every refusal gives. Another site numbers the same posts its own way -- usually the way this
  * series was renumbered to get away from -- so its chapter 20 is not ours, and nothing that lines two sources
- * up by number (a follower, a hunt, a borrowed name, a fill from elsewhere) can work.
+ * up by number (a follower, a hunt, a borrowed name, a fill from elsewhere) can work. Its words are a said code since
+ * v0.54.0 (lib/said.ts `numbering.postingRefusal`), so a refusal that names it can carry the code beside the English.
  */
-export const POSTING_ORDER_REFUSAL =
-  'This series is numbered by posting order, so another source’s chapter numbers do not line up with it.';
+export const POSTING_ORDER_REFUSAL = say('numbering.postingRefusal').text;
 
 // ---- deciding --------------------------------------------------------------------------------------------
 
