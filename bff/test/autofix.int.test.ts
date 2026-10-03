@@ -510,6 +510,61 @@ test('Fix everything: one run over a library with something wrong on every card'
   });
 });
 
+test("the owner's damage is undone by the next run: a series on a source failing at its page lists moves to the source that only asked for room", { skip }, async () => {
+  // v0.55.1, as the owner's library stood after the first run (2026-10-03): Mangakakalot answered 429 at its images and
+  // was Replaced, three of its series went to AllManga -- failing at its page lists ("Timed out waiting for WebView after
+  // 20s", 39 in a row) while its search and chapter lists answer -- and Mangakakalot was dropped from them. The next run
+  // must Replace AllManga, find the series on Mangakakalot by search, and move them there: a rate limit is a cooldown
+  // (lib/sourceStanding.ts), and a cooling source carries a series (lib/findSources.ts). Reintroduce v0.55.0's reading
+  // of a rate limit as a failure (currentFailures in lib/sourceEvidence.ts): Mangakakalot cannot take the series, which
+  // stays on AllManga -- and Mangakakalot is a Replace target itself.
+  const AM = 'af-allmanga', KK = 'af-kakalot';
+  const barb = 's_af_barb', kk = 's_af_kk';
+  const TB = 'Fix Barbarian Adventure', TK = 'Fix Kakalot Own';
+  catalog.set(AM, new Map([[TB, range(1, 5)]]));
+  catalog.set(KK, new Map([[TB, range(1, 5)], [TK, range(1, 5)]]));
+  sources.registerAdapter({
+    ...adapter(AM),
+    async getPageUrls() { throw new Error('suwayomi: Timed out waiting for WebView after 20s'); },
+  } as any);
+  sources.registerAdapter(adapter(KK) as any);
+  const at = new Date().toISOString();
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error, stages) VALUES
+             ($1, 'ok', 0, NULL, NULL, $2::jsonb),
+             ($3, 'rate_limited', 5, now() - interval '10 minutes', '0/32 pages downloaded (HTTP 429)', $4::jsonb)`, [
+    AM, JSON.stringify({
+      search: { okAt: at, okBy: 'test', streak: 0 }, chapters: { okAt: at, okBy: 'test', streak: 0 },
+      pages: { failAt: at, failBy: 'test', since: new Date(Date.now() - 86_400_000).toISOString(), streak: 39, kind: 'error', error: 'suwayomi: Timed out waiting for WebView after 20s' },
+    }),
+    KK, JSON.stringify({ images: { failAt: at, failBy: 'traffic', streak: 5, kind: 'error', error: '0/32 pages downloaded (HTTP 429)' } }),
+  ]);
+  for (const [id, title, src] of [[barb, TB, AM], [kk, TK, KK]]) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+             VALUES ($1,'T!af',$2,$3,0,$4,$5,$6,true)`, [id, title, `T!af/${id}`, LIB, src, `${src}::${title}`]);
+    for (const n of range(1, 5)) {
+      const file = `T!af/${id}/Chapter ${n}.cbz`;
+      cbz(join(DL, file), 3, title);
+      await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, pages_checked_at, root, source_id, mtime)
+               VALUES ($1,$2,'T!af',$3,$4,$5,3,now(),$6,$7,1000)`, [`b_${id}_${n}`, id, file, n, `Chapter ${n}`, DL, src]);
+    }
+  }
+  try {
+    const started = autofix.startAutofix(adminId);
+    assert.ok('runId' in started);
+    await autofix.autofixSettled();
+    assert.equal((await autofix.autofixRun((started as any).runId))?.status, 'done');
+    assert.equal((await seriesRow(barb)).source_id, KK, 'the series moved to the source that only asked for room');
+    assert.equal((await seriesRow(kk)).source_id, KK, 'which keeps its own series');
+    assert.equal((await health(KK)).disabled, false, 'and is never turned off');
+    assert.equal((await health(AM)).disabled, true, 'the source failing at its page lists is Replaced, and off once nothing is left on it');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[barb, kk]]).catch(() => {});
+    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[AM, KK]]).catch(() => {});
+    sources.unregisterAdapter(AM);
+    sources.unregisterAdapter(KK);
+  }
+});
+
 test('one Fix everything at a time, and never beside a repair, a Find or a sweep', { skip }, async () => {
   // Reintroduce by dropping a refusal: busyWith() in lib/autofix.ts (each `running` below), runtime.autofixing in
   // repair.ts runRepair ("a repair refuses beside it") or in findSources.ts startFind ("so does a Find").
