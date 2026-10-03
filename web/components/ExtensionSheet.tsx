@@ -1,6 +1,6 @@
 'use client';
-// One installed extension (v0.53.0): what it is, its languages with a switch each and how each is doing, its
-// settings, and Remove -- everything about one extension in one place, opened from its row in Admin → Extensions.
+// One installed extension (v0.53.0): what it is, its languages with a switch each, its settings, and Remove --
+// everything about one extension in one place, opened from its row in Admin → Extensions.
 //
 // THE LANGUAGES ARE SWITCHES. An extension carries one source per language, and which of them are on is the choice
 // people make most here after installing (#121: a language select in the old settings sheet looked like that choice
@@ -8,8 +8,12 @@
 // on the per-source route would hold the switch for most of a minute. A switch by id never changes the languages
 // hidden in every extension (the Languages sheet's standing choice), so it says when its language is one of those.
 //
-// The health beside each language is Providers' own reading -- the registry's status with #115's confirmed failures
-// over it -- and "over the source limit" for a source switched on that search cannot reach (SUWAYOMI_MAX_SOURCES).
+// Round 2 says less: a language's row has a line under its name only for a problem -- Providers' own reading (its
+// status with #115's confirmed failures over it), "over the source limit" for a source switched on that search
+// cannot reach (SUWAYOMI_MAX_SOURCES), or hidden in every extension -- because "Turned off" and "Healthy" under every
+// row said what its switch says. With none on, the Languages header offers Turn on its sources in place of an amber
+// box; the limit across all extensions is said from 80 % of it; Settings is a disclosure, closed; and Remove sits in
+// the footer beside the way to test the sources under Providers.
 //
 // Remove asks first, inside the sheet: a ConfirmDialog is z-50 and a Sheet z-60 in one stacking context, so a dialog
 // opened over this sheet would paint underneath it and could not be tapped (ExtensionSettings.tsx asks the same way).
@@ -20,8 +24,8 @@ import { t as tr } from '@/lib/i18n';
 import { sentenceGap } from '@/lib/jobs';
 import { adultShown } from '@/lib/adult';
 import {
-  extLanguageName, langTag, languagesOnText, needsTurningOn, overLimitText, sourceHealth, sourcesOnText,
-  type ExtSource, type ExtStatus, type InstalledExt,
+  extLanguageName, extLanguagesText, langTag, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn, overLimitText,
+  sourceHealth, type ExtSource, type ExtStatus, type InstalledExt,
 } from '@/lib/extensions';
 import type { AdminSourceRow, SrcStatus } from '@/lib/providerGroups';
 import { Sheet } from '@/components/ui';
@@ -29,9 +33,10 @@ import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
-import { StatusGlyph, StatusMark } from '@/components/StatusMark';
+import { StatusMark } from '@/components/StatusMark';
+import { IcChevronRight } from '@/components/icons';
 import { ExtensionSettingsBody } from '@/components/ExtensionSettings';
-import { Busy, ExtIcon, ExtTags, busyKey } from '@/components/ExtensionBits';
+import { Busy, ExtIcon, ExtTags, Facts, busyKey } from '@/components/ExtensionBits';
 import type { ExtActions } from '@/components/ExtensionsPanel';
 
 const seriesText = (n: number) => (n === 1 ? tr('1 series') : tr('{n} series', { n }));
@@ -69,12 +74,16 @@ export function ExtensionSheet({ ext, status, hiddenLangs, actions, onClose, onL
   // opens the moment an install answers may draw before the extension's sources are listed.
   const [picked, setSettingsOf] = useState<string | null>(null);
   const settingsOf = picked ?? (ext.sources.find((s) => s.enabled) ?? ext.sources[0])?.id ?? null;
+  // Closed until asked for: an extension's settings are the rarest thing done here, and open they were most of the
+  // sheet under its languages.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const busy = actions.busy[ext.pkgName];
   const off = needsTurningOn(ext);
   const over = overLimitText(status.skipped, status.cap);
   const across = tr('Across all extensions: {n} of {max} sources on.', { n: status.enabled ?? 0, max: status.cap ?? 0 });
   const name = `⁨${ext.name}⁩`;
+  const settingsLang = ext.sources.length > 1 ? ext.sources.find((s) => s.id === settingsOf)?.lang : undefined;
 
   /** One language on or off: that source alone, by id. The switch is the list's, so it waits for the list. */
   const toggle = async (s: ExtSource, on: boolean) => {
@@ -95,92 +104,30 @@ export function ExtensionSheet({ ext, status, hiddenLangs, actions, onClose, onL
     if (r) onClose();
   };
 
+  const facts = [ext.versionName ? `v${ext.versionName}` : null, extLanguagesText(ext), ext.used > 0 ? seriesText(ext.used) : null];
   return (
-    <Sheet title={name} onClose={onClose} overBottomNav>
-      <div className="space-y-5 pb-3" data-ext-sheet={ext.pkgName}>
-        <div className="flex items-center gap-3">
-          <ExtIcon url={ext.iconUrl} name={ext.name} size={48} />
-          <div className="min-w-0 flex-1">
-            <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-fog-400">
-              <span>{[ext.versionName ? `v${ext.versionName}` : null, extLanguageName(ext.lang)].filter(Boolean).join(' · ')}</span>
-              <ExtTags e={ext} />
-            </p>
-            {ext.used > 0 && <p className="mt-0.5 text-[12px] text-fog-500">{seriesText(ext.used)}</p>}
-          </div>
-          {ext.hasUpdate && (
-            <button type="button" onClick={() => void actions.act(ext, 'update')} disabled={!!busy} data-ext-update
-              className={`btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100 ${busyKey(busy === 'update')}`}>
-              {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
-            </button>
-          )}
-        </div>
-
-        {off && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5" data-ext-sheet-off>
-            <StatusGlyph tone="warn" />
-            <p className="min-w-0 flex-1 basis-40 text-[12px] leading-snug text-amber-200">{tr('None of its sources are on')}</p>
-            <button type="button" onClick={() => void actions.act(ext, 'enable')} disabled={!!busy} className={`btn-key btn-key-primary ${busyKey(busy === 'enable')}`} data-ext-turn-on>
-              {busy === 'enable' ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on its sources')}
-            </button>
-          </div>
-        )}
-
-        <section aria-labelledby="ext-sheet-langs">
-          <div className="flex items-baseline justify-between gap-3">
-            <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Languages')}</h3>
-            {ext.sources.length > 0 && <span className="text-[12px] tabular-nums text-fog-500">{languagesOnText(ext.on, ext.sources.length)}</span>}
-          </div>
-          <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr('Each language is its own source; turn on the ones you read.')}</p>
-          {!ext.sources.length ? (
-            <p className="py-3 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
-          ) : (
-            <ul className="mt-2 divide-y divide-ink-800/70 overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-900/40" data-ext-langs>
-              {ext.sources.map((s) => {
-                const h = sourceHealth(s, reg, rows);
-                const hidden = !!s.lang && hiddenLangs.includes(s.lang);
-                return (
-                  <li key={s.id} data-ext-lang={s.id} data-on={s.enabled || undefined} className="flex min-w-0 items-center gap-3 px-3 py-2.5">
-                    <span aria-hidden className={`w-11 shrink-0 rounded-[4px] px-1 text-center text-[10px] font-semibold leading-[18px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
-                      {langTag(s.lang)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-fog-100">{extLanguageName(s.lang)}</p>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fog-500">
-                        <StatusMark tone={h.tone} label={h.label} size="xs" />
-                        {!!s.used && <span>{seriesText(s.used)}</span>}
-                        {hidden && <span data-ext-lang-hidden>{tr('Hidden in every extension')}</span>}
-                      </p>
-                    </div>
-                    {switching === s.id && <ProgressRing progress="spin" size={14} tone="muted" />}
-                    <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extLanguageName(s.lang)} onChange={(v) => void toggle(s, v)} />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {/* The limit where it bites: a switch turned on past it is a source search cannot reach. */}
-          <p className="mt-2 text-[12px] leading-relaxed text-fog-500" data-ext-sheet-cap>
-            {across}
-            {over && <>{sentenceGap(across)}<span className="text-amber-300">{over}</span></>}
-          </p>
-          <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-            <button type="button" onClick={onLanguages} className="text-accent hover:underline">{tr('Languages hidden in every extension')}&nbsp;›</button>
-            {onProviders && <button type="button" onClick={onProviders} className="text-accent hover:underline">{tr('Test its sources under Providers')}&nbsp;›</button>}
-          </p>
-        </section>
-
-        {settingsOf && (
-          <section aria-labelledby="ext-sheet-settings">
-            <h3 id="ext-sheet-settings" className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Settings')}</h3>
-            <ExtensionSettingsBody sourceId={settingsOf} onSourceId={setSettingsOf} note />
-          </section>
-        )}
-
-        <section className="border-t border-ink-800/70 pt-4" aria-label={tr('Remove extension')}>
+    <Sheet title={name} onClose={onClose} overBottomNav
+      lead={<ExtIcon url={ext.iconUrl} name={ext.name} size={52} />}
+      subtitle={<><span><Facts items={facts} /></span><ExtTags e={ext} /></>}
+      action={ext.hasUpdate ? (
+        <button type="button" onClick={() => void actions.act(ext, 'update')} disabled={!!busy} data-ext-update
+          className={`btn-key border-amber-500/35 bg-amber-500/10 text-amber-300 hover:border-amber-400/70 hover:text-amber-200 ${busyKey(busy === 'update')}`}>
+          {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
+        </button>
+      ) : undefined}
+      footer={
+        <div className="pb-1">
           {!removing ? (
-            <button type="button" onClick={() => setRemoving(true)} disabled={!!busy} className="btn-key btn-key-danger" data-ext-remove>
-              {tr('Remove extension')}
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              {onProviders ? (
+                <button type="button" onClick={onProviders} className="inline-flex items-center gap-0.5 text-[12px] text-accent hover:underline">
+                  {tr('Test its sources under Providers')}<IcChevronRight aria-hidden width={13} height={13} className="rtl:-scale-x-100" />
+                </button>
+              ) : <span />}
+              <button type="button" onClick={() => setRemoving(true)} disabled={!!busy} className="btn-key btn-key-danger text-rose-300" data-ext-remove>
+                {tr('Remove extension')}
+              </button>
+            </div>
           ) : (
             <div role="alertdialog" aria-label={tr('Remove {name}?', { name })} className="border-s-2 border-red-400 bg-ink-850/80 py-2.5 pe-2 ps-3" data-ext-remove-confirm>
               <p className="text-sm text-fog-100">{tr('Remove {name}?', { name })}</p>
@@ -198,7 +145,80 @@ export function ExtensionSheet({ ext, status, hiddenLangs, actions, onClose, onL
               </div>
             </div>
           )}
+        </div>
+      }>
+      <div className="space-y-4 pb-3" data-ext-sheet={ext.pkgName}>
+        <section aria-labelledby="ext-sheet-langs">
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Languages')}</h3>
+            <span className="flex items-center gap-2.5">
+              {ext.sources.length > 0 && <span className="text-[12px] tabular-nums text-fog-500">{languagesOnText(ext.on, ext.sources.length)}</span>}
+              {/* None on -- installed in the engine's own page, or every language switched off: one press, here. */}
+              {off && (
+                <button type="button" onClick={() => void actions.act(ext, 'enable')} disabled={!!busy} className={`btn-key btn-key-primary ${busyKey(busy === 'enable')}`} data-ext-turn-on>
+                  {busy === 'enable' ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on its sources')}
+                </button>
+              )}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr('Each language is its own source; turn on the ones you read.')}</p>
+          {!ext.sources.length ? (
+            <p className="py-3 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-ink-800/70 overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-900/40" data-ext-langs>
+              {ext.sources.map((s) => {
+                const problem = languageProblem(sourceHealth(s, reg, rows));
+                const hidden = !!s.lang && hiddenLangs.includes(s.lang);
+                return (
+                  <li key={s.id} data-ext-lang={s.id} data-on={s.enabled || undefined} className="flex min-w-0 items-center gap-3 px-3.5 py-2.5">
+                    <span aria-hidden className={`w-12 shrink-0 whitespace-nowrap rounded-[4px] px-1 text-center text-[10px] font-semibold leading-[18px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
+                      {langTag(s.lang)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-fog-100">{extLanguageName(s.lang)}</p>
+                      {(problem || hidden) && (
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fog-500" data-ext-lang-problem>
+                          {problem && <StatusMark tone={problem.tone} label={problem.label} size="xs" />}
+                          {/* Hidden in every extension is the Languages sheet's standing choice: a link to it. */}
+                          {hidden && <button type="button" onClick={onLanguages} className="text-fog-400 underline decoration-ink-600 underline-offset-2 hover:text-accent" data-ext-lang-hidden>{tr('Hidden in every extension')}</button>}
+                        </p>
+                      )}
+                    </div>
+                    {switching === s.id && <ProgressRing progress="spin" size={14} tone="muted" />}
+                    <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extLanguageName(s.lang)} onChange={(v) => void toggle(s, v)} />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {/* The limit where it bites: a switch turned on past it is a source search cannot reach. Said from 80 % of it. */}
+          {nearSourceLimit(status) && (
+            <p className="mt-2 text-[12px] leading-relaxed text-fog-500" data-ext-sheet-cap>
+              {across}
+              {over && <>{sentenceGap(across)}<span className="text-amber-300">{over}</span></>}
+            </p>
+          )}
         </section>
+
+        {settingsOf && (
+          <section aria-labelledby="ext-sheet-settings" className="border-t border-ink-800/70">
+            <button type="button" id="ext-sheet-settings" aria-expanded={settingsOpen} aria-controls="ext-sheet-settings-body"
+              onClick={() => setSettingsOpen((o) => !o)} data-ext-settings-toggle
+              className="group flex w-full items-center justify-between gap-3 py-3.5 text-start">
+              <span className="min-w-0 truncate text-sm text-fog-200 group-hover:text-fog-50">
+                {tr('Settings')}
+                {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: extLanguageName(settingsLang) })}</span>}
+              </span>
+              {/* It turns with the section, at once: round 2 adds no motion. */}
+              <IcChevronRight aria-hidden width={16} height={16} className={`shrink-0 text-fog-500 ${settingsOpen ? 'rotate-90' : 'rtl:-scale-x-100'}`} />
+            </button>
+            {settingsOpen && (
+              <div id="ext-sheet-settings-body" className="pb-2">
+                <ExtensionSettingsBody sourceId={settingsOf} onSourceId={setSettingsOf} note />
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </Sheet>
   );

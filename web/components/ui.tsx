@@ -90,11 +90,18 @@ export function OnBody({ children }: { children: ReactNode }) {
  * `data-lenis-prevent` on the scroller is not optional: Lenis drives smooth scrolling for the whole app, and
  * without it a flick inside the sheet scrolls the chapter behind it instead.
  */
-export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle, children }: {
+export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle, lead, subtitle, children }: {
   title: string;
   onClose: () => void;
   /** Something small beside the close button: the (i) that opens the explainer, for instance. */
   action?: ReactNode;
+  /**
+   * A sheet about one thing that has a face: its picture before the title, and a muted line of facts under it -- an
+   * extension's icon and "v1.4.79 · 6 languages · 12 series" (v0.53.0). The title is then a size larger. Without
+   * either the header is exactly the one-line title every other sheet has.
+   */
+  lead?: ReactNode;
+  subtitle?: ReactNode;
   /**
    * A row pinned under the scrolling body -- a form's Save, for one. It lives OUTSIDE the scroller on
    * purpose: a `sticky bottom-0` inside it sticks to the scrollport's edge, which on a phone is exactly
@@ -154,8 +161,18 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
                        : 'pb-[max(1rem,env(safe-area-inset-bottom))]'
                    }`}
       >
-        <div className="mb-3 flex items-center justify-between gap-3 px-4">
-          <h2 className={`min-w-0 ${wrapTitle ? 'line-clamp-2 break-words' : 'truncate'} font-display text-base font-semibold text-fog-50`}>{title}</h2>
+        <div className={`mb-3 flex justify-between gap-3 px-4 ${lead || subtitle ? 'items-start' : 'items-center'}`}>
+          {lead || subtitle ? (
+            <div className="flex min-w-0 items-center gap-3.5">
+              {lead}
+              <div className="min-w-0">
+                <h2 className="truncate font-display text-lg font-semibold leading-snug text-fog-50">{title}</h2>
+                {subtitle && <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-fog-500">{subtitle}</div>}
+              </div>
+            </div>
+          ) : (
+            <h2 className={`min-w-0 ${wrapTitle ? 'line-clamp-2 break-words' : 'truncate'} font-display text-base font-semibold text-fog-50`}>{title}</h2>
+          )}
           <span className="flex shrink-0 items-center gap-2">
             {action}
             <button onClick={onClose} aria-label={tr('Close')}

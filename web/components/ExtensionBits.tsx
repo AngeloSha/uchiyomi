@@ -1,6 +1,6 @@
 'use client';
 // The small pieces Admin → Extensions' rows and sheets share (v0.53.0): an extension's icon, its marks, a busy key.
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { t as tr } from '@/lib/i18n';
 import type { CatalogExt } from '@/lib/extensions';
 import { ProgressRing } from '@/components/ProgressRing';
@@ -31,6 +31,14 @@ export function ExtTags({ e }: { e: Pick<CatalogExt, 'nsfw' | 'obsolete'> }) {
       )}
     </>
   );
+}
+
+/**
+ * Facts on one line -- "v1.4.79 · 6 languages · 12 series" -- each isolated (<bdi>). In Arabic the version's Latin run
+ * took the "6" of "6 لغات" with it, and the line read "6 · v1.4.79 لغات".
+ */
+export function Facts({ items }: { items: Array<string | null | false | undefined> }) {
+  return <>{items.filter((f): f is string => !!f).map((f, i) => <Fragment key={i}>{i > 0 && ' · '}<bdi>{f}</bdi></Fragment>)}</>;
 }
 
 /**

@@ -1,5 +1,5 @@
-// Admin → Extensions (v0.53.0), the part with no React in it: what the status header says, how the installed list is
-// put together and ordered, what the Browse filters ask the server, and the words for the counts.
+// Admin → Extensions (v0.53.0), the part with no React in it: what the status strip says, how the installed list is
+// put together, ordered and grouped, what a row offers, what Browse asks the server, and the words for the counts.
 //
 // The redesign answers discussion #121, where a real user on a 1,300-extension repository found the old single card
 // unusable: the catalogue stopped at "Showing 400 of 570 matches -- narrow the search", "18+" read as a filter to
@@ -9,7 +9,7 @@
 // web/test/extensions.test.ts.
 import { t as tr } from './i18n';
 import { languageName, numberText } from './format';
-import { engineMark, sourceMark, type Tone } from './status';
+import { sourceMark, type Tone } from './status';
 import { headline, type EngineReport, type Headline } from './engineSetup';
 import { providerStatus, type AdminSourceRow, type SrcStatus } from './providerGroups';
 
@@ -150,47 +150,124 @@ export function installedList(exts: readonly CatalogExt[], sources: readonly Ext
       || a.name.localeCompare(b.name));
 }
 
-/** An installed extension that has sources and none of them on: the row offers "Turn on its sources". */
+/** An installed extension that has sources and none of them on: the row offers "Turn on". */
 export const needsTurningOn = (e: Pick<InstalledExt, 'on' | 'sources'>): boolean => e.on === 0 && e.sources.length > 0;
 
-// ---- the status header ------------------------------------------------------------------------------------------
+// ---- Installed, grouped (v0.53.0 round 2) ---------------------------------------------------------------------
+//
+// Round 1 said one thing three times: an amber bar over the list ("3 of your extensions have no source on yet"),
+// amber words on every row it meant, and a filled key on each of those rows -- and the same again for an update.
+// Now a row says at most one state word and offers at most one key, and the list is grouped only while something
+// needs someone, with the keys for all of them in that group's header.
 
-/** The engine's state, as the header's first tile says it. */
+/** An extension waiting for someone: an update, or nothing of it switched on. */
+export const needsAttention = (e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): boolean => e.hasUpdate || needsTurningOn(e);
+
+/**
+ * The one key an installed row offers. Turn on before Update: an extension with no source on gives search nothing at
+ * all, and its update stays one press away (the group's Update all, its sheet). None when nothing waits: the row is
+ * then its languages and a chevron, and opens its sheet.
+ */
+export function rowKey(e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): 'turn-on' | 'update' | null {
+  return needsTurningOn(e) ? 'turn-on' : e.hasUpdate ? 'update' : null;
+}
+
+/**
+ * The one state word at the end of an installed row's meta line. An update outranks "No source on": with both, the
+ * row's key already says Turn on, and the word is the one thing the key does not say.
+ */
+export function rowWord(e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): 'update' | 'off' | null {
+  return e.hasUpdate ? 'update' : needsTurningOn(e) ? 'off' : null;
+}
+
+/**
+ * Installed as the tab shows it: one plain list while nothing needs anyone (`all`, no header), else what needs
+ * attention first and the rest under it (`ready`, left out when empty). installedList's order is kept inside each.
+ */
+export function installedGroups<T extends Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>>(list: readonly T[]): Array<{ key: 'all' | 'attention' | 'ready'; list: T[] }> {
+  const attention = list.filter(needsAttention);
+  if (!attention.length) return [{ key: 'all', list: [...list] }];
+  const ready = list.filter((e) => !needsAttention(e));
+  return [{ key: 'attention', list: attention }, ...(ready.length ? [{ key: 'ready' as const, list: ready }] : [])];
+}
+
+/**
+ * What an extension reads in, for its row and its sheet: its one language, or how many its sources cover. A
+ * multi-language extension whose sources are not listed yet (or that has none) says "Multiple languages".
+ */
+export function extLanguagesText(e: Pick<InstalledExt, 'lang' | 'sources'>): string {
+  const langs = [...new Set(e.sources.map((s) => s.lang))];
+  if (langs.length === 1) return extLanguageName(langs[0]);
+  if (langs.length > 1) return tr('{n} languages', { n: numberText(langs.length) });
+  return extLanguageName(e.lang);
+}
+
+/** An engine's version as the strip prints it: "v2.3.2243", whether or not the engine sent its "v". */
+export const versionText = (v: string): string => (/^\d/.test(v) ? `v${v}` : v);
+
+// ---- the status strip -----------------------------------------------------------------------------------------
+
+/**
+ * The engine's state, as the strip's first cell says it beside "Extension engine". The strip is only drawn for an
+ * engine that answers (the setup screen is every other state), so its word is the short "Ready"; the version and
+ * the sources on are the muted line under it (engineMeta). ⚠️ "Ready" is the engine's alone: the Installed group of
+ * extensions that need nothing is "Ready · {n}", a key of its own, so each agrees with its own noun in translation.
+ */
 export function engineLine(s: ExtStatus): { state: Headline; tone: Tone; label: string } {
   const h = headline(s);
-  if (h === 'ready') return { state: h, ...engineMark(true, s.version) };
+  if (h === 'ready') return { state: h, tone: 'ok', label: tr('Ready') };
   if (h === 'unreachable') return { state: h, tone: 'problem', label: tr('The extension engine isn’t answering') };
   if (h === 'switched_off') return { state: h, tone: 'off', label: tr('Extensions are turned off') };
   return { state: h, tone: 'info', label: tr('No extension engine is set up') };
 }
 
+/**
+ * The strip's muted line under "Extension engine": its version and the sources on against the limit -- "v2.3.2243 ·
+ * 5 of 25 sources on". The extensions installed are not here any more: the Installed tab counts them.
+ */
+export function engineMeta(s: Pick<ExtStatus, 'version' | 'enabled' | 'cap'>): string {
+  return [s.version ? versionText(s.version) : null, sourcesOnText(s.enabled ?? 0, s.cap ?? 0)].filter(Boolean).join(' · ');
+}
+
 export type HelperState = 'connected' | 'own' | 'off' | 'localhost' | 'unsupported';
 
 /**
- * The engine's own Cloudflare helper, as the header's second tile says it, and the one thing to do about it: Connect
+ * The engine's own Cloudflare helper, as the strip's second cell says it, and the one thing to do about it: Connect
  * when Uchiyomi has a helper to share, else set FLARESOLVERR_URL first. Null when there is nothing to say: the
  * engine is not answering, or its settings could not be read.
+ *
+ * `detail` is the one muted line under the mark, and there is none for a helper that works: round 1 put a paragraph
+ * under every state, and "Extensions get past Cloudflare through Uchiyomi's helper." under a green "Connected" was a
+ * sentence saying the mark again. Not connected (off, or pointed at localhost where no helper runs) is one short
+ * line beside Connect; the long why stays on Health's Extension engine row.
  */
 export function helperLine(solver: EngineReport['solver'] | undefined): {
-  state: HelperState; tone: Tone; label: string; detail: string; action: 'connect' | 'set_url' | null;
+  state: HelperState; tone: Tone; label: string; detail: string | null; action: 'connect' | 'set_url' | null;
 } | null {
   if (!solver) return null;
   const fix = solver.connectable ? 'connect' as const : 'set_url' as const;
   switch (solver.wiring) {
     case 'ok':
-      return { state: 'connected', tone: 'ok', label: tr('Connected'), detail: tr('Extensions get past Cloudflare through Uchiyomi’s helper.'), action: null };
+      return { state: 'connected', tone: 'ok', label: tr('Connected'), detail: null, action: null };
     case 'other':
-      return { state: 'own', tone: 'ok', label: tr('Connected'), detail: tr('The engine uses a Cloudflare helper of its own.'), action: null };
+      return { state: 'own', tone: 'ok', label: tr('Connected'), detail: null, action: null };
     case 'off':
-      return { state: 'off', tone: 'warn', label: tr('Not connected'), detail: tr('The engine’s own Cloudflare helper is off, so extensions on Cloudflare-protected sites fail.'), action: fix };
+      return { state: 'off', tone: 'warn', label: tr('Not connected'), detail: tr('Needed for sites behind Cloudflare.'), action: fix };
     case 'localhost':
-      return {
-        state: 'localhost', tone: 'warn', label: tr('Not connected'),
-        detail: tr('The engine’s Cloudflare helper points at localhost, where no helper runs, so extensions on Cloudflare-protected sites fail.'), action: fix,
-      };
+      return { state: 'localhost', tone: 'warn', label: tr('Not connected'), detail: tr('Needed for sites behind Cloudflare.'), action: fix };
     default:
       return { state: 'unsupported', tone: 'off', label: tr('Not available'), detail: tr('This engine has no Cloudflare helper setting.'), action: null };
   }
+}
+
+/**
+ * Whether the sheet says the limit across all extensions: from 80 % of it, or once something is over it. Below
+ * that it was one more sentence under every extension's languages that nobody needed.
+ */
+export function nearSourceLimit(s: Pick<ExtStatus, 'enabled' | 'cap' | 'skipped'>): boolean {
+  if (s.skipped) return true;
+  const cap = s.cap ?? 0;
+  return cap > 0 && (s.enabled ?? 0) >= cap * 0.8;
 }
 
 // ---- counts, in words -----------------------------------------------------------------------------------------
@@ -203,9 +280,6 @@ export const sourcesOnText = (on: number, max: number): string => tr('{n} of {ma
 
 /** An extension's own languages: "2 of 5 on". */
 export const languagesOnText = (on: number, total: number): string => tr('{n} of {total} on', { n: numberText(on), total: numberText(total) });
-
-export const extensionsInstalledText = (n: number): string =>
-  (n === 1 ? tr('1 extension installed') : tr('{n} extensions installed', { n: numberText(n) }));
 
 /** The over-the-limit sentence, or '' when nothing is over it. */
 export function overLimitText(skipped: number | undefined, cap: number | undefined): string {
@@ -234,6 +308,10 @@ export interface BrowseFilters {
   q: string;
   /** A language code, `all` for the multi-language extensions, '' for every language. */
   lang: string;
+  /**
+   * The catalogue's own filters, which Browse no longer offers (v0.53.0 round 2): its Installed and Has an update
+   * chips were the Installed tab again. The route keeps them, and so does this.
+   */
   installed: boolean;
   updates: boolean;
   /** Show 18+ extensions: off, they are left out of the list (never "only 18+", which is how "18+" read). */
@@ -303,6 +381,14 @@ export function sourceHealth(
   if (registry && !pub) return { tone: 'warn', label: tr('Over the source limit'), over: true };
   const st = providerStatus(pub?.status ?? 'ok', adminRows?.get(id) ?? null);
   return { ...sourceMark(st), over: false };
+}
+
+/**
+ * What a language's row in the sheet says under its name: a problem only -- failing, blocked by the site, over the
+ * source limit and the like -- or nothing. "Turned off" and "Healthy" under every row said what its switch says.
+ */
+export function languageProblem(h: { tone: Tone; label: string }): { tone: Tone; label: string } | null {
+  return h.tone === 'ok' || h.tone === 'off' ? null : { tone: h.tone, label: h.label };
 }
 
 // ---- which view ------------------------------------------------------------------------------------------------

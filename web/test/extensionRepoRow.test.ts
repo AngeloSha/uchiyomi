@@ -5,8 +5,8 @@
 // at all (while the empty catalogue said "add a repository above"), the placeholder named a file Mihon users do
 // not have, the server's reason for a refusal was never shown, and not one string of the flow was translated.
 // Since v0.53.0 the form stands on Browse itself on a first visit (components/ExtensionsPanel.tsx) and is a sheet
-// behind Browse's Repositories key after that (components/ExtensionRepos.tsx). Each rule is pinned here and names the
-// edit that brings its fault back.
+// behind the repositories link in Browse's count line after that (components/ExtensionRepos.tsx). Each rule is pinned
+// here and names the edit that brings its fault back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
@@ -45,8 +45,8 @@ test('with no repository, the form stands on Browse itself, and a first visit wi
     'the first visit does not say what a repository is');
   const lib = read('lib/extensions.ts');
   assert.match(lib, /return installedCount > 0 \? 'installed' : 'browse';/, 'a first visit with nothing installed opens on Installed');
-  // Later, the repositories are one key away, with their count, beside Browse's filters.
-  assert.match(browse, /<button type="button" onClick=\{onRepos\} className="btn-key ms-auto" data-ext-repos>\s*\{tr\('Repositories'\)\}/, 'Browse has no way to the repositories');
+  // Later, the repositories are one press away, counted, as a link in Browse's count line (round 2: a key before).
+  assert.match(browse, /<button type="button" onClick=\{onRepos\} className="text-accent hover:underline" data-ext-repos>\s*\{!repos \? tr\('Repositories'\) : repos\.length === 1 \? tr\('1 repository'\)/, 'Browse has no way to the repositories');
   assert.match(repos, /export function ReposSheet\([\s\S]*?<RepoForm \/>/, 'the repositories sheet cannot add one');
 });
 

@@ -64,7 +64,7 @@ export function EngineInstall({ span = '' }: { span?: string }) {
   const pct = st?.total ? (st.bytes ?? 0) / st.total : st?.progress ?? 0;
 
   return (
-    <div className={`card grad-border p-4 ${span}`}>
+    <div className={`card grad-border rounded-2xl p-4 ${span}`}>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
 
       {!b ? (
