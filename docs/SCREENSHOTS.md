@@ -9,7 +9,7 @@ bash scripts/shots/run.sh --yes                        # everything
 bash scripts/shots/run.sh --yes --only home,library    # a subset
 bash scripts/shots/run.sh --yes --site-dir /path/to/site  # also refresh the marketing site's copies
 bash scripts/shots/run.sh --yes --record                 # the tour video instead of stills
-# the fixture shots (extensions, providers) against a throwaway instance -- see "Shots that use a fixture"
+# the fixture shots (Admin → Sources) against a throwaway instance -- see "Shots that use a fixture"
 SHOT_NET=<its docker network> SHOT_BASE=http://<its container>:3000 \
   bash scripts/shots/run.sh --yes --login <user>:<password> --only admin-extensions,crop-extensions
 # the desktop app's own pages, from the real Electron app
@@ -67,8 +67,11 @@ provided. They are listed here so nobody later mistakes them for mockups.
   names, some 18+, and a shot of the repository row would show the live server's repository address. So these
   are taken on a page whose `/api/admin/extensions/*`, `/api/sources` and `/api/admin/sources*` answers come from
   `scripts/shots/fixtures.mjs` — made-up extensions (*Example Manga (EN)*, *Sample Reader*…), generated icons with no letters
-  in them, MangaDex beside two made-up sites, and the repository `https://example.org/repo/index.min.json` the
-  tests use. It applies on every run, against any instance, so a later live run cannot bring the real names
+  in them, MangaDex beside two made-up sites (the sources overview Admin → Sources lists since v0.54.0 too), and the
+  repository `https://example.org/repo/index.min.json` the tests use. ⚠️ The app's service worker fetches
+  `/api/admin/*` and the images itself, out of a page's request interception's sight, wherever one can register
+  (https, or a `localhost` base): `fixturePage()` and `neutralNames()` bypass it, or the real names would come back
+  without a word. It applies on every run, against any instance, so a later live run cannot bring the real names
   back; and unlike the older shots these fail loudly when an element is missing. They need no library, so take
   them against a throwaway instance with `--login` (no database is touched), never by creating an account on
   someone's server.
@@ -85,7 +88,7 @@ provided. They are listed here so nobody later mistakes them for mockups.
   app's own API answers carry as a made-up one (*Example Manga*, *Example Scans*, *Sample Translations*…) — in
   text and in `title` / `aria-label` / `alt`, from the first frame — and every source or extension icon (a site's
   logo) as a generated tile. MangaDex stays: it is the built-in source every guide names. The names are met first
-  (the Providers tab lists them all), so a name inside a sentence is caught too. The tour also uses the extension
+  (Admin → Sources lists them all), so a name inside a sentence is caught too. The tour also uses the extension
   fixture above for its catalogue, and keeps no frame until the reader has jumped past a chapter's first page
   (the credits page). ⚠️ Silent by design, like the rest of the rig: a name that reaches the screen by a field
   `namesIn()` does not read is not rewritten — look at every image and every second of the video.
@@ -97,7 +100,7 @@ Everything else is the real thing, including the health findings.
 `scripts/shots/desktop.mjs` launches the real Electron app under Xvfb on a fresh profile and photographs its
 own pages: the first-launch choice, the server address, the certificate prompt and the changed-certificate
 warning (a self-signed https front it runs itself, proxying to `SHOT_SERVER`), the error page for a server that
-does not answer, the library-folder page, and the Extensions tab before the engine download (that one needs
+does not answer, the library-folder page, and Admin → Sources before the engine download (that one needs
 the standalone payload staged: `node desktop/scripts/stage.mjs`). It needs Linux with Xvfb, node 22+,
 `npm ci` and `npm run build` in `desktop/` with the Electron binary installed, and openssl. The black around a
 shell page is trimmed. The tray menus and native dialogs cannot be reached from the page, so they are

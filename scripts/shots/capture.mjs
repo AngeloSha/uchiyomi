@@ -237,7 +237,7 @@ async function main() {
   // By address rather than by tab button: `?tab=` is the tab's URL since v0.39.0, and the shot doubles as a
   // check that the deep link opens the rebuilt Settings tab (Server first, then the other three sections).
   if (want('admin-settings')) { await go('/admin/?tab=Settings', 1000); await adminShot('admin-settings'); }
-  // The reviewable import (v0.35.0) is its own route, reached from the Providers card. Its intake card is
+  // The reviewable import (v0.35.0) is its own route, reached from Admin → Sources' Add sources. Its intake card is
   // the shot: what the docs describe first, and the one state a capture-only account can always reach (a
   // batch in review needs titles this instance's sources answer for).
   if (want('admin-import')) { await go('/admin/import/', 600); await shot(page, 'admin-import'); }
@@ -281,7 +281,6 @@ async function main() {
     await cropCard('crop-tokens', 'API tokens');
   }
   if (want('crop-health')) { await adminTab('Health'); await cropCard('crop-health', 'Suspiciously short chapters'); }
-  if (want('crop-addsite')) { await adminTab('Providers'); await cropCard('crop-addsite', 'Add a site'); }
   // ---- fixture shots (see "fixtures" at the top: invented extensions and sources, never the real ones) ----
   const cropOn = async (p, name, headingText) => {
     if (!want(name)) return;
@@ -301,6 +300,19 @@ async function main() {
     await p.goto(`${BASE}/admin/?tab=${tab}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(p, 700);
   };
+  /** From the top of `from` to the bottom of `to` (the same element by default), in document coordinates. */
+  const clipOf = (p, from, to = from, pad = 12) => p.evaluate((from, to, pad) => {
+    const a = document.querySelector(from), b = document.querySelector(to);
+    if (!a || !b) return null;
+    a.scrollIntoView({ block: 'start', behavior: 'instant' });
+    window.scrollBy(0, -100);
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const left = Math.min(ra.left, rb.left), right = Math.max(ra.right, rb.right);
+    return { x: left - pad + window.scrollX, y: ra.top - pad + window.scrollY, width: right - left + 2 * pad, height: rb.bottom - ra.top + 2 * pad };
+  }, from, to, pad);
+  // Admin → Sources (v0.54.0) reads every source from one answer, the overview: always the fixture's here, with the
+  // extensions' state, so no real source name reaches a shot of the tab.
+  const sourcesPage = (profile, state) => fixturePage(ctx, profile, [sourcesFixture(state), extensionFixture(state)]);
   const focusOn = async (p, headingText) => {
     await p.evaluate((t) => {
       const el = [...document.querySelectorAll('h1,h2,h3,p,span')]
@@ -325,13 +337,14 @@ async function main() {
   }, rows);
   if (want('crop-repo-empty') || want('crop-repo-added')) {
     const state = { repos: [] };
-    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture(state)]);
-    await tabOn(xp, 'Extensions');
+    const xp = await sourcesPage(PROFILES.desk, state);
+    await tabOn(xp, 'Sources&view=add');
     const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
     await sleep(400);
     await cropOn(xp, 'crop-repo-empty', 'Add an extension repository');
-    await clickText(xp, 'button', 'Add');
+    // The first-run card's Add: Add sources' "Add a site by address" has an Add of its own above it (v0.54.0).
+    await clickText(xp, '[data-ext-first-run] button', 'Add');
     await xp.waitForFunction(() => document.body.innerText.includes('Checking the repository'), { timeout: 5000 });
     await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
     await settle(xp, 200);
@@ -353,11 +366,11 @@ async function main() {
   // 6 s here, lib/notices.ts noticeDuration), away from the row, so the crops above never show it: it is
   // photographed on its own, the moment the add answers.
   if (want('crop-repo-toast')) {
-    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [] })]);
-    await tabOn(xp, 'Extensions');
+    const xp = await sourcesPage(PROFILES.desk, { repos: [] });
+    await tabOn(xp, 'Sources&view=add');
     const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
-    await clickText(xp, 'button', 'Add');
+    await clickText(xp, '[data-ext-first-run] button', 'Add');
     // The card itself (components/Toast.tsx `data-notice`), not the capsule at the top it replaced: a selector
     // for that timed out, and every capture after it in the run was skipped.
     const toast = await xp.waitForFunction(
@@ -365,9 +378,11 @@ async function main() {
       { timeout: 15000 },
     );
     await sleep(300);
+    // Document coordinates, as a clip is measured: the notice is fixed to the window, and the page has scrolled to the
+    // first-run card under Add sources' other ways in (v0.54.0) -- in window coordinates the crop took the page there.
     const box = await xp.evaluate((el) => {
       const r = el.getBoundingClientRect();
-      return { x: Math.max(0, r.left - 28), y: Math.max(0, r.top - 16), width: r.width + 56, height: r.height + 32 };
+      return { x: Math.max(0, r.left - 28) + window.scrollX, y: Math.max(0, r.top - 16) + window.scrollY, width: r.width + 56, height: r.height + 32 };
     }, toast);
     await xp.screenshot({ path: `${OUT}/crop-repo-toast.png`, clip: box });
     console.log('  ✓ crop-repo-toast');
@@ -377,8 +392,8 @@ async function main() {
   // The same two moments at phone width, for the site's phone plates: the first-run card alone (and, after the
   // add, the top of Browse), at native scale -- a desktop crop in a 390px column is unreadable.
   if (want('phone-repo-empty') || want('phone-repo-added')) {
-    const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [] })]);
-    await tabOn(xp, 'Extensions');
+    const xp = await sourcesPage(PROFILES.phone, { repos: [] });
+    await tabOn(xp, 'Sources&view=add');
     const input = await xp.waitForSelector('[data-ext-first-run] input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
     await input.type(FIXTURE_REPO);
     // Out of the field, so it shows the address from its start: at 390 px the caret's end of it began "xample.org/…".
@@ -394,7 +409,7 @@ async function main() {
     if (!box) throw new Error('phone-repo-empty: no first-run card');
     await sleep(600);
     if (want('phone-repo-empty')) { await xp.screenshot({ path: `${OUT}/phone-repo-empty.png`, clip: box }); console.log('  ✓ phone-repo-empty'); }
-    await clickText(xp, 'button', 'Add');
+    await clickText(xp, '[data-ext-first-run] button', 'Add');
     await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
     // Let the notice go: on a phone it sits above the bottom nav, and a crop that reaches down would take it in.
     await xp.waitForFunction(() => !document.querySelector('[data-notices] [data-notice]'), { timeout: 15000 }).catch(() => {});
@@ -407,25 +422,18 @@ async function main() {
     await xp.close();
   }
 
-  // A later visit: one repository, three extensions installed and one out of date -- the engine's strip and
-  // Installed (v0.53.0), the update in its own group. The crop is Installed alone, from its tabs to its last row.
+  // A later visit: one repository, three extensions installed and one out of date -- the engine's strip, Needs
+  // attention with the update, and Your sources (v0.54.0; Installed in v0.53.0). The crop is Your sources alone,
+  // from its row of views to its last row.
   if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
-    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
-    await tabOn(xp, 'Extensions');
+    const xp = await sourcesPage(PROFILES.desk, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(xp, 'Sources');
     await xp.waitForFunction(() => document.body.innerText.includes('Example Manga (EN)'), { timeout: 15000 });
     await settle(xp, 300);
     if (want('admin-extensions')) { await focusOn(xp, 'Extension engine'); await shot(xp, 'admin-extensions'); }
     if (want('crop-extensions')) {
-      const box = await xp.evaluate(() => {
-        const tabs = document.querySelector('[data-ext-view="installed"]')?.closest('[role=tablist]');
-        const list = document.querySelector('[data-ext-installed]');
-        if (!tabs || !list) return null;
-        tabs.scrollIntoView({ block: 'start', behavior: 'instant' });
-        window.scrollBy(0, -100);
-        const a = tabs.getBoundingClientRect(), b = list.getBoundingClientRect();
-        return { x: b.left - 12 + window.scrollX, y: a.top - 12 + window.scrollY, width: b.width + 24, height: b.bottom - a.top + 24 };
-      });
-      if (!box) throw new Error('crop-extensions: no Installed list');
+      const box = await clipOf(xp, '[role=tablist]:has([data-sources-view="yours"])', '[data-sources-yours]');
+      if (!box) throw new Error('crop-extensions: no Your sources list');
       await sleep(500);
       await xp.screenshot({ path: `${OUT}/crop-extensions.png`, clip: box });
       console.log('  ✓ crop-extensions');
@@ -436,7 +444,7 @@ async function main() {
     // its logo, and a third of the old strips spelled the site's name. They are the fixture's generated tiles.
     if (want('ext-strip-1')) {
       // Browse, every page of it (v0.53.0: the list is the page's, a page at a time, with Show more under it).
-      await xp.goto(`${BASE}/admin/?tab=Extensions&view=browse`, { waitUntil: 'networkidle2', timeout: 60000 });
+      await xp.goto(`${BASE}/admin/?tab=Sources&view=add`, { waitUntil: 'networkidle2', timeout: 60000 });
       await xp.waitForSelector('[data-ext-list] img', { timeout: 15000 });
       const icons = await xp.evaluate(async () => {
         for (let i = 0; i < 10 && document.querySelector('[data-ext-more]'); i++) {
@@ -487,8 +495,8 @@ async function main() {
 
   // The list at phone width for the site: the search row and the first extensions, at native scale.
   if (want('phone-extensions')) {
-    const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
-    await tabOn(xp, 'Extensions&view=browse');
+    const xp = await sourcesPage(PROFILES.phone, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(xp, 'Sources&view=add');
     await xp.waitForSelector('[data-ext-list] > li', { timeout: 15000 });
     await settle(xp, 300);
     // Browse's search, filters and its first extensions: the installed three lead, then the catalogue by name.
@@ -500,36 +508,36 @@ async function main() {
     await xp.close();
   }
 
-  if (want('admin-providers') || want('phone-sources')) {
-    const pp = await fixturePage(ctx, PROFILES.desk, [sourcesFixture(), extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
-    await tabOn(pp, 'Providers');
-    await pp.waitForFunction(() => document.body.innerText.includes('Sample Comics'), { timeout: 15000 });
+  // Add sources (v0.54.0; Providers' "Add a site" until then): the ways in -- a site by address, MangaDex's languages,
+  // the language of sites that do not say, Import a list, source packs -- over the extension catalogue.
+  if (want('admin-providers') || want('crop-addsite')) {
+    const pp = await sourcesPage(PROFILES.desk, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(pp, 'Sources&view=add');
+    await pp.waitForSelector('[data-sources-add-site]', { timeout: 15000 });
     await settle(pp, 300);
-    if (want('admin-providers')) { await focusOn(pp, 'Add a site'); await shot(pp, 'admin-providers'); }
-    await pp.close();
-    if (want('phone-sources')) {
-      // The site's small-screen stand-in for admin-providers: the first source cards at phone width.
-      const ph2 = await fixturePage(ctx, PROFILES.phone, [sourcesFixture(), extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
-      await tabOn(ph2, 'Providers');
-      await ph2.waitForFunction(() => document.body.innerText.includes('Sample Comics'), { timeout: 15000 });
-      await settle(ph2, 300);
-      // Two cards, the built-in source and a site added by URL, as one clip.
-      const box = await ph2.evaluate((names) => {
-        const cards = names.map((n) => [...document.querySelectorAll('span')].find((e) => (e.textContent || '').trim().startsWith(n))?.closest('.card'));
-        if (cards.some((c) => !c)) return null;
-        cards[0].scrollIntoView({ block: 'start', behavior: 'instant' });
-        window.scrollBy(0, -16);
-        // Document coordinates: a screenshot clip is measured from the top of the page, not of the viewport.
-        const r = cards.map((c) => c.getBoundingClientRect());
-        const x = Math.min(...r.map((b) => b.left)) - 8 + window.scrollX, y = Math.min(...r.map((b) => b.top)) - 8 + window.scrollY;
-        return { x, y, width: Math.max(...r.map((b) => b.right)) + window.scrollX - x + 8, height: Math.max(...r.map((b) => b.bottom)) + window.scrollY - y + 8 };
-      }, ['MangaDex', 'Example Manga']);
-      if (!box) throw new Error('phone-sources: the MangaDex and Example Manga cards were not found');
-      await sleep(600);
-      await ph2.screenshot({ path: `${OUT}/phone-sources.png`, clip: box });
-      console.log('  ✓ phone-sources');
-      await ph2.close();
+    if (want('admin-providers')) { await focusOn(pp, 'Add a site by address'); await shot(pp, 'admin-providers'); }
+    if (want('crop-addsite')) {
+      const box = await clipOf(pp, '[data-sources-add-site]');
+      if (!box) throw new Error('crop-addsite: no Add a site by address');
+      await sleep(500);
+      await pp.screenshot({ path: `${OUT}/crop-addsite.png`, clip: box });
+      console.log('  ✓ crop-addsite');
     }
+    await pp.close();
+  }
+  if (want('phone-sources')) {
+    // The site's small-screen stand-in for admin-providers: the first rows of Your sources at phone width -- a site
+    // added by URL and the built-in MangaDex, each one line under its name.
+    const ph2 = await sourcesPage(PROFILES.phone, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(ph2, 'Sources');
+    await ph2.waitForFunction(() => document.body.innerText.includes('Example Manga'), { timeout: 15000 });
+    await settle(ph2, 300);
+    const box = await clipOf(ph2, '[data-sources-list] > li:nth-child(1)', '[data-sources-list] > li:nth-child(3)', 8);
+    if (!box) throw new Error('phone-sources: no rows in Your sources');
+    await sleep(600);
+    await ph2.screenshot({ path: `${OUT}/phone-sources.png`, clip: box });
+    console.log('  ✓ phone-sources');
+    await ph2.close();
   }
 
   // ---- phone ----

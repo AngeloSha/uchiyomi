@@ -39,6 +39,11 @@ test('namesIn finds every source and group name the library pages draw, and keep
   // Every source the server has (what meetNames() reads first), the sites added by URL, and Discover's results.
   assert.deepEqual(names('/api/sources', { content: [{ id: 'mangadex', name: 'MangaDex' }, { id: 'sw:1', name: 'A Real Extension (EN)' }] }), ['source:A Real Extension (EN)']);
   assert.deepEqual(names('/api/admin/sources/custom', { content: [{ id: 'custom:x', name: 'A Real Site', base: 'https://x.example' }] }), ['source:A Real Site']);
+  // v0.54.0: Admin → Sources lists every source of every kind from one answer, the one meetNames() now reads.
+  assert.deepEqual(names('/api/admin/sources/overview', { sources: [
+    { id: 'mangadex', name: 'MangaDex', kind: 'mangadex' }, { id: 'aqua', name: 'A Real Site', kind: 'site' },
+    { id: 'sw:1', name: 'A Real Extension (EN)', kind: 'extension', pkgName: 'x' },
+  ], attention: { replace: ['aqua'], failingUnused: [], updates: 0 } }), ['source:A Real Extension (EN)', 'source:A Real Site'], 'the sources overview\'s names are drawn as they are');
   assert.deepEqual(names('/api/sources/search', { content: [{ title: 'Real Title', providers: [{ source: 'aqua', sourceId: '1', name: 'A Real Site', title: 'Real Title' }] }] }), ['source:A Real Site']);
   // ...and nothing that is not a source or a group: titles, collections, libraries, members.
   assert.deepEqual(names('/api/collections', { content: [{ id: 'c', name: 'Favourites' }] }), []);

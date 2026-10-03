@@ -205,11 +205,12 @@ try {
 
   // ---------------------------------------------------------------- the extension engine, on first use
   if (served) {
-    await page.goto(`${origin}/admin/?tab=Extensions`, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+    await page.goto(`${origin}/admin/?tab=Sources`, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
     await sleep(3000);
     await shot(page, 'product-extensions-before');
     const t0 = Date.now();
-    // Exactly the call the Extensions card makes, with its progress feed.
+    // Exactly the call the engine's card at the top of Admin → Sources makes (Admin → Extensions until v0.54.0), with its
+    // progress feed.
     const outcome = await page.evaluate(() => new Promise((resolve) => {
       const states = [];
       const off = window.uchiyomiDesktop.engine.onStatus((s) => { if (states[states.length - 1] !== s.state) states.push(s.state); });
@@ -226,11 +227,11 @@ try {
       if (ext?.json?.reachable) break;
       await sleep(3000);
     }
-    await page.goto(`${origin}/admin/?tab=Extensions`, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+    await page.goto(`${origin}/admin/?tab=Sources`, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
     await sleep(5000);
     await shot(page, 'product-extensions-after');
     const offer = await page.evaluate(() => /Download the extension engine/i.test(document.body?.innerText || '')).catch(() => null);
-    check('the Extensions panel is reachable (the engine answers the bff)', !!ext?.json?.reachable && offer === false, { status: ext?.json, downloadOfferStillShown: offer });
+    check('the extensions in Admin → Sources are reachable (the engine answers the bff)', !!ext?.json?.reachable && offer === false, { status: ext?.json, downloadOfferStillShown: offer });
   } else {
     check('the engine downloads, verifies, installs and starts from the bridge', false, 'no engine fixture (run scripts/ci/engine-fixture.mjs first)');
   }

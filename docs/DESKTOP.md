@@ -143,17 +143,17 @@ The library is empty until you add somewhere to get manga from. There are three 
 them:
 
 1. **MangaDex** works straight away: open **Discover**, search a title and add it.
-2. **A site by its address.** **Admin → Providers** → **Add a site**: paste the site's homepage address, give it
-   a name, **Add**. Uchiyomi recognises the common manga-site families by itself. Step by step:
-   [the user guide, section 7](USAGE.md#add-a-site--step-by-step).
+2. **A site by its address.** **Admin → Sources** → **Add sources** → **Add a site by address**: paste the site's
+   homepage address, give it a name, **Add**. Uchiyomi recognises the common manga-site families by itself. Step by
+   step: [the user guide, section 7](USAGE.md#add-a-site--step-by-step).
 3. **Mihon / Tachiyomi extensions.** These need the **extension engine**, a separate download, then an
    extension repository:
 
-   ![The Extensions card before the engine is installed: Download the extension engine (about 200 MB)](shots/desktop-engine.webp)
+   ![The extension engine's card before it is installed: Download the extension engine (about 200 MB)](shots/desktop-engine.webp)
 
-   1. Open **Admin → Extensions** and choose **Download the extension engine (about 200 MB)**. (Until then the
-      Extensions card under Admin → Providers says *Not installed yet — download it under Extensions*.) You
-      see *Downloading the extension engine…* with how much has arrived, *Installing the extension engine…*,
+   1. Open **Admin → Sources** and choose **Download the extension engine (about 200 MB)**, at the top of the tab
+      (until then MangaDex and the sites you add are listed under it, and work). You see *Downloading the
+      extension engine…* with how much has arrived, *Installing the extension engine…*,
       then *Starting the extension engine…*: Uchiyomi restarts its own server once to connect to it, a blink of
       two or three seconds, and reconnects by itself. The download comes from this project's own GitHub
       release for the engine, and is checked against a SHA-256 fingerprint pinned inside the app before

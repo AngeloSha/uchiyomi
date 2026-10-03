@@ -655,7 +655,7 @@ seconds — and now and then a long one of 20 to 45 minutes. That comes to about
 sites at once; the series queued on one site take turns, so ten of them share its four chapters an hour.
 
 **What it waits for.** Everything else goes first. It stands aside while the scheduled check, the library repair or
-the daily source check (or *Check all now*) runs; while anyone else downloads from the same site or into the same
+the daily source check (or *Test all*) runs; while anyone else downloads from the same site or into the same
 series; while the site is cooling down, switched off or not installed; outside the hours it may run; and while the
 download disk has less free space than its floor. A site that refuses a chapter (403 or 429) is left alone for an
 hour, then three, then twelve, then a day at a time, and the series stays queued; a chapter that keeps failing is
@@ -1223,28 +1223,29 @@ dialog and on the series page.
 
 ## 7. Sources: extensions, add-a-site and MangaDex
 
-![Add a site](shots/admin-providers.webp)
+![Add sources: a site by its address, MangaDex's languages, the language of sites that do not say theirs, Import a list and source packs, over the extension catalogue](shots/admin-providers.webp)
 
 **MangaDex works out of the box** (the official public API), with nothing to set up. Everything else you add
-yourself, two ways:
+yourself, two ways, both under **Admin → Sources → Add sources** (`/admin/?tab=Sources`; **Admin** on the profile
+rail, then **Sources**). Since v0.54.0 it is one tab for every source, where Providers and Extensions were two; their
+old addresses, `?tab=Providers` and `?tab=Extensions`, lead there.
 
-- **A site by its address**, in **Admin → Providers** (below). Uchiyomi bundles generic **engines** for three
-  common manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of
-  them.
-- **Mihon / Tachiyomi extensions**, in **Admin → Extensions**, from an extension repository you add
+- **A site by its address** (below). Uchiyomi bundles generic **engines** for three common manga-site families
+  (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of them.
+- **Mihon / Tachiyomi extensions**, from an extension repository you add
   ([below](#extensions-mihon--tachiyomi), step by step in [extensions.md](extensions.md#add-an-extension-repository--step-by-step)).
 
 ### Add a site — step by step
 
-1. Go to **Admin → Providers** (`/admin/?tab=Providers`; **Admin** on the profile rail, then the **Providers** tab).
-2. In the **Add a site** box, leave the engine on **Auto-detect**. (The small (i) beside the heading
-   explains, in five lines, what a source, an extension, a site by URL and a translation group are, and
-   the difference between *Fetch* and *Save offline*.)
+1. Go to **Admin → Sources** and open **Add sources**.
+2. Under **Add a site by address**, leave the engine on **Auto-detect**. (The small (i) beside the heading says
+   which sites it works for.)
 3. Paste the site's **homepage URL**, the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
    specific series or chapter.
 4. Type a **Name** (any label you like; it's just what shows in your source list).
 5. Click **Add**. Uchiyomi fetches the homepage, figures out the engine, and the source goes live **instantly, no
-   restart**. It then appears in the list and is searchable from **Discover**.
+   restart**: it is tested on the spot, with the checks it passed and failed listed under the form. It then appears
+   under **Your sources** and is searchable from **Discover**.
 
 ### Will a site work?
 
@@ -1267,57 +1268,98 @@ Open **Discover**, tap the **All sources** chip and pick your new source to brow
 [section 6](#6-discover--add-new-series)). New sources also join the cross-source search there
 automatically.
 
-### Managing sources
+### Your sources
 
-Each source shows its **health** as a mark and a word (since v0.49.0; it was a capsule with the server's own
-token, in English): *Healthy*, *Rate-limited*, *Blocked by the site*, *Not answering*, *Answers empty*, *Turned
-off*, or *Failing* — a step failed its last Test or daily check, or three times in a row in normal use, within the
-last week and while nothing has put the source in a cooldown. The shapes differ, so the mark reads without its
-colour. From the list you can:
+![Admin → Sources: the extension engine's strip, Needs attention with an extension update, and Your sources, one row per source](shots/admin-extensions.webp)
 
-- **Test** a source now: it asks for a search, a chapter list and a page list, ignoring any cooldown, and the key
-  counts against its time limit (*Testing… 0:12 of up to 0:53*),
-- **Disable** / **Enable** a source,
-- **Clear** a temporary block (if a site rate-limited you after heavy downloading),
-- **Remove** a site you added (the built-in MangaDex can't be removed),
-- **Reload sources** to re-scan after dropping a compiled source-plugin pack into `SOURCES_DIR`.
+**Your sources** lists every source Uchiyomi has, of every kind — the built-in engines, MangaDex in each language
+you have on, the sites you added, each language of each extension, and source packs — one row each: its kind beside
+its name, and one line under it with its state, how many series use it and its language. The state is a word, amber
+only when something is wrong: *Healthy*, *Rate-limited* (and when it tries again), *Blocked by the site*, *Failing
+since 23 Sep* (and the step that fails), *Offline since 23 Sep* for a site that answers with its own "we are offline"
+page, *Turned off*, *Hidden language*; *Failing* means a step failed its last Test or daily check, or three times in
+a row in normal use, within the last week and while nothing has put the source in a cooldown. The sources you
+switched off are folded away at the end, under **Switched off**. A row with one thing to do has its key (**Turn
+on**, for a switched-off source that series still use); every row opens the source's sheet. An extension that
+ships one source per language is one row per language: switch off the languages you do not read (in a source's
+sheet, or for every extension at once with **Languages**) and they fold away.
 
-An extension that ships one source per language is one card, not one per language: the card is headed
-with the extension's name, *{n} languages*, how many are on and the worst health among them, and opens to
-a compact row per language with its own status, series count and **Enable** / **Disable**. The count
-above the list reads *{n} sources in {m} providers* for the same reason. An extension with a single source,
-the built-in engines and sites added by URL are plain cards as before.
+**Needs attention**, above the list, appears only while something needs you, one row each:
 
-**What a card knows about its source** (since v0.49.0, #115). A source is checked in four steps — **Search**,
+- a source that is offline, failing or switched off and still the **main source** of some series, with how many,
+  and how many of those already follow a working source: **Replace** ([below](#replace-a-source));
+- the failing sources nothing uses, by name, with **Turn off all**, which asks first;
+- an extension update, with **Update** (**Update all** for several).
+
+**A source's sheet** holds everything about it: its state, **Details** (below), and its keys — **Replace** while it
+cannot serve the series it is the main source of; **Test**, which asks for a search, a chapter list and a page list,
+ignoring any cooldown, its key counting against the time limit (*Testing… 0:12 of up to 0:53*); **Clear block** in a
+cooldown (if a site rate-limited you after heavy downloading); **Turn off** or **Turn on**, which asks first when
+series use it (they get no new chapters from it until you turn it back on; nothing is deleted); and **Remove** for a
+site you added, refused while it is still some series' main source (replace it first). **Used by 195 series ›**
+opens the Library filtered to them. Then what its kind has: an extension's languages, settings, **Update** and
+**Remove extension**; MangaDex's languages; a site's address, with **Update address**.
+
+**Test all**, beside the views, tests every source, one at a time, in the background: the line under it says how far
+it has got (*Testing 7 of 40 · …*), and a check that was already running when you opened the tab is picked up. When
+it ends it says what it found: *Checked 40 sources.*, with how many need attention and how many could not finish in
+time. The same check runs by itself once a day; since v0.49.0 it notifies admins once per new or changed failure,
+not every day, and the notification opens Health. **Languages**, beside it, hides languages in every extension at
+once, and **Check for extension updates** asks the repositories again. **Reload sources**, under **Add sources →
+Source packs**, re-scans after you drop a compiled source-plugin pack into `SOURCES_DIR`.
+
+**What a source's sheet knows** (since v0.49.0, #115). A source is checked in four steps — **Search**,
 **Chapter list**, **Page list** and **Images** (the Test and the daily check try the first three; images are seen
 when chapters download) — and Uchiyomi keeps what each was last seen doing and who saw it: the Test button, the
-daily check, or normal use. A card with a failing step (above) reads *Failing*, with a line per step (✗ for the one
-that broke, when, and the engine's or site's own error, cut to two lines with the rest on hover), and keeps them
-after a reload; one whose last check passed says so in one line. A failed Test or daily check marks its step
+daily check, or normal use. A source with a failing step (above) reads *Failing*, and its sheet's **Details** has a
+line per step (✗ for the one that broke, when, and the engine's or site's own error, cut to two lines with the rest
+on hover), and keeps them after a reload; a Test opens **Details** on its answer. One whose last check passed says so
+in one line. A failed Test or daily check marks its step
 failing at once; normal use does after three failures in a row at the same step. Only a later success at **that
 same step** clears it: a downloaded chapter says nothing about a broken search. A test that ran out of time reads
 *could not finish in time — not proof it is broken*, never *Failing*: raise `SOURCE_TEST_TIMEOUT_MS` (up to 120 s)
 for a source that keeps doing that behind a slow Cloudflare check. A Test never changes a cooldown. The same lines
 are on **Admin → Health** under *Source health*.
 
-**Check all now** tests every enabled source, one at a time, in the background: the button shows how far it has
-got (*Checking 7 of 40 · …*), and a check that was already running when you opened the tab is picked up. When it
-ends, a message counts the sources that need attention and those that could not finish in time. The same check
-runs by itself once a day; since v0.49.0 it notifies admins once per new or changed failure, not every day, and
-the notification opens Health.
+### Replace a source
+
+When a site goes offline or stops working for good, every series whose **main source** it is stops updating, and
+since v0.54.0 **Replace** moves them all off it in one run. The dialog first says what will happen, in numbers the
+server works out before anything moves:
+
+1. *184 already follow a working source: it becomes their main source.* At once, with no search.
+2. *The other 11 are searched for on your other sources.* One at a time, under their titles and other names, as
+   *Find other sources* does: a match is taken only when its title and chapter numbers line up.
+3. *Example Manga is turned off once nothing uses it.*
+
+A series numbered by posting order keeps its main source, and the dialog says how many. **Turn it off when done**
+(on by default) switches the source off at the end if nothing uses it any more. **Let me review each match first**
+moves nothing: each series' match waits in the results, with **Make main** on it, and **Make all green main** for
+every good match at once. **Start**, and the dialog becomes the run: how far it has got (*184 of 195 series · Now:
+…*), three counts — *Moved*, *New source found*, *No replacement* — and each series as it lands, *Example Manga →
+Sample Comics* or why not. **Stop** stops it; **Run in background** closes the dialog and the run goes on, on
+**Library → Downloads** (*Server tasks*) and on Health's card, which open its results. One such run, Replace or *Find
+other sources*, goes at a time. Health offers **Replace** too, as the key of a source row that series depend on, and
+on *Series that can no longer update*.
+
+One series at a time: a series' **Sources & translations** sheet offers **Make main** on each source it follows that
+works. It asks first, in one line — *Make Sample Comics this series' main source? Example Manga is kept as a backup*
+(or *…is dropped*, when the old one no longer works) — and a refusal says why: the series is numbered by posting
+order, its chapters wait for a renumbering review, it is being checked right now, and so on.
 
 ### MangaDex in other languages
 
 Since v0.52.0 ([#123](https://github.com/AngeloSha/uchiyomi/issues/123)) MangaDex serves other languages than
-English. In **Admin → Providers** MangaDex is one card, its languages behind **Manage**: English is always on, and
-each language you tap on becomes a source of its own at once, *MangaDex (ES-419)* say, with its own Newest and
+English. Its languages are under **Admin → Sources → Add sources → MangaDex languages** (folded until you open it),
+and in a MangaDex source's own sheet: English is always on, and each language you tap on becomes a source of its
+own at once, a row of **Your sources**, *MangaDex (ES-419)* say, with its own Newest and
 Popular in Discover and chapters in that language only. A series added from it is in that language, and a series you
 already have can take it as another language edition (*Reading a series in two languages*, in section 4). Turning off
 a language that series came from asks first: they keep their chapters, get no new ones until it is back, and Health
 lists them under its frozen series with the switch named. All the languages share one rate limit: when MangaDex asks
 Uchiyomi to slow down, every language waits.
 
-Beside **Add a site**, **Sites that do not say their language** is the language Uchiyomi takes a source to be in
+In **Add sources**, **Sites that do not say their language** is the language Uchiyomi takes a source to be in
 when it declares none, which most sites added by address do: English unless you choose another. It matters for
 the rule in *Following a second source* (section 4): a source is followed automatically only for a series in its
 language.
@@ -1341,16 +1383,17 @@ sites, but not every one.
 Beyond the built-in engines, Uchiyomi can use the **Mihon / Tachiyomi extension ecosystem**, well over a
 thousand of them. Uchiyomi ships none and has no repository built in, so the first step is yours:
 
-1. Open **Admin → Extensions**. With no repository yet, **Browse** opens on *Add an extension repository*.
+1. Open **Admin → Sources → Add sources**. With no repository yet, its **Extensions** part opens on *Add an
+   extension repository*.
 2. Paste the address of an **extension repository** you trust — the same one you added in Mihon (Mihon: **More →
    Settings → Browse → Extension repos**), usually ending in `index.min.json`. A repository's *Add to Mihon* link
    works too. Press **Add**; it can take up to a minute.
 3. **Added — {n} extensions from this repository.** Browse lists them, a page at a time: press **Install** on each
-   one you want. Its sources switch on straight away and are searchable from Discover immediately. Hide the
-   languages you don't read — **Languages**, on **Installed**, for every extension at once, or the switches in one
-   extension's sheet.
+   one you want. Its sources switch on straight away, are listed under **Your sources** and are searchable from
+   Discover immediately. Hide the languages you don't read — **Languages**, beside **Test all** on **Your sources**,
+   for every extension at once, or the switches in a source's sheet.
 
-![The extension browser](shots/admin-extensions.webp)
+![The extension catalogue in Add sources: its search and language, how many match and from how many repositories, and the first extensions with Update, Already installed and Install](shots/crop-repo-added.webp)
 
 What to paste, what every message means, the 25-source limit and removing a repository:
 **[Add an extension repository — step by step](extensions.md#add-an-extension-repository--step-by-step)**.
@@ -1358,10 +1401,11 @@ Adult extensions stay out of Browse until **Show 18+ extensions** is switched on
 second app on Unraid and CasaOS, and a one-time download in the desktop app
 ([what you need first](extensions.md#what-you-need-first-the-extension-engine)).
 
-With no engine — turned off (`EXTENSION_ENGINE=0`), not set up, or not answering — **Admin → Extensions** is a
-setup screen instead of your extensions (since v0.49.0): it says which of the three it is, shows the steps for your
-platform with each command ready to copy, and **Check again** asks the engine at once; the card turns into your
-extensions by itself when it answers. Uchiyomi also keeps asking on its own, every 5 minutes, so an engine started
+With no engine — turned off (`EXTENSION_ENGINE=0`), not set up, or not answering — **Admin → Sources** starts with a
+setup card (since v0.49.0; until v0.54.0 it was the whole Extensions tab): it says which of the three it is, shows
+the steps for your platform with each command ready to copy, and **Check again** asks the engine at once; the card
+turns into the engine's strip by itself when it answers. The built-in engines, MangaDex and the sites you added are
+listed under it and work meanwhile. Uchiyomi also keeps asking on its own, every 5 minutes, so an engine started
 later needs no restart. With the engine there, the top of the tab is a slim strip of two cells (since v0.53.0): the
 engine, *Ready* with its version and how many sources are on of the 25 that can be, and its *Cloudflare helper*,
 *Connected*, or *Not connected* with **Connect** when the engine's own helper is off or points at `localhost` (Health's
@@ -1370,9 +1414,9 @@ switch it off safely (on a server; the desktop app has no switch).
 Never delete the engine's data: it holds the link from every series you added through an extension to its source,
 and Uchiyomi's nightly backup does not include it ([your engine's data](extensions.md#your-engines-data)).
 
-**An extension's own settings** (since v0.49.0). An installed extension's sheet in **Admin → Extensions** (press its
-row under **Installed**) has its languages, a switch each, and under **Settings** (closed until you open it) the screen
-Mihon shows for it:
+**An extension's own settings** (since v0.49.0). The sheet of an extension's source in **Admin → Sources** (press its
+row under **Your sources**, or the extension in **Add sources**) has the extension's languages, a switch each, and
+under **Settings** (closed until you open it) the screen Mihon shows for it:
 switches, lists, choices and text, exactly as the extension offers them, saved to the engine as you change them (a
 text setting when you press **Save**). An extension that provides one source per language shows *Settings for* first,
 one choice per language, since each keeps its own settings; it only picks whose settings you see. They apply to every series from that source. A setting the extension has switched off in its
@@ -1429,7 +1473,8 @@ work against this too; it was not tested here. The full list of what is and is n
 
 Reachable from **Admin** on the profile rail, or directly at `/admin/` (admins only). Panels are grouped by
 what you are doing rather than by what the code is called: **Server** (Overview, Tasks, Settings), **People**
-(Members, Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (Providers, Extensions).
+(Members, Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (one tab since v0.54.0, where
+Providers and Extensions were two; `?tab=Providers` and `?tab=Extensions` lead there).
 Every tab has an address — `/admin/?tab=Settings`, `/admin/?tab=Health` and so on — so a refresh, the Back
 button, a bookmark or a language change keeps you on the tab you were on. The first tab, Overview, is plain
 `/admin/`. The same is true of the profile: `/profile/?tab=Settings`, `/profile/?tab=Connections`,
@@ -1607,12 +1652,14 @@ slowly*) — the row is greyed as being archived slowly, and the nightly repair 
 other gap keeps the row a finding. **Fill now** is still there, and fetches the archive's chapters at once, at the
 usual pace, instead of waiting for it; the row says so before you press it.
 
-A source you turned off yourself -- one at a time on Providers, or a whole language at once on Extensions --
+A source you turned off yourself -- one at a time in Admin → Sources, or a whole language at once with its
+**Languages** --
 is listed greyed under *Source health* so the count stays visible, but it never makes the check amber: it is
 your decision, not a fault. A source whose last success is newer than its last failure is not diagnosed from
 the words of that old failure any more: since v0.37.0 the row shows only what is live (an empty streak, say)
 instead of sending you to fix a Cloudflare problem that ended days ago, and the same holds for the *Test*
-button on Providers, which no longer keeps an extension source's stale verdict once its live checks pass. The same greying marks the advisory rows, such as a solver or Uchiyomi version
+button in a source's sheet in Admin → Sources, which no longer keeps an extension source's stale verdict once its
+live checks pass. The same greying marks the advisory rows, such as a solver or Uchiyomi version
 that is merely behind. Since v0.41.0 the same greying covers a failing source **no series uses** — on a real
 install ten of twelve not-ok sources are Discover-only noise nobody can act on — and it counts as a fault
 again the moment something uses it, or it is actually in a cooldown, or (since v0.49.0) its failure is confirmed.
@@ -1622,11 +1669,13 @@ more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
 **Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
 Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote
 nothing down, and one downloaded chapter put the source back to `ok`. Now the check reads what each of the four
-steps — search, chapter list, page list, images — was last seen doing (see *What a card knows about its source*
-under [Managing sources](#managing-sources)). A row names the source and leads with the step that broke — *Search
+steps — search, chapter list, page list, images — was last seen doing (see *What a source's sheet knows*
+under [Your sources](#your-sources)). A row names the source and leads with the step that broke — *Search
 failing since 2026-09-27 08:14 — This source's extension reported an error. Last tested 2026-09-27 10:02 by Test;
 3 series use it* — followed by a line for each step it has something on and, under a finding, the fix; it keeps
-its **Test**, **Clear block** and **Turn off** keys. A failure is confirmed by a failed Test or daily check at
+its **Test**, **Clear block** and **Turn off** keys, and since v0.54.0 a source that series still use as their main
+source leads with **Replace** ([section 7](#replace-a-source)), wherever it is listed, *Switched off by you*
+included. A failure is confirmed by a failed Test or daily check at
 once, or by three failures in a row at one step in normal use, and cleared only by a later success at that same
 step. A confirmed failure is a finding even for a source no series uses: turn it off, or **Ignore** it, and the
 ignore holds until a different step starts failing. Greyed, for reference: a test that ran out of time (*not proof
@@ -1653,7 +1702,7 @@ every 5 minutes by itself), or ready, with whether the engine's own Cloudflare h
 off, or points at `localhost` where no helper runs, turns the row amber while an extension source is seen behind
 Cloudflare, and is a greyed line otherwise. When Uchiyomi has a helper of its own to share (`FLARESOLVERR_URL`),
 the row has **Connect**: it points the engine at that helper and switches it on, with nothing restarted — the same
-key as in the strip at the top of **Admin → Extensions**, where the row's **Open** leads, with the setup steps and
+key as in the strip at the top of **Admin → Sources**, where the row's **Open** leads, with the setup steps and
 **Check again**. When the engine cannot say what its helper is set to (just now, or it is too old to report it)
 while a source fails with the engine's own *Cloudflare bypass currently disabled*, the row reads *It cannot use its
 Cloudflare helper*, with **Connect** wherever there is a setting to change. Series from extensions that cannot
@@ -1933,10 +1982,9 @@ the app open with no connection: it ends when that member signs out, or when the
 expired, but until then a device already holding their downloads can still read them. Signing them out
 everywhere ends it on the next occasion that device reaches the server.
 
-**Providers:** the source health + Add-a-site controls from section 7, with a multi-language extension
-folded into one card that opens per language. This tab also holds **Import a list**, for moving a library
-over from another app. It is one path: import a list → review the matches → add. Pressing it opens the
-import page (`/admin/import/`), which takes the list four ways:
+**Sources:** every source and the ways to add one, from section 7. Its **Add sources** also holds **Import a
+list**, for moving a library over from another app. It is one path: import a list → review the matches → add.
+Pressing it opens the import page (`/admin/import/`), which takes the list four ways:
 
 ![Import and review matches](shots/admin-import.webp)
 
@@ -2209,7 +2257,7 @@ Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its 
 be connected at once; each syncs on its own.
 
 **Bringing your list over.** The same connection reads in the other direction, once: on the import page
-(section 8, *Providers → Import a list*) the *From your tracker* box loads the account's manga list — the
+(section 8, *Sources → Import a list*) the *From your tracker* box loads the account's manga list — the
 lists you tick — into the reviewed import, and every title that comes in, or that you already had, is linked
 to its tracker entry, so the first chapter you finish syncs. The import also records how far the tracker
 already says you are in each of those series, for the account whose list was read, and a chapter finished
@@ -2469,32 +2517,33 @@ computer, with `http://` in full if it is not https; the message under the field
 ([details](DESKTOP.md#a-server-with-a-self-signed-certificate)); a password prompt on a reverse proxy (Basic
 Auth) is not supported by the app yet, while sign-in portals such as Authelia and single sign-on work.
 
-**The Extensions tab is empty / there are no extensions to add.** Uchiyomi ships none: add an extension
-repository first ([step by step](extensions.md#add-an-extension-repository--step-by-step)). In the desktop app
-on the computer itself, download the extension engine first, from the same tab.
+**Add sources lists no extensions.** Uchiyomi ships none: add an extension repository first
+([step by step](extensions.md#add-an-extension-repository--step-by-step)). In the desktop app on the computer
+itself, download the extension engine first, from the top of **Admin → Sources**.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
-automatically by the bundled FlareSolverr. *Blocked by the site* or *Rate-limited* on a source's card means it
+automatically by the bundled FlareSolverr. *Blocked by the site* or *Rate-limited* on a source's row means it
 is in a cooldown — wait a bit, or try another source.
 
-**The Extensions tab says the extension engine isn't answering.** Its container is still starting (a minute or two
+**The extension engine isn't answering, says Admin → Sources.** Its container is still starting (a minute or two
 the first time), has stopped, or `SUWAYOMI_URL` names the wrong address. The tab shows what to check for your
 platform, with the commands; **Check again** asks at once, and Uchiyomi asks by itself every 5 minutes, so the
 extensions come back without a restart once the engine answers. *Extensions are turned off* means
 `EXTENSION_ENGINE=0`; *No extension engine is set up* means `SUWAYOMI_URL` is empty. Series added through
 extensions keep their chapters meanwhile. See [extensions.md](extensions.md#what-you-need-first-the-extension-engine).
 
-**A source says *Failing*.** The mark means a step of it failed the last time it was tested, or three times in a
-row in normal use, within the last week: the line under the card says which step and what went wrong. **Test** it
-again; a pass at that step clears it. A test that keeps running out of time behind Cloudflare is not a failure;
+**A source says *Failing*.** The word means a step of it failed the last time it was tested, or three times in a
+row in normal use, within the last week: its row says which step, and its sheet's **Details** what went wrong.
+**Test** it again; a pass at that step clears it. When it is gone for good, **Replace** moves its series to your
+other sources ([section 7](#replace-a-source)). A test that keeps running out of time behind Cloudflare is not a failure;
 raise `SOURCE_TEST_TIMEOUT_MS` (up to 120 s) if you want it to finish.
 
 **A Webtoons series has a handful of chapters, each with dozens of versions.** Its source gives many different
 posts one chapter number. Since v0.49.0 such a series is numbered by posting order instead (section 4, *Chapter
 numbering*): one you add now is numbered as it is added, and one already in your library waits for an admin's
 review on its page. The Webtoons extension's own *Use sequential chapter numbering*, under **Settings** in its sheet in
-**Admin → Extensions**, is the other way to the same numbers, and changing it asks for the same review.
+**Admin → Sources**, is the other way to the same numbers, and changing it asks for the same review.
 
 **A series says *Chapter numbers need a review* and gets no new chapters.** That is on purpose: its files still
 carry the source's old numbers, and a chapter fetched now would land under a number the plan is about to move. An
@@ -2515,7 +2564,7 @@ and the Health page say the same, in these words: *The extension engine's own Cl
 the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and
 FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files),
 then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix
-there.* Since v0.49.0 **Admin → Extensions** says so (since v0.53.0 in the *Cloudflare helper* cell of its strip), and
+there.* Since v0.49.0 **Admin → Sources** says so (since v0.53.0 in the *Cloudflare helper* cell of the engine's strip), and
 **Connect** there — or on Health's
 *Extension engine* row — points the engine at the solver Uchiyomi uses (`FLARESOLVERR_URL`) without restarting
 anything. Running the engine yourself? That works too, or set both on that container — see

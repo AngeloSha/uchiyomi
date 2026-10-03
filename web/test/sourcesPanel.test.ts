@@ -99,8 +99,8 @@ test('the old tabs\' parameters open the matching view, and settings=<id> that s
 test('Your sources is ONE list of every kind, in the server\'s order, the switched-off ones folded away', () => {
   // Providers listed built-ins, MangaDex, sites and only the extension sources registered; Extensions the packages. One
   // answer now lists every source. Reintroduce a filter by kind (`on.filter((s) => s.kind !== 'extension')`, Providers'
-  // registered-only list): "an extension's source is not in the one list" fails; show the switched-off ones in the
-  // list: "a switched-off source is in the list" does.
+  // registered-only list): "the list is not the server's, in its order" fails; show the switched-off ones in the list:
+  // the same assertion, then "a switched-off source is in the list", does.
   const html = renderToStaticMarkup(createElement(YourSources, {
     overview: OVERVIEW, failed: false, evidence: new Map(), onRetry: noop, onOpen: noop, onChanged: later, onAdd: noop,
   }));
@@ -200,7 +200,7 @@ test('Replace says what it will do in the preview\'s numbers, before anything mo
     'The other 9 are searched for on your other sources.',
     '2 numbered by posting order stay as they are.',
     '⁨Aqua Manga⁩ is turned off once nothing uses it.',
-  ]);
+  ], 'the plan says other numbers than the preview\'s');
   assert.deepEqual(replacePlan({ ...PREVIEW, withBackup: 0, postingOrder: 0, toSearch: 1 }, 'X', false), ['It is searched for on your other sources.'], 'Turn it off when done is off and still said');
   assert.deepEqual(replacePlan({ ...PREVIEW, withBackup: 1, toSearch: 0, postingOrder: 1 }, 'X', false), [
     '1 already follows a working source: it becomes its main source.', '1 numbered by posting order stays as it is.',
@@ -261,11 +261,11 @@ test('the run says how far it has got, three counts, and each series as it lands
 
 test('the sheet\'s keys by state and kind: Replace only for a dead main source, Remove only for a site', () => {
   // Reintroduce Replace for any source that is not working (drop `s.main > 0`): "a source nothing uses offers Replace"
-  // fails; Remove for every kind: "a built-in offers Remove" does; Test for a source its extension switched off (it is
-  // not loaded, and its Test would only say so): "an unloaded source offers Test" does.
+  // fails; Remove for every kind: "a working built-in offers a key it has no use for" does; Test for a source its
+  // extension switched off (it is not loaded, and its Test would only say so): "an unloaded source offers Test" does.
   const a = OVERVIEW.attention;
   assert.deepEqual(sheetKeys(AQUA, a), ['replace', 'test', 'turn-on', 'remove']);
-  assert.deepEqual(sheetKeys(src('mangaread', { main: 125 }), a), ['test', 'turn-off'], 'a working source offers Replace');
+  assert.deepEqual(sheetKeys(src('mangaread', { main: 125 }), a), ['test', 'turn-off'], 'a working built-in offers a key it has no use for (Replace, Remove)');
   assert.deepEqual(sheetKeys(src('x', { standing: 'failing', state: 'failing' }), a), ['test', 'turn-off'], 'a source nothing uses offers Replace');
   assert.deepEqual(sheetKeys(src('x', { standing: 'failing', state: 'failing', main: 3 }), a), ['replace', 'test', 'turn-off']);
   assert.deepEqual(sheetKeys(src('n', { standing: 'cooling', state: 'blocked', main: 123 }), a), ['test', 'unblock', 'turn-off'], 'a cooldown offers Replace, or no Clear block');

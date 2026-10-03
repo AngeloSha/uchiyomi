@@ -229,7 +229,7 @@ default back, which is why that never worked); delete such a line if you want to
 **Unraid and CasaOS.** Add the engine with the `uchiyomi-suwayomi` template (Unraid, from Apps) or the add-on
 [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) (CasaOS, imported as a custom
 app), then set `SUWAYOMI_URL` on Uchiyomi; remove it by stopping the engine and emptying `SUWAYOMI_URL`. The
-step-by-step for each, with the folder to create first, is under **Admin → Extensions** while no engine is set up.
+step-by-step for each, with the folder to create first, is under **Admin → Sources** while no engine is set up.
 **Umbrel** cannot add an optional second container, so extensions are not available there.
 
 ## Moving the engine between setups
@@ -252,7 +252,7 @@ Compose ↔ Unraid ↔ CasaOS, or to a machine of its own: copy the engine's dat
 4. Keep the same address if you can. Covers fetched through the engine are stored with its address, so after a
    move to a new one they show as placeholders until the series' covers are fetched again.
 5. Point `SUWAYOMI_URL` at the new engine. The extension sources come back by themselves within a few minutes
-   (or at once with **Check again** under Admin → Extensions).
+   (or at once with **Check again** under Admin → Sources).
 
 **Removing it for good.** Series added through extensions stay in your library and stay readable; Admin → Health
 lists them as waiting for the extension engine. Delete the engine's data only if you will never come back:

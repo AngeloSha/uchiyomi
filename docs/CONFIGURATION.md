@@ -120,9 +120,9 @@ Uchiyomi bundles a few **generic engines** (parsers for the common manga-site fa
 MangaThemesia / Manganato) but **no specific sites for them**. Along this route, nothing fetches anything
 until *you* add a site:
 
-**Admin → Providers → Add a site:** pick the engine, paste a site's homepage URL, done. It loads instantly
-(no rebuild). The engines are generic parsers; you supply the URLs, and you're responsible for using them in
-line with those sites' terms and your local law.
+**Admin → Sources → Add sources → Add a site by address:** pick the engine, paste a site's homepage URL, done. It
+loads instantly (no rebuild). The engines are generic parsers; you supply the URLs, and you're responsible for using
+them in line with those sites' terms and your local law.
 
 A handful of one-off, site-specific sources (e.g. an official API client) aren't engines and aren't bundled.
 Nothing is published for you to drop in — the loader will register any compiled CommonJS plugin you build
@@ -135,9 +135,9 @@ SOURCES_PATH=/path/to/your/plugins/dist     # compiled .js plugins, mounted read
 ```
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
-plugin and hit **Admin → Providers → Reload sources** (`POST /api/admin/sources/reload`); no rebuild. With no sites
-added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library you
-already own.
+plugin and hit **Admin → Sources → Add sources → Reload sources** (`POST /api/admin/sources/reload`); no rebuild.
+With no sites added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library
+you already own.
 
 **Progressive search.** A cross-source Discover search returns after `SEARCH_FIRST_ANSWER_MS` (default
 `6000`) at the latest, or `SEARCH_GRACE_MS` (`1500`) after its first useful answer, while unfinished sources
@@ -160,8 +160,8 @@ The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER
 `SCAN_FIRST_ANSWER_MS` (default `2500`, since v0.48.4) is how long Find missing chapters waits before showing
 what has arrived; the rest comes in as each source answers, so no request waits on the slowest source.
 
-**Testing a source.** `SOURCE_TEST_TIMEOUT_MS` (default `45000`, 1000–120000) is how long one **Test** on Admin →
-Providers or Health, and each source in the daily check or *Check all now*, may take end to end. Since v0.49.0 it
+**Testing a source.** `SOURCE_TEST_TIMEOUT_MS` (default `45000`, 1000–120000) is how long one **Test** in Admin →
+Sources or Health, and each source in the daily check or *Test all*, may take end to end. Since v0.49.0 it
 also bounds every call inside the test, and a test that runs out of it is reported as *could not finish in time*
 rather than as a failure: raise it for extension sources behind a slow Cloudflare check that keep reading so. The
 Test key counts against it, plus a few seconds of margin (*Testing… 0:12 of up to 0:53* at the default).
@@ -203,7 +203,7 @@ ever hit.
   (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
   Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect** —
   on the *Extension engine* row of **Admin → Health**, which says when it is needed, or in the *Cloudflare helper*
-  cell of the strip at the top of **Admin → Extensions** — sets the engine's own `flareSolverrEnabled` /
+  cell of the strip at the top of **Admin → Sources** — sets the engine's own `flareSolverrEnabled` /
   `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API. Nothing restarts, and the engine keeps the value
   unless its container names another solver. It is only ever done on a press, and needs `FLARESOLVERR_URL` set on
   Uchiyomi. An engine too old to report the setting has to be given the two on its own container.
@@ -215,7 +215,7 @@ ever hit.
   applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the
   development stack): an engine you run yourself is never switched off by it. Needs the v0.49.0 compose files;
   an older file ignores the line. See [extensions.md](extensions.md#turning-it-off).
-- `UCHIYOMI_PLATFORM` (optional): `compose`, `unraid`, `casaos` or `umbrel`. Only tells **Admin → Extensions**
+- `UCHIYOMI_PLATFORM` (optional): `compose`, `unraid`, `casaos` or `umbrel`. Only tells **Admin → Sources**
   which setup steps to open on; the CasaOS listing, the Unraid template and the Umbrel package set it, and Unraid's
   own `HOST_OS` and a v0.49.0 compose file's `EXTENSION_ENGINE` are read when it is absent. Nothing else depends
   on it.

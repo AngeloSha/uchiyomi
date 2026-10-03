@@ -168,15 +168,14 @@ async function main() {
   };
   await clickTab('Health');
   await awaitThen(() => /checks found something|All good/i.test(document.body.innerText), 2400);
-  // Extensions, not Providers: v0.39.0 moved the extension catalogue out of the Providers tab into its own,
-  // leaving a link card behind. capture.mjs was updated and this was not, so the search below silently found
-  // nothing (`if (f)`), the icon wait never fired, and the Add hover at the end landed on the Providers
-  // tab's own disabled "Add a site" button. All three failures are silent by design, so the recording just
-  // quietly lost its best twelve seconds.
-  await clickTab('Extensions'); await skim(900);
-  // v0.53.0: the catalogue is Browse, beside Installed; the search is Browse's. Missing either is a silent skip,
-  // as everything here is -- look at the recording.
-  const browse = await page.$('[data-ext-view="browse"]');
+  // ⚠️ When the catalogue moves, move this with capture.mjs: v0.39.0 moved it out of the Providers tab into its own
+  // and only capture.mjs followed, so the search below silently found nothing (`if (f)`), the icon wait never fired,
+  // and the Add hover at the end landed on Providers' own disabled "Add a site" button. All three failures are
+  // silent by design, so the recording just quietly lost its best twelve seconds.
+  // v0.54.0: Providers and Extensions are one Sources tab; the catalogue is in its Add sources, whose search is
+  // Browse's. Missing either is a silent skip, as everything here is -- look at the recording.
+  await clickTab('Sources'); await skim(900);
+  const browse = await page.$('[data-sources-view="add"]');
   if (browse) { await browse.click(); await skim(700); }
   const f = await page.$('[data-ext-search]');
   if (f) {
