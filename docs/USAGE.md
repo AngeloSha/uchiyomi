@@ -1496,13 +1496,23 @@ v0.49.1 the page says the server's findings in your language, with dates and tim
 Since v0.41.0 every finding also carries the key that fixes it, and most of them fix themselves overnight
 without you pressing anything. Since v0.48.3:
 
-- **Fix all issues**, at the top, runs the repair once with every step that has something to do — longer copies
-  for short chapters, gaps, every source's failed chapters tried again now, and the solver. Since v0.49.0 it is a
-  row like the others, with no confirmation after the press: its plan, one line per step with that step's
-  limits, is under *How it works* before you press **Start**, with what it never does (delete, merge, switch
-  off) and, when the solver step is in it, that it ends the cooldowns of the sources that blame the solver. One
-  run takes up to 20 short chapters and 5 series with gaps (the `REPAIR_SHORT_MAX` / `REPAIR_GAPS_MAX` defaults);
-  the nightly carries on with the rest, or press it again.
+- **Fix everything** (since v0.55.0, where *Fix all issues* was), beside **Re-check**, is there whenever any card
+  has a finding. It asks one question:
+  - **Fix it for me** (the default) runs one background run that tries every remedy on every card: it replaces
+    broken sources, fetches missing and broken chapters, finds new sources (installing up to 3 extensions if it has
+    to, and keeping only those that found something), merges duplicate series, deletes chapters saved twice or
+    numbered impossibly, and applies the renumbering plans that are safe. Merges and deletes cannot be undone. While it
+    runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
+    never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
+    *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says
+    **All green**, or how many things need you, then up to six lines of what it did (*Moved 184 series off Aqua
+    Manga*, *Fetched 37 missing chapters*…). Each thing that needs you has its one key — the page it is about, its
+    card here, or Admin → Settings — what clears by itself says when, and the rest is under *Details*. **Run again**
+    is offered only while something a run could still change is left.
+  - **Let me choose** runs the safe repair *Fix all issues* used to run — failed chapters tried again now, longer
+    copies for short chapters, gaps and the solver, the steps some finding offers — and leaves the rest to the
+    cards. One run takes up to 20 short chapters and 5 series with gaps (the `REPAIR_SHORT_MAX` / `REPAIR_GAPS_MAX`
+    defaults); what it did stays under the keys until the next press.
 - **Open** goes to the chapter the finding is about: a short chapter opens in the reader; a gap or an impossible
   number opens the series with its list turned to that chapter and the row lit up (for a gap, the chapter just
   before it).
@@ -1574,7 +1584,9 @@ on its card that says so.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
-are reversible or provable on their own, and two more only when you switch them on, in this order:
+are reversible or provable on their own, and two more only when you switch them on, in this order. Since v0.55.0,
+**Every night**, just under that switch, chooses what runs: this **Safe repair** (the default), or a whole **Fix
+everything**, which does what its key on Health does and can merge, delete and install extensions without asking.
 
 * **clears stale Cloudflare state** when sources are blaming the solver and it answers: the remembered sessions,
   the "could not be solved" marks and those sources' cooldowns; and it forgets any cooldown that lapsed more than
@@ -1606,7 +1618,8 @@ leave the gaps with nothing.
 **Merge** per pair, and **Merge all** for the whole check, behind a confirmation that lists every pair and
 marks the copy that is kept (most chapters, then most readers, then the older row); merging is one way.
 **Impossible chapter numbers** offer **Delete chapters**, also behind a confirmation, and a chapter anyone
-has bookmarked is skipped. There is deliberately no *Fix all* for either.
+has bookmarked is skipped. There is deliberately no *Fix all* for either — only Fix everything's *Fix it for me*
+merges and deletes by itself, because pressing it is choosing that.
 **The same chapter saved twice** (since v0.50.0) lists series where two sites' splits of one chapter are both on
 disk — 335 and 335.5 from one site, 335.1 and 335.6 from another that arrived later — which updates before
 v0.50.0 could download (see *Parts that sites number differently*). It warns while it finds any. Each row names
@@ -1615,8 +1628,9 @@ every row, after a confirmation that lists them. A part another site supplied un
 numbers, which that site lists too, is not a second copy and is not listed. Deleted files stay listed as deleted
 chapters, everyone keeps their reading history, and updates do not fetch them back.
 
-**What the nightly never does.** It never deletes a chapter, never marks one as gone, never merges two
-series and never renumbers anything. It also never runs beside a chapter sweep: whichever starts second
+**What the nightly never does.** The safe repair never deletes a chapter, never marks one as gone, never merges
+two series and never renumbers anything; with **Every night** set to *Fix everything* the nightly is Fix
+everything, which can. It also never runs beside a chapter sweep: whichever starts second
 waits ten minutes. Switching it off stops the schedule only — *Run now* and the buttons below keep working.
 
 **The keys, one set per finding.** *Fix* asks the repair to look at that one chapter now (since v0.49.0 not
@@ -1665,7 +1679,10 @@ that is merely behind. Since v0.41.0 the same greying covers a failing source **
 install ten of twelve not-ok sources are Discover-only noise nobody can act on — and it counts as a fault
 again the moment something uses it, or it is actually in a cooldown, or (since v0.49.0) its failure is confirmed.
 When an extension server is configured there is one more check, *Extension source limit*, which goes amber when
-more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
+more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register. Since v0.55.0 a series under *Series
+that can no longer update* whose source is over that limit offers **Free a slot** instead of *Replace* — the source
+works, it is only not loaded — which opens that source in **Admin → Sources**, where switching off a source no
+series uses makes room for it.
 
 **Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
 Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote
@@ -2121,7 +2138,8 @@ chapters), the **Backup time (hour, 0–23)** of the nightly backup — change i
 once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
 automatically** and its check interval. **Look for failed chapters on other sources** controls the bounded,
 once-a-day source hunt described in section 4 and is on by default. **Library housekeeping**: **Delete read chapters** and its **Wait
-(days)**, below, and **Repair the library nightly** (on by default), the job described under *Health* above. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
+(days)**, below, **Repair the library nightly** (on by default), the job described under *Health* above, and
+**Every night** (since v0.55.0): *Safe repair*, or *Fix everything*. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
 groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
 the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
 in section 4. **Notifications** (since v0.43.0): where new chapters and server problems are sent besides
