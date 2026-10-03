@@ -196,19 +196,33 @@ export function deadFollowers(f: SeriesFacts): FollowerFacts[] {
   return f.followers.filter((x) => !carries(x.standing)).sort((a, b) => rank(a.standing) - rank(b.standing));
 }
 
+export interface ReplaceCounts { withBackup: number; toSearch: number; postingOrder: number }
+
 /**
  * Of the series whose main source is being replaced, how many a Replace run would move at once (a follower takes
- * over), search for (no follower can), and leave alone (numbered by posting order). For the preview and the overview.
+ * over), search for (no follower can), and leave alone (numbered by posting order). For the preview.
  */
-export async function replaceCounts(
-  seriesIds: readonly string[], maxAgeRating: number | null,
-): Promise<{ withBackup: number; toSearch: number; postingOrder: number }> {
-  const facts = await replaceFacts(seriesIds, { maxAgeRating });
-  let withBackup = 0, toSearch = 0, postingOrder = 0;
+export async function replaceCounts(seriesIds: readonly string[], maxAgeRating: number | null): Promise<ReplaceCounts> {
+  return (await countsByMain(await replaceFacts(seriesIds, { maxAgeRating }))).get(null) ?? { withBackup: 0, toSearch: 0, postingOrder: 0 };
+}
+
+/**
+ * The same counts for every series whose main source is one of `sourceIds`, by that source, in one pass: the sources
+ * overview's "already have a working backup" beside each source.
+ */
+export async function replaceCountsByMain(seriesIds: readonly string[], maxAgeRating: number | null): Promise<Map<string | null, ReplaceCounts>> {
+  return countsByMain(await replaceFacts(seriesIds, { maxAgeRating }), true);
+}
+
+async function countsByMain(facts: Map<string, SeriesFacts>, byMain = false): Promise<Map<string | null, ReplaceCounts>> {
+  const out = new Map<string | null, ReplaceCounts>();
   for (const f of facts.values()) {
-    if (f.posting) postingOrder++;
-    else if (rankFollowers(f.followers, { numbers: [], held: [] }).ranked.length) withBackup++;
-    else toSearch++;
+    const key = byMain ? f.sourceId : null;
+    const c = out.get(key) ?? { withBackup: 0, toSearch: 0, postingOrder: 0 };
+    if (f.posting) c.postingOrder++;
+    else if (rankFollowers(f.followers, { numbers: [], held: [] }).ranked.length) c.withBackup++;
+    else c.toSearch++;
+    out.set(key, c);
   }
-  return { withBackup, toSearch, postingOrder };
+  return out;
 }

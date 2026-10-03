@@ -234,6 +234,18 @@ for what is new. Answers **409** while a sweep is running (since v0.49.0 with it
 follow that one instead). It no longer touches extensions -- that is its own scheduled task,
 below, because the engine has to re-read its repositories before "an update is available" means anything.
 
+`GET /api/admin/sources/overview` (admin, since v0.54.0) is every source the server knows, of every kind, in one
+answer -- the one Sources section's list: `{sources, attention}`. Each source is `{id, name, kind: builtin|mangadex|
+site|extension|pack, lang, pkgName? (extensions), standing, offBy, state, stage, cooldown, offline, main, followed,
+withBackup, lastTestedAt, icon, address? (sites)}`: `state`, `stage`, `cooldown` and `offBy` are Source health's own
+(`ok` when Health has nothing to say), `standing` the series' Sources sheet's, `main` the series whose main source it
+is, `followed` the series that follow it without it being their main, `withBackup` of `main` the series a working
+follower would take over (the Replace preview's count), `offline` a confirmed site-offline notice. `attention` is
+`{replace, failingUnused, updates}`: the sources off or failing that are some series' main source, the findings on
+sources no series uses (Health's `unused` group), and installed extensions with an update waiting. The sources in
+`attention` come first, then by `main + followed`, then by name; switched-off sources last. The engine's own state
+stays `GET /api/admin/extensions/status`'s.
+
 `POST /api/admin/sources/:id/retire {how?: 'off'|'remove'}` (admin, since v0.54.0) retires a source no series has as
 its main source -- **409** `in_use` with `main` and `messageSaid` (`retire.inUse`) while one does: Replace it first.
 Every series' follow of it is dropped with its listing rows; then `off` (the default) switches it off, and `remove`
@@ -1174,7 +1186,7 @@ POST   /api/sources/runs/:kind/cancel
 DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
-POST   /api/admin/sources/:id/retire
+POST   /api/admin/sources/:id/retire GET    /api/admin/sources/overview
 POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/find    GET    /api/admin/sources/find
 POST   /api/admin/sources/find/stop

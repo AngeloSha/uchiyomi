@@ -968,7 +968,8 @@ const iso = (t: string | number | Date) => new Date(t).toISOString();
 const GROUP_ORDER: Record<SourceGroup, number> = { affected: 0, unused: 1, quiet: 2, off: 3 };
 const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1, empty: 1, inconclusive: 2, untested: 2, off: 3 };
 
-async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+/** Source health (#115, v0.53.0's groups). Exported for the sources overview (v0.54.0), which reads its rows. */
+export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean; off_in: 'language' | 'extension' | null;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;

@@ -9919,6 +9919,79 @@ paths:
           description: "`not_found`: no such run, proposal or series, or a series this admin may not see"
         "409":
           description: "`decided` (with `state`): followed or dismissed already"
+  /api/admin/sources/overview:
+    get:
+      tags:
+        - admin
+      summary: "Every source the server knows, of every kind, in one answer (since v0.54.0)."
+      operationId: getApiAdminSourcesOverview
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The one Sources
+        section's list: every source loaded, every extension source the engine ever registered (switched on, off, or not
+        loaded now), every source a series still names, and every source Health lists. Each row's `state`, `stage`,
+        `cooldown` and `offBy` are Source health's own (GET /api/admin/health, check `sources`); `ok` when Health has
+        nothing to say about it. `standing` is lib/sourceStanding.ts's (SeriesSource.standing). `main` counts the series
+        whose main source it is, `followed` the series that follow it without it being their main source, and
+        `withBackup`, of `main`, the series a working follower would take over -- the Replace preview's own count.
+        `offline`: a confirmed failure that is the site's own offline notice. `attention` is what the section leads
+        with: `replace` (off or failing, and some series' main source -- Health's replace_source rule), `failingUnused`
+        (Health's `unused` group: a finding on a source no series uses) and `updates` (installed extensions with an
+        update waiting: the engine asked briefly and kept 30 s, else the last extension check's). Ordered: the
+        sources in `attention` first, then by main + followed, most first, then by name; switched-off sources last.
+        The extension engine's own state stays GET /api/admin/extensions/status's.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources, attention]
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, kind, lang, standing, offBy, state, stage, cooldown, offline, main, followed, withBackup, lastTestedAt, icon]
+                      properties:
+                        id: { type: string, description: "'sw:<id>' for an extension source, 'mangadex' or 'mangadex-<code>', a site's slug, a pack's or a built-in's id." }
+                        name: { type: string }
+                        kind: { type: string, enum: [builtin, mangadex, site, extension, pack] }
+                        lang: { type: [string, "null"], description: "What it declares ('all' for an extension in every language); null when it declares none." }
+                        pkgName: { type: [string, "null"], description: Extension sources only. }
+                        standing:
+                          $ref: "#/components/schemas/SourceStanding"
+                        offBy: { type: [string, "null"], enum: [admin, extension, language, null], description: "Where it was switched off: under Sources, in its extension, or by hiding its language." }
+                        state: { type: string, enum: [blocked, failing, slow, empty, inconclusive, untested, off, ok] }
+                        stage: { type: [string, "null"], enum: [search, chapters, pages, images, null] }
+                        cooldown:
+                          oneOf:
+                            - type: object
+                              required: [status, until]
+                              properties:
+                                status: { type: string }
+                                until: { type: [string, "null"], format: date-time }
+                            - type: "null"
+                        offline: { type: boolean }
+                        main: { type: integer, minimum: 0 }
+                        followed: { type: integer, minimum: 0 }
+                        withBackup: { type: integer, minimum: 0 }
+                        lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
+                        icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
+                        address: { type: string, description: A site added by address only. }
+                  attention:
+                    type: object
+                    required: [replace, failingUnused, updates]
+                    properties:
+                      replace: { type: array, items: { type: string } }
+                      failingUnused: { type: array, items: { type: string } }
+                      updates: { type: integer, minimum: 0 }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/{id}/retire:
     post:
       tags:

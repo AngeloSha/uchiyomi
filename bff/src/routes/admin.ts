@@ -67,6 +67,7 @@ import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
 import { mainUses, retireSource } from '../lib/retireSource';
+import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
@@ -3944,6 +3945,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     return reply.code(202).send(checkProgress());
   });
   app.get('/api/admin/sources/check', async () => checkProgress());
+
+  /**
+   * Every source the server knows, of every kind, in one answer (v0.54.0, lib/sourcesOverview.ts): the one Sources
+   * section reads it. `attention` is what it leads with: the sources to Replace, the failing ones nothing uses, and how
+   * many extensions have an update waiting. The extension engine's own state stays GET /api/admin/extensions/status's.
+   */
+  app.get('/api/admin/sources/overview', async () => sourcesOverview());
 
   const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
