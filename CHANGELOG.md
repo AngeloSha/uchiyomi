@@ -2,47 +2,70 @@
 
 ## v0.53.0 — 2026-10-03
 
-**Admin → Extensions is redesigned around what you do there: whether the extension engine and its Cloudflare helper
-work, at a glance; what you have installed and what you can install, as two views; every extension in a repository
-reachable, however large; and one sheet per extension with a switch for each of its languages.** And the series page
-shows a series' banner sharp. Much of what the tab now does differently comes from **@Kedryn**'s notes on Discussion
-[#121](https://github.com/AngeloSha/uchiyomi/discussions/121).
+**Three screens that had grown cluttered are redone around what you do on them: Admin → Extensions, Health's Source
+health, and a series' Edit details. Each now says first what needs you, offers one action for it, and keeps the rest
+a tap away.** And the series page shows a series' banner sharp. Much of the Extensions work answers **@Kedryn**'s notes
+on Discussion [#121](https://github.com/AngeloSha/uchiyomi/discussions/121).
 
 ### Admin → Extensions, redesigned
 
-- **The engine at a glance.** The top of the tab is one card in two halves. **Extension engine** says *Engine ready*
-  with its version, how many extensions are installed and how many of their sources are on, against the limit
-  (*5 of 25 sources on*). **Cloudflare helper** says *Connected*, or offers **Connect**, one press. When the engine
-  is not answering or not set up, the tab is the setup screen, as before.
-- **Installed and Browse.** Two views under the card, each with its count: Installed opens once something is
-  installed, Browse until then, and `?view=` in the address opens either. The Installed count is extensions, never
-  their sources, which read as far more than the twelve Kedryn had added.
+- **The engine at a glance.** One slim strip. **Extension engine** says *Ready*, its version and how many sources are
+  on against the limit (*5 of 25 sources on*). **Cloudflare helper** says *Connected*, or offers **Connect** with one
+  line on why it matters. Turning the engine off is under the strip's ⋯. When the engine is not answering or not set
+  up, the tab is the setup screen, as before.
+- **Installed and Browse,** two views with their counts, and **Languages** and **Check for extension updates** beside
+  them.
+- **Installed is one list.** While something needs you it is grouped: **Needs attention** first, with **Update all**
+  and **Turn on all** in its header, then **Ready**. Each extension says at most one thing (*Update available*, *No
+  source on*) and offers at most one key; the others show their languages and how many are on. The amber bars and the
+  warning on every card are gone.
 - **Browse reaches every extension.** On a repository of 1,300 the list stopped at the first 400 and said *narrow the
   search*, so an extension past them, MangaFire in Kedryn's case, could not be found by scrolling. Browse now shows
-  60 at a time and the next ones as you scroll (or with **Show 60 more**), to the last. Search by name, pick a
-  language, narrow it to **Installed** or **Has an update**. The 18+ filter is a switch that says what it does,
-  **Show 18+ extensions**: a chip reading *18+* was taken for "only 18+". A search that finds only 18+ ones says so
-  and offers the switch.
+  60 at a time and the next ones as you scroll, to the last. Search by name and pick a language. **Show 18+
+  extensions** is a switch that says what it does (a chip reading *18+* was taken for "only 18+"), and the Browse tab
+  counts what the list holds. *1 repository* in the count line opens the repositories.
 - **Install is one press,** with its own busy state: the extension's sources switch on and are searchable from
-  Discover at once. One with several languages then opens its sheet on them, so you can switch off the ones you
-  don't read.
-- **Installed** has a row per extension: its icon, name and version, its languages with the ones that are on
-  highlighted, and how many are on. One with a newer version comes first with **Update**, and an amber bar offers
-  **Update all**; **Check for extension updates** re-reads the repositories and says when one does not answer.
+  Discover at once, and one with several languages then opens on them, so you can switch off the ones you don't read.
 - **An extension installed in the engine's own page** arrived with every source off, and the only way on was Remove
-  and Add again. Now it says *None of its sources are on* and offers **Turn on its sources**, and a bar offers **Turn
-  on all their sources** when several are like that. A language you hid stays off.
-- **The extension's sheet** holds everything about one extension: a switch per language (*Each language is its own
-  source; turn on the ones you read.*), how each is doing as Providers reads it, *Over the source limit* for one that
-  search cannot reach, and *Across all extensions: 5 of 25 sources on.* under them. Then its **Settings**, where
-  *Settings for* picks whose settings you see: a language select there looked like it chose the language to read. And
-  **Remove extension**, which asks first and says how many series in your library came from it.
+  and Add again. Now it says *No source on* and offers **Turn on**. A language you hid stays off.
+- **The extension's sheet:**
+  - a switch per language (*Each language is its own source; turn on the ones you read.*), with a status under one
+    only when something is wrong: failing, blocked by the site, over the source limit, or hidden in every extension;
+  - the source limit, said when you are near it;
+  - **Settings**, folded until you open them. *Settings for* picks whose settings you see: a language select there
+    looked like it chose the language to read;
+  - **Remove extension**, which asks first and says how many series came from it.
 - **Languages** lists every language your extensions offer, with its sources, how many are on and how many series
   came from it, and a switch that hides it in every extension, now and in the next one you install.
-- **Repositories** are behind a key at the end of Browse's filters. With none yet, Browse opens on **Add an
-  extension repository**, with a line on what one is.
-- **Phones and right-to-left.** At 390 px the sheets come up from the bottom and nothing scrolls sideways, and in
-  Arabic the names keep their own direction.
+- **Phones and right-to-left.** The sheets come up from the bottom and nothing scrolls sideways at 390 px; in Arabic
+  names and facts keep their own direction.
+
+### Health: Source health, sorted by what it costs you
+
+- On a library with many extensions the card listed every source with anything to say, switched-off ones first. On
+  one real library that was 31 sources turned off on purpose, each with its own Test key, under a glossary and a
+  paragraph, and above the few sources its series depended on: several screens of it.
+- It now leads with **Used by your series**, the most series first. Each row is one line (*Rate-limited — trying
+  again in 20 minutes · 37 series*) with one key, **Test** or **Clear block**; the rest are under ⋯, and the evidence
+  under *Details*.
+- **Failing, used by no series** comes next, with **Turn off all**, which asks first and turns them off one by one.
+- **Switched off by you** and **Nothing to fix right now** fold into one line each. The switched-off ones link to
+  where each comes back on, Providers or Extensions. What the keys do, and what counts as failing, are links at the
+  card's foot.
+- The card's summary counts the two groups that matter: *4 sources your series use need a look · 5 sources nothing
+  uses are failing*.
+
+### Edit details, redone
+
+- A series' **Edit details** was one long column where some fields saved at once and the rest only with a *Save
+  details* key halfway down, easy to miss. It is now a dialog with tabs, **Details**, **Reading**, **New chapters**
+  and **Files**, and every field saves itself, said once at the top (*Saved*), as Profile and Admin → Settings do.
+- **The art is in view while you edit:** the cover and the background as the page shows them, with **Upload** (or
+  drop an image on the preview), **From a link**, **New banner** while the banner is an automatic one, and **Reset to
+  automatic**. Images up to 11 MB, as it says: a picture over about 9 MB used to fail as too large.
+- Status, reading direction and age rating are one-tap choices; *Always show* and *Auto-update* are switches. The
+  folder paths and **Mark caught up** keep their place, under Files and New chapters. On a phone it is a sheet with
+  **Art** as a tab of its own. Its words that were still English in every language are translated.
 
 ### The series page shows its banner sharp
 
@@ -61,17 +84,20 @@ shows a series' banner sharp. Much of what the tab now does differently comes fr
 - **No database change.** v0.52.0 runs on the same database, and nothing changes in compose files or the environment.
 - **For scripts** ([api.md](docs/api.md)):
   - `GET /api/admin/extensions/catalog` answers a page at a time: `offset` (from 0) and `limit` (default and maximum
-    400, so a call with neither gets the first 400 as before), echoed beside `shown` (the page's length) and `matched`
-    (every match). It takes `updates=true` (only the extensions with a newer version), `hiddenAdult` counts the 18+
-    extensions the other filters match (it counted the whole catalogue), and `adultTotal` is the whole catalogue's 18+
-    extensions that are not installed.
+    400, so a call with neither gets the first 400 as before), echoed beside `shown` and `matched`. It takes
+    `updates=true`, `hiddenAdult` counts the 18+ extensions the other filters match (it counted the whole catalogue),
+    and `adultTotal` is the whole catalogue's 18+ extensions that are not installed.
   - `POST /api/admin/extensions/catalog/:pkgName` takes `enable` beside `install`, `update` and `uninstall`: it
     switches an installed extension's sources on as its install would, answering `{ok, sources, on, hidden,
     registered}`, or 409 `no_sources`; it is audited as `extension.enable`.
-  - `GET /api/admin/extensions/sources` gives each source `used`, the series that came from it.
-    `POST /api/admin/extensions/sources/bulk` records a source it has no row for, and switches it as asked.
-  - `GET /img/series/:id/backdrop` takes `style=banner`: a real banner sharp, and the blurred cover for a series
-    without one.
+  - `GET /api/admin/extensions/sources` gives each source `used`, the series that came from it, and
+    `POST /api/admin/extensions/sources/bulk` records a source it has no row for and switches it as asked.
+  - Health's `sources` items carry `group` (`affected`, `unused`, `quiet`, `off`), `state`, `stage`, `cooldown`,
+    `offBy` and `icon`, and come in that order. The card's summary uses new codes (`sources.affected`,
+    `sources.failingUnused`, `sources.working`) and a new join, `dot`.
+  - `GET /img/series/:id/backdrop` takes `style=banner`: a real banner sharp, the blurred cover for a series without
+    one.
+  - `PUT /api/admin/series/:id/art` accepts the body of an 11 MB picture.
 
 ## v0.52.0 — 2026-10-02
 
