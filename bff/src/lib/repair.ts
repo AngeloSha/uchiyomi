@@ -74,7 +74,7 @@ import { assess, gapsOf, splitAtFloor } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
 // question the page answers or the button and the page disagree about whether there is anything to do.
-import { solverBlaming, gapsAnswered, impossibleLimit, type StoredGaps } from './health';
+import { solverBlaming, gapsAnswered, plausibleNumbers, type StoredGaps } from './health';
 import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
 import { withOrigin } from './downloadActivity';
@@ -1488,13 +1488,13 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     // hole as "listed: the next sweep fetches it", a promise no sweep kept, or search other sites for chapters it then
     // could not fetch. Reintroduce by taking every hole: "a hole below a series' Latest N start" in repair.int.test.ts
     // finds it looked at and stored as the sweep's.
-    const gaps = splitAtFloor(gapsOf(have), s.floor).above;
+    // And only between plausible numbers (health.ts plausibleNumbers): one chapter numbered 9001 is not a 9000-chapter
+    // gap -- a search for one would follow whatever lists the most chapters -- but the series' real holes below it are
+    // still fetched; the 9001 is the outliers card's, and Fix everything's files phase deletes it. Reintroduce by
+    // counting every number: "the gaps step fills a real hole beside an impossible number, and never searches the
+    // impossible range" in autofix.int.test.ts finds thousands of numbers searched.
+    const gaps = splitAtFloor(gapsOf(plausibleNumbers(have)), s.floor).above;
     if (!gaps.length) continue;
-    // Fix everything (v0.55.0) leaves a series with an impossible chapter number to its files phase: one chapter
-    // numbered 9001 is a 9000-chapter "gap", and a search for it would follow whatever lists the most chapters.
-    // Reintroduce by dropping it: "the gaps step leaves a series with an impossible number alone" in autofix.int.test.ts
-    // finds it searched.
-    if (opts.autofix && impossibleLimit(have) !== null) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
     const archive = archiving.get(s.id);

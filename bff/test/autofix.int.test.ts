@@ -361,9 +361,17 @@ test('Fix everything: one run over a library with something wrong on every card'
     assert.ok(run.summary.done.some((d: any) => d.kind === 'shortFixed' && d.n === 1));
   });
 
-  await t.test('chapters: the gaps step leaves a series with an impossible number alone', async () => {
-    assert.equal((await seriesRow(S.oddGap)).gaps_checked_at, null, 'not looked at: one chapter numbered 9001 is not a 9000-chapter gap');
-    assert.equal(existsSync(join(DL, folderOf('oddGap'), 'Chapter 3.cbz')), false, 'and nothing was fetched for it');
+  await t.test('chapters: the gaps step looks for a real hole beside an impossible number, and never the impossible range', async () => {
+    // v0.55.0 integration: holes are counted between plausible numbers only (health.ts plausibleNumbers), in Health's
+    // gaps check and the repair's gap step alike. One chapter numbered 9001 is not a 9000-chapter gap, and the series'
+    // real hole, chapter 3, is still looked for: the lane's version left the whole series alone, so the hole stayed and
+    // every run's end said "the next run continues" while the 9001 was bookmarked. (No listing is stored for this series,
+    // so the search is all it gets, and nothing here has chapter 3.) Reintroduce by counting every number in the gap
+    // step: "only the real hole was looked for" reads thousands of numbers.
+    const g = (await q('SELECT gaps_result FROM lib_series WHERE id = $1', [S.oddGap]))[0]?.gaps_result;
+    assert.equal(g?.scanned, 1, `only the real hole was looked for, never the impossible range: ${JSON.stringify(g)}`);
+    assert.deepEqual(g?.unfillable, ['3'], 'and it is the one no source has');
+    assert.equal(existsSync(join(DL, folderOf('oddGap'), 'Chapter 5.cbz')), false, 'nothing from the impossible range was fetched');
   });
 
   await t.test('duplicates: copies that agree are merged, ones that do not are left, two languages are linked', async () => {

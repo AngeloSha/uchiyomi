@@ -471,7 +471,10 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       // finding the repair then greyed for a week as "the next sweep fetches it", which no sweep ever did; it is
       // listed for reference now, and only the holes at or above the start are the finding. Reintroduce by counting
       // every hole: "a hole below a series' Latest N start" in repair.int.test.ts finds a finding with Fill now on it.
-      const { above: gaps, below } = splitAtFloor(gapsOf(s.numbers), s.floor);
+      // Only between plausible numbers: an impossible one is the outliers card's (plausibleNumbers). Reintroduce by
+      // counting every number: "an impossible number is the outliers card's, not a gap of thousands" in
+      // health.int.test.ts finds Odd Walk on this card.
+      const { above: gaps, below } = splitAtFloor(gapsOf(plausibleNumbers(s.numbers)), s.floor);
       const numbers: number[] = [];
       for (const g of gaps) for (let n = g.lo; n <= g.hi && numbers.length < MAX_NUMBERS; n++) numbers.push(n);
       return { s, gaps, below, missing: gaps.reduce((n, g) => n + g.count, 0), before: below.reduce((n, g) => n + g.count, 0), numbers };
@@ -1367,6 +1370,18 @@ export function impossibleLimit(numbers: readonly number[]): number | null {
   const med = median(nums);
   const limit = Math.max(med * 4, med + 500);
   return nums[nums.length - 1] > limit ? limit : null;
+}
+
+/**
+ * The numbers a series' holes are counted between: all of them but the ones the outliers card names (impossibleLimit).
+ * One chapter numbered 9001 among 1 to 4 is a chapter numbered impossibly, not 8,996 missing chapters: counted as a gap
+ * it filled the gaps card with a hole nothing can fetch -- which Fix everything left alone, so a bookmarked 9001 kept
+ * "the next run continues" and Run again on the end for good -- and sent the nightly searching other sites for
+ * thousands of chapters. Health's gaps check and the repair's gap step both count this way (v0.55.0 integration).
+ */
+export function plausibleNumbers(numbers: readonly number[]): number[] {
+  const limit = impossibleLimit(numbers);
+  return limit === null ? [...numbers] : numbers.filter((n) => n <= limit);
 }
 
 /** Chapter numbers far beyond the rest of the series: the sidebar-widget scraping bug's signature. */

@@ -126,16 +126,19 @@ test('an ignore whose finding has been gone for a week is forgotten, and one sti
 });
 
 test('a gap of thousands is recorded as its runs, not one entry per missing chapter', { skip }, async () => {
-  // A chapter numbered 9001 by mistake opens a gap of nine thousand. Reintroduce by recording one member per
-  // missing number: the ignore row carries ~9000 of them, recomputed on every Health run.
+  // Chapters 2000 to 2010 after 1 to 10 open a gap of nearly two thousand. (A lone chapter numbered 9001 by mistake no
+  // longer does since v0.55.0: it is the outliers card's, and holes are counted between plausible numbers only --
+  // health.ts plausibleNumbers.) Reintroduce by recording one member per missing number: the ignore row carries ~1989
+  // of them, recomputed on every Health run.
+  const far = Array.from({ length: 11 }, (_, i) => 2000 + i);
   await q(`DELETE FROM health_ignored WHERE item_key = $1`, [KEY]);
-  await book(9001);
+  for (const n of far) await book(n);
   const r = await post({ check: 'chapter-gaps', key: KEY, ignored: true });
   assert.equal(r.statusCode, 200, r.body);
   const row = (await q(`SELECT members FROM health_ignored WHERE item_key = $1`, [KEY]))[0];
   assert.ok(row.members.length < 10, `recorded ${row.members.length} members for one gap`);
-  assert.ok(row.members.includes('11-9000'), JSON.stringify(row.members));
+  assert.ok(row.members.includes('11-1999'), JSON.stringify(row.members));
   assert.equal((await gapItem()).item.info, true, 'the big gap is not ignored');
-  await q(`DELETE FROM lib_books WHERE id = 'b_hign_9001'`);
+  await q(`DELETE FROM lib_books WHERE id = ANY($1)`, [far.map((n) => `b_hign_${n}`)]);
   await q(`DELETE FROM health_ignored WHERE item_key = $1`, [KEY]);
 });

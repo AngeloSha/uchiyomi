@@ -764,6 +764,16 @@ test('an impossible chapter number is offered for deletion, unless it was renumb
     assert.deepEqual(item.bookIds, [`b_${S_OUT}_10000`], 'the chip is told exactly which chapter to delete');
     assert.deepEqual(item.numbers, [10000]);
     assert.deepEqual(item.actions, ['delete', 'ignore'], 'deleting is the action, and it is never automatic');
+    // v0.55.0 integration: the 10000 is this card's, never 9,994 missing chapters on the gaps card -- a hole nothing can
+    // fetch, which Fix everything's gap step leaves alone, so a bookmarked one kept "the next run continues" on its end
+    // for good. A real hole below it is still a gap. Reintroduce by counting every number in chapterGaps (drop
+    // plausibleNumbers): "an impossible number is the outliers card's, not a gap of thousands" fails.
+    const gapRow = async () => (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps').items.find((i: any) => i.title === 'Outlier Fixture');
+    assert.equal(await gapRow(), undefined, 'an impossible number is the outliers card\'s, not a gap of thousands');
+    await q('DELETE FROM lib_books WHERE id = $1', [`b_${S_OUT}_4`]);
+    assert.deepEqual((await gapRow())?.numbers, [4], 'a real hole below an impossible number is still a gap');
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages) VALUES ($1,$2,'test',$3,'Chapter 4',4,20)`,
+      [`b_${S_OUT}_4`, S_OUT, `/test/${S_OUT}/4.cbz`]);
 
     await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 6)`, [`b_${S_OUT}_10000`]);
     assert.equal(await outlier(), undefined, 'correcting the number clears the finding');
