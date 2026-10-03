@@ -9,7 +9,7 @@ import autoHeroRoutes from './autoHero';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
-import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
+import { persistScan, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
 import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
@@ -2211,7 +2211,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!series) return reply.code(404).send({ error: 'not_found' });
 
     if (b.data.libraryId === null) {
-      const libs = await q<{ id: string; path: string }>('SELECT id, path FROM libraries');
+      const libs = await libraryRows();
       await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
         [id, libraryIdFor(series.folder, libs)]);
       await logAudit('series.library', { userId: userIdOf(req), detail: { id, libraryId: null }, req });
@@ -2245,7 +2245,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const skipped = b.data.seriesIds.filter((id) => !found.some((f) => f.id === id)).map((id) => ({ id }));
 
     if (b.data.libraryId === null) {
-      const libs = await q<{ id: string; path: string }>('SELECT id, path FROM libraries');
+      const libs = await libraryRows();
       for (const s of found) {
         await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
           [s.id, libraryIdFor(s.folder, libs)]);
@@ -2434,6 +2434,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     await tx(async (qq) => {
       await qq(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,$2,$3,$4)`,
         [id, b.data.name.trim(), path, b.data.ageRating ?? null]);
+      // The folder the scanner files by (lib/library.ts libraryRows); `path` above is what v0.55.0 reads.
+      await qq('INSERT INTO library_paths (library_id, path) VALUES ($1,$2)', [id, path]);
       // Reassignment is deliberate and happens here, not in a scan: the scanner keeps an existing folder in
       // the library it is already in, precisely so it can never re-mint an id by recomputing.
       //
@@ -2496,6 +2498,8 @@ export default async function adminRoutes(app: FastifyInstance) {
           [id, path],
         );
         await qq('UPDATE libraries SET path = $2 WHERE id = $1', [id, path]);
+        await qq('DELETE FROM library_paths WHERE library_id = $1', [id]);
+        await qq('INSERT INTO library_paths (library_id, path) VALUES ($1,$2)', [id, path]);
         await qq(
           `UPDATE lib_series s SET library_id = $1
             WHERE NOT s.library_pinned

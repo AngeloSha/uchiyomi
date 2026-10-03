@@ -531,8 +531,19 @@ test('a nothing-yet add creates the series with no chapters, a listing and a flo
   const sourceRoutes = (await import('../src/routes/sources')).default;
   const catalogRoutes = (await import('../src/routes/catalog')).default;
   const adminRoutes = (await import('../src/routes/admin')).default;
-  const { libraryIdFor } = await import('../src/lib/library');
+  const { libraryIdFor, libraryRows } = await import('../src/lib/library');
   const folder = 'Nothing Source/Announced';
+  // #148: the series' folder is under the SECOND folder of a library, and the add files it there as the scan would
+  // (lib/library.ts libraryRows). Reintroduce by reading `SELECT id, path FROM libraries` in the `none` branch
+  // (routes/sources.ts): the row lands in the default library, a library over from where its first chapter is filed.
+  const NOTHING_LIB = 'add-lib-nothing';
+  const dropLib = async () => {
+    await q(`UPDATE lib_series SET library_id = 'lib' WHERE library_id = $1`, [NOTHING_LIB]);
+    await q('DELETE FROM libraries WHERE id = $1', [NOTHING_LIB]);
+  };
+  await dropLib();
+  await q(`INSERT INTO libraries (id, name, path) VALUES ($1, 'Announced', 'Nothing Elsewhere')`, [NOTHING_LIB]);
+  await q(`INSERT INTO library_paths (library_id, path) VALUES ($1, 'Nothing Elsewhere'), ($1, 'Nothing Source')`, [NOTHING_LIB]);
   await q('DELETE FROM users WHERE username = $1', [USER]);
   const uid = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
@@ -563,8 +574,8 @@ test('a nothing-yet add creates the series with no chapters, a listing and a flo
       assert.equal(Number(s.chapter_floor), 3.001, 'above 3 so 3 is below the floor, and below 3.5 so the next release is not');
       assert.deepEqual([s.source_id, s.source_series_id, s.auto_update, s.source], [NOTHING, `${NOTHING}-1`, true, 'Nothing Source'], 'routed for the sweep, as a normal add stamps it');
       assert.equal(s.summary, 'Bold and a link', 'the description is stored clean');
-      const libs = await q('SELECT id, path FROM libraries ORDER BY length(path) DESC');
-      assert.equal(s.library_id, libraryIdFor(folder, libs), 'the library persistScan would pick, so its ON CONFLICT lands on this row');
+      assert.equal(s.library_id, NOTHING_LIB, 'not filed into the library holding its folder');
+      assert.equal(s.library_id, libraryIdFor(folder, await libraryRows()), 'the library persistScan would pick, so its ON CONFLICT lands on this row');
     });
 
     await t.test('nothing was fetched, queued or created on disk', async () => {
@@ -668,6 +679,7 @@ test('a nothing-yet add creates the series with no chapters, a listing and a flo
   } finally {
     await app.close();
     globalThis.fetch = realFetch;
+    await dropLib();
   }
 });
 
@@ -690,12 +702,12 @@ const idOfFolder = async (folder: string): Promise<string> =>
   (await q('SELECT id FROM lib_series WHERE folder = $1', [folder]))[0]?.id;
 
 async function seedHeldLibrary(which: string, numbers: number[]): Promise<string> {
-  const { libraryIdFor } = await import('../src/lib/library');
+  const { libraryIdFor, libraryRows } = await import('../src/lib/library');
   const title = HELD_TITLES[which];
   const folder = `Held Source/${title}`;
   await q('DELETE FROM lib_series WHERE folder = $1', [folder]);
   rmSync(join(root, folder), { recursive: true, force: true });
-  const libs = await q('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+  const libs = await libraryRows();
   const id = `s_held_${which}`;
   await q(
     `INSERT INTO lib_series (id, source, title, folder, books_count, library_id)

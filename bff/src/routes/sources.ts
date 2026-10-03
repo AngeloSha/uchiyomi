@@ -74,7 +74,7 @@ function fillScanView(st: FillScan) {
 }
 /** Test seam. */
 export function _clearFillScans(): void { fillScans.clear(); }
-import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
+import { persistScan, setBookDates, setBookMeta, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
 import { notInLibrary, notInLibraryParts } from '../lib/downloadCensus';
 import { english, joined, say, saids, type Part, type Said } from '../lib/said';
 import { diskSpelling } from '../lib/libraryAdmin';
@@ -1317,7 +1317,7 @@ export async function addSeriesFromSource(opts: {
    */
   if (chapterFrom === 'none') {
     const floor = chosen.length ? Math.max(...chosen.map((c) => c.number)) + 0.001 : null;
-    const libs = await q<LibraryRow>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+    const libs = await libraryRows();
     const libraryId = existing
       ? (await one<{ library_id: string }>('SELECT library_id FROM lib_series WHERE id = $1', [existing.id]))?.library_id ?? libraryIdFor(folder, libs)
       : libraryIdFor(folder, libs);

@@ -36,6 +36,7 @@ const AdmZip = require('adm-zip');
 let q: <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 let persistScan: () => Promise<any>;
 let libraryIdFor: (folderRel: string, libs: Array<{ id: string; path: string }>) => string;
+let libraryRows: () => Promise<Array<{ id: string; path: string }>>;
 
 async function cbz(relDir: string, name: string, body: string) {
   const zip = new AdmZip();
@@ -48,6 +49,12 @@ const rows = () =>
   q<{ id: string; folder: string; library_id: string }>(
     'SELECT id, folder, library_id FROM lib_series ORDER BY folder',
   );
+
+/** A library as the admin routes leave one: its row, whose `path` is its first folder, and a row per folder it holds. */
+async function declare(id: string, name: string, ...paths: string[]) {
+  await q('INSERT INTO libraries (id, name, path) VALUES ($1,$2,$3)', [id, name, paths[0]]);
+  for (const p of paths) await q('INSERT INTO library_paths (library_id, path) VALUES ($1,$2)', [id, p]);
+}
 
 async function wipe() {
   await q('DELETE FROM lib_books');
@@ -64,6 +71,7 @@ before(async () => {
   const lib = await import('../src/lib/library');
   persistScan = lib.persistScan;
   libraryIdFor = (lib as any).libraryIdFor;
+  libraryRows = (lib as any).libraryRows;
   await migrate();
   await mkdir(ROOT, { recursive: true });
   await mkdir(DL, { recursive: true });
@@ -150,7 +158,7 @@ test('a scan after promotion is still a no-op', { skip }, async () => {
   // conflict target would miss and a second row would be minted with a fresh id.
   await cbz('Comics/Manga/Berserk', 'Chapter 1.cbz', 'bk');
   await persistScan();
-  await q(`INSERT INTO libraries (id, name, path) VALUES ('manga','Manga','Comics/Manga')`);
+  await declare('manga', 'Manga', 'Comics/Manga');
   await q(`UPDATE lib_series SET library_id = 'manga' WHERE folder LIKE 'Comics/Manga%'`);
   const before1 = await rows();
 
@@ -161,13 +169,60 @@ test('a scan after promotion is still a no-op', { skip }, async () => {
 });
 
 test('a new folder under a declared library is assigned to it', { skip }, async () => {
-  await q(`INSERT INTO libraries (id, name, path) VALUES ('manga','Manga','Comics/Manga')`);
+  await declare('manga', 'Manga', 'Comics/Manga');
   await cbz('Comics/Manga/Vinland Saga', 'Chapter 1.cbz', 'vs');
   await cbz('Elsewhere/Thing', 'Chapter 1.cbz', 'el');
   await persistScan();
   const r = await rows();
   assert.equal(r.find((x) => x.folder === 'Comics/Manga/Vinland Saga')!.library_id, 'manga');
   assert.equal(r.find((x) => x.folder === 'Elsewhere/Thing')!.library_id, 'lib');
+});
+
+test('a library holding several folders files new series from every one, and the default takes the rest', { skip }, async () => {
+  // #148, @Kedryn's library: one library made of the source folders, leaving out the two he keeps apart. Reintroduce
+  // by reading `SELECT id, path FROM libraries` in persistScan again -- a library's first folder only: the series
+  // under its second and third folders land in the default library.
+  await declare('picks', 'Uchiyomi manga', 'Aqua Manga (EN)', 'Mangafreak (EN)', 'ManhuaPlus (EN)');
+  await cbz('Aqua Manga (EN)/Solo Leveling', 'Chapter 1.cbz', 'sl');
+  await cbz('Mangafreak (EN)/Berserk', 'Chapter 1.cbz', 'bk');
+  await cbz('ManhuaPlus (EN)/Martial Peak', 'Chapter 1.cbz', 'mp');
+  await cbz('18+ comics/Thing', 'Chapter 1.cbz', 'ad');
+  await cbz('comix/Other Thing', 'Chapter 1.cbz', 'cx');
+  await persistScan();
+  assert.deepEqual(Object.fromEntries((await rows()).map((r) => [r.folder, r.library_id])), {
+    '18+ comics/Thing': 'lib',
+    'Aqua Manga (EN)/Solo Leveling': 'picks',
+    'Mangafreak (EN)/Berserk': 'picks',
+    'ManhuaPlus (EN)/Martial Peak': 'picks',
+    'comix/Other Thing': 'lib',
+  }, 'a series under one of the library\'s folders was not filed into it');
+});
+
+test('the longest folder wins across every library\'s folders: one inside another library\'s folder is its own', { skip }, async () => {
+  // Nesting, now between libraries of several folders each: `Manga/Seinen` held by one library beats `Manga` held by
+  // another, whichever folder of either library it is. Reintroduce by reading libraries.path in persistScan: the
+  // series under `Webtoons/Mature` (the inner library's second folder) lands in the outer library.
+  await declare('outer', 'Outer', 'Manga', 'Webtoons');
+  await declare('inner', 'Inner', 'Manga/Seinen', 'Webtoons/Mature');
+  await cbz('Manga/Shounen/Bleach', 'Chapter 1.cbz', 'bl');
+  await cbz('Manga/Seinen/Berserk', 'Chapter 1.cbz', 'bk');
+  await cbz('Webtoons/Tower of God', 'Chapter 1.cbz', 'tg');
+  await cbz('Webtoons/Mature/Thing', 'Chapter 1.cbz', 'th');
+  await cbz('Elsewhere/Gamma', 'Chapter 1.cbz', 'ga');
+  await persistScan();
+  const want = {
+    'Elsewhere/Gamma': 'lib',
+    'Manga/Seinen/Berserk': 'inner',
+    'Manga/Shounen/Bleach': 'outer',
+    'Webtoons/Mature/Thing': 'inner',
+    'Webtoons/Tower of God': 'outer',
+  };
+  assert.deepEqual(Object.fromEntries((await rows()).map((r) => [r.folder, r.library_id])), want,
+    'a series did not land in the library holding the longest folder it is in');
+  // The rule itself, over what every caller reads: the same answers, and the default for a folder no row contains.
+  const libs = await libraryRows();
+  for (const [folder, id] of Object.entries(want)) assert.equal(libraryIdFor(folder, libs), id, folder);
+  assert.ok(!libs.some((l) => l.id === 'lib'), 'the default library holds a folder row');
 });
 
 test('the widened index allows the same folder string in two libraries', { skip }, async () => {
