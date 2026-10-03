@@ -7371,7 +7371,10 @@ paths:
         chapters under the final survivor on the scan and reads "already in your library" in the batch
         importer instead of being re-added via another source. Since v0.52.0 two language editions of one work
         are refused with 409 `same_work` (their chapters are two languages); the absorbed row leaves its work, and
-        a work left with one edition dissolves.
+        a work left with one edition dissolves. Since v0.55.0 the absorbed series' main source becomes a source the
+        survivor follows when it still works (usable, or only cooling down), is in the survivor's language, is not
+        the survivor's own main source, and fits under the follower cap (two), unless the survivor is numbered by
+        posting order; the answer's `carried` names it, or is null.
       parameters:
         - name: id
           in: path

@@ -23,6 +23,9 @@ import { dissolveLoneWork } from './editions';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
 import { toStoredRel, dirnameRel } from './relPath';
+import { carries, standingsOf } from './sourceStanding';
+import { followGuard } from './seriesLang';
+import { MAX_FOLLOWERS } from './autoFollow';
 
 export interface SeriesRow {
   id: string;
@@ -73,6 +76,27 @@ export interface MergeResult {
   favorites: number;
   ratings: number;
   collections: number;
+  /** v0.55.0: the absorbed copy's main source, now a source the survivor follows; null when it was not carried. */
+  carried: string | null;
+}
+
+/**
+ * The absorbed copy's main source, when the survivor can follow it (v0.55.0): it still carries a series -- usable, or
+ * only cooling down (lib/sourceStanding.ts) -- it is not the survivor's own main source, it is in the survivor's
+ * language (the follow guard every automatic follow passes), and the survivor is not numbered by posting order, whose
+ * followers are never merged. Null otherwise. The follower cap is the INSERT's own, inside the merge.
+ */
+async function carryable(fromId: string, intoId: string): Promise<{ sourceId: string; ref: string; title: string } | null> {
+  const rows = await q<{ id: string; title: string; source_id: string | null; source_series_id: string | null; numbering: string | null }>(
+    'SELECT id, title, source_id, source_series_id, numbering FROM lib_series WHERE id = ANY($1::text[])', [[fromId, intoId]]);
+  const from = rows.find((r) => r.id === fromId);
+  const into = rows.find((r) => r.id === intoId);
+  if (!from?.source_id || !from.source_series_id || !into) return null;
+  if (from.source_id === into.source_id || into.numbering === 'posting_order') return null;
+  const standing = (await standingsOf([from.source_id])).get(from.source_id);
+  if (!standing || !carries(standing)) return null;
+  if (!(await followGuard(intoId))(from.source_id)) return null;
+  return { sourceId: from.source_id, ref: from.source_series_id, title: from.title };
 }
 
 /**
@@ -84,6 +108,7 @@ export interface MergeResult {
  * everyone a phantom NEW badge, or hide one.
  */
 export async function mergeSeries(fromId: string, intoId: string): Promise<MergeResult> {
+  const carry = await carryable(fromId, intoId).catch(() => null);
   return tx(async (qq) => {
     const moved = await qq<{ id: string }>(
       `UPDATE lib_books SET series_id = $2 WHERE series_id = $1 RETURNING id`,
@@ -197,6 +222,23 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     // still reads owned by the final survivor" in importBatch.int.test.ts finds m still pointing at t.
     await qq(`UPDATE lib_series SET merged_into = $2 WHERE merged_into = $1`, [fromId, intoId]);
     await qq(`DELETE FROM series_trackers WHERE series_id = $1`, [fromId]);
+    // v0.55.0: the absorbed copy's working main source becomes a source the survivor follows, under the follower cap
+    // (the count autoFollow.ts followJudged writes under, the survivor's row locked). The merge used to leave it on the
+    // absorbed row, which nothing updates any more: a duplicate merged into the copy on a dead source took the one
+    // source that worked with it. A source the survivor follows already is left as it is. Reintroduce by dropping it:
+    // "merge: the absorbed copy's working main source" in libraryAdmin.int.test.ts finds the survivor following nothing.
+    let carried: string | null = null;
+    if (carry) {
+      await qq('SELECT id FROM lib_series WHERE id = $1 FOR UPDATE', [intoId]);
+      const got = await qq<{ source_id: string }>(
+        `INSERT INTO series_sources (series_id, source_id, source_series_id, title)
+         SELECT $1::text, $2::text, $3::text, $4::text
+          WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $5::int
+         ON CONFLICT (series_id, source_id) DO NOTHING
+         RETURNING source_id`,
+        [intoId, carry.sourceId, carry.ref, carry.title, MAX_FOLLOWERS]);
+      carried = got[0]?.source_id ?? null;
+    }
 
     // The survivor's rollups are now wrong
     await qq(
@@ -220,6 +262,7 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
       favorites: favs.length,
       ratings: rates.length,
       collections: cols.length,
+      carried,
     };
   }).then(async (r) => {
     // outside the transaction: filesystem work must not hold it open

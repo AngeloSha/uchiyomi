@@ -828,7 +828,9 @@ state a series' language with `PATCH /api/admin/series/:id {lang}`. The age rati
 work's, a merge inside one work is refused (`same_work`), and a work left with one edition — by an unlink, a
 merge or a forget — dissolves. The Komga-compatible API and OPDS keep every edition a series of its own and
 title it with its code, "Blue Lock (ES-419)", while a sibling is in the caller's sight; a tracker push never
-goes below what another series on the same tracker entry has sent.
+goes below what another series on the same tracker entry has sent. Since v0.55.0 `POST /api/admin/series/:id/merge`
+carries the absorbed series' main source to the survivor as a source it follows, when that source still works, is in
+the survivor's language and fits under the follower cap (`carried` names it, or is null).
 
 **Mark caught up** (since v0.52.0, from discussion #72). `PATCH /api/admin/series/:id {chapterFloor:
 'caught_up'}` floors a series just above the newest chapter its sources list or the library holds, as a
