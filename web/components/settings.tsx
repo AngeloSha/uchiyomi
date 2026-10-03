@@ -13,12 +13,13 @@
 // width cap wider than `max-w-prose`/`.field`, because the owner's "768 px ribbon" complaint was exactly a
 // settings grid living inside a capped container on a 2560 px display.
 import Link from 'next/link';
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Switch } from './Switch';
 import { msgOf } from './ConfirmDialog';
 import { useRtl } from './ui';
 import { IcChevronRight } from './icons';
+import { useReduceEffects } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 
 export type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
@@ -82,6 +83,46 @@ export function SaveState({ status }: { status: SaveStatus }) {
 }
 
 /**
+ * Where the autosaves inside a `SaveScope` report: `from` is the reporting hook's own id.
+ */
+type SaveReport = (from: string, status: SaveStatus) => void;
+const ScopeReport = createContext<SaveReport | null>(null);
+
+/**
+ * Whether a report from `from` is what a scope's label shows now that `owner` sent the last one it showed: a save
+ * that starts, and any error, always; the rest of a save's life only while it is still the latest.
+ */
+export const scopeTakes = (owner: string, from: string, s: SaveStatus): boolean =>
+  s.kind === 'saving' || s.kind === 'error' || from === owner;
+
+/**
+ * One `SaveState` for a whole surface instead of one per row (v0.53.0, Edit details).
+ *
+ * A dialog of tabs has no row end the eye returns to, and a tick beside each of twenty fields is the "Saved in
+ * two places" this file exists to remove once a header also says it. So every `useAutosave` under a `SaveScope`
+ * reports here, and the rows under it draw no `SaveState` of their own (`Row` checks).
+ *
+ * The label is the LATEST save's: a run that starts takes it, and the end of an older one is not shown over it.
+ * An error always takes it, whoever sent it -- a failure hidden behind a later "Saved" is a setting the person
+ * believes stuck.
+ */
+export function useSaveScope(): { status: SaveStatus; report: SaveReport } {
+  const [status, setStatus] = useState<SaveStatus>(IDLE);
+  const owner = useRef('');
+  const report = useCallback<SaveReport>((from, s) => {
+    if (!scopeTakes(owner.current, from, s)) return;
+    owner.current = from;
+    setStatus(s);
+  }, []);
+  return { status, report };
+}
+
+/** The rows under it report to `report` (from `useSaveScope`) and leave the feedback to its one `SaveState`. */
+export function SaveScope({ report, children }: { report: SaveReport; children: ReactNode }) {
+  return <ScopeReport.Provider value={report}>{children}</ScopeReport.Provider>;
+}
+
+/**
  * Drive a `SaveState` from a promise.
  *
  * `run(fn)` shows Saving…, awaits `fn`, shows the tick for `SAVED_MS`, then goes idle; a throw shows the
@@ -93,6 +134,8 @@ export function SaveState({ status }: { status: SaveStatus }) {
  * mid-tick would set state on a component that is gone. A result that lands AFTER a newer run started is
  * ignored for the label (the newer run owns it) but still reported to its caller.
  *
+ * Under a `SaveScope` every state is reported to it as well, for the surface's one label.
+ *
  * NEVER toasts. Toasts are for actions with side effects; a setting that says "Saved" in two places at
  * once is the noise this file exists to remove.
  */
@@ -101,6 +144,9 @@ export function useAutosave(): { status: SaveStatus; run: (fn: () => Promise<unk
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seq = useRef(0);
   const alive = useRef(true);
+  const me = useId();
+  const report = useContext(ScopeReport);
+  const show = useCallback((s: SaveStatus) => { setStatus(s); report?.(me, s); }, [report, me]);
   const clear = useCallback(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
   }, []);
@@ -111,22 +157,22 @@ export function useAutosave(): { status: SaveStatus; run: (fn: () => Promise<unk
   const run = useCallback(async (fn: () => Promise<unknown> | unknown): Promise<boolean> => {
     const mine = ++seq.current;
     clear();
-    setStatus({ kind: 'saving' });
+    show({ kind: 'saving' });
     try {
       await fn();
       // A save that lands after the row is gone (a tab switch mid-request) must not arm a timer nobody
       // will clear; one that lands after a NEWER run started leaves the label to that run.
       if (alive.current && mine === seq.current) {
-        setStatus({ kind: 'saved' });
+        show({ kind: 'saved' });
         clear();
-        timer.current = setTimeout(() => { timer.current = null; setStatus(IDLE); }, SAVED_MS);
+        timer.current = setTimeout(() => { timer.current = null; show(IDLE); }, SAVED_MS);
       }
       return true;
     } catch (e) {
-      if (alive.current && mine === seq.current) setStatus({ kind: 'error', message: msgOf(e, tr('Could not save')) });
+      if (alive.current && mine === seq.current) show({ kind: 'error', message: msgOf(e, tr('Could not save')) });
       return false;
     }
-  }, [clear]);
+  }, [clear, show]);
   return { status, run };
 }
 
@@ -185,6 +231,8 @@ export function Section({ title, description, icon, action, id, className, ref, 
  *
  * `stacked` is for controls that want the full width: a chip grid, the avatar picker, a text field, a
  * range. The label line then carries the `SaveState`.
+ *
+ * Under a `SaveScope` there is no `SaveState` here at all: the scope's one label says it (see useSaveScope).
  */
 export function Row({ label, help, htmlFor, stacked, status, id, className, children }: {
   label: ReactNode;
@@ -196,6 +244,7 @@ export function Row({ label, help, htmlFor, stacked, status, id, className, chil
   className?: string;
   children?: ReactNode;
 }) {
+  const scoped = useContext(ScopeReport) !== null;
   // A `<label>` only when there is a control to point at; a `<label>` with nothing to label is announced as
   // one anyway and confuses the reading order.
   const labelEl = htmlFor
@@ -207,7 +256,7 @@ export function Row({ label, help, htmlFor, stacked, status, id, className, chil
       <div id={id} className={`py-3 first:pt-1 last:pb-0 ${className ?? ''}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">{labelEl}{helpEl}</div>
-          <SaveState status={status ?? IDLE} />
+          {!scoped && <SaveState status={status ?? IDLE} />}
         </div>
         <div className="mt-2">{children}</div>
       </div>
@@ -218,7 +267,7 @@ export function Row({ label, help, htmlFor, stacked, status, id, className, chil
       <div className="min-w-0 flex-1 basis-32">{labelEl}{helpEl}</div>
       <div className="ms-auto flex max-w-full flex-wrap items-center justify-end gap-2">
         {children}
-        <SaveState status={status ?? IDLE} />
+        {!scoped && <SaveState status={status ?? IDLE} />}
       </div>
     </div>
   );
@@ -275,15 +324,25 @@ export function SwitchRow({ label, help, on, disabled, onChange }: {
  * beside "ページ送り（スワイプ）" is 353 px of pills in a 324 px row, and an `inline-flex` that cannot wrap
  * ran past the card and scrolled the page sideways at 390 px. Wrapped, the second pill sits under the
  * first inside the same rounded border; nothing is clipped and nothing leaves the card.
+ *
+ * `square` (v0.53.0): the same group with 8 px corners instead of capsules, for the surfaces redesigned after the
+ * owner's "no more pills" (Edit details). A wrapped square group also reads as one grid of choices, where a
+ * capsule bent around two rows does not.
+ *
+ * The checked mark slides only when motion is welcome: still under Reduce effects as under the system's reduced
+ * motion, as the Library's tabs are.
  */
-export function Segmented<T extends string>({ label, value, options, disabled, onChange }: {
+export function Segmented<T extends string>({ label, value, options, disabled, square, onChange }: {
   label: string;
   value: T | null;
   options: ReadonlyArray<{ value: T; label: string }>;
   disabled?: boolean;
+  square?: boolean;
   onChange: (v: T) => void;
 }) {
   const id = useId();
+  // Both hooks on every render and in this order (ProgressRing.tsx says why).
+  const plain = useReduceEffects();
   const still = useReducedMotion();
   const rtl = useRtl();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -310,7 +369,7 @@ export function Segmented<T extends string>({ label, value, options, disabled, o
   };
   return (
     <div role="radiogroup" aria-label={label}
-      className={`relative inline-flex max-w-full flex-wrap rounded-full border border-ink-700 bg-ink-850 p-0.5 ${disabled ? 'opacity-40' : ''}`}>
+      className={`relative inline-flex max-w-full flex-wrap border border-ink-700 bg-ink-850 p-0.5 ${square ? 'gap-0.5 rounded-xl' : 'rounded-full'} ${disabled ? 'opacity-40' : ''}`}>
       {options.map((o, i) => {
         const selected = i === checked;
         return (
@@ -324,11 +383,11 @@ export function Segmented<T extends string>({ label, value, options, disabled, o
             ref={(el) => { refs.current[i] = el; }}
             onClick={() => pick(i)}
             onKeyDown={(e) => onKey(e, i)}
-            className="relative rounded-full px-3 py-1.5 text-xs disabled:cursor-not-allowed"
+            className={`relative px-3 py-1.5 text-xs disabled:cursor-not-allowed ${square ? 'rounded-lg' : 'rounded-full'}`}
           >
             {selected && (
-              <motion.span aria-hidden layoutId={id} className="absolute inset-0 rounded-full bg-accent-soft"
-                transition={still ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }} />
+              <motion.span aria-hidden layoutId={id} className={`absolute inset-0 bg-accent-soft ${square ? 'rounded-lg' : 'rounded-full'}`}
+                transition={still || plain ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }} />
             )}
             <span className={`relative ${selected ? 'text-accent' : 'text-fog-300'}`}>{o.label}</span>
           </button>
@@ -357,8 +416,12 @@ export function Segmented<T extends string>({ label, value, options, disabled, o
  * `required`: an emptied field goes back to the last saved value instead of being sent, the way
  * `NumberRow` already treats an empty box. The server refuses an empty name with a bare 400, which the row
  * could only render as "Could not save" over a box that stayed empty until Escape.
+ *
+ * An Escape that puts an edit back is that and nothing more: it is marked handled, so a dialog around the row
+ * does not also close on it and drop the edit unsaved (Edit details closes on an unhandled Escape). `dir`: a
+ * value in another script than the interface -- a series title -- keeps its own direction (`auto`).
  */
-export function TextRow({ label, help, value, onSave, placeholder, maxLength, id, autoComplete, required }: {
+export function TextRow({ label, help, value, onSave, placeholder, maxLength, id, autoComplete, required, dir }: {
   label: string;
   help?: ReactNode;
   value: string;
@@ -368,6 +431,7 @@ export function TextRow({ label, help, value, onSave, placeholder, maxLength, id
   id?: string;
   autoComplete?: string;
   required?: boolean;
+  dir?: 'auto' | 'ltr' | 'rtl';
 }) {
   const auto = useId();
   const fid = id ?? auto;
@@ -394,6 +458,7 @@ export function TextRow({ label, help, value, onSave, placeholder, maxLength, id
       <input
         id={fid}
         className="field"
+        dir={dir}
         value={draft}
         placeholder={placeholder}
         maxLength={maxLength}
@@ -404,7 +469,10 @@ export function TextRow({ label, help, value, onSave, placeholder, maxLength, id
         onBlur={() => { setFocused(false); commit(); }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); commit(); }
-          else if (e.key === 'Escape') setDraft(last.current);
+          else if (e.key === 'Escape') {
+            if (draft !== last.current) e.preventDefault();
+            setDraft(last.current);
+          }
         }}
       />
     </Row>
