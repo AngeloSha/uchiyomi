@@ -26,6 +26,8 @@ import {
   type DirectionFrom, type ReadingDirection,
 } from './directionSignals';
 
+import { learnSeriesType, typeFromLanguage, typeFromCountry, typeFromAniListMatch } from './seriesType';
+
 export * from './directionSignals';
 
 /**
@@ -133,6 +135,9 @@ export async function detectDirections(opts: { max: number; log?: Log }): Promis
           for (const id of byMd.get(md.toLowerCase()) ?? []) {
             out.asked++;
             if (await learnDirection({ id }, directionFromLanguage(lang), 'source')) out.learned++;
+            // The same answer says what kind of comic it is (lib/seriesType.ts). Only for the series asked about the
+            // direction: the type is a passenger here, and changes nothing about who is asked.
+            await learnSeriesType({ id }, typeFromLanguage(lang), 'source').catch(() => false);
           }
         }
       } catch (e) {
@@ -167,6 +172,8 @@ export async function detectDirections(opts: { max: number; log?: Log }): Promis
           out.asked++;
           const dir = r.human ? directionFromCountry(a.country) : directionFromAniListMatch([r.title, r.otitle], a);
           if (await learnDirection({ id: r.id }, dir, 'anilist')) out.learned++;
+          const type = r.human ? typeFromCountry(a.country) : typeFromAniListMatch([r.title, r.otitle], a);
+          await learnSeriesType({ id: r.id }, type, 'anilist').catch(() => false);
         }
       }
     } catch (e) {
