@@ -250,14 +250,15 @@ export interface DoneLine { kind: DoneKind; text: string; items: string[] }
 
 /**
  * What it did, worded: the first six for the end, the rest for Details. A line this build cannot word is left out. Each
- * line's `items` -- what it installed, merged, deleted -- go under Details.
+ * line's `items` -- what it installed, merged, deleted -- go under Details; one that says its line again word for word
+ * ("Moved 2 series off fake-a" under "Moved 2 series off fake-a", Replace off one source) is left out, so Details holds
+ * only what the line does not already say. Reintroduce by keeping every item: "an item that repeats its line" fails.
  */
 export function doneLines(s: Pick<AutofixSummary, 'done'> | null | undefined): { shown: DoneLine[]; rest: DoneLine[] } {
-  const all = (s?.done ?? []).map((d) => ({
-    kind: d.kind,
-    text: saidWords(d.said) ?? '',
-    items: (d.items ?? []).map((x) => saidWords(x) ?? '').filter(Boolean),
-  })).filter((d) => d.text);
+  const all = (s?.done ?? []).map((d) => {
+    const text = saidWords(d.said) ?? '';
+    return { kind: d.kind, text, items: (d.items ?? []).map((x) => saidWords(x) ?? '').filter((t) => t && t !== text) };
+  }).filter((d) => d.text);
   return { shown: all.slice(0, DONE_SHOWN), rest: all.slice(DONE_SHOWN) };
 }
 

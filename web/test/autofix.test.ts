@@ -278,6 +278,9 @@ test('the end shows at most six lines of what it did; the rest, and what each na
   assert.deepEqual(shown.map((d) => d.kind), ['replaced', 'fetched', 'installed', 'merged', 'deletedTwice', 'renumbered'], 'more than six lines of what it did are shown');
   assert.deepEqual(rest.map((d) => d.kind), ['shortFixed', 'retired'], 'the lines past six are not kept for Details');
   assert.deepEqual(shown[2].items, ['Asura Scans (EN): Solo Leveling']);
+  // An item that says its line again word for word (Replace off one source) is not repeated under Details.
+  const once = doneLines(summary({ done: [{ kind: 'replaced', n: 2, said: said('Moved 2 series off fake-a'), items: [said('Moved 2 series off fake-a')] }] }));
+  assert.deepEqual(once.shown[0].items, [], 'an item that repeats its line is shown under it again');
   // A sentence this build cannot word is left out, never half English.
   assert.deepEqual(doneLines(summary({ done: [{ kind: 'fetched', n: 1, said: { code: 'autofix.unknownCode' } }] })).shown, []);
   const html = dialog(ended(run({ summary: summary({ done: EIGHT }), log: [said('Step 1: a line of the log')] })));
