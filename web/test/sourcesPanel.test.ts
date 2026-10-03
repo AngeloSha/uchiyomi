@@ -97,17 +97,17 @@ test('the old tabs\' parameters open the matching view, and settings=<id> that s
 
 // ---- Your sources ----------------------------------------------------------------------------------------------------
 
-test('Your sources is ONE list of every kind, in the server\'s order, the switched-off ones folded away', () => {
+test('Your sources is ONE list of every kind, the most used first, the switched-off ones folded away', () => {
   // Providers listed built-ins, MangaDex, sites and only the extension sources registered; Extensions the packages. One
   // answer now lists every source. Reintroduce a filter by kind (`on.filter((s) => s.kind !== 'extension')`, Providers'
-  // registered-only list): "the list is not the server's, in its order" fails; show the switched-off ones in the list:
-  // the same assertion, then "a switched-off source is in the list", does.
+  // registered-only list): "the list is not every source, the most used first" fails; show the switched-off ones in the
+  // list: the same assertion, then "a switched-off source is in the list", does.
   const html = renderToStaticMarkup(createElement(YourSources, {
     overview: OVERVIEW, failed: false, evidence: new Map(), onRetry: noop, onOpen: noop, onChanged: later, onAdd: noop,
   }));
   const list = slice(html, 'data-sources-list', '</ul>');
   const rows = [...list.matchAll(/data-sources-row="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(rows, ['sw:1533', 'mangaread', 'natomanga', 'mangadex', 'sw:2001', 'pack:one'], 'the list is not the server\'s, in its order');
+  assert.deepEqual(rows, ['mangaread', 'natomanga', 'sw:2001', 'mangadex', 'sw:1533', 'pack:one'], 'the list is not every source, the most used first');
   const kinds = new Set([...list.matchAll(/data-source-kind="([a-z]+)"/g)].map((m) => m[1]));
   assert.ok(kinds.has('extension'), 'an extension\'s source is not in the one list');
   for (const k of ['builtin', 'mangadex', 'pack']) assert.ok(kinds.has(k), `a ${k} source is not in the one list`);
@@ -124,6 +124,32 @@ test('Your sources is ONE list of every kind, in the server\'s order, the switch
   assert.match(row, /data-source-kind="builtin">Built-in</);
   assert.match(slice(list, 'data-sources-row="sw:1533"', '</li>'), /<span class="text-amber-300">Failing<\/span> — Search step<span> · <bdi>not used<\/bdi>/,
     'a failing source does not say so, and at which step');
+});
+
+test('the list leads with the sources your series use, the most used first, then the rest by name', () => {
+  // The server's order leads with what needs a look (attention first), and Needs attention already shows those: the
+  // failing sources nothing uses topped Your sources a second time, above the sources the library reads from. The web
+  // sorts the list for finding a source; the server's order stays Needs attention's. Reintroduce the server's order
+  // (`list.filter(...)` as it comes): "a failing source nothing uses is repeated at the top" fails.
+  const order = (sources: OverviewSource[]) => { const { on, off } = splitSources(sources); return [on.map((s) => s.id), off.map((s) => s.id)]; };
+  const [on, off] = order([
+    src('zz-unused', { name: 'Zeta' }),
+    src('sw:1533', { name: 'Hentai Shelf (AR)', standing: 'failing', state: 'failing' }),
+    src('b-used', { name: 'Beta', main: 1, followed: 1 }),
+    src('a-most', { name: 'Alpha', main: 120, followed: 5 }),
+    src('c-tie', { name: 'Gamma', main: 3 }),
+    src('d-tie', { name: 'Delta', followed: 3 }),
+    src('a-unused', { name: 'alpha two' }),
+    src('off-used', { name: 'Off Used', standing: 'off', state: 'off', main: 4 }),
+    src('off-more', { name: 'Off More', standing: 'off', state: 'off', main: 195 }),
+    src('off-none', { name: 'A Off', standing: 'off', state: 'off' }),
+  ]);
+  assert.equal(on[0], 'a-most', 'a failing source nothing uses is repeated at the top');
+  assert.deepEqual(on, ['a-most', 'd-tie', 'c-tie', 'b-used', 'a-unused', 'sw:1533', 'zz-unused'],
+    'not the most used first (main and followed together), then the rest by name, whatever their state');
+  assert.deepEqual(off, ['off-more', 'off-used', 'off-none'], 'the switched-off fold is not in the same order');
+  // The panel draws that order, and the count on its tab is of the sources switched on.
+  assert.match(code('components/SourcesPanel.tsx'), /const \{ on, off \} = splitSources\(overview\.sources\);/);
 });
 
 test('a row offers at most one key -- Turn on, for a source switched off that series use -- else a chevron', () => {

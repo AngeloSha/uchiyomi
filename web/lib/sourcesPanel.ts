@@ -221,11 +221,16 @@ export function rowFacts(s: OverviewSource): string[] {
 // ---- the list ---------------------------------------------------------------------------------------------------
 
 /**
- * Your sources, as the tab shows them: every source in the server's order (Needs attention's first, then the most
- * used, then by name), the switched-off ones apart, folded under "Switched off".
+ * Your sources, as the tab shows them: the sources your series use first, the most used first (as their main source or
+ * followed), then the rest by name; the switched-off ones apart, in the same order, folded under "Switched off". The
+ * server's order leads with what needs a look, which Needs attention above already shows: the failing sources nothing
+ * uses topped this list too, a second time, above the sources the library reads from. Here they sort with the other
+ * sources nothing uses.
  */
 export function splitSources(list: readonly OverviewSource[]): { on: OverviewSource[]; off: OverviewSource[] } {
-  return { on: list.filter((s) => s.standing !== 'off'), off: list.filter((s) => s.standing === 'off') };
+  const byName = new Intl.Collator(activeLocale(), { numeric: true, sensitivity: 'base' });
+  const shown = [...list].sort((a, b) => usedBy(b) - usedBy(a) || byName.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { on: shown.filter((s) => s.standing !== 'off'), off: shown.filter((s) => s.standing === 'off') };
 }
 
 /**
