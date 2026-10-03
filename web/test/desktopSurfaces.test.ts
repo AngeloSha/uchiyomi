@@ -76,7 +76,7 @@ test('the admin and profile consoles hide tabs by filtering what the rail receiv
   assert.deepEqual([...DESKTOP_HIDDEN.adminTabs], ['Members', 'Sessions']);
   assert.deepEqual([...DESKTOP_HIDDEN.profileTabs], ['Account']);
   const admin = code(read('app/admin/page.tsx'));
-  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview'\);/, 'the pinned admin useTabParam line changed');
+  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview', SOURCES_TAB_ALIASES\);/, 'the pinned admin useTabParam line changed');
   assert.match(admin, /keys\('Members', 'Sessions', 'Activity'\)/, 'GROUPS itself was edited rather than filtered');
   assert.match(admin, /<ConsoleNav groups=\{isDesktop\(\) \? visibleGroups\(GROUPS, DESKTOP_HIDDEN\.adminTabs\) : GROUPS\}/, 'the admin rail still lists Members and Sessions on desktop');
   assert.match(admin, /const hiddenTab = hiddenOnDesktop\(DESKTOP_HIDDEN\.adminTabs, tab\);\s*useEffect\(\(\) => \{ if \(hiddenTab\) setTab\('Overview'\); \}, \[hiddenTab\]\);/, 'a deep link to a hidden admin tab does not fall back to Overview');
@@ -115,21 +115,20 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   assert.match(libs, /const desktopLibs = isDesktop\(\);/);
   assert.match(libs, /\{!desktopLibs && <button onClick=\{\(\) => setAccess\(l\)\} className="chip text-xs">\{tr\('Access'\)\}<\/button>\}/, 'the Access chip shows on desktop');
   assert.match(libs, /\{!desktopLibs && <>\{' · '\}\{!anyMembers \? tr\('admins only'\)/, 'the "who can open it" fact shows on desktop');
-  // v0.53.0: the tab is components/ExtensionsPanel.tsx; the desktop gate is its own, before the server's setup card.
-  const ext = slice(code(read('components/ExtensionsPanel.tsx')), 'export function ExtensionsPanel(', 'function useViewParam(');
-  const gate = ext.indexOf('if (isDesktop() && !ready) return <EngineInstall />;');
-  assert.ok(gate > 0, 'Extensions on desktop is still the Docker card');
-  assert.ok(gate < ext.indexOf('if (!ready) return <EngineSetup status={status} />;'), 'the Docker card is decided before the desktop one');
-  assert.ok(gate > ext.indexOf('if (!status) return'), 'the engine card renders before the server has answered');
+  // v0.54.0: the engine's card is the top of Admin → Sources (components/SourcesPanel.tsx), above the rest of the
+  // sources -- never instead of them; the desktop gate is its own, before the server's setup card.
+  const panel = slice(code(read('components/SourcesPanel.tsx')), 'export function SourcesPanel(', 'function AttentionRow(');
+  const top = /\{!status \? <div className="skeleton[^"]*" aria-busy="true" \/>\s*: (.+?)\s*: (.+?)\s*: (<EngineReady status=\{status\} desktop=\{isDesktop\(\)\} \/>)\}/.exec(panel);
+  assert.ok(top, 'the engine card renders before the server has answered, or no longer as one choice');
+  assert.equal(top![1], 'isDesktop() && !ready ? <EngineInstall />', 'Extensions on desktop is still the Docker card');
   // v0.49.0 (#72): the server's card is the setup screen (components/EngineSetup.tsx), whose steps name the shipped
   // container; engineSetup.test.ts pins them.
-  assert.match(ext, /if \(!ready\) return <EngineSetup status=\{status\} \/>;/, 'the server\'s own card is not the setup screen');
+  assert.equal(top![2], '!ready ? <EngineSetup status={status} />', 'the server\'s own card is not the setup screen, or comes before the desktop one');
   // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated -- under the
   // engine's strip since v0.53.0, whose count it limits.
   assert.match(code(read('components/EngineSetup.tsx')), /\{over\}\{sentenceGap\(over\)\}\s*<span[^>]*>\{desktop\s*\? tr\('Hide languages you don’t read\.'\)\s*: tr\('Hide languages you don’t read, or raise \{name\}\.', \{ name: 'SUWAYOMI_MAX_SOURCES' \}\)\}/,
     'the source-limit line names an env var on desktop, or changed on the server');
-  assert.match(code(read('components/ExtensionsPanel.tsx')), /<EngineReady status=\{status\} desktop=\{isDesktop\(\)\} \/>/,
-    'the header is not told it is on desktop');
+  assert.equal(top![3], '<EngineReady status={status} desktop={isDesktop()} />', 'the header is not told it is on desktop');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));
   assert.match(card, /import \{ bridge, type EngineStatus \} from '@\/lib\/desktop';/);
@@ -250,14 +249,16 @@ test('copy that explains a hidden feature has a desktop arm, and the server keep
   const admin = code(read('app/admin/page.tsx'));
   const libs = slice(admin, 'function LibrariesSection(', 'function LibraryAccessDialog(');
   assert.match(libs, /\{desktopLibs\s*\? tr\('A library is a folder, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that\.'\)\s*: tr\('A library is a folder, plus any series you file into it by hand\. Give it an age rating and everything in it inherits that, and choose who can open it\.'\)\}/, 'the Libraries line offers access control on desktop');
-  const prov = slice(admin, 'function Providers(', 'function ExtensionsLink(');
-  assert.match(prov, /\{isDesktop\(\) \? \(\s*<p [^>]*>\{tr\('Add a site above, or download the extension engine under Extensions and turn on an extension source\. With none, Uchiyomi reads only the library you already own\.'\)\}<\/p>\s*\) : \(\s*<p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code/, 'the Providers empty state tells desktop to mount SOURCES_DIR, or the server\'s changed');
+  // v0.54.0: Admin → Sources' empty state, in the reader's words on both arms (the server's was bare English).
+  const empty = slice(code(read('components/SourcesPanel.tsx')), 'data-sources-empty', '</div>');
+  assert.match(empty, /\{isDesktop\(\)\s*\? tr\('Add a site, or download the extension engine and add an extension, under Add sources\. With none, Uchiyomi reads only the library you already own\.'\)\s*: tr\('Add a site or an extension under Add sources, or mount a source pack at the server’s \{dir\}\. With none, Uchiyomi reads only the library you already own\.', \{ dir: 'SOURCES_DIR' \}\)\}/,
+    'the Sources empty state tells desktop to mount SOURCES_DIR, or the server\'s changed');
   const expl = code(read('components/SourcesExplainer.tsx'));
   const desk = slice(expl, '{isDesktop() ? (', ') : (');
   assert.match(desk, /tr\('Fetch brings a chapter into your library folder on this computer\.'\)/);
   assert.doesNotMatch(desk, /Save offline/, 'the explainer defines Save offline on desktop');
   const disc = code(read('app/discover/page.tsx'));
-  assert.match(disc, /sub=\{isDesktop\(\)\s*\? tr\('Add a site, or turn on an extension source, in Admin → Providers\.'\)\s*: tr\('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab\.'\)\}/, 'Discover tells desktop to mount SOURCES_DIR');
+  assert.match(disc, /sub=\{isDesktop\(\)\s*\? tr\('Add a site, or turn on an extension source, in Admin → Sources\.'\)\s*: tr\('Add a site or an extension in Admin → Sources, or mount a source pack at SOURCES_DIR\.'\)\}/, 'Discover tells desktop to mount SOURCES_DIR');
 });
 
 test('the desktop window never shows a sign-in form, and a browser tab on its port is told where the library opens', () => {

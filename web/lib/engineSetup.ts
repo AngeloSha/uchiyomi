@@ -1,4 +1,4 @@
-// What Admin → Extensions says, step by step, when the extension engine is off, not set up or not answering
+// What Admin → Sources says, step by step, when the extension engine is off, not set up or not answering
 // (#72), with no React in it so the steps can be tested line by line (web/test/engineSetup.test.ts).
 //
 // Adding the engine is a different job on each platform -- a line in .env on Compose, a second template on

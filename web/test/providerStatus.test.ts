@@ -1,25 +1,30 @@
-// #115 on the Providers card: a source whose Test or daily check failed says "Failing", not "Healthy".
+// #115 on a source's row: a source whose Test or daily check failed says "Failing", not "Healthy".
 //
-// "Manga Ball (EN)" failed its Test while its card said "ok": the card read the public status, which knows only
-// cooldowns and which any download or the nightly lapsed-block reset puts back to 'ok'. The admin rows now carry
-// the open, confirmed failures (`failing`), and providerStatus overlays them. The wiring facts about page.tsx are
-// read from source, as healthActions.test.ts does, each guard naming the edit that fails it.
+// "Manga Ball (EN)" failed its Test while its Providers card said "ok": the card read the public status, which knows
+// only cooldowns and which any download or the nightly lapsed-block reset puts back to 'ok'. The admin rows carry the
+// open, confirmed failures (`failing`), and providerStatus overlays them -- for an extension's language in its sheet
+// (lib/extensions.ts sourceHealth); since v0.54.0 Admin → Sources reads the server's word for each source (the sources
+// overview's `state`, Health's own) and says since when from the same rows. The wiring facts are read from source, as
+// healthActions.test.ts does, each guard naming the edit that fails it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { groupProviders, providerStatus, worstStatus, type ProviderSrc } from '../lib/providerGroups';
+import { providerStatus } from '../lib/providerGroups';
 import { sourceMark, SOURCE_STATUSES } from '../lib/status';
+import { setActiveLocale } from '../lib/format';
+import { failingSince, sourceSays, type OverviewSource } from '../lib/sourcesPanel';
 
 const ROOT = join(__dirname, '..');
 /** The file with its comments removed -- several comments quote the code they forbid. */
 const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-const page = () => code(readFileSync(join(ROOT, 'app/admin/page.tsx'), 'utf8'));
-/** The Providers function of page.tsx. */
-const providers = () => { const s = page(); return s.slice(s.indexOf('function Providers('), s.indexOf('function useDesktopEngineState(')); };
+const read = (p: string) => code(readFileSync(join(ROOT, p), 'utf8'));
+const panel = () => read('components/SourcesPanel.tsx');
+const sheet = () => read('components/SourceSheet.tsx');
 
 const failing = { failing: [{ stage: 'search' }] };
+setActiveLocale('en');
 
 test('a confirmed failure turns a healthy or quiet card into "failing"', () => {
   // Reintroduce by returning `pub ?? 'ok'` alone (the card built from the public status): 'ok' comes back.
@@ -37,51 +42,61 @@ test('a cooldown or a switched-off source keeps its own words', () => {
   }
 });
 
-test('"failing" has an amber mark and its own word, and outranks healthy on a package card', () => {
+test('"failing" has an amber mark and its own word, and a failing source says since when', () => {
   assert.deepEqual(sourceMark('failing'), { tone: 'warn', label: 'Failing' });
   assert.ok(SOURCE_STATUSES.includes('failing'), 'sourceMark does not know failing');
-  // Reintroduce by leaving `failing` out of SEVERITY (it then ranks as 1, like ok): the header stays healthy.
-  assert.equal(worstStatus(['ok', 'failing', 'quiet']), 'failing');
-  assert.equal(worstStatus(['failing', 'blocked']), 'failing', 'ties keep the first seen');
-  const variant = (id: string, status: ProviderSrc['status']): ProviderSrc => ({
-    id: `sw:${id}`, name: `X (${id})`, lang: id, status, extension: { pkgName: 'pkg.x', name: 'X' },
-  });
-  const [g] = groupProviders([variant('en', 'ok'), variant('fr', 'failing'), variant('de', 'disabled')]);
-  assert.equal(g.worst, 'failing', 'a failing language colours the folded card');
+  // Since when: the oldest open failure, else the last failure. Reintroduce the newest: a source failing for a week
+  // reads as failing since this morning.
+  const since = failingSince({ source_id: 'x', last_fail_at: '2026-10-02T08:00:00Z', failing: [
+    { stage: 'search', since: '2026-09-29T08:00:00Z', error: null, kind: 'test', by: 'sweep', streak: 3 },
+    { stage: 'pages', since: '2026-09-23T08:00:00Z', error: null, kind: 'use', by: 'update', streak: 3 },
+  ] });
+  assert.equal(since, '2026-09-23T08:00:00Z', 'a source failing for days says since its latest failure');
+  assert.equal(failingSince({ source_id: 'x', last_fail_at: '2026-10-02T08:00:00Z' }), '2026-10-02T08:00:00Z');
+  assert.equal(failingSince(undefined), null);
+  const s: OverviewSource = { id: 'ball', name: 'Manga Ball (EN)', kind: 'extension', lang: 'en', standing: 'failing', state: 'failing', stage: 'search', main: 2, followed: 0, withBackup: 0 };
+  const says = sourceSays(s, since);
+  assert.match(says.word, /^Failing since /, 'a failing source does not say since when');
+  assert.equal(says.tone, 'warn');
+  assert.equal(says.reason, 'Search step', 'the step it fails at is not said');
+  // The row and the sheet read since when from the admin rows the panel holds.
+  assert.match(panel(), /since=\{failingSince\(evidence\.get\(s\.id\)\)\}/, 'a row does not say since when');
+  assert.match(sheet(), /const says = s \? sourceSays\(s, failingSince\(row\)\) : null;/, 'the sheet does not say since when');
 });
 
-test('Providers builds its cards through providerStatus, from the admin rows', () => {
-  // Reintroduce by building `list` from `srcs.content` as it is: the overlay never happens and the card says ok.
-  assert.match(providers(), /\.map\(\(s\) => \(\{ \.\.\.s, status: providerStatus\(s\.status as any, hmap\.get\(s\.id\)\) \}\)\)/);
-  assert.match(providers(), /const groups = groupProviders\(list\);/);
+test('an extension\'s language reads its status through providerStatus, from the admin rows', () => {
+  // Reintroduce `sourceMark(pub?.status ?? 'ok')` in lib/extensions.ts sourceHealth: the overlay never happens and the
+  // language says Healthy over a confirmed failure.
+  assert.match(read('lib/extensions.ts'), /const st = providerStatus\(pub\?\.status \?\? 'ok', adminRows\?\.get\(id\) \?\? null\);/);
 });
 
 test('"Working normally." is never the page\'s own fallback', () => {
   // It is said only by lib/sourceEvidence.ts answerView, and only under a passing Test with no ✗ on screen.
-  // Reintroduce `{d.reason || 'Working normally.'}` in the card: this fails.
-  assert.doesNotMatch(page(), /Working normally/);
-  assert.match(providers(), /<SourceEvidence answer=\{t\}/, 'the card no longer shows a live Test through SourceEvidence');
-  assert.match(providers(), /<SourceEvidence lines=\{h\.evidence\} tested=\{h\.live\}/, 'a reload loses the verdict: the stored evidence is not shown');
+  // Reintroduce `{d.reason || 'Working normally.'}` in the sheet: this fails.
+  assert.doesNotMatch(read('app/admin/page.tsx') + panel() + sheet(), /Working normally/);
+  assert.match(sheet(), /<SourceEvidence answer=\{answer\}/, 'the sheet no longer shows a live Test through SourceEvidence');
+  assert.match(sheet(), /<SourceEvidence lines=\{row\?\.evidence\} tested=\{row\?\.live\}/, 'a reload loses the verdict: the stored evidence is not shown');
   // A failed Test is red only while the source still fails (lib/sourceEvidence.ts testedLine, sourceEvidence.test.ts).
-  assert.match(providers(), /tested=\{h\.live\} failing=\{failing\}/, 'the card does not say whether it is still failing');
+  assert.match(sheet(), /tested=\{row\?\.live\} failing=\{!!row\?\.failing\?\.length\}/, 'the sheet does not say whether it is still failing');
 });
 
 test('a Test, a cleared block or a switched-off source refreshes Health and the header mark too', () => {
-  // Reintroduce by dropping invalHealth() from inval (or act): Health keeps saying what it said before the Test.
-  const p = providers();
-  assert.match(p, /const invalHealth = \(\) => \{ qc\.invalidateQueries\(\{ queryKey: \['admin-health'\] \}\); qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\); \};/);
-  const inval = p.slice(p.indexOf('const inval = '), p.indexOf('\n', p.indexOf('const inval = ')));
-  assert.match(inval, /invalHealth\(\)/, 'inval() does not refresh Health');
-  const act = p.slice(p.indexOf('const act = '), p.indexOf('\n', p.indexOf('const act = ')));
-  assert.match(act, /invalHealth\(\)/, 'act() does not refresh Health');
+  // Reintroduce by dropping the Health keys from the panel's `changed` (or `onChanged` from the sheet's run): Health
+  // keeps saying what it said before the Test.
+  const changed = panel().slice(panel().indexOf('const changed = () => Promise.all(['), panel().indexOf(']);', panel().indexOf('const changed = ')));
+  assert.match(changed, /qc\.invalidateQueries\(\{ queryKey: \['admin-health'\] \}\)/, 'a change here does not refresh Health');
+  assert.match(changed, /qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\)/, 'a change here does not refresh the header mark');
+  assert.match(changed, /qc\.invalidateQueries\(\{ queryKey: \['sources'\] \}\)/, 'a change here does not refresh the lists');
+  const run = sheet().slice(sheet().indexOf('const run = async ('), sheet().indexOf('const test = () =>'));
+  assert.match(run, /await onChanged\(\);/, 'the sheet\'s keys do not ask the lists and Health again');
+  assert.match(panel(), /<SourceSheet [\s\S]*?onChanged=\{changed\} \/>/, 'the sheet is not handed the panel\'s refresh');
 });
 
-test('the Test key ticks against the limit, and Check all says where it has got to', () => {
+test('the Test key ticks against the limit, and Test all says where it has got to', () => {
   // Reintroduce `'Testing…'` as the running label: the clock is gone and a 50-second Test reads as stuck.
-  const p = providers();
-  assert.match(p, /testingId === s\.id \? testClock\(now - testFrom, health\?\.testMs\) : tr\('Test'\)/);
-  assert.match(p, /const now = useTicker\(!!testingId\);/);
-  assert.match(p, /checking \? checkAllLabel\(progress\) :/);
-  assert.match(p, /progress: \(p\) => \{ setChecking\(true\); setProgress\(p\); \}/, 'the progress never reaches the button');
-  assert.match(p, /void run\.follow\(\);/, 'a sweep already running when the tab opens is not followed');
+  assert.match(sheet(), /busy === 'test' \? testClock\(now - testFrom, testMs\) : tr\('Test'\)/);
+  assert.match(sheet(), /const now = useTicker\(busy === 'test'\);/);
+  assert.match(panel(), /testMs=\{adminRows\?\.testMs\}/, 'the clock does not know the limit');
+  assert.match(panel(), /progress: \(p\) => \{ setChecking\(true\); setProgress\(p\); \}/, 'the progress never reaches the line');
+  assert.match(panel(), /void run\.follow\(\);/, 'a sweep already running when the tab opens is not followed');
 });

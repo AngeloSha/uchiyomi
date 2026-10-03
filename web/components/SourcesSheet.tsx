@@ -36,6 +36,7 @@ import {
 } from '@/lib/findSources';
 import { useFindRuns } from '@/lib/useFindRun';
 import { FindModeChoice, SeriesReview, type EditionAsk } from '@/components/FindSources';
+import { makeMainQuestion, mayMakeMain } from '@/lib/mainSource';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -339,12 +340,20 @@ function Languages({ series, onAdd, onChange, onUnlink, onOpen }: {
   );
 }
 
-/** One source the updater asks: favicon, name, its role, what it lists, when it was last asked. */
-function SourceRow({ s, onUnfollow, unfollowing }: { s: SeriesSource; onUnfollow?: () => void; unfollowing?: boolean }) {
+/**
+ * One source the updater asks: favicon, name, its role, what it lists, when it was last asked -- and, for an admin, the
+ * × that stops following it and (v0.54.0) Make main on a follower that works: it asks first, in one line, what becomes
+ * of the main source it replaces (lib/mainSource.ts).
+ */
+export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
+  s: SeriesSource; onUnfollow?: () => void; unfollowing?: boolean;
+  makeMain?: { question: string; busy: boolean; refusal: string | null; asking: boolean; onAsk: () => void; onCancel: () => void; onConfirm: () => void };
+}) {
   // ⚠️ The server names an adapter it no longer loads by its id, and an extension's id is nineteen digits
   // nobody can read (supplyLine.ts applies the same rule to the line under the title).
   const unknown = !s.registered && s.name === s.sourceId;
   return (
+    <>
     <div className="flex items-center gap-2.5 py-2 text-sm">
       <SourceIcon id={s.sourceId} name={unknown ? '?' : s.name} size={24} registered={s.registered} />
       <span className="min-w-0 flex-1">
@@ -364,11 +373,28 @@ function SourceRow({ s, onUnfollow, unfollowing }: { s: SeriesSource; onUnfollow
           {s.checkedAt && tr('checked {ago}', { ago: relativeTime(s.checkedAt) })}
         </span>
       </span>
+      {makeMain && !makeMain.asking && (
+        <button type="button" onClick={makeMain.onAsk} disabled={makeMain.busy} className="btn-key shrink-0" data-make-main={s.sourceId}>
+          {tr('Make main')}
+        </button>
+      )}
       {onUnfollow && (
         <button type="button" onClick={onUnfollow} disabled={unfollowing} aria-label={tr('Stop following {s}', { s: s.name })}
           className="shrink-0 px-1 text-fog-500 hover:text-rose-400 disabled:opacity-50">×</button>
       )}
     </div>
+    {/* Asked in one line under the row, inside the sheet: a dialog opened over a Sheet paints under it. */}
+    {makeMain?.asking && (
+      <div role="alertdialog" aria-label={makeMain.question} className="mb-2 border-s-2 border-accent/70 bg-ink-850/80 py-2 pe-2 ps-2.5" data-make-main-confirm={s.sourceId}>
+        <p className="text-[12px] leading-relaxed text-fog-100">{makeMain.question}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" onClick={makeMain.onConfirm} disabled={makeMain.busy} className="btn-key" data-make-main-yes>{tr('Make main')}</button>
+          <button type="button" autoFocus onClick={makeMain.onCancel} disabled={makeMain.busy} className="btn-key">{tr('Cancel')}</button>
+        </div>
+      </div>
+    )}
+    {makeMain?.refusal && <p role="alert" className="mb-2 text-[11px] leading-relaxed text-amber-300" data-make-main-refusal>{makeMain.refusal}</p>}
+    </>
   );
 }
 
@@ -582,6 +608,29 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   };
   const useDefaults = async () => { if (await patch(null)) { setLocal({ priority: [], blocked: [] }); setPatience(''); } };
 
+  // Make main (v0.54.0): a follower that works becomes the series' main source, asked first in one line. The server
+  // keeps the old main as a backup while it works and drops it when it does not; a refusal is said by its code.
+  const [asked, setAsked] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<string | null>(null);
+  const [refused, setRefused] = useState<{ id: string; why: string } | null>(null);
+  const makeMain = async (s: SeriesSource) => {
+    setPromoting(s.sourceId);
+    setRefused(null);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(id)}/main-source`, { json: { sourceId: s.sourceId } });
+      setAsked(null);
+      toast(tr('{name} is now the main source', { name: `\u2068${s.name}\u2069` }), 'success');
+      onSaved();
+      for (const k of ['series-listing', 'series-scanlators', 'series-groups']) qc.invalidateQueries({ queryKey: [k, id] });
+    } catch (e) {
+      // The refusal in the server's own words, by its code (lib/mainSource.ts): not followed, posting order, a series being
+      // checked, another language…
+      setRefused({ id: s.sourceId, why: msgOf(e, tr('Could not change the main source')) });
+      setAsked(null);
+    }
+    setPromoting(null);
+  };
+
   // Extra sources are added from Find missing chapters, where a person has seen the source's title and its
   // overlap with what is on disk. Here they can only be removed; the main one is not removable at all,
   // since it is the row the series was created from.
@@ -682,7 +731,16 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
           ? <div className="divide-y divide-ink-800/70">
               {sources.map((s) => (
                 <SourceRow key={s.sourceId} s={{ ...s, checkedAt: s.checkedAt ?? (s.primary ? checkedAt : null) }}
-                  onUnfollow={isAdmin && !s.primary ? () => unfollow(s) : undefined} unfollowing={unfollowing === s.sourceId} />
+                  onUnfollow={isAdmin && !s.primary ? () => unfollow(s) : undefined} unfollowing={unfollowing === s.sourceId}
+                  makeMain={adminAccount && mayMakeMain(s) ? {
+                    question: makeMainQuestion(s, main?.primary ? main : null),
+                    busy: promoting !== null,
+                    refusal: refused?.id === s.sourceId ? refused.why : null,
+                    asking: asked === s.sourceId,
+                    onAsk: () => { setRefused(null); setAsked(s.sourceId); },
+                    onCancel: () => setAsked(null),
+                    onConfirm: () => void makeMain(s),
+                  } : undefined} />
               ))}
             </div>
           : <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>}

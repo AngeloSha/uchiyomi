@@ -1,6 +1,6 @@
 'use client';
-// One verdict about a source, said the same way on Admin -> Providers and on Health's Source health rows (#115,
-// v0.49.0).
+// One verdict about a source, said the same way in its sheet in Admin → Sources (Providers' card until v0.54.0) and on
+// Health's Source health rows (#115, v0.49.0).
 //
 // Two inputs, one look (lib/sourceEvidence.ts turns either into the same lines):
 // - `answer`: a Test that just ran in this page -- its checks, its diagnosis, whether it ran out of time, and the

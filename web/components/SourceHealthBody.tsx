@@ -16,6 +16,7 @@ import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import { HealthCardActions, HealthRow, disableSource } from '@/components/HealthActions';
 import { ActionStatus } from '@/components/ActionList';
 import { SourceEvidence } from '@/components/SourceEvidence';
+import { SourceTile } from '@/components/SourceTile';
 import { useToast } from '@/components/Toast';
 import { IcChevronRight } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
@@ -25,10 +26,8 @@ import { useRepairRun } from '@/lib/useRepairRun';
 import { keysFor } from '@/lib/healthKeys';
 import { checkNote, itemDetail, itemTitle } from '@/lib/said';
 import { healthRowEvidence } from '@/lib/sourceEvidence';
-import { sourceIcon } from '@/lib/sourceGroups';
-import { TONE_SURFACE, type Tone } from '@/lib/status';
 import {
-  FINDING_GROUPS, bulkTargets, groupOf, primaryOf, seriesText, stateReason, stateWord, tileLetters, tileTone,
+  FINDING_GROUPS, bulkTargets, groupOf, primaryOf, seriesText, stateReason, stateWord, tileTone,
   turnOffAllLabel, turnOffEach, turnOffOutcome, turnOffQuestion,
 } from '@/lib/sourceHealth';
 import type { HealthCheck, HealthItem, SourceGroup } from '@/lib/types';
@@ -55,16 +54,12 @@ export function SourceHealthBody({ check }: { check: HealthCheck }) {
       {off.length > 0 && (
         <Fold id="off" title={tr('Switched off by you')} n={off.length}>
           {off.map(draw)}
-          {/* Where each comes back on: Providers for a source turned off there, Admin → Extensions for an extension's
-              source switched off or hidden with its language. Plain links, a whole page load: the console reads its
-              tab from the address once, so a client-side link to another of its tabs would leave Health on screen. */}
+          {/* Where they come back on: Admin → Sources since v0.54.0, whoever switched them off -- the admin's switch, an
+              extension's, or a hidden language -- where Providers and Extensions were two links, and the wrong one was a
+              tab that could not turn that source on. A plain link, a whole page load: the console reads its tab from the
+              address once, so a client-side link to another of its tabs would leave Health on screen. */}
           <p className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 text-xs">
-            {off.some((r) => !r.it.offBy || r.it.offBy === 'admin') && (
-              <a href="/admin/?tab=Providers" data-source-turn-on="providers" className="text-accent hover:underline">{tr('Turn sources on in Providers')}{'\u00a0'}›</a>
-            )}
-            {off.some((r) => r.it.offBy === 'extension' || r.it.offBy === 'language') && (
-              <a href="/admin/?tab=Extensions" data-source-turn-on="extensions" className="text-accent hover:underline">{tr('Turn sources on in Extensions')}{'\u00a0'}›</a>
-            )}
+            <a href="/admin/?tab=Sources" data-source-turn-on="sources" className="text-accent hover:underline">{tr('Turn sources back on in Admin → Sources')}{'\u00a0'}›</a>
           </p>
         </Fold>
       )}
@@ -135,7 +130,7 @@ function SourceRow({ check, it, rowKey }: { check: HealthCheck; it: HealthItem; 
   return (
     <HealthRow check={check} item={it} rowKey={rowKey}
       compact={{
-        lead: <SourceTile it={it} name={name} />,
+        lead: <SourceTile id={it.sourceId} name={name} icon={it.icon} tone={tileTone(it)} />,
         primary: primaryOf(it),
         name,
         hooks: { 'data-source-row': it.sourceId ?? rowKey, 'data-source-state': it.state ?? '' },
@@ -173,29 +168,6 @@ function SourceRow({ check, it, rowKey }: { check: HealthCheck; it: HealthItem; 
   );
 }
 
-/** The ring an extension's logo wears in its row's tone. Written out: Tailwind compiles only what it finds. */
-const TILE_RING: Record<Tone, string> = {
-  ok: 'ring-emerald-500/40', warn: 'ring-amber-400/50', problem: 'ring-red-400/50', info: 'ring-ink-600', off: 'ring-ink-700', accent: 'ring-accent/40',
-};
-
-/** The source's initials on its state's tint, or its extension's logo when it has one. */
-function SourceTile({ it, name }: { it: HealthItem; name: string }) {
-  const [failed, setFailed] = useState(false);
-  const tone = tileTone(it);
-  const calm = tone === 'off' || tone === 'info';
-  if (it.icon && it.sourceId && !failed) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={sourceIcon(it.sourceId)} alt="" aria-hidden width={32} height={32} loading="lazy" decoding="async"
-      onError={() => setFailed(true)}
-      className={`h-8 w-8 shrink-0 rounded-lg bg-ink-700 object-cover ring-1 ${TILE_RING[tone]} ${calm ? 'opacity-60' : ''}`} />;
-  }
-  return (
-    <span aria-hidden data-source-tile={tone}
-      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border text-[11px] font-semibold ${TONE_SURFACE[tone]}`}>
-      {tileLetters(name)}
-    </span>
-  );
-}
 
 /**
  * Turn off all, for the failing sources nothing uses: a key in the group's head, which asks first -- inline, under the

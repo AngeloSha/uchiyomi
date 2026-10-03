@@ -472,7 +472,7 @@ test('the results open on <body>, whatever card opened them, and each group is i
   // `fixed` sheet inside it (the slow archive's s14 MAJOR). Reintroduce `return (<Sheet` without OnBody: this names it.
   const src = code(read('components/FindSources.tsx'));
   const sheet = slice(src, 'export function FindResultsSheet(', 'export function FindRunCard(');
-  assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
+  assert.match(sheet, /return \(\s*<OnBody>\s*<Sheet title=\{run && isReplace\(run\) \? replaceRunTitle\(\) : tr\('Other-source search'\)\}/, 'the results are rendered inside the card that opened them');
   // The skipped group has a key of its own (v0.52.0): the shared "Skipped" is also a match's state and an import row's,
   // and the heading is about series, which es, fr and pt agree it with. Reintroduce the shared key: this fails.
   for (const [id, title] of [['found', 'New sources'], ['nothing', 'Nothing found'], ['skipped', 'Skipped series'], ['not-tried', 'Not tried']]) {
@@ -771,8 +771,9 @@ test('an earlier search opens in the sheet by its id, and the latest is a key aw
   assert.match(sheet, /useEffect\(\(\) => \{\s*if \(shown\.current === openId\) return;\s*shown\.current = openId;\s*top\.current\?\.scrollIntoView\(\{ block: 'start' \}\);\s*\}, \[openId\]\);/,
     'an opened run begins a screen above where the reader is');
   assert.match(sheet, /<div data-find-results ref=\{top\}/);
-  // A match's state has a key of its own too: one match, beside "Followed", in the number and gender it agrees with.
-  assert.match(code(read('components/FindSources.tsx')), /p\.state === 'followed' \? tr\('Followed'\) : tr\('Skipped for good'\)/);
+  // A match's state has a key of its own too: one match, beside "Followed" (and v0.54.0's "Made main"), in the number
+  // and gender it agrees with.
+  assert.match(code(read('components/FindSources.tsx')), /p\.state === 'followed' \? tr\('Followed'\) : p\.state === 'promoted' \? tr\('Made main'\) : tr\('Skipped for good'\)/);
 });
 
 test('the start dialog remembers the last choice on this device; storage that throws reads as automatic', () => {

@@ -234,9 +234,16 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     'the library still marks these {n} deleted, and no scan has read the files since',
   // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
   'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
-  // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources".
-  'Turn off this source? No series uses it. You can turn it back on in Providers.':
-    'Turn off these {n} sources? No series uses them. You can turn them back on in Providers.',
+  // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources" (v0.54.0: the
+  // place it names is Admin → Sources).
+  'Turn off this source? No series uses it. You can turn it back on in Admin → Sources.':
+    'Turn off these {n} sources? No series uses them. You can turn them back on in Admin → Sources.',
+  // v0.54.0, Admin → Sources: a source's Turn off, and the Replace dialog's head and plan, where "it" and "its" agree too.
+  '1 series uses it. It stops getting new chapters from this source until you turn it back on. Nothing is deleted.':
+    '{n} series use it. They stop getting new chapters from this source until you turn it back on. Nothing is deleted.',
+  '1 series uses it as its main source': '{n} series use it as their main source',
+  '1 already follows a working source: it becomes its main source.': '{n} already follow a working source: it becomes their main source.',
+  '1 numbered by posting order stays as it is.': '{n} numbered by posting order stay as they are.',
   // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
   'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
   'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',
@@ -253,6 +260,8 @@ const NOT_PAIRED: Record<string, string> = {
   '{n} copies — merge them one pair at a time': 'said only for three copies or more: never 1',
   'Switched off after {n} failed deliveries in a row. Fix it, then switch it back on.':
     'a target switches itself off only at bff notify AUTO_DISABLE_AFTER (10) failures in a row: never 1',
+  // v0.54.0: its singular, "1 language", was Providers' MangaDex group and the old MangaDex card's, both gone.
+  '{n} languages': 'extLanguagesText names the one language instead (lib/extensions.ts): said only for two or more',
 };
 /**
  * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its
@@ -271,14 +280,14 @@ const SHIPPED_UNPAIRED = [
   '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total',
   '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
   '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series would move',
-  '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
+  '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
   'failed {n} times',
   '{n} titles matched', '{n} chapters listed', '{n} chapters listed · none fetched yet',
   '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.',
   'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 34;
+const SHIPPED_UNPAIRED_MAX = 33;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

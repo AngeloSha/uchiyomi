@@ -31,13 +31,16 @@ export function groupOf(it: HealthItem): SourceGroup {
 export const FINDING_GROUPS: readonly SourceGroup[] = ['affected', 'unused'];
 
 /**
- * The ONE key a row shows (the rest are in its ⋯ menu): Clear block for a source in a cooldown that has one to clear,
- * Test for everything else -- the one action that answers "is this still true?". None on a folded row: a source
- * switched off, or one listed for reference, has nothing to press for in the list.
+ * The ONE key a row shows (the rest are in its ⋯ menu): Replace for a source that is some series' main source and
+ * cannot serve them (v0.54.0) -- in any group, the switched-off fold included, where aqua sat switched off and still
+ * the main source of 195 series -- then Clear block for a source in a cooldown that has one to clear, Test for
+ * everything else -- the one action that answers "is this still true?". Otherwise none on a folded row: a source
+ * switched off, or one listed for reference, has nothing else to press for in the list.
  */
 export function primaryOf(it: HealthItem): HealthAction | null {
-  if (!FINDING_GROUPS.includes(groupOf(it))) return null;
   const actions = it.actions ?? [];
+  if (actions.includes('replace_source')) return 'replace_source';
+  if (!FINDING_GROUPS.includes(groupOf(it))) return null;
   if (it.state === 'blocked' && actions.includes('unblock')) return 'unblock';
   return actions.includes('test') ? 'test' : null;
 }
@@ -87,11 +90,16 @@ export function stateReason(it: HealthItem, now = Date.now()): string {
 
 /**
  * The letters on a source's tile: the first of its first two words that start with a letter, its language suffix left
- * out -- "Hentai Shelf (AR)" is HS and "Lantern 10 (FR)" is L, never "L1" -- else the group avatar's initials.
+ * out -- "Hentai Shelf (AR)" is HS and "Lantern 10 (FR)" is L, never "L1". A name that starts with its number is that
+ * number and the letter after it -- "3Hentai (EN)" is 3H and "1Manga.co" 1M, where the avatar's rule drew "3(" from the
+ * suffix (v0.54.0, the Sources list) -- and one with no letter at all is the group avatar's initials.
  */
 export function tileLetters(name: string): string {
-  const words = name.replace(/\s*\([^)]*\)\s*$/, '').split(/[\s\-_.·&/,]+/).filter((w) => /^\p{L}/u.test(w));
-  return words.length ? words.slice(0, 2).map((w) => w.charAt(0).toLocaleUpperCase()).join('') : initialsOf(name);
+  const bare = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  const lead = /^(\p{N})\p{N}*(\p{L})/u.exec(bare);
+  if (lead) return `${lead[1]}${lead[2].toLocaleUpperCase()}`;
+  const words = bare.split(/[\s\-_.·&/,]+/).filter((w) => /^\p{L}/u.test(w));
+  return words.length ? words.slice(0, 2).map((w) => w.charAt(0).toLocaleUpperCase()).join('') : initialsOf(bare || name);
 }
 
 /** "3 series", or nothing for a source no series uses. */
@@ -118,10 +126,10 @@ export function bulkTargets(items: readonly HealthItem[]): HealthItem[] {
 /** The group key's words: "Turn off all 5", or for one source the row's own verb. */
 export const turnOffAllLabel = (n: number): string => (n === 1 ? tr('Turn off') : tr('Turn off all {n}', { n }));
 
-/** What Turn off all asks before it does anything. */
+/** What Turn off all asks before it does anything (Health's card, and Admin → Sources' Needs attention since v0.54.0). */
 export const turnOffQuestion = (n: number): string => (n === 1
-  ? tr('Turn off this source? No series uses it. You can turn it back on in Providers.')
-  : tr('Turn off these {n} sources? No series uses them. You can turn them back on in Providers.', { n }));
+  ? tr('Turn off this source? No series uses it. You can turn it back on in Admin → Sources.')
+  : tr('Turn off these {n} sources? No series uses them. You can turn them back on in Admin → Sources.', { n }));
 
 /**
  * Turn off all: the row's own Turn off (`post`, the request HealthActions.tsx's `disableSource` makes), for each source

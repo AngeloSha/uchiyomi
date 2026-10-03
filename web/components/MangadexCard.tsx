@@ -1,31 +1,23 @@
 'use client';
-// Admin → Providers: MangaDex in other languages (v0.52.0, #123), and the language of sites that do not say theirs.
+// Admin → Sources: MangaDex in other languages (v0.52.0, #123), and the language of sites that do not say theirs.
 //
 // On the server MangaDex is one source per language (bff lib/sources/mangadex.ts): `mangadex` is English and always
 // on, and every language turned on here becomes a source of its own, "MangaDex (ES-419)", with its own Newest and
-// Popular. They fold into this one card (lib/providerGroups.ts MANGADEX_GROUP) whatever is on -- with English alone
-// too, because this card is where the other languages are offered.
-//
-// The rows are Providers' own (its Test / Clear block / Disable row, handed in as `row`), so a language is tested and
-// switched off exactly as an extension's languages are, and the header wears the unhappiest language's status. The
-// languages themselves fold behind a "Languages · …  Manage" strip, the Extensions tab's pattern: 26 of them are a
-// wall of chips on a phone for a setting most servers change once. Each tap is one PATCH of the whole list, saved as
-// it is tapped -- no draft, no Save -- and "Saving… / ✓ Saved" says so beside the chips.
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+// Popular. Since v0.54.0 each of them is a row of Your sources like any other source, tested and switched off in its
+// own sheet; this is where the languages are chosen: Add sources' "MangaDex languages", folded until opened, and the
+// same chips in a MangaDex source's sheet. Each tap is one PATCH of the whole list, saved as it is tapped -- no draft,
+// no Save -- and "Saving… / ✓ Saved" says so beside the chips.
+import { useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useReducedMotion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
-import { onText } from '@/lib/counted';
 import { activeLocale, languageName } from '@/lib/format';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { OnBody } from '@/components/ui';
 import { Row, SaveState, useAutosave } from '@/components/settings';
-import { mangadexSourceId, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
-import { offCost, opensMangadexLanguages, serial, toggleLang } from '@/lib/mangadexLangs';
+import { offCost, opensMangadexLanguages, serial, toggleLang, type LanguageSource } from '@/lib/mangadexLangs';
 import { useReduceEffects } from '@/lib/effects';
-import type { ProviderStatus } from '@/lib/status';
+import { IcChevronRight } from '@/components/icons';
 import type { LanguageSettings } from '@/lib/types';
 
 /** The Settings tab's own key: both read one answer, and a save here is what the Settings tab shows next. */
@@ -43,26 +35,30 @@ function nameList(codes: string[]): string {
   try { return new Intl.ListFormat(activeLocale(), { type: 'unit', style: 'short' }).format(names); } catch { return names.join(', '); }
 }
 
-export function MangadexCard({ group, row, mark, onSaved }: {
-  /** The family as GET /api/sources lists it: English, then each language that is on. */
-  group: ProviderGroup;
-  /** Providers' row for one language: its code, status, series count, Test / Clear block / Disable and evidence. */
-  row: (s: ProviderSrc) => ReactNode;
-  /** Providers' status mark. */
-  mark: (st: ProviderStatus) => ReactNode;
-  /** After the last save of a run of taps: the source lists and Health are refetched. */
+/**
+ * The MangaDex languages: a fold that names the ones on ("Languages · English, Latin American Spanish") and opens on the
+ * chips, or the chips alone, open, in a MangaDex source's sheet (`open`). Turning off a language series came from asks
+ * first, inside this block -- it may sit in a sheet, and a dialog opened over a Sheet paints under it.
+ */
+export function MangadexLanguages({ sources, onSaved, open: always = false }: {
+  /** MangaDex's sources as the sources overview lists them: how many series use each, for the question. */
+  sources: readonly LanguageSource[];
+  /** After the last save of a run of taps: the source lists and Health are asked again. */
   onSaved: () => void;
+  /** Open, with no fold of its own: a MangaDex source's sheet, which is about nothing else. */
+  open?: boolean;
 }) {
   const qc = useQueryClient();
   const { data } = useLanguageSettings();
   const available = data?.mangadex_available ?? [];
   // Arrived by the add dialog's "Turn on more MangaDex languages" (`?card=mangadex`, v0.52.0): the languages unfolded
-  // and the card on screen, once -- read in a lazy initialiser, as every address the console reads is
-  // (lib/useTabParam.ts), so a refetch or a later tap never pulls the page back. Reintroduce by starting folded:
-  // "the card does not unfold" in mangadexLangs.test.ts.
+  // and on screen, once -- read in a lazy initialiser, as every address the console reads is (lib/useTabParam.ts), so a
+  // refetch or a later tap never pulls the page back. Reintroduce by starting folded: "the languages do not unfold" in
+  // mangadexLangs.test.ts.
   const params = useSearchParams();
-  const [arrived] = useState(() => opensMangadexLanguages(params));
-  const [open, setOpen] = useState(arrived);
+  const [arrived] = useState(() => !always && opensMangadexLanguages(params));
+  const [unfolded, setUnfolded] = useState(arrived);
+  const open = always || unfolded;
   const cardRef = useRef<HTMLDivElement>(null);
   const plain = useReduceEffects();
   const still = useReducedMotion();
@@ -97,100 +93,88 @@ export function MangadexCard({ group, row, mark, onSaved }: {
 
   const toggle = (code: string) => {
     // Series would stop updating: asked first, with how many. A language nothing came from goes at once.
-    const cost = on.includes(code) ? offCost(group, code) : null;
+    const cost = on.includes(code) ? offCost(sources, code) : null;
     if (cost) setConfirm({ code, ...cost });
     else commit(toggleLang(available, on, code));
   };
 
-  // English first, then the languages in the picker's order, however the registry happened to list them.
-  const rank = (s: ProviderSrc) => {
-    const i = available.findIndex((c) => mangadexSourceId(c) === s.id);
-    return i < 0 ? available.length : i;
-  };
-  const rows = [...group.sources].sort((a, b) => rank(a) - rank(b));
-  const disabled = group.sources.length - group.on;
   const shown = ['en', ...on];
   const panel = useId();
-
-  return (
-    <div ref={cardRef} data-source-card="mangadex" className="card grad-border wide scroll-mt-4 p-4 lg:scroll-mt-20">
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 text-sm text-fog-100">
-          MangaDex
-          <span className="ms-2 text-[11px] text-fog-500">
-            {rows.length === 1 ? tr('1 language') : tr('{n} languages', { n: rows.length })}
-            {disabled > 0 && <> · {onText(group.on)}</>}
-          </span>
-        </span>
-        {mark(group.worst)}
+  const chips = (
+    <div id={panel} data-mangadex-langs>
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 max-w-prose text-[11px] leading-relaxed text-fog-400">
+          {tr('English is always on. Each language you add becomes its own source, such as MangaDex (ES-419), with its own Newest and Popular. Series you add from it are in that language.')}
+        </p>
+        <SaveState status={status} />
       </div>
-      <ul className="mt-2 divide-y divide-ink-800">{rows.map(row)}</ul>
-
-      <div className="mt-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={panel}
-          className="flex w-full items-center justify-between gap-2 text-start">
-          <span className="min-w-0 truncate text-[11px] text-fog-300">
-            {tr('Languages')}<span className="text-fog-500"> · {nameList(shown)}</span>
-          </span>
-          <span className="shrink-0 text-[11px] text-fog-500">{open ? tr('Hide') : tr('Manage')}</span>
-        </button>
-        {open && (
-          <div id={panel} className="mt-2">
-            <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 max-w-prose text-[11px] leading-relaxed text-fog-400">
-                {tr('English is always on. Each language you add becomes its own source, such as MangaDex (ES-419), with its own Newest and Popular. Series you add from it are in that language.')}
-              </p>
-              <SaveState status={status} />
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={tr('Languages')}>
-              {available.map((code) => {
-                const always = code === 'en';
-                const lit = always || on.includes(code);
-                return (
-                  <button key={code} type="button" onClick={() => toggle(code)} disabled={always} aria-pressed={lit}
-                    title={always ? 'MangaDex' : `MangaDex (${code.toUpperCase()})`}
-                    className={`chip whitespace-nowrap text-xs disabled:cursor-default ${lit ? 'chip-active' : ''}`}>
-                    {lit && <span aria-hidden>✓</span>}
-                    {languageName(code)}
-                    {always && <span className="text-[10px] opacity-75">· {tr('always on')}</span>}
-                  </button>
-                );
-              })}
-              {!data && <span className="text-[11px] text-fog-500">{tr('Loading…')}</span>}
-            </div>
-            <p className="mt-2 max-w-prose text-[10px] leading-relaxed text-fog-500">
-              {tr('All MangaDex sources share one rate limit: when MangaDex asks Uchiyomi to slow down, every language waits.')}
-            </p>
-          </div>
-        )}
+      <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={tr('Languages')}>
+        {available.map((code) => {
+          const always = code === 'en';
+          const lit = always || on.includes(code);
+          return (
+            // Filter chips: a set of choices, the one chip shape the owner kept.
+            <button key={code} type="button" onClick={() => toggle(code)} disabled={always} aria-pressed={lit}
+              title={always ? 'MangaDex' : `MangaDex (${code.toUpperCase()})`}
+              className={`chip whitespace-nowrap text-xs disabled:cursor-default ${lit ? 'chip-active' : ''}`}>
+              {lit && <span aria-hidden>✓</span>}
+              {languageName(code)}
+              {always && <span className="text-[10px] opacity-75">· {tr('always on')}</span>}
+            </button>
+          );
+        })}
+        {!data && <span className="text-[11px] text-fog-500">{tr('Loading…')}</span>}
       </div>
-
-      {/* ⚠️ On <body>: a `.card` blurs its backdrop, which makes it the containing block of a `fixed` dialog. */}
+      <p className="mt-2 max-w-prose text-[10px] leading-relaxed text-fog-500">
+        {tr('All MangaDex sources share one rate limit: when MangaDex asks Uchiyomi to slow down, every language waits.')}
+      </p>
+      {/* The question, here rather than in a dialog: this block may be inside a sheet, which a dialog would paint under. */}
       {confirm && (
-        <OnBody>
-          <ConfirmDialog
-            // Isolated (FSI … PDI): a title is a plain string, and without it an Arabic sentence's direction takes the
-            // closing bracket of "MangaDex (ES-419)".
-            title={tr('Turn off {name}?', { name: `\u2068${confirm.name}\u2069` })}
-            body={confirm.used === 1
+        <div role="alertdialog" aria-label={tr('Turn off {name}?', { name: `⁨${confirm.name}⁩` })}
+          className="mt-3 border-s-2 border-amber-400 bg-ink-850/80 py-2 pe-2 ps-2.5" data-mangadex-confirm>
+          {/* Isolated (FSI … PDI): without it an Arabic sentence's direction takes the closing bracket of "MangaDex (ES-419)". */}
+          <p className="text-sm text-fog-100">{tr('Turn off {name}?', { name: `⁨${confirm.name}⁩` })}</p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-fog-400">
+            {confirm.used === 1
               ? tr('1 series from it will stop updating until you turn it back on, but stays readable.')
               : tr('{n} series from it will stop updating until you turn it back on, but stay readable.', { n: confirm.used })}
-            confirmLabel={tr('Turn off')}
-            onConfirm={() => { const code = confirm.code; setConfirm(null); commit(toggleLang(available, on, code)); }}
-            onClose={() => setConfirm(null)}
-          />
-        </OnBody>
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className="btn-key btn-key-danger" data-mangadex-confirm-yes
+              onClick={() => { const code = confirm.code; setConfirm(null); commit(toggleLang(available, on, code)); }}>{tr('Turn off')}</button>
+            <button type="button" className="btn-key" onClick={() => setConfirm(null)}>{tr('Cancel')}</button>
+          </div>
+        </div>
       )}
     </div>
+  );
+
+  if (always) return <section aria-label={tr('MangaDex languages')} data-source-card="mangadex-languages">{chips}</section>;
+  return (
+    <section ref={cardRef} aria-label={tr('MangaDex languages')} data-source-card="mangadex" className="scroll-mt-4 lg:scroll-mt-20">
+      <button type="button" onClick={() => setUnfolded(!unfolded)} aria-expanded={open} aria-controls={panel} data-mangadex-fold
+        className="group flex w-full min-w-0 items-center gap-3 py-3 text-start">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-fog-100">{tr('MangaDex languages')}</span>
+          <span className="block truncate text-[11px] text-fog-500">{nameList(shown)}</span>
+        </span>
+        {/* Mirrored on the outer span and turned on the inner one: both on one pointed it up in Arabic. */}
+        <span aria-hidden className="inline-grid shrink-0 text-fog-500 group-hover:text-fog-200 rtl:-scale-x-100">
+          <IcChevronRight width={16} height={16} className={open ? 'rotate-90' : ''} />
+        </span>
+      </button>
+      {open && <div className="pb-3">{chips}</div>}
+    </section>
   );
 }
 
 /**
  * Which language the sources that do not say are in (server_settings.unstated_lang): most added sites, and the
  * source packs. English unless this server's sites are in another. The same-language guard on automatic follows
- * reads it, so a server of Spanish sites set to English would follow none of them for its Spanish series.
+ * reads it, so a server of Spanish sites set to English would follow none of them for its Spanish series. A row of
+ * Add sources since v0.54.0, where it was a card of its own.
  */
-export function UnstatedLanguageCard() {
+export function UnstatedLanguageRow() {
   const qc = useQueryClient();
   const { data } = useLanguageSettings();
   const { status, run } = useAutosave();
@@ -211,14 +195,12 @@ export function UnstatedLanguageCard() {
     void run(async () => { qc.setQueryData(SETTINGS_KEY, await send); }).finally(() => { if (!--pending.current) setPicked(null); });
   };
   return (
-    <div className="card grad-border wide p-4">
-      <Row htmlFor={id} status={status}
-        label={tr('Sites that do not say their language')}
-        help={tr('Uchiyomi takes them to be in this language, and follows a source for a series automatically only when both are in the same language.')}>
-        <select id={id} value={value} onChange={(e) => pick(e.target.value)} className="field w-auto">
-          {codes.map((c) => <option key={c} value={c}>{languageName(c)}</option>)}
-        </select>
-      </Row>
-    </div>
+    <Row htmlFor={id} status={status} id="sources-unstated-language"
+      label={tr('Sites that do not say their language')}
+      help={tr('Uchiyomi takes them to be in this language, and follows a source for a series automatically only when both are in the same language.')}>
+      <select id={id} value={value} onChange={(e) => pick(e.target.value)} className="field w-auto">
+        {codes.map((c) => <option key={c} value={c}>{languageName(c)}</option>)}
+      </select>
+    </Row>
   );
 }

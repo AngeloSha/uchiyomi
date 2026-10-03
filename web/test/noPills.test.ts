@@ -70,6 +70,14 @@ const SURFACES = [
   'components/ExtensionRepos.tsx',
   'components/ExtensionBits.tsx',
   'lib/extensions.ts',
+  // v0.54.0, Admin → Sources, where Providers and Extensions were two tabs: the panel, one sheet for every source, its
+  // tile, the Replace dialog and its run, and the words they say.
+  'components/SourcesPanel.tsx',
+  'components/SourceSheet.tsx',
+  'components/SourceTile.tsx',
+  'components/ReplaceDialog.tsx',
+  'lib/sourcesPanel.ts',
+  'lib/mainSource.ts',
 ];
 
 /**
@@ -79,16 +87,12 @@ const SURFACES = [
  * The admin console's status badges (step 3) and its action keys: the owner ruled that only filter and sort
  * chips keep the chip shape, so the Providers panel's Test / Clear block / Enable / Update address / Check
  * all / Reload and the Extensions tab's keys (v0.53.0: Install, Update, Turn on, Update all, Turn on all, Check for
- * extension updates, Languages, Connect) are `.btn-key`s. The engine strip's slice stops short of the platform
- * picker's chips. Health()'s own capsules belong to the Health step, which adds its slice when it redesigns them.
+ * extension updates, Languages, Connect) were `.btn-key`s -- and Admin → Sources, which took both tabs' place in
+ * v0.54.0, is a whole surface above. The engine strip's slice stops short of the platform picker's chips.
+ * Health()'s own capsules belong to the Health step, which adds its slice when it redesigns them.
  */
 const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'function TabTile('],
-  ['app/admin/page.tsx', 'Providers: source cards and their keys', 'function controlsOf(', '<div className="board">'],
-  ['app/admin/page.tsx', 'Providers: Check all and Reload', "{tr('{n} sources in {m} providers'", '{sweep && ('],
-  // The owner's call (fixB): Providers' own calls to action -- Add a site's Add and "Import and review matches"
-  // -- are keys too, like the Extensions repository's Add beside them.
-  ['app/admin/page.tsx', 'Providers: Add a site and Import a list', "{tr('Add a site')}</p>", '{list.length === 0 ? ('],
   // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
@@ -110,6 +114,8 @@ const SLICES: [string, string, string, string][] = [
   // v0.49.1: the Sources sheet's Find more sources and Other names -- keys and a plain list, beside the sheet's
   // Prefer/Block chips, which stay.
   ['components/SourcesSheet.tsx', 'Sources sheet: Find more sources and Other names', 'function FindMore(', 'const emptyStat'],
+  // v0.54.0: a follower's Make main and the one line it asks first, beside the row's main / followed chip, which stays.
+  ['components/SourcesSheet.tsx', 'Sources sheet: Make main and its question', '{makeMain && !makeMain.asking && (', '{makeMain?.refusal &&'],
   // v0.53.0, Admin → Extensions: the engine's strip, beside the platform picker's chips, which stay. The tab itself is
   // a whole surface above since round 2 took Browse's chips out.
   ['components/EngineSetup.tsx', 'Extensions: the engine strip', 'export function EngineReady(', 'function EngineOffSheet('],
@@ -186,16 +192,15 @@ test('no capsule in the redesigned surfaces: no rounded-full with padding, no pi
 
 test('the admin console\'s status badges are marks and its actions keys: the slices hold what they claim to', () => {
   // A slice that silently lost its content (a marker matched something earlier) would scan nothing and pass.
-  // Reintroduce by renaming `statusMark` back to `statusChip`: "Providers: source cards and their keys: … is
-  // not where this test looks" fails -- the scan above goes first and says so too. Anchor the engine slice on
-  // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
-  // not-configured card" fails.
+  // Reintroduce by renaming a marker's function: "… is not where this test looks" fails -- the scan above goes first
+  // and says so too. Anchor the engine slice on "{tr('Extensions')}</p>" again: it starts at the not-configured card
+  // and "the engine slice holds the not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, toolbar, calls, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
   const ext = (name: string) => { const [f, , from, to] = SLICES.find(([, n]) => n === name)!; return slice(code(read(f)), from, to, name); };
   const engine = ext('Extensions: the engine strip');
   const panel = code(read('components/ExtensionsPanel.tsx'));
-  const installed = slice(panel, 'function InstalledTools(', 'function BrowseView(', 'Extensions: Installed');
+  const tools = slice(panel, 'export function ExtensionTools(', 'export const OPENER', 'Extensions: the tools');
   const browse = slice(panel, 'function BrowseView(', '', 'Extensions: Browse');
   // Health (step 8): a mark per card, Re-check a key, and nothing called HEALTH_LABEL left to be a capsule.
   assert.match(health, /<StatusMark \{\.\.\.mark\} size="xs" \/>/, 'the Health slice has no mark');
@@ -203,29 +208,43 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.doesNotMatch(health, /HEALTH_LABEL|HEALTH_TONE/, 'the Health capsules are back');
   assert.match(tasks, /className="btn-key /, 'Run now is not a key');
   assert.match(attention, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>/, 'the Needs attention slice has no mark');
-  assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
-  assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');
   const keys = (src: string) => (src.match(/className=\{?[`"]btn-key\b/g) || []).length;
-  // Update address moved into SourceEvidence (#115), which offers it under the Test that found the move.
-  assert.equal(keys(providers), 3, 'Test, Clear block and Enable/Disable are not all keys');
+  // Update address under a Test that found the move is SourceEvidence's (#115).
   assert.equal(keys(code(read('components/SourceEvidence.tsx'))), 1, 'Update address is not a key');
-  assert.equal(keys(toolbar), 2, 'Check all and Reload are not both keys');
-  // v0.53.0: the engine and its helper are marks, the engine's ⋯ and Connect are keys; Installed's Languages and Check
-  // for extension updates, Update all, Turn on all, a row's Turn on and Update and the empty state's Browse are keys;
-  // Browse's Try again, Show more, the empty state's two and a row's Install and Update too. Its repositories are a
-  // text link in its count line since round 2, as an extension's "Hidden in every extension" is.
+  // v0.53.0: the engine and its helper are marks, the engine's ⋯ and Connect are keys; Languages and Check for
+  // extension updates, Browse's Try again, Show more, the empty state's two and a row's Install and Update too. Its
+  // repositories are a text link in its count line since round 2, as an extension's "Hidden in every extension" is.
   assert.match(engine, /<StatusMark tone=\{engine\.tone\} label=\{engine\.label\} size="md" \/>/, 'the engine is not a mark');
   assert.match(engine, /<StatusMark tone=\{helperTone\}/, 'the Cloudflare helper is not a mark');
   assert.match(engine, /onClick=\{connect\}[^>]*className="btn-key btn-key-primary[^"]*"/, 'Connect is not a key');
   assert.equal(keys(engine), 2, 'the engine\'s ⋯ and Connect are not both keys');
   assert.doesNotMatch(engine, /className="[^"]*\bchip\b/, 'the engine strip slice runs into the platform chips');
-  assert.equal(keys(installed), 7, 'Installed\'s keys are not all keys');
+  assert.equal(keys(tools), 2, 'Languages and Check for extension updates are not both keys');
   assert.equal(keys(browse), 6, 'Browse\'s keys are not all keys');
-  assert.doesNotMatch(panel, /\bchip(-active)?\b/, 'a chip is back in the Extensions tab');
+  assert.doesNotMatch(panel, /\bchip(-active)?\b/, 'a chip is back in the extension catalogue');
   assert.equal(keys(code(read('components/ExtensionSheet.tsx'))), 5, 'the sheet\'s Update, Turn on its sources, Remove extension, Remove and Cancel are not keys');
-  // Reintroduce `btn-accent` on either: the capsule scan fails, and so does this.
-  assert.match(calls, /onClick=\{addSite\}[^>]*className="btn-key btn-key-primary"/, "Add a site's Add is not a key");
-  assert.match(calls, /router\.push\('\/admin\/import\/'\)\} className="btn-key btn-key-primary w-full"/, '"Import and review matches" is not a key');
+  // v0.54.0, Admin → Sources: a source's state is a mark; every key of its sheet goes through one helper that makes a
+  // .btn-key; and the one filled key of the panel and of the sheet is Replace (Start, in the Replace dialog).
+  const sheet = code(read('components/SourceSheet.tsx'));
+  assert.match(sheet, /<StatusMark tone=\{says\.tone\} label=\{says\.word\} size="md" \/>/, 'a source\'s state is not a mark');
+  assert.match(sheet, /const key = \(k: SheetKey, label: ReactNode, onClick: \(\) => void, cls = 'btn-key', /, 'the sheet\'s keys are not keys');
+  const calls = sheet.split('\n').filter((l) => /&& key\('/.test(l));
+  assert.ok(calls.length >= 5, 'the sheet\'s keys are not where this test looks');
+  for (const l of calls) {
+    const cls = /, '([^']*)'(?:, \{[^}]*\})?\)\}\s*$/.exec(l)?.[1];
+    if (cls !== undefined) assert.match(cls, /^btn-key\b/, `a sheet key is drawn in a class that is not a key: ${l.trim()}`);
+  }
+  const sources = code(read('components/SourcesPanel.tsx'));
+  for (const [name, src, filled] of [['the panel', sources, 'Replace'], ['the sheet', sheet, 'Replace'], ['the Replace dialog', code(read('components/ReplaceDialog.tsx')), 'Start']] as const) {
+    assert.equal((src.match(/btn-key-primary/g) ?? []).length, 1, `${name} has a filled key besides ${filled}`);
+  }
+  // Add a site's Add is a key, the accent's fill kept for Replace, Start and Connect; Import a list is a row's link.
+  assert.match(sources, /<button type="submit" [^>]*className=\{`btn-key \$\{busyKey\(adding\)\}`\} data-sources-add-site-go>/, "Add a site's Add is not a key");
+  assert.match(sources, /<LinkRow href="\/admin\/import\/" label=\{tr\('Import a list'\)\}/, 'Import a list is not a row of Add sources');
+  // The series sheet's Make main, and the yes of its question: keys beside the row's chip.
+  const make = ext('Sources sheet: Make main and its question');
+  assert.match(make, /className="btn-key shrink-0" data-make-main=\{s\.sourceId\}>/, 'Make main is not a key');
+  assert.match(make, /className="btn-key" data-make-main-yes>\{tr\('Make main'\)\}<\/button>/, 'the question\'s Make main is not a key');
 });
 
 test('the downloads counts are squared tags: the switch\'s, the ring\'s and the Updates bell\'s beside it', () => {

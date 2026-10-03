@@ -6,10 +6,14 @@
 // extensions installed in the engine's own page stayed off with no way on but Remove and Add again. Each test names
 // the edit that brings its fault back.
 //
-// Round 2 (the owner: "still too cluttered") is the second half of this file: a row with one state word and one key,
-// no bars, groups only while something needs attention, Browse without its two chips and with its repositories in
-// the count line, Settings closed, a language row with a line only for a problem, and a strip that says nothing more
-// than its marks when all is well.
+// Round 2 (the owner: "still too cluttered") is the second half of this file: Browse without its two chips and with
+// its repositories in the count line, Settings closed, a language row with a line only for a problem, and a strip
+// that says nothing more than its marks when all is well.
+//
+// v0.54.0 folded the tab into Admin → Sources (components/SourcesPanel.tsx): the Installed list became Your sources --
+// one list of every source, an extension's among them, each opening one sheet (components/SourceSheet.tsx) whose
+// extension part is components/ExtensionSheet.tsx -- and Browse sits in Add sources. The tests of the Installed rows
+// and groups went with them; what they protected that survives is held here, where it now lives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
@@ -20,11 +24,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { setActiveLocale } from '../lib/format';
 import { Facts } from '../components/ExtensionBits';
 import {
-  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, browseCount, catalogQuery, engineLine, engineMeta, extLanguageName, extLanguagesText, helperLine,
-  initialView, installedGroups, installedList, languageOptions, languageProblem, languagesOnText, nearSourceLimit, needsAttention, needsTurningOn,
-  nextOffset, overLimitText, reasonLine, rowKey, rowWord, sourceHealth, sourcesOnText, versionText,
+  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, catalogQuery, engineLine, engineMeta, extLanguageName, extLanguagesText, helperLine,
+  installedList, languageOptions, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn,
+  nextOffset, overLimitText, reasonLine, sourceHealth, sourcesOnText, versionText,
   type CatalogExt, type ExtSource,
 } from '../lib/extensions';
+import { turnOffRequest, turnOnRequest } from '../lib/sourcesPanel';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 const code = (src: string): string =>
@@ -119,7 +124,7 @@ test('the strip says the engine\'s state and the Cloudflare helper\'s, and offer
   assert.equal(helperLine(undefined), null, 'an engine whose settings could not be read is said to have no helper');
 });
 
-test('counts say their unit: sources against the limit, an extension\'s languages, the extensions installed', () => {
+test('counts say their unit: sources against the limit, an extension\'s languages, the sources switched on', () => {
   // #121: "I added only 12 extensions", beside a count of sources. Reintroduce a bare number for either: these fail.
   assert.equal(sourcesOnText(18, 25), '18 of 25 sources on');
   assert.equal(sourcesOnText(1300, 2000), '1,300 of 2,000 sources on', 'a count in the thousands is not grouped');
@@ -131,25 +136,28 @@ test('counts say their unit: sources against the limit, an extension\'s language
   assert.equal(engineMeta({ version: '2.3.2243', enabled: 27, cap: 25 }), 'v2.3.2243 · 27 of 25 sources on', 'an engine that sends no "v"');
   assert.equal(engineMeta({ enabled: 0, cap: 25 }), '0 of 25 sources on', 'an engine that sends no version');
   assert.equal(versionText('v1'), 'v1');
-  const tabs = slice(code(read('components/ExtensionsPanel.tsx')), 'function ExtensionLists(', 'function ViewTabs(');
-  assert.match(tabs, /<ViewTabs view=\{view\} onView=\{setView\} installed=\{inst\?\.installed\} /, 'the Installed tab counts something other than the extensions installed');
+  // Your sources counts the sources switched on (the list it opens on), never the extensions installed: #121 read "12
+  // extensions" as many more sources. Reintroduce another count on the tab: this fails.
+  const panel = code(read('components/SourcesPanel.tsx'));
+  assert.match(panel, /<ViewTabs view=\{view\} onView=\{setView\} count=\{overview \? splitSources\(overview\.sources\)\.on\.length : undefined\} \/>/,
+    'Your sources counts something other than the sources switched on');
 });
 
-test('the Browse tab counts what Browse lists, and follows Show 18+ extensions', () => {
-  // It said "Browse 1,304" over a list that ended at "1,118 of 1,118": the tab counted the 18+ extensions the list
-  // leaves out. Reintroduce `total={inst?.total}`, or drop the subtraction: these fail.
-  assert.equal(browseCount({ total: 1304, adultTotal: 186 }, false), 1118, 'the tab counts the 18+ extensions Browse leaves out');
-  assert.equal(browseCount({ total: 1304, adultTotal: 186 }, true), 1304, 'with Show 18+ extensions on, the tab leaves them out');
-  assert.equal(browseCount({ total: 40 }, false), 40, 'an older server, which does not count them, breaks the count');
-  const lists = slice(code(read('components/ExtensionsPanel.tsx')), 'function ExtensionLists(', 'function ViewTabs(');
-  assert.match(lists, /<ViewTabs [^>]*total=\{inst \? browseCount\(inst, adult\) : undefined\}/, 'the Browse tab counts something other than what Browse lists');
-  assert.match(lists, /const \[adult, setAdult\] = useState\(false\);/);
-  assert.match(lists, /<BrowseView [^>]*adult=\{adult\} onAdult=\{setAdult\}/, 'the switch Browse shows is not the one the tab counts by');
-  const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'function BrowseView(', 'function NothingFound(');
+test('Show 18+ extensions is the one switch Browse asks with, and Add sources counts nothing it might not list', () => {
+  // Extensions' Browse tab said "Browse 1,304" over a list that ended at "1,118 of 1,118": it counted the 18+ extensions
+  // the list leaves out. Add sources has no count; Browse's own line says how many match. Reintroduce a count on the
+  // tab, or a second switch: these fail.
+  const panel = code(read('components/SourcesPanel.tsx'));
+  assert.match(slice(panel, 'function ViewTabs(', 'type CheckResult'), /\[\['yours', tr\('Your sources'\), count\], \['add', tr\('Add sources'\), undefined\]\]/,
+    'the Add sources tab counts the catalogue again');
+  const add = slice(panel, 'function AddSources(', 'function AddSite(');
+  assert.match(add, /const \[adult, setAdult\] = useState\(false\);/);
+  assert.match(add, /<BrowseView [^>]*adult=\{adult\} onAdult=\{setAdult\}/, 'the switch Browse shows is not the one it asks with');
+  const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'export function BrowseView(', 'function NothingFound(');
   assert.match(browse, /const f = useMemo<BrowseFilters>\(\(\) => \(\{ \.\.\.narrow, adult \}\), \[narrow, adult\]\);/, 'Browse asks with a switch of its own');
 });
 
-test('a language\'s health: off, over the source limit, or what Providers says of it', () => {
+test('a language\'s health: off, over the source limit, or what Sources says of it', () => {
   const reg = new Map([['sw:1', { status: 'ok' as const }], ['sw:3', { status: 'blocked' as const }]]);
   assert.deepEqual(sourceHealth({ id: '1', enabled: false }, reg, null), { tone: 'off', label: 'Turned off', over: false });
   assert.deepEqual(sourceHealth({ id: '1', enabled: true }, reg, null), { tone: 'ok', label: 'Healthy', over: false });
@@ -157,20 +165,13 @@ test('a language\'s health: off, over the source limit, or what Providers says o
   assert.deepEqual(sourceHealth({ id: '2', enabled: true }, reg, null), { tone: 'warn', label: 'Over the source limit', over: true });
   assert.equal(sourceHealth({ id: '2', enabled: true }, null, null).over, false, 'a registry still loading reads as over the limit');
   assert.equal(sourceHealth({ id: '3', enabled: true }, reg, null).label, 'Blocked by the site');
-  // #115: a confirmed failure outranks the public "ok", as on the Providers card.
+  // #115: a confirmed failure outranks the public "ok", as on the source's row in Admin → Sources.
   assert.equal(sourceHealth({ id: '1', enabled: true }, reg, new Map([['sw:1', { failing: [{ stage: 'search' }] }]])).label, 'Failing');
-});
-
-test('the view: as asked, else Installed with something installed and Browse on a first visit', () => {
-  assert.equal(initialView('browse', 4), 'browse');
-  assert.equal(initialView(null, 4), 'installed');
-  assert.equal(initialView(null, 0), 'browse');
-  assert.equal(initialView('nonsense', undefined), null, 'a view decided before the count is known');
 });
 
 test('Browse reaches every extension: pages as it scrolls, Show more under them, and no "narrow the search"', () => {
   const panel = code(read('components/ExtensionsPanel.tsx'));
-  const browse = slice(panel, 'function BrowseView(', 'function NothingFound(');
+  const browse = slice(panel, 'export function BrowseView(', 'function NothingFound(');
   // Reintroduce the capped list: the old "Showing {shown} of {matched} matches — narrow the search to see the rest."
   assert.doesNotMatch(panel, /narrow the search/, 'the dead end is back');
   assert.match(browse, /queryFn: \(\{ pageParam \}\) => api<CatalogPage>\(`\/api\/admin\/extensions\/catalog\?\$\{catalogQuery\(f, pageParam\)\}`\)/, 'Browse does not ask for pages');
@@ -183,7 +184,7 @@ test('Browse reaches every extension: pages as it scrolls, Show more under them,
 
 test('the 18+ control says what it does, and off hides them', () => {
   // #121: a chip reading "18+" was read as "only 18+". Reintroduce the chip: the switch's words are gone.
-  const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'function BrowseView(', 'function NothingFound(');
+  const browse = slice(code(read('components/ExtensionsPanel.tsx')), 'export function BrowseView(', 'function NothingFound(');
   assert.match(browse, /<Switch on=\{f\.adult\} onChange=\{onAdult\} label=\{tr\('Show 18\+ extensions'\)\} \/>\s*<span>\{tr\('Show 18\+ extensions'\)\}<\/span>/,
     'the 18+ filter is not a switch saying "Show 18+ extensions"');
   assert.doesNotMatch(browse, />\s*18\+\s*</, 'a bare "18+" control is back');
@@ -194,19 +195,24 @@ test('the 18+ control says what it does, and off hides them', () => {
 });
 
 test('an extension installed in the engine\'s own page shows as installed, with its sources one press away', () => {
-  // #121: it showed as installed and stayed off, and Remove then Add was the only way on. Reintroduce by dropping the
-  // row's key (or its `enable`): the assertions name it.
-  const panel = code(read('components/ExtensionsPanel.tsx'));
-  const row = slice(panel, 'function InstalledRow(', 'function BrowseView(');
-  assert.match(row, /\{key === 'turn-on' \? \(\s*<button type="button" onClick=\{\(\) => void act\(e, 'enable'\)\}[^>]*data-ext-turn-on>/, 'the row does not offer to turn its sources on');
-  assert.match(row, /: tr\('Turn on'\)\}/, 'the row\'s key does not say it turns its sources on');
-  assert.match(row, /\{tr\('No source on'\)\}/, 'the row does not say none of its sources are on');
-  const view = slice(panel, 'function InstalledView(', 'function InstalledRow(');
-  assert.match(view, /for \(const e of off\) await act\(e, 'enable'\);/, 'several such extensions are turned on one by one by hand');
-  const actions = slice(panel, 'export function useExtensionActions(', 'export type ExtActions');
+  // #121: it showed as installed and stayed off, and Remove then Add was the only way on. Its sources are rows of Your
+  // sources, switched off by their extension; the sheet's Turn on, and its extension part's Turn on its sources, undo
+  // that switch. Reintroduce the admin's /enable for them (which left the extension's switch off), or drop the key:
+  // the assertions name it.
+  const quiet = { id: 'sw:77', kind: 'extension' as const, offBy: 'extension' as const };
+  assert.deepEqual(turnOnRequest(quiet), { path: '/api/admin/extensions/sources/bulk', json: { ids: ['77'], enabled: true } },
+    'Turn on leaves the extension\'s own switch off');
+  assert.deepEqual(turnOnRequest({ ...quiet, offBy: 'language' }), { path: '/api/admin/extensions/sources/bulk', json: { ids: ['77'], enabled: true } });
+  assert.deepEqual(turnOnRequest({ ...quiet, offBy: 'admin' }), { path: '/api/admin/sources/sw%3A77/enable' }, 'an admin\'s switch is undone by another');
+  // Turn off goes through the same switch, so a language never reads "on" beside a source switched off.
+  assert.deepEqual(turnOffRequest({ id: 'sw:77', kind: 'extension' }), { path: '/api/admin/extensions/sources/bulk', json: { ids: ['77'], enabled: false } });
+  assert.deepEqual(turnOffRequest({ id: 'aqua', kind: 'site' }), { path: '/api/admin/sources/aqua/disable' });
+  const section = slice(code(read('components/ExtensionSheet.tsx')), 'export function ExtensionSection(', 'export function ExtensionRemove(');
+  assert.match(section, /const off = needsTurningOn\(ext\);/);
+  assert.match(section, /\{off && \(\s*<button type="button" onClick=\{\(\) => void actions\.act\(ext, 'enable'\)\}[^>]*data-ext-turn-on>/, 'the sheet does not offer to turn its sources on');
+  assert.match(section, /: tr\('Turn on its sources'\)\}/, 'the key does not say it turns its sources on');
+  const actions = slice(code(read('components/ExtensionsPanel.tsx')), 'export function useExtensionActions(', 'export type ExtActions');
   assert.match(actions, /api<\{ sources: number; on\?: number; hidden\?: number \}>\(`\/api\/admin\/extensions\/catalog\/\$\{encodeURIComponent\(e\.pkgName\)\}`, \{ json: \{ action \} \}\)/);
-  const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /onClick=\{\(\) => void actions\.act\(ext, 'enable'\)\}/, 'the sheet does not offer to turn its sources on');
 });
 
 test('an extension\'s languages are switches, one source each, said to be just that', () => {
@@ -221,22 +227,27 @@ test('an extension\'s languages are switches, one source each, said to be just t
   assert.match(sheet, /const across = tr\('Across all extensions: \{n\} of \{max\} sources on\.', \{ n: status\.enabled \?\? 0, max: status\.cap \?\? 0 \}\);/);
   assert.match(sheet, /data-ext-sheet-cap>\s*\{across\}/, 'the source limit is not said beside the switches');
   // Remove asks first, inside the sheet (its footer since round 2), counting what stops updating.
-  assert.match(sheet, /\{!removing \? \([\s\S]{0,700}?<button type="button" onClick=\{\(\) => setRemoving\(true\)\}[^>]*data-ext-remove>/, 'Remove does not ask first');
-  assert.match(sheet, /role="alertdialog" aria-label=\{tr\('Remove \{name\}\?', \{ name \}\)\}/);
+  const remove = slice(sheet, 'export function ExtensionRemove(', '');
+  assert.match(remove, /if \(!removing\) \{\s*return \(\s*<button type="button" onClick=\{\(\) => setRemoving\(true\)\}[^>]*data-ext-remove>/, 'Remove does not ask first');
+  assert.match(remove, /role="alertdialog" aria-label=\{tr\('Remove \{name\}\?', \{ name \}\)\}/);
   assert.doesNotMatch(sheet, /<ConfirmDialog\b|<Modal\b/, 'Remove asks in a dialog the sheet would cover');
 });
 
 test('names keep their own direction, and a phone never scrolls sideways', () => {
   const panel = code(read('components/ExtensionsPanel.tsx'));
-  // An extension's name is the site's own: in an Arabic page an English name's punctuation jumped to its start.
-  assert.equal((panel.match(/<bdi dir="auto" className="truncate text-sm font-medium text-fog-100">\{e\.name\}<\/bdi>/g) ?? []).length, 2, 'a row\'s name is not isolated');
+  // An extension's name is the site's own: in an Arabic page an English name's punctuation jumped to its start. So is a
+  // source's, in Your sources.
+  assert.equal((panel.match(/<bdi dir="auto" className="truncate text-sm font-medium text-fog-100">\{e\.name\}<\/bdi>/g) ?? []).length, 1, 'a Browse row\'s name is not isolated');
+  const sources = code(read('components/SourcesPanel.tsx'));
+  assert.match(slice(sources, 'function SourceRow(', 'function AddSources('), /<bdi dir="auto" className="truncate text-sm font-medium text-fog-100">\{s\.name\}<\/bdi>/, 'a source\'s name is not isolated');
   assert.match(code(read('components/ExtensionBits.tsx')), /<span dir="ltr" className="[^"]*">18\+<\/span>/, 'the 18+ tag prints "+18" in Arabic');
-  // Installed is one column at every width (round 2): a two-column grid of cards made rows of uneven height, and an
-  // implicit grid column grows to a truncating name. Reintroduce the grid: this fails.
-  assert.match(panel, /<ul className="card grad-border divide-y divide-ink-800\/70 overflow-hidden rounded-2xl" data-ext-list-installed>/, 'Installed is not one list in one card');
-  assert.doesNotMatch(panel, /grid-cols-2/, 'Installed is a grid of cards again');
+  // Your sources is one column at every width, in one card (round 2's Installed): a two-column grid of cards made rows
+  // of uneven height, and an implicit grid column grows to a truncating name. Reintroduce the grid: this fails.
+  assert.match(sources, /<ul className="card grad-border divide-y divide-ink-800\/70 overflow-hidden rounded-2xl" data-sources-list>/, 'Your sources is not one list in one card');
+  assert.doesNotMatch(panel + sources, /grid-cols-2/, 'a list is a grid of cards again');
   // The tab switch slides only when motion is welcome.
-  assert.match(panel, /transition=\{plain \|\| still \? \{ duration: 0 \} : \{ type: 'spring', stiffness: 520, damping: 40 \}\}/, 'the tab underline moves under Reduce effects');
+  assert.match(slice(sources, 'function ViewTabs(', 'type CheckResult'), /transition=\{plain \|\| still \? \{ duration: 0 \} : \{ type: 'spring', stiffness: 520, damping: 40 \}\}/,
+    'the tab underline moves under Reduce effects');
 });
 
 test('a repository that does not answer stays said beside the check that found it, until one answers', () => {
@@ -252,9 +263,10 @@ test('a repository that does not answer stays said beside the check that found i
   assert.equal(reasonLine('first line\r\n\r\nat x.y(Z.kt:1)'), 'first line');
   assert.equal(reasonLine('x'.repeat(300)).length, 240);
   assert.equal(reasonLine(null), '');
-  const view = slice(panel, 'function InstalledView(', 'function InstalledRow(');
-  assert.match(view, /\{actions\.refreshError !== null && \(\s*<p role="alert"[^>]*data-ext-refresh-error>\s*\{tr\('Could not reach the repositories to check for updates\.'\)\}/,
-    'Installed does not say the repositories could not be reached');
+  // Said under Your sources' row of tools, where the check is.
+  const view = slice(code(read('components/SourcesPanel.tsx')), 'export function SourcesPanel(', 'function AttentionRow(');
+  assert.match(view, /\{view === 'yours' && actions\.refreshError !== null && \(\s*<p role="alert"[^>]*data-ext-refresh-error>\s*\{tr\('Could not reach the repositories to check for updates\.'\)\}/,
+    'Your sources does not say the repositories could not be reached');
   // The engine's own words, in their own direction.
   assert.match(view, /<span dir="auto"[^>]*>\{actions\.refreshError\}<\/span>/);
 });
@@ -280,69 +292,19 @@ test('an action is done when the lists on screen have it, so an install opens it
 
 // ---- round 2: decluttered ---------------------------------------------------------------------------------------
 
-const installedOf = (over: Partial<CatalogExt>, on: boolean[]) => installedList([ext('x', over)], on.map((v, i) => src(`x${i}`, 'x', ['en', 'es', 'fr'][i], v)))[0];
-
-test('a row offers one key and says one state word: Turn on before Update, the update said in its words', () => {
-  // Round 1 gave an extension with an update and nothing on two keys (Update, Turn on its sources) and two amber
-  // lines. Reintroduce `{e.hasUpdate && (` / `{off && (` keys side by side in InstalledRow, or let rowKey answer the
-  // update first: these fail.
-  const both = installedOf({ hasUpdate: true }, [false, false]);
-  assert.equal(rowKey(both), 'turn-on', 'an extension with nothing on and an update offers Update first');
-  assert.equal(rowWord(both), 'update', 'its update is not said in its meta line');
-  const update = installedOf({ hasUpdate: true }, [true]);
-  assert.deepEqual([rowKey(update), rowWord(update)], ['update', 'update']);
-  const off = installedOf({}, [false]);
-  assert.deepEqual([rowKey(off), rowWord(off)], ['turn-on', 'off']);
-  const quiet = installedOf({}, [true, false]);
-  assert.deepEqual([rowKey(quiet), rowWord(quiet)], [null, null], 'a row with nothing waiting offers a key or says a state');
-  const row = slice(code(read('components/ExtensionsPanel.tsx')), 'function InstalledRow(', 'function RowWord(');
-  assert.match(row, /const key = rowKey\(e\);\s*const word = rowWord\(e\);/, 'the row decides its key and word on its own');
-  assert.match(row, /\{key === 'turn-on' \? \([\s\S]*?\) : key === 'update' \? \([\s\S]*?\) : null\}/, 'the row\'s keys are not one choice');
-  assert.equal((row.match(/data-ext-turn-on\b/g) ?? []).length, 1);
-  assert.equal((row.match(/data-ext-update\b/g) ?? []).length, 1);
-  assert.doesNotMatch(row, /\{(e\.hasUpdate|off) && \(\s*<button/, 'a row offers a key of its own beside the other');
-  assert.match(row, /\{word && <RowWord word=\{word\} \/>\}/, 'the row says its state in more than one word');
-  // "No source on" is grey with a hollow ring, never amber: amber is for an update waiting.
-  const words = slice(code(read('components/ExtensionsPanel.tsx')), 'function RowWord(', 'function LanguagesOn(');
-  assert.match(words, /\$\{line\} text-fog-400`\} data-ext-word="off"><StatusGlyph tone="info"/, '"No source on" is said in amber');
-  assert.match(words, /\$\{line\} text-amber-300`\} data-ext-word="update"><StatusGlyph tone="warn"/);
-  // On a phone the word is a line of its own, with no dot left dangling at the end of the line before it.
-  assert.match(words, /const line = 'inline-flex basis-full items-center gap-1 sm:basis-auto';/, 'the state word shares the meta line on a phone');
-  assert.match(words, /<span aria-hidden className="hidden sm:inline">·<\/span>/);
-  // The key is the accent without its fill: a column of filled keys had no hierarchy. Only Connect is filled.
-  assert.match(row, /className=\{`btn-key btn-key-accent relative [^`]*`\} data-ext-turn-on>/, 'Turn on is a filled key again');
-});
-
-test('no bars: Update all and Turn on all sit in the header of the group they act on', () => {
+test('no bars: Update and Update all sit in Needs attention\'s row of the updates', () => {
   // Round 1 put "1 extension is out of date" and "3 of your extensions have no source on yet" in two amber bars over the
-  // list. Reintroduce either bar: the first assertion fails; move a key out of the group header: the rest do.
-  const panel = code(read('components/ExtensionsPanel.tsx'));
+  // list. Since v0.54.0 an update waiting is one row of Needs attention, with Update (one) or Update all (several) as its
+  // key. Reintroduce either bar: the first assertions fail; move a key out of the row: the rest do.
+  const panel = code(read('components/ExtensionsPanel.tsx')) + code(read('components/SourcesPanel.tsx'));
   assert.doesNotMatch(panel, /data-ext-update-bar|data-ext-off-bar/, 'a bar is back over the list');
   assert.doesNotMatch(panel, /rounded-xl border border-amber-500\/30 bg-amber-500\/10/, 'an amber bar is back over the list');
-  const view = slice(panel, 'function InstalledView(', 'function GroupHead(');
-  const head = slice(view, '<GroupHead title=', '</GroupHead>');
-  assert.match(head, /\{g\.key === 'attention' && updates > 0 && \(\s*<button type="button" onClick=\{updateAll\}[^>]*data-ext-update-all/, 'Update all is not in the group\'s header');
-  assert.match(head, /\{g\.key === 'attention' && off\.length > 1 && \(\s*<button type="button" onClick=\{turnAllOn\}[^>]*data-ext-turn-on-all>/, 'Turn on all is not in the group\'s header');
-  assert.match(head, /: tr\('Turn on all'\)\}/);
-  assert.equal((view.match(/onClick=\{updateAll\}/g) ?? []).length, 1, 'Update all is offered twice');
-  assert.equal((view.match(/onClick=\{turnAllOn\}/g) ?? []).length, 1, 'Turn on all is offered twice');
-});
-
-test('Installed is grouped only while something needs attention', () => {
-  // One plain list while all is well; "Needs attention" first and "Ready" under it otherwise. Reintroduce the groups
-  // for everyone (always two): the first assertion fails; draw a header for `all`: the last one does.
-  const quiet = [installedOf({}, [true]), installedOf({}, [true, false])];
-  assert.deepEqual(installedGroups(quiet).map((g) => [g.key, g.list.length]), [['all', 2]], 'a list with nothing waiting is grouped');
-  const mixed = installedList([ext('upd', { hasUpdate: true }), ext('off'), ext('fine')], [src('u', 'upd', 'en', true), src('o', 'off', 'en', false), src('f', 'fine', 'en', true)]);
-  assert.deepEqual(installedGroups(mixed).map((g) => [g.key, g.list.map((e) => e.pkgName)]), [['attention', ['upd', 'off']], ['ready', ['fine']]]);
-  assert.deepEqual(installedGroups(mixed.slice(0, 2)).map((g) => g.key), ['attention'], 'an empty Ready group is drawn');
-  assert.equal(needsAttention(mixed[2]), false);
-  const view = slice(code(read('components/ExtensionsPanel.tsx')), 'function InstalledView(', 'function GroupHead(');
-  assert.match(view, /installedGroups\(list\)\.map\(\(g\) => \(/, 'Installed is not drawn from its groups');
-  assert.match(view, /\{g\.key !== 'all' && \(\s*<GroupHead title=/, 'a list with nothing waiting has group headers');
-  // The counts in the header, one sentence per count.
-  assert.match(view, /g\.list\.length === 1 \? tr\('Needs attention · 1'\) : tr\('Needs attention · \{n\}', \{ n: g\.list\.length \}\)/);
-  assert.match(view, /g\.list\.length === 1 \? tr\('Ready · 1'\) : tr\('Ready · \{n\}', \{ n: g\.list\.length \}\)/);
+  const attention = slice(code(read('components/SourcesPanel.tsx')), 'function Attention(', 'function TurnOffAll(');
+  const row = slice(attention, '{a.updates > 0 && (', '</AttentionRow>');
+  assert.match(row, /\{a\.updates === 1 && updating\.length === 1 \? \(\s*<button type="button" onClick=\{\(\) => void actions\.act\(updating\[0\], 'update'\)\}[^>]*data-ext-update\b/,
+    'one update is not offered in its row');
+  assert.match(row, /<button type="button" onClick=\{\(\) => void actions\.updateAll\(\)\}[^>]*data-ext-update-all/, 'Update all is not in the row of the updates');
+  assert.equal((panel.match(/actions\.updateAll\(\)/g) ?? []).length, 1, 'Update all is offered twice');
 });
 
 test('Browse has no Installed or Has an update chips, and its repositories are a link in its count line', () => {
@@ -361,11 +323,12 @@ test('Browse has no Installed or Has an update chips, and its repositories are a
   assert.match(catalogQuery({ ...NO_FILTERS, installed: true, updates: true }, 0), /installed=true&updates=true/);
 });
 
-test('an extension\'s Settings are closed until asked for', () => {
-  // Open, they were most of the sheet under its languages. Reintroduce `useState(true)`, or the body without its
-  // disclosure: these fail.
+test('an extension\'s Settings are closed until asked for, or linked to', () => {
+  // Open, they were most of the sheet under its languages. Open only for the `settings=<id>` deep link (Health, the
+  // series page and the add dialog give it). Reintroduce `useState(true)`, or the body without its disclosure: these fail.
   const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /const \[settingsOpen, setSettingsOpen\] = useState\(false\);/, 'Settings opens open');
+  assert.match(sheet, /const \[settingsOpen, setSettingsOpen\] = useState\(!!openFirst\);/, 'Settings opens open');
+  assert.match(code(read('components/SourceSheet.tsx')), /settingsOpen=\{'id' in target && !!target\.settings\}/, 'Settings opens for anything but its deep link');
   assert.match(sheet, /aria-expanded=\{settingsOpen\} aria-controls="ext-sheet-settings-body"/, 'the disclosure does not say whether it is open');
   assert.match(sheet, /\{settingsOpen && \(\s*<div id="ext-sheet-settings-body"[^>]*>\s*<ExtensionSettingsBody sourceId=\{settingsOf\}/, 'the settings show while the disclosure is closed');
   assert.equal((sheet.match(/<ExtensionSettingsBody\b/g) ?? []).length, 1, 'the settings are drawn outside their disclosure');
@@ -376,7 +339,7 @@ test('an extension\'s Settings are closed until asked for', () => {
   assert.doesNotMatch(toggle, /transition|duration-|animate-/, 'the disclosure animates');
 });
 
-test('a language in the sheet says a problem only, never "Turned off" or "Healthy"', () => {
+test('a language in the sheet says a problem only, never "Healthy", and "Turned off" only when its switch hides it', () => {
   // The switch says on or off; a line under every row repeated it. Reintroduce the mark for every row (`h.label`), or
   // let languageProblem pass "ok" and "off" through: these fail.
   const reg = new Map([['sw:1', { status: 'ok' as const }], ['sw:3', { status: 'blocked' as const }]]);
@@ -386,7 +349,12 @@ test('a language in the sheet says a problem only, never "Turned off" or "Health
   assert.equal(languageProblem(sourceHealth({ id: '3', enabled: true }, reg, null))?.label, 'Blocked by the site');
   assert.equal(languageProblem(sourceHealth({ id: '1', enabled: true }, reg, new Map([['sw:1', { failing: [{ stage: 'search' }] }]])))?.label, 'Failing');
   const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /const problem = languageProblem\(sourceHealth\(s, reg, rows\)\);/, 'a language\'s row reads its health unfiltered');
+  assert.match(sheet, /const problem = adminOff \? \{ tone: 'off' as const, label: tr\('Turned off'\) \} : languageProblem\(sourceHealth\(s, reg, rows\)\);/,
+    'a language\'s row reads its health filtered');
+  // v0.54.0: one exception, a real problem -- the switch reads on while an admin's switch (Health's Turn off, or the old
+  // Providers' Disable) has the source off. The old sheet showed it on with no word about it. Reintroduce the bare
+  // languageProblem: the line is gone.
+  assert.match(sheet, /const adminOff = s\.enabled && !!offByAdmin\?\.has\(s\.id\);/, 'a language an admin switched off reads as on');
   assert.match(sheet, /\{\(problem \|\| hidden\) && \(\s*<p [^>]*data-ext-lang-problem>/, 'a language\'s row has a line with no problem to say');
   assert.doesNotMatch(sheet, /\{!!s\.used && /, 'a language\'s row counts its series again');
   // Hidden in every extension is a link to the Languages sheet; the footer's link to it is gone.
@@ -395,7 +363,8 @@ test('a language in the sheet says a problem only, never "Turned off" or "Health
   // No amber box for "none on": the Languages header offers Turn on its sources.
   assert.doesNotMatch(sheet, /data-ext-sheet-off|tr\('None of its sources are on'\)/, 'the amber "None of its sources are on" box is back');
   const langs = slice(sheet, '<section aria-labelledby="ext-sheet-langs">', '</ul>');
-  assert.match(langs, /\{off && \(\s*<button type="button" onClick=\{\(\) => void actions\.act\(ext, 'enable'\)\}[^>]*className=\{`btn-key btn-key-primary [^`]*`\} data-ext-turn-on>/, 'Turn on its sources is not in the Languages header');
+  // The accent without its fill: filled is for Replace, Start and Connect only (v0.54.0).
+  assert.match(langs, /\{off && \(\s*<button type="button" onClick=\{\(\) => void actions\.act\(ext, 'enable'\)\}[^>]*className=\{`btn-key btn-key-accent [^`]*`\} data-ext-turn-on>/, 'Turn on its sources is not in the Languages header');
   // A tag never wraps (round 1's PT-BR did).
   assert.match(langs, /<span aria-hidden className=\{`w-12 shrink-0 whitespace-nowrap /, 'a language\'s tag wraps');
 });
@@ -437,54 +406,67 @@ test('the strip says no more than its marks when all is well', () => {
   assert.match(ready, /className=\{`mt-1 [^`]*\$\{over \? 'text-amber-300' : 'text-fog-500'\}`\} data-engine-counts>/);
 });
 
-test('Installed\'s tools sit at the end of the views\' row, as icons on a phone, with no hint line over the list', () => {
+test('Your sources\' tools sit at the end of the views\' row, as icons on a phone, with no hint line over the list', () => {
   // Reintroduce the hint line, or the tools above the list: these fail.
-  const panel = code(read('components/ExtensionsPanel.tsx'));
-  assert.doesNotMatch(panel, /tr\('Open an extension for its languages and settings\.'\)/, 'the hint line is back');
-  const lists = slice(panel, 'function ExtensionLists(', 'function ViewTabs(');
-  assert.match(lists, /<ViewTabs [^\n]*\/>\s*\{view === 'installed' && <InstalledTools actions=\{actions\} onLanguages=\{\(\) => setSheet\('langs'\)\} \/>\}\s*<\/div>/, 'the tools are not in the views\' row');
+  const tools = code(read('components/ExtensionsPanel.tsx'));
+  const sources = code(read('components/SourcesPanel.tsx'));
+  assert.doesNotMatch(tools + sources, /tr\('Open an extension for its languages and settings\.'\)/, 'the hint line is back');
+  const panel = slice(sources, 'export function SourcesPanel(', 'function AttentionRow(');
+  assert.match(panel, /<ViewTabs [^\n]*\/>\s*\{view === 'yours' && \(\s*<div className="ms-auto flex shrink-0 gap-1\.5 pb-2 sm:gap-2">\s*<TestAllKey checking=\{check\.checking\} onPress=\{check\.press\} \/>\s*\{ready && <ExtensionTools actions=\{actions\} onLanguages=\{\(\) => setAside\('langs'\)\} \/>\}/,
+    'the tools are not in the views\' row');
   // Russian's "Установленные" at 390 pushed the tools 7 px past the row: longer words and counts wrap the tools to a
-  // line of their own instead. Reintroduce the row without `flex-wrap`: this fails.
-  assert.match(lists, /<div className="flex flex-wrap items-end justify-between gap-x-3 border-b border-ink-800\/80">\s*<ViewTabs /, 'the views\' row overflows rather than wraps');
-  assert.match(slice(panel, 'function InstalledTools(', 'const AMBER_KEY'), /<div className="ms-auto flex shrink-0 /, 'wrapped tools do not keep to the end of the row');
-  const tools = slice(panel, 'function InstalledTools(', 'const AMBER_KEY');
+  // line of their own instead, kept to its end. Reintroduce the row without `flex-wrap`: this fails.
+  assert.match(panel, /<div className="flex flex-wrap items-end justify-between gap-x-3 border-b border-ink-800\/80">\s*<ViewTabs /, 'the views\' row overflows rather than wraps');
+  const ext = slice(tools, 'export function ExtensionTools(', 'const AMBER_KEY');
   for (const hook of ['data-ext-languages', 'data-ext-refresh']) {
     const key = new RegExp(`<button [^>]*aria-label=\\{[^}]+\\} title=\\{[^}]+\\}\\s*className=\\{?[\`"]btn-key w-8 px-0 sm:w-auto sm:px-3[^>]*${hook}>`);
-    assert.match(tools, key, `${hook} is not a named icon key on a phone`);
+    assert.match(ext, key, `${hook} is not a named icon key on a phone`);
   }
-  assert.equal((tools.match(/<span className="hidden sm:inline">/g) ?? []).length, 3, 'a tool\'s words show on a phone');
-  // The Installed tab's amber mark only while Installed is not the open view: its group says it there.
-  assert.match(slice(panel, 'function ViewTabs(', 'function InstalledTools('), /\{v === 'installed' && !on && updates > 0 && <span aria-hidden className="h-1\.5 w-1\.5 rounded-full bg-amber-400" \/>\}/,
-    'the Installed tab marks an update while Installed is open, beside the group that says it');
+  assert.equal((ext.match(/<span className="hidden sm:inline">/g) ?? []).length, 3, 'a tool\'s words show on a phone');
+  const test = slice(sources, 'function TestAllKey(', 'function TestAllLine(');
+  assert.match(test, /<button type="button" onClick=\{onPress\} disabled=\{checking\} aria-label=\{label\} title=\{label\} data-source-check-all\s*className=\{`btn-key w-8 px-0 sm:w-auto sm:px-3 /,
+    'Test all is not a named icon key on a phone');
+  assert.equal((test.match(/<span className="hidden sm:inline">/g) ?? []).length, 2, 'Test all\'s words show on a phone');
 });
 
 test('a row is one opener with its key beside it, never a button in a button', () => {
   // The whole row opens the sheet (its ::after covers the row) and a key sits over it, a sibling. Reintroduce the key
   // inside the opener: the nesting assertion fails.
   const panel = code(read('components/ExtensionsPanel.tsx'));
-  assert.match(panel, /const OPENER = '[^']*after:absolute after:inset-0[^']*focus-visible:after:ring-2[^']*';/, 'the row is not one hit area with a focus ring');
-  for (const [name, from, to] of [['InstalledRow', 'function InstalledRow(', 'function RowWord('], ['BrowseRow', 'function BrowseRow(', '']] as const) {
-    const row = slice(panel, from, to);
-    const opener = slice(row, 'className={OPENER} data-ext-open>', '</button>');
+  const sources = code(read('components/SourcesPanel.tsx'));
+  assert.match(panel, /export const OPENER = '[^']*after:absolute after:inset-0[^']*focus-visible:after:ring-2[^']*';/, 'the row is not one hit area with a focus ring');
+  for (const [name, src, from, to, li] of [
+    ['SourceRow', sources, 'function SourceRow(', 'function AddSources(', /<li data-sources-row=\{s\.id\}[^>]*className=\{`\$\{ROW\} /],
+    ['AttentionRow', sources, 'function AttentionRow(', 'function CountTile(', /<li \{\.\.\.hook\} className=\{`\$\{ROW\} /],
+    ['BrowseRow', panel, 'function BrowseRow(', '', /<li data-ext-item=\{e\.pkgName\}[^>]*className=\{`\$\{ROW\} /],
+  ] as const) {
+    const row = slice(src, from, to);
+    const opener = row.includes('data-sources-open>') ? slice(row, 'className={OPENER} data-sources-open>', '</button>') : slice(row, 'className={OPENER} data-ext-open>', '</button>');
     assert.doesNotMatch(opener, /<button\b/, `${name}: a key inside the opener`);
-    assert.match(row, /<li data-ext-(row|item)=\{e\.pkgName\}[^>]*className=\{`\$\{ROW\} /, `${name}: the row is not the opener's positioned box`);
+    assert.match(row, li, `${name}: the row is not the opener's positioned box`);
   }
   // No transition on a row: round 2 adds no motion.
-  assert.doesNotMatch(slice(panel, 'const ROW = ', ';'), /transition/);
+  assert.doesNotMatch(slice(panel, 'export const ROW = ', ';'), /transition/);
   // An installed extension in Browse is its row, "Already installed" and a chevron: Manage was a key for the same.
   const browseRow = slice(panel, 'function BrowseRow(', '');
   assert.doesNotMatch(browseRow, /data-ext-manage|tr\('Manage'\)/, 'an installed extension in Browse has a Manage key again');
   assert.match(browseRow, /\{e\.installed \? \(\s*<button type="button" onClick=\{onOpen\} className=\{OPENER\} data-ext-open>/, 'an installed extension in Browse does not open its sheet');
 });
 
-test('an extension\'s sheet: its icon and facts on top, Update there when one waits, Remove and Providers in its footer', () => {
-  const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /lead=\{<ExtIcon url=\{ext\.iconUrl\} name=\{ext\.name\} size=\{52\} \/>\}/);
-  assert.match(sheet, /const facts = \[ext\.versionName \? `v\$\{ext\.versionName\}` : null, extLanguagesText\(ext\), ext\.used > 0 \? seriesText\(ext\.used\) : null\]/);
-  assert.match(sheet, /action=\{ext\.hasUpdate \? \(\s*<button type="button" onClick=\{\(\) => void actions\.act\(ext, 'update'\)\}/, 'Update is not at the top of the sheet');
-  const foot = slice(sheet, 'footer={', '}>\n');
-  assert.match(foot, /onClick=\{onProviders\}/, 'the way to test the sources is not in the footer');
-  assert.match(foot, /className="btn-key btn-key-danger text-rose-300" data-ext-remove>/, 'Remove extension is not a quiet danger key in the footer');
+test('a source\'s sheet: its face and facts on top, Update there when one waits, Remove extension in its footer, Test in itself', () => {
+  // v0.53.0's extension sheet sent its sources to Providers to be tested ("Test its sources under Providers"); the one
+  // sheet tests them itself. Reintroduce the link: the last assertion fails.
+  const sheet = code(read('components/SourceSheet.tsx'));
+  assert.match(sheet, /lead=\{s \? <SourceTile id=\{s\.id\} name=\{s\.name\} icon=\{s\.icon\}[^\n]*size=\{52\} \/>\s*: ext \? <ExtIcon url=\{ext\.iconUrl\} name=\{ext\.name\} size=\{52\} \/> : undefined\}/,
+    'the sheet does not lead with the source\'s face, or the extension\'s icon');
+  assert.match(sheet, /action=\{ext \? <ExtensionUpdateKey ext=\{ext\} actions=\{actions\} \/> : undefined\}/, 'Update is not at the top of the sheet');
+  const update = slice(code(read('components/ExtensionSheet.tsx')), 'export function ExtensionUpdateKey(', 'export function ExtensionSection(');
+  assert.match(update, /if \(!ext\.hasUpdate\) return null;/, 'Update is offered with no update waiting');
+  assert.match(update, /onClick=\{\(\) => void actions\.act\(ext, 'update'\)\}/);
+  const foot = slice(sheet, 'const footer = ', ') : undefined;');
+  assert.match(foot, /\{ext && <ExtensionRemove ext=\{ext\} actions=\{actions\} onRemoved=\{onClose\} \/>\}/, 'Remove extension is not in the footer');
+  assert.match(code(read('components/ExtensionSheet.tsx')), /className="btn-key btn-key-danger text-rose-300" data-ext-remove>/, 'Remove extension is not a quiet danger key');
+  assert.doesNotMatch(sheet + code(read('components/ExtensionSheet.tsx')), /onProviders|under Providers/, 'the sheet sends its sources elsewhere to be tested');
   // What an extension reads in: its one language, or how many.
   assert.equal(extLanguagesText({ lang: 'all', sources: [src('1', 'p', 'en', true), src('2', 'p', 'ja', false)] }), '2 languages');
   assert.equal(extLanguagesText({ lang: 'all', sources: [src('1', 'p', 'en', true)] }), 'English');
@@ -497,9 +479,13 @@ test('a line of facts isolates each one, so a version never takes an Arabic coun
   (globalThis as { React?: unknown }).React = React;
   const html = renderToStaticMarkup(createElement(Facts, { items: ['v1.4.79', null, '6 لغات', false] }));
   assert.equal(html, '<bdi>v1.4.79</bdi> · <bdi>6 لغات</bdi>');
-  const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /subtitle=\{<><span><Facts items=\{facts\} \/><\/span><ExtTags e=\{ext\} \/><\/>\}/, 'the sheet\'s facts are one string');
+  const sheet = code(read('components/SourceSheet.tsx'));
+  assert.match(sheet, /subtitle=\{s \? <><span><Facts items=\{sheetFacts\(s\)\} \/><\/span>\{ext && <ExtTags e=\{ext\} \/>\}<\/>/, 'the sheet\'s facts are one string');
+  assert.match(sheet, /: ext \? <><span><Facts items=\{\[ext\.versionName \? `v\$\{ext\.versionName\}` : null, extLanguagesText\(ext\)\]\} \/><\/span><ExtTags e=\{ext\} \/><\/>/);
   const panel = code(read('components/ExtensionsPanel.tsx'));
-  assert.equal((panel.match(/<Facts items=\{\[/g) ?? []).length, 2, 'a row\'s facts are one string');
-  assert.doesNotMatch(panel + sheet, /\.filter\(Boolean\)\.join\(' · '\)/, 'facts are joined into one string again');
+  assert.equal((panel.match(/<Facts items=\{\[/g) ?? []).length, 1, 'a Browse row\'s facts are one string');
+  // Your sources' rows: each fact in its own <bdi>.
+  const sources = code(read('components/SourcesPanel.tsx'));
+  assert.match(slice(sources, 'function SourceRow(', 'function AddSources('), /\{facts\.map\(\(f\) => <span key=\{f\}> · <bdi>\{f\}<\/bdi><\/span>\)\}/, 'a source row\'s facts are one string');
+  assert.doesNotMatch(panel + sheet + sources + code(read('components/ExtensionSheet.tsx')), /\.filter\(Boolean\)\.join\(' · '\)/, 'facts are joined into one string again');
 });

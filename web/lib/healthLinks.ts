@@ -62,9 +62,9 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     case 'duplicates':
       if (it.seriesIds?.length) return it.seriesIds.map((id, i) => ({ href: seriesHref(id), label: it.titles?.[i] }));
       break;
-    // #72: the engine's row is about no series; its setup steps, Check again and Connect are on the Extensions tab.
+    // #72: the engine's row is about no series; its setup steps, Check again and Connect are on Admin → Sources.
     case 'extension-engine':
-      return [{ href: '/admin/?tab=Extensions' }];
+      return [{ href: '/admin/?tab=Sources' }];
     // #116: a finding that waits for a renumbering review is about a plan, so Open is the plan -- which file becomes
     // which chapter -- on the series page. Any other numbering row opens the series itself: the page's plan is the
     // route's `next`, so "numbered by posting order lately" (info, keep_numbers) opened "Use the source's numbers"

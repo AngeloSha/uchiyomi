@@ -183,8 +183,18 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   },
   disable: {
     label: () => tr('Turn off'),
-    what: () => tr('Stops asking this source for anything until you turn it back on under Providers. Nothing is deleted.'),
+    // True since v0.54.0, when a switched-off source stopped being asked by the sweep too.
+    what: () => tr('Stops asking this source for anything until you turn it back on in Admin → Sources. Nothing is deleted.'),
     eta: moment,
+  },
+  // v0.54.0: every series whose main source is this one, moved in ONE Replace run (POST /api/admin/sources/find {mode:
+  // 'replace'}): to a source it already follows that works, at once and without a search, else to one the run finds.
+  // The same dialog as Admin → Sources' Replace (components/ReplaceDialog.tsx), which says the numbers first.
+  replace_source: {
+    label: () => tr('Replace'),
+    what: () => tr('Moves every series whose main source this is to a working source: one it already follows, or one found by searching your other sources. It can turn this source off once nothing uses it.'),
+    how: () => tr('A series that already follows a working source switches to it at once, without a search. The others are searched for one at a time, under their titles and other names, and switch only to a match whose title and chapter numbers line up. A series numbered by posting order keeps its main source. Nothing is downloaded and no file moves.'),
+    eta: () => tr('Moments for series that already follow a working source; up to a minute and a half for each one searched for'),
   },
   merge: {
     label: () => tr('Merge'),

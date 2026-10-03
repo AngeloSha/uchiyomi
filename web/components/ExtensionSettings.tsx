@@ -1,7 +1,8 @@
 'use client';
 // An extension's own settings (#116): the preference screen Mihon shows for a source. The body is a section of an
-// extension's sheet in Admin → Extensions (v0.53.0), and a sheet of its own by deep link
-// (`?tab=Extensions&settings=<source id>`, which the add dialog, the series page and Health use).
+// extension source's sheet in Admin → Sources (v0.54.0; the extension's sheet in Admin → Extensions in v0.53.0), which
+// the deep link `?tab=Sources&settings=<source id>` opens on its settings -- the add dialog, the series page and Health
+// use it -- and a sheet of its own for a source that link names and the sources list does not hold.
 //
 // Issue #116 is why it exists: the Webtoons extension numbers posts by the episode in their titles, so Istrevelia's
 // 226 posts land on 13 numbers, and its own "Use sequential chapter numbering" switch -- the fix the reporter
@@ -26,7 +27,6 @@
 // each keeps its own settings; switching languages on and off is the extension sheet's Languages section.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
@@ -42,29 +42,6 @@ import { extLanguageName } from '@/lib/extensions';
 
 /** What the sheet opens on: one source (the deep link), or one extension, whose first source it picks. */
 export type SettingsTarget = { sourceId: string; name?: string } | { pkgName: string; name?: string };
-
-/**
- * The Extensions tab's sheet state, seeded once from `?settings=` (lib/useTabParam.ts's rule: read in a lazy
- * initialiser, never an effect) and taken off the address when the sheet closes, so a reload does not reopen it.
- */
-export function useExtensionSettingsParam(): [SettingsTarget | null, (t: SettingsTarget | null) => void] {
-  const params = useSearchParams();
-  const [target, setTarget] = useState<SettingsTarget | null>(() => {
-    const id = params.get('settings');
-    return id && /^-?\d{1,20}$/.test(id) ? { sourceId: id } : null;
-  });
-  const set = (t: SettingsTarget | null) => {
-    setTarget(t);
-    if (!t && typeof window !== 'undefined') {
-      const u = new URL(window.location.href);
-      if (u.searchParams.has('settings')) {
-        u.searchParams.delete('settings');
-        window.history.replaceState(null, '', u.toString());
-      }
-    }
-  };
-  return [target, set];
-}
 
 /** A change waiting for its second word: the numbering setting, the value, and how many series it renumbers. */
 interface Pending { pref: SourcePref; value: PrefValue }

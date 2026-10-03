@@ -1,8 +1,9 @@
 'use client';
-// The top of Admin → Extensions: the extension engine's state (#72, v0.53.0).
+// The top of Admin → Sources (Admin → Extensions in v0.53.0): the extension engine's state (#72, v0.53.0).
 //
-// Not working -- off, not set up or not answering -- it is the whole tab: the state, the retry, Check again, and the
-// steps for the platform Uchiyomi runs on. It replaces one sentence that fitted nobody: "If you turned it off by
+// Not working -- off, not set up or not answering -- it is a card at the top of the tab (v0.53.0's whole tab; since
+// v0.54.0 the built-ins, MangaDex and sites below it work without the engine): the state, the retry, Check again,
+// and the steps for the platform Uchiyomi runs on. It replaces one sentence that fitted nobody: "If you turned it off by
 // emptying SUWAYOMI_URL, put that line back" for a Compose admin who had just set EXTENSION_ENGINE=0, the same for
 // Unraid and CasaOS where no engine ever ran, and "Can't reach the extension engine" with nothing to do about it.
 // The steps are per platform (the words and commands live in lib/engineSetup.ts, where they are tested), and the
@@ -157,7 +158,7 @@ function ShieldGlyph({ size }: { size: number }) {
 }
 
 /**
- * The card for an engine that is off, not set up or not answering: the whole of Admin → Extensions until it works.
+ * The card for an engine that is off, not set up or not answering: the top of Admin → Sources until it works.
  */
 export function EngineSetup({ status }: { status: EngineReport }) {
   const qc = useQueryClient();
@@ -267,9 +268,9 @@ function Tile({ tone, children }: { tone: Tone; children: ReactNode }) {
 }
 
 /**
- * The top of a working Admin → Extensions (v0.53.0): one slim strip in two cells, the engine and its Cloudflare
- * helper, side by side from `sm` and stacked on a phone. Each is a tile, its name with its mark, and at most one
- * muted line.
+ * The top of a working Admin → Sources (v0.53.0's Admin → Extensions): one slim strip in two cells, the engine and
+ * its Cloudflare helper, side by side from `sm` and stacked on a phone. Each is a tile, its name with its mark, and
+ * at most one muted line.
  *
  * Round 1 was a card of two halves with an amber edge, a paragraph under each and the installed count, and the owner
  * found the tab cluttered: when everything warns, nothing does. So the strip says only what is useful at a glance --

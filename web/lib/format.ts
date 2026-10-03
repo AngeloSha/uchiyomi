@@ -129,7 +129,7 @@ export function cached<T extends Formatter>(key: string, make: () => T): T {
 
 /**
  * A count the way the reader's language groups its digits, with Western digits kept: "1,304", "1.304", "1 304".
- * Admin → Extensions counts a repository's extensions in the thousands (v0.53.0).
+ * The extension catalogue counts a repository's extensions in the thousands (v0.53.0).
  */
 export const numberText = (n: number): string => cached('num', () => new Intl.NumberFormat(intlTag())).format(n);
 

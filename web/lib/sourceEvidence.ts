@@ -2,7 +2,7 @@
  * What a source was seen doing, as the admin screens say it (#115, v0.49.0): the part of
  * components/SourceEvidence.tsx with no React in it, so a test can hold the words and the rules.
  *
- * "Manga Ball (EN)" failed its Test while its Providers card said "ok" and Health said "All good", and the one
+ * "Manga Ball (EN)" failed its Test while its Providers card (Admin → Sources since v0.54.0) said "ok" and Health said "All good", and the one
  * line the Test did show read "Working normally." under a ✗. The server now keeps evidence per STAGE (search,
  * chapter list, page list, images: bff/src/lib/sourceEvidence.ts) and this turns either kind of answer into the
  * same lines:
@@ -272,10 +272,13 @@ export function testStep(testMs?: number | null): string {
   return testMs && testMs > 0 ? tr('Testing… up to {max}', { max: formatClock(testMs) }) : tr('Working…');
 }
 
-/** GET /api/admin/sources/check while it runs, as the Check all button's words: "Checking 7 of 40 · Manga Ball (EN)". */
+/**
+ * GET /api/admin/sources/check while it runs, as Admin → Sources' Test all says it (v0.54.0, "Check all now" before):
+ * "Testing 7 of 40 · Manga Ball (EN)".
+ */
 export function checkAllLabel(p: { total: number; done: number; current: { name: string } | null } | null | undefined): string {
-  if (!p || !p.total) return tr('Checking…');
-  const head = tr('Checking {done} of {total}', { done: Math.min(p.done + (p.current ? 1 : 0), p.total), total: p.total });
+  if (!p || !p.total) return tr('Testing…');
+  const head = tr('Testing {done} of {total}', { done: Math.min(p.done + (p.current ? 1 : 0), p.total), total: p.total });
   return p.current?.name ? `${head} · ${p.current.name}` : head;
 }
 

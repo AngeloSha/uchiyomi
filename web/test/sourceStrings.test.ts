@@ -109,11 +109,12 @@ test('one failure is the bare status, and the streak is said from two on', () =>
   }
 });
 
-test('Admin → Providers says Reload sources, its busy word and its toasts in the reader\'s language', () => {
+test('Admin → Sources says Reload sources, its busy word and its toasts in the reader\'s language', () => {
   // It stayed English beside a translated "Check all now" (i18n pass 1, pt-BR). Reintroduce
-  // `{reloading ? 'Reloading…' : '↻ Reload sources'}`: "the reload key is English" fails.
-  const page = read('app/admin/page.tsx');
-  assert.match(page, /\{reloading \? tr\('Reloading…'\) : `↻ \$\{tr\('Reload sources'\)\}`\}/, 'the reload key is English');
+  // `{reloading ? 'Reloading…' : 'Reload sources'}`: "the reload key is English" fails. (Providers' toolbar until
+  // v0.54.0; Add sources' Source packs row since.)
+  const page = read('components/SourcesPanel.tsx');
+  assert.match(page, /\{reloading \? <Busy tone="muted">\{tr\('Reloading…'\)\}<\/Busy> : tr\('Reload sources'\)\}/, 'the reload key is English');
   assert.doesNotMatch(page, /'↻ Reload sources'|: 'Reloading…'|toast\(`Reloaded|toast\('Reload failed'/, 'a reload word is left in bare English');
   assert.match(page, /toast\(r\.available === 1 \? tr\('Reloaded — 1 source available'\) : tr\('Reloaded — \{n\} sources available', \{ n: r\.available \}\), 'success'\)/,
     'the reload toast is English, or has no singular');
@@ -192,7 +193,9 @@ const code = (src: string): string =>
  * comparison's `>` before a condition: `{n > MAX && <span`).
  */
 const bareText = (src: string): string[] =>
-  [...code(src).matchAll(/(?<!=)>([^<>{}();=]*[A-Za-z]{2,}[^<>{}();=]*)</g)].map((m) => m[1].trim()).filter((t) => t && !/&&|\|\|/.test(t));
+  [...code(src).matchAll(/(?<!=)>([^<>{}();=]*[A-Za-z]{2,}[^<>{}();=]*)</g)].map((m) => m[1].trim())
+    // Not text: an operator between two elements, or a ternary's middle between two branches (`/> : ext ? <`).
+    .filter((t) => t && !/&&|\|\|/.test(t) && !/^: .*\?$/.test(t));
 /** A toast, a confirm or an error fallback written as an English template or string, not through tr(). */
 const bareCalls = (src: string): string[] =>
   [...code(src).matchAll(/\b(?:toast|confirm|msgOf\([^,]+,)\s*\(?\s*(`[^`]*[A-Za-z]{3,}[^`]*`|'[^']*[A-Za-z]{3,}[^']*')/g)].map((m) => m[1]);
@@ -216,7 +219,7 @@ test("Admin → Extensions → Languages and the Offline page say nothing in bar
   assert.match(read('components/SourcePicker.tsx'), /count === 1 \? tr\('1 source'\)/, '"All sources · 1 sources" on Discover');
 });
 
-test("the rest of Admin → Extensions, and Providers' source rows, say nothing in bare English", () => {
+test("the rest of Admin → Extensions, and Admin → Sources' rows, sheet and Replace, say nothing in bare English", () => {
   // v0.52.0: the catalogue's paragraph, the out-of-date banner and its Update all, a row's Update / Add / Remove and
   // obsolete tag, the Added filter, the "Showing n of m" line and the add / update / remove toasts were English in
   // every language; so were Providers' Enable / Disable and their toasts, which every MangaDex language's row now
@@ -229,12 +232,14 @@ test("the rest of Admin → Extensions, and Providers' source rows, say nothing 
     assert.ok(i >= 0 && j > i, `PREMISE: ${a} … ${b} is not where this test looks`);
     return src.slice(i, j);
   };
-  // v0.53.0: the tab is components/ExtensionsPanel.tsx and its sheets; the engine's header is EngineSetup.tsx's.
+  // v0.53.0: the tab is components/ExtensionsPanel.tsx and its sheets; the engine's header is EngineSetup.tsx's. Since
+  // v0.54.0 they are part of Admin → Sources, whose panel, sheet and Replace dialog are scanned whole beside them.
   const ext = [
     read('components/ExtensionsPanel.tsx'), read('components/ExtensionSheet.tsx'), read('components/ExtensionRepos.tsx'),
     read('components/ExtensionBits.tsx'), between(read('components/EngineSetup.tsx'), 'export function EngineReady(', ''),
   ].join('\n');
-  const rows = between(admin, 'function controlsOf(', 'function sourceCard(');
+  const sources = [read('components/SourcesPanel.tsx'), read('components/SourceSheet.tsx'), read('components/ReplaceDialog.tsx'), read('components/SourceTile.tsx')].join('\n');
+  assert.ok(!admin.includes('function controlsOf('), 'Providers\' source rows are back in the admin page');
   /**
    * Any word of English in a string or template left outside tr(): a label a ternary picks (`? 'Update' :`), a toast's
    * other arm (`n ? updated : 'Everything is already up to date'`), a template a toast is built from. A key compared
@@ -248,17 +253,15 @@ test("the rest of Admin → Extensions, and Providers' source rows, say nothing 
   // Whole files since v0.53.0, so what a file says to the bundler (its imports, 'use client') and a class list a
   // ternary picks are not words anyone reads: a class list is tokens of Tailwind's shape with one hyphenated at least.
   // An English phrase in lower case ("none of its sources are on") has no hyphenated token, and is still caught.
-  const isClassList = (t: string) => t.trim().split(/\s+/).every((w) => /^[a-z0-9:[\]/.%!-]+$/.test(w)) && /(^|\s)-?[a-z]+-[a-z0-9[]/.test(t.trim());
+  // An arbitrary value may hold a CSS function: `origin-[var(--start)]`.
+  const isClassList = (t: string) => t.trim().split(/\s+/).every((w) => /^[a-z0-9:[\]/.%!()-]+$/.test(w)) && /(^|\s)-?[a-z]+-[a-z0-9[]/.test(t.trim());
   const program = (src: string) => src.split('\n').filter((l) => !/^\s*(import\b|'use client';)/.test(l) && !/^\s*\} from '/.test(l)).join('\n');
-  for (const [name, src] of [['Admin → Extensions', program(ext)], ["Providers' source rows", rows]] as const) {
+  for (const [name, src] of [['Admin → Extensions', program(ext)], ['Admin → Sources', program(sources)]] as const) {
     assert.deepEqual(bareText(src), [], `bare English text in ${name}`);
     assert.deepEqual(bareCalls(src), [], `a bare English toast in ${name}`);
     assert.deepEqual(bareLiterals(src).filter((t) => !isClassList(t)), [], `bare English in a string in ${name}`);
   }
-  // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half). Round 2's group headers
-  // agree with their count in most of the eight ("Requiere atención · 1", "Requieren atención · 3").
-  assert.match(ext, /g\.list\.length === 1 \? tr\('Needs attention · 1'\) : tr\('Needs attention · \{n\}', \{ n: g\.list\.length \}\)/,
-    'a group of one is said with the plural');
+  // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half).
   assert.match(ext, /repos\.length === 1 \? tr\('1 repository'\) : tr\('\{n\} repositories', \{ n: numberText\(repos\.length\) \}\)/, '"1 repositories"');
   assert.match(ext, /first\.matched === 1 \? tr\('1 extension matches'\) : tr\('\{n\} extensions match', \{ n: numberText\(first\.matched\) \}\)/,
     '"1 extensions match"');

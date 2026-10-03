@@ -178,15 +178,16 @@ test('the Search stage is a noun of its own, not the search button\'s verb', () 
   assert.equal(answerView({ ok: true, checks: [{ name: 'Search', ok: true, detail: '1 result(s)' }] }).rows.find((r) => r.key === 'check:Search')?.label, 'Search step');
 });
 
-test('the running Test\'s clock, Check all\'s progress and its toast', () => {
+test('the running Test\'s clock, Test all\'s progress and its toast', () => {
   assert.equal(testClock(12_400, 53_000), 'Testing… 0:12 of up to 0:53');
   assert.equal(testClock(12_400), 'Testing… 0:12');
   // Health's Test key keeps its verb; its status line carries the limit beside the row's own clock.
   assert.equal(testStep(53_000), 'Testing… up to 0:53');
   assert.equal(testStep(undefined), 'Working…', 'no limit known: the generic words, not "up to 0:00"');
-  assert.equal(checkAllLabel({ total: 40, done: 6, current: { name: 'Manga Ball (EN)' } }), 'Checking 7 of 40 · Manga Ball (EN)');
-  assert.equal(checkAllLabel({ total: 40, done: 40, current: null }), 'Checking 40 of 40');
-  assert.equal(checkAllLabel(null), 'Checking…');
+  // v0.54.0: Admin → Sources' Test all (Providers' Check all) says it with the key's verb, the source it is on beside.
+  assert.equal(checkAllLabel({ total: 40, done: 6, current: { name: 'Manga Ball (EN)' } }), 'Testing 7 of 40 · Manga Ball (EN)');
+  assert.equal(checkAllLabel({ total: 40, done: 40, current: null }), 'Testing 40 of 40');
+  assert.equal(checkAllLabel(null), 'Testing…');
   assert.deepEqual(sweepToast({ needsAttention: [1], inconclusive: [] }), { text: '1 source needs attention', type: 'error' });
   assert.deepEqual(sweepToast({ needsAttention: [1, 2], inconclusive: [1] }), { text: '2 sources need attention · 1 source could not finish in time', type: 'error' });
   // Alone, this part is the whole toast: it names what could not finish, or a gendered language has to guess.

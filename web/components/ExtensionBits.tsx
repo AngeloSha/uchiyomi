@@ -1,5 +1,6 @@
 'use client';
-// The small pieces Admin → Extensions' rows and sheets share (v0.53.0): an extension's icon, its marks, a busy key.
+// The small pieces the extension rows and sheets of Admin → Sources share (v0.53.0): an extension's icon, its marks,
+// a busy key.
 import { Fragment, useState, type ReactNode } from 'react';
 import { t as tr } from '@/lib/i18n';
 import type { CatalogExt } from '@/lib/extensions';

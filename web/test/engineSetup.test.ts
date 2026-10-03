@@ -159,7 +159,8 @@ test('the card polls the status while it is looked at, and Check again refetches
   assert.doesNotMatch(src, /rounded-full/, 'a capsule');
   // v0.53.0: a working engine's strip keeps the helper's Connect and the way to turn the engine off (a sheet, behind the
   // engine's ⋯ since round 2).
-  const panel = code(read('components/ExtensionsPanel.tsx'));
+  // v0.54.0: the strip heads Admin → Sources.
+  const panel = code(read('components/SourcesPanel.tsx'));
   assert.match(panel, /<EngineReady status=\{status\} desktop=\{isDesktop\(\)\} \/>/, 'the ready panel lost its helper line and Turning it off');
   const ready = src.slice(src.indexOf('export function EngineReady('));
   assert.match(ready, /\{!said\?\.ok && helper\?\.action === 'connect' && \(\s*<button[^>]*data-engine-connect>/, 'the helper has no Connect');
@@ -184,8 +185,10 @@ test('"Last tried" is the last attempt to reach the engine, and says when it did
   assert.match(src, /: waiting \? lastTryLine\(status\) \|\| null : null;/, 'the waiting card does not read the last try through lastTryLine');
 });
 
-test('the engine row on Health opens the Extensions tab', () => {
-  assert.deepEqual(healthLinks('extension-engine', { title: 'Cloudflare helper', detail: '' } as any), [{ href: '/admin/?tab=Extensions' }]);
+test('the engine row on Health opens Admin → Sources, where the engine is', () => {
+  // v0.54.0: the Extensions tab is part of Sources. Reintroduce `?tab=Extensions`: it lands there through the alias, but
+  // this names the old address.
+  assert.deepEqual(healthLinks('extension-engine', { title: 'Cloudflare helper', detail: '' } as any), [{ href: '/admin/?tab=Sources' }]);
 });
 
 /** Reintroduce by deleting any one of these keys from public/locales/ar.json: the test names it. */

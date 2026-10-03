@@ -426,8 +426,8 @@ export default function DiscoverPage() {
         ) : isAdmin ? (
           <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
             sub={isDesktop()
-              ? tr('Add a site, or turn on an extension source, in Admin → Providers.')
-              : tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
+              ? tr('Add a site, or turn on an extension source, in Admin → Sources.')
+              : tr('Add a site or an extension in Admin → Sources, or mount a source pack at SOURCES_DIR.')} />
         ) : (
           <EmptyState art={ART.emptyLibrary} title={tr('No sources available')}
             sub={tr('There is nothing set up for your account to browse yet. Ask whoever runs this server.')} />
@@ -586,7 +586,7 @@ export default function DiscoverPage() {
           <p className={`text-sm ${alone?.warn ? 'text-amber-300' : 'text-fog-400'}`}>
             {mode === 'search' ? (searchQ.isError ? tr('Search failed') : tr('No results across your sources — try another title.'))
               // Only an admin can act on the first sentence; a member told to open Admin has nowhere to go.
-              : budget.length === 0 ? (isAdmin ? tr('No sources are set up yet. Add one in Admin \u2192 Providers.') : tr('No sources are set up yet. Ask whoever runs this server.'))
+              : budget.length === 0 ? (isAdmin ? tr('No sources are set up yet. Add one in Admin \u2192 Sources.') : tr('No sources are set up yet. Ask whoever runs this server.'))
               // One source alone: its reason, amber, before any sentence about the wall as a whole.
               : alone ? alone.text
               : Object.values(states).every((s) => s === 'blocked')

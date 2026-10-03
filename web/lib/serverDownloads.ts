@@ -18,7 +18,7 @@
  */
 import { t as tr } from './i18n';
 import { chaptersLeft } from './chapterRows';
-import { downloadsLabel, finished, runTitle, type JobCard, type RunCard } from './jobs';
+import { downloadsLabel, finished, replaceRunTitle, runTitle, type JobCard, type RunCard } from './jobs';
 import { kindLabel } from './healthCopy';
 import { ringFraction, type RingValue } from './ring';
 import { archiveItems, waitingText, type ArchiveItem, type ArchiveView } from './archive';
@@ -343,7 +343,9 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
  * for each could not be told from the nightly. With no series the viewer may list (the server drops the label
  * for the 18+ hide) it is the press alone, "Fill now"; a server older than v0.49.0 sends no kind at all.
  */
-export function runName(r: Pick<RunCard, 'kind' | 'repairKind' | 'label' | 'number'>): string {
+export function runName(r: Pick<RunCard, 'kind' | 'repairKind' | 'label' | 'number'> & Partial<Pick<RunCard, 'mode' | 'promoted'>>): string {
+  // v0.54.0: a Find run replacing a source is named for that, not as a search.
+  if (r.kind === 'find_sources' && (r.mode === 'replace' || !!r.promoted)) return replaceRunTitle();
   if (r.kind !== 'repair' || !r.repairKind || r.repairKind === 'full') return runTitle(r.kind);
   return kindLabel(r.repairKind, { label: r.label, number: r.number });
 }

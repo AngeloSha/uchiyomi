@@ -5,8 +5,9 @@
 // at all (while the empty catalogue said "add a repository above"), the placeholder named a file Mihon users do
 // not have, the server's reason for a refusal was never shown, and not one string of the flow was translated.
 // Since v0.53.0 the form stands on Browse itself on a first visit (components/ExtensionsPanel.tsx) and is a sheet
-// behind the repositories link in Browse's count line after that (components/ExtensionRepos.tsx). Each rule is pinned
-// here and names the edit that brings its fault back.
+// behind the repositories link in Browse's count line after that (components/ExtensionRepos.tsx); since v0.54.0 Browse
+// is part of Admin → Sources' Add sources (components/SourcesPanel.tsx). Each rule is pinned here and names the edit
+// that brings its fault back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
@@ -29,22 +30,23 @@ const trKeys = (src: string): Set<string> => {
   return keys;
 };
 
-const admin = code(read('app/admin/page.tsx'));
 const panel = code(read('components/ExtensionsPanel.tsx'));
+const sources = code(read('components/SourcesPanel.tsx'));
 const repos = code(read('components/ExtensionRepos.tsx'));
 const browse = slice(panel, 'function BrowseView(', 'function NothingFound(');
 const form = slice(repos, 'export function RepoForm(', 'export function ReposSheet(');
 
-test('with no repository, the form stands on Browse itself, and a first visit with nothing installed opens on Browse', () => {
+test('with no repository, the form stands on Browse itself, and a list with no source offers the way to add one', () => {
   // Reintroduce by showing the catalogue's empty line instead (`firstRun` gone): a first visit says "add a repository"
-  // with no field in sight -- the v0.45.0 audit's first finding. Reintroduce `return 'installed'` for nothing installed:
-  // a first visit opens on an empty Installed list.
+  // with no field in sight -- the v0.45.0 audit's first finding. Your sources lists the built-ins and MangaDex, so it is
+  // the first view; with no source at all it says how to add one and offers Add sources. Drop that key: this fails.
   assert.match(browse, /const firstRun = noRepos && !!first && first\.total === 0;/, 'the first-run card is not decided by "no repository, empty catalogue"');
   assert.match(browse, /\{firstRun \? \(\s*<div className="[^"]*" data-ext-first-run>[\s\S]*?<RepoForm \/>/, 'the first visit has no repository field');
   assert.match(browse, /tr\('An extension repository is a list of extensions that someone publishes\. Uchiyomi doesn’t host any, so you add one you trust\.'\)/,
     'the first visit does not say what a repository is');
-  const lib = read('lib/extensions.ts');
-  assert.match(lib, /return installedCount > 0 \? 'installed' : 'browse';/, 'a first visit with nothing installed opens on Installed');
+  const empty = slice(sources, 'data-sources-empty>', '</div>');
+  assert.match(empty, /<button type="button" onClick=\{onAdd\} className="btn-key mt-3">\{tr\('Add sources'\)\}<\/button>/, 'a list with no source has no way to add one');
+  assert.match(sources, /onAdd=\{\(\) => setView\('add'\)\}/, 'Add sources in the empty list does not open Add sources');
   // Later, the repositories are one press away, counted, as a link in Browse's count line (round 2: a key before).
   assert.match(browse, /<button type="button" onClick=\{onRepos\} className="text-accent hover:underline" data-ext-repos>\s*\{!repos \? tr\('Repositories'\) : repos\.length === 1 \? tr\('1 repository'\)/, 'Browse has no way to the repositories');
   assert.match(repos, /export function ReposSheet\([\s\S]*?<RepoForm \/>/, 'the repositories sheet cannot add one');
@@ -92,24 +94,20 @@ test('a repository change asks again for everything it can move', () => {
   assert.equal((repos.match(/for \(const queryKey of REPO_KEYS\) void qc\.invalidateQueries/g) ?? []).length, 2, 'the add or the removal does not ask again');
 });
 
-test('with no engine the tab is the setup screen, and the Providers card says why without calling a missing download a fault', () => {
+test('with no engine its setup screen stands above your sources, never instead of them', () => {
   // v0.49.0 (#72): the not-configured card was one sentence for every platform ("If you turned it off by emptying
   // SUWAYOMI_URL, put that line back"), wrong for a Compose admin who set EXTENSION_ENGINE=0 and for Unraid and
-  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx, whose steps engineSetup.test.ts pins -- the
-  // whole tab while the engine is off, not set up or not answering (v0.53.0). Reintroduce the old card: "the setup
-  // screen" fails. Drop the `engine === 'absent'` arm of ExtensionsLink: "not installed yet" fails, and desktop's first
-  // visit reads as a fault again. Collapse the three server arms back into one: its assertion names the arm.
-  const top = slice(panel, 'export function ExtensionsPanel(', 'function useViewParam(');
-  assert.match(top, /if \(!ready\) return <EngineSetup status=\{status\} \/>;/, 'the setup screen');
-  assert.doesNotMatch(panel, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
-  const link = slice(admin, 'function ExtensionsLink(', 'function ArtReview(');
-  assert.match(link, /: down && engine === 'absent' \? tr\('Not installed yet — download it under Extensions'\)/, 'not installed yet');
-  assert.match(link, /: down && status\.off === 'switch' \? tr\('Extensions are turned off'\)/, 'switched off on purpose');
-  assert.match(link, /: down && status\.off === 'unset' \? tr\('No extension engine is set up'\)/, 'never set up');
-  assert.match(link, /: down \? tr\('The extension engine isn’t answering'\)/, 'set up and not answering');
-  const hook = slice(admin, 'function useDesktopEngineState(', 'function ExtensionsLink(');
-  assert.match(hook, /useState<EngineStatus\['state'\] \| null>\(null\)/, 'the hook answers something before the shell does');
-  assert.match(hook, /const b = bridge\(\);\s*if \(!b\?\.engine\) return;/, 'the hook asks for an engine where there is no bridge');
+  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx, whose steps engineSetup.test.ts pins; v0.53.0
+  // made it the whole Extensions tab while the engine was off, not set up or not answering. In Admin → Sources
+  // (v0.54.0) the built-ins, MangaDex and sites work without the engine, so its setup stands at the top and the list
+  // follows. Reintroduce the old card: "the old one-sentence card" fails; return the setup screen alone: "your sources
+  // wait for the engine" does.
+  const top = slice(sources, 'export function SourcesPanel(', 'function AttentionRow(');
+  assert.match(top, /\{!status \? <div className="skeleton h-16 rounded-2xl" aria-busy="true" \/>\s*: isDesktop\(\) && !ready \? <EngineInstall \/>\s*: !ready \? <EngineSetup status=\{status\} \/>\s*: <EngineReady status=\{status\} desktop=\{isDesktop\(\)\} \/>\}/,
+    'the setup screen');
+  assert.doesNotMatch(top, /if \(!ready\) return\b|if \(!status\) return\b/, 'your sources wait for the engine');
+  assert.match(top, /<YourSources overview=\{overview\}/);
+  assert.doesNotMatch(panel + sources, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
 });
 
 test('the engine\'s state is a mark in the viewer\'s words, not an English capsule', () => {
@@ -126,9 +124,10 @@ test('the sheets are portalled out of every card, and a hide asks inside its she
   // A `.card` blurs its backdrop, which makes it the containing block of a `fixed` dialog: a sheet inside one dimmed
   // only the card and could land off-screen. Every sheet the tab opens goes to <body>. A ConfirmDialog over a Sheet
   // paints UNDER it (z-50 against z-60), so the hide asks inside the Languages sheet. Reintroduce a bare
-  // `<ExtensionSheet` (no OnBody): the first assertion names it.
-  const lists = slice(panel, 'function ExtensionLists(', 'function ViewTabs(');
-  assert.match(lists, /<OnBody>\s*<ExtensionSheet\b/, 'an extension\'s sheet is rendered inside the panel');
+  // `<SourceSheet` (no OnBody): the first assertion names it.
+  const lists = slice(sources, 'export function SourcesPanel(', 'function AttentionRow(');
+  assert.match(lists, /<OnBody>\s*<SourceSheet\b/, 'a source\'s sheet is rendered inside the panel');
+  assert.match(lists, /<OnBody>\s*<ReplaceDialog\b/, 'the Replace dialog is rendered inside the panel');
   assert.match(lists, /<OnBody><ReposSheet\b/, 'the repositories sheet is rendered inside the panel');
   assert.match(lists, /<OnBody><LanguagesSheet\b/, 'the languages sheet is rendered inside the panel');
   const langs = code(read('components/ExtensionLanguages.tsx'));
@@ -150,7 +149,7 @@ test('the repository flow is translated in all eight languages', () => {
   const keys = new Set<string>([
     ...trKeys(repos),
     ...trKeys(browse),
-    ...trKeys(slice(admin, 'function ExtensionsLink(', 'function ArtReview(')),
+    ...trKeys(sources),
     ...trKeys(read('components/EngineInstall.tsx')),
     ...trKeys(read('components/EngineSetup.tsx')),
     ...trKeys(read('lib/engineSetup.ts')),

@@ -39,6 +39,11 @@ export interface SeriesSource {
   registered: boolean;
   /** Followed by the add, not by a person (`added_by IS NULL`). Absent from an older server. */
   auto?: boolean;
+  /**
+   * v0.54.0: whether updates can use it (bff lib/sourceStanding.ts): working, cooling down, failing, switched off, or not
+   * loaded. A follower that works is what the Sources sheet offers Make main for. Absent from an older server.
+   */
+  standing?: 'usable' | 'cooling' | 'failing' | 'off' | 'not_loaded';
 }
 
 /**
@@ -438,7 +443,10 @@ export type HealthAction =
   // v0.49.1: look for other sources for every series whose main source is `sourceId` (POST /api/admin/sources/find).
   | 'find_sources'
   // v0.52.0 (#72): a duplicate pair in two languages, linked as editions of one work (POST /api/admin/series/:id/editions).
-  | 'link_editions';
+  | 'link_editions'
+  // v0.54.0: move every series whose main source is `sourceId` -- off or failing -- to a working source, in one Replace
+  // run (POST /api/admin/sources/find in its replace mode); the source and the frozen-series rows offer it.
+  | 'replace_source';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';

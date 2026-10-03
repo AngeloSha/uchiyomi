@@ -10,7 +10,7 @@
  */
 import { keys, t as tr } from './i18n';
 import type { Said } from './said';
-import { followedText } from './findSources';
+import { followedText, movedText } from './findSources';
 
 export interface JobCard {
   folder: string;
@@ -61,6 +61,12 @@ export interface RunCard {
   current?: { id: string; title: string };
   /** A `find_sources` run's follows so far: one per (series, source). */
   followed?: number;
+  /**
+   * v0.54.0: a `find_sources` run in Replace mode moves series off one source (`mode: 'replace'`), and `promoted`
+   * counts the series whose main source it changed so far.
+   */
+  mode?: 'follow' | 'replace';
+  promoted?: number;
   /**
    * A `find_sources` run that waits for a sweep, a repair or the daily source check before its next series (its
    * `current` still names the series it did last). Absent while it is not waiting.
@@ -122,6 +128,9 @@ export function runTitle(kind: RunKind): string {
     : tr('Fetch newest');
 }
 
+/** v0.54.0: a Replace run's name, the noun for "Replace" as "Other-source search" is Find other sources'. */
+export const replaceRunTitle = (): string => tr('Source replacement');
+
 /**
  * The line under a run's name: how far it has got and what it has saved. The repair counts steps, the other
  * two count series; "0 of 0" is a run that has not sized itself yet and says nothing rather than that.
@@ -135,8 +144,10 @@ export function runProgress(r: RunCard): string {
   }
   if (r.fetched) bits.push(tr('{n} chapters saved', { n: r.fetched }));
   if (r.failed) bits.push(tr('{n} could not be saved', { n: r.failed }));
-  // A find run saves nothing; what it has done is follow sources.
-  if (r.followed) bits.push(followedText(r.followed));
+  // A find run saves nothing; what it has done is follow sources -- or, replacing one (v0.54.0), move series off it.
+  if (r.mode === 'replace' || r.promoted) {
+    if (r.promoted) bits.push(movedText(r.promoted));
+  } else if (r.followed) bits.push(followedText(r.followed));
   return bits.join(' · ');
 }
 

@@ -1,12 +1,14 @@
-// Admin → Extensions (v0.53.0), the part with no React in it: what the status strip says, how the installed list is
-// put together, ordered and grouped, what a row offers, what Browse asks the server, and the words for the counts.
+// The extensions in Admin → Sources (v0.54.0; Admin → Extensions' own tab in v0.53.0), the part with no React in it:
+// what the engine's strip says, how the installed extensions are joined to their sources, what Browse asks the server,
+// an extension's language rows, and the words for the counts.
 //
 // The redesign answers discussion #121, where a real user on a 1,300-extension repository found the old single card
 // unusable: the catalogue stopped at "Showing 400 of 570 matches -- narrow the search", "18+" read as a filter to
 // adult extensions only, a language select in an extension's settings looked like it chose the language, the count
 // of sources read as a count of extensions, and an extension installed in the engine's own page showed as installed
 // with no way to switch its sources on but Remove and Add again. Each of those is a rule below, tested in
-// web/test/extensions.test.ts.
+// web/test/extensions.test.ts. Since v0.54.0 the installed extensions are no list of their own: their sources are rows
+// of Your sources (lib/sourcesPanel.ts), and an extension's languages are its source's sheet's section.
 import { t as tr } from './i18n';
 import { languageName, numberText } from './format';
 import { sourceMark, type Tone } from './status';
@@ -43,14 +45,6 @@ export interface CatalogPage {
   adultTotal?: number;
   langs: string[];
 }
-
-/**
- * The Browse tab's count: the extensions Browse lists, so the tab and the list's last line agree. Without Show 18+
- * extensions that is the catalogue less its 18+ extensions not installed (an installed one is always listed); it said
- * "Browse 1,304" over a list that ended at "1,118 of 1,118".
- */
-export const browseCount = (p: Pick<CatalogPage, 'total' | 'adultTotal'>, adult: boolean): number =>
-  (adult ? p.total : Math.max(0, p.total - (p.adultTotal ?? 0)));
 
 /** One row of GET /api/admin/extensions/sources: a source an installed extension provides, one per language. */
 export interface ExtSource {
@@ -152,44 +146,6 @@ export function installedList(exts: readonly CatalogExt[], sources: readonly Ext
 
 /** An installed extension that has sources and none of them on: the row offers "Turn on". */
 export const needsTurningOn = (e: Pick<InstalledExt, 'on' | 'sources'>): boolean => e.on === 0 && e.sources.length > 0;
-
-// ---- Installed, grouped (v0.53.0 round 2) ---------------------------------------------------------------------
-//
-// Round 1 said one thing three times: an amber bar over the list ("3 of your extensions have no source on yet"),
-// amber words on every row it meant, and a filled key on each of those rows -- and the same again for an update.
-// Now a row says at most one state word and offers at most one key, and the list is grouped only while something
-// needs someone, with the keys for all of them in that group's header.
-
-/** An extension waiting for someone: an update, or nothing of it switched on. */
-export const needsAttention = (e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): boolean => e.hasUpdate || needsTurningOn(e);
-
-/**
- * The one key an installed row offers. Turn on before Update: an extension with no source on gives search nothing at
- * all, and its update stays one press away (the group's Update all, its sheet). None when nothing waits: the row is
- * then its languages and a chevron, and opens its sheet.
- */
-export function rowKey(e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): 'turn-on' | 'update' | null {
-  return needsTurningOn(e) ? 'turn-on' : e.hasUpdate ? 'update' : null;
-}
-
-/**
- * The one state word at the end of an installed row's meta line. An update outranks "No source on": with both, the
- * row's key already says Turn on, and the word is the one thing the key does not say.
- */
-export function rowWord(e: Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>): 'update' | 'off' | null {
-  return e.hasUpdate ? 'update' : needsTurningOn(e) ? 'off' : null;
-}
-
-/**
- * Installed as the tab shows it: one plain list while nothing needs anyone (`all`, no header), else what needs
- * attention first and the rest under it (`ready`, left out when empty). installedList's order is kept inside each.
- */
-export function installedGroups<T extends Pick<InstalledExt, 'on' | 'sources' | 'hasUpdate'>>(list: readonly T[]): Array<{ key: 'all' | 'attention' | 'ready'; list: T[] }> {
-  const attention = list.filter(needsAttention);
-  if (!attention.length) return [{ key: 'all', list: [...list] }];
-  const ready = list.filter((e) => !needsAttention(e));
-  return [{ key: 'attention', list: attention }, ...(ready.length ? [{ key: 'ready' as const, list: ready }] : [])];
-}
 
 /**
  * What an extension reads in, for its row and its sheet: its one language, or how many its sources cover. A
@@ -366,8 +322,8 @@ export function languageOptions(codes: readonly string[]): Array<{ value: string
 
 /**
  * One language of an installed extension, as its row in the detail sheet marks it: off, on but over the source limit
- * (enabled, yet not in the registry the search reaches), or the status Providers gives it -- the public status with
- * #115's confirmed failures over it.
+ * (enabled, yet not in the registry the search reaches), or its status -- the public status with #115's confirmed
+ * failures over it (lib/providerGroups.ts providerStatus).
  */
 export function sourceHealth(
   s: Pick<ExtSource, 'id' | 'enabled'>,
@@ -389,15 +345,4 @@ export function sourceHealth(
  */
 export function languageProblem(h: { tone: Tone; label: string }): { tone: Tone; label: string } | null {
   return h.tone === 'ok' || h.tone === 'off' ? null : { tone: h.tone, label: h.label };
-}
-
-// ---- which view ------------------------------------------------------------------------------------------------
-
-export type ExtView = 'installed' | 'browse';
-
-/** `?view=` read once: a named view, else Installed when something is installed and Browse on a first visit. */
-export function initialView(param: string | null, installedCount: number | undefined): ExtView | null {
-  if (param === 'installed' || param === 'browse') return param;
-  if (installedCount === undefined) return null;
-  return installedCount > 0 ? 'installed' : 'browse';
 }
