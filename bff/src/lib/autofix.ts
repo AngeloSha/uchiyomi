@@ -97,6 +97,12 @@ export type AutofixStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interru
 export interface AutofixSummary {
   /** Nothing but Needs you is left: every finding still on the page is one only a person can act on. */
   green: boolean;
+  /**
+   * Something a run could still change is left (v0.55.0 integration): what this one did not get to -- stopped, out of
+   * time or searches, at its install budget -- which `clears` says as "the next Fix everything continues". Never for a
+   * cooldown, the sweep or Needs you alone: Run again is offered on this, not on `!green`.
+   */
+  again: boolean;
   done: Array<{ kind: DoneKind; n: number; said: Said; items?: Said[] }>;
   clears: Array<{ said: Said; at?: string }>;
   needsYou: Array<{ check: string; said: Said; action?: NeedsYouAction }>;
@@ -111,6 +117,8 @@ export interface AutofixRun {
   by: string | null;
   phase: AutofixPhase | null;
   phaseIndex: number;
+  /** Asked to stop and winding down to its next safe point: every viewer's "Stopping…", not only the one who pressed. */
+  stopping?: boolean;
   current?: { title?: string; done?: number; of?: number; said?: Said };
   summary?: AutofixSummary;
   log?: Said[];
@@ -185,6 +193,15 @@ interface Run {
   /** What Health cannot show by itself: an extension that would carry series but found the source limit full. */
   noRoom: string[];
   lines: Said[];
+  /**
+   * The phases that ran to their end: not stopped in or before, not cut short by the run's time, its Tests or its
+   * installs (`cut`), and not thrown out of. A finding only these phases work on is Needs you once they have; before,
+   * it is what the next run continues (summarise).
+   */
+  finished: Set<AutofixPhase>;
+  cut: Set<AutofixPhase>;
+  /** Renumber reviews passed over because a download or a check was inside the series: the next run's. */
+  numberingBusy: number;
 }
 
 let active: Run | null = null;
@@ -195,6 +212,8 @@ let quietMs = 5_000;
 const halted = (a: Run): boolean => a.stop || runtime.stopping || stopRequested(a.card);
 /** The network-heavy phases also stop when the run's time is spent. */
 const outOfTime = (a: Run): boolean => Date.now() > a.deadline;
+/** A phase left work behind for a reason of the run's own -- its time, its Tests, its installs: it did not finish. */
+const cutShort = (a: Run, phase: AutofixPhase): void => { a.cut.add(phase); };
 const nap = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A line for the run's log, newest last, at most LOG_MAX. */
@@ -249,6 +268,7 @@ export function startAutofix(
     deadline: startedAt + AUTOFIX_MAX_MINUTES * 60_000, phase: null, phaseIndex: 0, phaseMs: {}, current: null, repairCur: null,
     stop: false, card, log: o.log, budget: { left: AUTOFIX_SEARCHES }, engine: 'none', solver: 'none', timeUp: false,
     counts: {}, items: {}, counted: 0, replacedNames: [], keptPkgs: [], removedPkgs: [], installs: 0, installed: [], tried: [], noRoom: [], lines: [],
+    finished: new Set(), cut: new Set(), numberingBusy: 0,
   };
   active = a;
   // The audit line is written when the run ends, long after the request: its IP and user agent are taken now.
@@ -334,7 +354,12 @@ async function runAll(a: Run, from?: FastifyRequest): Promise<void> {
       const t = Date.now();
       try {
         if (phase === 'recheck') report = await recheckReport(a);
-        else await steps[phase](a);
+        else {
+          await steps[phase](a);
+          // Ran to its end: what it leaves on its cards is for a person. Stopped inside it, or cut short, it is not --
+          // what it did not reach is the next run's, never Needs you (summarise).
+          if (!halted(a) && !a.cut.has(phase)) a.finished.add(phase);
+        }
       } catch (e) {
         // One phase failing is that phase's; the run goes on to the next, and the recheck says what is left.
         a.log?.warn(`autofix: the ${phase} phase threw: ${(e as Error)?.message || e}`);
@@ -422,6 +447,8 @@ async function liveView(a: Run): Promise<AutofixRun> {
     : undefined;
   return {
     id: a.id, status: 'running', startedAt: new Date(a.startedAt).toISOString(), by, phase: a.phase, phaseIndex: a.phaseIndex,
+    // Stop asked, by the route or the run card's generic cancel: said to every viewer until the run reaches its safe point.
+    ...(a.stop || stopRequested(a.card) ? { stopping: true } : {}),
     ...(current ? { current } : {}), log: [...a.lines],
   };
 }
@@ -537,8 +564,9 @@ async function sources(a: Run): Promise<void> {
     && (i.state === 'failing' || i.state === 'inconclusive' || i.state === 'untested' || (i.state === 'blocked' && !i.info)));
   let tests = 0;
   for (const [n, it] of testable.entries()) {
-    if (halted(a) || outOfTime(a)) break;
-    if (tests >= AUTOFIX_TESTS) break;
+    if (halted(a)) break;
+    // Out of time or Tests with sources still to Test: the next run Tests them.
+    if (outOfTime(a) || tests >= AUTOFIX_TESTS) { cutShort(a, 'sources'); break; }
     const id = it.sourceId!;
     if (await solverSpeaksFor(a, id)) continue;
     if (a.engine !== 'up' && isSwAdapterId(id)) continue;
@@ -560,7 +588,8 @@ async function sources(a: Run): Promise<void> {
   }
 
   for (const t of await replaceTargets(a)) {
-    if (halted(a) || outOfTime(a)) break;
+    if (halted(a)) break;
+    if (outOfTime(a)) { cutShort(a, 'sources'); break; }
     if (ignored.has(t.id)) continue;
     if (!(await waitSweep(a))) break;
     now(a, say('autofix.now.replacing', { name: t.name }));
@@ -765,7 +794,8 @@ async function numbering(a: Run): Promise<void> {
   await held(async () => {
     for (const [i, s] of rows.entries()) {
       if (halted(a)) return;
-      if (folderBusy(s.folder) || runsInside(s.id) > 0) continue;
+      // A download or a check inside it: not judged now, so neither applied nor a person's -- the next run's.
+      if (folderBusy(s.folder) || runsInside(s.id) > 0) { a.numberingBusy++; continue; }
       now(a, say('autofix.now.renumbering'), { title: s.title, done: i, of: rows.length });
       const r = await updateSeries(s.id, 0, { confirmRenumber: 'clean' }).catch(() => null);
       if (r?.renumber?.state === 'applied') did(a, 'renumbered', 1, say('autofix.item.renumbered', { title: s.title }));
@@ -783,7 +813,7 @@ async function numbering(a: Run): Promise<void> {
  * or a renumber waiting alone.
  */
 async function chapters(a: Run): Promise<void> {
-  if (outOfTime(a)) { a.timeUp = true; return; }
+  if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'chapters'); return; }
   const r: RepairResult = await held(() => repairForAutofix(a.log, { only: ['failures', 'short', 'gaps'], userId: a.by }, drive(a)));
   a.repairCur = null;
   did(a, 'failuresCleared', r.failures.reset);
@@ -791,7 +821,7 @@ async function chapters(a: Run): Promise<void> {
   did(a, 'shortFixed', r.short.replaced);
   did(a, 'shortConfirmed', r.short.confirmed);
   did(a, 'fetched', r.gaps.fetched);
-  if (outOfTime(a)) a.timeUp = true;
+  if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'chapters'); }
 }
 
 // ── 8. extensions ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -881,7 +911,7 @@ async function extensions(a: Run): Promise<void> {
     note(a, say('autofix.item.skipped', { why: a.engine === 'none' ? 'no_engine' : 'engine_down' }));
     return;
   }
-  if (outOfTime(a)) { a.timeUp = true; return; }
+  if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
   let targets = await extensionTargets(a);
   if (!targets.length) return;
   let catalogue: ExtensionInfo[];
@@ -905,8 +935,11 @@ async function extensions(a: Run): Promise<void> {
         .sort((x, y) => y.named - x.named || y.used - x.used || x.e.name.localeCompare(y.e.name));
       for (const c of candidates) {
         if (!mine.length) break;
-        if (halted(a) || outOfTime(a)) { if (outOfTime(a)) a.timeUp = true; return; }
-        if (a.installs >= AUTOFIX_INSTALLS) { note(a, say('autofix.item.skipped', { why: 'installs' })); return; }
+        if (halted(a)) return;
+        if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
+        // Series still without a source and a package not yet tried for them: the next run installs the next ones, so
+        // they are not Needs you yet.
+        if (a.installs >= AUTOFIX_INSTALLS) { note(a, say('autofix.item.skipped', { why: 'installs' })); cutShort(a, 'extensions'); return; }
         const found = await tryPackage(a, c.e, lang, mine);
         if (found === 'full') return;
         mine = mine.filter((t) => !found.has(t.id));
@@ -1151,6 +1184,13 @@ const healthKey = (check: string): NeedsYouAction => ({ kind: 'health', check })
  * What is left after the run, from Health as it reads now, sorted into what only a person can do (Needs you: one line
  * per kind, with its one key) and what clears by itself (with when, where there is a time). `green` is true when nothing
  * but Needs you is left. ⚠️ Nothing here ignores anything: an unfixable finding is said, never hidden.
+ *
+ * ⚠️ Needs you never holds what a run could still fix (the v0.55.0 integration): a card's finding is a person's only once
+ * every phase that works on that card has run to its end in this run (`a.finished`). A run stopped before its duplicates
+ * phase has not looked at the duplicates, and one cut short by its time, its Tests or its installs has not finished with
+ * what it left: those are "the next Fix everything continues", which is what `again` says. Reintroduce by sorting a
+ * card's findings into Needs you whatever the run reached: "a stopped run leaves what it did not reach to the next run"
+ * in autofix.int.test.ts finds the duplicates, the renumbering and the impossible number under Needs you.
  */
 function summarise(a: Run, report: HealthReport): AutofixSummary {
   const by = new Map(report.checks.map((c) => [c.id, c]));
@@ -1158,15 +1198,27 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const clears: AutofixSummary['clears'] = [];
   const need = (check: string, p: Part, action: NeedsYouAction = healthKey(check)) => needsYou.push({ check, said: saidOf(p), action });
   const clear = (p: Part, at?: string | null) => clears.push({ said: saidOf(p), ...(at ? { at } : {}) });
-  /** Findings a run did not get to (stopped, or out of time): the next one continues. */
+  /** Findings a run did not get to (stopped, or out of time, searches, Tests or installs): the next one continues. */
   let leftover = 0;
+  /** `n` findings of a card the phases named work on: a person's once all of them ran to their end, else the next run's. */
+  const needAfter = (phases: AutofixPhase[], check: string, n: number, p: Part) => {
+    if (n <= 0) return;
+    if (phases.every((ph) => a.finished.has(ph))) need(check, p);
+    else leftover += n;
+  };
 
   const solverCheck = by.get('solver');
   if (solverCheck && solverCheck.status !== 'ok') {
-    const down = solverCheck.summarySaid?.[0]?.code === 'solver.down';
-    need('solver', say(down ? 'autofix.needs.solverDown' : 'autofix.needs.solverFailing'));
+    // Down is the operator's whatever the run did; answering but failing is the solver step's to reset first.
+    if (solverCheck.summarySaid?.[0]?.code === 'solver.down') need('solver', say('autofix.needs.solverDown'));
+    else needAfter(['solver'], 'solver', 1, say('autofix.needs.solverFailing'));
   }
-  if (findings(by.get('extension-engine')).length) need('extension-engine', say('autofix.needs.engine'));
+  // The engine: what the solver phase connects (its Cloudflare helper) is the run's until that phase has run; the rest
+  // -- an engine that is down, an older one -- is the operator's.
+  const engine = findings(by.get('extension-engine'));
+  const connectable = engine.filter((i) => i.actions?.includes('engine_solver')).length;
+  if (engine.length > connectable) need('extension-engine', say('autofix.needs.engine'));
+  else needAfter(['solver'], 'extension-engine', connectable, say('autofix.needs.engine'));
   if (findings(by.get('folders-twice')).length) need('folders-twice', say('autofix.needs.foldersTwice'));
   const cap = findings(by.get('extension-cap'));
   if (cap.length) {
@@ -1182,13 +1234,14 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
     need('downloads-missing', say('autofix.needs.downloadsMissing', { n }));
   }
 
-  // Series that can no longer update: the limit is a slot to free, the engine is its own row's; the rest no source carries.
+  // Series that can no longer update: the limit is a slot to free, the engine is its own row's; the rest no source carries
+  // -- once Replace and the extensions phase have both had their go at them.
   const frozen = findings(by.get('frozen-series'));
   const slot = frozen.filter((i) => i.actions?.includes('free_slot')).length;
   const engineBound = frozen.filter((i) => /^frozen\.engine/.test(i.detailSaid?.[0]?.code ?? '')).length;
   const stuck = frozen.length - slot - engineBound;
   if (slot) need('frozen-series', say('autofix.needs.freeSlot', { n: slot }));
-  if (stuck) need('frozen-series', say('autofix.needs.frozen', { n: stuck }));
+  needAfter(['sources', 'extensions'], 'frozen-series', stuck, say('autofix.needs.frozen', { n: stuck }));
   if (engineBound && !needsYou.some((x) => x.check === 'extension-engine')) need('extension-engine', say('autofix.needs.engine'));
 
   // Sources: a cooldown and a slow streak end by themselves; a failure that is still there needs a person.
@@ -1200,29 +1253,35 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const slow = src.filter((i) => i.state === 'slow' || i.state === 'empty').length;
   if (slow) clear(say('autofix.clears.slow', { n: slow }));
   const failing = src.filter((i) => i.state === 'failing' || i.state === 'inconclusive' || i.state === 'untested').length;
-  if (failing) need('sources', say('autofix.needs.sourceFailing', { n: failing }));
+  needAfter(['sources'], 'sources', failing, say('autofix.needs.sourceFailing', { n: failing }));
 
   const dupes = findings(by.get('duplicates')).length;
-  if (dupes) need('duplicates', say('autofix.needs.duplicates', { n: dupes }));
-  const renum = findings(by.get('numbering')).length;
-  if (renum) need('numbering', say('autofix.needs.numbering', { n: renum }));
-  const odd = findings(by.get('outliers')).length;
-  if (odd) need('outliers', say('autofix.needs.outliers', { n: findings(by.get('outliers')).reduce((k, i) => k + (i.bookIds?.length ?? 1), 0) }));
+  needAfter(['duplicates'], 'duplicates', dupes, say('autofix.needs.duplicates', { n: dupes }));
+  // A plan passed over while a download or a check was inside its series was not judged: the next run's.
+  const renumAll = findings(by.get('numbering')).length;
+  const renumBusy = Math.min(renumAll, a.numberingBusy);
+  leftover += renumBusy;
+  needAfter(['numbering'], 'numbering', renumAll - renumBusy, say('autofix.needs.numbering', { n: renumAll - renumBusy }));
+  const odd = findings(by.get('outliers'));
+  const oddN = odd.reduce((k, i) => k + (i.bookIds?.length ?? 1), 0);
+  needAfter(['files'], 'outliers', odd.length ? oddN : 0, say('autofix.needs.outliers', { n: oddN }));
   const twice = findings(by.get('saved-twice'));
-  if (twice.length) need('saved-twice', say('autofix.needs.twice', { n: twice.reduce((k, i) => k + (i.bookIds?.length ?? 1), 0) }));
+  const twiceN = twice.reduce((k, i) => k + (i.bookIds?.length ?? 1), 0);
+  needAfter(['files'], 'saved-twice', twice.length ? twiceN : 0, say('autofix.needs.twice', { n: twiceN }));
 
-  // Short chapters: tried again tomorrow when a source was silent or the searches ran out; partial ones are the sweep's;
-  // the rest are a person's call (It's fine, or a copy of their own).
+  // Short chapters: tried again tomorrow when a source was silent or still cooling; partial ones are the sweep's; the
+  // ones the run's searches ran out before are the next run's (a run starts with searches of its own); the rest are a
+  // person's call (It's fine, or a copy of their own).
   const short = findings(by.get('short-chapters'));
-  const AGAIN = new Set(['source_silent', 'hunt_cooldown', 'no_searches', 'download_failed']);
+  const AGAIN = new Set(['source_silent', 'hunt_cooldown', 'download_failed']);
   const shortAgain = short.filter((i) => i.outcome?.kind === 'short' && AGAIN.has(i.outcome.why)).length;
   const shortPartial = short.filter((i) => i.outcome?.kind === 'short' && i.outcome.why === 'partial').length;
-  const shortUntried = short.filter((i) => !i.outcome).length;
+  const shortUntried = short.filter((i) => !i.outcome || (i.outcome.kind === 'short' && i.outcome.why === 'no_searches')).length;
   const shortYours = short.length - shortAgain - shortPartial - shortUntried;
   if (shortAgain) clear(say('autofix.clears.tomorrow', { n: shortAgain }), new Date(Date.now() + 24 * 3600_000).toISOString());
   if (shortPartial) clear(say('autofix.clears.partial', { n: shortPartial }));
   leftover += shortUntried;
-  if (shortYours) need('short-chapters', say('autofix.needs.short', { n: shortYours }));
+  needAfter(['chapters'], 'short-chapters', shortYours, say('autofix.needs.short', { n: shortYours }));
 
   // Chapters that would not download: a source that is off is a person's; reset rows wait for the sweep; rows of a
   // source still failing at their chapters no source here can download.
@@ -1237,7 +1296,7 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
     else stuckN += n;
   }
   if (sweepN) clear(say('autofix.clears.sweep', { n: sweepN }));
-  if (stuckN) need('chapter-failures', say('autofix.needs.failures', { n: stuckN }));
+  needAfter(['chapters'], 'chapter-failures', stuckN, say('autofix.needs.failures', { n: stuckN }));
 
   // Gaps: a paused series is a person's; one searched too recently is asked again tomorrow; the rest wait for the next
   // run (out of time or searches), or -- searched, and nobody had them -- go grey once answered.
@@ -1250,5 +1309,6 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   if (leftover) clear(say('autofix.clears.nextRun', { n: leftover }));
 
   const green = clears.length === 0;
-  return { green, done: doneLines(a), clears, needsYou };
+  // Run again is worth it while a run has something left to change; a cooldown, the sweep or Needs you alone is not that.
+  return { green, again: leftover > 0, done: doneLines(a), clears, needsYou };
 }

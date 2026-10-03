@@ -121,12 +121,15 @@ components:
       type: object
       description: >-
         Health's Fix everything (since v0.55.0). `by` is the starting admin's name, null for the nightly. `phase` and
-        `phaseIndex` (0-based, of 10) while running; `current` is what it is on ("Now: ..."). `summary` once it ends:
-        `green` (nothing but Needs you is left -- every finding still on the page is one only a person can act on;
-        `needsYou` may be non-empty), `done` (at most 12 kinds, the ones that matter most first, each with its count,
-        its line and up to 20 `items`), `clears` (what ends by itself, with `at` where there is a time) and `needsYou`
-        (per check, each with its one action: `open` {href}, `health` {check} or `settings` {key}). `log` is the
-        detail, newest last, at most 200 lines.
+        `phaseIndex` (0-based, of 10) while running; `current` is what it is on ("Now: ..."); `stopping` once Stop was
+        asked and until the run reaches its safe point. `summary` once it ends: `green` (nothing but Needs you is left --
+        every finding still on the page is one only a person can act on; `needsYou` may be non-empty), `again` (something
+        a run could still change is left -- what this one did not get to, said in `clears` as the next run continuing --
+        never for a cooldown, the sweep or Needs you alone), `done` (at most 12 kinds, the ones that matter most first,
+        each with its count, its line and up to 20 `items`), `clears` (what ends by itself, with `at` where there is a
+        time) and `needsYou` (per check, each with its one action: `open` {href}, `health` {check} or `settings` {key};
+        a card is listed there only once every phase that works on it ran to its end in this run). `log` is the detail,
+        newest last, at most 200 lines.
       required: [id, status, startedAt, by, phase, phaseIndex]
       properties:
         id: { type: string }
@@ -139,6 +142,7 @@ components:
           nullable: true
           enum: [preflight, scan, solver, sources, duplicates, numbering, chapters, extensions, files, recheck, null]
         phaseIndex: { type: integer }
+        stopping: { type: boolean }
         current:
           type: object
           properties:
@@ -150,6 +154,7 @@ components:
           type: object
           properties:
             green: { type: boolean }
+            again: { type: boolean }
             done:
               type: array
               items:

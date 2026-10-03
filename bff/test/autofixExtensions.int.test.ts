@@ -188,7 +188,12 @@ test('the extensions phase: ranked by the series\' own groups, at most three, on
     assert.equal(run!.summary!.done.find((d) => d.kind === 'uninstalled')?.n, 1);
     const via = await q(`SELECT DISTINCT detail->>'via' AS via FROM audit_log WHERE event IN ('extension.install','extension.uninstall') AND detail->>'runId' = $1`, [started.runId]);
     assert.deepEqual(via.map((r: any) => r.via), ['autofix'], 'audited as Fix everything\'s');
-    assert.ok(run!.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'the series nothing carries is Needs you');
+    // Night Bloom is not a person's yet: the run stopped at its three installs with Birch Reader -- which carries it --
+    // still untried (v0.55.0 integration: Needs you never holds what a run could still fix). The next run continues.
+    assert.ok(!run!.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'a series the next install may carry is Needs you');
+    assert.ok(run!.log!.some((l) => l.code === 'autofix.item.skipped' && l.params?.why === 'installs'), 'PREMISE: the install budget ran out');
+    assert.ok(run!.summary!.clears.some((c) => c.said.code === 'autofix.clears.nextRun'), 'the next run continues it');
+    assert.equal(run!.summary!.again, true, 'and Run again is offered');
   });
 });
 
@@ -209,6 +214,8 @@ test('an install that would not fit under the source limit is not made, and it i
     // Reintroduce by dropping the tried filter in extensions(): Amber Comics, which the last run found carrying nothing,
     // is the first candidate again.
     assert.deepEqual(need?.said.params, { name: 'Birch Reader' }, 'naming the package that may carry the series, never one the last run found carrying nothing');
+    // Every candidate tried or out of room: the series nothing in reach carries is a person's now.
+    assert.ok(run!.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'the series nothing carries is Needs you');
   } finally {
     env.SUWAYOMI_MAX_SOURCES = original;
   }

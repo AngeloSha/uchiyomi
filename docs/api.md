@@ -556,10 +556,13 @@ impossible chapter numbers deleted, with the delete route's guards) and `recheck
 `GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
 `GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
 (`{ok, stopping}`), never inside a merge, a delete or a renumber. A run is `{id, status, startedAt, finishedAt?, by,
-phase, phaseIndex, current?, summary?, log?}`, every sentence a `Said` (`autofix.*` codes): `summary` is `{green,
-done, clears, needsYou}` -- `green` when nothing but Needs you is left, `done` one line per kind of thing done (at
-most twelve, with `items`), `clears` what ends by itself (with `at`), `needsYou` what only a person can do, each with
-its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or `{kind: 'settings', key}`). Runs are kept in the
+phase, phaseIndex, stopping?, current?, summary?, log?}` (`stopping` from Stop until its safe point, for every
+viewer), every sentence a `Said` (`autofix.*` codes): `summary` is `{green, again, done, clears, needsYou}` -- `green`
+when nothing but Needs you is left, `again` when something a run could still change is left (what this one did not
+get to: stopped, or out of time, searches, Tests or installs -- `clears` says "the next Fix everything continues"),
+`done` one line per kind of thing done (at most twelve, with `items`), `clears` what ends by itself (with `at`),
+`needsYou` what only a person can do, each with its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or
+`{kind: 'settings', key}`), and only once every phase that works on that card ran to its end. Runs are kept in the
 repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
 audited as `library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
 `done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly

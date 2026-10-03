@@ -104,6 +104,7 @@ const S = {
   twicePartial: 's_af_twicepartial', held: 's_af_held',
   dupA: 's_af_dupa', dupB: 's_af_dupb', dupC: 's_af_dupc', dupD: 's_af_dupd', edA: 's_af_eda', edB: 's_af_edb',
   numClean: 's_af_numclean', numTracker: 's_af_numtracker', paused: 's_af_paused', cf: 's_af_cf',
+  againA: 's_af_againa', againB: 's_af_againb', againOdd: 's_af_againodd',
 };
 const ALL = Object.values(S);
 const T: Record<keyof typeof S, string> = {
@@ -112,6 +113,7 @@ const T: Record<keyof typeof S, string> = {
   twicePartial: 'Fix Twice Partial', held: 'Fix Held',
   dupA: 'Fix Twin', dupB: 'Fix Twin', dupC: 'Fix Alpha', dupD: 'Totally Unrelated', edA: 'Fix Edition', edB: 'Fix Edicion',
   numClean: 'Istrevelia', numTracker: 'Istrevelia', paused: 'Fix Paused', cf: 'Fix Cloudflare',
+  againA: 'Fix Again', againB: 'Fix Again', againOdd: 'Fix Again Odd',
 };
 const folderOf = (k: keyof typeof S) => `T!af/${k}`;
 
@@ -447,6 +449,75 @@ test('Stop ends the run at a safe point, and it is recorded stopped', { skip }, 
   assert.ok(r?.log?.some((l: any) => l.code === 'autofix.item.skipped' && l.params?.why === 'stopped'), 'and its log says so');
   assert.ok(r?.summary, 'with a summary of what it did before the stop');
   assert.equal(autofix.stopAutofix(), false, 'nothing to stop once it has ended');
+});
+
+test('Stopping is said to every viewer until the run reaches its safe point', { skip }, async () => {
+  // The web's own press is not the only viewer: another admin's page, or the one that pressed after a reload, reads the
+  // run. Reintroduce by leaving `stopping` out of the live run (lib/autofix.ts liveView): "every viewer reads Stopping"
+  // reads undefined.
+  autofix.setAutofixTiming({ quietMs: 2_000 });
+  const started = autofix.startAutofix(adminId);
+  assert.ok('runId' in started);
+  try {
+    // A sweep starts: the run waits for it before its first phase, which holds it still long enough to ask.
+    runtime.updating = true;
+    let waiting = false;
+    for (let i = 0; i < 200 && !waiting; i++) {
+      waiting = (await autofix.autofixState()).run?.current?.said?.code === 'autofix.now.waitSweep';
+      if (!waiting) await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.ok(waiting, 'PREMISE: the run waits for the sweep');
+    assert.equal((await autofix.autofixState()).run?.stopping, undefined, 'a run nobody stopped reads as stopping');
+    assert.equal(autofix.stopAutofix(), true);
+    const st = await autofix.autofixState();
+    assert.equal(st.run?.id, started.runId, 'PREMISE: still winding down');
+    assert.equal(st.run?.stopping, true, 'every viewer reads Stopping');
+  } finally {
+    runtime.updating = false;
+    autofix.setAutofixTiming({ quietMs: 20 });
+    await autofix.autofixSettled();
+  }
+  assert.equal((await autofix.autofixRun(started.runId))?.status, 'stopped');
+});
+
+test('a stopped run leaves what it did not reach to the next run, never to Needs you; the next run does it', { skip }, async () => {
+  // Needs you is what only a person can do: a card the run never reached is not that. Reintroduce by sorting a card's
+  // findings into Needs you whatever the run reached (summarise's needAfter as need): "a stopped run lists duplicates
+  // under Needs you" fails -- and the second run below merges them, which a person was told they had to.
+  await seedSeries('againA'); for (const n of [1, 2, 3]) await seedBook('againA', n);
+  await seedSeries('againB'); for (const n of [1, 2, 3]) await seedBook('againB', n);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','af-again'), ($2,'anilist','af-again')`, [S.againA, S.againB]);
+  await seedSeries('againOdd'); for (const n of [1, 2, 3]) await seedBook('againOdd', n);
+  await seedBook('againOdd', 8888);
+
+  const first = autofix.startAutofix(adminId);
+  assert.ok('runId' in first);
+  // Stopped before its first phase: only the recheck runs, so the summary says what is left and nothing was looked at.
+  autofix.stopAutofix();
+  await autofix.autofixSettled();
+  const stopped = (await autofix.autofixRun(first.runId))!;
+  assert.equal(stopped.status, 'stopped');
+  const needs = stopped.summary!.needsYou.map((n) => n.check);
+  for (const c of ['duplicates', 'outliers', 'numbering', 'saved-twice', 'sources', 'frozen-series', 'chapter-failures', 'short-chapters']) {
+    assert.ok(!needs.includes(c), `a stopped run lists ${c} under Needs you: ${needs.join(', ')}`);
+  }
+  assert.ok(stopped.summary!.clears.some((c) => c.said.code === 'autofix.clears.nextRun'), 'the next run continues them');
+  assert.equal(stopped.summary!.again, true, 'Run again is offered');
+  assert.equal(stopped.summary!.green, false, 'and it is not green');
+
+  // The premise: a run could fix them. The next one does, and what it leaves for a person is Needs you again.
+  const second = autofix.startAutofix(adminId);
+  assert.ok('runId' in second);
+  await autofix.autofixSettled();
+  const done = (await autofix.autofixRun(second.runId))!;
+  assert.equal(done.status, 'done');
+  const [ra, rb] = [await seriesRow(S.againA), await seriesRow(S.againB)];
+  assert.ok(ra.merged_into === S.againB || rb.merged_into === S.againA, 'the duplicate the stopped run left was merged');
+  assert.ok((await book(`b_${S.againOdd}_8888`)).pruned_at, 'and its impossible number deleted');
+  const left = done.summary!.needsYou.map((n) => n.check);
+  for (const c of ['numbering', 'outliers', 'saved-twice']) assert.ok(left.includes(c), `${c} is a person's once the run has done its part: ${left.join(', ')}`);
+  assert.equal(done.summary!.again, done.summary!.clears.some((c) => c.said.code === 'autofix.clears.nextRun'),
+    'Run again exactly while the next run has something to continue');
 });
 
 test('a solver that is down: the sources behind it are left alone, and it is Needs you', { skip }, async () => {
