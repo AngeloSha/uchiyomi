@@ -502,7 +502,26 @@ export interface HealthItem {
    * source is `sourceId`. The key's words say the number when it is here.
    */
   findSeries?: number;
+
+  // ---- v0.53.0, Source health rows only (bff lib/health.ts): the card's group, and what the row's one line and its
+  // one key are chosen by. components/SourceHealthBody.tsx reads them; lib/sourceHealth.ts words them.
+  /** `affected` and `unused` are the findings; `quiet` and `off` are listed for reference, folded away. */
+  group?: SourceGroup;
+  state?: SourceState;
+  /** The stage a `failing`, `inconclusive` or `untested` row is about. */
+  stage?: StageLine['stage'];
+  /** A `blocked` row's status and when its cooldown ends (null: none is set). */
+  cooldown?: { status: string; until: string | null };
+  /** Where an `off` row was switched off, which is where it comes back on: Providers, Extensions, or a hidden language. */
+  offBy?: 'admin' | 'extension' | 'language';
+  /** The source has an extension's logo, which /img/sources/icon/:id serves. */
+  icon?: boolean;
 }
+
+/** v0.53.0: the Source health card's groups, in the server's order. */
+export type SourceGroup = 'affected' | 'unused' | 'quiet' | 'off';
+/** v0.53.0: a source row's one state (bff lib/health.ts SourceState). */
+export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off';
 
 /** The last attempt at a finding, per check (bff lib/health.ts `HealthOutcome`). */
 export type HealthOutcome =

@@ -29,7 +29,8 @@ export type Join =
   | 'dash'      // "a — b"
   | 'dashCap'   // "a — B"
   | 'paren'     // "a (b)"
-  | 'colon';    // "a: b"
+  | 'colon'     // "a: b"
+  | 'dot';      // "a · b" -- v0.53.0, Source health's summary: two counts side by side, neither a clause of the other
 
 export type Param = string | number | boolean | null | string[] | number[];
 
@@ -191,8 +192,15 @@ const EN = {
     `primary ${source ?? '(none)'} gone; still following ${followed.join(', ')}`,
 
   // ---- Source health (#115). `status` is a SourceStatus code; `stage` a Stage.
-  'sources.live': ({ n }: { n: number }) => `${n} source${s(n, ' is', 's are')} failing or blocked`,
+  // v0.53.0: the summary counts the card's two groups that need a look, joined by 'dot'; with neither, `sources.unused`
+  // while rows are listed for reference (never "all working" over a source nobody could test to the end), else
+  // `sources.working`. The five after `sources.unused` are the summary before v0.53.0, no longer sent: a summary an
+  // older server stored still carries them (the header reads the last stored report), so they keep their words.
+  'sources.affected': ({ n }: { n: number }) => `${n} source${s(n, '', 's')} your series use ${s(n, 'needs', 'need')} a look`,
+  'sources.failingUnused': ({ n }: { n: number }) => `${n} source${s(n, ' nothing uses is', 's nothing uses are')} failing`,
+  'sources.working': () => 'All sources are working',
   'sources.unused': () => 'Nothing is failing that your library uses',
+  'sources.live': ({ n }: { n: number }) => `${n} source${s(n, ' is', 's are')} failing or blocked`,
   'sources.none': () => 'All sources responding normally',
   'sources.off': ({ n }: { n: number }) => `${n} turned off by you`,
   'sources.idle': ({ n }: { n: number }) => `${n} no series use`,
@@ -545,6 +553,7 @@ const JOIN: Record<Join, (a: string, b: string) => string> = {
   dashCap: (a, b) => `${a} — ${cap(b)}`,
   paren: (a, b) => `${a} (${b})`,
   colon: (a, b) => `${a}: ${b}`,
+  dot: (a, b) => `${a} · ${b}`,
 };
 
 type Parts = ReadonlyArray<Part | null | undefined | false>;

@@ -22,6 +22,8 @@ export interface MenuItem {
   danger?: boolean;
   /** Shown, not hidden: offline, the items that need the server say so by being there and greyed. */
   disabled?: boolean;
+  /** `data-menu-item` on the item, for a browser walk to find it by what it does rather than by its words. */
+  hook?: string;
 }
 
 type At = { x: number; y: number };
@@ -76,7 +78,7 @@ function Menu({ items, at, label, onClose }: { items: MenuItem[]; at: At; label:
         style={{ left: pos?.left ?? at.x, top: pos?.top ?? at.y, visibility: pos ? 'visible' : 'hidden' }}
         className="fixed z-[91] w-52 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
         {items.map((it, k) => (
-          <button key={k} type="button" role="menuitem" tabIndex={-1} disabled={it.disabled}
+          <button key={k} type="button" role="menuitem" tabIndex={-1} disabled={it.disabled} data-menu-item={it.hook}
             onClick={() => { onClose(true); void it.onSelect(); }}
             className={`block w-full px-3.5 py-2.5 text-start text-xs hover:bg-ink-800 focus:bg-ink-800 focus:outline-none disabled:opacity-40 ${
               it.divider && k > 0 ? 'border-t border-ink-800' : ''} ${it.danger ? 'text-red-300' : 'text-fog-200'}`}>

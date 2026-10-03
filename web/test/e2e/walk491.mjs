@@ -21,8 +21,9 @@
 //     are added from fake-a, fake-b is checked NOT to be followed (followed anyway, it is unfollowed through the
 //     Sources sheet), and fake-a goes offline. Providers -> Test fake-a says "The site says it is offline (its own
 //     page)", and "the site says it is offline" at the search step; Health -> Source health's fake-a row says the same
-//     with the fix sentence, and offers "Find other sources (2 series)". The API row carries the same code and count.
-//   run -- that key, pressed. The run starts (two series); Library -> Downloads' Server tasks shows its card with
+//     with the fix sentence behind its Details, and offers "Find other sources (2 series)" in its ⋯ menu (v0.53.0). The
+//     API row carries the same code and count.
+//   run -- that item, pressed, and the start dialog's Start (v0.51.0). The run starts (two series); Library -> Downloads' Server tasks shows its card with
 //     "1 of 2 series", the series it is on and Stop, then it finishes. Its results: Walk Tale under New sources with
 //     fake-b and its 12 chapters, Walk Gap under Skipped with its reason in words. Walk Tale's Sources sheet then
 //     lists fake-b, and its "12 chapters listed" appears within a bounded wait: the run's paced listing refresh.
@@ -246,27 +247,61 @@ async function openSourceHealth() {
   }
   return !!(await waitFor(() => page.$('#health-sources-details'), 10_000));
 }
-const healthRowOnPage = (sourceId) => page.evaluate((id) => {
-  const row = [...document.querySelectorAll('[data-health-check="sources"] [data-health-item]')]
-    .find((r) => r.querySelector('p[dir="auto"]')?.textContent?.trim() === id);
-  if (!row) return null;
-  const ps = [...row.querySelectorAll(':scope p[dir="auto"]')];
-  const key = row.querySelector('button[data-health-action="find_sources"]');
-  const stage = row.querySelector('[data-evidence-stage="search"]');
-  // The search step's error: the source's own words as the server kept them, English in every language.
-  const err = stage?.querySelector('p[dir="auto"]');
-  const ev = row.querySelector('[data-source-evidence]');
-  const fix = ev ? [...ev.querySelectorAll(':scope > p[dir="auto"]')].pop() : null;
-  return {
-    text: row.innerText.replace(/\s+/g, ' ').trim(),
-    detail: ps[1]?.textContent ?? '', detailDir: ps[1] ? getComputedStyle(ps[1]).direction : null, detailAuto: ps[1]?.getAttribute('dir') === 'auto',
-    fix: fix?.textContent ?? '', fixDir: fix ? getComputedStyle(fix).direction : null,
-    stage: stage?.getAttribute('data-evidence-state') ?? null, stageText: stage?.querySelector('bdi')?.textContent ?? '',
-    error: err?.textContent ?? '', errorDir: err ? getComputedStyle(err).direction : null, errorAuto: err?.getAttribute('dir') === 'auto',
-    key: key?.textContent?.trim() ?? null, keyDisabled: key ? key.disabled : null,
-    status: [...row.querySelectorAll('[data-action-status]')].map((s) => `${s.getAttribute('data-action-status')}: ${s.textContent}`),
-  };
-}, sourceId);
+/**
+ * fake-a's row as the page shows it. v0.53.0: one line and one key, the server's sentence, the stage lines and the fix
+ * behind its Details (opened here), and Find other sources in its ⋯ menu -- or beside its key, as Stop, while its run
+ * goes (components/SourceHealthBody.tsx).
+ */
+const rowSel = (id) => `[data-health-check="sources"] [data-source-row="${id}"]`;
+const healthRowOnPage = async (sourceId) => {
+  const sel = rowSel(sourceId);
+  if (!(await page.$(sel))) return null;
+  await page.$eval(`${sel} [data-health-details] button[aria-expanded="false"]`, (b) => b.click()).catch(() => {});
+  let key = await page.$eval(`${sel} button[data-health-action="find_sources"]`, (b) => ({ text: b.textContent.trim(), disabled: b.disabled })).catch(() => null);
+  if (!key) {
+    await page.$eval(`${sel} button[data-health-more]`, (b) => b.click()).catch(() => {});
+    key = await waitFor(() => page.$eval('[role="menu"] [data-menu-item="find_sources"]', (b) => ({ text: b.textContent.trim(), disabled: b.disabled })), 3000, 100);
+    if (await page.$('[role="menu"]')) {
+      await page.keyboard.press('Escape');
+      await waitFor(async () => !(await page.$('[role="menu"]')), 3000, 100);
+    }
+  }
+  const row = await page.evaluate((sel) => {
+    const row = document.querySelector(sel);
+    if (!row) return null;
+    const detail = row.querySelector('[data-health-detail]');
+    const stage = row.querySelector('[data-evidence-stage="search"]');
+    // The search step's error: the source's own words as the server kept them, English in every language.
+    const err = stage?.querySelector('p[dir="auto"]');
+    const ev = row.querySelector('[data-source-evidence]');
+    const fix = ev ? [...ev.querySelectorAll(':scope > p[dir="auto"]')].pop() : null;
+    return {
+      text: row.innerText.replace(/\s+/g, ' ').trim(), line: row.querySelector('[data-source-line]')?.textContent ?? '',
+      detail: detail?.textContent ?? '', detailDir: detail ? getComputedStyle(detail).direction : null, detailAuto: detail?.getAttribute('dir') === 'auto',
+      fix: fix?.textContent ?? '', fixDir: fix ? getComputedStyle(fix).direction : null,
+      stage: stage?.getAttribute('data-evidence-state') ?? null, stageText: stage?.querySelector('bdi')?.textContent ?? '',
+      error: err?.textContent ?? '', errorDir: err ? getComputedStyle(err).direction : null, errorAuto: err?.getAttribute('dir') === 'auto',
+      status: [...row.querySelectorAll('[data-action-status]')].map((s) => `${s.getAttribute('data-action-status')}: ${s.textContent}`),
+    };
+  }, sel);
+  return row && { ...row, key: key?.text ?? null, keyDisabled: key ? key.disabled : null };
+};
+/**
+ * Find other sources on fake-a's row: its ⋯, the item, and -- since v0.51.0 -- the start dialog's Start (the default,
+ * automatic). False while the item is not there or waits.
+ */
+const pressFindOnRow = async (sourceId) => {
+  const sel = rowSel(sourceId);
+  if (!(await page.$(sel))) return false;
+  await page.$eval(`${sel} button[data-health-more]`, (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+  const item = await waitFor(() => page.$('[role="menu"] [data-menu-item="find_sources"]:not([disabled])'), 3000, 100);
+  if (!item) { await page.keyboard.press('Escape').catch(() => {}); return false; }
+  await item.click();
+  const start = await waitFor(() => page.$('[data-find-start]'), 10_000, 150);
+  if (!start) return false;
+  await start.click();
+  return true;
+};
 
 /** The find_sources card under Library -> Downloads -> Server tasks, measured. */
 const cardOnPage = () => page.evaluate(() => {
@@ -387,8 +422,7 @@ async function offline() {
     && item?.actions?.includes('find_sources') && item?.findSeries === 2 && !item?.info,
     JSON.stringify(item && { diagnosis: item.diagnosis, actions: item.actions, findSeries: item.findSeries, info: item.info }));
   check(`${tag}: Health has no sideways scroll`, await noSideScroll());
-  await page.evaluate(() => [...document.querySelectorAll('[data-health-check="sources"] [data-health-item]')]
-    .find((r) => r.querySelector('p[dir="auto"]')?.textContent?.trim() === 'fake-a')?.scrollIntoView({ block: 'center' }));
+  await page.$eval(rowSel('fake-a'), (el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
   await shot('offline-2-health-row');
 }
 
@@ -401,16 +435,8 @@ async function run() {
   await script(FAKE_B, 'search', 'slow:15000');
   const before = (await findState()).run?.id ?? null;
   if (!(await openSourceHealth())) throw new Error('Health -> Source health did not open');
-  const pressed = await waitFor(() => page.evaluate(() => {
-    const row = [...document.querySelectorAll('[data-health-check="sources"] [data-health-item]')]
-      .find((r) => r.querySelector('p[dir="auto"]')?.textContent?.trim() === 'fake-a');
-    const b = row?.querySelector('button[data-health-action="find_sources"]');
-    if (!b || b.disabled) return false;
-    b.scrollIntoView({ block: 'center' });
-    b.click();
-    return true;
-  }), 30_000);
-  check(`${tag}: Health's Find other sources is pressed`, !!pressed);
+  const pressed = await waitFor(() => pressFindOnRow('fake-a'), 30_000);
+  check(`${tag}: Health's Find other sources is pressed, from the row's ⋯, and started`, !!pressed);
   const started = await waitFor(async () => { const s = await findState(); return s.running && s.run && s.run.id !== before ? s.run : null; }, 15_000);
   check(`${tag}: a run starts, over fake-a's 2 series`, started?.total === 2, JSON.stringify(started));
   const working = await waitFor(async () => { const r = await healthRowOnPage('fake-a'); return r?.key === 'Stop' && r.status.some((s) => s.startsWith('working')) ? r : null; }, 10_000);
@@ -665,16 +691,11 @@ async function arabic() {
     check('ar: ...its fix is worded in Arabic, right to left', row?.fix === ar('Wait for the site to come back, or find other sources for its series.') && row?.fixDir === 'rtl', JSON.stringify(row));
     check('ar: ...and its search step says it too', row?.stageText === ar('the site says it is offline'), JSON.stringify(row));
     check('ar: Health has no sideways scroll', await noSideScroll());
-    await page.evaluate(() => [...document.querySelectorAll('[data-health-check="sources"] [data-health-item]')]
-      .find((r) => r.querySelector('p[dir="auto"]')?.textContent?.trim() === 'fake-a')?.scrollIntoView({ block: 'center' }));
+    await page.$eval(rowSel('fake-a'), (el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
     await shot('ar-1-health-row');
 
     const before = (await findState()).run?.id ?? null;
-    await page.evaluate(() => {
-      const row = [...document.querySelectorAll('[data-health-check="sources"] [data-health-item]')]
-        .find((r) => r.querySelector('p[dir="auto"]')?.textContent?.trim() === 'fake-a');
-      row?.querySelector('button[data-health-action="find_sources"]')?.click();
-    });
+    await waitFor(() => pressFindOnRow('fake-a'), 15_000);
     const started = await waitFor(async () => { const s = await findState(); return s.running && s.run && s.run.id !== before ? s.run : null; }, 15_000);
     check('ar: the key starts a run over the 2 series', started?.total === 2, JSON.stringify(started));
     await go('/library/?view=downloads', 1500);
@@ -696,7 +717,7 @@ async function arabic() {
     const view = await openResultsFromCard();
     const found = view?.groups?.found;
     const skipped = view?.groups?.skipped;
-    check('ar: the results\' groups are Arabic', (found?.head ?? '').startsWith(ar('New sources')) && (skipped?.head ?? '').startsWith(ar('Skipped')), JSON.stringify(view?.groups));
+    check('ar: the results\' groups are Arabic', (found?.head ?? '').startsWith(ar('New sources')) && (skipped?.head ?? '').startsWith(ar('Skipped series')), JSON.stringify(view?.groups));
     const f = found?.rows?.[0];
     check('ar: ...the series title and the source name keep their own direction',
       f?.title === LONG && f?.titleAuto && f?.titleDir === 'ltr' && f?.sources?.[0]?.name === 'fake-b' && f?.sources?.[0]?.dir === 'ltr', JSON.stringify(f));

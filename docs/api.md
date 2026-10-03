@@ -530,7 +530,7 @@ params?, join?}` — `code` stable (`gaps.live`, `sources.failing`, `job.partial
 `pref.noChoice`, a diagnosis's `fix.moved`…), `params` what fills it (counts as numbers, moments as ISO strings,
 names, file names and a system's own error text as strings), and, in a field that is a list, `join` how a part
 joins the one before it (`clause` "a; b" when absent, `sentence`, `then` — a sentence that opens on a name, left as
-it is — `period`, `dash`, `dashCap`, `paren`, `colon`).
+it is — `period`, `dash`, `dashCap`, `paren`, `colon`, and since v0.53.0 `dot`, "a · b").
 The fields: a check's `summarySaid` and `noteSaid`, an item's `detailSaid` and `titleSaid`, a diagnosis's
 `fixSaid` (its `reason` is its `code`'s sentence), a download card's and an activity entry's `reasonSaid` (a list),
 a run card's `reasonSaid`, a refusal's `messageSaid`, and a numbering answer's `errorSaid`. The English is
@@ -583,6 +583,22 @@ disabled*, the check is `warn` with the summary *It cannot use its Cloudflare he
 there is a setting to write and a helper (`FLARESOLVERR_URL`) to share. A `frozen-series` item for an extension
 series now names the engine when it is the reason (*can't be reached because the extension engine isn't answering*
 / *is off*).
+
+**Source health's groups** (since v0.53.0). Every `sources` item carries `group`: `affected` (a finding on a source
+series use), `unused` (a finding on a source no series uses — a confirmed failure is a finding whatever uses it, so
+it is grouped apart rather than hidden), `quiet` (listed for reference: a cooldown on a source nothing uses, a test
+that ran out of time, a failure unchecked for seven days, an ignored finding) or `off` (switched off, with `offBy`:
+`admin` under Providers, `extension` in Admin → Extensions, or `language` for a language hidden in every extension —
+where it comes back on). The check lists them in that
+order: `affected` by series, most first, then blocked or failing before slow or empty; the other three by name.
+`state` is the row's one state — `blocked`, `failing`, `slow`, `empty`, `inconclusive`, `untested` or `off` — with
+`stage` for failing, inconclusive and untested, and `cooldown` `{status, until}` for blocked (`until` null when no
+cooldown is set), so a client picks a row's words and its one key without reading `detail`; `icon` is true when the
+source has an extension's logo, which `GET /img/sources/icon/:id` serves. The summary counts the first two groups —
+*3 sources your series use need a look · 5 sources nothing uses are failing* (`sources.affected`,
+`sources.failingUnused`, joined by `dot`) — and with neither says *All sources are working* (`sources.working`), or
+*Nothing is failing that your library uses* while quiet rows are listed. The status is decided as before: `warn`
+while any finding remains.
 
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering

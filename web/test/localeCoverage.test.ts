@@ -232,6 +232,9 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     'the library still marks these {n} deleted, and no scan has read the files since',
   // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
   'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
+  // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources".
+  'Turn off this source? No series uses it. You can turn it back on in Providers.':
+    'Turn off these {n} sources? No series uses them. You can turn them back on in Providers.',
   // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
   'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
   'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',

@@ -153,7 +153,40 @@ export interface HealthItem {
   diagnosis?: { code: DiagnosisCode; reason: string; fix: string; fixSaid?: Said };
   /** How many series use the source (primaries and followers). */
   series?: number;
+
+  // ---- v0.53.0, Source health rows only: what the card's groups and each row's one line are made of, as data, so a
+  // client sorts and words a row without reading `detail`.
+  /**
+   * Which part of the card the row belongs to. `affected`: a finding on a source series use. `unused`: a finding on a
+   * source no series uses -- a confirmed failure is a finding whatever uses it (#115), so it is grouped apart, never
+   * hidden. `off`: switched off under Providers, or its language hidden. `quiet`: every other row listed for reference
+   * (a cooldown on a source nothing uses, a test that ran out of time, a failure unchecked for a week, an ignore).
+   */
+  group?: SourceGroup;
+  /** The row's one state, whatever its group: what its words and its one key are chosen by. */
+  state?: SourceState;
+  /** The stage a `failing`, `inconclusive` or `untested` row is about. */
+  stage?: Stage;
+  /** A `blocked` row's status (rate_limited, blocked, down) and when its cooldown ends; `until` null when none is set. */
+  cooldown?: { status: string; until: string | null };
+  /**
+   * Where an `off` row was switched off: under Providers (`admin`), in Admin -> Extensions (`extension`), or by hiding
+   * its language in every extension (`language`) -- which says where it comes back on.
+   */
+  offBy?: 'admin' | 'extension' | 'language';
+  /** The source has a logo of its own, an extension's: GET /img/sources/icon/{sourceId} serves it. */
+  icon?: boolean;
 }
+
+/** v0.53.0: the Source health card's four groups, in the order the check lists them. */
+export type SourceGroup = 'affected' | 'unused' | 'quiet' | 'off';
+/**
+ * v0.53.0: a source row's one state. `blocked`: a cooldown, or a status other than ok (`cooldown` says which);
+ * `failing`: a confirmed failure at `stage`; `slow` and `empty`: answers too slow, or empty, three times in a row;
+ * `inconclusive`: its last test ran out of time at `stage`; `untested`: a failure at `stage` nothing has checked for a
+ * week; `off`: switched off.
+ */
+export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off';
 
 /**
  * The last attempt at a finding, per check. Every field comes from a stored row the repair wrote (gaps_result,
@@ -884,9 +917,13 @@ export function sourceLabel(id: string, engineName?: string | null): string {
 
 const iso = (t: string | number | Date) => new Date(t).toISOString();
 
+/** v0.53.0: the Source health card's groups in its order, and how bad a state is among rows with as many series. */
+const GROUP_ORDER: Record<SourceGroup, number> = { affected: 0, unused: 1, quiet: 2, off: 3 };
+const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1, empty: 1, inconclusive: 2, untested: 2, off: 3 };
+
 async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
-    source_id: string; status: string; consecutive: number; disabled: boolean;
+    source_id: string; status: string; consecutive: number; disabled: boolean; off_in: 'language' | 'extension' | null;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
     last_fail_at: string | null; last_slow_at: string | null; slow_streak: number;
     stages: Stages | null; live_at: string | null; live_by: 'test' | 'sweep' | null;
@@ -900,6 +937,12 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
             -- it again and a stale 'down' row would otherwise keep this check amber for good).
             (sh.disabled OR EXISTS (SELECT 1 FROM suwayomi_sources ss
                                       WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)) AS disabled,
+            -- v0.53.0: where an extension's source was switched off, for the row's words and the way back: its language
+            -- hidden in every extension, or the source itself switched off in Admin -> Extensions. NULL: neither, so it
+            -- was turned off under Providers.
+            (SELECT CASE WHEN st.hidden_langs ? ss.lang THEN 'language' ELSE 'extension' END
+               FROM suwayomi_sources ss LEFT JOIN server_settings st ON st.id = 1
+              WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled LIMIT 1) AS off_in,
             sh.blocked_until, sh.last_error,
             sh.empty_streak, sh.last_ok_at,
             -- When the stored error was written, so a success that came AFTER it can be told apart from one
@@ -925,7 +968,9 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3 OR sh.slow_streak >= 3
          OR sh.live_state IN ('fail', 'inconclusive') OR sh.stages::text LIKE '%failAt%'
          OR EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)
-      ORDER BY 4 DESC, sh.consecutive DESC`,
+      -- Any order: the card's is set below, once each row's group is known. This was ORDER BY disabled DESC, which
+      -- put thirty switched-off sources at the top of the card and the ones the library depends on at its very end.
+      ORDER BY sh.source_id`,
   );
   const now = Date.now();
   // v0.49.1: how many series each source is the MAIN source of -- what Find other sources on its row would search for.
@@ -946,12 +991,12 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     !r.disabled && r.series === 0 && !(r.blocked_until && new Date(r.blocked_until).getTime() > now);
   const traffic = (r: typeof rows[number]) => r.status !== 'ok' || r.empty_streak >= 3 || r.slow_streak >= 3;
   const WEEK = 7 * DAY_MS;
-  let off = 0, idle = 0, unfinished = 0, untested = 0;
   const items: Array<HealthItem & { members?: string[] }> = [];
   for (const r of rows) {
     // Evidence counts only for a source that is loaded: an uninstalled extension's series are the frozen-series
     // check's business, and its last test is about something that no longer exists here.
-    const loaded = !!getSource(r.source_id);
+    const src = getSource(r.source_id);
+    const loaded = !!src;
     const open = loaded ? openFailures(r.stages, now).filter((f) => f.confirmed) : [];
     const failing = open.filter((f) => !f.stale);
     const inconclusive = loaded && r.live_state === 'inconclusive' && !!r.live_at && now - new Date(r.live_at).getTime() < WEEK;
@@ -991,7 +1036,6 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     let info = false;
     let members: string[] = [];
     if (r.disabled) {
-      off++;
       info = true;
       detail = [state, uses];
     } else if (failing.length) {
@@ -1009,21 +1053,29 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       members = failing.map((f) => f.stage);
     } else if (traffic(r)) {
       info = unused(r);
-      if (info) idle++;
       detail = [
         state, uses,
         ...(d.code === 'ok' ? [] : [joined('dash', d.fix ? own(d.fixSaid, d.fix) : say('sources.reason', { diagnosis: d.code }))]),
       ];
     } else if (inconclusive) {
-      unfinished++;
       info = true;
       detail = [say('sources.inconclusive', { stage: r.live_stage ?? 'search' }), tested, uses].filter((p): p is Part => !!p);
     } else {
-      untested++;
       info = true;
       const days = Math.floor((now - new Date(open[0].at).getTime()) / DAY_MS);
       detail = [say('sources.stale', { stage: open[0].stage, at: iso(open[0].at), days }), uses];
     }
+    // v0.53.0: the row's one state and what its words need, as data (HealthItem.state). The same branches as the
+    // detail above, in the same order, so the two can never tell one row two ways.
+    const sourceState: SourceState = r.disabled ? 'off'
+      : failing.length ? 'failing'
+      : traffic(r) ? (r.status !== 'ok' ? 'blocked' : r.empty_streak >= 3 ? 'empty' : 'slow')
+      : inconclusive ? 'inconclusive'
+      : 'untested';
+    const stage = sourceState === 'failing' ? lead.stage
+      : sourceState === 'inconclusive' ? (r.live_stage ?? 'search')
+      : sourceState === 'untested' ? open[0].stage
+      : null;
     const findHere = (r.disabled || !info) && (mainCounts.get(r.source_id) ?? 0) > 0;
     items.push({
       title: sourceLabel(r.source_id, r.engine_name),
@@ -1048,22 +1100,42 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       ...(r.live_at ? { tested: { at: new Date(r.live_at).toISOString(), by: r.live_by, state: r.live_state, stage: r.live_stage } } : {}),
       diagnosis: { code: d.code, reason: d.reason, fix: d.fix, ...(d.fixSaid ? { fixSaid: d.fixSaid } : {}) },
       series: r.series,
+      state: sourceState,
+      ...(stage ? { stage } : {}),
+      ...(sourceState === 'blocked' ? { cooldown: { status: r.status, until: r.blocked_until ? iso(r.blocked_until) : null } } : {}),
+      // Switched off in Extensions as well as under Providers: Extensions is where it comes back on.
+      ...(r.disabled ? { offBy: r.off_in ?? 'admin' as const } : {}),
+      // An extension's own logo, which /img/sources/icon/:id serves while the source is loaded. Not a site's favicon:
+      // that is a request to the site for every row on every visit.
+      ...(src?.iconUrl ? { icon: true } : {}),
     });
   }
   const ignored = applyIgnores('sources', items, ctx);
+  // v0.53.0: the card's groups, AFTER the ignores -- an ignored finding is `info` from here on, and quiet -- and the
+  // card's order: what the library depends on first, the most series first and the worst first among equals; then
+  // what fails with nothing on it; then the quiet rows and the switched-off ones, by name. Only the first two groups
+  // are findings, so the summary below counts them and the status says the same thing.
+  for (const it of items) {
+    it.group = it.state === 'off' ? 'off' : it.info ? 'quiet' : (it.series ?? 0) > 0 ? 'affected' : 'unused';
+  }
+  items.sort((a, b) => GROUP_ORDER[a.group!] - GROUP_ORDER[b.group!]
+    || (a.group === 'affected' ? (b.series ?? 0) - (a.series ?? 0) || SEVERITY[a.state!] - SEVERITY[b.state!] : 0)
+    || a.title.localeCompare(b.title, 'en', { sensitivity: 'base', numeric: true })
+    || (a.sourceId ?? '').localeCompare(b.sourceId ?? ''));
+  const affected = items.filter((i) => i.group === 'affected').length;
+  const failingUnused = items.filter((i) => i.group === 'unused').length;
   const live = items.filter((i) => !i.info).length;
   return {
     id: 'sources',
     title: 'Source health',
     status: live ? 'warn' : 'ok',
     ...summaryOf([
-      live ? say('sources.live', { n: live })
-        // Never "all responding" over a source that is failing unused, or that nobody could test to the end.
-        : idle + unfinished + untested ? say('sources.unused') : say('sources.none'),
-      off > 0 && say('sources.off', { n: off }),
-      idle > 0 && say('sources.idle', { n: idle }),
-      unfinished > 0 && say('sources.unfinished', { n: unfinished }),
-      ignoredPart(ignored),
+      affected > 0 && say('sources.affected', { n: affected }),
+      failingUnused > 0 && joined('dot', say('sources.failingUnused', { n: failingUnused })),
+      // Never "all working" over a row listed for reference: a source nobody could test to the end, a cooldown on one
+      // nothing uses, an ignore.
+      !live && (items.some((i) => i.group === 'quiet') ? say('sources.unused') : say('sources.working')),
+      ignored > 0 && joined('dot', say('ignored', { n: ignored })),
     ]),
     ...noteOf([say('sources.note')]),
     testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,

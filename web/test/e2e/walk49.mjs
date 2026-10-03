@@ -89,8 +89,9 @@
 //     1. Providers -> Test fake-a: the running key shows its clock, the card lists ✗ Search, never "Working
 //        normally." beside a ✗, and its mark reads "Failing" (the public status is still 'ok');
 //     2. a reload keeps the verdict: the card's stored evidence still says ✗ Search;
-//     3. Health -> Source health lists fake-a by name with the ✗ Search line;
-//     4. with search scripted back to `ok`, Test from the Health row clears the finding.
+//     3. Health -> Source health lists fake-a by name among its findings (v0.53.0: one line, one key), and its
+//        Details say ✗ Search;
+//     4. with search scripted back to `ok`, the row's one key, Test, clears the finding.
 //
 //   engine -- Admin → Extensions with the extension engine not answering, then answering, then the redesigned tab
 //   (v0.53.0) on a 1,300-extension repository: Installed, Turn on its sources, Update, Browse to the catalogue's last
@@ -562,30 +563,32 @@ async function sources(width) {
 
   await go('/admin/?tab=Health', 4000);
   const hc = '[data-health-check="sources"]';
+  // v0.53.0: a source is one line with one key, in the group of the findings it belongs to, and its stage lines wait
+  // behind its Details (components/SourceHealthBody.tsx).
+  const fakeA = `${hc} [data-source-row="fake-a"]`;
   await page.waitForSelector(hc, { timeout: 30_000 });
   await page.$eval(`${hc} button`, (b) => b.click());
-  const row = await waitFor(() => page.evaluate((hc) => {
-    const r = [...document.querySelectorAll(`${hc} [data-source-evidence]`)].map((e) => e.closest('.flex'))
-      .find((x) => x?.querySelector('p')?.textContent?.trim() === 'fake-a');
-    return r ? !!r.querySelector('[data-evidence-stage="search"][data-evidence-state="fail"]') : null;
-  }, hc), 20_000, 300);
-  check(`${tag}: Health -> Source health names fake-a with ✗ Search`, row === true, String(row));
-  await page.$eval(hc, (el) => el.scrollIntoView({ block: 'start' }));
+  const listed = await waitFor(() => page.evaluate((sel) => {
+    const r = document.querySelector(sel);
+    return r && r.querySelector('[data-source-name]')?.textContent?.trim() === 'fake-a' ? r.closest('[data-source-group]')?.getAttribute('data-source-group') : null;
+  }, fakeA), 20_000, 300);
+  check(`${tag}: Health -> Source health lists fake-a by name, among the findings`, listed === 'affected' || listed === 'unused', String(listed));
+  await page.$eval(`${fakeA} [data-health-details] button`, (b) => b.click()).catch(() => {});
+  const row = await waitFor(() => page.evaluate((sel) => !!document.querySelector(`${sel} [data-evidence-stage="search"][data-evidence-state="fail"]`) || null, fakeA), 10_000, 300);
+  check(`${tag}: ...and its Details say ✗ Search`, row === true, String(row));
+  await page.$eval(fakeA, (el) => el.scrollIntoView({ block: 'center' }));
   await shot(`${tag}-sources-3-health`);
 
-  // Search works again: a Test from the Health row records the pass, and the finding goes.
+  // Search works again: the row's one key is Test, it records the pass, and the finding goes.
   await script(FAKE_A, 'search', 0, 'ok');
-  const pressed = await page.evaluate((hc) => {
-    // The row's keys sit beside its name and evidence, not inside them: the Health item holds both.
-    const r = [...document.querySelectorAll(`${hc} [data-source-evidence]`)]
-      .find((e) => e.closest('.flex')?.querySelector('p')?.textContent?.trim() === 'fake-a');
-    const b = r?.closest('[data-health-item]')?.querySelector('[data-health-action="test"]');
+  const pressed = await page.evaluate((sel) => {
+    const b = document.querySelector(`${sel} button[data-health-primary][data-health-action="test"]`);
     b?.click();
     return !!b;
-  }, hc);
-  check(`${tag}: the Health row offers Test`, pressed);
-  const gone = await waitFor(() => page.evaluate((hc) => ![...document.querySelectorAll(`${hc} [data-evidence-state="fail"]`)].length, hc), 60_000, 500);
-  check(`${tag}: a passing Test from Health clears the ✗`, !!gone);
+  }, fakeA);
+  check(`${tag}: the Health row's one key is Test`, pressed);
+  const gone = await waitFor(() => page.evaluate((hc) => !document.querySelector(`${hc} [data-source-group] [data-source-row="fake-a"]`), hc), 60_000, 500);
+  check(`${tag}: a passing Test from Health clears the finding`, !!gone);
   await shot(`${tag}-sources-4-health-cleared`);
 }
 

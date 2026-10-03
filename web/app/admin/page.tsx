@@ -45,7 +45,8 @@ import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
 import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
 import { SourceEvidence } from '@/components/SourceEvidence';
-import { checkAllLabel, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
+import { SourceHealthBody } from '@/components/SourceHealthBody';
+import { checkAllLabel, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
 import { useTicker } from '@/lib/ticker';
 
 /**
@@ -2054,7 +2055,14 @@ function Health() {
               </button>
               {c.id === 'update' && <DesktopUpdateNote />}
 
-              {isOpen && (
+              {/* v0.53.0: Source health draws a body of its own -- the sources the library depends on first, one line
+                  and one key each, the rest folded, and its glossary at its foot (components/SourceHealthBody.tsx). */}
+              {isOpen && c.id === 'sources' && (
+                <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
+                  <SourceHealthBody check={c} />
+                </div>
+              )}
+              {isOpen && c.id !== 'sources' && (
                 <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
                   <HealthCardActions check={c} />
                   {c.note && <p data-health-note dir="auto" className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{checkNote(c)}</p>}
@@ -2079,10 +2087,6 @@ function Health() {
                             or in an Arabic page a sentence's full stop and closing bracket land at its start. */}
                         <p dir="auto" className="break-words text-sm text-fog-100">{itemTitle(it)}</p>
                         <p dir="auto" className="text-[11px] text-fog-500">{itemDetail(it)}</p>
-                        {/* #115: the stage lines and the fix, through the component Providers uses too, and only
-                            where they say something (healthRowEvidence). Among the row's words, above its keys: the
-                            source rows have no Open link beside them, so the lines take the row's full width. */}
-                        {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} />}
                       </HealthRow>
                     ))}
                   </div>
