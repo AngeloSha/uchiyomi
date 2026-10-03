@@ -776,14 +776,13 @@ test('a newest chapter deleted on purpose is told apart from one we hold, and is
 });
 
 /**
- * The verdict's `isDisabled` check sits after the listing, which for the sweep is the right place (a
- * disabled adapter stays loaded and the listing keeps the series page's ghost rows current). A bulk
- * button over 500 series on one disabled source would ask that source for 500 listings, 1.5 s apiece,
- * to say "disabled" 500 times. Fetch newest filters a disabled source out before the listing loop; a
- * series whose every source is disabled is its verdict with no network call, and a series that also
- * follows a live source is asked on that one only.
- * Reintroduce by dropping the newestOnly filter over `followed` before the listing loop: the first
- * assertion below counts one listing call (the verdict still reads disabled, from the later check).
+ * A bulk button over 500 series on one disabled source would ask that source for 500 listings, 1.5 s apiece,
+ * to say "disabled" 500 times. A disabled source is filtered out before the listing loop -- for every run since
+ * v0.54.0, the sweep's included (the tests at the end of this file) -- so a series whose every source is
+ * disabled is its verdict with no network call, and a series that also follows a live source is asked on that
+ * one only. The verdict's own `isDisabled` check after the listing stays, for a source switched off in between.
+ * Reintroduce by dropping the filter over `followed` before the listing loop: the first assertion below counts
+ * one listing call (the verdict still reads disabled, from the later check).
  */
 test('a disabled source is never asked for its listing by fetch newest; a live follower still is', { skip }, async () => {
   const { registerAdapter } = await import('../src/lib/sources');
@@ -1368,4 +1367,128 @@ test('the updater and the downloader leave evidence without a cooldown', { skip 
   assert.equal(h.stages.pages.error, 'suwayomi: HTTP error 500');
   assert.equal(h.consecutive, 0, 'and no escalation');
   assert.equal(h.status, 'ok');
+});
+
+// ---- v0.54.0: switched off means off --------------------------------------------------------------------------
+//
+// aqua, switched off since its site went offline, was still the main source of 195 series, and the sweep asked it for
+// every one of them on every visit -- the newestOnly-only filter -- and downloaded its chosen copies, while Health and
+// the Turn off confirmation said it was asked for nothing. Its 195 series also shared one queue keyed on it, so its own
+// cooldowns decided when they were visited, whatever they were actually asked through.
+
+/** A source that counts what it is asked: its listings and the chapters it is asked pages for. */
+function countingSource(id: string, nums: number[], o: { throws?: boolean } = {}) {
+  const seen = { listed: 0, pages: [] as string[] };
+  const adapter = {
+    id, name: id,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
+    async listChapters() {
+      seen.listed++;
+      if (o.throws) throw new Error(`${id} is temporarily offline`);
+      return nums.map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}:${n}` }));
+    },
+    async getPageUrls(chId: string) { seen.pages.push(chId); return [`https://example.invalid/${chId}.png`]; },
+    async latest() { return []; },
+  };
+  return { adapter, seen };
+}
+
+test('the sweep never asks a switched-off main for anything when the series follows a working source', { skip }, async () => {
+  // Reintroduce the newestOnly-only filter in updateSeries: the main is listed once.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  const main = countingSource('upd-offmain', [1, 2, 3]);
+  const fol = countingSource('upd-offfol', [1, 2, 3]);
+  registerAdapter(main.adapter as any);
+  registerAdapter(fol.adapter as any);
+  await mkSeries('offmain', 'upd-offmain');
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('offmain')]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'upd-offfol', 'fol-offmain') ON CONFLICT DO NOTHING`, [S('offmain')]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-offmain', 'upd-offfol']]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  await setDisabled('upd-offmain', true);
+  try {
+    const r = await updateSeries(S('offmain'), 5);
+    assert.equal(main.seen.listed, 0, 'the sweep never asks a switched-off main for its listing');
+    assert.deepEqual(main.seen.pages, [], 'and downloads nothing from it');
+    assert.equal(r.outcome, 'ok');
+    assert.equal(r.added, 3, 'every chapter came from the follower');
+    assert.deepEqual(fol.seen.pages, ['upd-offfol:1', 'upd-offfol:2', 'upd-offfol:3']);
+    assert.deepEqual(r.landed.map((l: any) => l.source), ['upd-offfol', 'upd-offfol', 'upd-offfol']);
+  } finally {
+    await setDisabled('upd-offmain', false);
+  }
+});
+
+test('a series whose every source is off is not asked: outcome off, no stamp, its listing kept', { skip }, async () => {
+  // Reintroduce by keeping the sources of a series whose every source is off (no early return): the offline site is
+  // asked once and the series reads source_error -- the outcome that made every night unhealthy.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  const dead = countingSource('upd-alloff', [1, 2], { throws: true });
+  registerAdapter(dead.adapter as any);
+  await mkSeries('alloff', 'upd-alloff');
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-alloff']);
+  await q('UPDATE lib_series SET source_checked_at = NULL WHERE id = $1', [S('alloff')]);
+  await q('DELETE FROM series_listing WHERE series_id = $1', [S('alloff')]);
+  for (const n of [1, 2]) {
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1, $2, 'upd-alloff', $3::jsonb)`,
+      [S('alloff'), n, JSON.stringify({ sourceId: `upd-alloff:${n}`, number: n, source: 'upd-alloff' })]);
+  }
+  await only(['alloff']);
+  await setDisabled('upd-alloff', true);
+  try {
+    const r = await updateSeries(S('alloff'), 5);
+    assert.equal(dead.seen.listed, 0, 'a series whose every source is off is not asked');
+    assert.equal(r.outcome, 'off');
+    assert.equal(r.asked, false);
+    assert.equal((await stamp('alloff')).t, null, 'never asked, so never stamped');
+    assert.equal((await q('SELECT count(*)::int AS n FROM series_listing WHERE series_id = $1', [S('alloff')]))[0].n, 2, 'its listing stands');
+
+    const sweep = await runUpdateAll({ maxNew: 5 });
+    assert.equal(sweep.outcomes.off, 1, 'the sweep counts it as off');
+    assert.equal(sweep.outcomes.source_error, 0);
+    assert.equal(sweep.healthy, true, 'a switched-off source is a choice, not a failure: the night is healthy');
+    assert.equal(dead.seen.listed, 0);
+  } finally {
+    await setDisabled('upd-alloff', false);
+  }
+});
+
+test('queues follow the source a series is asked through', { skip }, async () => {
+  // A main switched off and cooling down; s1 follows a source in a cooldown, s2 a fine one. Keyed on the main source,
+  // both share its queue: s1 comes back blocked (its only askable source is cooling), the main's queue is parked, and
+  // s2 -- which would have landed its chapter from the fine follower -- is skipped, the main's own cooldown keeping the
+  // queue parked for the rest of the sweep. Reintroduce by keying on `source_id`: s2 is skipped.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  const main = countingSource('upd-qmain', [1]);
+  const cool = countingSource('upd-qcool', [1]);
+  const fine = countingSource('upd-qfine', [1]);
+  for (const s of [main, cool, fine]) registerAdapter(s.adapter as any);
+  for (const [key, fol] of [['q1', 'upd-qcool'], ['q2', 'upd-qfine']] as const) {
+    await mkSeries(key, 'upd-qmain');
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [S(key), fol, `${fol}-${key}`]);
+  }
+  // s1 first in the sweep's order.
+  await q(`UPDATE lib_series SET source_checked_at = NULL, latest_mtime = CASE id WHEN $1 THEN 2000 ELSE 1000 END WHERE id = ANY($2::text[])`,
+    [S('q1'), [S('q1'), S('q2')]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qmain', 'upd-qcool', 'upd-qfine']]);
+  await q(`INSERT INTO source_health (source_id, status, disabled, blocked_until) VALUES
+             ('upd-qmain', 'down', true, now() + interval '1 hour'), ('upd-qcool', 'rate_limited', false, now() + interval '1 hour')`);
+  await only(['q1', 'q2']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.equal(r.outcomes.blocked, 1, 's1 waits for its cooling follower');
+    assert.equal(r.outcomes.skipped, 0, 'the series on the fine follower was visited, not parked behind the dead main');
+    assert.equal(r.outcomes.ok, 1);
+    assert.ok(onDisk('q2', 1), 'and landed its chapter');
+    assert.equal(main.seen.listed + cool.seen.listed, 0, 'neither the switched-off main nor the cooling follower was asked');
+  } finally {
+    await setDisabled('upd-qmain', false);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qmain', 'upd-qcool', 'upd-qfine']]);
+  }
 });

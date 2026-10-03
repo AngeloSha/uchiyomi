@@ -220,3 +220,25 @@ test('a copy that was not kept leaves the downloads at once', { skip }, async ()
   assert.deepEqual([two.kind, two.via], ['partial', PRI], 'PREMISE: the first hold was written');
   assert.deepEqual(open(12), [], 'and the hold not written leaves the downloads too');
 });
+
+test('a copy on a source switched off mid-run is never asked: the same number comes from a follower, never a hunt', { skip }, async () => {
+  // v0.54.0, switched off means off. The sweep filters a switched-off source out before it lists (lib/updater.ts); an
+  // admin's Turn off after that listing reaches only this helper, which skips the chosen copy as it skips a refusing
+  // one. Reintroduce by asking the chosen copy whatever its source (dropping `!off` from its gate): fb-pri is asked.
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  await setDisabled(PRI, true);
+  try {
+    let hunts = 0;
+    const out = await run(chapter(PRI, 'off-five', 13), [chapter(FOL, 'fol-five', 13)], { hunt: async () => { hunts++; return null; } }).result;
+    assert.equal(asked.some((x) => x.startsWith(`${PRI}/`)), false, 'a copy on a source switched off mid-run is never asked');
+    assert.deepEqual([out.kind, out.via], ['landed', FOL], 'the same number came from the follower');
+    assert.deepEqual(out.switched, { from: PRI, why: 'off' }, 'and the switch says why');
+    assert.equal(hunts, 0, 'no hunt: nothing failed');
+    // With nothing else to ask, it was not asked at all: not a failure, and nothing toward the retry cap.
+    const alone = await run(chapter(PRI, 'off-one', 14)).result;
+    assert.deepEqual(alone, { kind: 'skipped', why: 'refusing' });
+    assert.equal(asked.some((x) => x.startsWith(`${PRI}/`)), false);
+  } finally {
+    await setDisabled(PRI, false);
+  }
+});

@@ -1699,6 +1699,13 @@ With a follower in place, the updater takes each missing number from whichever f
 best copy — a ranked group first, then a hosted copy over an external link, then the primary over the
 followers in the order they were added, then the earliest release — and a series whose primary is in a
 cooldown still updates from a follower that answers; it is `blocked` only when every followed source is.
+Since v0.54.0 a source an admin switched off (`POST /api/admin/sources/:id/disable`) is asked for nothing by the
+sweep, *Check now* or a listing refresh -- not its chapter list, and not a chapter, even one chosen before it was
+switched off (another followed source's copy of the number is taken instead): before, only *Fetch newest* left it
+alone. A series whose every source is switched off is not asked at all: the sweep counts it as `off` (not a
+failure), stamps nothing and leaves its listing standing. The sweep's queues follow the source each series is
+asked through -- the first it follows that is loaded and not switched off -- so a dead main source's cooldown no
+longer parks series that update from their followers.
 `GET /api/admin/series/:id/check` now reports `waiting` alongside `added`: the number of missing chapters
 held back for a ranked group (omitted when none). The `frozen-series` health check lists a series whose
 primary is gone but which still follows a live source as information rather than a warning.
