@@ -519,3 +519,65 @@ test('migrate: the archive compares its bounds in the listing\'s own type', { sk
     }
   });
 });
+
+test('migrate: v0.55.1 adds library_paths, seeded from libraries.path, and a v0.55.0 rollback is put right at boot', { skip }, async () => {
+  // #148: a library holds several folders, one library_paths row each. libraries.path stays and holds the first, which
+  // is all v0.55.0 reads -- so a rollback boots on this schema, and the table must be right again when v0.55.1 boots
+  // back after v0.55.0 has created, re-pathed or deleted libraries knowing only that column.
+  const IDS = ['t-lp-a', 't-lp-b', 't-lp-c', 't-lp-d', 't-lp-e'];
+  const rows = async () => Object.fromEntries((await q<{ library_id: string; paths: string[] }>(
+    `SELECT library_id, array_agg(path ORDER BY path) AS paths FROM library_paths WHERE library_id = ANY($1) GROUP BY library_id`,
+    [IDS])).map((r) => [r.library_id, r.paths]));
+  try {
+    // A single-folder library as every install has them today: the boot seeds its row. Reintroduce by dropping the
+    // INSERT ... SELECT from libraries: "an existing library's folder is not seeded" fails.
+    await q(`INSERT INTO libraries (id, name, path) VALUES ('t-lp-a', 'A', 'Lp/A')`);
+    await migrate();
+    assert.deepEqual(await rows(), { 't-lp-a': ['Lp/A'] }, 'an existing library\'s folder is not seeded');
+    assert.equal((await q(`SELECT 1 FROM library_paths WHERE library_id = 'lib'`)).length, 0,
+      'the default library holds a folder: its empty path is "everything no other library holds"');
+
+    // v0.55.1's own state, as the routes leave it: libraries.path is the first of several folders.
+    await q(`INSERT INTO libraries (id, name, path) VALUES ('t-lp-b', 'B', 'Lp/B'), ('t-lp-c', 'C', 'Lp/C'), ('t-lp-d', 'D', 'Lp/D'), ('t-lp-e', 'E', 'Lp/E')`);
+    await q(`INSERT INTO library_paths (library_id, path) VALUES
+               ('t-lp-a', 'Lp/A2'), ('t-lp-b', 'Lp/B'), ('t-lp-b', 'Lp/B2'), ('t-lp-c', 'Lp/C'), ('t-lp-c', 'Lp/Shared'),
+               ('t-lp-d', 'Lp/D'), ('t-lp-e', 'Lp/E'), ('t-lp-e', 'Lp/E2')`);
+    const steady = await rows();
+    // Idempotent: two more boots change nothing.
+    await migrate();
+    await migrate();
+    assert.deepEqual(await rows(), steady, 'a boot changed a v0.55.1 library\'s folders');
+
+    // Now v0.55.0 runs for a while. It re-paths A (its only folder, as far as it knows), files a new library F under a
+    // folder C holds as a further one (it checks only libraries.path for a duplicate), and deletes D.
+    await q(`UPDATE libraries SET path = 'Lp/Z' WHERE id = 't-lp-a'`);
+    await q(`INSERT INTO libraries (id, name, path) VALUES ('t-lp-f', 'F', 'Lp/Shared')`);
+    IDS.push('t-lp-f');
+    await q(`DELETE FROM libraries WHERE id = 't-lp-d'`);
+    await migrate();
+    assert.deepEqual(await rows(), {
+      // Reintroduce by dropping the DELETE: A keeps Lp/A and Lp/A2 beside Lp/Z, folders v0.55.0 took away from it.
+      't-lp-a': ['Lp/Z'],
+      't-lp-b': ['Lp/B', 'Lp/B2'],
+      // Reintroduce ON CONFLICT DO NOTHING: F holds no folder at all, and C keeps the one F has been filing since.
+      't-lp-c': ['Lp/C'],
+      't-lp-f': ['Lp/Shared'],
+      't-lp-e': ['Lp/E', 'Lp/E2'],
+    }, 'a library v0.55.0 changed does not hold what v0.55.0 left it holding');
+    // D's rows went with it (ON DELETE CASCADE): v0.55.0's DELETE FROM libraries never meets the table.
+    assert.equal((await q(`SELECT 1 FROM library_paths WHERE library_id = 't-lp-d'`)).length, 0);
+    const again = await rows();
+    await migrate();
+    assert.deepEqual(await rows(), again, 'the reconcile is not idempotent');
+
+    // What a v0.55.0 writer has to supply is unchanged: libraries gained no required column, and the new table has
+    // only its two.
+    const required = await q<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'library_paths' AND is_nullable = 'NO' AND column_default IS NULL
+        ORDER BY column_name`);
+    assert.deepEqual(required.map((r) => r.column_name), ['library_id', 'path']);
+  } finally {
+    await q(`DELETE FROM libraries WHERE id = ANY($1)`, [IDS]);
+  }
+});
