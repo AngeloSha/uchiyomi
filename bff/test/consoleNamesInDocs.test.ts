@@ -45,7 +45,31 @@ function consoleNames(): Set<string> {
     for (const m of src.matchAll(/>\s*([A-Z][^<>{}]{1,60}?)\s*</g)) names.add(norm(m[1]));
     for (const m of src.matchAll(/\?\s*'[^']*'\s*:\s*'([^']+)'/g)) names.add(norm(m[1]));
   }
+  for (const alias of tabAliases(names)) names.add(alias);
   return names;
+}
+
+/**
+ * The names an admin tab went by before a redesign merged it, which still land on it: v0.54.0 made Providers and
+ * Extensions one Sources tab, and `?tab=Providers` / `?tab=Extensions` open Sources (web/lib/tabParam.ts readTab, with
+ * the map in web/lib/sourcesPanel.ts). So an older CHANGELOG entry's "Admin → Providers" still leads somewhere and keeps
+ * its historical words. An alias counts only while the admin page hands its map to the tab parameter and the tab it
+ * lands on is itself on screen: a map nothing reads, or one pointing at a tab that is gone, is no place.
+ *
+ * Reintroduce by dropping the `SOURCES_TAB_ALIASES` argument from the admin page's `useTabParam`: "Admin → Providers
+ * and Admin → Extensions no longer land on Sources", and past that line the CHANGELOG's seven "Admin → Providers" are
+ * named as leading nowhere.
+ */
+function tabAliases(names: Set<string>): string[] {
+  const admin = read('web/app/admin/page.tsx');
+  const out: string[] = [];
+  for (const f of readdirSync(join(REPO, 'web/lib')).filter((f) => f.endsWith('.ts'))) {
+    for (const m of read(`web/lib/${f}`).matchAll(/export const (\w+_TAB_ALIASES) = \{([^}]*)\}/g)) {
+      if (!new RegExp(`useTabParam<\\w+>\\([^)]*\\b${m[1]}\\)`).test(admin)) continue;
+      for (const [, from, to] of m[2].matchAll(/(\w+): '([^']+)'/g)) if (names.has(norm(to))) out.push(norm(from));
+    }
+  }
+  return out;
 }
 
 /**
@@ -78,7 +102,9 @@ function documentedPaths(): Array<{ file: string; line: number; text: string; se
 
 test('every console path the docs name exists in the UI', () => {
   const names = consoleNames();
-  assert.ok(names.has('account') && names.has('api tokens') && names.has('providers'), 'the name scan lost the console itself');
+  assert.ok(names.has('account') && names.has('api tokens') && names.has('sources'), 'the name scan lost the console itself');
+  // v0.54.0: the tab's old names are places only because they still land on it (tabAliases above).
+  assert.ok(names.has('providers') && names.has('extensions'), 'Admin → Providers and Admin → Extensions no longer land on Sources');
   assert.ok(!names.has('security'), 'the profile has no Security tab; if it grew one, the docs may say so again');
 
   const paths = documentedPaths();
