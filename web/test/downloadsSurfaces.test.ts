@@ -143,7 +143,8 @@ test('a Server tasks card is named by runName, leads to its series, and for an a
   assert.match(task, /<p className="truncate text-sm font-medium text-fog-100" data-task-name>\{name\}<\/p>/);
   assert.match(task, /label=\{name\}/, 'the ring is named differently from the card');
   assert.match(task, /\{r\.seriesId && <Link href=\{seriesHref\(r\.seriesId, r\.number\)\}/, 'a one-series press has no way to its series');
-  assert.match(task, /const history = admin && r\.kind === 'repair';[\s\S]*?\{history && <Link href="\/admin\/\?tab=Health#repairs"/, 'an admin has no way to Recent repairs');
+  // v0.55.0: Fix everything's runs are kept there too.
+  assert.match(task, /const history = admin && \(r\.kind === 'repair' \|\| r\.kind === 'autofix'\);[\s\S]*?\{history && <Link href="\/admin\/\?tab=Health#repairs"/, 'an admin has no way to Recent repairs');
   // A run that failed says its name the same way.
   const failedRun = view.slice(view.indexOf("if (a.kind === 'run') {"), view.indexOf('const thumb = '));
   assert.match(failedRun, /\{runName\(r\)\}/, 'a failed run is named differently from a running one');

@@ -27,6 +27,8 @@ import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { archiveProgressText } from '@/lib/archive';
 import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
 import { FindResultsSheet } from '@/components/FindSources';
+import { autofixPhaseLabel, autofixRunCard, withAutofixCard } from '@/lib/autofix';
+import { AUTOFIX_KEY, stopAutofix, useAutofixStatus } from '@/lib/useAutofixRun';
 
 // lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
 // notes pin (partialSurfaces.test.ts) reads.
@@ -71,7 +73,12 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   const qc = useQueryClient();
   const toast = useToast();
   const { data: raw, isLoading, isError, refetch } = useServerDownloads({ fresh: true });
-  const data = raw as SourceJobs<Job> | undefined;
+  // v0.55.0: Health's Fix everything, an admin's, under Server tasks while it runs. The server keeps no run card for it,
+  // so its card is built from the run's own status (lib/autofix.ts) -- unless a server that does sends one.
+  const autofix = useAutofixStatus(isAdmin);
+  const [stoppingFix, setStoppingFix] = useState<string | null>(null);
+  const fixRun = autofix.data?.run?.status === 'running' ? autofix.data.run : null;
+  const data = withAutofixCard(raw as SourceJobs<Job> | undefined, autofixRunCard(autofix.data, !!fixRun && stoppingFix === fixRun.id));
   const jobs = data?.content ?? [];
   const s = downloadSections(data, { admin: isAdmin });
   const [allCameIn, setAllCameIn] = useState(false);
@@ -91,8 +98,16 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   };
   const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST');
   const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
-  // A "Find other sources" run stops through its own route (v0.49.1), at once.
-  const cancelRun = (kind: string) => call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
+  // A "Find other sources" run stops through its own route (v0.49.1), at once; Fix everything through its own (v0.55.0),
+  // at its next safe point -- never inside a merge, a delete or a renumbering.
+  const cancelRun = (kind: string) => {
+    if (kind !== 'autofix') return call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
+    setStoppingFix(fixRun?.id ?? null);
+    return (async () => {
+      try { await stopAutofix(); } catch (e) { setStoppingFix(null); toast(msgOf(e, tr('Could not stop Fix everything')), 'error'); }
+      void qc.invalidateQueries({ queryKey: AUTOFIX_KEY });
+    })();
+  };
   const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE');
   // Try again is a Fetch of what did not land: the same route, the same checks (the series' visibility, its
   // listing, the 300 cap, a 409 while the series is busy), and a new job that takes the failed card's place.
@@ -363,14 +378,18 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
 function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean; onCancel: (kind: string) => void; onDismiss: (kind: string) => void }) {
   const running = r.status === 'running';
   const mine = admin || !!r.mine;
-  const step = r.kind === 'repair' && running ? repairStepLabel(r.step) : '';
+  // v0.55.0: Fix everything's phase, in Health's words for it (lib/autofix.ts), as the repair's step is in its own.
+  const step = !running ? '' : r.kind === 'repair' ? repairStepLabel(r.step) : r.kind === 'autofix' ? autofixPhaseLabel(r.step) : '';
   const name = runName(r);
   // A Health press is about one series -- the way to it (the server drops it for a viewer who may not list that
-  // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
-  const history = admin && r.kind === 'repair';
+  // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it. Fix everything's
+  // runs are kept there too.
+  const history = admin && (r.kind === 'repair' || r.kind === 'autofix');
   // v0.49.1: a "Find other sources" run steps series by series, stops at once when asked, and keeps what it did per
-  // series -- which series got which sources -- a press away, while it runs and after.
+  // series -- which series got which sources -- a press away, while it runs and after. Fix everything, too, stops on
+  // Stop rather than Cancel -- at its next safe point, never mid-chapter.
   const find = r.kind === 'find_sources';
+  const stops = find || r.kind === 'autofix';
   const [results, setResults] = useState(false);
   // ONE sentence split around its placeholder, so the series name is its own bidi run (<bdi>): inside the Arabic
   // sentence a title ending in "!" printed the "!" at the wrong end of the name.
@@ -404,9 +423,9 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         </p>
         {/* A find run stops at once -- the series in flight is not tried unless it already followed a source -- so it
             says the plain word, never "after this series". */}
-        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{find ? tr('Stopping…') : tr('Stopping after this chapter…')}</p>}
+        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{stops ? tr('Stopping…') : tr('Stopping after this chapter…')}</p>}
         {/* A stopped find run downloaded nothing to keep: what it followed stays followed, and its results say which. */}
-        {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{find ? tr('Stopped before it finished') : tr('Cancelled; what landed is kept.')}</p>}
+        {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{stops ? tr('Stopped before it finished') : tr('Cancelled; what landed is kept.')}</p>}
         {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{reasonText(r)}</p>}
         {(r.seriesId || history || (find && admin)) && (
           <p className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
@@ -420,7 +439,7 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
         {results && <FindResultsSheet onClose={() => setResults(false)} />}
       </div>
       {mine && running && !r.cancelRequested && (
-        <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{find ? tr('Stop') : tr('Cancel')}</button>
+        <button type="button" onClick={() => onCancel(r.kind)} className="btn-key" data-task-stop={r.kind}>{stops ? tr('Stop') : tr('Cancel')}</button>
       )}
       {mine && !running && (
         <button type="button" onClick={() => onDismiss(r.kind)} className="btn-key">{tr('Dismiss')}</button>

@@ -131,6 +131,24 @@ export function settingsTarget(params: { get(name: string): string | null }): st
   return id && /^-?\d{1,20}$/.test(id) ? `sw:${id}` : null;
 }
 
+/**
+ * `source=<overview id>` (v0.55.0): the source whose sheet opens on arrival -- any kind, by the id the overview gives it
+ * (`sw:<id>`, `mangadex-es`, a site's slug). Health's Free a slot sends it. Null for anything else.
+ */
+export function sourceTarget(params: { get(name: string): string | null }): string | null {
+  const id = params.get('source');
+  return id && id.length <= 200 && !/[\s<>"]/.test(id) ? id : null;
+}
+
+/**
+ * Where Health's Free a slot goes (v0.55.0): Admin → Sources, on the frozen series' source when the row names one --
+ * its sheet, where a source nothing uses can be switched off to make room under the source limit. A whole page load:
+ * the console reads its tab from the address once (lib/useTabParam.ts).
+ */
+export function freeSlotHref(item: Pick<HealthItem, 'sourceId'>): string {
+  return item.sourceId ? `/admin/?tab=Sources&source=${encodeURIComponent(item.sourceId)}` : '/admin/?tab=Sources';
+}
+
 // ---- one source in words ---------------------------------------------------------------------------------------
 
 /** Declared through keys(): they reach tr() through kindLabel's switch (lib/i18n.ts). */

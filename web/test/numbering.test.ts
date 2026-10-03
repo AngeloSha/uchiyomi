@@ -321,7 +321,8 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   const panel = code(read('components/SourcesPanel.tsx'));
   const top = panel.slice(panel.indexOf('export function SourcesPanel('), panel.indexOf('function AttentionRow('));
   // Reintroduce by dropping the initialiser: /admin/?tab=Sources&settings=<id> opens nothing.
-  assert.match(top, /const \[sheet, setSheet\] = useState<SheetTarget \| null>\(\(\) => \{\s*const id = settingsTarget\(params\);\s*return id \? \{ id, settings: true \} : null;\s*\}\);/,
+  // v0.55.0: `source=` (Health's Free a slot) opens a source's sheet when there is no `settings=` (test/autofix.test.ts).
+  assert.match(top, /const \[sheet, setSheet\] = useState<SheetTarget \| null>\(\(\) => \{\s*const id = settingsTarget\(params\);\s*if \(id\) return \{ id, settings: true \};/,
     'Sources does not read the ?settings= deep link');
   assert.match(panel, /u\.searchParams\.delete\('settings'\);/, 'a closed sheet reopens on reload');
   assert.match(top, /const closeSheet = \(\) => \{ setSheet\(null\); dropSettingsParam\(\); \};/, 'a closed sheet reopens on reload');

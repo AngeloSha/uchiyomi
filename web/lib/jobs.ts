@@ -29,8 +29,12 @@ export interface JobCard {
   cancelled?: boolean;
 }
 
-/** `find_sources` (v0.49.1): a "Find other sources" run, admins only. It follows sources and downloads nothing. */
-export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources';
+/**
+ * `find_sources` (v0.49.1): a "Find other sources" run, admins only. It follows sources and downloads nothing.
+ * `autofix` (v0.55.0): Health's Fix everything, admins only -- built by the Downloads view from GET
+ * /api/admin/health/autofix (lib/autofix.ts autofixRunCard), since the server keeps no card of its own for it.
+ */
+export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources' | 'autofix';
 
 /**
  * The repair's steps, in the order a run takes them (bff lib/repair.ts REPAIR_STEPS), each in the words a
@@ -128,6 +132,8 @@ export function runTitle(kind: RunKind): string {
     : kind === 'repair' ? tr('Library repair')
     // A noun, as the repair's runs are named (healthCopy.ts kindLabel), never the key's "Find other sources".
     : kind === 'find_sources' ? tr('Other-source search')
+    // v0.55.0: the run's name, never the key's "Fix everything" -- the same name Recent repairs gives it (kindLabel).
+    : kind === 'autofix' ? tr('Fixing everything')
     : tr('Fetch newest');
 }
 
@@ -139,13 +145,14 @@ export const replaceRunTitle = (name?: string): string =>
   (name ? tr('Replacing {name}', { name: `\u2068${name}\u2069` }) : tr('Source replacement'));
 
 /**
- * The line under a run's name: how far it has got and what it has saved. The repair counts steps, the other
- * two count series; "0 of 0" is a run that has not sized itself yet and says nothing rather than that.
+ * The line under a run's name: how far it has got and what it has saved. The repair counts steps, and so does Fix
+ * everything (its ten phases); the others count series. "0 of 0" is a run that has not sized itself yet and says
+ * nothing rather than that.
  */
 export function runProgress(r: RunCard): string {
   const bits: string[] = [];
   if (r.total > 0) {
-    bits.push(r.kind === 'repair'
+    bits.push(r.kind === 'repair' || r.kind === 'autofix'
       ? tr('step {done} of {total}', { done: Math.min(r.total, r.done + (r.status === 'running' ? 1 : 0)), total: r.total })
       : tr('{done} of {total} series', { done: r.done, total: r.total }));
   }

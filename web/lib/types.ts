@@ -446,7 +446,10 @@ export type HealthAction =
   | 'link_editions'
   // v0.54.0: move every series whose main source is `sourceId` -- off or failing -- to a working source, in one Replace
   // run (POST /api/admin/sources/find in its replace mode); the source and the frozen-series rows offer it.
-  | 'replace_source';
+  | 'replace_source'
+  // v0.55.0: a frozen series whose source is over the extension engine's source limit. Opens Admin → Sources on that
+  // source, where one nothing uses can be switched off to make room (no server action).
+  | 'free_slot';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';

@@ -398,8 +398,10 @@ export interface NavRing {
 export function navRing(d: Partial<SourceJobs> | undefined): NavRing {
   const s = downloadSections(d, { admin: false });
   const jobs = s.running.filter((t) => t.job).map((t) => t.job!);
-  // Reintroduce by dropping the kind: the admin's Library ring turns for hours while a find run follows sources.
-  const runs = (d?.runs ?? []).filter((r) => r.status === 'running' && r.downloads !== false && r.kind !== 'find_sources');
+  // Reintroduce by dropping the kind: the admin's Library ring turns for hours while a find run follows sources. Fix
+  // everything (v0.55.0) neither: it runs for up to an hour and a half, and what it downloads comes in through the
+  // repair's own card and the chapters' activity, which turn the ring while they fetch.
+  const runs = (d?.runs ?? []).filter((r) => r.status === 'running' && r.downloads !== false && r.kind !== 'find_sources' && r.kind !== 'autofix');
   const serverChapters = [...s.running, ...s.queued].filter((t) => !t.job && !t.archive).reduce((n, t) => n + t.entries.length, 0);
   // Reintroduce by counting the archive's chapters here: a week-long archive turns the ring for a week.
   const active = jobs.length > 0 || serverChapters > 0 || runs.length > 0;

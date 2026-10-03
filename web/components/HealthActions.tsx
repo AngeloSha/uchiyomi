@@ -4,8 +4,9 @@
 //
 // Health has always been able to name a problem; since v0.41.0 it can act on one. The nightly repair does
 // everything that is reversible or provable on its own; these keys are the same work asked for by hand, on
-// ONE row, plus the two things the nightly deliberately never does -- merging duplicates and deleting a
-// chapter whose number is impossible -- which stay a human's decision behind a confirmation.
+// ONE row, plus the two things the safe repair deliberately never does -- merging duplicates and deleting a
+// chapter whose number is impossible -- which stay a human's decision behind a confirmation. Since v0.55.0 the
+// page's Fix everything (components/FixEverythingDialog.tsx) can do those too, as one run the admin chose.
 //
 // The owner could not tell what a key did, how, how long, or whether it was working. So (v0.49.0):
 // - each card opens with a LEGEND of its actions (ActionList): what, how, usually how long; the card-wide
@@ -39,12 +40,12 @@ import { languageName } from '@/lib/format';
 import { IDLE, actionButton, isBusy, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
-  ACTION_COPY, actionCopy, caveatLine, caveatTone, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
+  ACTION_COPY, actionCopy, caveatLine, caveatTone, outcomeLine, repairGate, rowState, solverDownLine,
   type CopyCtx,
 } from '@/lib/healthCopy';
 import {
-  CARD_STEP, cardBody, cardRecord, cardStepState, isRepairAction, itemBody, kindOfBody, pageBody,
-  pagePlan, pageRecord, recordFor, runTouches, solverDown, stepFindings, type RepairEstimate, type RepairStatus,
+  CARD_STEP, cardBody, cardRecord, cardStepState, isRepairAction, itemBody, kindOfBody,
+  recordFor, runTouches, solverDown, stepFindings, type RepairEstimate, type RepairStatus,
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
@@ -52,6 +53,7 @@ import { diagnosisReason, itemDetail, itemTitle, type Said } from '@/lib/said';
 import { useFindRun } from '@/lib/useFindRun';
 import { findGate, findSlotState } from '@/lib/findSources';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
+import { freeSlotHref } from '@/lib/sourcesPanel';
 import type { HealthAction, HealthCheck, HealthItem } from '@/lib/types';
 
 type Toast = ReturnType<typeof useToast>;
@@ -381,6 +383,11 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
       // filled key of the row, as it is on Admin → Sources.
       case 'replace_source':
         return { ...base, primary: true, label: tr('Replace'), onRun: () => setAsking('replace') };
+      // v0.55.0: a series frozen because its source is over the extension engine's source limit -- Replace was the wrong
+      // fix there, since the source works and is only not loaded. Admin → Sources, on that source, where one nothing uses
+      // can be switched off to make room. A whole page load: the console reads its tab from the address once.
+      case 'free_slot':
+        return { ...base, primary: true, label: tr('Free a slot'), onRun: () => { window.location.assign(freeSlotHref(item)); } };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
       // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen
       // which file becomes which chapter.
@@ -713,7 +720,8 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
     });
   }
   if (later.length) {
-    // Never part of Fix all issues: that one press runs the repair's steps, and nothing deletes without its own yes.
+    // Never part of the safe repair (Fix everything's Let me choose): it runs the repair's steps, and nothing deletes
+    // without its own yes. Fix it for me may delete these -- the admin chose it knowing so (bff lib/autofix.ts).
     const copy = ACTION_COPY.delete_all;
     rows.push({
       id: 'delete_all', label: copy.label(ctx), what: copy.what(ctx), eta: copy.eta(ctx), state: purge, runLabel: tr('Fix all'), danger: true,
@@ -864,65 +872,4 @@ export function CardProgress({ checkId }: { checkId: string }) {
   if (!s || s.state !== 'running') return null;
   const label = s.planned ? tr('{done} of {of}', { done: Math.min(s.planned, (s.done ?? 0) + 1), of: s.planned }) : tr('Working…');
   return <StatusMark tone="accent" working label={label} size="xs" />;
-}
-
-/**
- * "Fix all issues" for the whole Health page (v0.48.3), as one action row (v0.49.0): ONE run of the repair with
- * every page step that has something to do -- the same steps the cards' Fix all rows run, so nothing here is a
- * new remedy. Its plan, with each step's caps, is under "How it works" BEFORE the press, where the old
- * confirmation hid it until after; the failures step asks for `now`.
- *
- * ⚠️ Health is checked again when the run ENDS (lib/useRepairRun.tsx), not when it starts.
- */
-export function FixAllIssues({ checks }: { checks: HealthCheck[] }) {
-  const rr = useRepairRun();
-  const { status, slots } = rr;
-  const plan = pagePlan(checks);
-  const slot = slots.page;
-  const body = pageBody(plan);
-  const kind = kindOfBody(body);
-  const run = status?.run && ((slot?.runId && status.run.id === slot.runId) || (status.run.kind === kind && plan.length > 1)) ? status.run : null;
-  const record = slot?.runId ? rr.record(slot.runId) ?? pageRecord(rr.runs) : pageRecord(rr.runs);
-  const state = rowState({ slot, run, record, action: 'fix_all_issues', onStop: run ? () => { void rr.stop('page'); } : undefined });
-  if (!plan.length && state.kind === 'idle') return null;
-  const ctx: CopyCtx = { limits: status?.limits };
-  // Usually: this plan's own history when there is one; otherwise the sum of its steps' estimates (the
-  // searches are shared, so "at most" is generous rather than short).
-  const own = estOf(status, kind);
-  const parts = plan.map((p) => estOf(status, kindOfBody(cardBody(p.step))));
-  const est: RepairEstimate | null = own?.typicalMs != null ? own : parts.some(Boolean) ? {
-    typicalMs: null, runs: 0,
-    worstMs: parts.reduce<number | null>((a, e) => (a === null || e?.worstMs == null ? null : a + e.worstMs), 0),
-    downloads: parts.reduce((a, e) => a + (e?.downloads ?? 0), 0),
-  } : own;
-  const copy = ACTION_COPY.fix_all_issues;
-  const lines = plan.map((p) => `• ${planLine(p.step, { ...ctx, n: p.n })}`);
-  const caps = tr('One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.',
-    { short: ctx.limits?.shortMax ?? 20, gaps: ctx.limits?.gapsMax ?? 5 });
-  const busy = state.kind === 'starting' || state.kind === 'working';
-  const gate = repairGate(rr.blocked, status?.run, busy);
-  const spec: ActionSpec = {
-    id: 'fix_all_issues',
-    label: copy.label(ctx),
-    what: fixAllWhat(plan.length, ctx),
-    how: [...lines, caps, planFooter(plan.map((p) => p.step))].join('\n'),
-    eta: timeLineOr(est),
-    state,
-    primary: true,
-    runLabel: tr('Start'),
-    disabled: !plan.length || !!gate.disabled,
-    disabledWhy: gate.disabledWhy,
-    onRun: () => { void rr.start('page', 'fix_all_issues', body); },
-    buttonProps: { 'data-health-fix-all-page': '' } as ActionSpec['buttonProps'],
-  };
-  return (
-    <div data-health-fix-all-issues className="card grad-border full px-4 py-1">
-      <ActionList actions={[spec]} />
-    </div>
-  );
-}
-
-/** The estimate line, or a plain bound before the status route has answered. */
-function timeLineOr(e: RepairEstimate | null): string {
-  return timeLine(e) || tr('A few minutes at most');
 }
