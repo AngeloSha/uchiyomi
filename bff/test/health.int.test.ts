@@ -437,14 +437,17 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
   const stub = { search: async () => [], getSeries: async () => null, listChapters: async () => [], getPageUrls: async () => [] };
   registerAdapter({ id: 'hg-zz-fail', name: 'Alpha Failing', iconUrl: 'http://icons.invalid/alpha.png', ...stub } as any);
   registerAdapter({ id: 'hg-late', name: 'Late Source', ...stub } as any);
-  const IDS = ['hg-busy', 'hg-slow', 'hg-one', 'hg-zz-fail', 'hg-zeta', 'hg-idle', 'hg-late', 'hg-off', 'sw:hg-lang'];
+  const IDS = ['hg-busy', 'hg-slow', 'hg-one', 'hg-zz-fail', 'hg-zeta', 'hg-idle', 'hg-late', 'hg-off', 'sw:hg-lang', 'sw:hg-ext'];
   const SERIES = ['s_hg_1', 's_hg_2', 's_hg_3', 's_hg_4', 's_hg_5'];
   const clean = async () => {
     await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [SERIES]);
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
-    await q(`DELETE FROM suwayomi_sources WHERE source_id = 'hg-lang'`);
+    await q(`DELETE FROM suwayomi_sources WHERE source_id = ANY($1::text[])`, [['hg-lang', 'hg-ext']]);
   };
   await clean();
+  // Russian hidden in every extension: hg-lang is off for its language, hg-ext switched off by itself.
+  const [{ hidden_langs: hiddenWas }] = await q(`SELECT hidden_langs FROM server_settings WHERE id = 1`);
+  await q(`UPDATE server_settings SET hidden_langs = '["ru"]'::jsonb WHERE id = 1`);
   const series = (id: string, source: string) => q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
     VALUES ($1, 'test', $1, $1, 3, $2, 'x')`, [id, source]);
   // hg-busy carries three series and hg-slow follows the same three: a tie on series, decided by how bad. hg-one
@@ -456,7 +459,7 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
   await series('s_hg_4', 'hg-one');
   await series('s_hg_5', 'hg-late');
   await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ('s_hg_4', 'hg-late', 'x')`);
-  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('hg-lang', 'Hidden Lang', 'ru', false)`);
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('hg-lang', 'Hidden Lang', 'ru', false), ('hg-ext', 'Ext Off', 'xx', false)`);
   const failAt = new Date().toISOString();
   await q(
     `INSERT INTO source_health (source_id, status, consecutive, blocked_until, slow_streak, empty_streak, disabled, stages,
@@ -469,7 +472,8 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
        ('hg-idle', 'down', 4, now() - interval '1 hour', 0, 0, false, '{}'::jsonb, NULL, NULL, NULL, NULL),
        ('hg-late', 'ok', 0, NULL, 0, 0, false, '{}'::jsonb, 'inconclusive', 'pages', now() - interval '1 hour', 'test'),
        ('hg-off', 'down', 4, NULL, 0, 0, true, '{}'::jsonb, NULL, NULL, NULL, NULL),
-       ('sw:hg-lang', 'down', 4, NULL, 0, 0, false, '{}'::jsonb, NULL, NULL, NULL, NULL)`,
+       ('sw:hg-lang', 'down', 4, NULL, 0, 0, false, '{}'::jsonb, NULL, NULL, NULL, NULL),
+       ('sw:hg-ext', 'ok', 0, NULL, 0, 0, false, '{}'::jsonb, NULL, NULL, NULL, NULL)`,
     [JSON.stringify({ chapters: { failAt, failBy: 'test', since: failAt, kind: 'error', error: 'HTTP 500' } })],
   );
   try {
@@ -488,8 +492,12 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
     assert.equal(row('hg-late').series, 2);
     assert.deepEqual(shape('hg-off'), { group: 'off', state: 'off', stage: null, info: true });
     assert.deepEqual(shape('sw:hg-lang'), { group: 'off', state: 'off', stage: null, info: true });
+    assert.deepEqual(shape('sw:hg-ext'), { group: 'off', state: 'off', stage: null, info: true });
+    // Where each was switched off, which is where it comes back on. Reintroduce `offBy: 'language'` for every
+    // extension source that is off: "switched off by itself in Extensions" fails.
     assert.equal(row('hg-off').offBy, 'admin', 'turned off under Providers');
-    assert.equal(row('sw:hg-lang').offBy, 'language', 'its language hidden');
+    assert.equal(row('sw:hg-lang').offBy, 'language', 'its language hidden in every extension');
+    assert.equal(row('sw:hg-ext').offBy, 'extension', 'switched off by itself in Extensions');
     assert.equal(row('hg-busy').cooldown.status, 'rate_limited');
     assert.ok(Date.parse(row('hg-busy').cooldown.until) > Date.now(), 'a cooldown says when it ends');
     assert.ok(Date.parse(row('hg-idle').cooldown.until) < Date.now(), 'and an ended one says so too');
@@ -509,7 +517,7 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
       'the series\' sources, the most series first, and the worst first between two with as many');
     assert.deepEqual(mine.filter((id: string) => row(id).group === 'unused'), ['hg-zz-fail', 'hg-zeta'], 'by name: Alpha Failing, then hg-zeta');
     assert.deepEqual(mine.filter((id: string) => row(id).group === 'quiet'), ['hg-idle', 'hg-late'], 'by name');
-    assert.deepEqual(mine.filter((id: string) => row(id).group === 'off'), ['hg-off', 'sw:hg-lang'], 'by name: hg-off, then Hidden Lang');
+    assert.deepEqual(mine.filter((id: string) => row(id).group === 'off'), ['sw:hg-ext', 'hg-off', 'sw:hg-lang'], 'by name: Ext Off, hg-off, Hidden Lang');
 
     // The summary counts the two groups that need a look, whoever else left rows here.
     const n = (g: string) => c.items.filter((i: any) => i.group === g).length;
@@ -537,6 +545,7 @@ test('Source health groups its rows, names each one\'s state, lists what the lib
     }
   } finally {
     await clean();
+    await q(`UPDATE server_settings SET hidden_langs = $1::jsonb WHERE id = 1`, [JSON.stringify(hiddenWas ?? [])]);
   }
 });
 

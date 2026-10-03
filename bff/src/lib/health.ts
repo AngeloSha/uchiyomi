@@ -169,8 +169,11 @@ export interface HealthItem {
   stage?: Stage;
   /** A `blocked` row's status (rate_limited, blocked, down) and when its cooldown ends; `until` null when none is set. */
   cooldown?: { status: string; until: string | null };
-  /** An `off` row: turned off under Providers (`admin`), or its language hidden in every extension (`language`). */
-  offBy?: 'admin' | 'language';
+  /**
+   * Where an `off` row was switched off: under Providers (`admin`), in Admin -> Extensions (`extension`), or by hiding
+   * its language in every extension (`language`) -- which says where it comes back on.
+   */
+  offBy?: 'admin' | 'extension' | 'language';
   /** The source has a logo of its own, an extension's: GET /img/sources/icon/{sourceId} serves it. */
   icon?: boolean;
 }
@@ -920,7 +923,7 @@ const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1,
 
 async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
-    source_id: string; status: string; consecutive: number; disabled: boolean; hidden: boolean;
+    source_id: string; status: string; consecutive: number; disabled: boolean; off_in: 'language' | 'extension' | null;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
     last_fail_at: string | null; last_slow_at: string | null; slow_streak: number;
     stages: Stages | null; live_at: string | null; live_by: 'test' | 'sweep' | null;
@@ -934,8 +937,12 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
             -- it again and a stale 'down' row would otherwise keep this check amber for good).
             (sh.disabled OR EXISTS (SELECT 1 FROM suwayomi_sources ss
                                       WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)) AS disabled,
-            -- v0.53.0: which of the two, for the row's words ("Hidden language" rather than "Turned off").
-            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled) AS hidden,
+            -- v0.53.0: where an extension's source was switched off, for the row's words and the way back: its language
+            -- hidden in every extension, or the source itself switched off in Admin -> Extensions. NULL: neither, so it
+            -- was turned off under Providers.
+            (SELECT CASE WHEN st.hidden_langs ? ss.lang THEN 'language' ELSE 'extension' END
+               FROM suwayomi_sources ss LEFT JOIN server_settings st ON st.id = 1
+              WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled LIMIT 1) AS off_in,
             sh.blocked_until, sh.last_error,
             sh.empty_streak, sh.last_ok_at,
             -- When the stored error was written, so a success that came AFTER it can be told apart from one
@@ -1096,7 +1103,8 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       state: sourceState,
       ...(stage ? { stage } : {}),
       ...(sourceState === 'blocked' ? { cooldown: { status: r.status, until: r.blocked_until ? iso(r.blocked_until) : null } } : {}),
-      ...(r.disabled ? { offBy: r.hidden ? 'language' as const : 'admin' as const } : {}),
+      // Switched off in Extensions as well as under Providers: Extensions is where it comes back on.
+      ...(r.disabled ? { offBy: r.off_in ?? 'admin' as const } : {}),
       // An extension's own logo, which /img/sources/icon/:id serves while the source is loaded. Not a site's favicon:
       // that is a request to the site for every row on every visit.
       ...(src?.iconUrl ? { icon: true } : {}),

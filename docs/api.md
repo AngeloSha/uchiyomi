@@ -588,7 +588,8 @@ series now names the engine when it is the reason (*can't be reached because the
 series use), `unused` (a finding on a source no series uses — a confirmed failure is a finding whatever uses it, so
 it is grouped apart rather than hidden), `quiet` (listed for reference: a cooldown on a source nothing uses, a test
 that ran out of time, a failure unchecked for seven days, an ignored finding) or `off` (switched off, with `offBy`:
-`admin` under Providers, or `language` for a language hidden in every extension). The check lists them in that
+`admin` under Providers, `extension` in Admin → Extensions, or `language` for a language hidden in every extension —
+where it comes back on). The check lists them in that
 order: `affected` by series, most first, then blocked or failing before slow or empty; the other three by name.
 `state` is the row's one state — `blocked`, `failing`, `slow`, `empty`, `inconclusive`, `untested` or `off` — with
 `stage` for failing, inconclusive and untested, and `cooldown` `{status, until}` for blocked (`until` null when no
