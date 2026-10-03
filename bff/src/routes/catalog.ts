@@ -34,6 +34,8 @@ import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
 import { effectiveLang } from '../lib/seriesLang';
 import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
+import { noticeBook, isFractionalNumber } from '../lib/noticeChapters';
+import { noticeTypes, hiddenCount, seriesHidesNotices } from '../lib/noticeSettings';
 import { join } from 'node:path';
 
 
@@ -312,6 +314,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
                       -- the chapter you are part-way through wins
                       (SELECT p.book_id FROM read_progress p
                          WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
+                           -- not a notice chapter the admin hides (lib/noticeChapters.ts): it is no chapter to resume
+                           AND NOT ${noticeBook('p.book_id')}
                          ORDER BY p.updated_at DESC LIMIT 1),
                       -- otherwise the lowest-numbered chapter you have not finished
                       (SELECT b.id FROM lib_books b
@@ -319,6 +323,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
                          WHERE b.series_id = r.series_id
                            -- never offer a chapter whose pages were deleted (a tombstone, lib/chapterCleanup.ts)
                            AND b.pruned_at IS NULL
+                           AND NOT ${noticeBook('b.id')}
                            AND NOT EXISTS (
                              SELECT 1 FROM read_progress p2
                               WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
@@ -430,8 +435,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; adult_exempt: boolean | null; reading_direction: string | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt, reading_direction,
+                          age_rating: number | null; adult_exempt: boolean | null; reading_direction: string | null;
+                          series_type: string | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt, reading_direction, series_type,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -448,7 +454,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
                         author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
-                        adultExempt: ov.adult_exempt === true, readingDirection: ov.reading_direction };
+                        adultExempt: ov.adult_exempt === true, readingDirection: ov.reading_direction,
+                        seriesType: ov.series_type };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
@@ -467,9 +474,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
       const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
-                            reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null }>(
+                            reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null;
+                            series_type: string | null; series_type_from: string | null; type_override: string | null; hide_notices: boolean | null }>(
         `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow,
-                reading_direction, reading_direction_from, lang, source_id,
+                reading_direction, reading_direction_from, lang, source_id, series_type, series_type_from, hide_notices,
+                (SELECT o.series_type FROM series_overrides o WHERE o.series_id = lib_series.id) AS type_override,
                 ARRAY(SELECT DISTINCT b.root FROM lib_books b WHERE b.series_id = lib_series.id AND b.root IS NOT NULL ORDER BY b.root) AS roots
            FROM lib_series WHERE id = $1`, [id]);
       if (f) out.folder = f.folder;
@@ -490,6 +499,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // What the evidence says about the reading direction, and which evidence (lib/readingDirection.ts), so
       // the edit modal's "Automatic" can name what it would fall back to. null when nothing has said.
       out.detectedDirection = f?.reading_direction ? { direction: f.reading_direction, from: f.reading_direction_from } : null;
+      // Notice chapters (lib/noticeChapters.ts): the type the switches go by (the admin's, else the evidence's,
+      // else unknown) and what the evidence said, for Edit details; the series' own switch -- null when its type's
+      // applies -- and what applies, with how many chapters that hides right now, for the Sources sheet.
+      const type = f?.type_override ?? f?.series_type ?? 'unknown';
+      out.seriesType = type;
+      out.detectedType = f?.series_type ? { type: f.series_type, from: f.series_type_from } : null;
+      out.hideNotices = f?.hide_notices ?? null;
+      out.hideNoticesEffective = f?.hide_notices ?? (await noticeTypes()).includes(type as any);
+      out.hiddenNotices = out.hideNoticesEffective ? await hiddenCount(id) : 0;
     }
     return out;
   });
@@ -516,7 +534,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     if (out.length) {
       const latest = await q<{ series_id: string; latest: string }>(
         `SELECT series_id, max(COALESCE(published_at, to_timestamp(mtime / 1000.0))) AS latest
-         FROM lib_books WHERE series_id = ANY($1) GROUP BY series_id`,
+         FROM lib_books WHERE series_id = ANY($1) AND NOT ${noticeBook('lib_books.id')} GROUP BY series_id`,
         [out.map((o) => o.series.id)],
       );
       const byId = new Map(latest.map((r) => [r.series_id, r.latest]));
@@ -682,13 +700,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/groups', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const rows = await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]);
+    // A notice chapter the admin hides (lib/noticeChapters.ts) is nobody's release here either.
+    const shown = (await seriesHidesNotices(id)) ? (n: number) => !isFractionalNumber(n) : () => true;
+    const rows = (await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]))
+      .filter((r) => shown(Number(r.number)));
     const copies: StatCopy[] = [];
     for (const r of rows) for (const c of r.copies ?? []) copies.push({ ...c, number: Number(r.number) });
     // Live rows only: a tombstone's group is a file that is no longer here, and "3 on this server" has to
     // count what a reader can open.
-    const onDisk = await q<{ number: number; scanlator: string | null }>(
-      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]);
+    const onDisk = (await q<{ number: number; scanlator: string | null }>(
+      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]))
+      .filter((b) => shown(Number(b.number)));
     return { checkedAt: await checkedAtOf(id), content: groupStats(copies, onDisk.map((b) => ({ number: Number(b.number), scanlator: b.scanlator }))) };
   });
 
@@ -713,8 +735,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
-      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+    // Not the versions of a notice chapter the admin hides (lib/noticeChapters.ts).
+    const shown = (await seriesHidesNotices(id)) ? (n: number) => !isFractionalNumber(n) : () => true;
+    const rows = (await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
+      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]))
+      .filter((r) => shown(Number(r.number)));
     const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
       'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
     const booksOf = new Map<number, typeof books>();

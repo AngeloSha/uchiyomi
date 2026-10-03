@@ -6,6 +6,7 @@ import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
+import { learnTypeFromAniList } from '../lib/seriesType';
 import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
@@ -360,6 +361,7 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
         await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
         // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
         await learnDirection({ id }, directionFromAniListMatch(title, fetched as { country?: string | null; titles?: string[] }), 'anilist').catch(() => {});
+        await learnTypeFromAniList({ id }, title, fetched as { country?: string | null; titles?: string[] });
       }
       art = fetched;
     } catch {

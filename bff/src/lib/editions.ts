@@ -18,6 +18,7 @@ import { sanitize } from './downloader';
 import { canonLang, langLabel } from './lang';
 import { effectiveLang, followGuard } from './seriesLang';
 import { Params, visible, type ViewCtx } from './visibility';
+import { noticeShown, visibleBookCount } from './noticeChapters';
 
 /** The module's q, or a transaction's own (db.ts tx). */
 type Qq = <R = any>(text: string, params?: any[]) => Promise<R[]>;
@@ -142,10 +143,12 @@ export async function editionInfo(id: string, ctx: ViewCtx, userId: string | nul
   const me = p.add(id);
   const uid = p.add(userId);
   const rows = await q<{ id: string; work_id: string; lang: string | null; source_id: string | null; title: string; books_count: number | null; last_read: number | null }>(
-    `SELECT s.id, s.work_id, s.lang, s.source_id, COALESCE(o.title, s.title) AS title, s.books_count,
+    // Both figures leave out the notice chapters the edition hides (lib/noticeChapters.ts), as its own page does.
+    `SELECT s.id, s.work_id, s.lang, s.source_id, COALESCE(o.title, s.title) AS title, ${visibleBookCount('s')} AS books_count,
             (SELECT max(COALESCE(ov.number, b.number)) FROM read_progress rp
                JOIN lib_books b ON b.id = rp.book_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
-              WHERE rp.user_id = ${uid} AND rp.series_id = s.id AND rp.completed) AS last_read
+              WHERE rp.user_id = ${uid} AND rp.series_id = s.id AND rp.completed
+                AND ${noticeShown('s', 'COALESCE(ov.number, b.number)')}) AS last_read
        FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
       WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND ${visible('s', ctx, p)}
       ORDER BY s.created_at, s.id`,

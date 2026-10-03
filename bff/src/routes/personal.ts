@@ -17,6 +17,7 @@ import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } fro
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
+import { noticeBook } from '../lib/noticeChapters';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -292,7 +293,7 @@ export default async function personalRoutes(app: FastifyInstance) {
            JOIN lib_books b   ON b.id = bm.book_id
            JOIN lib_series s  ON s.id = b.series_id AND ${browsable('s', ctx, p)}
            LEFT JOIN series_overrides so ON so.series_id = s.id
-          WHERE bm.user_id = ${uid}${extra}
+          WHERE bm.user_id = ${uid}${extra} AND NOT ${noticeBook('b.id')}
           ORDER BY bm.created_at DESC LIMIT 500`,
         p.values as any[],
       ),
@@ -443,6 +444,8 @@ export default async function personalRoutes(app: FastifyInstance) {
          -- through browsable() make history obey the same rule as every other listing, 18+ included.
          JOIN lib_books b ON b.id = e.book_id
          JOIN lib_series s ON s.id = e.series_id AND ${browsable('s', hctx, hp)}
+         -- not a notice chapter the admin hides (lib/noticeChapters.ts)
+         WHERE NOT ${noticeBook('b.id')}
          ORDER BY e.created_at DESC
          LIMIT ${hp.add(limit)}`,
         hp.values as any[],
@@ -628,6 +631,8 @@ export default async function personalRoutes(app: FastifyInstance) {
         `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
          SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
            FROM lib_books b WHERE b.series_id = ANY($2)
+            -- What the reader sees: a notice chapter the admin hides (lib/noticeChapters.ts) is left as it was.
+            AND NOT ${noticeBook('b.id')}
          ON CONFLICT (user_id, book_id) DO UPDATE
            SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()`,
         [uid, live],

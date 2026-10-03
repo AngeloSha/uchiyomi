@@ -11,6 +11,7 @@ import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp, chapterName } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { directionFromComicInfo } from './directionSignals';
+import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { reconcileListingProgress } from './listingProgress';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
@@ -926,6 +927,18 @@ async function scanOnce(): Promise<ScanResult> {
             );
             id = rows[0].id;
             seenFolders.set(folderRel, id);
+            // What kind of comic the file's genres say it is (lib/seriesType.ts), below nothing weaker and above
+            // nothing stronger -- the rule learnSeriesType applies, in this transaction.
+            const t = typeFromGenres((field(firstXml, 'Genre') || '').split(','));
+            if (t) {
+              await qq(
+                `UPDATE lib_series SET series_type = $2, series_type_from = $3
+                  WHERE id = $1
+                    AND COALESCE(array_position($4::text[], series_type_from), 0) <= array_position($4::text[], $3::text)
+                    AND (series_type IS DISTINCT FROM $2 OR series_type_from IS DISTINCT FROM $3)`,
+                [id, t.type, t.from, SERIES_TYPE_FROM],
+              );
+            }
           }
 
           const params: any[] = [];

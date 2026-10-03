@@ -53,6 +53,9 @@ import { writePreflight } from '../lib/fsGuard';
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
+import { sanitiseNoticeTypes } from '../lib/noticeChapters';
+import { seriesHidesNotices, hiddenCount } from '../lib/noticeSettings';
+import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -517,7 +520,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
-    + 'mangadex_langs, unstated_lang, '
+    + 'mangadex_langs, unstated_lang, hide_notice_types, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
@@ -658,6 +661,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        * sites are in another. The same-language guard on automatic follows reads it.
        */
       unstatedLang: z.string().min(1).max(35).optional(),
+      /**
+       * Notice chapters (lib/noticeChapters.ts): the series types whose chapters numbered with a fraction (100.1,
+       * 100.5) are hidden everywhere and not downloaded, replaced whole. Empty is off, the default. A series' own
+       * switch (`hideNotices` on PATCH /api/admin/series/:id) outranks its type's.
+       */
+      hideNoticeTypes: z.array(z.enum(SERIES_TYPES)).max(SERIES_TYPES.length).optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
       ...ARCHIVE_SETTINGS_SHAPE,
     }).superRefine(archiveWindowPair).parse(req.body);
@@ -735,6 +744,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET unstated_lang = $1, updated_at = now() WHERE id = 1', [lang]);
       // The guard compares synchronously (lib/lang.ts): the next follow decision reads the new language.
       setUnstatedLang(lang);
+    }
+    if (b.hideNoticeTypes !== undefined) {
+      // Read live by every query (lib/noticeChapters.ts): the next request lists, counts and sweeps by it.
+      await q('UPDATE server_settings SET hide_notice_types = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify(sanitiseNoticeTypes(b.hideNoticeTypes))]);
     }
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
@@ -1212,10 +1226,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       borrowNames: z.boolean().nullable().optional(),
       lang: z.string().min(1).max(35).nullable().optional(),
       chapterFloor: z.union([z.literal('caught_up'), z.number().min(0).max(1e6), z.null()]).optional(),
+      // Notice chapters (lib/noticeChapters.ts): this series' own switch, outranking its type's; null follows the type.
+      hideNotices: z.boolean().nullable().optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.sourcePrefs === undefined
-        && b.data.borrowNames === undefined && b.data.lang === undefined && b.data.chapterFloor === undefined) {
+        && b.data.borrowNames === undefined && b.data.lang === undefined && b.data.chapterFloor === undefined
+        && b.data.hideNotices === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
@@ -1287,10 +1304,20 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (on) void borrowNamesFor(id, { force: true }).catch(() => {});
       else await clearBorrowedNames({ seriesId: id }).catch(() => 0);
     }
+    let notices: { hideNotices: boolean | null; hideNoticesEffective: boolean; hiddenNotices: number } | undefined;
+    if (b.data.hideNotices !== undefined) {
+      // Nothing to move: every read applies the switch as it stands (lib/noticeChapters.ts), and the next sweep
+      // fetches what it no longer hides. Answered with what applies now and how many chapters that hides.
+      await q('UPDATE lib_series SET hide_notices = $2 WHERE id = $1', [id, b.data.hideNotices]);
+      detail.hideNotices = b.data.hideNotices;
+      const effective = await seriesHidesNotices(id);
+      notices = { hideNotices: b.data.hideNotices, hideNoticesEffective: effective, hiddenNotices: effective ? await hiddenCount(id) : 0 };
+    }
     await logAudit('series.settings', { userId: userIdOf(req), detail, req });
     return {
       ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}),
       ...(b.data.lang !== undefined ? { lang } : {}), ...(caughtUp ? { chapterFloor: caughtUp } : {}),
+      ...(notices ?? {}),
     };
   });
 
@@ -1777,6 +1804,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        * from before this field (a cached PWA) wipe the direction on every retitle.
        */
       readingDirection: z.enum(READING_DIRECTIONS).nullable().optional(),
+      /**
+       * What kind of comic it is (lib/seriesType.ts) -- manga, manhwa, manhua, webtoon, comic -- or null for
+       * "automatic": what the genres, the source or AniList said, unknown when none did. The notice-chapter switches
+       * go by it (lib/noticeChapters.ts). Absent leaves it, null clears it, as readingDirection.
+       */
+      seriesType: z.enum(SERIES_TYPES).nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
@@ -1804,18 +1837,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     // genres all failed the same way, under a message that only said "Could not save". `?? null` because
     // the field is nullish: absent and null both mean "inherit whatever ComicInfo said".
     const sentDirection = b.data.readingDirection !== undefined;
+    const sentType = b.data.seriesType !== undefined;
+    // "unknown" is the absence of a type, not one: stored as NULL, so "Automatic" and "Unknown" cannot disagree.
+    const type = isKnownSeriesType(b.data.seriesType) ? b.data.seriesType : null;
     await tx(async (qq) => {
       await qq(
-        `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, reading_direction, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, now())
+        `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, reading_direction, series_type, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, $12, now())
          ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
            genres = $6, age_rating = $7,
            adult_exempt = COALESCE($8, series_overrides.adult_exempt),
            reading_direction = CASE WHEN $9::boolean THEN $10 ELSE series_overrides.reading_direction END,
+           series_type = CASE WHEN $11::boolean THEN $12 ELSE series_overrides.series_type END,
            updated_at = now()`,
         [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status),
          normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null,
-         sentDirection, b.data.readingDirection ?? null],
+         sentDirection, b.data.readingDirection ?? null, sentType, type],
       );
       // The 18+ rating is the WORK's (v0.52.0, #72): written onto every other language edition in the same
       // transaction, so a capped account can never open the Spanish copy of a work rated 18+ in English, nor the 18+
@@ -2715,6 +2752,7 @@ export default async function adminRoutes(app: FastifyInstance) {
             if ((art as any).mediaId) {
               await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
               await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, art as any), 'anilist').catch(() => {});
+              await learnTypeFromAniList({ id: t.id }, t.title, art as any);
             }
             if (art.banner) job.banners++;
             else job.covers++;
@@ -3276,6 +3314,7 @@ export default async function adminRoutes(app: FastifyInstance) {
           if (m.mediaId) {
             await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null);
             await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, m), 'anilist').catch(() => {});
+            await learnTypeFromAniList({ id: t.id }, t.title, m);
             job.linked++;
           }
           else job.misses++;
