@@ -77,6 +77,38 @@ const SWAPS = EXTRA.has('v54')
     sourceId: `swap-${role}-${pass}`, title: `Swap ${role[0].toUpperCase()}${role.slice(1)} ${pass[0].toUpperCase()}${pass.slice(1)}`, first: 1, last: 12,
   })))
   : [];
+// ⚠️ The `fix-*` series are opt-in too (`--extra v55`, on BOTH fakes): autofixWalk.mjs's (v0.55.0, Health's Fix
+// everything), one per thing the run is to fix or leave. Fix Backup and Fix Search are added from fake-a, which then
+// goes offline (Replace moves one to the fake-b it follows, and finds the other on fake-b); the rest are fake-b's: two
+// copies of one series under two titles (Twin Walk, Twin Walk Again), one series in two languages, the chapters a
+// later split saves twice, the impossible numbers, two series numbered by posting order -- twelve posts on two numbers
+// each, the smallest listing the detector calls strong (lib/postingOrder.ts SHARED_NUMBERING) -- a gap no source here
+// lists (Gap Only: fake-b serves it, and the walk scripts `omit:6-7` on it; the fake engine's Gap Scans has all
+// twelve), and two chapters that fail (one before the runs, one after). Twelve chapters where a search must judge them (a primary listing ten or more
+// numbers is judged one way, lib/autoFollow.ts). Gated as the others are: the older walks see what they always did.
+const FIX_POSTS = Array.from({ length: 12 }, (_, i) => ({
+  k: i + 1, number: i < 6 ? 1 : 2, title: `E${i < 6 ? 1 : 2} - Page ${i + 1}`, publishedAt: new Date(Date.UTC(2025, 0, i + 1)).toISOString(),
+}));
+const FIXES = EXTRA.has('v55')
+  ? [
+    { sourceId: 'fix-backup', title: 'Fix Backup', first: 1, last: 12 },
+    { sourceId: 'fix-search', title: 'Fix Search', first: 1, last: 12 },
+    { sourceId: 'twin-walk', title: 'Twin Walk', first: 1, last: 12 },
+    { sourceId: 'twin-again', title: 'Twin Walk Again', first: 1, last: 12 },
+    { sourceId: 'edition-en', title: 'Edition Walk', first: 1, last: 12 },
+    { sourceId: 'edition-es', title: 'Edición Walk', first: 1, last: 12 },
+    { sourceId: 'twice-walk', title: 'Twice Walk', first: 1, last: 6 },
+    { sourceId: 'twice-short', title: 'Twice Short', first: 1, last: 8 },
+    { sourceId: 'odd-walk', title: 'Odd Walk', first: 1, last: 4 },
+    { sourceId: 'odd-mark', title: 'Odd Mark', first: 1, last: 4 },
+    { sourceId: 'num-clean', title: 'Number Clean', first: 1, last: FIX_POSTS.length, posts: FIX_POSTS },
+    { sourceId: 'num-held', title: 'Number Held', first: 1, last: FIX_POSTS.length, posts: FIX_POSTS },
+    { sourceId: 'gap-only', title: 'Gap Only', first: 1, last: 12 },
+    { sourceId: 'fail-walk', title: 'Fail Walk', first: 1, last: 4 },
+    // Added after the runs, its chapter 4 refused: the failure Let me choose's safe repair then retries.
+    { sourceId: 'fail-late', title: 'Fail Late', first: 1, last: 4 },
+  ]
+  : [];
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
@@ -85,6 +117,7 @@ const SERIES = [
   // first/last count POSTS here, which is what chapterFromId checks a post id against.
   ...(POSTS ? [{ sourceId: 'walk-istrevelia', title: 'Walk Istrevelia', first: 1, last: POSTS.length, posts: POSTS }] : []),
   ...SWAPS,
+  ...FIXES,
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 

@@ -17,6 +17,7 @@
 #   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
 #   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
 #   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v54 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # the stack for walk49's replace
+#   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's autofix
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -84,6 +85,10 @@ fi
 # downloads to -- in this rig the host's own disk. A test host with less free than that refuses every download, and
 # the walks read it as a broken feature; 0 turns the floor off. Unset: the app's own default.
 if [ -n "${E2E_MIN_FREE_GB:-}" ]; then APP_ENV+=(-e "MIN_FREE_GB=$E2E_MIN_FREE_GB"); fi
+# E2E_MAX_SOURCES: the extension engine's source limit (SUWAYOMI_MAX_SOURCES, 25 when unset). The autofix walk runs
+# under a limit of one: Fix everything's install still fits, and a second used source is then the one over it (Free a
+# slot). Unset: the app's own default.
+if [ -n "${E2E_MAX_SOURCES:-}" ]; then APP_ENV+=(-e "SUWAYOMI_MAX_SOURCES=$E2E_MAX_SOURCES"); fi
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT} (library $LIB, data $DATA)"; return; }
@@ -121,7 +126,7 @@ if [ "$ENGINE" = "fake" ]; then
   echo "· starting the fake extension engine (${E2E_ENGINE_MODE:-up})"
   docker run -d --name "$ENGINE_C" --network "$NET" -p "127.0.0.1:$ENGINE_PORT:$ENGINE_PORT" \
     -v "$REPO:/repo:ro" -w /repo node:24-alpine \
-    node web/test/e2e/fakeEngine.mjs --port "$ENGINE_PORT" --mode "${E2E_ENGINE_MODE:-up}" >/dev/null
+    node web/test/e2e/fakeEngine.mjs --port "$ENGINE_PORT" --mode "${E2E_ENGINE_MODE:-up}" --extra "${E2E_FAKE_EXTRA:-none}" >/dev/null
   ready=0
   for _ in $(seq 1 50); do
     if curl -sf -o /dev/null "http://127.0.0.1:$ENGINE_PORT/__mode"; then ready=1; break; fi

@@ -1158,6 +1158,37 @@ export function defaultSeed() {
   };
 }
 
+/** Gap Scans (v0.55.0): a package not installed, in two languages; its English source carries Gap Only, all twelve. */
+export const GAP_SCANS = Object.freeze({ pkg: 'eu.kanade.tachiyomi.extension.all.gapscans', en: '7000000000000055001', es: '7000000000000055002' });
+
+/**
+ * The standard installation with Gap Scans in the repository, not installed: what Health's Fix everything installs by
+ * itself to fill a gap no installed source has (web/test/e2e/autofixWalk.mjs; fakeEngine.mjs --extra v55). Its sources
+ * come FIRST in the engine's order, so that under a source limit of one a series on Webtoons.com is the one left over --
+ * Free a slot's case -- while Gap Scans keeps its place.
+ */
+export function autofixSeed() {
+  const seed = defaultSeed();
+  const chapters = Array.from({ length: 12 }, (_, i) => 12 - i).map((n) => ({
+    name: `Chapter ${n}`, url: `/gap-only/${n}`, chapterNumber: n, scanlator: 'Gap Scans', uploadDate: EPOCH + n * DAY, pages: 3,
+  }));
+  const src = (id, lang, mangas) => ({
+    id, name: 'Gap Scans', lang, pkgName: GAP_SCANS.pkg, supportsLatest: true, isNsfw: false, baseUrl: 'https://gapscans.example', mangas,
+  });
+  return {
+    ...seed,
+    sources: [
+      src(GAP_SCANS.en, 'en', [{ title: 'Gap Only', url: '/gap-only', realUrl: 'https://gapscans.example/gap-only', genre: ['Drama'], status: 'ONGOING', chapters }]),
+      src(GAP_SCANS.es, 'es', []),
+      ...seed.sources,
+    ],
+    extensions: [
+      ...seed.extensions,
+      { pkgName: GAP_SCANS.pkg, name: 'Gap Scans', lang: 'all', versionName: '1.0.0', installed: false, isNsfw: false, repo: 'https://repo.example/repo.json' },
+    ],
+  };
+}
+
 // A repository the size of the ones people add: the keiyoushi repository lists more than 1,300 extensions, and
 // Admin → Extensions once stopped at "Showing 400 of 570 matches — narrow the search" on it (discussion #121).
 // The names are made up, two words from the lists below; the languages, the one-in-five multi-language

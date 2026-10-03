@@ -28,7 +28,13 @@
 // The seed: the Local source, Webtoons.com (EN) with every preference kind, an Istrevelia-shaped series and a
 // clean one, Manga Ball (EN) -- #115's source -- and an adult source. Ids and titles: SOURCE_IDS and
 // defaultSeed() in fakeSuwayomiEngine.mjs.
-import { startFakeEngine, MODES, SOURCE_IDS } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
+//
+// --extra v55 (up.sh passes E2E_FAKE_EXTRA): one more extension in the repository, NOT installed -- Gap Scans, in two
+// languages, whose English source carries Gap Only with all twelve chapters (the fake sources leave out 6 and 7):
+// what Health's Fix everything installs by itself to fill a gap nobody else has (autofixWalk.mjs). Its sources come
+// first in the engine's order, so that under a source limit of one (E2E_MAX_SOURCES) a series on Webtoons.com is the
+// one left over the limit -- Free a slot's case -- and Gap Scans keeps its place. Other extras are the fake sources'.
+import { startFakeEngine, autofixSeed, MODES, SOURCE_IDS } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
 
 const argv = new Map();
 for (let i = 2; i < process.argv.length; i += 2) argv.set(process.argv[i], process.argv[i + 1]);
@@ -37,8 +43,9 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`bad --
 const host = argv.get('--host') ?? '0.0.0.0';
 const mode = argv.get('--mode') ?? 'up';
 if (!MODES.includes(mode)) throw new Error(`bad --mode ${mode}; one of ${MODES.join(', ')}`);
+const extra = new Set(String(argv.get('--extra') ?? '').split(',').map((e) => e.trim()).filter(Boolean));
 
-const fake = await startFakeEngine({ port, host });
+const fake = await startFakeEngine({ port, host, ...(extra.has('v55') ? { seed: autofixSeed() } : {}) });
 fake.engine.setMode(mode);
 // The harness waits for this line (and a port-0 caller reads the port from it).
 console.log(`[fake-engine] listening on ${fake.port} (mode ${mode}; Manga Ball is ${SOURCE_IDS.mangaBall})`);

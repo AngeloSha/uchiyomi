@@ -21,7 +21,7 @@
 // The default PHASES are the ones a plain up.sh stack can serve: notices, archive, sources. numbering and engine
 // need the fake extension engine (E2E_ENGINE=fake); its control port is 23000 plus the app port's last three digits
 // (23149 above, as up.sh derives it), which numbering derives by itself and engine takes as ENGINE. PHASES may name
-// only the five phases below: any other name is a failed check, so a typo cannot pass as a green run. The release
+// only the phases below: any other name is a failed check, so a typo cannot pass as a green run. The release
 // plan's other phases live elsewhere: its downloads checks are run.mjs's (the walk up.sh runs by itself), and Health
 // clarity is walk41's.
 //
@@ -108,8 +108,16 @@
 //   off all asks first, a site in use cannot be removed, and the old Providers/Extensions addresses land on Sources
 //   (replaceWalk.mjs). Needs up.sh with E2E_ENGINE=fake and E2E_FAKE_EXTRA=v54, and E2E_NET (up.sh's network) here.
 //
+//   autofix -- v0.55.0, Health's Fix everything: at 1280, 390 and 390 in Arabic, a library with something wrong on every
+//   card the run can fix -- a broken main source, a duplicate and a two-language pair, chapters saved twice, impossible
+//   numbers, two renumbering reviews, a gap only an extension not yet installed carries, a failed chapter -- and what a
+//   person must decide; Fix it for me runs it all, the phases advance, Run in background and back, and the end names
+//   exactly what needs a person over "Everything else is green", every other Health card green; then Stop at a safe
+//   point, the Arabic end, Let me choose's safe repair, the nightly's choice after a reload, and Free a slot
+//   (autofixWalk.mjs). Needs up.sh with E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=1, and E2E_NET here.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   replace, engine. The engine phase resets the fake engine and takes it down, so nothing that needs it can follow; a
+//   replace, autofix, engine. The engine phase resets the fake engine and takes it down, so nothing that needs it can follow; a
 //   sources run that stops half-way leaves fake-a's search failing, which only the engine phase then meets, and it
 //   never searches.
 //
@@ -154,7 +162,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'replace', 'engine'];
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'replace', 'autofix', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1394,6 +1402,12 @@ try {
   if (PHASES.includes('replace')) {
     const { replaceWalk } = await import('./replaceWalk.mjs');
     await replaceWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
+  }
+  // v0.55.0: Health's Fix everything (autofixWalk.mjs; up.sh with E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=1,
+  // and E2E_NET on this command). Before engine, which takes the engine down.
+  if (PHASES.includes('autofix')) {
+    const { autofixWalk } = await import('./autofixWalk.mjs');
+    await autofixWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.
