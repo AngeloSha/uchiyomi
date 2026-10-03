@@ -1504,9 +1504,10 @@ without you pressing anything. Since v0.48.3:
     numbered impossibly, and applies the renumbering plans that are safe. Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
-    *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says
-    **All green**, or how many things need you, then up to six lines of what it did (*Moved 184 series off Aqua
-    Manga*, *Fetched 37 missing chapters*…). Each thing that needs you has its one key — the page it is about, its
+    *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says how
+    many things need you (with *Everything else is green* under it when nothing else is left), or **All green** when
+    nothing does, then up to six lines of what it did (*Moved 184 series off Aqua Manga*, *Fetched 37 missing
+    chapters*…). What a stopped run did not reach is never something that needs you: the next run continues it. Each thing that needs you has its one key — the page it is about, its
     card here, or Admin → Settings — what clears by itself says when, and the rest is under *Details*. **Run again**
     is offered only while something a run could still change is left.
   - **Let me choose** runs the safe repair *Fix all issues* used to run — failed chapters tried again now, longer
