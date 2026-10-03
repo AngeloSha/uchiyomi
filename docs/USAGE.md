@@ -2148,6 +2148,45 @@ this browser — see the next section. Switches save the moment they flip; text 
 leave them or press Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save
 button (**Save scanlator defaults**), because a half-typed list is not something to save on every keystroke.
 
+### Notice chapters
+
+Many sources post announcements for readers (a hiatus, a season break, a schedule change) as a chapter
+numbered after the latest one with a fraction: **100.1**, **100.5**. **Admin → Settings → Notice chapters**
+has one switch per series type: **Manga**, **Manhwa**, **Manhua**, **Webtoon**, **Comic** and **Unknown /
+other**. All are off by default. For a type that is switched on, every chapter whose number is not a whole
+number is hidden:
+
+- **Everywhere you read.** It is hidden from the chapter list, the reader's next and previous, Continue Reading,
+  Updates, history, bookmarks, OPDS, offline downloads and the Komga-compatible API that the Mihon extension
+  reads. It applies to everyone, admins included.
+- **From the counts.** It is not counted in chapter totals or unread badges, in Mihon's *read up to* and
+  *Completed*, or in what AniList, MyAnimeList and Kitsu are told. An unread 100.5 therefore no longer keeps a
+  series you have read to the end from being finished.
+- **From downloads.** Neither the updater nor the slow archive downloads new ones, and they are not counted as
+  missing.
+
+Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
+rescan. Any that were never downloaded are fetched at the next check. Because the chapter count goes up when
+they reappear, those series can show as having new chapters.
+
+**Which type a series is** is worked out from, most trusted first:
+
+1. A genre naming its origin (Manga, Manhwa, Manhua, Comic).
+2. The followed source: MangaDex's original language.
+3. AniList's country of origin.
+4. A Webtoon genre with none of the above.
+
+A series tagged both Manhwa and Webtoon is a manhwa. A series nothing speaks for is **Unknown / other**. You
+can set the type by hand under **Series type** in *Edit details* → **Reading**.
+
+**One series** can override its type's switch with **Hide notice chapters** in its **Sources & translations**
+sheet. The sheet also says how many chapters that hides right now, and **Use the server default** puts the
+series back under its type's switch. Use this for a series whose x.5 chapters are real content, such as a long
+chapter posted in two parts.
+
+The rule is any fraction. It takes no notice of the chapter title or page count, so a series numbered in
+parts (78.1 … 78.9) loses those parts while its type's switch is on, unless you switch it off for that series.
+
 ### Notifications
 
 **Admin → Settings → Notifications** sends new chapters and server problems somewhere other than a browser:

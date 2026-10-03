@@ -523,6 +523,11 @@ this API as well; it is closed source and was not tested here — a report eithe
   direction the server reports the leading run of read chapters: nothing read reports 0, and so does a run
   that ends on — or starts with an unread — number-0 chapter, so an unread *Extra* at the head keeps the run
   behind it from reaching the phone until it is read.
+- **Notice chapters** (*Admin → Settings → Notice chapters*, off by default) are hidden from the phone too.
+  For a series type that is switched on, or a series switched on in its own *Sources & translations* sheet,
+  every chapter numbered with a fraction (100.1, 100.5) is left out of the chapter list, the counts and the
+  tracker's progress. An unread notice therefore never holds the read-up-to number or *Completed* back.
+  Switching it off lists them again on the next refresh.
 - Plain HTTP on a LAN works; the cookie is marked Secure only over HTTPS.
 
 ## Where the line is
