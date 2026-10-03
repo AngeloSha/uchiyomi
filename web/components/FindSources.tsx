@@ -90,7 +90,7 @@ export function FindResultRow({ r, onOpen }: { r: FindResult; onOpen: () => void
             <bdi className="min-w-0 truncate">{r.promoted.fromName}</bdi>
             <span className="inline-block shrink-0 rtl:-scale-x-100">→</span>
             <bdi className="min-w-0 truncate text-fog-200">{r.promoted.toName}</bdi>
-            {r.promoted.via === 'search' && <span className="shrink-0 text-fog-500">· {tr('New source found')}</span>}
+            {r.promoted.via === 'search' && <span className="shrink-0 text-fog-500">· {tr('Found by searching')}</span>}
           </span>
         </p>
       ) : r.followed.length > 0

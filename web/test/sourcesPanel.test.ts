@@ -449,3 +449,15 @@ test('a Replace run is named for its source, and offers Replace again only while
   assert.match(dialog, /\{ended && onAgain && !!run\?\.left && <button type="button" onClick=\{onAgain\}[^>]*data-replace-again>/,
     'Replace again is offered after a run that left nothing on the source');
 });
+
+test('a row of a Replace run says its move in words of its own, and Turn off says what really stops', () => {
+  // "Moved" and "New source found" are the run's counts, plural in es, fr and pt-BR ("Movidas", "Déplacées"): on one
+  // series' row they read wrong. Reintroduce them on the row: the first assertion fails.
+  const dialog = readFileSync(join(__dirname, '..', 'components/ReplaceDialog.tsx'), 'utf8');
+  assert.match(dialog, /\{r\.promoted\.via === 'search' \? tr\('Found by searching'\) : tr\('A source it already follows'\)\}/,
+    'a series\' row reuses the counts\' plural words');
+  assert.doesNotMatch(readFileSync(join(__dirname, '..', 'components/FindSources.tsx'), 'utf8'), /· \{tr\('New source found'\)\}/);
+  // The series that follow a switched-off source stop GETTING chapters from it (they were never "asked").
+  const health = readFileSync(join(__dirname, '..', 'components/HealthActions.tsx'), 'utf8');
+  assert.doesNotMatch(health, /stop being asked for new chapters/, 'Turn off says the series are asked');
+});

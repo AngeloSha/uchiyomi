@@ -472,7 +472,7 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
             confirmLabel={tr('Turn off')}
             danger
             // True since v0.54.0, when a switched-off source stopped being asked by the sweep too.
-            body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on in Admin → Sources.')}</p>}
+            body={<p>{tr('Nothing is deleted. Series that follow it stop getting new chapters from it until you turn it back on in Admin → Sources.')}</p>}
             onConfirm={() => act('disable', doDisable)}
             onClose={() => setAsking(null)}
           />

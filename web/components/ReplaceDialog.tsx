@@ -256,7 +256,8 @@ function RunRow({ r }: { r: FindResult }) {
           : <span className="min-w-0 truncate text-[13px] text-fog-500">{tr('Hidden by the 18+ filter')}</span>}
         {r.promoted && (
           <span className="shrink-0 rounded-[4px] bg-ink-800 px-1.5 text-[10px] font-semibold leading-4 text-fog-400">
-            {r.promoted.via === 'search' ? tr('New source found') : tr('Moved')}
+            {/* The row's own words, singular: "Moved" and "New source found" are the counts' (plural in es, fr and pt-BR). */}
+            {r.promoted.via === 'search' ? tr('Found by searching') : tr('A source it already follows')}
           </span>
         )}
       </p>
