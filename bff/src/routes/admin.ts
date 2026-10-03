@@ -2331,9 +2331,10 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ⚠️ Every typed library path in the four routes below goes through toStoredRel (a `\` typed on Windows is a
   // separator, and the database stores `/`: lib/relPath.ts) and, on the desktop, diskSpelling -- NTFS and
-  // APFS find `manga/seinen` for `Manga/Seinen`, but lib_series.folder and libraries.path are compared as
+  // APFS find `manga/seinen` for `Manga/Seinen`, but lib_series.folder and a library's folders are compared as
   // exact strings with the on-disk spelling, so the typed case would match nothing. Both are identities on
-  // the server.
+  // the server. The folder browser does it here; the preview, create and edit take every folder through
+  // storedFolders (lib/libraryFolders.ts).
 
   /**
    * The folders that actually exist, at any depth.
