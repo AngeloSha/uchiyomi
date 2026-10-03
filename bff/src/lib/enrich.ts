@@ -19,6 +19,7 @@ import { roleOf, userIdOf } from './auth';
 import { autoHeroFor } from './autoHero';
 import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
+import { noticeBook } from './noticeChapters';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -52,6 +53,9 @@ async function seriesProgress(userId: string, seriesIds: string[]): Promise<Map<
             count(*) FILTER (WHERE NOT completed)::int  AS started
        FROM read_progress
       WHERE user_id = $1 AND series_id = ANY($2)
+        -- A hidden notice chapter (lib/noticeChapters.ts) is out of the total these are laid against, so out of
+        -- these too, or one read notice would cover for an unread chapter.
+        AND NOT ${noticeBook('read_progress.book_id')}
       GROUP BY series_id`,
     [userId, seriesIds],
   );

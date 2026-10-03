@@ -5,6 +5,7 @@ import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, persistScan } from './library';
 import { ViewCtx, Params, visible, browsable, ADULT_RATING } from './visibility';
 import { cleanDescription } from './htmlText';
 import { effectiveLang } from './seriesLang';
+import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -38,7 +39,9 @@ const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
          COALESCE(o.age_rating, s.age_rating) AS age_rating,
          -- The admin's direction, else what the evidence said (lib/readingDirection.ts), else NULL: unknown.
          COALESCE(o.reading_direction, s.reading_direction) AS reading_direction,
-         s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
+         -- The stored count less the notice chapters this series hides (lib/noticeChapters.ts), so every badge,
+         -- filter and sort over it, and the Komga-compatible series Mihon's tracker reads, counts what is listed.
+         ${visibleBookCount('s')} AS books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
          s.auto_update, s.library_id, s.library_pinned,
          -- What the source last said, so "how far behind is this?" is a column rather than a network call.
          -- Kept in step with SERIES_COLS above; see the warning there.
@@ -81,6 +84,9 @@ const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
     -- soft delete, merge, and now library access -- reaches chapters only through here.
     JOIN lib_series s ON s.id = b.series_id AND ${visible('s', ctx, p)}
     LEFT JOIN book_overrides ov ON ov.book_id = b.id
+    -- A notice chapter the admin hides (lib/noticeChapters.ts) is not a chapter to anyone: not listed, not opened
+    -- by id, not next or previous, not in the offline plan or the Komga-compatible API. By the effective number.
+   WHERE ${noticeShown('s', 'COALESCE(ov.number, b.number)')}
 ) ${alias}`;
 
 /** The overridden title for one series, for the book DTOs that carry seriesTitle. */
@@ -335,7 +341,11 @@ const MINE_CTE = `WITH mine AS (
          count(*) FILTER (WHERE NOT completed)::int AS started,
          -- When this viewer last read in the series: the edition of a work the Library shows (searchSeries).
          max(updated_at)                            AS last_at
-    FROM read_progress WHERE user_id = $1 GROUP BY series_id
+    FROM read_progress WHERE user_id = $1
+     -- Against the count that leaves hidden notice chapters out (seriesSrcWith), so a read notice cannot fill in
+     -- for an unread chapter in "read" and "in progress".
+     AND NOT ${noticeBook('read_progress.book_id')}
+   GROUP BY series_id
 ), fav AS (
   SELECT series_id FROM favorites WHERE user_id = $1
 )`;

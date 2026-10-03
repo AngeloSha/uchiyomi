@@ -26,6 +26,11 @@ export interface SourceSeries {
    * added (lib/readingDirection.ts), below ComicInfo's own word and above AniList's.
    */
   readingDirection?: ReadingDirection;
+  /**
+   * The title's ORIGINAL language, when the source can say: MangaDex's `originalLanguage`. Learned onto the series
+   * as its type (lib/seriesType.ts: ja manga, ko manhwa, zh manhua), which the notice-chapter switches go by.
+   */
+  originalLanguage?: string;
 }
 
 export interface SourceChapter {

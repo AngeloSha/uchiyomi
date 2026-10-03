@@ -17,6 +17,7 @@ import { viewCtxFor, visibleBookFile, Params, visible, browsable, type ViewCtx }
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { serveImage } from '../lib/imageCache';
 import { editionLabels } from '../lib/editions';
+import { noticeShown, visibleBookCount } from '../lib/noticeChapters';
 const AdmZip = require('adm-zip');
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -115,7 +116,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
    * would have inherited a change made to the real one in ownedCatalog.
    */
   const seriesSrcWith = (gate: typeof visible, ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
-          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, s.books_count,
+          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, ${visibleBookCount('s')} AS books_count,
           COALESCE(o.genres, s.genres) AS genres, COALESCE(o.status, s.status) AS status, s.library_id,
           s.latest_mtime, s.created_at
      FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
@@ -272,16 +273,22 @@ export default async function opdsRoutes(app: FastifyInstance) {
       // This had no visibility predicate whatsoever: the chapter list of a hidden series was served in
       // full. The join is what carries the rule down from the series. The progress join is per reader, so
       // `pse:lastRead` is where THIS person stopped, not where anyone did.
-      `SELECT b.id, b.title, b.number, b.pages, b.updated_at, b.root, b.file, rp.page AS last_page, rp.updated_at AS last_at
+      // The number is the effective one -- the admin's renumber when there is one -- as booksSrc hands it to the
+      // app and the Komga-compatible API, so the three surfaces list a chapter under one number and in one order.
+      `SELECT b.id, b.title, COALESCE(ov.number, b.number) AS number, b.pages, b.updated_at, b.root, b.file,
+              rp.page AS last_page, rp.updated_at AS last_at
          FROM lib_books b
          JOIN lib_series s ON s.id = b.series_id AND ${visible('s', vc(req), bp)}
+         LEFT JOIN book_overrides ov ON ov.book_id = b.id
          LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ${uid}
         WHERE b.series_id = ${bp.add(id)}
           -- A tombstone (lib/chapterCleanup.ts) has no file behind it. Listed, the loop below would stat it
           -- as a "never counted" chapter on every fetch and fail silently, and a reader would be offered a
           -- CBZ that 404s.
           AND b.pruned_at IS NULL
-        ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
+          -- Nor a notice chapter the admin hides (lib/noticeChapters.ts).
+          AND ${noticeShown('s', 'COALESCE(ov.number, b.number)')}
+        ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`, bp.values as any[]);
     // A page count of 0 means "never counted", not "no pages". The scanner counts most archives, but a
     // streaming link with count 0 is a link a reader cannot use, so the unknowns get counted here, once,
     // and written back the way the image server does it.

@@ -1688,6 +1688,35 @@ paths:
                             type: string
                             enum: [comicinfo, source, anilist]
                       - type: "null"
+                  seriesType:
+                    description: >-
+                      Admins only. What kind of comic the series is, as the notice-chapter switches read it: the
+                      admin's override (`overrides.seriesType`), else `detectedType`, else `unknown`.
+                    type: string
+                    enum: [manga, manhwa, manhua, webtoon, comic, unknown]
+                  detectedType:
+                    description: >-
+                      Admins only. What the evidence says the series is and which evidence said it -- `genre`,
+                      `source` (MangaDex's original language), `anilist` (the country of origin) or `webtoon` (a
+                      Webtoon genre with no origin genre), most trusted first -- or null when nothing has.
+                    oneOf:
+                      - type: object
+                        properties:
+                          type: { type: string, enum: [manga, manhwa, manhua, webtoon, comic] }
+                          from: { type: string, enum: [genre, source, anilist, webtoon] }
+                      - type: "null"
+                  hideNotices:
+                    description: >-
+                      Admins only. This series' own notice-chapter switch: true hides every chapter numbered with a
+                      fraction (100.1, 100.5), false shows them; null follows its type's switch
+                      (`hideNoticeTypes` on PATCH /api/admin/settings).
+                    type: [boolean, "null"]
+                  hideNoticesEffective:
+                    description: Admins only. Whether this series' notice chapters are hidden once its type's switch is applied.
+                    type: boolean
+                  hiddenNotices:
+                    description: Admins only. How many notice chapters that hides right now, downloaded or only listed by its sources.
+                    type: integer
         "401":
           description: Not authenticated
         "404":
@@ -6223,6 +6252,21 @@ paths:
                     in the same language, so a server whose sites are in Spanish sets es here. Any one language
                     (BCP-47, normalised: pt-br is pt-BR); "all", "other" or an empty string is refused (400
                     unknown_language). Applied at once.
+                hideNoticeTypes:
+                  type: array
+                  maxItems: 6
+                  items:
+                    type: string
+                    enum: [manga, manhwa, manhua, webtoon, comic, unknown]
+                  description: >-
+                    Notice chapters: the series types whose chapters numbered with a fraction (100.1, 100.5 -- the
+                    notices many sources post after their latest chapter) are hidden, replaced whole. Empty, the
+                    default, is off. A hidden chapter is left out of every chapter list, count, badge and feed, the
+                    reader's next and previous, OPDS, the Komga-compatible API and what the trackers are told, and
+                    the sweep and the slow archive do not download new ones. Nothing is deleted: taking a type off
+                    the list shows its chapters again on the next request, and the next check fetches those never
+                    downloaded. A series' own switch (`hideNotices` on PATCH /api/admin/series/{id}) outranks its
+                    type's; its type is `seriesType` on GET /api/series/{id}. Read back as `hide_notice_types`.
       security:
         - bearer: []
       responses:
@@ -6703,13 +6747,20 @@ paths:
                     - type: number
                       minimum: 0
                     - type: "null"
+                hideNotices:
+                  description: >-
+                    Notice chapters for this series: true hides every chapter numbered with a fraction (100.1, 100.5)
+                    everywhere and does not download new ones, false shows them, null follows its type's switch
+                    (`hideNoticeTypes` on PATCH /api/admin/settings). Applied on the next request; nothing is deleted.
+                  type: [boolean, "null"]
       security:
         - bearer: []
       responses:
         "200":
           description: >-
             { ok: true }, with `autoUpdate` echoed when it was sent, `lang` when it was, and for `chapterFloor`
-            `{floor, previous}`: the floor now and the one it replaced.
+            `{floor, previous}`: the floor now and the one it replaced. With `hideNotices`: `hideNotices` as stored,
+            `hideNoticesEffective` (whether its notice chapters are hidden now) and `hiddenNotices` (how many).
         "400":
           description: Malformed body, an unknown field, or a body naming nothing to change
         "401":
@@ -7624,6 +7675,15 @@ paths:
                     the current override alone. It is what `metadata.readingDirection` reports everywhere --
                     the reader's "Series default" direction, the offline manifest, and the Komga-compatible
                     API.
+                seriesType:
+                  type: [string, "null"]
+                  enum: [manga, manhwa, manhua, webtoon, comic, unknown, null]
+                  description: >-
+                    What kind of comic the series is, which the notice-chapter switches go by (hideNoticeTypes on
+                    PATCH /api/admin/settings). null, or unknown, goes back to automatic: what a genre naming the
+                    origin, the followed source (MangaDex's original language), AniList's country of origin or a
+                    Webtoon genre said, in that order of trust, and unknown when none did. Absent leaves the current
+                    override alone.
       security:
         - bearer: []
       responses:
