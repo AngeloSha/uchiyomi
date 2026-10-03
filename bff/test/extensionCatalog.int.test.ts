@@ -266,6 +266,28 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
       const w = await get(`/api/admin/extensions/sources?pkg=${encodeURIComponent(PKG.webtoons)}`);
       assert.equal(w.content[0].used, 0);
     });
+
+    /**
+     * The copy kept for half a minute is never read past an install, an update or a removal: Needs attention's Update
+     * left its own row up until the copy ran out (walk49's engine phase at 1280). Reintroduce by dropping the generation
+     * from updatesWaiting: "an update applied is no longer counted, at once" reads 1. Last: it asks the engine for an
+     * update, which "Turn on its sources" counts as never asked.
+     */
+    await t.test('an update applied is no longer counted, at once', async () => {
+      const { forgetUpdates } = await import('../src/lib/sourcesOverview');
+      fake.extension(PKG.mangaBall).hasUpdate = true;
+      forgetUpdates();
+      try {
+        assert.equal((await get('/api/admin/sources/overview')).attention.updates, 1, 'PREMISE: Manga Ball has an update waiting');
+        const r = await post(`/api/admin/extensions/catalog/${encodeURIComponent(PKG.mangaBall)}`, { action: 'update' });
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(fake.extension(PKG.mangaBall).hasUpdate, false, 'PREMISE: the engine applied it');
+        assert.equal((await get('/api/admin/sources/overview')).attention.updates, 0, 'an update applied is no longer counted, at once');
+      } finally {
+        fake.extension(PKG.mangaBall).hasUpdate = false;
+        forgetUpdates();
+      }
+    });
   } finally {
     [console.warn, console.log] = quiet;
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});

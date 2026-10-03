@@ -19,7 +19,7 @@ import { q } from './db';
 import { getSource, listSources, isPackSource, isSwAdapterId, SW_PREFIX, suwayomiConfigured, withTimeout } from './sources';
 import { MANGADEX_GROUP } from './sources/mangadex';
 import { readSites } from './sources/customSites';
-import { listExtensions } from './sources/suwayomi/extensions';
+import { extensionsGeneration, listExtensions } from './sources/suwayomi/extensions';
 import { visibleToAll } from './visibility';
 import { mainSourceCounts } from './findScope';
 import { sourceTrouble, sourceLabel, type HealthItem } from './health';
@@ -63,16 +63,21 @@ export interface SourcesOverview {
 /** How long the engine may take to say which extensions have an update, and how long its answer is kept. */
 const UPDATES_MS = 4_000;
 const UPDATES_KEEP_MS = 30_000;
-let updatesSeen: { at: number; n: number } | null = null;
+let updatesSeen: { at: number; n: number; gen: number } | null = null;
 
 /**
  * Extensions with an update waiting: the engine's own word, asked briefly and kept half a minute (a section that is
  * open polls); when it does not answer in time, the last extension check's (server_settings.extension_last_result: what
- * was waiting and was not updated) -- kept as long, so an engine that is away costs one wait, not one a poll.
+ * was waiting and was not updated) -- kept as long, so an engine that is away costs one wait, not one a poll. Never
+ * kept past an install, update or removal, or a re-read of the repositories (extensionsGeneration): the Update of
+ * Needs attention's own row left the row up until the copy ran out. Reintroduce by dropping the generation:
+ * "an update applied is no longer counted, at once" in extensionCatalog.int.test.ts still counts it.
  */
 async function updatesWaiting(): Promise<number> {
   if (!suwayomiConfigured()) return 0;
-  if (updatesSeen && Date.now() - updatesSeen.at < UPDATES_KEEP_MS) return updatesSeen.n;
+  // Read before the engine is asked: a change landing while it answers leaves this copy behind it.
+  const gen = extensionsGeneration();
+  if (updatesSeen && updatesSeen.gen === gen && Date.now() - updatesSeen.at < UPDATES_KEEP_MS) return updatesSeen.n;
   let n: number;
   try {
     n = (await withTimeout(listExtensions(), UPDATES_MS)).filter((e) => e.installed && e.hasUpdate).length;
@@ -83,7 +88,7 @@ async function updatesWaiting(): Promise<number> {
     const done = new Set((last?.updated ?? []).map((u) => u.name));
     n = (last?.updatesAvailable ?? []).filter((name) => !done.has(name)).length;
   }
-  updatesSeen = { at: Date.now(), n };
+  updatesSeen = { at: Date.now(), n, gen };
   return n;
 }
 

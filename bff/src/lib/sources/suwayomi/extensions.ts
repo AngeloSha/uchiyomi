@@ -44,6 +44,18 @@ const toInfo = (e: RawExtension): ExtensionInfo | null =>
       }
     : null;
 
+/**
+ * Moved on by everything here that can change which extensions have an update waiting -- an install, an update or a
+ * removal, a re-read of the repositories, a new list of them -- once it has asked the engine, whatever the answer. A
+ * copy of the engine's answer kept for half a minute (lib/sourcesOverview.ts updatesWaiting) is not read past it:
+ * Needs attention's "1 extension has an update" stayed up to 45 s after its own Update had applied it.
+ */
+let generation = 0;
+export const extensionsGeneration = (): number => generation;
+const moved = async <T>(work: Promise<T>): Promise<T> => {
+  try { return await work; } finally { generation++; }
+};
+
 /** Everything the configured repositories offer, plus what is already installed. */
 export async function listExtensions(run: Gql = defaultGql): Promise<ExtensionInfo[]> {
   const d = await run<{ extensions: { nodes: RawExtension[] } }>(`{ extensions { nodes { ${EXT_FIELDS} } } }`, {}, 30000);
@@ -61,9 +73,9 @@ export async function listExtensions(run: Gql = defaultGql): Promise<ExtensionIn
  * nothing to do, indefinitely.
  */
 export async function refreshExtensions(run: Gql = defaultGql, timeoutMs = 120000): Promise<number> {
-  const d = await run<{ fetchExtensions: { extensions: RawExtension[] } }>(
+  const d = await moved(run<{ fetchExtensions: { extensions: RawExtension[] } }>(
     `mutation{ fetchExtensions(input:{}){ extensions { pkgName } } }`, {}, timeoutMs,
-  );
+  ));
   return d?.fetchExtensions?.extensions?.length ?? 0;
 }
 
@@ -71,11 +83,11 @@ export type ExtensionAction = 'install' | 'uninstall' | 'update';
 
 export async function setExtensionState(pkgName: string, action: ExtensionAction, run: Gql = defaultGql): Promise<boolean> {
   const patch = action === 'install' ? 'install:true' : action === 'uninstall' ? 'uninstall:true' : 'update:true';
-  const d = await run<{ updateExtension: { extension: RawExtension | null } }>(
+  const d = await moved(run<{ updateExtension: { extension: RawExtension | null } }>(
     `mutation($id:String!){ updateExtension(input:{id:$id,patch:{${patch}}}){ extension { pkgName isInstalled } } }`,
     { id: pkgName },
     180000, // installing downloads an APK and converts its bytecode; it is genuinely slow
-  );
+  ));
   return !!d?.updateExtension?.extension;
 }
 
@@ -98,11 +110,11 @@ export async function getRepos(run: Gql = defaultGql): Promise<string[]> {
 }
 
 export async function setRepos(urls: string[], run: Gql = defaultGql): Promise<string[]> {
-  const d = await run<{ setSettings: { settings: { extensionRepos: string[] | null } } }>(
+  const d = await moved(run<{ setSettings: { settings: { extensionRepos: string[] | null } } }>(
     `mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }`,
     { r: urls },
     20000,
-  );
+  ));
   return d?.setSettings?.settings?.extensionRepos ?? [];
 }
 
