@@ -1181,6 +1181,7 @@ POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
 POST   /api/admin/series/bulk/hide
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
+POST   /api/admin/series/:id/main-source
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
 DELETE /api/admin/series/:id/alt-titles/:norm
 GET    /api/admin/libraries       POST   /api/admin/libraries
@@ -1681,7 +1682,8 @@ judgement on the server, starting from that rule (`followable()` in `lib/fill.ts
 the admin looking at each candidate; there from the add's own listing plus the candidate's title, and the
 numbering both ways unless the title is exact on a listing of at least ten (`lib/autoFollow.ts`, described
 under the add route). Neither takes a bare pair on trust, which would let a client follow anything it
-could name. Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not
+could name. Refusals: **409** `plan_stale` (scan again), `is_primary` (since v0.54.0 also for a plan's candidate
+that has become the main source since the plan was made), `source_unavailable` (adapter not
 loaded or disabled), and since v0.52.0 (#123) `language_differs` -- the source is in another language than the
 series; the scan never offers one, so only a plan from before the series' language changed meets it. Its `message`
 and `messageSaid` (`follow.languageDiffers`, `{theirs, ours}` as language codes) name both, and `edition: {of, lang}`
@@ -1706,6 +1708,25 @@ alone. A series whose every source is switched off is not asked at all: the swee
 failure), stamps nothing and leaves its listing standing. The sweep's queues follow the source each series is
 asked through -- the first it follows that is loaded and not switched off -- so a dead main source's cooldown no
 longer parks series that update from their followers.
+
+**Making a follower the main source** (since v0.54.0). `POST /api/admin/series/:id/main-source {sourceId, old?}`
+makes a source the series already follows its main source -- only a followed one: its follow is the "same series?"
+judgement already made, and the sweep already merges its chapters, so the switch changes which source wins a tie
+and the label, not which chapters arrive. The pair moves under the series row's lock and the promoted row leaves the
+followers. `old` says what becomes of the old main: `auto` (the default) keeps it as the last follower while it still
+carries the series (`standing` usable or cooling) and the follower cap has room; `keep` and `drop` decide. A dropped
+old main takes its listing rows with it, as an unfollow does, and the chapters capped against it get their tries back
+for the new main. A series whose language was only inferred from its main source is pinned to that language when
+the new main would say otherwise (`langPinned`), so the language guard, its editions and Komga's `language` do not
+change by the way. Its last-check figures, folder, cover, reading direction and floor stay. It answers `{ok, from, to,
+old: kept|dropped, langPinned?, sources}` (read before the listing refresh it starts through the new main), **404**
+`not_found`, or **409** with `message` and `messageSaid`: `is_main`, `not_followed`, `posting_order` (the series
+takes its chapters from its numbering source alone), `renumber_pending`, `busy` (a check, the sweep or a listing
+refresh is inside the series), `source_unavailable` (not loaded, switched off, or beyond the admin's age reach),
+`moved` (the main changed meanwhile) or `language_differs` (with `edition`, as the follow route answers it). Audited
+as `series.main_source` with `via: manual`. Each entry of `sources` (here, in the follow and unfollow answers and in
+`GET /api/series/:id`) carries `standing`: `usable`, `cooling`, `failing` (a confirmed failure at the chapter list,
+the pages or the images, or the site's own offline notice), `off` (switched off) or `not_loaded`.
 `GET /api/admin/series/:id/check` now reports `waiting` alongside `added`: the number of missing chapters
 held back for a ranked group (omitted when none). The `frozen-series` health check lists a series whose
 primary is gone but which still follows a live source as information rather than a warning.

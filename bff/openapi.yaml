@@ -363,7 +363,7 @@ components:
     SeriesSource:
       type: object
       description: One place a series' chapters come from. The primary is the pair the series was added with; the rest were followed later.
-      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto]
+      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto, standing]
       properties:
         sourceId: { type: string, description: The adapter id. }
         name: { type: string, description: The adapter's display name, or the id when the adapter is not loaded. }
@@ -373,6 +373,19 @@ components:
         chapters: { type: [integer, "null"], description: "For a follower, the distinct chapter numbers it listed then; for the primary, the merged count across every followed source after the release preferences (the same figure as the series' source.chapters)." }
         registered: { type: boolean, description: Whether the adapter is loaded right now; a follower whose extension was removed keeps its row so it can still be unfollowed. }
         auto: { type: boolean, description: "Followed by the add-time auto-follow (POST /api/sources/add alsoFollow) rather than by a person: the row has no author. Always false for the primary. A person confirming the same source through a fill-scan plan turns it false." }
+        standing:
+          $ref: "#/components/schemas/SourceStanding"
+    SourceStanding:
+      type: string
+      enum: [usable, cooling, failing, off, not_loaded]
+      description: >-
+        Since v0.54.0 (bff lib/sourceStanding.ts): whether a series can be updated through the source right now.
+        `off`: switched off -- under Sources (POST /api/admin/sources/{id}/disable) or in the extension's own
+        switches, which also unloads it; `not_loaded`: no adapter by that id is loaded (uninstalled, a site removed,
+        the extension engine away); `failing`: a confirmed, current failure at the chapter list, the page list or the
+        images, or the site's own offline notice at any step (a search failure stops no update); `cooling`: inside a
+        cooldown, which ends by itself; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
+        main source, and only those count as still carrying a series.
     Ghost:
       type: object
       description: A chapter number the sources listed at the last check that this server has no row for.
@@ -6830,7 +6843,8 @@ paths:
         "409":
           description: >-
             plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
-            own source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
+            own source -- since v0.54.0 also when it became the main source after the plan was made, by
+            POST /api/admin/series/{id}/main-source); source_unavailable (the adapter is not loaded or is disabled); since v0.49.0 (#116)
             posting_order (the series is numbered by posting order, so a follower would never be merged); since
             v0.52.0 (#123) language_differs (the source is in another language than the series: the scan never
             offers one, so only a plan from before the series' language changed meets this. `message` and
@@ -6839,6 +6853,85 @@ paths:
             holds an edition that may follow the source, `edition` also carries `existing: {id, lang}`, that
             edition's series id and language, and the sentence is `follow.languageDiffersEdition` (params `theirs`,
             `ours` and `edition`): follow it on that edition instead).
+  /api/admin/series/{id}/main-source:
+    post:
+      tags:
+        - admin
+      summary: Make a source the series follows its main source (since v0.54.0).
+      operationId: postApiAdminSeriesIdMainSource
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Only a source the
+        series already follows can be promoted: its follow is the "same series?" judgement already made, and the
+        sweep already merges its chapters, so the switch changes which source wins a tie and the label, not which
+        chapters arrive. The pair (`source_id`, `source_series_id`) moves under the series row's lock and the promoted
+        row leaves the followers. The old main stays as the last follower (`old: kept`) when it still carries the
+        series -- standing usable or cooling -- and the follower cap has room; otherwise it is dropped with its listing
+        rows, and the chapters capped against it get their tries back for the new main. A series whose language was
+        only inferred from its main source is pinned to it when the new main would say otherwise (`langPinned`).
+        The series' last-check figures, folder, cover, reading direction and floor stay. Audited as
+        `series.main_source` {id, title, from, fromRef, to, toRef, old, coverage, addedBy, langPinned?, via:
+        manual}. The answer's `sources` is read before the listing refresh the switch starts (through the new main).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceId]
+              additionalProperties: false
+              properties:
+                sourceId:
+                  type: string
+                  description: A source the series follows.
+                old:
+                  type: string
+                  enum: [auto, keep, drop]
+                  description: >-
+                    What becomes of the old main: `auto` (the default) keeps it while it still carries the series;
+                    `keep` and `drop` decide whatever its standing.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Switched. The series' full source list, the new main first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, from, to, old, sources]
+                properties:
+                  ok: { type: boolean }
+                  from: { type: [string, "null"], description: The old main source. }
+                  to: { type: string }
+                  old: { type: string, enum: [kept, dropped] }
+                  langPinned: { type: string, description: "The language the series was pinned to, when the switch would otherwise have changed it." }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "400":
+          description: bad_request (no sourceId, or an `old` it does not know).
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: not_found -- not a series this admin may see.
+        "409":
+          description: >-
+            Refused, with `message` and `messageSaid` (Said): is_main (main.isMain); not_followed (main.notFollowed);
+            posting_order (numbering.postingRefusal: the series takes its chapters from its numbering source alone);
+            renumber_pending (main.renumberPending: a renumber waits for a review, or is being applied); busy
+            (renumber.checking: a check, the sweep or a listing refresh is inside the series right now);
+            source_unavailable (main.unavailable: not loaded, switched off, or beyond the admin's age reach);
+            moved (main.moved: the main source changed meanwhile); language_differs (the follow route's refusal:
+            follow.languageDiffers or follow.languageDiffersEdition, with `edition: {of, lang, existing?}`).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:

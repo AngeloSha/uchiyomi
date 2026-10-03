@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2827
+    "strings": 2833
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -2830,5 +2830,11 @@
   "Banner reset to automatic": "バナーを自動に戻しました",
   "Could not change the banner": "バナーを変更できませんでした",
   "More banner options": "バナーのその他のオプション",
-  "Because you read {title}": "「{title}」を読んだあなたへ"
+  "Because you read {title}": "「{title}」を読んだあなたへ",
+  "This series is numbered by posting order, so another source’s chapter numbers do not line up with it.": "このシリーズは投稿順で番号付けされているため、他のソースの話数とは対応しません。",
+  "That source is already this series’ main source.": "そのソースはすでにこのシリーズのメインソースです。",
+  "This series does not follow that source. Only a source it follows can become its main source.": "このシリーズはそのソースをフォローしていません。メインソースにできるのはフォロー中のソースだけです。",
+  "This series’ chapters are waiting to be renumbered. Review that on the series page first.": "このシリーズの話は番号の振り直しを待っています。先にシリーズページで確認してください。",
+  "That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.": "そのソースは今は使えません。インストールされていないか、無効になっているか、このアカウントでは利用できません。",
+  "This series’ main source changed meanwhile. Look again.": "このシリーズのメインソースがその間に変わりました。もう一度確認してください。"
 }

@@ -699,6 +699,14 @@ const WORDS: Record<string, (p: P) => string | null> = {
     theirs: languageName(str(p, 'theirs')), ours: languageName(str(p, 'ours')), edition: languageName(str(p, 'edition')),
   }),
 
+  // ---- Make main refused (v0.54.0, bff lib/mainSource.ts): the Sources sheet's key and the Replace run's review.
+  'numbering.postingRefusal': () => tr('This series is numbered by posting order, so another source’s chapter numbers do not line up with it.'),
+  'main.isMain': () => tr('That source is already this series’ main source.'),
+  'main.notFollowed': () => tr('This series does not follow that source. Only a source it follows can become its main source.'),
+  'main.renumberPending': () => tr('This series’ chapters are waiting to be renumbered. Review that on the series page first.'),
+  'main.unavailable': () => tr('That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.'),
+  'main.moved': () => tr('This series’ main source changed meanwhile. Look again.'),
+
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()
     ? tr('The browser inside Uchiyomi\'s built-in Cloudflare helper crashed. Quit and reopen Uchiyomi to restart it.')

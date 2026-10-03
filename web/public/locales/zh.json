@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2827
+    "strings": 2833
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2830,5 +2830,11 @@
   "Banner reset to automatic": "横幅已恢复为自动",
   "Could not change the banner": "无法更改横幅",
   "More banner options": "更多横幅选项",
-  "Because you read {title}": "因为你读过《{title}》"
+  "Because you read {title}": "因为你读过《{title}》",
+  "This series is numbered by posting order, so another source’s chapter numbers do not line up with it.": "此作品按发布顺序编号，其他来源的章节编号与它对不上。",
+  "That source is already this series’ main source.": "该来源已经是此作品的主来源。",
+  "This series does not follow that source. Only a source it follows can become its main source.": "此作品没有关注该来源。只有已关注的来源才能成为它的主来源。",
+  "This series’ chapters are waiting to be renumbered. Review that on the series page first.": "此作品的章节正在等待重新编号。请先在作品页面审核。",
+  "That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.": "该来源目前无法使用：它未安装、已关闭，或此账户无法使用。",
+  "This series’ main source changed meanwhile. Look again.": "此作品的主来源在此期间已更改。请重新查看。"
 }

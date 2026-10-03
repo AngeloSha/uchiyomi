@@ -65,6 +65,7 @@ import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
+import { switchMainSource } from '../lib/mainSource';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
@@ -1397,7 +1398,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });
     const cand = plan.candidates.find((c) => c.source === source && c.sourceSeriesId === sourceSeriesId);
     if (!cand) return reply.code(400).send({ error: 'not_in_plan', message: 'That source was not one of the options.' });
-    if (cand.pinned) return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    // The plan's own mark, and the series' main source NOW (v0.54.0): a plan lives five minutes, and a Make main in
+    // between can make one of its candidates the main source -- following that would list every chapter twice.
+    // Reintroduce by checking `cand.pinned` alone: "a fill plan made before a switch cannot follow the series' own
+    // main source" in seriesSources.int.test.ts is answered 200, with a row naming the main.
+    if (cand.pinned || source === (await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]))?.source_id) {
+      return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    }
     // The one rule, shared with the add-time auto-follow (lib/fill.ts followable(): coverage at or over
     // MIN_COVERAGE with a verdict that says the numbering lines up), so the two paths cannot disagree
     // about what may be followed.
@@ -1466,6 +1473,34 @@ export default async function adminRoutes(app: FastifyInstance) {
     // refreshes the listing itself before it picks a copy.
     void updateSeries(id, 0).catch(() => {});
     return { ok: true, sources: list };
+  });
+
+  /**
+   * Make a source the series follows its main source (v0.54.0, lib/mainSource.ts): the Sources sheet's Make main.
+   * Body `{sourceId, old?}`: `old` is what becomes of the old main -- `auto` (the default) keeps it as the last
+   * follower while it still carries the series (usable or cooling), `keep` and `drop` decide. 200 `{ok, from, to, old:
+   * kept|dropped, langPinned?, sources}`; 404 `not_found`; 409 with the refusal's code, its English and its said code
+   * (`is_main`, `not_followed`, `posting_order`, `renumber_pending`, `busy`, `source_unavailable`, `moved`, and
+   * `language_differs` with `edition {of, lang, existing?}`, as the follow route answers it).
+   */
+  app.post('/api/admin/series/:id/main-source', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ sourceId: z.string().min(1).max(200), old: z.enum(['auto', 'keep', 'drop']).optional() }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Name the source ({sourceId}), and optionally what becomes of the old main ({old}).' });
+    const out = await switchMainSource(id, b.data.sourceId, {
+      old: b.data.old ?? 'auto', ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), via: 'manual', req,
+    });
+    if ('refused' in out) {
+      if (out.refused === 'not_found' || !out.said) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(409).send({
+        error: out.refused, message: out.said.text, messageSaid: saidOf(out.said), ...(out.edition ? { edition: out.edition } : {}),
+      });
+    }
+    // Read before the refresh starts, as the follow's answer is (above): the switch is not a check.
+    const list = await seriesSourcesFor(id);
+    // The listing again, through the new main: its chapters show on the series page now, not at the next sweep.
+    void updateSeries(id, 0).catch(() => {});
+    return { ok: true, from: out.from, to: out.to, old: out.old, ...(out.langPinned ? { langPinned: out.langPinned } : {}), sources: list };
   });
 
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {

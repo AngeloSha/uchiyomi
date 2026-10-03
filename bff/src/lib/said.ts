@@ -508,6 +508,16 @@ const EN = {
   // edition is wanted, the follow belongs there.
   'follow.languageDiffersEdition': ({ theirs, ours, edition }: { theirs: string; ours: string; edition: string }) =>
     `That source is in ${langName(theirs)} and this series is in ${langName(ours)}. Follow it on the ${langName(edition)} edition instead.`,
+
+  // ---- Making a followed source a series' main source refused (v0.54.0: lib/mainSource.ts, the Replace run). A busy
+  // series says 'renumber.checking'; another language, the follow's own two sentences.
+  // Every path that lines two sources up by number refuses a series numbered by posting order (lib/numbering.ts).
+  'numbering.postingRefusal': () => 'This series is numbered by posting order, so another source’s chapter numbers do not line up with it.',
+  'main.isMain': () => 'That source is already this series’ main source.',
+  'main.notFollowed': () => 'This series does not follow that source. Only a source it follows can become its main source.',
+  'main.renumberPending': () => 'This series’ chapters are waiting to be renumbered. Review that on the series page first.',
+  'main.unavailable': () => 'That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.',
+  'main.moved': () => 'This series’ main source changed meanwhile. Look again.',
 };
 
 export type SaidCode = keyof typeof EN;

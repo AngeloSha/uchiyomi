@@ -4,10 +4,11 @@
 // page seeds its list from GET /api/series/:id and replaces it with what the admin route returns after a
 // change, and two hand-written versions of "primary first, then the followers" would drift the first time
 // one gained a field. The primary is a row on lib_series and not on series_sources on purpose: everything
-// that routes a series (updater, fill, "check for new") reads source_id there, and moving it would touch all
-// of them for no gain.
+// that routes a series (updater, fill, "check for new") reads source_id there. It moves in exactly one place,
+// lib/mainSource.ts (v0.54.0): Make main and the Replace run, which swap a follower's row with the pair.
 import { q, one } from './db';
 import { getSource } from './sources';
+import { standingOf, standingRows, type Standing } from './sourceStanding';
 
 export interface SeriesSource {
   sourceId: string;
@@ -32,6 +33,11 @@ export interface SeriesSource {
    * the primary: it was added, not followed.
    */
   auto: boolean;
+  /**
+   * v0.54.0: whether the series can be updated through it now (lib/sourceStanding.ts): `usable`, `cooling`, `failing`,
+   * `off` or `not_loaded`. The Sources sheet says it, and offers Make main on a usable or cooling follower.
+   */
+  standing: Standing;
 }
 
 const iso = (v: string | Date | null | undefined): string | null =>
@@ -43,6 +49,13 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
     'SELECT source_id, source_series_id, source_checked_at, source_chapters FROM lib_series WHERE id = $1',
     [seriesId],
   );
+  const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null; chapters: number | null; added_by: string | null }>(
+    'SELECT source_id, source_series_id, checked_at, chapters, added_by FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id',
+    [seriesId],
+  );
+  const now = Date.now();
+  const rows = await standingRows([...(s?.source_id ? [s.source_id] : []), ...extras.map((r) => r.source_id)]).catch(() => new Map());
+  const standing = (id: string) => standingOf(id, rows.get(id), now);
   const out: SeriesSource[] = [];
   if (s?.source_id) {
     out.push({
@@ -54,12 +67,9 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       chapters: s.source_chapters ?? null,
       registered: !!getSource(s.source_id),
       auto: false,
+      standing: standing(s.source_id),
     });
   }
-  const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null; chapters: number | null; added_by: string | null }>(
-    'SELECT source_id, source_series_id, checked_at, chapters, added_by FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id',
-    [seriesId],
-  );
   for (const r of extras) {
     // A row that names the primary's own adapter would be listed twice; the follow route refuses it, but
     // a row written before that rule existed must not double the list.
@@ -73,6 +83,7 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       chapters: r.chapters ?? null,
       registered: !!getSource(r.source_id),
       auto: r.added_by == null,
+      standing: standing(r.source_id),
     });
   }
   return out;
