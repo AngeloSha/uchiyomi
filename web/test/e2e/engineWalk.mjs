@@ -13,11 +13,18 @@
 // helper, which is off on a fresh engine, and pressing it writes the setting on the engine.
 //
 // Then the tab itself (v0.53.0, discussion #121), on a repository of 1,300 made-up extensions (the fake engine's
-// /__catalogue): extensions installed in the engine's own page show as installed with none of their sources on, and
-// "Turn on its sources" switches them on without asking the engine to install anything; an update waiting is said
-// and Update applies it; Browse reaches the last extension of the catalogue a page at a time (it stopped at 400 and
-// said "narrow the search"); the 18+ switch shows what it hid, and "nothing found" offers it; installing a
-// multi-language extension opens its sheet on its languages, whose switches are one source each; Remove asks first.
+// /__catalogue): extensions installed in the engine's own page show as installed with no source on, and Turn on
+// switches them on without asking the engine to install anything; an update waiting is said and Update applies it;
+// Browse reaches the last extension of the catalogue a page at a time (it stopped at 400 and said "narrow the
+// search"); the 18+ switch shows what it hid, and "nothing found" offers it; installing a multi-language extension
+// opens its sheet on its languages, whose switches are one source each; Remove asks first.
+//
+// Round 2 (decluttered): the strip says Ready, the version and the sources on, with no installed count and no edge;
+// Turning it off is behind the engine's ⋯, by keyboard too; Installed's tools sit in the views' row, as named icons
+// on a phone; Installed is grouped only while something needs attention, with Update all and Turn on all in the
+// group's header and no bars; a row offers one key and says one state word; Browse has no filter chips and its
+// repositories are a link in its count line; an extension's Settings are closed until asked for, and its languages
+// say a problem only.
 //
 // Kept in its own module so walk49.mjs changes by one line; it is handed walk49's page and helpers.
 import { catalogueExtensions } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
@@ -98,8 +105,20 @@ export async function engineWalk({ page, api, go, press, shot, check, waitFor, s
       const done = await waitFor(async () => (await page.evaluate(() => /Connected: the extension engine now uses/.test(document.querySelector('[data-engine-solver]')?.textContent ?? ''))) || null, 15_000);
       const eng = await state();
       check(`${tag}: Connect switched the engine's helper on, pointed at Uchiyomi's`, !!done && eng.settings?.flareSolverrEnabled === true && /^http/.test(eng.settings?.flareSolverrUrl ?? ''), JSON.stringify(eng.settings ?? {}).slice(0, 200));
-      // Turning it off: a sheet behind the engine's own key since v0.53.0, with the platform's steps.
-      await page.evaluate(() => document.querySelector('[data-engine-off]')?.click());
+      // Turning it off: a sheet behind the engine's ⋯ since v0.53.0 round 2, with the platform's steps -- reached here by
+      // keyboard alone: Enter on the ⋯ opens its menu on its first item, and Enter takes it.
+      const more = await page.$('[data-engine-more]');
+      let item = null;
+      if (more) {
+        await more.focus();
+        await page.keyboard.press('Enter');
+        item = await waitFor(() => page.evaluate(() => {
+          const a = document.activeElement;
+          return a?.getAttribute('role') === 'menuitem' ? (a.textContent || '').trim() : null;
+        }), 5000);
+      }
+      check(`${tag}: the engine's ⋯ opens its menu by keyboard, on Turning it off`, item === 'Turning it off', more ? String(item) : 'no ⋯ in the strip');
+      if (item) await page.keyboard.press('Enter');
       const off = await waitFor(() => page.$eval('[data-engine-off-sheet]', (e) => ({
         chips: e.querySelectorAll('[role="radiogroup"] [role="radio"]').length,
         commands: [...e.querySelectorAll('pre code')].map((c) => c.textContent),
@@ -134,6 +153,11 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
   await control('/__reset');
   await control('/__mode', { mode: 'up' });
   await control('/__catalogue', { extensions: 1300, set: { [MANGABALL]: { hasUpdate: true } } });
+  // ...listed by one repository, as a real catalogue is: Browse's count line names how many.
+  await control('/api/graphql', {
+    query: 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }',
+    variables: { r: ['https://repo.example/index.min.json'] },
+  });
   // As installed in the engine's own page: Uchiyomi has their sources, every one switched off (an earlier phase may
   // have switched Webtoons.com on over the API).
   const theirs = ((await api('/api/admin/extensions/sources')).content ?? []).filter((s) => [MANGABALL, WEBTOONS, NIGHTSHELF].includes(s.pkgName)).map((s) => s.id);
@@ -142,8 +166,26 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
 
   const row = (pkg) => page.evaluate((pkg) => {
     const el = document.querySelector(`[data-ext-row="${pkg}"]`);
-    return el && { off: el.hasAttribute('data-ext-off'), text: el.textContent || '', on: el.querySelectorAll('[data-ext-tag="on"]').length, turnOn: !!el.querySelector('[data-ext-turn-on]'), update: !!el.querySelector('[data-ext-update]') };
+    return el && {
+      off: el.hasAttribute('data-ext-off'), text: el.textContent || '', on: el.querySelectorAll('[data-ext-tag="on"]').length,
+      turnOn: !!el.querySelector('[data-ext-turn-on]'), update: !!el.querySelector('[data-ext-update]'),
+      word: el.querySelector('[data-ext-word]')?.getAttribute('data-ext-word') ?? null,
+      group: el.closest('[data-ext-group]')?.getAttribute('data-ext-group') ?? null,
+    };
   }, pkg);
+  // Installed as it is drawn: its groups, each with its header's words and keys, and every row's keys.
+  const installedNow = () => page.evaluate(() => ({
+    groups: [...document.querySelectorAll('[data-ext-group]')].map((g) => ({
+      key: g.getAttribute('data-ext-group'),
+      head: g.querySelector('[data-ext-group-head]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+      updateAll: !!g.querySelector('[data-ext-group-head] [data-ext-update-all]'),
+      turnOnAll: !!g.querySelector('[data-ext-group-head] [data-ext-turn-on-all]'),
+      rows: g.querySelectorAll('[data-ext-row]').length,
+    })),
+    bars: document.querySelectorAll('[data-ext-update-bar], [data-ext-off-bar]').length,
+    keysPerRow: [...document.querySelectorAll('[data-ext-row]')].map((r) => r.querySelectorAll('[data-ext-turn-on], [data-ext-update]').length),
+    hint: /Open an extension for its languages and settings/.test(document.body.innerText),
+  }));
   const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   const scrollTo = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel); el?.scrollIntoView({ block: 'start' }); window.scrollBy(0, -80); return !!el; }, sel);
   const search = async (q) => {
@@ -160,51 +202,84 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
     await page.setViewport({ width, height: width < 1024 ? 844 : 900 });
     await go('/admin/?tab=Extensions&view=installed', 3500);
 
-    // 1. The header: the engine and its Cloudflare helper at a glance, with the one action the helper needs.
+    // 1. The strip: the engine and its Cloudflare helper at a glance, with the one action the helper needs.
     const head = await waitFor(() => page.evaluate(() => {
       const card = document.querySelector('[data-engine-state="ready"]');
       return card && {
         engine: card.querySelector('[data-engine-tile="engine"]')?.textContent || '',
         solver: card.querySelector('[data-engine-solver]')?.getAttribute('data-engine-solver'),
+        helper: card.querySelector('[data-engine-tile="helper"]')?.textContent || '',
         connect: !!card.querySelector('[data-engine-connect]'),
         counts: card.querySelector('[data-engine-counts]')?.textContent || '',
+        edge: !!card.querySelector('[data-status-edge]'),
+        filled: document.querySelectorAll('[data-extensions] .btn-key-primary').length,
       };
     }), 15_000);
-    check(`${tag}: the header says the engine is ready, and how many extensions and sources`, !!head && /Engine ready · v2\.3\.2243/.test(head.engine)
-      && /extensions installed · \d+ of 25 sources on/.test(head.counts), JSON.stringify(head));
-    check(`${tag}: ...and that its Cloudflare helper is not connected, with Connect`, head?.solver === 'off' && head.connect, JSON.stringify(head));
+    check(`${tag}: the strip says the engine is ready, its version and the sources on -- not the extensions installed`, !!head
+      && /Extension engine\s*Ready/.test(head.engine) && /^v2\.3\.2243 · \d+ of 25 sources on$/.test(head.counts) && !/installed/.test(head.engine), JSON.stringify(head));
+    check(`${tag}: ...and that its Cloudflare helper is not connected, in one line, with Connect`, head?.solver === 'off' && head.connect
+      && /Not connected/.test(head.helper) && /Needed for sites behind Cloudflare\./.test(head.helper), JSON.stringify(head));
+    check(`${tag}: ...with no amber edge, and Connect the one filled key on the screen`, !!head && !head.edge && head.filled === 1, JSON.stringify(head));
+    // The tools sit in the views' row: on a phone their icons alone, named.
+    const tools = await page.evaluate(() => ['data-ext-languages', 'data-ext-refresh'].map((h) => {
+      const b = document.querySelector(`[${h}]`);
+      const words = b?.querySelector('span.hidden');
+      return b && { name: b.getAttribute('aria-label'), inRow: !!b.closest('div')?.parentElement?.querySelector('[role="tablist"]'),
+        words: words ? getComputedStyle(words).display !== 'none' : null };
+    }));
+    check(`${tag}: Languages and Check for extension updates sit in the views' row${width < 640 ? ', as named icons' : ', with their words'}`,
+      tools.every((t) => t && t.name && t.inRow && t.words === (width >= 640)), JSON.stringify(tools));
 
     // 2. Installed: three extensions installed in the engine's own page, none of their sources on, one update waiting.
     if (width === 390) {
       for (const pkg of [MANGABALL, WEBTOONS, NIGHTSHELF]) {
         const r = await row(pkg);
-        check(`${tag}: ${pkg.split('.').pop()} shows as installed, says none of its sources are on, and offers to turn them on`,
-          !!r && r.off && /None of its sources are on/.test(r.text) && r.turnOn, JSON.stringify(r));
+        // Manga Ball also has an update: its one word says that, and its one key is still Turn on.
+        const word = pkg === MANGABALL ? ['update', /Update available/] : ['off', /No source on/];
+        check(`${tag}: ${pkg.split('.').pop()} shows as installed with no source on, says ${pkg === MANGABALL ? 'its update' : 'so'} in one word, and offers Turn on alone`,
+          !!r && r.off && r.word === word[0] && word[1].test(r.text) && r.turnOn && !r.update && r.group === 'attention', JSON.stringify(r));
       }
-      const bars = await page.evaluate(() => ({ update: document.querySelector('[data-ext-update-bar]')?.textContent || '', off: document.querySelector('[data-ext-off-bar]')?.textContent || '' }));
-      check(`${tag}: an update waiting is said, with Update all`, /1 extension is out of date/.test(bars.update) && /Update all/.test(bars.update), JSON.stringify(bars));
-      check(`${tag}: so are the three with no source on, with one key for all of them`, /^3 of your extensions have no source on yet/.test(bars.off), JSON.stringify(bars));
+      const inst = await installedNow();
+      const att = inst.groups.find((g) => g.key === 'attention');
+      check(`${tag}: no bars and no hint line; one group, "Needs attention · 3", with Update all and Turn on all in its header`,
+        inst.bars === 0 && !inst.hint && inst.groups.length === 1 && !!att && /^Needs attention · 3/.test(att.head ?? '')
+        && att.updateAll && att.turnOnAll && att.rows === 3, JSON.stringify(inst));
+      check(`${tag}: every row offers one key at most`, inst.keysPerRow.every((n) => n <= 1), JSON.stringify(inst.keysPerRow));
       check(`${tag}: no sideways scroll on Installed`, (await sideways()) <= 0, String(await sideways()));
+      // The first extension no longer starts below a whole screen of chrome.
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const firstTop = await page.evaluate(() => document.querySelector('[data-ext-row]')?.getBoundingClientRect().top ?? null);
+      check(`${tag}: the first extension starts on the first screen`, firstTop !== null && firstTop < 844, String(firstTop));
       await scrollTo('[data-ext-installed]');
       await shot(`${tag}-1-installed`);
-      // Turn on its sources: Manga Ball's one source, and the engine asked to install nothing.
+      // Turn on: Manga Ball's one source, and the engine asked to install nothing.
       await page.evaluate((pkg) => document.querySelector(`[data-ext-row="${pkg}"] [data-ext-turn-on]`)?.click(), MANGABALL);
-      const on = await waitFor(async () => { const r = await row(MANGABALL); return r && !r.off && r.on === 1 ? r : null; }, 15_000);
-      check(`${tag}: Turn on its sources switches Manga Ball's source on, and the row shows it lit`, !!on && /1 of 1 on/.test(on.text), JSON.stringify(await row(MANGABALL)));
+      const on = await waitFor(async () => { const r = await row(MANGABALL); return r && !r.off && r.update ? r : null; }, 15_000);
+      check(`${tag}: Turn on switches Manga Ball's source on, and its one key is now its Update`, !!on && !on.turnOn && on.word === 'update', JSON.stringify(await row(MANGABALL)));
       const src = (await api(`/api/admin/extensions/sources?pkg=${MANGABALL}`)).content ?? [];
       check(`${tag}: ...as the server has it`, src.length === 1 && src[0].enabled === true, JSON.stringify(src));
       const asked = (await engineLog()).slice(sinceReset).filter((c) => c.fields?.includes('updateExtension'));
       check(`${tag}: ...without asking the engine to install anything`, asked.length === 0, JSON.stringify(asked).slice(0, 300));
     } else {
-      // Update: the waiting version, applied on the engine; the bar goes.
+      // Two groups now: Lotus Scans (installed at 390, one language switched off) needs nothing.
+      const before = await installedNow();
+      check(`${tag}: "Needs attention · 3" over "Ready · 1", and every row offers one key at most`,
+        before.groups.map((g) => `${g.key}:${g.rows}`).join(',') === 'attention:3,ready:1' && /^Ready · 1$/.test(before.groups[1]?.head ?? '')
+        && before.keysPerRow.every((n) => n <= 1), JSON.stringify(before));
+      const lotus = await row(made.extensions.find((e) => e.name === 'Lotus Scans').pkgName);
+      check(`${tag}: a row with nothing waiting is its languages, how many are on and a chevron`, !!lotus && !lotus.turnOn && !lotus.update && !lotus.word
+        && lotus.on === 4 && /5 of 6 on/.test(lotus.text), JSON.stringify(lotus));
+      await scrollTo('[data-ext-installed]');
+      await shot(`${tag}-1-installed`);
+      // Update: the waiting version, applied on the engine; Update all goes, and Manga Ball moves to Ready.
       await page.evaluate((pkg) => document.querySelector(`[data-ext-row="${pkg}"] [data-ext-update]`)?.click(), MANGABALL);
       const updated = await waitFor(async () => {
         const e = (await state()).extensions.find((x) => x.pkgName === MANGABALL);
-        return e && e.hasUpdate === false && !(await page.$('[data-ext-update-bar]')) ? e : null;
+        return e && e.hasUpdate === false && !(await page.$('[data-ext-update-all]')) ? e : null;
       }, 20_000);
-      check(`${tag}: Update applies Manga Ball's update on the engine, and the update bar goes`, !!updated, JSON.stringify((await state()).extensions.find((x) => x.pkgName === MANGABALL)));
-      await scrollTo('[data-ext-installed]');
-      await shot(`${tag}-1-installed`);
+      check(`${tag}: Update applies Manga Ball's update on the engine, and Update all goes`, !!updated, JSON.stringify((await state()).extensions.find((x) => x.pkgName === MANGABALL)));
+      const mb = await waitFor(async () => { const r = await row(MANGABALL); return r?.group === 'ready' ? r : null; }, 10_000);
+      check(`${tag}: ...and Manga Ball is Ready, its language lit`, !!mb && mb.on === 1 && /1 of 1 on/.test(mb.text), JSON.stringify(await row(MANGABALL)));
     }
 
     // 3. Browse: the catalogue a page at a time, to its last extension.
@@ -215,6 +290,13 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
     const tabSays = await page.$eval('[data-ext-view="browse"]', (e) => e.textContent || '').catch(() => '');
     check(`${tag}: the Browse tab says the same number`, tabSays.replace(/\s+/g, ' ').trim().endsWith(MATCHED.toLocaleString('en')), tabSays);
     check(`${tag}: no sideways scroll on Browse`, (await sideways()) <= 0, String(await sideways()));
+    const line = await page.evaluate(() => ({
+      chips: document.querySelectorAll('[data-ext-browse] [data-ext-filter], [data-ext-browse] .chip').length,
+      repos: document.querySelector('[data-ext-count-line] [data-ext-repos]')?.textContent?.trim() ?? null,
+      adult: !!document.querySelector('[data-ext-count-line] [data-ext-adult] [role="switch"]'),
+    }));
+    check(`${tag}: Browse has no filter chips; its count line holds the repositories link and the 18+ switch`,
+      line.chips === 0 && line.repos === '1 repository' && line.adult, JSON.stringify(line));
     await scrollTo('[data-ext-search]');
     await shot(`${tag}-2-browse`);
     let presses = 0;
@@ -251,14 +333,26 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
     if (width === 390) {
       await page.evaluate((pkg) => document.querySelector(`[data-ext-item="${pkg}"] [data-ext-install]`)?.click(), LOTUS.pkgName);
     } else {
-      await page.evaluate((pkg) => document.querySelector(`[data-ext-item="${pkg}"] [data-ext-manage]`)?.click(), LOTUS.pkgName);
+      // An installed extension's row in Browse is its opener: "Already installed" and a chevron.
+      await page.evaluate((pkg) => document.querySelector(`[data-ext-item="${pkg}"] [data-ext-open]`)?.click(), LOTUS.pkgName);
     }
     const sheet = await waitFor(() => page.evaluate((pkg) => {
       const el = document.querySelector(`[data-ext-sheet="${pkg}"]`);
-      return el && { langs: el.querySelectorAll('[data-ext-lang]').length, on: el.querySelectorAll('[data-ext-lang][data-on]').length, text: el.textContent || '' };
+      return el && {
+        langs: el.querySelectorAll('[data-ext-lang]').length, on: el.querySelectorAll('[data-ext-lang][data-on]').length, text: el.textContent || '',
+        problems: el.querySelectorAll('[data-ext-lang-problem]').length,
+        settings: !!el.querySelector('[data-ext-settings]'),
+        toggle: el.querySelector('[data-ext-settings-toggle]')?.getAttribute('aria-expanded') ?? null,
+      };
     }, LOTUS.pkgName), 30_000);
-    check(`${tag}: ${width === 390 ? 'installing' : 'Manage on'} ${LOTUS.name} opens its sheet on its ${lotusLangs.length} languages`, !!sheet && sheet.langs === lotusLangs.length, JSON.stringify(sheet)?.slice(0, 300));
+    check(`${tag}: ${width === 390 ? 'installing' : 'its row in Browse opens'} ${LOTUS.name}${width === 390 ? ' opens' : ''} its sheet on its ${lotusLangs.length} languages`, !!sheet && sheet.langs === lotusLangs.length, JSON.stringify(sheet)?.slice(0, 300));
     check(`${tag}: ...saying what a language switch is`, !!sheet && sheet.text.includes('Each language is its own source; turn on the ones you read.'));
+    check(`${tag}: ...with no line under a language that is fine, on or off`, !!sheet && sheet.problems === 0 && !/Healthy|Turned off/.test(sheet.text), JSON.stringify(sheet)?.slice(0, 300));
+    check(`${tag}: ...and its Settings closed until asked for`, !!sheet && !sheet.settings && sheet.toggle === 'false', JSON.stringify(sheet)?.slice(0, 300));
+    await page.evaluate(() => document.querySelector('[data-ext-settings-toggle]')?.click());
+    const opened = await waitFor(() => page.evaluate(() => document.querySelector('[data-ext-settings-toggle]')?.getAttribute('aria-expanded') === 'true'
+      && !!document.querySelector('[data-ext-sheet] [data-ext-settings]')), 10_000);
+    check(`${tag}: ...which open on a press`, !!opened);
     if (width === 390) {
       check(`${tag}: ...every one of them on, as the install switched them`, sheet?.on === lotusLangs.length, JSON.stringify(sheet));
       const eng = (await state()).extensions.find((x) => x.pkgName === LOTUS.pkgName);
