@@ -211,6 +211,8 @@ Uchiyomi is free and open-source. If it's useful to you, you can help fund conti
 You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Uchiyomi** link inside
 the app on the **Profile** rail.
 
+Thank you to everyone who supports Uchiyomi on Ko-fi: ☕ **Samukka**
+
 ## Contributors
 
 Uchiyomi is built and maintained by [@AngeloSha](https://github.com/AngeloSha). Pull requests, bug reports, and
