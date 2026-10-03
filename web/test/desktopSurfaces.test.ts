@@ -124,11 +124,11 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   // v0.49.0 (#72): the server's card is the setup screen (components/EngineSetup.tsx), whose steps name the shipped
   // container; engineSetup.test.ts pins them.
   assert.match(ext, /if \(!ready\) return <EngineSetup status=\{status\} \/>;/, 'the server\'s own card is not the setup screen');
-  // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated -- in the
-  // engine's part of the header since v0.53.0, beside the count it limits.
+  // v0.49.1: in the reader's words, with the variable's name copied into the sentence, never translated -- under the
+  // engine's strip since v0.53.0, whose count it limits.
   assert.match(code(read('components/EngineSetup.tsx')), /\{over\}\{sentenceGap\(over\)\}\s*<span[^>]*>\{desktop\s*\? tr\('Hide languages you don’t read\.'\)\s*: tr\('Hide languages you don’t read, or raise \{name\}\.', \{ name: 'SUWAYOMI_MAX_SOURCES' \}\)\}/,
     'the source-limit line names an env var on desktop, or changed on the server');
-  assert.match(code(read('components/ExtensionsPanel.tsx')), /<EngineReady status=\{status\} installed=\{inst \? inst\.installed : null\} desktop=\{isDesktop\(\)\} \/>/,
+  assert.match(code(read('components/ExtensionsPanel.tsx')), /<EngineReady status=\{status\} desktop=\{isDesktop\(\)\} \/>/,
     'the header is not told it is on desktop');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));

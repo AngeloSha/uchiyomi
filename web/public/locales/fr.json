@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2807
+    "strings": 2820
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -2810,5 +2810,18 @@
   "That file is not an image this server can read.": "Ce fichier n’est pas une image que ce serveur sait lire.",
   "That image is over {n} MB. Pick a smaller one.": "Cette image dépasse {n} Mo. Choisissez-en une plus petite.",
   "Upload": "Envoyer",
-  "Where its chapters come from, and which translation groups come first.": "D’où viennent ses chapitres, et quels groupes de traduction passent en premier."
+  "Where its chapters come from, and which translation groups come first.": "D’où viennent ses chapitres, et quels groupes de traduction passent en premier.",
+  "Ready": "Prêt",
+  "Needed for sites behind Cloudflare.": "Nécessaire pour les sites protégés par Cloudflare.",
+  "Needs attention · 1": "À examiner · 1",
+  "Needs attention · {n}": "À examiner · {n}",
+  "Ready · 1": "Prête · 1",
+  "Ready · {n}": "Prêtes · {n}",
+  "Turn on all": "Tout activer",
+  "Turn on": "Activer",
+  "Update available": "Mise à jour disponible",
+  "No source on": "Aucune source activée",
+  "1 repository": "1 dépôt",
+  "{n} repositories": "{n} dépôts",
+  "for {language}": "en {language}"
 }

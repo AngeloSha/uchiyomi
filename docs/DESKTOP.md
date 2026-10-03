@@ -162,8 +162,10 @@ them:
       Mihon. [Add an extension repository — step by step](extensions.md#add-an-extension-repository--step-by-step)
       explains what to paste and what each message means.
    3. **Choose extensions** under **Browse** and press **Install** on each one you want. Then hide the languages
-      you don't read (**Languages**, under **Installed**, or the switches in an extension's own sheet): only 25
-      extension sources can be switched on at once, and on the desktop app there is no setting to raise that.
+      you don't read (**Languages**, at the end of the **Installed** | **Browse** row, or the switches in an
+      extension's own sheet): only 25 extension sources can be switched on at once, and on the desktop app there is
+      no setting to raise that. The strip at the top of the tab has no **⋯** on the desktop app: there is no turning
+      the engine off there.
 
    If the download fails, *The extension engine could not be installed.* shows the reason and **Try again**.
    From then on the engine starts with Uchiyomi. It listens only on this computer, with a random password,

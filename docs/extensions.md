@@ -30,9 +30,10 @@ Where it comes from depends on how you run Uchiyomi:
 | **Unraid** | A template of its own: install **uchiyomi-suwayomi** from Apps ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): pinned, memory-capped, chapter downloads off, Cloudflare helper on). Set its *FLARESOLVERR_URL* to the solver Uchiyomi uses, then set Uchiyomi's advanced *SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567`. |
 | **Umbrel** | Not available. An Umbrel app cannot offer an optional second container, and putting the engine in the package would cost every Umbrel install about 800 MB whether it uses extensions or not. MangaDex and sites you add by address work there as everywhere. |
 
-When the engine is there, the top of **Admin → Extensions** is one card in two halves (since v0.53.0): **Extension
-engine** — *Engine ready · <version>*, how many extensions are installed and how many of their sources are on
-(*12 of 25 sources on*) — and **Cloudflare helper**, *Connected* or **Connect** ([how it behaves](#how-it-behaves)).
+When the engine is there, the top of **Admin → Extensions** is a slim strip of two cells (since v0.53.0): **Extension
+engine** — *Ready*, with its version and how many sources are on under it (*v2.3.2243 · 12 of 25 sources on*) — and
+**Cloudflare helper**: *Connected*, or *Not connected* with **Connect** ([how it behaves](#how-it-behaves)). The engine's
+**⋯** holds **Turning it off** ([below](#turning-it-off)); on a phone the two cells stack.
 When it is not, the tab is a **setup screen** instead (since v0.49.0). It says which of three things it is:
 
 - *Extensions are turned off* — `EXTENSION_ENGINE=0` on Docker;
@@ -81,8 +82,8 @@ https://example.org/repo/index.min.json
 
 1. Open **Admin → Extensions** (`/admin/?tab=Extensions`; the Extensions card under Providers leads there too).
 2. With no repository yet, **Browse** opens on **Add an extension repository**: a line on what a repository is,
-   and an address field (`https://…/index.min.json`). Later, the field is behind **Repositories**, at the end of
-   Browse's filters.
+   and an address field (`https://…/index.min.json`). Later, the field is behind the repositories link in the line
+   under Browse's search (*1 repository*, *2 repositories*).
 
    ![The Extensions tab on a first visit: Add an extension repository, the address field with https://example.org/repo/index.min.json typed in, and the Add button](shots/crop-repo-empty.webp)
 
@@ -96,7 +97,7 @@ https://example.org/repo/index.min.json
 
    Browse then lists what the repository offers, each extension with **Install**:
 
-   ![After the add: Browse with its search, language and filters, how many extensions there are, and the first ones with Install](shots/crop-repo-added.webp)
+   ![After the add: Browse with its search and language, the line saying how many extensions there are and from how many repositories, and the first ones with Install](shots/crop-repo-added.webp)
 
    The number is what **this** repository brought — not the size of the whole list, which also counts any
    repositories you added before.
@@ -134,49 +135,58 @@ change the address.
 | *The extension engine refused that address: …* | The engine would not take the address; its reason follows. Nothing was changed. |
 | *Could not reach the extension engine: …* | The engine is not running or not reachable ([what you need first](#what-you-need-first-the-extension-engine)). Nothing was changed. |
 
-**Removing one:** **Browse** → **Repositories** lists each address with **Remove** next to it: *Repository removed*. A removed
+**Removing one:** **Browse** → the repositories link (*1 repository*) lists each address with **Remove** next to it: *Repository removed*. A removed
 repository stays removed (before v0.45.0 the scheduled extension check could put it back). Its installed
 extensions keep working until you remove them too, but they get no updates. Add the repository again and they
 get updates again.
 
-**Check for extension updates**, on **Installed**, re-reads every repository: *Refreshed — {n} extensions available*.
-A repository that does not answer is said there, under the key, until the next check: *Could not reach the repositories
-to check for updates.* with the engine's own reason.
+**Check for extension updates**, at the end of the **Installed** | **Browse** row (its icon alone on a phone), re-reads
+every repository: *Refreshed — {n} extensions available*. A repository that does not answer is said under that row until
+the next check: *Could not reach the repositories to check for updates.* with the engine's own reason.
 
 ## Choose your extensions
 
-![Admin → Extensions: the engine and its Cloudflare helper in one card, then Installed with three extensions, one with an update](shots/admin-extensions.webp)
+![Admin → Extensions: the engine and its Cloudflare helper in one strip, then Installed: the extension with an update under Needs attention, the other two under Ready](shots/admin-extensions.webp)
 
-Since v0.53.0 the tab has two views under the engine's card: **Installed**, what you have, and **Browse**, everything
+Since v0.53.0 the tab has two views under the engine's strip: **Installed**, what you have, and **Browse**, everything
 your repositories offer. It opens on Installed once something is installed and on Browse until then; `?view=installed`
 or `?view=browse` in the address opens either.
 
-1. **Browse and press Install.** Search by name, pick a **Language**, narrow it to **Has an update** or **Installed**.
-   Every extension is reachable: Browse shows 60 at a time (*Showing 60 of 1,118*) and the next ones come as you
-   scroll, or with **Show 60 more**. (Before v0.53.0 the list stopped at the first 400 and the rest could only be
-   found by searching.) **Install** is one press: the extension installs, its sources switch on straight away, and it
-   is searchable from Discover immediately — no second step, no restart. One with several languages then opens its
-   sheet on them, so you can switch off the ones you don't read. Installed ones show **Manage**, and one with a newer
-   version **Update**.
+1. **Browse and press Install.** Search by name, or pick a **Language**. The line under them says how many match, the
+   repositories they come from (a link to them) and **Show 18+ extensions**. Every extension is reachable: Browse shows
+   60 at a time (*Showing 60 of 1,118*) and the next ones come as you scroll, or with **Show 60 more**. (Before v0.53.0
+   the list stopped at the first 400 and the rest could only be found by searching.) **Install** is one press: the
+   extension installs, its sources switch on straight away, and it is searchable from Discover immediately — no second
+   step, no restart. One with several languages then opens its sheet on them, so you can switch off the ones you don't
+   read. An installed one says *Already installed* and opens its sheet; one with a newer version has **Update**. (What
+   you have installed is the **Installed** view: Browse has no filter of its own for it.)
 2. **Adult extensions** stay out of Browse until **Show 18+ extensions** is switched on. A search that finds only
    adult ones says so: *An 18+ extension matches. It is hidden while Show 18+ extensions is off.*
-3. **Installed** has a row per extension: its icon, name and version, its languages (the ones that are on
-   highlighted) and how many of them are on. One with a newer version has **Update**, and when several do, an amber
-   bar offers **Update all**. Press a row for the extension's sheet.
-4. **The extension's sheet** has everything about one extension. Its **languages**, a switch each — *Each language is
-   its own source; turn on the ones you read.* — with how each is doing beside it (Providers' own reading, and *Over
-   the source limit* for one switched on that search cannot reach), and *Across all extensions: 12 of 25 sources on.*
-   under them. Its **Settings** ([below](#an-extensions-own-settings)). And **Remove extension**, which asks first and
-   says how many series in your library came from it: they stay readable but stop updating.
+3. **Installed** is one list, a row per extension: its icon, its name, its language (or how many it has) and version,
+   and — when nothing waits — its languages (the ones that are on highlighted), how many of them are on, and a chevron.
+   While something needs you, the list is in two groups, **Needs attention** (an update waiting, or no source on) over
+   **Ready**; when nothing does, there are no groups at all. A row says at most one thing (*Update available*, or *No
+   source on*) and offers at most one key: **Turn on**, else **Update**. An extension that needs both says *Update
+   available* and offers **Turn on**; its update is in its sheet and in **Update all**, which sits in the group's header
+   with **Turn on all** (for two or more with no source on). Press a row for the extension's sheet.
+4. **The extension's sheet** has everything about one extension: its icon, name, version, languages and how many of
+   your series came from it at the top, with **Update** beside them when one waits. Its **languages**, a switch each —
+   *Each language is its own source; turn on the ones you read.* A language has a line under it only when something is
+   wrong: Providers' own reading (*Failing*, *Blocked by the site*, …), *Over the source limit* for one switched on that
+   search cannot reach, or *Hidden in every extension* (a link to **Languages**). Near the limit (from 80 % of it) or
+   over it, *Across all extensions: 20 of 25 sources on.* is said under them. Its **Settings**, closed until you open
+   them ([below](#an-extensions-own-settings)). At its foot, *Test its sources under Providers* and **Remove
+   extension**, which asks first and says how many series in your library came from it: they stay readable but stop
+   updating.
 
-**An extension installed in the engine's own page** arrives with every source off. Installed lists it with *None of
-its sources are on* and **Turn on its sources**, and an amber bar offers **Turn on all their sources** when several
-are like that. (Before v0.53.0 they stayed off and nothing said so.) A language hidden in every extension (below) stays
-off.
+**An extension installed in the engine's own page** arrives with every source off. Installed lists it under **Needs
+attention** with *No source on* and **Turn on**, the group's **Turn on all** does it for every one of them, and its
+sheet offers **Turn on its sources**. (Before v0.53.0 they stayed off and nothing said so.) A language hidden in every
+extension (below) stays off.
 
 **Hide the languages you don't read.** A multi-language extension provides one source per language, and installing
 it switches all of them on — thirty sources you will never search, each counting towards the limit below.
-**Languages**, on Installed, lists every language your extensions offer with how many sources it has, how many are
+**Languages**, at the end of Installed's row (the globe on a phone), lists every language your extensions offer with how many sources it has, how many are
 on, and how many of your series came from them. **Hide** switches that language's sources off in one go, and it
 stays hidden: the next extension you install leaves its sources in that language off (the install message says how
 many). **Show** brings them back. Series added from a hidden language stay readable but stop updating until it is
@@ -184,15 +194,16 @@ shown again, and the Health page names them. A switch in an extension's sheet is
 this standing choice alone; the sheet marks a language you hid here *Hidden in every extension*.
 
 **Only 25 extension sources can be switched on at once** (`SUWAYOMI_MAX_SOURCES`, 25 by default), because every
-one of them is searched together. The engine's card counts them (*12 of 25 sources on*); when more are switched on
-than that, it says in amber how many were left out, and **Content → Health** lists them under *Extension source
-limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
+one of them is searched together. The engine's strip counts them (*v2.3.2243 · 12 of 25 sources on*); when more are
+switched on than that, the count turns amber, a line under the strip says how many were left out and how to get under
+the limit, and **Content → Health** lists them under *Extension source limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
 the desktop app has no setting for it.
 
 ## An extension's own settings
 
 Since v0.49.0. Many extensions have settings of their own — the screen Mihon opens from an extension's entry — and
-**Admin → Extensions** has them too: under **Settings** in the extension's sheet (press its row under Installed).
+**Admin → Extensions** has them too: under **Settings** in the extension's sheet (press its row under Installed, then
+**Settings**; with several languages the closed row says whose it opens on, *for English*).
 
 - **One language at a time.** An extension that provides one source per language keeps settings per language, and
   *Settings for* above them says whose they are (it opens on the first one switched on). It only picks whose settings
@@ -325,7 +336,7 @@ file.** An install set up before v0.46.0 gets the cap by downloading the current
 - **Health checks the engine's own Cloudflare helper.** The **Extension engine** row reads the engine's
   `flareSolverrEnabled` / `flareSolverrUrl`. When the helper is off, or points at `localhost` (the engine's own
   container, where no solver runs), the row turns amber while an extension source is seen behind Cloudflare, and
-  is a greyed line otherwise. The row, and the *Cloudflare helper* half of the card at the top of **Admin →
+  is a greyed line otherwise. The row, and the *Cloudflare helper* cell of the strip at the top of **Admin →
   Extensions**, offer **Connect**, which sets the engine to the solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it
   on. Nothing restarts, and the engine keeps it unless its own container names another solver. It is never changed
   without someone pressing it; with no `FLARESOLVERR_URL` on Uchiyomi both say to set that first. When the engine
@@ -370,7 +381,7 @@ with it the links for every series you added through an extension.
 `docker compose stop` only lasts until the next `docker compose up`, which starts it again. On Unraid and CasaOS,
 stop or remove the engine's container and empty `SUWAYOMI_URL`. The desktop app has no switch for it: an engine
 that was never downloaded costs nothing, and one that was only runs while Uchiyomi does. The same steps, per
-platform, are under **Admin → Extensions** → **Turning it off**, in the engine's card.
+platform, are under **Admin → Extensions** → the engine's **⋯** → **Turning it off**.
 
 ## Your engine's data
 
@@ -397,8 +408,8 @@ volume of that name without a word, and the backup is an empty file. With the en
 (`EXTENSION_ENGINE=0`) there is no container to borrow from: take the volume's full name from `docker volume ls`
 and mount that, `docker run --rm -v <project>_uchiyomi_suwayomi:/d -v "$PWD":/b alpine tar czf /b/engine.tgz -C /d .`
 
-On Unraid and CasaOS, copy the folder above the same way, with the engine stopped. Admin → Extensions → **Turning it
-off** says how many series depend on it, and warns you never to delete it: turning the engine off is safe, deleting its data is
+On Unraid and CasaOS, copy the folder above the same way, with the engine stopped. Admin → Extensions → **⋯** →
+**Turning it off** says how many series depend on it, and warns you never to delete it: turning the engine off is safe, deleting its data is
 not. Moving it between setups is in [MIGRATING.md](MIGRATING.md#adding-or-removing-the-extension-engine).
 
 ## Settings

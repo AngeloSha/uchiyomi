@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2807
+    "strings": 2820
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2810,5 +2810,18 @@
   "That file is not an image this server can read.": "这个文件不是本服务器能读取的图片。",
   "That image is over {n} MB. Pick a smaller one.": "这张图片超过了 {n} MB，请选择更小的图片。",
   "Upload": "上传",
-  "Where its chapters come from, and which translation groups come first.": "章节从哪里获取，以及哪些汉化组优先。"
+  "Where its chapters come from, and which translation groups come first.": "章节从哪里获取，以及哪些汉化组优先。",
+  "Ready": "就绪",
+  "Needed for sites behind Cloudflare.": "访问受 Cloudflare 保护的网站时需要。",
+  "Needs attention · 1": "需要关注 · 1",
+  "Needs attention · {n}": "需要关注 · {n}",
+  "Ready · 1": "就绪 · 1",
+  "Ready · {n}": "就绪 · {n}",
+  "Turn on all": "全部开启",
+  "Turn on": "开启",
+  "Update available": "有可用更新",
+  "No source on": "没有开启的来源",
+  "1 repository": "1 个仓库",
+  "{n} repositories": "{n} 个仓库",
+  "for {language}": "适用于{language}"
 }

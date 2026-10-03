@@ -258,6 +258,12 @@
   .btn-key-danger {
     @apply hover:border-rose-400/60 hover:text-rose-300;
   }
+  /* The accent without its fill (v0.53.0, Admin → Extensions): an action worth seeing that is not THE action on
+     the screen. A column of filled accent keys -- Turn on its sources on every row -- had no hierarchy left. */
+  .btn-key-accent {
+    @apply border-accent/35 bg-accent-soft text-accent hover:border-accent/70 hover:text-accent
+           disabled:hover:border-accent/35 disabled:hover:text-accent;
+  }
   .card {
     @apply rounded-3xl border border-ink-700/70 bg-ink-850/70 backdrop-blur;
   }

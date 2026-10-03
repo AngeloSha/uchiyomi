@@ -94,9 +94,9 @@
 //     4. with search scripted back to `ok`, the row's one key, Test, clears the finding.
 //
 //   engine -- Admin → Extensions with the extension engine not answering, then answering, then the redesigned tab
-//   (v0.53.0) on a 1,300-extension repository: Installed, Turn on its sources, Update, Browse to the catalogue's last
-//   extension, the 18+ switch, an extension's sheet and its languages, Remove, Repositories and Languages
-//   (engineWalk.mjs). Needs up.sh with E2E_ENGINE=fake, and ENGINE=http://127.0.0.1:<the engine's port>; it takes the
+//   (v0.53.0) on a 1,300-extension repository: the strip, Installed and its groups, Turn on, Update, Browse to the
+//   catalogue's last extension, the 18+ switch, an extension's sheet, its languages and its closed Settings, Remove,
+//   Repositories and Languages (engineWalk.mjs). Needs up.sh with E2E_ENGINE=fake, and ENGINE=http://127.0.0.1:<the engine's port>; it takes the
 //   engine down and up itself.
 //
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
@@ -1256,9 +1256,9 @@ async function numbering(width) {
   await everyFile('every file is back on the number the source gives it', 0, IST.set);
   check(`${tag}: a series an admin put on the source's numbers carries no notice`, !!(await waitFor(async () => !(await page.$('[data-numbering-notice]')), 10_000)));
 
-  // 10. Admin -> Extensions -> Webtoons.com: its sheet's Settings (v0.53.0; a Settings key on its row before). Its
-  // sequential-numbering switch moves the source's numbers under every series that uses them -- Istrevelia again --
-  // so it says so before it is touched, and asks again.
+  // 10. Admin -> Extensions -> Webtoons.com: its sheet's Settings (v0.53.0; a Settings key on its row before), a
+  // disclosure closed until pressed since round 2. Its sequential-numbering switch moves the source's numbers under
+  // every series that uses them -- Istrevelia again -- so it says so before it is touched, and asks again.
   await go('/admin/?tab=Extensions&view=installed', 3500);
   const opened = await waitFor(() => page.evaluate(() => {
     const b = document.querySelector('[data-ext-row="eu.kanade.tachiyomi.extension.all.webtoons"] [data-ext-open]');
@@ -1267,7 +1267,14 @@ async function numbering(width) {
     return !!b;
   }), 15_000);
   check(`${tag}: Webtoons.com's row in Admin -> Extensions opens its sheet`, !!opened);
-  check(`${tag}: ...whose Settings section holds the extension's own settings`,
+  const toggle = await waitFor(() => page.evaluate(() => {
+    const b = document.querySelector('[data-ext-sheet="eu.kanade.tachiyomi.extension.all.webtoons"] [data-ext-settings-toggle]');
+    if (!b || b.getAttribute('aria-expanded') !== 'false') return null;
+    b.click();
+    return true;
+  }), 15_000);
+  check(`${tag}: ...whose Settings are closed until pressed`, !!toggle);
+  check(`${tag}: ...and then hold the extension's own settings`,
     !!(await waitFor(() => page.$('[data-ext-sheet="eu.kanade.tachiyomi.extension.all.webtoons"] [data-ext-settings]'), 15_000)));
   const row = `[data-pref="${SEQUENTIAL_KEY}"]`;
   const warn = await waitFor(() => page.$eval(`${row} [data-renumber-warning]`, (e) => e.textContent || ''), 15_000);

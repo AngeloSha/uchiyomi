@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2807
+    "strings": 2820
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -2810,5 +2810,18 @@
   "That file is not an image this server can read.": "Этот файл не похож на изображение, которое сервер может прочитать.",
   "That image is over {n} MB. Pick a smaller one.": "Это изображение больше {n} МБ. Выберите поменьше.",
   "Upload": "Загрузить",
-  "Where its chapters come from, and which translation groups come first.": "Откуда берутся главы и какие группы перевода идут первыми."
+  "Where its chapters come from, and which translation groups come first.": "Откуда берутся главы и какие группы перевода идут первыми.",
+  "Ready": "Готов",
+  "Needed for sites behind Cloudflare.": "Нужен для сайтов под защитой Cloudflare.",
+  "Needs attention · 1": "Требует внимания · 1",
+  "Needs attention · {n}": "Требуют внимания · {n}",
+  "Ready · 1": "Готово · 1",
+  "Ready · {n}": "Готовы · {n}",
+  "Turn on all": "Включить все",
+  "Turn on": "Включить",
+  "Update available": "Доступно обновление",
+  "No source on": "Нет включённых источников",
+  "1 repository": "1 репозиторий",
+  "{n} repositories": "Репозиториев: {n}",
+  "for {language}": "язык: {language}"
 }

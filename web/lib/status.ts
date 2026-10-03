@@ -142,9 +142,3 @@ export function sourceMark(st: ProviderStatus | undefined | null): Mark {
   const m = (st && SOURCE_MARK[st]) || SOURCE_MARK.ok;
   return { tone: m.tone, label: tr(m.label) };
 }
-
-/** The extension engine's state, for the Extensions header. */
-export function engineMark(reachable: boolean, version?: string | null): Mark {
-  if (!reachable) return { tone: 'problem', label: tr('Engine unreachable') };
-  return { tone: 'ok', label: version ? tr('Engine ready · {version}', { version }) : tr('Engine ready') };
-}

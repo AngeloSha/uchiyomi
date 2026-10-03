@@ -63,7 +63,8 @@ const SURFACES = [
   // v0.53.0, Edit details redone: its keys, its genre tags and its close key.
   'components/SeriesEditor.tsx',
   // v0.53.0, Admin → Extensions redesigned: an extension's sheet, the languages and repositories sheets, the pieces
-  // the rows share and the words they say. Browse's filter row keeps its chips: ExtensionsPanel.tsx is sliced below.
+  // the rows share and the words they say -- and since round 2 the whole tab, whose Browse has no filter chips left.
+  'components/ExtensionsPanel.tsx',
   'components/ExtensionSheet.tsx',
   'components/ExtensionLanguages.tsx',
   'components/ExtensionRepos.tsx',
@@ -77,11 +78,9 @@ const SURFACES = [
  *
  * The admin console's status badges (step 3) and its action keys: the owner ruled that only filter and sort
  * chips keep the chip shape, so the Providers panel's Test / Clear block / Enable / Update address / Check
- * all / Reload and the Extensions tab's keys (v0.53.0: Install, Update, Manage, Turn on its sources, Update all,
- * Check for extension updates, Languages, Repositories, Connect) are `.btn-key`s. Browse's Installed and Has an
- * update are filters and stay chips, so its slices stop short of them, and so does the engine header's slice of
- * the platform picker's chips. Health()'s own capsules belong to the Health step, which adds its slice when it
- * redesigns them.
+ * all / Reload and the Extensions tab's keys (v0.53.0: Install, Update, Turn on, Update all, Turn on all, Check for
+ * extension updates, Languages, Connect) are `.btn-key`s. The engine strip's slice stops short of the platform
+ * picker's chips. Health()'s own capsules belong to the Health step, which adds its slice when it redesigns them.
  */
 const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'function TabTile('],
@@ -111,11 +110,9 @@ const SLICES: [string, string, string, string][] = [
   // v0.49.1: the Sources sheet's Find more sources and Other names -- keys and a plain list, beside the sheet's
   // Prefer/Block chips, which stay.
   ['components/SourcesSheet.tsx', 'Sources sheet: Find more sources and Other names', 'function FindMore(', 'const emptyStat'],
-  // v0.53.0, Admin → Extensions: the engine's header (beside the platform picker's chips, which stay), the tab's
-  // actions, Installed and its rows, and Browse after its filter chips: its list, its paging and its empty states.
-  ['components/EngineSetup.tsx', 'Extensions: the engine header', 'export function EngineReady(', 'function EngineOffSheet('],
-  ['components/ExtensionsPanel.tsx', 'Extensions: actions, tabs, Installed and its rows', 'export function useExtensionActions(', 'function BrowseView('],
-  ['components/ExtensionsPanel.tsx', 'Extensions: Browse below its filters', '{noRepos && (', ''],
+  // v0.53.0, Admin → Extensions: the engine's strip, beside the platform picker's chips, which stay. The tab itself is
+  // a whole surface above since round 2 took Browse's chips out.
+  ['components/EngineSetup.tsx', 'Extensions: the engine strip', 'export function EngineReady(', 'function EngineOffSheet('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
@@ -196,7 +193,10 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   const admin = code(read('app/admin/page.tsx'));
   const [attention, providers, toolbar, calls, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
   const ext = (name: string) => { const [f, , from, to] = SLICES.find(([, n]) => n === name)!; return slice(code(read(f)), from, to, name); };
-  const [engine, installed, browse] = ['Extensions: the engine header', 'Extensions: actions, tabs, Installed and its rows', 'Extensions: Browse below its filters'].map(ext);
+  const engine = ext('Extensions: the engine strip');
+  const panel = code(read('components/ExtensionsPanel.tsx'));
+  const installed = slice(panel, 'function InstalledTools(', 'function BrowseView(', 'Extensions: Installed');
+  const browse = slice(panel, 'function BrowseView(', '', 'Extensions: Browse');
   // Health (step 8): a mark per card, Re-check a key, and nothing called HEALTH_LABEL left to be a capsule.
   assert.match(health, /<StatusMark \{\.\.\.mark\} size="xs" \/>/, 'the Health slice has no mark');
   assert.match(health, /className="btn-key"/, 'Re-check is not a key');
@@ -210,18 +210,18 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.equal(keys(providers), 3, 'Test, Clear block and Enable/Disable are not all keys');
   assert.equal(keys(code(read('components/SourceEvidence.tsx'))), 1, 'Update address is not a key');
   assert.equal(keys(toolbar), 2, 'Check all and Reload are not both keys');
-  // v0.53.0: the engine and its helper are marks, Connect is a key; Installed's Languages, Check for extension updates,
-  // Update all, Turn on all their sources, a row's Update and Turn on its sources and the empty state's Browse are
-  // keys; Browse's Try again, Show more, the empty state's two and a row's Install, Update and Manage too (its
-  // Repositories key sits in the filter row, beside the chips, and is a key there: the ExtensionsPanel scan reads it).
+  // v0.53.0: the engine and its helper are marks, the engine's ⋯ and Connect are keys; Installed's Languages and Check
+  // for extension updates, Update all, Turn on all, a row's Turn on and Update and the empty state's Browse are keys;
+  // Browse's Try again, Show more, the empty state's two and a row's Install and Update too. Its repositories are a
+  // text link in its count line since round 2, as an extension's "Hidden in every extension" is.
   assert.match(engine, /<StatusMark tone=\{engine\.tone\} label=\{engine\.label\} size="md" \/>/, 'the engine is not a mark');
   assert.match(engine, /<StatusMark tone=\{helperTone\}/, 'the Cloudflare helper is not a mark');
   assert.match(engine, /onClick=\{connect\}[^>]*className="btn-key btn-key-primary[^"]*"/, 'Connect is not a key');
-  assert.doesNotMatch(engine, /className="[^"]*\bchip\b/, 'the engine header slice runs into the platform chips');
+  assert.equal(keys(engine), 2, 'the engine\'s ⋯ and Connect are not both keys');
+  assert.doesNotMatch(engine, /className="[^"]*\bchip\b/, 'the engine strip slice runs into the platform chips');
   assert.equal(keys(installed), 7, 'Installed\'s keys are not all keys');
-  assert.doesNotMatch(installed, /chip-active|className=\{`chip /, 'the Installed slice runs into Browse\'s filter chips');
-  assert.equal(keys(browse), 7, 'Browse\'s keys are not all keys');
-  assert.match(code(read('components/ExtensionsPanel.tsx')), /onClick=\{onRepos\} className="btn-key ms-auto"/, 'Repositories is not a key');
+  assert.equal(keys(browse), 6, 'Browse\'s keys are not all keys');
+  assert.doesNotMatch(panel, /\bchip(-active)?\b/, 'a chip is back in the Extensions tab');
   assert.equal(keys(code(read('components/ExtensionSheet.tsx'))), 5, 'the sheet\'s Update, Turn on its sources, Remove extension, Remove and Cancel are not keys');
   // Reintroduce `btn-accent` on either: the capsule scan fails, and so does this.
   assert.match(calls, /onClick=\{addSite\}[^>]*className="btn-key btn-key-primary"/, "Add a site's Add is not a key");
@@ -258,7 +258,8 @@ test('the action keys that replace the pills are rectangles', () => {
   assert.ok(key, 'there is no .btn-key');
   assert.match(key!, /\brounded-lg\b/, 'the action key lost its 8 px corners');
   assert.ok(!isCapsule(key!), 'the action key is a capsule');
-  for (const v of ['btn-key-primary', 'btn-key-danger']) {
+  // v0.53.0 round 2: .btn-key-accent, the accent without its fill.
+  for (const v of ['btn-key-primary', 'btn-key-danger', 'btn-key-accent']) {
     assert.ok(cls.has(v), `there is no .${v}`);
     assert.doesNotMatch(cls.get(v)!, /rounded-full/, `.${v} makes the key a capsule`);
   }

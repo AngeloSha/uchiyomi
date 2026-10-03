@@ -255,9 +255,11 @@ test("the rest of Admin → Extensions, and Providers' source rows, say nothing 
     assert.deepEqual(bareCalls(src), [], `a bare English toast in ${name}`);
     assert.deepEqual(bareLiterals(src).filter((t) => !isClassList(t)), [], `bare English in a string in ${name}`);
   }
-  // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half).
-  assert.match(ext, /updatable === 1 \? tr\('1 extension is out of date'\) : tr\('\{n\} extensions are out of date', \{ n: updatable \}\)/,
-    '"1 extensions are out of date"');
+  // Counted, one sentence per count (localeCoverage.test.ts holds each pair to its other half). Round 2's group headers
+  // agree with their count in most of the eight ("Requiere atención · 1", "Requieren atención · 3").
+  assert.match(ext, /g\.list\.length === 1 \? tr\('Needs attention · 1'\) : tr\('Needs attention · \{n\}', \{ n: g\.list\.length \}\)/,
+    'a group of one is said with the plural');
+  assert.match(ext, /repos\.length === 1 \? tr\('1 repository'\) : tr\('\{n\} repositories', \{ n: numberText\(repos\.length\) \}\)/, '"1 repositories"');
   assert.match(ext, /first\.matched === 1 \? tr\('1 extension matches'\) : tr\('\{n\} extensions match', \{ n: numberText\(first\.matched\) \}\)/,
     '"1 extensions match"');
   assert.match(ext, /ext\.used === 1 \? tr\('1 series from it will stop updating but stay readable\.'\)/, 'Remove counts one series in the plural');

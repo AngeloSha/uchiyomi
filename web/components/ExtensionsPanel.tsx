@@ -8,11 +8,17 @@
 // line, an update line and a 400-row list capped with "narrow the search" -- and discussion #121 is a real user
 // getting lost in it (lib/extensions.ts lists what went wrong).
 //
-// Installed: one row per extension, its languages as tags (lit when on), what is waiting (an update, no source on)
-// and the one action for it; a row opens the extension's sheet (components/ExtensionSheet.tsx): its languages with a
-// switch each, their health, its settings and Remove. Browse: the repositories' catalogue a page at a time, searched
-// by name, filtered by language, installed, update waiting and an unambiguous "Show 18+ extensions", installed with
-// one press. The repositories and the languages hidden everywhere are sheets of their own, one press away.
+// Round 2 is the same tab decluttered, after the owner found round 1 "still too cluttered": it said one thing three
+// times (an amber bar, amber words on each row it meant, a filled key on each), warned in amber everywhere, and put
+// a hint line, two keys and two bars before the first extension. Now:
+// - on top, a slim strip (components/EngineSetup.tsx EngineReady), and Installed's two tools sit at the end of the
+//   views' row;
+// - Installed is one list -- grouped into "Needs attention" and "Ready" only while something needs someone, with
+//   Update all and Turn on all in that group's header -- and a row says at most one state word and offers at most
+//   one key (lib/extensions.ts rowKey / rowWord), the rest of it opening the extension's sheet;
+// - Browse is its search and language, one quiet line (how many match, the repositories as a link, Show 18+
+//   extensions), and the catalogue a page at a time: its Installed and Has an update chips were the Installed tab.
+// Amber is for a real problem only, and the one filled accent key on the screen is Connect.
 //
 // Every sheet is portalled to <body> (components/ui.tsx OnBody): inside a `.card`, whose backdrop blur makes it the
 // containing block of anything `fixed`, a sheet covered the card instead of the screen.
@@ -26,8 +32,8 @@ import { useReduceEffects } from '@/lib/effects';
 import { isDesktop } from '@/lib/desktop';
 import { numberText } from '@/lib/format';
 import {
-  BROWSE_PAGE, NO_FILTERS, browseCount, catalogQuery, extLanguageName, initialView, installedList, langTag,
-  languageOptions, languagesOnText, narrowed, needsTurningOn, nextOffset, reasonLine,
+  BROWSE_PAGE, NO_FILTERS, browseCount, catalogQuery, extLanguageName, extLanguagesText, initialView, installedGroups, installedList, langTag,
+  languageOptions, languagesOnText, narrowed, needsTurningOn, nextOffset, reasonLine, rowKey, rowWord,
   type BrowseFilters, type CatalogExt, type CatalogPage, type ExtSourcesAnswer, type ExtStatus, type ExtView, type InstalledExt,
 } from '@/lib/extensions';
 import { useToast } from '@/components/Toast';
@@ -35,13 +41,13 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { OnBody } from '@/components/ui';
 import { Switch } from '@/components/Switch';
 import { ProgressRing } from '@/components/ProgressRing';
-import { StatusEdge, StatusGlyph, StatusMark } from '@/components/StatusMark';
-import { IcChevronRight, IcRefresh, IcSearch } from '@/components/icons';
+import { StatusGlyph, StatusMark } from '@/components/StatusMark';
+import { IcChevronRight, IcGlobe, IcRefresh, IcSearch } from '@/components/icons';
 import { EngineInstall } from '@/components/EngineInstall';
 import { EngineReady, EngineSetup } from '@/components/EngineSetup';
 import { ExtensionSettings, useExtensionSettingsParam } from '@/components/ExtensionSettings';
 import { ExtensionSheet } from '@/components/ExtensionSheet';
-import { Busy, ExtIcon, ExtTags, busyKey } from '@/components/ExtensionBits';
+import { Busy, ExtIcon, ExtTags, Facts, busyKey } from '@/components/ExtensionBits';
 import { LanguagesSheet } from '@/components/ExtensionLanguages';
 import { RepoForm, ReposSheet } from '@/components/ExtensionRepos';
 
@@ -205,12 +211,19 @@ function ExtensionLists({ status, onProviders }: { status: ExtStatus; onProvider
 
   return (
     <>
-      <EngineReady status={status} installed={inst ? inst.installed : null} desktop={isDesktop()} />
+      <EngineReady status={status} desktop={isDesktop()} />
       <section aria-label={tr('Extensions')} className="space-y-4">
-        <ViewTabs view={view} onView={setView} installed={inst?.installed} total={inst ? browseCount(inst, adult) : undefined} updates={inst?.updatable ?? 0} />
+        {/* One row: the two views, and at its end Installed's two tools -- in place of a hint line and two keys over the
+            list. The rule under the row is the row's, so the tools sit on it too. Russian's "Установленные" at 390 pushed
+            the tools 7 px into the gutter: the tabs are a size smaller on a phone, and the tools wrap rather than
+            overflow when the words and counts are longer still. */}
+        <div className="flex flex-wrap items-end justify-between gap-x-3 border-b border-ink-800/80">
+          <ViewTabs view={view} onView={setView} installed={inst?.installed} total={inst ? browseCount(inst, adult) : undefined} updates={inst?.updatable ?? 0} />
+          {view === 'installed' && <InstalledTools actions={actions} onLanguages={() => setSheet('langs')} />}
+        </div>
         {view === 'installed' ? (
-          <InstalledView list={installed} loading={!inst || !srcs} failed={instFailed} actions={actions} updatable={inst?.updatable ?? 0}
-            onOpen={setOpen} onBrowse={() => setView('browse')} onLanguages={() => setSheet('langs')} />
+          <InstalledView list={installed} loading={!inst || !srcs} failed={instFailed} actions={actions}
+            onOpen={setOpen} onBrowse={() => setView('browse')} />
         ) : (
           <BrowseView actions={actions} repos={repos?.content} adult={adult} onAdult={setAdult} onOpen={setOpen} onRepos={() => setSheet('repos')} />
         )}
@@ -239,16 +252,17 @@ function ViewTabs({ view, onView, installed, total, updates }: {
   const still = useReducedMotion();
   const tabs: Array<[ExtView, string, number | undefined]> = [['installed', tr('Installed'), installed], ['browse', tr('Browse'), total]];
   return (
-    <div role="tablist" aria-label={tr('Extensions')} className="flex items-end gap-6 border-b border-ink-800/80">
+    <div role="tablist" aria-label={tr('Extensions')} className="flex items-end gap-5 sm:gap-6">
       {tabs.map(([v, label, n]) => {
         const on = v === view;
         return (
           <button key={v} type="button" role="tab" aria-selected={on} data-ext-view={v} onClick={() => { if (!on) onView(v); }}
-            className={`relative -mb-px flex items-center gap-1.5 pb-2 pt-1 font-display text-base font-semibold transition-colors ${on ? 'text-fog-50' : 'text-fog-500 hover:text-fog-200'}`}>
+            className={`relative -mb-px flex items-center gap-1.5 whitespace-nowrap pb-2 pt-1 font-display text-[15px] font-semibold transition-colors sm:text-base ${on ? 'text-fog-50' : 'text-fog-500 hover:text-fog-200'}`}>
             {label}
-            {typeof n === 'number' && <span className="text-sm font-medium tabular-nums text-fog-500">{numberText(n)}</span>}
-            {/* An update waiting is a thing to be told: a small amber mark on Installed, whichever view is open. */}
-            {v === 'installed' && updates > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+            {typeof n === 'number' && <span className="text-[13px] font-medium tabular-nums text-fog-500 sm:text-sm">{numberText(n)}</span>}
+            {/* An update waiting, told from Browse with a small amber mark on Installed. On Installed itself its group
+                header says so already, and a third mark for one fact was round 1's clutter. */}
+            {v === 'installed' && !on && updates > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
             {on && (
               <motion.span layoutId="extview" aria-hidden className="absolute inset-x-0 -bottom-px h-0.5 rounded-sm bg-accent"
                 transition={plain || still ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 40 }} />
@@ -260,14 +274,41 @@ function ViewTabs({ view, onView, installed, total, updates }: {
   );
 }
 
+/**
+ * Installed's two tools, at the end of the views' row: the languages hidden in every extension, and the check for
+ * updates. Their words from `sm`; on a phone the icon alone, named for a screen reader and in a tooltip.
+ */
+function InstalledTools({ actions, onLanguages }: { actions: ExtActions; onLanguages: () => void }) {
+  const checking = !!actions.busy.__refresh;
+  const check = checking ? tr('Checking for updates…') : tr('Check for extension updates');
+  return (
+    <div className="ms-auto flex shrink-0 gap-1.5 pb-2 sm:gap-2">
+      <button type="button" onClick={onLanguages} aria-label={tr('Languages')} title={tr('Languages')}
+        className="btn-key w-8 px-0 sm:w-auto sm:px-3" data-ext-languages>
+        <IcGlobe aria-hidden width={15} height={15} />
+        <span className="hidden sm:inline">{tr('Languages')}</span>
+      </button>
+      <button type="button" onClick={actions.refresh} disabled={checking} aria-label={check} title={check}
+        className={`btn-key w-8 px-0 sm:w-auto sm:px-3 ${busyKey(checking)}`} data-ext-refresh>
+        {checking ? <Busy><span className="hidden sm:inline">{check}</span></Busy>
+          : <><IcRefresh aria-hidden width={14} height={14} /><span className="hidden sm:inline">{check}</span></>}
+      </button>
+    </div>
+  );
+}
+
 // ---- Installed -------------------------------------------------------------------------------------------------
 
-function InstalledView({ list, loading, failed, actions, updatable, onOpen, onBrowse, onLanguages }: {
-  list: InstalledExt[]; loading: boolean; failed: boolean; actions: ExtActions; updatable: number;
-  onOpen: (pkg: string) => void; onBrowse: () => void; onLanguages: () => void;
+/** The amber key, for an update waiting: the one amber action on the screen. */
+const AMBER_KEY = 'border-amber-500/35 bg-amber-500/10 text-amber-300 hover:border-amber-400/70 hover:text-amber-200';
+
+function InstalledView({ list, loading, failed, actions, onOpen, onBrowse }: {
+  list: InstalledExt[]; loading: boolean; failed: boolean; actions: ExtActions;
+  onOpen: (pkg: string) => void; onBrowse: () => void;
 }) {
-  const { busy, act, updateAll, refresh } = actions;
+  const { busy, act, updateAll } = actions;
   const off = list.filter(needsTurningOn);
+  const updates = list.filter((e) => e.hasUpdate).length;
   // Every one of them in turn: one route call each, as its own row's key would make.
   const [allOn, setAllOn] = useState(false);
   const turnAllOn = async () => {
@@ -276,55 +317,13 @@ function InstalledView({ list, loading, failed, actions, updatable, onOpen, onBr
     setAllOn(false);
   };
   return (
-    <div className="space-y-3" data-ext-installed>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <p className="min-w-0 flex-1 basis-56 text-[12px] leading-relaxed text-fog-400">
-          {tr('Open an extension for its languages and settings.')}
-        </p>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button type="button" onClick={onLanguages} className="btn-key" data-ext-languages>{tr('Languages')}</button>
-          <button type="button" onClick={refresh} disabled={!!busy.__refresh} className={`btn-key ${busyKey(!!busy.__refresh)}`} data-ext-refresh>
-            {busy.__refresh ? <Busy>{tr('Checking for updates…')}</Busy> : <><IcRefresh aria-hidden width={14} height={14} />{tr('Check for extension updates')}</>}
-          </button>
-        </div>
-      </div>
-
-      {/* A repository that did not answer: said where its check was pressed, with the engine's own words. */}
+    <div className="space-y-5" data-ext-installed>
+      {/* A repository that did not answer: said under the row whose key asked, with the engine's own words. */}
       {actions.refreshError !== null && (
         <p role="alert" className="text-[12px] leading-relaxed text-amber-300" data-ext-refresh-error>
           {tr('Could not reach the repositories to check for updates.')}
           {actions.refreshError && <span dir="auto" className="ms-1 line-clamp-2 break-words text-amber-200/70">{actions.refreshError}</span>}
         </p>
-      )}
-
-      {/* Out of date is a thing to be told, not a thing to go looking for. */}
-      {updatable > 0 && (
-        <div data-ext-update-bar className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5">
-          <StatusGlyph tone="warn" />
-          <p className="min-w-0 flex-1 basis-48 text-[12px] leading-snug text-amber-200">
-            {updatable === 1 ? tr('1 extension is out of date') : tr('{n} extensions are out of date', { n: updatable })}
-            <span className="text-amber-200/60"> · {updatable === 1
-              ? tr('a newer version is available from its repository')
-              : tr('newer versions are available from their repositories')}</span>
-          </p>
-          <button type="button" onClick={updateAll} disabled={!!busy.__updateall}
-            className={`btn-key border-amber-500/40 bg-amber-500/20 text-amber-100 hover:border-amber-400/70 hover:text-amber-50 ${busyKey(!!busy.__updateall)}`}>
-            {busy.__updateall ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update all')}
-          </button>
-        </div>
-      )}
-
-      {/* Installed in the engine's own page, or every language switched off: nothing of theirs reaches search. */}
-      {off.length > 1 && (
-        <div data-ext-off-bar className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5">
-          <StatusGlyph tone="warn" />
-          <p className="min-w-0 flex-1 basis-48 text-[12px] leading-snug text-amber-200">
-            {tr('{n} of your extensions have no source on yet', { n: off.length })}
-          </p>
-          <button type="button" onClick={turnAllOn} disabled={allOn} className={`btn-key btn-key-primary ${busyKey(allOn)}`}>
-            {allOn ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on all their sources')}
-          </button>
-        </div>
       )}
 
       {failed ? (
@@ -333,83 +332,144 @@ function InstalledView({ list, loading, failed, actions, updatable, onOpen, onBr
           <p className="mx-auto mt-1 max-w-sm text-[12px] text-fog-500">{tr('The extension engine did not answer. Try again in a moment.')}</p>
         </div>
       ) : loading ? (
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2" aria-busy="true">
-          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-[76px] rounded-3xl" />)}
+        <div className="card divide-y divide-ink-800/70 overflow-hidden rounded-2xl" aria-busy="true">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex h-16 items-center gap-3 px-4"><div className="skeleton h-10 w-10 rounded-xl" /><div className="skeleton h-3 w-40 rounded" /></div>
+          ))}
         </div>
       ) : list.length === 0 ? (
         <div className="card flex flex-col items-center px-6 py-10 text-center" data-ext-installed-empty>
           <p className="font-display text-lg font-semibold text-fog-50">{tr('No extensions installed yet')}</p>
           <p className="mt-1 max-w-sm text-sm text-fog-400">{tr('Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.')}</p>
-          <button type="button" onClick={onBrowse} className="btn-key btn-key-primary mt-4">{tr('Browse extensions')}</button>
+          <button type="button" onClick={onBrowse} className="btn-key btn-key-accent mt-4">{tr('Browse extensions')}</button>
         </div>
       ) : (
-        // grid-cols-1: an implicit column grows to a truncating name's whole width and pushes a phone sideways.
-        <ul className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {list.map((e) => <InstalledRow key={e.pkgName} e={e} busy={busy[e.pkgName]} onOpen={() => onOpen(e.pkgName)} act={act} />)}
-        </ul>
+        // One column at every width, one card: a two-column grid of cards made rows of uneven height.
+        installedGroups(list).map((g) => (
+          <section key={g.key} data-ext-group={g.key} className="space-y-2">
+            {g.key !== 'all' && (
+              <GroupHead title={g.key === 'attention'
+                ? (g.list.length === 1 ? tr('Needs attention · 1') : tr('Needs attention · {n}', { n: g.list.length }))
+                : (g.list.length === 1 ? tr('Ready · 1') : tr('Ready · {n}', { n: g.list.length }))}>
+                {/* What used to be the update bar and the no-source bar: their keys, where the rows they act on start. */}
+                {g.key === 'attention' && updates > 0 && (
+                  <button type="button" onClick={updateAll} disabled={!!busy.__updateall} data-ext-update-all
+                    className={`btn-key ${AMBER_KEY} ${busyKey(!!busy.__updateall)}`}>
+                    {busy.__updateall ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update all')}
+                  </button>
+                )}
+                {g.key === 'attention' && off.length > 1 && (
+                  <button type="button" onClick={turnAllOn} disabled={allOn} className={`btn-key btn-key-accent ${busyKey(allOn)}`} data-ext-turn-on-all>
+                    {allOn ? <Busy>{tr('Turning on…')}</Busy> : tr('Turn on all')}
+                  </button>
+                )}
+              </GroupHead>
+            )}
+            <ul className="card grad-border divide-y divide-ink-800/70 overflow-hidden rounded-2xl" data-ext-list-installed>
+              {g.list.map((e) => <InstalledRow key={e.pkgName} e={e} busy={busy[e.pkgName]} onOpen={() => onOpen(e.pkgName)} act={act} />)}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );
 }
 
+/** A group's header: its name and count, and the keys for all of it. */
+function GroupHead({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-0.5" data-ext-group-head>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{title}</h3>
+      {children && <div className="flex flex-wrap gap-2">{children}</div>}
+    </div>
+  );
+}
+
 /**
- * One installed extension: its icon, name and version, its languages as tags (lit when on) and how many are on --
- * or, with none on, saying so -- and the one action it needs: Update, or Turn on its sources. The rest of the row
- * opens its sheet. The action key is the row's sibling, never inside the opener (a button in a button).
+ * A row's opener. The whole row is its hit area -- the ::after covers the <li> -- and its focus ring is drawn there
+ * too. A key in the row is the opener's sibling, raised over that area: pressing it never opens the sheet, and there
+ * is no button inside a button.
+ */
+const OPENER = 'flex min-w-0 flex-1 items-center gap-3 text-start after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-accent/60';
+/** A row, about 64 px. One that opens a sheet is tinted under the pointer, with no transition: round 2 adds no motion. */
+const ROW = 'relative flex min-h-16 min-w-0 items-center gap-3 px-4 py-3';
+
+/**
+ * One installed extension: its icon, name and marks, "{language} · v{version}" and at most one state word, and at
+ * most one key -- Turn on when none of its sources is on, else Update when one waits (lib/extensions.ts rowKey).
+ * With nothing waiting, its languages (from `sm`), how many are on and a chevron instead. The row opens its sheet.
  */
 function InstalledRow({ e, busy, onOpen, act }: {
   e: InstalledExt; busy?: ExtAction | 'all'; onOpen: () => void; act: ExtActions['act'];
 }) {
-  const off = needsTurningOn(e);
-  const MAX_TAGS = 6;
+  const key = rowKey(e);
+  const word = rowWord(e);
   return (
-    <li data-ext-row={e.pkgName} data-ext-off={off || undefined}
-      className="card grad-border relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-      <StatusEdge tone={off || e.hasUpdate ? 'warn' : 'ok'} />
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 basis-60 items-center gap-3 text-start" data-ext-open>
+    <li data-ext-row={e.pkgName} data-ext-off={needsTurningOn(e) || undefined} className={`${ROW} hover:bg-ink-800/40`}>
+      <button type="button" onClick={onOpen} className={OPENER} data-ext-open>
         <ExtIcon url={e.iconUrl} name={e.name} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
             <bdi dir="auto" className="truncate text-sm font-medium text-fog-100">{e.name}</bdi>
             <ExtTags e={e} />
           </span>
-          <span className="mt-0.5 block truncate text-[12px] text-fog-500">
-            {[e.versionName ? `v${e.versionName}` : null, extLanguageName(e.lang)].filter(Boolean).join(' · ')}
+          <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-fog-500">
+            <span className="truncate"><Facts items={[extLanguagesText(e), e.versionName ? `v${e.versionName}` : null]} /></span>
+            {word && <RowWord word={word} />}
           </span>
-          {off ? (
-            <span className="mt-1 flex items-center gap-1.5 text-[12px] text-amber-300"><StatusGlyph tone="warn" size={10} />{tr('None of its sources are on')}</span>
-          ) : e.sources.length > 0 ? (
-            <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1">
-              {e.sources.slice(0, MAX_TAGS).map((s) => (
-                <span key={s.id} title={extLanguageName(s.lang)} data-ext-tag={s.enabled ? 'on' : 'off'}
-                  className={`rounded-[4px] px-1 text-[10px] font-semibold leading-[16px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
-                  {langTag(s.lang)}
-                </span>
-              ))}
-              {e.sources.length > MAX_TAGS && <span className="text-[10px] tabular-nums text-fog-500">+{e.sources.length - MAX_TAGS}</span>}
-              <span className="ms-1 text-[11px] text-fog-500">{languagesOnText(e.on, e.sources.length)}</span>
-            </span>
-          ) : null}
         </span>
-        {/* With nothing waiting, opening it is the row's one action, and the chevron says so. */}
-        {!(e.hasUpdate || off) && <IcChevronRight aria-hidden width={16} height={16} className="shrink-0 text-fog-600 rtl:-scale-x-100" />}
+        {!key && e.sources.length > 0 && <LanguagesOn e={e} />}
+        {!key && <IcChevronRight aria-hidden width={16} height={16} className="shrink-0 text-fog-600 rtl:-scale-x-100" />}
       </button>
-      {(e.hasUpdate || off) && (
-        <div className="ms-auto flex shrink-0 gap-2">
-          {e.hasUpdate && (
-            <button type="button" onClick={() => void act(e, 'update')} disabled={!!busy} data-ext-update
-              className={`btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100 ${busyKey(busy === 'update')}`}>
-              {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
-            </button>
-          )}
-          {off && (
-            <button type="button" onClick={() => void act(e, 'enable')} disabled={!!busy} className={`btn-key btn-key-primary ${busyKey(busy === 'enable')}`} data-ext-turn-on>
-              {busy === 'enable' ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on its sources')}
-            </button>
-          )}
-        </div>
-      )}
+      {key === 'turn-on' ? (
+        <button type="button" onClick={() => void act(e, 'enable')} disabled={!!busy} className={`btn-key btn-key-accent relative ${busyKey(busy === 'enable')}`} data-ext-turn-on>
+          {busy === 'enable' ? <Busy>{tr('Turning on…')}</Busy> : tr('Turn on')}
+        </button>
+      ) : key === 'update' ? (
+        <button type="button" onClick={() => void act(e, 'update')} disabled={!!busy} className={`btn-key relative ${AMBER_KEY} ${busyKey(busy === 'update')}`} data-ext-update>
+          {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
+        </button>
+      ) : null}
     </li>
+  );
+}
+
+/**
+ * A row's one state word, with its glyph: an update waiting (an amber diamond), or no source on (a hollow ring, grey).
+ * From `sm` it ends the meta line after a dot; on a phone it is a line of its own, every such row alike -- it wrapped
+ * by the width of a version number, and the line it left ended in a dangling dot.
+ */
+function RowWord({ word }: { word: 'update' | 'off' }) {
+  const line = 'inline-flex basis-full items-center gap-1 sm:basis-auto';
+  return (
+    <>
+      <span aria-hidden className="hidden sm:inline">·</span>
+      {word === 'update' ? (
+        <span className={`${line} text-amber-300`} data-ext-word="update"><StatusGlyph tone="warn" size={9} />{tr('Update available')}</span>
+      ) : (
+        <span className={`${line} text-fog-400`} data-ext-word="off"><StatusGlyph tone="info" size={9} />{tr('No source on')}</span>
+      )}
+    </>
+  );
+}
+
+/** A quiet row's languages: up to four tags from `sm`, the ones on first and lit, then +n; and how many are on. */
+function LanguagesOn({ e }: { e: InstalledExt }) {
+  const MAX_TAGS = 4;
+  const tags = [...e.sources].sort((a, b) => Number(b.enabled) - Number(a.enabled));
+  return (
+    <span className="flex shrink-0 items-center gap-2.5">
+      <span className="hidden items-center gap-1 sm:flex">
+        {tags.slice(0, MAX_TAGS).map((s) => (
+          <span key={s.id} title={extLanguageName(s.lang)} data-ext-tag={s.enabled ? 'on' : 'off'}
+            className={`whitespace-nowrap rounded-[4px] px-1.5 text-[10px] font-semibold leading-[17px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
+            {langTag(s.lang)}
+          </span>
+        ))}
+        {tags.length > MAX_TAGS && <span className="rounded-[4px] bg-ink-800 px-1.5 text-[10px] font-semibold leading-[17px] tabular-nums text-fog-500">+{tags.length - MAX_TAGS}</span>}
+      </span>
+      <span className="whitespace-nowrap text-[12px] tabular-nums text-fog-500">{languagesOnText(e.on, e.sources.length)}</span>
+    </span>
   );
 }
 
@@ -461,6 +521,7 @@ function BrowseView({ actions, repos, adult, onAdult, onOpen, onRepos }: {
 
   const noRepos = !!repos && repos.length === 0;
   const firstRun = noRepos && !!first && first.total === 0;
+  const counted = !!first && first.matched > 0;
   return (
     <div className="space-y-3" data-ext-browse>
       {firstRun ? (
@@ -485,23 +546,28 @@ function BrowseView({ actions, repos, adult, onAdult, onOpen, onRepos }: {
               {options.map((o) => <option key={o.value || 'any'} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            {/* Filter chips keep the chip shape (the owner's rule: filters stay chips, actions are keys). */}
-            <button type="button" aria-pressed={f.installed} onClick={() => set({ installed: !f.installed })} className={`chip text-xs ${f.installed ? 'chip-active' : ''}`} data-ext-filter="installed">
-              {tr('Installed')}
-            </button>
-            <button type="button" aria-pressed={f.updates} onClick={() => set({ updates: !f.updates })} className={`chip text-xs ${f.updates ? 'chip-active' : ''}`} data-ext-filter="updates">
-              {tr('Has an update')}
-            </button>
+          {/* One quiet line under them: how many match, the repositories they come from -- a link to their sheet, in
+              place of a Repositories key -- and the 18+ switch. No filter chips: Installed and Has an update were the
+              Installed tab again. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-fog-500" data-ext-count-line>
+            <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+              {counted && (
+                <span className="tabular-nums" data-ext-count>
+                  {first.matched === 1 ? tr('1 extension matches') : tr('{n} extensions match', { n: numberText(first.matched) })}
+                </span>
+              )}
+              {isFetching && !isFetchingNextPage && <ProgressRing progress="spin" size={12} tone="muted" />}
+              {counted && <span aria-hidden>·</span>}
+              {/* Counted once the list has answered; reachable before that, and if it never does. */}
+              <button type="button" onClick={onRepos} className="text-accent hover:underline" data-ext-repos>
+                {!repos ? tr('Repositories') : repos.length === 1 ? tr('1 repository') : tr('{n} repositories', { n: numberText(repos.length) })}
+              </button>
+            </p>
             {/* A switch with its words, not a chip reading "18+": that read as "only 18+" (#121), and off it hides them. */}
-            <label className="flex items-center gap-2 text-[12px] text-fog-300" data-ext-adult>
+            <label className="ms-auto flex items-center gap-2 text-fog-300" data-ext-adult>
               <Switch on={f.adult} onChange={onAdult} label={tr('Show 18+ extensions')} />
               <span>{tr('Show 18+ extensions')}</span>
             </label>
-            <button type="button" onClick={onRepos} className="btn-key ms-auto" data-ext-repos>
-              {tr('Repositories')}
-              {repos && <span className="rounded-[4px] bg-ink-900 px-1 text-[10px] font-semibold tabular-nums text-fog-400">{repos.length}</span>}
-            </button>
           </div>
 
           {noRepos && (
@@ -517,19 +583,15 @@ function BrowseView({ actions, repos, adult, onAdult, onOpen, onRepos }: {
               <button type="button" onClick={() => void refetch()} className="btn-key btn-key-primary mt-3">{tr('Try again')}</button>
             </div>
           ) : !first ? (
-            <div className="card divide-y divide-ink-800/70" aria-busy="true">
-              {Array.from({ length: 6 }).map((_, i) => <div key={i} className="flex items-center gap-3 px-4 py-3"><div className="skeleton h-9 w-9 rounded-xl" /><div className="skeleton h-3 w-40 rounded" /></div>)}
+            <div className="card divide-y divide-ink-800/70 overflow-hidden rounded-2xl" aria-busy="true">
+              {Array.from({ length: 6 }).map((_, i) => <div key={i} className="flex h-16 items-center gap-3 px-4"><div className="skeleton h-10 w-10 rounded-xl" /><div className="skeleton h-3 w-40 rounded" /></div>)}
             </div>
           ) : rows.length === 0 ? (
             <NothingFound f={f} hiddenAdult={first.hiddenAdult} total={first.total} onClear={() => { setTyped(''); setF(NO_FILTERS); }}
               onAdult={() => onAdult(true)} />
           ) : (
             <>
-              <p className="flex items-center gap-2 text-[12px] text-fog-500" data-ext-count>
-                {first.matched === 1 ? tr('1 extension matches') : tr('{n} extensions match', { n: numberText(first.matched) })}
-                {isFetching && !isFetchingNextPage && <ProgressRing progress="spin" size={12} tone="muted" />}
-              </p>
-              <ul className={`card divide-y divide-ink-800/70 transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`} data-ext-list>
+              <ul className={`card grad-border divide-y divide-ink-800/70 overflow-hidden rounded-2xl transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`} data-ext-list>
                 {rows.map((e) => (
                   <BrowseRow key={e.pkgName} e={e} busy={actions.busy[e.pkgName]} onInstall={() => void install(e)}
                     onUpdate={() => void actions.act(e, 'update')} onOpen={() => onOpen(e.pkgName)} />
@@ -580,41 +642,53 @@ function NothingFound({ f, hiddenAdult, total, onClear, onAdult }: {
 }
 
 /**
- * One extension of the catalogue: icon, name and its marks, language and version, and one key -- Install, Update, or
- * Manage for one already installed (its sheet). Installing takes a while (the engine downloads and converts it), so
- * the key turns into a small ring and its words while it does.
+ * One extension of the catalogue: icon, name and its marks, language and version, and at the end what it is to you.
+ * Not installed: Install, one press, the key turning into a small ring and its words while the engine downloads and
+ * converts it. Installed: "Already installed" and a chevron, and the row opens its sheet -- or, with an update
+ * waiting, the amber Update.
  */
 function BrowseRow({ e, busy, onInstall, onUpdate, onOpen }: {
   e: CatalogExt; busy?: ExtAction | 'all'; onInstall: () => void; onUpdate: () => void; onOpen: () => void;
 }) {
-  return (
-    <li data-ext-item={e.pkgName} className="flex min-w-0 items-center gap-3 px-3 py-2.5 sm:px-4">
-      <ExtIcon url={e.iconUrl} name={e.name} size={36} />
-      <div className="min-w-0 flex-1">
-        <p className="flex min-w-0 items-center gap-1.5">
+  const head = (
+    <>
+      <ExtIcon url={e.iconUrl} name={e.name} />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
           <bdi dir="auto" className="truncate text-sm font-medium text-fog-100">{e.name}</bdi>
           <ExtTags e={e} />
-        </p>
-        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-fog-500">
-          <span className="truncate">{[extLanguageName(e.lang), e.versionName ? `v${e.versionName}` : null].filter(Boolean).join(' · ')}</span>
-          {/* Words where there is room; the check alone on a phone, where the Manage key beside it says the rest. */}
-          {e.installed && <span className="hidden shrink-0 sm:inline-flex"><StatusMark tone="ok" label={tr('Already installed')} size="xs" /></span>}
-          {e.installed && <span className="inline-flex shrink-0 sm:hidden"><StatusMark tone="ok" title={tr('Already installed')} size="xs" /></span>}
-        </p>
-      </div>
-      {!e.installed ? (
-        // A calm key, not the accent's fill: a page of sixty would be a column of sixty bright buttons.
-        <button type="button" onClick={onInstall} disabled={!!busy} className={`btn-key min-w-[5.5rem] text-accent ${busyKey(busy === 'install')}`} data-ext-install>
-          {busy === 'install' ? <Busy tone="muted">{tr('Installing…')}</Busy> : tr('Install')}
-        </button>
-      ) : e.hasUpdate ? (
-        <button type="button" onClick={onUpdate} disabled={!!busy} data-ext-update
-          className={`btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100 ${busyKey(busy === 'update')}`}>
-          {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
+        </span>
+        <span className="mt-0.5 block truncate text-[12px] text-fog-500"><Facts items={[extLanguageName(e.lang), e.versionName ? `v${e.versionName}` : null]} /></span>
+      </span>
+    </>
+  );
+  return (
+    <li data-ext-item={e.pkgName} className={`${ROW} ${e.installed ? 'hover:bg-ink-800/40' : ''}`}>
+      {e.installed ? (
+        <button type="button" onClick={onOpen} className={OPENER} data-ext-open>
+          {head}
+          {!e.hasUpdate && (
+            <>
+              {/* Words where there is room; the check alone on a phone, named for a screen reader. */}
+              <span className="hidden shrink-0 sm:inline-flex"><StatusMark tone="ok" label={tr('Already installed')} size="md" /></span>
+              <span className="inline-flex shrink-0 sm:hidden"><StatusMark tone="ok" title={tr('Already installed')} size="md" /></span>
+              <IcChevronRight aria-hidden width={16} height={16} className="shrink-0 text-fog-600 rtl:-scale-x-100" />
+            </>
+          )}
         </button>
       ) : (
-        <button type="button" onClick={onOpen} className="btn-key" data-ext-manage>{tr('Manage')}</button>
+        <span className="flex min-w-0 flex-1 items-center gap-3">{head}</span>
       )}
+      {!e.installed ? (
+        // The accent without its fill: a page of sixty would be a column of sixty bright buttons.
+        <button type="button" onClick={onInstall} disabled={!!busy} className={`btn-key btn-key-accent min-w-[5.5rem] ${busyKey(busy === 'install')}`} data-ext-install>
+          {busy === 'install' ? <Busy>{tr('Installing…')}</Busy> : tr('Install')}
+        </button>
+      ) : e.hasUpdate ? (
+        <button type="button" onClick={onUpdate} disabled={!!busy} className={`btn-key relative ${AMBER_KEY} ${busyKey(busy === 'update')}`} data-ext-update>
+          {busy === 'update' ? <Busy tone="amber">{tr('Updating…')}</Busy> : tr('Update')}
+        </button>
+      ) : null}
     </li>
   );
 }

@@ -407,8 +407,8 @@ async function main() {
     await xp.close();
   }
 
-  // A later visit: one repository, three extensions installed and one out of date -- the engine's header and
-  // Installed (v0.53.0). The crop is Installed alone, from its tabs to its last row.
+  // A later visit: one repository, three extensions installed and one out of date -- the engine's strip and
+  // Installed (v0.53.0), the update in its own group. The crop is Installed alone, from its tabs to its last row.
   if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
     const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
     await tabOn(xp, 'Extensions');

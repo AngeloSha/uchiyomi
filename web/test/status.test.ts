@@ -7,7 +7,7 @@ import { join } from 'path';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { HEALTH_LABELS, SOURCE_LABELS, SOURCE_STATUSES, engineMark, healthMark, sourceMark, TONE_TEXT, type Tone } from '../lib/status';
+import { HEALTH_LABELS, SOURCE_LABELS, SOURCE_STATUSES, healthMark, sourceMark, TONE_TEXT, type Tone } from '../lib/status';
 import { StatusEdge, StatusGlyph, StatusMark } from '../components/StatusMark';
 
 // Under tsx the components compile to the classic `React.createElement` (tsconfig's `jsx: preserve` is for
@@ -64,14 +64,13 @@ test('a source card\'s words agree with the noun "source" in the languages that 
   assert.notEqual(blockedKey, 'Blocked', 'a source shares the scanlation group\'s "Blocked" key');
 });
 
-test('the Health and engine marks', () => {
+test('the Health marks', () => {
+  // The engine's mark left this file in v0.53.0: the Extensions strip says it beside "Extension engine" (lib/extensions.ts
+  // engineLine, pinned in extensions.test.ts).
   assert.deepEqual(healthMark('problem'), { tone: 'problem', label: 'Needs attention' });
   assert.deepEqual(healthMark('warn'), { tone: 'warn', label: 'Worth a look' });
   assert.deepEqual(healthMark('ok'), { tone: 'ok', label: 'All good' });
   assert.deepEqual([...HEALTH_LABELS], ['Needs attention', 'Worth a look', 'All good']);
-  assert.deepEqual(engineMark(true, 'v2.3.2243'), { tone: 'ok', label: 'Engine ready · v2.3.2243' });
-  assert.deepEqual(engineMark(true), { tone: 'ok', label: 'Engine ready' });
-  assert.deepEqual(engineMark(false, 'v2'), { tone: 'problem', label: 'Engine unreachable' });
 });
 
 test('a mark is a glyph and coloured words: no fill, no border, no rounding', () => {
