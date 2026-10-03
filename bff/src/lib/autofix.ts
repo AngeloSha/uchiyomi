@@ -185,6 +185,12 @@ interface Run {
   counted: number;
   /** Source names Replace moved series off, package names kept and removed: the done lines name them. */
   replacedNames: string[];
+  /**
+   * The sources this run Replaces (v0.55.1): no Replace of its own makes one of them a series' main source, nor
+   * searches it (lib/findSources.ts `avoid`). The owner's first run moved a series off AllManga onto Mangakakalot, the
+   * source it had been replacing a moment before.
+   */
+  replacing: string[];
   keptPkgs: Array<{ name: string; series: number }>;
   removedPkgs: string[];
   installs: number;
@@ -268,7 +274,7 @@ export function startAutofix(
     id, by, origin: o.origin ?? (by ? 'manual' : 'nightly'), ctx: o.ctx ?? SYSTEM_CTX, startedAt,
     deadline: startedAt + AUTOFIX_MAX_MINUTES * 60_000, phase: null, phaseIndex: 0, phaseMs: {}, current: null, repairCur: null,
     stop: false, card, log: o.log, budget: { left: AUTOFIX_SEARCHES }, engine: 'none', solver: 'none', timeUp: false,
-    counts: {}, items: {}, counted: 0, replacedNames: [], keptPkgs: [], removedPkgs: [], installs: 0, installed: [], tried: [], noRoom: [], lines: [],
+    counts: {}, items: {}, counted: 0, replacedNames: [], replacing: [], keptPkgs: [], removedPkgs: [], installs: 0, installed: [], tried: [], noRoom: [], lines: [],
     finished: new Set(), cut: new Set(), numberingBusy: 0,
   };
   active = a;
@@ -618,13 +624,17 @@ async function sources(a: Run): Promise<void> {
     }
   }
 
-  for (const t of await replaceTargets(a)) {
+  const targets = await replaceTargets(a);
+  // Reintroduce by not passing them: "the run's Replace runs never promote onto a source it is replacing too" in
+  // autofix.int.test.ts finds a Replace run without them.
+  a.replacing = targets.map((t) => t.id);
+  for (const t of targets) {
     if (halted(a)) break;
     if (outOfTime(a)) { cutShort(a, 'sources'); break; }
     if (ignored.has(t.id)) continue;
     if (!(await waitSweep(a))) break;
     now(a, say('autofix.now.replacing', { name: t.name }));
-    const started = await startFind({ sourceId: t.id }, a.by, a.ctx, undefined, { mode: 'replace', turnOff: true, autofix: a.id });
+    const started = await startFind({ sourceId: t.id }, a.by, a.ctx, undefined, { mode: 'replace', turnOff: true, autofix: a.id, avoid: a.replacing });
     if (!('runId' in started)) continue;
     await findRunSettled();
     const st = await findState({ runId: started.runId }).catch(() => null);
@@ -1042,7 +1052,8 @@ async function tryPackage(a: Run, e: ExtensionInfo, lang: string, targets: Targe
   for (const [main, list] of byMain) {
     if (halted(a)) break;
     if (!(await waitSweep(a))) break;
-    const r = await startFind({ sourceId: main }, a.by, a.ctx, undefined, { mode: 'replace', turnOff: true, autofix: a.id, only: [entry.sourceId] });
+    const r = await startFind({ sourceId: main }, a.by, a.ctx, undefined,
+      { mode: 'replace', turnOff: true, autofix: a.id, only: [entry.sourceId], avoid: a.replacing });
     if (!('runId' in r)) continue;
     await findRunSettled();
     const st = await findState({ runId: r.runId }).catch(() => null);

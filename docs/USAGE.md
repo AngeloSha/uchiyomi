@@ -1330,7 +1330,10 @@ server works out before anything moves:
 
 1. *184 already follow a working source: it becomes their main source.* At once, with no search.
 2. *The other 11 are searched for on your other sources.* One at a time, under their titles and other names, as
-   *Find other sources* does: a match is taken only when its title and chapter numbers line up.
+   *Find other sources* does: a match is taken only when its title and chapter numbers line up. Since v0.55.1 only a
+   source that can update the series is asked — working, or only cooling down after asking Uchiyomi to slow down —
+   so a series is never moved onto a source failing at its chapter or page lists or its images; with none to take
+   it, it stays where it was and says so.
 3. *Example Manga is turned off once nothing uses it.*
 
 A series numbered by posting order keeps its main source, and the dialog says how many. **Turn it off when done**

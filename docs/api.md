@@ -1899,9 +1899,13 @@ the best is the one that answered with its list within the week, then the one li
 numbers (in tenths), then the admin's source order, then the one furthest ahead, then the follow order -- a cooling
 one only after every usable one. A series with none is searched for as Find does, its dead followers (failing, not
 loaded, switched off) not counting against the cap and dropped -- worst first, with their listing rows -- only as far
-as a follow needs the room; the first source it follows becomes its main source. A series numbered by posting order
-(`posting_order`), waiting for a renumber (`renumber_pending`), no longer on the source (`moved`), or with a sweep, a
-check or a listing refresh inside it for 30 s (`busy`) is left alone. Each result adds `promoted: {from, fromName,
+as a follow needs the room; the first source it follows becomes its main source. Since v0.55.1 that search asks only
+a source that can update the series (`standing` usable or cooling), so a source failing at the chapter list, the
+pages or the images is neither followed nor made the main source, and the first source it followed that can still
+update it is promoted -- none can, and the series stays with `why: no_answer`; a Replace run Fix everything starts
+never promotes onto, nor searches, a source that run is replacing too (such a follower is `skipped` as `failing`). A
+series numbered by posting order (`posting_order`), waiting for a renumber (`renumber_pending`), no longer on the
+source (`moved`), or with a sweep, a check or a listing refresh inside it for 30 s (`busy`) is left alone. Each result adds `promoted: {from, fromName,
 to, toName, via: follower|search, old: dropped|kept}` (and then no `why`), `skipped: [{sourceId, name, why: off|
 failing|cooling|not_loaded|language|age}]` (the followers passed over) and `dropped: [{sourceId, name}]`. The run reads
 `mode: 'replace'` and `promoted` (counted from its results; in `recent` too), and in full `left` (the series on the

@@ -9887,9 +9887,12 @@ paths:
         source order, how far ahead it is, the follow order) becomes its main source at once, with no search and no
         pacing (as POST /api/admin/series/{id}/main-source does, the replaced source dropped from it); a series with
         none is searched for as above -- its dead followers not counting against the cap, and dropped only as far as a
-        follow needs the room -- and the first source it follows becomes its main source. A series numbered by
-        posting order, waiting for a renumber, moved off the source, or with a run inside it for 30 s is left alone
-        and says so. `turnOff: true` (Replace only, never with `review`): when the run ends done with no series left
+        follow needs the room -- and the first source it follows becomes its main source. Since v0.55.1 that search
+        asks only a source that can update the series (standing usable or cooling), and the first source followed
+        that can still update it is promoted (none can: the series stays, `why: no_answer`); a Replace run Fix
+        everything starts never promotes onto, nor searches, a source that run is replacing too (such a follower is
+        `skipped` as `failing`). A series numbered by posting order, waiting for a renumber, moved off the source,
+        or with a run inside it for 30 s is left alone and says so. `turnOff: true` (Replace only, never with `review`): when the run ends done with no series left
         on the source, it is switched off and dropped from every series' followers with their listing rows (audited
         `source.retire`). Review first proposes instead: POST .../find/{runId}/promote applies one. Each switch is
         audited as `series.main_source` with `via: replace` and the run's id; `source.find` adds `mode`, `promoted`,

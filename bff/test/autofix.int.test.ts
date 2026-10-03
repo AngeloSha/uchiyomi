@@ -362,6 +362,18 @@ test('Fix everything: one run over a library with something wrong on every card'
     assert.equal((await health(ERR)).disabled, true);
   });
 
+  await t.test("sources: the run's Replace runs never promote onto a source it is replacing too", async () => {
+    // v0.55.1, the owner's first run: AllManga's Replace moved a series onto Mangakakalot, replaced a moment before.
+    // Each Replace run the run starts is told every source the run replaces (lib/findSources.ts `avoid`, which
+    // findSources.int.test.ts pins). Reintroduce by not passing them (lib/autofix.ts sources): they carry none.
+    const runs = await q(`SELECT scope FROM source_find_runs WHERE scope->>'autofix' = $1 AND scope->>'mode' = 'replace'`, [run.id]);
+    const replaced = runs.map((r: any) => r.scope.sourceId);
+    assert.ok(replaced.includes(DEAD) && replaced.includes(ERR), `PREMISE: it replaced more than one source: ${replaced.join(', ')}`);
+    for (const r of runs) {
+      for (const id of replaced) assert.ok(r.scope.avoid?.includes(id), `the Replace of ${r.scope.sourceId} never promotes onto ${id}`);
+    }
+  });
+
   await t.test('sources: a block is cleared only after a passing Test', async () => {
     // Reintroduce by clearing every block in the sources phase (drop `r.smoke.ok &&`): af-held, which fails its Test,
     // loses its cooldown.
