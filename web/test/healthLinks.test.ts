@@ -40,7 +40,7 @@ test('#116: a numbering finding opens its plan, and an extension source its own 
   // link further. Reintroduce the plain series link: "Open does not open the plan" fails.
   assert.equal(numberingHref('s 1'), '/series/?id=s%201&numbering=review');
   assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744', actions: ['renumber', 'keep_numbers'] }),
-    [{ href: '/series/?id=s1&numbering=review' }, { href: '/admin/?tab=Extensions&settings=2522335540328470744', label: 'Source settings' }],
+    [{ href: '/series/?id=s1&numbering=review' }, { href: '/admin/?tab=Sources&settings=2522335540328470744', label: 'Source settings' }],
     'Open does not open the plan');
   assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'mangadex', actions: ['renumber'] }), [{ href: '/series/?id=s1&numbering=review' }],
     'a built-in source is sent to extension settings');
@@ -54,7 +54,7 @@ test('#116: a numbering row with nothing to review opens the series, not a plan 
   // (info, Keep only) opened "Use the source's numbers" with a Rename key, and an interrupted renumber (no key: the
   // next check finishes it) a Confirm over its journal (web2 review). Reintroduce the plan for every numbering row:
   // each assertion below names its row.
-  const ext = { href: '/admin/?tab=Extensions&settings=2522335540328470744', label: 'Source settings' };
+  const ext = { href: '/admin/?tab=Sources&settings=2522335540328470744', label: 'Source settings' };
   assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744', actions: ['keep_numbers'], info: true }),
     [{ href: '/series/?id=s1' }, ext], 'a series numbered by posting order lately opens a rename plan');
   assert.deepEqual(healthLinks('numbering', { title: 't', detail: 'd', seriesId: 's1', sourceId: 'sw:2522335540328470744' }),

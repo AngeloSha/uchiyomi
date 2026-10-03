@@ -177,13 +177,20 @@ test('a sweep the daily check started is followed when Check all is pressed into
   assert.deepEqual(seen.failed, []);
 });
 
-test('Providers starts Check all through the helper, and leaves it when the tab goes', () => {
-  // Reintroduce by putting back `api('/api/admin/sources/check', { method: 'POST' })` in page.tsx: the toast reads
+test('Admin → Sources starts Test all through the helper, says how far it has got, and leaves it when the tab goes', () => {
+  // Reintroduce by putting back `api('/api/admin/sources/check', { method: 'POST' })` in the panel: the toast reads
   // the 202 answer, which has no needsAttention, and throws. Or by dropping the effect's `run.leave()`: a run the
-  // tab no longer shows keeps polling and gives its notice again beside the next visit's.
-  const src = readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8');
+  // tab no longer shows keeps polling and gives its notice again beside the next visit's. (Providers' Check all until
+  // v0.54.0; components/SourcesPanel.tsx's Test all since.) Drop the line under the row: "Test all does not say how
+  // far it has got" fails.
+  const src = readFileSync(join(__dirname, '..', 'components', 'SourcesPanel.tsx'), 'utf8');
   assert.match(src, /const run = checkAllSession\(api, \{/);
   assert.match(src, /void run\.follow\(\);\n    return \(\) => run\.leave\(\);/, 'the session is not left on unmount');
-  assert.match(src, /void checkRun\.current\?\.press\(\);/);
+  assert.match(src, /void session\.current\?\.press\(\);/);
   assert.doesNotMatch(src, /api<any>\('\/api\/admin\/sources\/check', \{ method: 'POST' \}\)/);
+  // Its progress, on a line of its own under the row of views, while the sweep runs; then what it found.
+  assert.match(src, /progress: \(p\) => \{ setChecking\(true\); setProgress\(p\); \},/, 'the progress the session reads is dropped');
+  assert.match(src, /\{view === 'yours' && <TestAllLine progress=\{check\.progress\} result=\{check\.result\} \/>\}/, 'Test all does not say how far it has got');
+  assert.match(src, /if \(progress\?\.running\) \{\s*return <p role="status" [^>]*data-source-check-progress>\{checkAllLabel\(progress\)\}<\/p>;/, 'Test all does not say how far it has got');
+  assert.match(src, /\{n === 1 \? tr\('Checked 1 source\.'\) : tr\('Checked \{n\} sources\.', \{ n \}\)\} \{t\.text\}/, 'Test all does not say what it found');
 });

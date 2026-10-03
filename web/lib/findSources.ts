@@ -56,9 +56,25 @@ export interface AltTitle {
  * - `not_tried`: never reached -- a stop, the run's time limit or a restart cut the run short. NOT searched.
  */
 export type FindWhy =
-  | 'posting_order' | 'no_match' | 'followed_already' | 'full' | 'refused' | 'too_few' | 'no_source' | 'no_answer' | 'not_tried';
+  | 'posting_order' | 'no_match' | 'followed_already' | 'full' | 'refused' | 'too_few' | 'no_source' | 'no_answer' | 'not_tried'
+  // v0.54.0, Replace: the series' main source changed while the run went, a check of the series held it past the wait,
+  // or a renumbering waits for review first.
+  | 'moved' | 'busy' | 'renumber_pending';
 
 export interface FindFollowed { sourceId: string; name: string; chapters: number | null }
+
+/**
+ * v0.54.0, Replace: the series' new main source, and how it was found -- a source it already followed (`follower`),
+ * or one the run searched for and followed first (`search`) -- and what became of the old one.
+ */
+export interface FindPromoted {
+  from: string;
+  fromName: string;
+  to: string;
+  toName: string;
+  via: 'follower' | 'search';
+  old: 'dropped' | 'kept';
+}
 
 /**
  * A match a review-first run kept (bff FindProposal, v0.51.0): green is what an automatic run would have followed,
@@ -79,8 +95,16 @@ export interface FindProposal {
   theirs: { lined: number; of: number };
   coverage: number | null;
   verdict: 'green' | 'amber';
-  amber?: 'numbering' | 'other_name';
-  state?: 'followed' | 'dismissed';
+  /**
+   * v0.54.0, Replace's review adds why a source the series already follows is amber: it is cooling down, it lists too
+   * few of the series' chapters (`coverage`), or it has not answered for the series lately (`stale`).
+   */
+  amber?: 'numbering' | 'other_name' | 'cooling' | 'coverage' | 'stale';
+  state?: 'followed' | 'dismissed' | 'promoted';
+  /** v0.54.0, Replace: a source the series follows already (`follower`), or a search's match (`search`). */
+  kind?: 'follower' | 'search';
+  /** v0.54.0, Replace: the one the run would make the main source -- what Make all green main takes. */
+  promote?: boolean;
 }
 
 export interface FindResult {
@@ -91,6 +115,12 @@ export interface FindResult {
   why?: FindWhy;
   /** A review-first run's matches for this series, in scan order (v0.51.0). */
   proposals?: FindProposal[];
+  /** v0.54.0, Replace: the series' new main source. */
+  promoted?: FindPromoted;
+  /** v0.54.0, Replace: the followed sources it passed over, and why. */
+  skipped?: Array<{ sourceId: string; name: string; why: 'off' | 'failing' | 'cooling' | 'not_loaded' | 'language' | 'age' }>;
+  /** v0.54.0, Replace: dead followed sources dropped to make room for a new one. */
+  dropped?: Array<{ sourceId: string; name: string }>;
 }
 
 export type FindRunStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupted';
@@ -108,6 +138,20 @@ export interface FindRunSummary {
   finishedAt?: string | number | null;
   /** Review first (v0.51.0): it followed nothing itself; its results carry `proposals`. */
   review?: boolean;
+  /**
+   * v0.54.0: a Replace run (`replace`) moves each series off one source -- to a source it already follows, or to one it
+   * finds -- where a Find run (`follow`, or absent from an older server) only adds sources to follow.
+   */
+  mode?: 'follow' | 'replace';
+  /** v0.54.0, Replace: series whose main source it changed. */
+  promoted?: number;
+  /** v0.54.0, Replace: series still on the source. */
+  left?: number;
+  /** v0.54.0, Replace: the source was turned off at the end, nothing using it any more. */
+  turnedOff?: boolean;
+  /** The source a source-wide run is about, where the server says (v0.54.0 asks it to). */
+  sourceId?: string;
+  sourceName?: string;
 }
 
 /** The running run, or the newest finished one, with what it did per series. */
@@ -133,7 +177,12 @@ export interface FindStatus {
  * What POST /api/admin/sources/find takes: some series, or every visible series whose MAIN source is this one -- and,
  * for review first (v0.51.0), `review: true`.
  */
-export type FindScope = ({ seriesIds: string[] } | { sourceId: string }) & { review?: boolean };
+export type FindScope = ({ seriesIds: string[] } | { sourceId: string }) & {
+  review?: boolean;
+  /** v0.54.0: Replace the source (`sourceId` only); `turnOff` with it switches the source off once nothing uses it. */
+  mode?: 'replace';
+  turnOff?: boolean;
+};
 
 // ---- the other names -----------------------------------------------------------------------------------
 
@@ -196,11 +245,17 @@ export function findWhyLine(why: string | null | undefined): string {
     case 'no_source': return tr('No other source could be asked');
     case 'no_answer': return tr('No other source answered');
     case 'not_tried': return tr('Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there');
+    // v0.54.0, Replace.
+    case 'moved': return tr('Its main source changed while the run went; it was left as it is');
+    case 'busy': return tr('It was being checked for new chapters; replace again later');
+    case 'renumber_pending': return tr('A renumbering waits for your review on its series page first');
   }
   return tr('Nothing found');
 }
 
 export interface FindGroups {
+  /** v0.54.0, Replace: series with a new main source. */
+  moved: FindResult[];
   /** A review-first run's series with matches (v0.51.0), decided or not: each is shown with its matches. */
   review: FindResult[];
   /** Gained at least one source. */
@@ -216,13 +271,14 @@ export interface FindGroups {
   notTried: FindResult[];
 }
 
-const SKIPPED: ReadonlySet<string> = new Set<FindWhy>(['full', 'posting_order', 'too_few', 'no_source']);
+const SKIPPED: ReadonlySet<string> = new Set<FindWhy>(['full', 'posting_order', 'too_few', 'no_source', 'moved', 'busy', 'renumber_pending']);
 
 /** A run's results in the groups the results sheet shows, each in the order the run took them. */
 export function groupResults(results: readonly FindResult[] | null | undefined): FindGroups {
-  const g: FindGroups = { review: [], found: [], nothing: [], skipped: [], notTried: [] };
+  const g: FindGroups = { moved: [], review: [], found: [], nothing: [], skipped: [], notTried: [] };
   for (const r of results ?? []) {
-    if (r.proposals?.length) g.review.push(r);
+    if (r.promoted) g.moved.push(r);
+    else if (r.proposals?.length) g.review.push(r);
     else if (r.followed?.length) g.found.push(r);
     else if (r.why === 'not_tried') g.notTried.push(r);
     else if (r.why && SKIPPED.has(r.why)) g.skipped.push(r);
@@ -239,15 +295,49 @@ export const toMs = (t: string | number | null | undefined): number =>
 export const followedText = (n: number): string =>
   (n === 1 ? tr('1 source followed') : tr('{n} sources followed', { n }));
 
+/** v0.54.0, Replace: "1 series moved", "{n} series moved" -- series whose main source the run changed. */
+export const movedText = (n: number): string => (n === 1 ? tr('1 series moved') : tr('{n} series moved', { n }));
+
+/** A Replace run (v0.54.0): it moves series off a source, where a Find run adds sources to follow. */
+export const isReplace = (run: Pick<FindRunSummary, 'mode'> | null | undefined): boolean => run?.mode === 'replace';
+
 /**
- * How far a running run has got: "12 of 189 series · 3 sources followed". A run for one series (the Sources sheet's)
- * counts nothing -- "0 of 1 series" says less than the step itself.
+ * The news a run has to tell about its series so far: a Replace run's moves -- a search's follow is how a series got
+ * its new main source there, never news of its own -- and a Find run's follows.
  */
-export function progressLine(run: Pick<FindRunSummary, 'done' | 'total' | 'followed'>): string {
+function newsOf(run: Pick<FindRunSummary, 'followed' | 'mode' | 'promoted'>, results?: readonly FindResult[]): string | null {
+  if (isReplace(run)) {
+    const moved = run.promoted ?? (results ? results.filter((r) => r.promoted).length : 0);
+    return moved > 0 ? movedText(moved) : null;
+  }
+  return run.followed > 0 ? followedText(run.followed) : null;
+}
+
+/**
+ * How far a running run has got: "12 of 189 series · 3 sources followed" ("· 180 series moved" for a Replace run). A
+ * run for one series (the Sources sheet's) counts nothing -- "0 of 1 series" says less than the step itself.
+ */
+export function progressLine(run: Pick<FindRunSummary, 'done' | 'total' | 'followed' | 'mode' | 'promoted'>): string {
   const bits: string[] = [];
   if (run.total > 1) bits.push(tr('{done} of {total} series', { done: Math.min(run.done, run.total), total: run.total }));
-  if (run.followed > 0) bits.push(followedText(run.followed));
+  const news = newsOf(run);
+  if (news) bits.push(news);
   return bits.join(' · ');
+}
+
+/**
+ * A Replace run's three counts, the run view's big numbers: moved to a source the series already followed, moved to
+ * a source found by searching, and no replacement -- searched with nothing to show, or skipped. A series still to
+ * review (review first) and one never reached are neither, and are not counted here.
+ */
+export function replaceCounts(run: Pick<FindRun, 'results'> | null | undefined): { moved: number; found: number; none: number; review: number } {
+  const out = { moved: 0, found: 0, none: 0, review: 0 };
+  for (const r of run?.results ?? []) {
+    if (r.promoted) out[r.promoted.via === 'search' ? 'found' : 'moved']++;
+    else if (r.proposals?.some((p) => !p.state)) out.review++;
+    else if (r.why !== 'not_tried') out.none++;
+  }
+  return out;
 }
 
 /**
@@ -281,8 +371,9 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
   const untriedSettled = g ? Math.max(0, g.notTried.length - Math.max(0, run.results!.length - run.done)) : 0;
   const through = Math.max(0, run.done - untriedSettled);
   if (run.status !== 'done' && run.total > 0 && through > 0) bits.push(tr('{done} of {total} series', { done: Math.min(through, run.total), total: run.total }));
-  // A follow is news; "0 sources followed" beside the groups that say why was not.
-  if (run.followed > 0) bits.push(followedText(run.followed));
+  // A follow is news; "0 sources followed" beside the groups that say why was not. A Replace run's news is its moves.
+  const news = newsOf(run, run.results);
+  if (news) bits.push(news);
   if (g) {
     // A review's series whose matches still wait for a decision (v0.51.0); a decided one is counted by its follows.
     const open = g.review.filter((r) => r.proposals!.some((p) => !p.state)).length;
@@ -295,8 +386,13 @@ export function findSummary(run: FindRunSummary & { results?: FindResult[] }, o:
     if (s) bits.push(s === 1 ? tr('1 series skipped') : tr('{n} series skipped', { n: s }));
     if (t) bits.push(t === 1 ? tr('1 series not tried') : tr('{n} series not tried', { n: t }));
   }
+  // v0.54.0, Replace: whether the source is done with -- the series still on it, or turned off with none left.
+  if (isReplace(run) && run.status !== 'running') {
+    if (run.turnedOff) bits.push(run.sourceName ? tr('{name} turned off', { name: `\u2068${run.sourceName}\u2069` }) : tr('The source is turned off'));
+    else if (run.left) bits.push(run.left === 1 ? tr('1 series is still on it') : tr('{n} series are still on it', { n: run.left }));
+  }
   // Nothing else to say -- a kept run without its results, say, that followed nothing -- and that is what it did.
-  if (!bits.length) bits.push(tr('No source followed'));
+  if (!bits.length) bits.push(isReplace(run) ? tr('No series moved') : tr('No source followed'));
   return bits.join(' · ');
 }
 
@@ -349,7 +445,8 @@ export function findRunState(run: FindRun | null | undefined, o: { onStop?: () =
     finishedAt: at,
     ...(timed ? { tookMs: finished - started } : {}),
     outcome: findSummary(run, { status: o.status }),
-    partial: cutShort(run.status) || g.notTried.length > 0 || undefined,
+    // A Replace run that left series on its source did not finish the job: amber, as a run cut short is.
+    partial: cutShort(run.status) || g.notTried.length > 0 || (isReplace(run) && !!run.left) || undefined,
   };
 }
 
@@ -357,6 +454,8 @@ export function findRunState(run: FindRun | null | undefined, o: { onStop?: () =
 export function seriesOutcome(run: FindRun | null | undefined, seriesId: string): { text: string; partial?: boolean } | null {
   if (!run) return null;
   const r = run.results?.find((x) => x.seriesId === seriesId);
+  // v0.54.0, Replace: what the series' main source is now.
+  if (r?.promoted) return { text: tr('Its main source is now {source}', { source: r.promoted.toName }) };
   if (r?.followed?.length) return { text: tr('Followed {source}', { source: r.followed.map((f) => f.name).join(', ') }) };
   // Review first: its matches wait below the key, or were all skipped.
   if (r?.proposals?.length) {
@@ -471,9 +570,14 @@ export function lineUpText(p: Pick<FindProposal, 'ours' | 'theirs'>): string {
 /** Why a match is amber, under it; null for a green one. */
 export function amberNote(p: Pick<FindProposal, 'verdict' | 'amber'>): string | null {
   if (p.verdict !== 'amber') return null;
-  return p.amber === 'other_name'
-    ? tr('Amber: it matched only under another name of this series, not its title. Check the covers before you follow it.')
-    : tr('Amber: a name matches, but the chapter numbers do not line up. Follow it only if the covers show the same series.');
+  switch (p.amber) {
+    case 'other_name': return tr('Amber: it matched only under another name of this series, not its title. Check the covers before you follow it.');
+    // v0.54.0, Replace's review: a source the series already follows, amber for its own reasons.
+    case 'cooling': return tr('Amber: this source is cooling down after refusing requests; it is asked again once that ends.');
+    case 'coverage': return tr('Amber: it lists only some of this series’ chapters.');
+    case 'stale': return tr('Amber: it has not answered for this series lately.');
+  }
+  return tr('Amber: a name matches, but the chapter numbers do not line up. Follow it only if the covers show the same series.');
 }
 
 /**
@@ -489,6 +593,36 @@ export function greenToFollow(run: Pick<FindRun, 'results'> | null | undefined):
     for (const p of r.proposals!) if (p.verdict === 'green' && !p.state) out.push({ seriesId: r.seriesId, sourceId: p.sourceId });
   }
   return out;
+}
+
+/**
+ * What "Make all green main" makes main, in the run's order (v0.54.0, Replace's review): for each series the page
+ * names, the match the run suggests (`promote`) when it is green and not decided yet -- one per series, since a series
+ * has one main source. ⚠️ Never an amber one, and never one of a series hidden by the 18+ filter.
+ */
+export function greenToPromote(run: Pick<FindRun, 'results'> | null | undefined): Array<{ seriesId: string; sourceId: string }> {
+  const out: Array<{ seriesId: string; sourceId: string }> = [];
+  for (const r of groupResults(run?.results).review) {
+    if (!r.title || r.proposals!.some((p) => p.state === 'promoted')) continue;
+    const p = r.proposals!.find((x) => x.promote && x.verdict === 'green' && !x.state);
+    if (p) out.push({ seriesId: r.seriesId, sourceId: p.sourceId });
+  }
+  return out;
+}
+
+/**
+ * A Make main the server refused (POST …/find/:runId/promote) that its own words do not cover: a match decided already.
+ * Every other refusal is the main-source switch's, which the server says itself (`messageSaid`, lib/mainSource.ts).
+ */
+export function promoteRefusal(code: string | null | undefined): string | null {
+  return code === 'decided' ? tr('Made main or skipped already') : null;
+}
+
+/** What Make all green main did, as its status line: the moves, and how many the server refused (amber). */
+export function promoteOutcome(moved: number, refused: number): { outcome: string; partial?: true } {
+  const bits = [moved ? movedText(moved) : tr('No series moved')];
+  if (refused) bits.push(refused === 1 ? tr('1 could not be moved') : tr('{n} could not be moved', { n: refused }));
+  return { outcome: bits.join(' · '), ...(refused ? { partial: true as const } : {}) };
 }
 
 /** A follow or a skip the server refused, by its code (bff routes/findSources.ts); null for anything else. */

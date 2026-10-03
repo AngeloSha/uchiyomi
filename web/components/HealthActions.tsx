@@ -31,6 +31,7 @@ import { StatusMark } from '@/components/StatusMark';
 import { OnBody } from '@/components/ui';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import { FindStartDialog } from '@/components/FindSources';
+import { ReplaceDialog } from '@/components/ReplaceDialog';
 import { t as tr } from '@/lib/i18n';
 import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { isDesktop } from '@/lib/desktop';
@@ -47,7 +48,7 @@ import {
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
-import { diagnosisReason, itemDetail, type Said } from '@/lib/said';
+import { diagnosisReason, itemDetail, itemTitle, type Said } from '@/lib/said';
 import { useFindRun } from '@/lib/useFindRun';
 import { findGate, findSlotState } from '@/lib/findSources';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
@@ -148,7 +149,7 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
   const slot = slots[slotKey];
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
-  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | null>(null);
+  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | 'replace' | null>(null);
   // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
   const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
@@ -181,6 +182,10 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
   // where one busy key would disable every key of its group for the whole run.
   const findSlot = fr?.slots[slotKey];
   const findNow = findSlotState(findSlot, fr?.runOf(slotKey), () => { void fr?.stop(slotKey); });
+  // v0.54.0: a Replace run started from this row, under a key of its own -- the Replace dialog shows the run its key
+  // started, never the row's Find other sources -- with its own status line under the row.
+  const replaceKey = `${slotKey}:replace`;
+  const replaceNow = findSlotState(fr?.slots[replaceKey], fr?.runOf(replaceKey), () => { void fr?.stop(replaceKey); });
   // The newest of the two is the row's line.
   const useSync = !!sync && sync.state.kind !== 'idle' && (repairState.kind === 'idle' || sync.at >= (slot?.startedAt ?? live?.startedAt ?? record?.finishedAt ?? 0));
   const rowNow: ActionState = useSync ? sync!.state : repairState;
@@ -370,6 +375,12 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
           state: findNow, what: copy.what({ ...ctx, n: item.findSeries }), label: copy.label({ ...ctx, n: item.findSeries }),
           onRun: () => setAsking('find'),
         };
+      // v0.54.0: every series whose main source is this row's source -- off or failing -- moved to a working source in ONE
+      // Replace run. The press opens the Replace dialog, which says the numbers first and becomes the run once started;
+      // the run is followed under this row's find slot, so the row's status line says what it is doing too. The one
+      // filled key of the row, as it is on Admin → Sources.
+      case 'replace_source':
+        return { ...base, primary: true, label: tr('Replace'), onRun: () => setAsking('replace') };
       // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
       // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen
       // which file becomes which chapter.
@@ -445,13 +456,23 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
           onStart={(review) => { setAsking(null); if (item.sourceId) void fr?.start(slotKey, { sourceId: item.sourceId, ...(review ? { review } : {}) }); }} />
       )}
 
+      {/* On <body>: a Health card is a `.card`, whose backdrop blur would make it the sheet's containing block. A source
+          row is titled with the source's name; a frozen series' row is the series', and the dialog finds the source's. */}
+      {asking === 'replace' && item.sourceId && (
+        <OnBody>
+          <ReplaceDialog sourceId={item.sourceId} name={check.id === 'sources' ? itemTitle(item) : undefined} fr={fr} slot={replaceKey}
+            onClose={() => setAsking(null)} />
+        </OnBody>
+      )}
+
       {asking === 'disable' && (
         <OnBody>
           <ConfirmDialog
             title={tr('Turn this source off?')}
             confirmLabel={tr('Turn off')}
             danger
-            body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on under Providers.')}</p>}
+            // True since v0.54.0, when a switched-off source stopped being asked by the sweep too.
+            body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on in Admin → Sources.')}</p>}
             onConfirm={() => act('disable', doDisable)}
             onClose={() => setAsking(null)}
           />
@@ -568,6 +589,7 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
           ))}
           <ActionStatus state={rowNow} />
           {finds.length > 0 && <ActionStatus state={findNow} />}
+          {actions.includes('replace_source') && <ActionStatus state={replaceNow} />}
           {compact.details && (
             <div data-health-details>
               <Disclosure label={tr('Details')}>{compact.details}</Disclosure>
@@ -598,6 +620,7 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
       )}
       <ActionStatus state={rowNow} />
       {finds.length > 0 && <ActionStatus state={findNow} />}
+      {actions.includes('replace_source') && <ActionStatus state={replaceNow} />}
 
       {dialogs}
     </div>

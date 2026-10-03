@@ -289,7 +289,7 @@ test('the settings sheet draws every kind of setting with the right control', ()
   assert.equal(needsRenumberConfirm({ numbering: true }, 3), true);
   assert.equal(needsRenumberConfirm({ numbering: true }, 0), false);
   assert.equal(needsRenumberConfirm({ numbering: false }, 3), false);
-  assert.equal(extensionSettingsHref('2522335540328470744'), '/admin/?tab=Extensions&settings=2522335540328470744');
+  assert.equal(extensionSettingsHref('2522335540328470744'), '/admin/?tab=Sources&settings=2522335540328470744');
 });
 
 test('the settings sheet writes by key, warns in the row, and asks its second word inside the sheet', () => {
@@ -312,19 +312,21 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   // only, and the admin header shows through above it.
   assert.match(src, /return createPortal\(\s*<Sheet\b/, 'the settings sheet is not portalled out of the card');
   assert.match(src, /<\/Sheet>,\s*document\.body,\s*\);/);
-  // The deep link: read once, dropped from the address on close.
-  assert.match(src, /const id = params\.get\('settings'\);/, 'the sheet does not read ?settings=');
-  assert.match(src, /u\.searchParams\.delete\('settings'\);/, 'a closed sheet reopens on reload');
 
-  // v0.53.0: the tab is components/ExtensionsPanel.tsx, and an installed extension's settings are a section of its
-  // sheet (components/ExtensionSheet.tsx) -- the same body as this sheet's.
-  const panel = code(read('components/ExtensionsPanel.tsx'));
-  const ext = panel.slice(panel.indexOf('export function ExtensionsPanel('), panel.indexOf('function useViewParam('));
-  // Reintroduce by dropping the hook from the panel: /admin/?tab=Extensions&settings=<id> opens nothing.
-  assert.match(ext, /const \[settingsFor, setSettingsFor\] = useExtensionSettingsParam\(\);/, 'Extensions does not read the ?settings= deep link');
-  assert.match(ext, /\{settingsFor && <ExtensionSettings target=\{settingsFor\} onClose=\{\(\) => setSettingsFor\(null\)\} \/>\}/);
-  // The hook sits with the other state, before the early returns (hooks keep their order).
-  assert.ok(ext.indexOf('useExtensionSettingsParam()') < ext.indexOf('if (!status) return'), 'the deep-link hook runs after an early return');
+  // v0.54.0: the deep link is Admin → Sources' (components/SourcesPanel.tsx): `settings=<id>` opens that source's sheet
+  // on its settings -- an installed extension's settings are a section of it (components/ExtensionSheet.tsx), the same
+  // body as this sheet's -- read once, and dropped from the address on close. A source the overview does not hold yet
+  // opens this sheet alone, as before.
+  assert.match(read('lib/sourcesPanel.ts'), /const id = params\.get\('settings'\);/, 'the panel does not read ?settings=');
+  const panel = code(read('components/SourcesPanel.tsx'));
+  const top = panel.slice(panel.indexOf('export function SourcesPanel('), panel.indexOf('function AttentionRow('));
+  // Reintroduce by dropping the initialiser: /admin/?tab=Sources&settings=<id> opens nothing.
+  assert.match(top, /const \[sheet, setSheet\] = useState<SheetTarget \| null>\(\(\) => \{\s*const id = settingsTarget\(params\);\s*return id \? \{ id, settings: true \} : null;\s*\}\);/,
+    'Sources does not read the ?settings= deep link');
+  assert.match(panel, /u\.searchParams\.delete\('settings'\);/, 'a closed sheet reopens on reload');
+  assert.match(top, /const closeSheet = \(\) => \{ setSheet\(null\); dropSettingsParam\(\); \};/, 'a closed sheet reopens on reload');
+  assert.match(top, /<ExtensionSettings target=\{\{ sourceId: sheet\.id\.replace\(\/\^sw:\/, ''\) \}\} onClose=\{closeSheet\} \/>/, 'a source the overview does not hold opens nothing');
+  assert.match(code(read('components/SourceSheet.tsx')), /settingsOpen=\{'id' in target && !!target\.settings\}/, 'the sheet opens on its languages, not its settings');
   // Reintroduce by dropping the Settings section from the sheet: an installed extension has no way to its settings.
   const sheet = code(read('components/ExtensionSheet.tsx'));
   assert.match(sheet, /<ExtensionSettingsBody sourceId=\{settingsOf\} onSourceId=\{setSettingsOf\} note \/>/, 'an installed extension has no settings');

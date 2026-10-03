@@ -19,10 +19,11 @@
 //
 //   offline -- fake-a says it is offline. Walk Tale (12 chapters) and Walk Gap (fake-a lists only 2 of its numbers)
 //     are added from fake-a, fake-b is checked NOT to be followed (followed anyway, it is unfollowed through the
-//     Sources sheet), and fake-a goes offline. Providers -> Test fake-a says "The site says it is offline (its own
-//     page)", and "the site says it is offline" at the search step; Health -> Source health's fake-a row says the same
-//     with the fix sentence behind its Details, and offers "Find other sources (2 series)" in its ⋯ menu (v0.53.0). The
-//     API row carries the same code and count.
+//     Sources sheet), and fake-a goes offline. Admin → Sources -> fake-a's sheet -> Test says "The site says it is
+//     offline (its own page)", and "the site says it is offline" at the search step (Providers' card until v0.54.0);
+//     Health -> Source health's fake-a row says the same with the fix sentence behind its Details, leads with Replace
+//     (v0.54.0: some series' main source, and failing) and offers "Find other sources (2 series)" in its ⋯ menu
+//     (v0.53.0). The API row carries the same code and count.
 //   run -- that item, pressed, and the start dialog's Start (v0.51.0). The run starts (two series); Library -> Downloads' Server tasks shows its card with
 //     "1 of 2 series", the series it is on and Stop, then it finishes. Its results: Walk Tale under New sources with
 //     fake-b and its 12 chapters, Walk Gap under Skipped with its reason in words. Walk Tale's Sources sheet then
@@ -386,14 +387,15 @@ async function offline() {
     && !(await sourcesOf(S.gap)).some((s) => s.sourceId === 'fake-b'));
 
   await script(FAKE_A, 'site', 'offline');
-  // Providers -> Test: the check an admin runs by hand.
+  // Admin → Sources -> fake-a's sheet -> Test: the check an admin runs by hand (Providers' card until v0.54.0).
   const card = '[data-source-card="fake-a"]';
-  await go('/admin/?tab=Providers', 2500);
-  await page.waitForSelector(`${card} [data-source-test="fake-a"]`, { timeout: 30_000 });
-  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
+  await go('/admin/?tab=Sources', 2500);
+  await page.waitForSelector('[data-sources-row="fake-a"] [data-sources-open]', { timeout: 30_000 });
+  await page.$eval('[data-sources-row="fake-a"] [data-sources-open]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+  await page.waitForSelector(`${card} [data-source-test="fake-a"]`, { timeout: 10_000 });
   await page.click(`${card} [data-source-test="fake-a"]`);
   const failed = await waitFor(() => page.$(`${card} [data-source-evidence="test"] [data-evidence-stage="search"][data-evidence-state="fail"]`), 60_000, 300);
-  check(`${tag}: Providers -> Test fake-a fails at the search step`, !!failed);
+  check(`${tag}: Sources -> Test fake-a fails at the search step`, !!failed);
   const test = await page.$eval(`${card} [data-source-evidence="test"]`, (el) => ({
     head: el.querySelector('[data-evidence-head]')?.textContent?.trim() ?? '',
     stage: el.querySelector('[data-evidence-stage="search"] bdi')?.textContent ?? '',
@@ -405,8 +407,8 @@ async function offline() {
     (test?.head ?? '').includes('The site says it is offline (its own page)') && test?.stage === 'the site says it is offline', JSON.stringify(test));
   check(`${tag}: ...never "markup may not match this engine"`, !/markup may not match/.test(test?.text ?? ''), test?.text);
   check(`${tag}: ...with the fix sentence`, /Wait for the site to come back, or find other sources for its series\./.test(test?.text ?? ''), test?.text);
-  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
-  await shot('offline-1-providers-test');
+  await shot('offline-1-sources-test');
+  await page.keyboard.press('Escape');
 
   // Health -> Source health: the row, its evidence, its fix and its key.
   check(`${tag}: Health -> Source health opens`, await openSourceHealth());
@@ -416,6 +418,10 @@ async function offline() {
   check(`${tag}: ...with the fix sentence under it`, row?.fix === 'Wait for the site to come back, or find other sources for its series.', JSON.stringify(row));
   check(`${tag}: ...its search step marked failing, as the site's own page`, row?.stage === 'fail' && row?.stageText === 'the site says it is offline', JSON.stringify(row));
   check(`${tag}: ...and it offers "Find other sources (2 series)"`, row?.key === 'Find other sources (2 series)' && row?.keyDisabled === false, JSON.stringify(row));
+  // v0.54.0: fake-a is still the main source of both, and failing: the row's one key is Replace, the same dialog Admin →
+  // Sources opens (its own walk is the integration's, on lane S's routes).
+  const primary = await page.$eval(`${rowSel('fake-a')} button[data-health-primary]`, (b) => b.getAttribute('data-health-action')).catch(() => null);
+  check(`${tag}: ...and leads with Replace`, primary === 'replace_source', String(primary));
   const item = await healthRow('fake-a');
   check(`${tag}: the API row is the same finding: site_offline, find_sources, 2 series`,
     item?.diagnosis?.code === 'site_offline' && item?.diagnosis?.reason === 'The site says it is offline (its own page)'

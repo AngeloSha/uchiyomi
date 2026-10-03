@@ -80,6 +80,9 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   { action: 'find_sources', labels: ['label: copy.label({ ...ctx, n: item.findSeries })'], wants: /onRun: \(\) => setAsking\('find'\)/ },
   // v0.52.0 (#72): a duplicate pair in two languages is linked as editions after a confirmation that names both.
   { action: 'link_editions', labels: ["tr('Link as editions')"], wants: /onRun: \(\) => setAsking\('link'\)/ },
+  // v0.54.0: a dead main source's series move in one run (POST /api/admin/sources/find, mode 'replace'). The press opens
+  // the Replace dialog (components/ReplaceDialog.tsx), the one Admin → Sources opens; its Start posts the source.
+  { action: 'replace_source', labels: ["tr('Replace')"], wants: /onRun: \(\) => setAsking\('replace'\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {

@@ -206,7 +206,8 @@ async function engineShot() {
   const app = await pageAt(browser, (u) => /^http:\/\/127\.0\.0\.1:\d+\//.test(u), 'the local app', 240_000);
   await app.setViewport(VIEW);
   await sleep(5000);
-  await app.goto(`${new URL(app.url()).origin}/admin/?tab=Extensions`, { waitUntil: 'domcontentloaded' });
+  // Admin → Sources (Admin → Extensions until v0.54.0): the engine's download card stands at its top.
+  await app.goto(`${new URL(app.url()).origin}/admin/?tab=Sources`, { waitUntil: 'domcontentloaded' });
   const box = await waitFor(() => app.evaluate(() => {
     const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').includes('Download the extension engine'));
     const card = b?.closest('.card');

@@ -96,9 +96,12 @@ export function toggleChoice(p: Pick<SourcePref, 'entryValues' | 'value'>, choic
  */
 export const needsRenumberConfirm = (p: Pick<SourcePref, 'numbering'>, renumbers: number): boolean => p.numbering && renumbers > 0;
 
-/** The Extensions tab's deep link to one source's settings: Health, the series page and the add dialog use it. */
+/**
+ * The deep link to one extension source's settings: its sheet in Admin → Sources, open on them (the Extensions tab's
+ * until v0.54.0, whose address lands there too). Health, the series page and the add dialog use it.
+ */
 export const extensionSettingsHref = (extSourceId: string): string =>
-  `/admin/?tab=Extensions&settings=${encodeURIComponent(extSourceId)}`;
+  `/admin/?tab=Sources&settings=${encodeURIComponent(extSourceId)}`;
 
 /** The extension's own source id inside an adapter id (`sw:2522335540328470744`); null for every other source. */
 export function extSourceIdOf(adapterId: string | null | undefined): string | null {

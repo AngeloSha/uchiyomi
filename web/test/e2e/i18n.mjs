@@ -112,9 +112,9 @@ for (const code of LOCALES) {
   //
   // Both consoles are visited. Checking only /admin is exactly how /profile shipped an English tab row.
   //
-  // The import page is its own route off Admin → Providers, so neither console's tab row covers it; PR #52
-  // shipped it with 62 of its strings in no locale file and the check here saw nothing, because it never
-  // went there. The words are from the intake card's sentences, not its eyebrow (uppercase in CSS, and
+  // The import page is its own route off Admin → Sources (Providers until v0.54.0), so neither console's tab row
+  // covers it; PR #52 shipped it with 62 of its strings in no locale file and the check here saw nothing, because
+  // it never went there. The words are from the intake card's sentences, not its eyebrow (uppercase in CSS, and
   // innerText reports text as rendered), and not "Mihon" (a name, the same in every language). "bring your
   // list over" is the tracker box's not-connected line (v0.36.0) -- the state an e2e instance is in --
   // and NOT its eyebrow "From your tracker", which `\bFrom your tracker\b` could never match in uppercase.
@@ -126,7 +126,9 @@ for (const code of LOCALES) {
   // correctly translated page, and three of those would fail a page that is fine. ("Server" in the older
   // /admin list is German too; it sits alone under the >= 3 threshold.)
   const CONSOLES = [
-    ['/admin', ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']],
+    // v0.54.0: Providers and Extensions are one Sources tab, whose views and Test all are visited by its address.
+    ['/admin', ['Overview', 'Members', 'Settings', 'Server', 'People', 'Content', 'Sources']],
+    ['/admin/?tab=Sources', ['Your sources', 'Add sources', 'Test all', 'Built-in']],
     ['/admin/?tab=Settings', ['Open registration', 'Check for updates', 'Delete read chapters', 'Library housekeeping', 'Backup time']],
     ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library', 'bring your list over']],
     ['/profile', ['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out']],

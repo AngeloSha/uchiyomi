@@ -84,7 +84,7 @@ engine. For Mihon/Tachiyomi extensions, import the add-on
 [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) the same way (its tips give the
 one folder command to run first), then set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567` in Uchiyomi's
 settings; then add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)).
-**Admin → Extensions** shows these steps too while no engine is set up. Set `PUBLIC_ORIGIN` to the address you
+**Admin → Sources** shows these steps too while no engine is set up. Set `PUBLIC_ORIGIN` to the address you
 actually open (the manifest defaults to `http://localhost:8080`) or logins will not stick.
 
 **On Unraid?** Uchiyomi is in **Community Applications** — search for *uchiyomi* on the **Apps** tab and
@@ -93,7 +93,7 @@ so renames work. For Mihon/Tachiyomi extensions, install **uchiyomi-suwayomi** f
 ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): the extension engine, pinned and
 memory-capped), create its folder first (`mkdir -p /mnt/user/appdata/uchiyomi-suwayomi && chown 1000:1000
 /mnt/user/appdata/uchiyomi-suwayomi` in the Unraid terminal), then set Uchiyomi's advanced *SUWAYOMI_URL* to
-`http://YOUR-SERVER-IP:4567`. Admin → Extensions walks through the same steps.
+`http://YOUR-SERVER-IP:4567`. Admin → Sources walks through the same steps.
 
 The template behind that listing is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this
 repository, which is laid out as a Community Applications template repository (`templates/` plus the

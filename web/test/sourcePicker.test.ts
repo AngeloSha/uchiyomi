@@ -325,18 +325,20 @@ test('the explainer\'s Fetch-vs-Save line flows as one sentence at phone width',
   }
 });
 
-test('the Providers (i) in Admin is a finger-sized target', () => {
+test('the (i) in Admin → Sources is a finger-sized target', () => {
   // The (i) beside "Add a site" measured 20 x 20 px at 390 px, a quarter of the 32-px (i) one tap away in
-  // the Sources sheet. It keeps the eyebrow row 20 px tall with negative vertical margins so the label
-  // does not drop. Reintroduce by writing `h-5 w-5` on it again, or by dropping the `-my-1.5`.
-  const file = readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8');
+  // the Sources sheet. It keeps the heading's row as tall as its words with negative vertical margins.
+  // Reintroduce by writing `h-5 w-5` on it again, or by dropping the `-my-1.5`. (Providers' header until v0.54.0;
+  // Add sources' "Add a site by address" since, its 28-word helper behind it.)
+  const file = readFileSync(join(__dirname, '..', 'components', 'SourcesPanel.tsx'), 'utf8');
   // The opening tag spans two lines and its onClick holds a `=>`, so "up to the next >" is not the tag:
   // take everything from `<button` to the icon it wraps.
-  const at = file.indexOf("aria-label={tr('What are sources and extensions?')}");
-  assert.ok(at > 0, 'the Admin → Providers (i) is gone');
+  const at = file.indexOf("aria-label={tr('About adding a site')}");
+  assert.ok(at > 0, 'the Admin → Sources (i) is gone');
   const btn = file.slice(file.lastIndexOf('<button', at), file.indexOf('<IcInfo', at));
   assert.match(btn, /\bh-8 w-8\b/, 'the (i) is smaller than the 32-px target the sheets give it');
-  assert.match(btn, /-my-1\.5\b/, 'the (i) will change the eyebrow height without the negative margins');
+  assert.match(btn, /-my-1\.5\b/, 'the (i) will change the heading\'s height without the negative margins');
+  assert.match(btn, /aria-expanded=\{help\} aria-controls="sources-add-site-help"/, 'the (i) does not say it opens the helper');
 });
 
 test('the locale polish holds: one Arabic word for a translation group, German plural agreement', () => {

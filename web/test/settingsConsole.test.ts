@@ -2,15 +2,16 @@
 // Settings tab, both composed from `components/settings.tsx`.
 //
 // Read from source, like library.test.ts: whether a text field saves on blur rather than on every keystroke,
-// whether the grid ever caps the page, whether /admin keeps its tab in the URL, whether Providers still embeds
-// the whole Extensions card -- each a thing that was wrong or inconsistent before this release, and each
-// invisible to a type check. Every guard names the edit that makes it fail again.
+// whether the grid ever caps the page, whether /admin keeps its tab in the URL, whether the sources are one tab
+// (v0.54.0; Providers once embedded the whole Extensions card) -- each a thing that was wrong or inconsistent before
+// its release, and each invisible to a type check. Every guard names the edit that makes it fail again.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 // Pure, so it is called rather than pinned (builder A's tab-address test below).
-import { withTab } from '../lib/tabParam';
+import { readTab, withTab } from '../lib/tabParam';
+import { SOURCES_TAB_ALIASES } from '../lib/sourcesPanel';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -270,7 +271,7 @@ test('/admin and /profile read and write ?tab=, without a history entry or a sna
   // `tab=Overview` for the fallback: "the first tab is written into the URL" fails.
   const admin = code(read('app/admin/page.tsx'));
   assert.match(admin, /<Suspense fallback=\{<div className="min-h-screen-d" \/>\}>/, 'the admin page has no Suspense boundary for useSearchParams');
-  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview'\);/, 'the admin tab is not read from the query');
+  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview', SOURCES_TAB_ALIASES\);/, 'the admin tab is not read from the query');
   const profile = code(read('app/profile/page.tsx'));
   assert.match(profile, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the profile tab is not read from the query');
   const hook = code(read('lib/useTabParam.ts'));
@@ -323,26 +324,47 @@ test('the import page sends people to the tracking card under Connections', () =
 
 // ---- builder E: the admin shell and Admin → Settings ----
 
-test('Providers no longer embeds the Extensions card', () => {
-  // `<Extensions span="full" />` rendered on the Extensions tab AND inside Providers, so the catalogue's
-  // search field, its language list and its 1,400 rows appeared twice in the console and "Search
-  // extensions" sat on a tab about sources. Providers keeps a door to the tab -- one status line and a
-  // chevron -- and the panel switch is the only place the card mounts. Reintroduce by putting
-  // `<Extensions span="full" />` back under the smoke-test block in Providers.
+test('the sources are ONE tab, mounting one panel, where Providers and Extensions were two', () => {
+  // v0.53.0 rendered `<Extensions span="full" />` on its own tab with a door to it in Providers; the owner: "why do we
+  // have 2 when they are basically the same". Since v0.54.0 the Sources group is one tab, Sources, mounting
+  // components/SourcesPanel.tsx once; the catalogue is part of it (Add sources), mounted there once. Reintroduce a
+  // Providers or Extensions tab: "the Sources group has more than its one tab" fails; mount the old panel: the
+  // count fails.
   const src = code(read('app/admin/page.tsx'));
-  const providers = src.slice(src.indexOf('function Providers('), src.indexOf('function ExtensionsLink('));
-  assert.ok(providers.length > 0, 'no Providers function, or ExtensionsLink no longer follows it');
-  assert.doesNotMatch(providers, /<Extensions /, 'Providers renders the whole Extensions card again');
-  assert.match(providers, /<ExtensionsLink onTab=\{onTab\} \/>/, 'Providers has no door to the Extensions tab');
-  const link = src.slice(src.indexOf('function ExtensionsLink('), src.indexOf('// ---- Art Review'));
-  assert.match(link, /onTab\('Extensions'\)/, 'the door does not switch to the Extensions tab');
-  assert.match(link, /queryKey: \['ext-status'\][^\n]*\/api\/admin\/extensions\/status/, 'the door reads a different status than the Extensions tab does');
-  assert.match(link, /rtl:-scale-x-100/, 'the chevron does not mirror under RTL');
-  // The tab itself mounts the panel (components/ExtensionsPanel.tsx since v0.53.0), once.
+  assert.match(src, /\{ id: 'sources', label: 'Sources', tabs: keys\('Sources'\) \}/, 'the Sources group has more than its one tab');
+  assert.doesNotMatch(src, /keys\([^)]*'(Providers|Extensions)'/, 'Providers or Extensions is a tab again');
+  assert.doesNotMatch(src, /function (Providers|ExtensionsLink|Extensions)\(/, 'the old Providers, its door or the Extensions card is back in the admin page');
   const panel = src.slice(src.indexOf('const panel = ('), src.indexOf('<ConsoleNav'));
-  assert.match(panel, /tab === 'Extensions' && <ExtensionsPanel onProviders=\{\(\) => setTab\('Providers'\)\} \/>/, 'the Extensions tab no longer mounts the panel');
-  assert.equal((src.match(/<ExtensionsPanel\b/g) ?? []).length, 1, 'the Extensions panel is mounted from more than one place');
-  assert.doesNotMatch(src, /function Extensions\(/, 'the old Extensions card is back in the admin page');
+  assert.match(panel, /\{tab === 'Sources' && <SourcesPanel \/>\}/, 'the Sources tab does not mount the panel');
+  assert.equal((src.match(/<SourcesPanel\b/g) ?? []).length, 1, 'the Sources panel is mounted from more than one place');
+  assert.doesNotMatch(src, /<ExtensionsPanel\b|ExtensionsPanel'/, 'the old Extensions panel is mounted again');
+  const sources = code(read('components/SourcesPanel.tsx'));
+  assert.equal((sources.match(/<BrowseView\b/g) ?? []).length, 1, 'the catalogue is mounted from more than one place');
+  // The Overview's tile counts the sources switched on, from the same answer the tab reads, and opens the tab.
+  assert.match(src, /<TabTile label=\{tr\('Sources'\)\} value=\{String\(sources \? splitSources\(sources\.sources\)\.on\.length : 0\)\} onClick=\{\(\) => onTab\('Sources'\)\} \/>/,
+    'the Overview has no Sources tile');
+  assert.doesNotMatch(src, /onTab\('(Providers|Extensions)'\)/, 'a tile opens a tab that is gone');
+});
+
+test('the old Providers and Extensions addresses land on Sources', () => {
+  // Bookmarks, the docs, Health's links and the add dialog's "Turn on more MangaDex languages" said `?tab=Providers`
+  // or `?tab=Extensions` until v0.54.0. Reintroduce readTab without its aliases (or drop them from the admin page): an
+  // old address lands on Overview, and these fail.
+  const TABS = ['Overview', 'Tasks', 'Settings', 'Members', 'Sessions', 'Activity', 'Library', 'Health', 'Art', 'Sources'] as const;
+  assert.equal(readTab('Providers', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources', '?tab=Providers lands somewhere else');
+  assert.equal(readTab('Extensions', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources', '?tab=Extensions lands somewhere else');
+  assert.equal(readTab('Sources', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources');
+  assert.equal(readTab('Health', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Health', 'an alias map hides a real tab');
+  // Not a way in for anything else: an unknown name, or one of Object's own, still falls back.
+  assert.equal(readTab('Bogus', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
+  assert.equal(readTab('constructor', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview', 'a name Object has lands on its function');
+  assert.equal(readTab('toString', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
+  assert.equal(readTab(null, TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
+  // Every other console reads its tabs as before.
+  assert.equal(readTab('Providers', TABS, 'Overview'), 'Overview');
+  // The old tabs' parameters keep working on the new one: lib/sourcesPanel.ts initialView / settingsTarget hold them
+  // (sourcesPanel.test.ts); here, that the hook hands the aliases to readTab.
+  assert.match(code(read('lib/useTabParam.ts')), /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback, aliases\)\)/, 'the hook drops the aliases');
 });
 
 test('read-chapter cleanup still asks first and carries the day count', () => {

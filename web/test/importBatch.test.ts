@@ -160,16 +160,18 @@ test('the intake copy names the button that commits, and the review copy tells t
   assert.match(src, /a long list takes a few minutes/, 'the review card does not say how long an import takes');
 });
 
-test('Admin → Providers has one way to import: the reviewed flow', () => {
+test('Admin → Sources has one way to import: the reviewed flow', () => {
   // The PR stacked the new button on top of the old textarea flow ("or, without a review step:"), which still
   // added the first cross-source hit with no review -- two ways to do one thing, one of them the bug the
-  // other fixes. Reintroduce by putting the textarea and its POST /api/admin/import back on the card.
-  const src = code(read('app/admin/page.tsx'));
-  assert.equal((src.match(/router\.push\('\/admin\/import\/'\)/g) || []).length, 1, 'the Providers card does not link to /admin/import/ exactly once');
+  // other fixes. Reintroduce by putting the textarea and its POST /api/admin/import back on the card. Since v0.54.0
+  // the door is a row of Admin → Sources' Add sources (Providers' card before).
+  const src = code(read('app/admin/page.tsx')) + code(read('components/SourcesPanel.tsx'));
+  assert.equal((src.match(/'\/admin\/import\/'/g) || []).length, 0, 'the console pushes to /admin/import/ by hand again');
+  assert.equal((src.match(/<LinkRow href="\/admin\/import\/" label=\{tr\('Import a list'\)\}/g) || []).length, 1, 'Add sources does not link to /admin/import/ exactly once');
   assert.doesNotMatch(src, /'\/api\/admin\/import'[,)]/, 'the one-shot POST /api/admin/import is back in the UI');
   assert.doesNotMatch(src, /\/api\/admin\/import\/(parse|status)/, 'the old parse/status calls are back');
   assert.doesNotMatch(src, /without a review step/, 'the "or, without a review step" fork is back');
-  assert.match(src, /import a list → review matches → add/, 'the card no longer says what the flow is');
+  assert.match(src, /you review every match before anything is added\./, 'the row no longer says what the flow is');
 });
 
 /**
@@ -200,10 +202,10 @@ test('every string the import screens render is in all eight locale files', () =
   // the parity test (library.test.ts) could not see it because it compares the files with each other, not
   // with the code. Reintroduce by deleting any one of these keys from es.json.
   const keys = trKeys(['app/admin/import/page.tsx', 'components/ImportMatchSheet.tsx', 'lib/importBatch.ts']);
-  // The Providers entry card too: it is the door to the page.
-  const admin = read('app/admin/page.tsx');
-  for (const k of ['Import a list', 'Import and review matches →']) {
-    assert.ok(admin.includes(`tr('${k}')`), `the Providers card no longer renders "${k}" through tr()`);
+  // Add sources' row too: it is the door to the page.
+  const door = read('components/SourcesPanel.tsx');
+  for (const k of ['Import a list', 'A Mihon or Tachiyomi backup, a public MangaDex list, or pasted titles: you review every match before anything is added.']) {
+    assert.ok(door.includes(`tr('${k}')`), `Add sources no longer renders "${k}" through tr()`);
     keys.add(k);
   }
   assert.ok(keys.size >= 70, `only ${keys.size} tr() keys found on the import screens — the extractor lost them`);
@@ -496,7 +498,7 @@ test('the profile page opens the tab named in ?tab=, under Suspense', () => {
   assert.match(src, /const PROFILE_TABS = PROFILE_GROUPS\[0\]\.tabs;/, 'the tab list is not the first group\'s tabs');
   assert.match(src, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the tab is not read from the query');
   const hook = code(read('lib/useTabParam.ts'));
-  assert.match(hook, /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback\)\)/, 'the hook does not read the query once, lazily');
+  assert.match(hook, /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback, aliases\)\)/, 'the hook does not read the query once, lazily');
   assert.doesNotMatch(hook, /useEffect\(/, 'the hook re-reads the query in an effect');
   // The pure half, called: an arbitrary ?tab= value falls back rather than rendering an empty panel.
   assert.equal(readTab('Bogus', ['You', 'Settings'], 'You'), 'You', 'an arbitrary ?tab= value is not rejected');

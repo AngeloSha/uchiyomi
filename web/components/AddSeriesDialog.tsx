@@ -251,7 +251,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // title in, brings its offer.
   const edSeed = seed.kind === 'edition' ? seed : null;
   // The languages the sources offer, asked again each time the dialog opens: a MangaDex language switched on in
-  // Admin -> Providers a minute ago (its "Turn on more" link below) is a row the next time, not after a reload.
+  // Admin -> Sources a minute ago (its "Turn on more" link below) is a row the next time, not after a reload.
   // Reintroduce by dropping `refetchOnMount`: "the language list is asked again" in addSeriesDialog.test.ts fails.
   const candQ = useQuery({
     queryKey: ['edition-candidates', edSeed?.of],
@@ -622,8 +622,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
         ) : !c || (!c.languages.length && !c.unstated.length) ? (
           <div className="py-6 text-center text-sm text-fog-500" data-edition-none>
             <p>{tr('None of your sources is in another language yet.')}</p>
-            {/* MangaDex in another language is a switch away (Admin → Providers); a member is not sent to a page they cannot open. */}
-            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-2 inline-block text-xs text-accent hover:underline">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
+            {/* MangaDex in another language is a switch away (Admin → Sources); a member is not sent to a page they cannot open. */}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-2 inline-block text-xs text-accent hover:underline">{tr('Turn on more MangaDex languages in Admin → Sources.')}</Link>}
           </div>
         ) : (
           <>
@@ -645,7 +645,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               )}
             </div>
             {/* The language wanted may be a MangaDex switch away, with others on already: an admin is told where. */}
-            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-3 inline-block text-[11px] text-fog-500 hover:text-accent">{tr('Turn on more MangaDex languages in Admin → Providers.')}</Link>}
+            {isAdmin && <Link href={MANGADEX_LANGUAGES_HREF} className="mt-3 inline-block text-[11px] text-fog-500 hover:text-accent">{tr('Turn on more MangaDex languages in Admin → Sources.')}</Link>}
           </>
         )}
       </Modal>

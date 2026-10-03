@@ -1,16 +1,20 @@
-// The MangaDex card's decisions, with no React in them (components/MangadexCard.tsx, v0.52.0, #123): what one tap
+// The MangaDex languages' decisions, with no React in them (components/MangadexCard.tsx, v0.52.0, #123): what one tap
 // on a language sends, whether turning one off asks first, and the order the saves go out in.
-import { mangadexSourceId, type ProviderGroup } from './providerGroups';
+import { mangadexSourceId } from './providerGroups';
 
 /**
- * Admin -> Providers at the MangaDex card, its languages unfolded (v0.52.0): where the add dialog's "Turn on more
- * MangaDex languages" goes, from an edition with no source in another language yet. `card=` as Profile's
- * `?tab=Connections&card=tracking` is.
+ * Admin → Sources → Add sources at the MangaDex languages, unfolded (v0.52.0; Providers' MangaDex card until v0.54.0):
+ * where the add dialog's "Turn on more MangaDex languages" goes, from an edition with no source in another language
+ * yet. `card=` as Profile's `?tab=Connections&card=tracking` is. The old `?tab=Providers&card=mangadex` lands there
+ * too (lib/sourcesPanel.ts SOURCES_TAB_ALIASES).
  */
-export const MANGADEX_LANGUAGES_HREF = '/admin/?tab=Providers&card=mangadex';
+export const MANGADEX_LANGUAGES_HREF = '/admin/?tab=Sources&card=mangadex';
 
-/** Whether the address asks for the MangaDex card with its languages unfolded (MANGADEX_LANGUAGES_HREF). */
+/** Whether the address asks for the MangaDex languages unfolded (MANGADEX_LANGUAGES_HREF). */
 export const opensMangadexLanguages = (params: { get(name: string): string | null }): boolean => params.get('card') === 'mangadex';
+
+/** One of MangaDex's sources as the question reads it: its name, and how many series use it. */
+export interface LanguageSource { id: string; name: string; main?: number; followed?: number; used?: number }
 
 /**
  * The languages besides English after one tap on `code`: on if it was off, off if it was on, in the picker's order
@@ -23,12 +27,14 @@ export function toggleLang(available: readonly string[], on: readonly string[], 
 }
 
 /**
- * What turning `code` off would cost, when it would cost something: its source's name and how many series came from
- * it, which stop updating until it is back. Null when nothing came from it -- that one goes at once, unasked.
+ * What turning `code` off would cost, when it would cost something: its source's name and how many series use it --
+ * as their main source or a followed one -- which stop updating from it until it is back. Null when nothing uses it:
+ * that one goes at once, unasked.
  */
-export function offCost(group: ProviderGroup, code: string): { name: string; used: number } | null {
-  const src = group.sources.find((s) => s.id === mangadexSourceId(code));
-  return src && (src.used ?? 0) > 0 ? { name: src.name, used: src.used! } : null;
+export function offCost(sources: readonly LanguageSource[], code: string): { name: string; used: number } | null {
+  const src = sources.find((s) => s.id === mangadexSourceId(code));
+  const used = src ? (src.used ?? (src.main ?? 0) + (src.followed ?? 0)) : 0;
+  return src && used > 0 ? { name: src.name, used } : null;
 }
 
 /**

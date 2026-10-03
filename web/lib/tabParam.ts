@@ -6,9 +6,19 @@
 // from the very tab that holds the language picker. These two functions are the whole contract between
 // the URL and that state; `useTabParam` (lib/useTabParam.ts) is the React wrapper around them.
 
-/** The tab a query value names, or the fallback for anything that is not one of the tabs. */
-export const readTab = <T extends string>(v: string | null, tabs: readonly T[], fallback: T): T =>
-  typeof v === 'string' && (tabs as readonly string[]).includes(v) ? (v as T) : fallback;
+/**
+ * The tab a query value names, or the fallback for anything that is not one of the tabs.
+ *
+ * `aliases` are the names a tab went by before a redesign merged or renamed it: the old name lands on its new tab, so
+ * the links people saved, the docs of older versions and the push notices already sent keep working. v0.54.0 made
+ * Admin's Providers and Extensions one Sources tab, and every `?tab=Providers` and `?tab=Extensions` -- the add
+ * dialog's MangaDex link, Health's links, a numbering finding's source settings -- would otherwise land on Overview.
+ * The other parameters stay where they were, for the tab to read (`card=`, `view=`, `settings=`).
+ */
+export const readTab = <T extends string>(v: string | null, tabs: readonly T[], fallback: T, aliases: Readonly<Record<string, T>> = {}): T =>
+  typeof v === 'string' && (tabs as readonly string[]).includes(v) ? (v as T)
+    : typeof v === 'string' && Object.prototype.hasOwnProperty.call(aliases, v) ? aliases[v]
+    : fallback;
 
 /**
  * `href` with its `tab` set to `tab`.

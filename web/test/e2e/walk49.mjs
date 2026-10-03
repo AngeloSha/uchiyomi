@@ -77,26 +77,27 @@
 //   a clean webtoon's add dialog reads its own 6 chapters and shows no numbering notice (it is not added: a second
 //   series on the source's numbers would change every count after it); the series goes back to the source's numbers
 //   from its own notice, through the plan, with every file back on the number the source gives it (the 13, nothing
-//   listed as missing); then Admin -> Extensions -> Webtoons.com's Settings: its sequential-numbering switch warns
+//   listed as missing); then Admin -> Sources -> Webtoons.com's Settings: its sequential-numbering switch warns
 //   that it renumbers the series and asks again, and the series waits on its page for the review of the remap it
 //   queued, whose rename is checked on every file the same way (13 on 13 numbers, 213 not on the server). What the
 //   final wording round reworded (i18n-source-issues-2) is read on the data the components carry (the add dialog's
 //   data-posts and data-numbers, the plan's data-plan-renamed) or in the English they hold when the walk runs
 //   (codeEnglish), never in a copy of it.
 //
-//   sources -- #115, a failing source shows its failing stage on Providers and on Health. fake-a's search is
-//   scripted to fail (fakeSource `error`, HTTP 500), then at 390 x 844 and 1280 x 800:
-//     1. Providers -> Test fake-a: the running key shows its clock, the card lists ✗ Search, never "Working
-//        normally." beside a ✗, and its mark reads "Failing" (the public status is still 'ok');
-//     2. a reload keeps the verdict: the card's stored evidence still says ✗ Search;
+//   sources -- #115, a failing source shows its failing stage in Admin → Sources (Providers until v0.54.0) and on
+//   Health. fake-a's search is scripted to fail (fakeSource `error`, HTTP 500), then at 390 x 844 and 1280 x 800:
+//     1. Admin → Sources -> fake-a's sheet -> Test: the running key shows its clock, Details opens on ✗ Search, never
+//        "Working normally." beside a ✗, and its mark reads "Failing" (the public status is still 'ok');
+//     2. a reload keeps the verdict: the sheet's Details still say ✗ Search from what was stored;
 //     3. Health -> Source health lists fake-a by name among its findings (v0.53.0: one line, one key), and its
 //        Details say ✗ Search;
-//     4. with search scripted back to `ok`, the row's one key, Test, clears the finding.
+//     4. with search scripted back to `ok`, the row's Test (its one key, or in its ⋯ menu behind Replace when fake-a is
+//        some series' main source, v0.54.0) clears the finding.
 //
-//   engine -- Admin → Extensions with the extension engine not answering, then answering, then the redesigned tab
-//   (v0.53.0) on a 1,300-extension repository: the strip, Installed and its groups, Turn on, Update, Browse to the
-//   catalogue's last extension, the 18+ switch, an extension's sheet, its languages and its closed Settings, Remove,
-//   Repositories and Languages (engineWalk.mjs). Needs up.sh with E2E_ENGINE=fake, and ENGINE=http://127.0.0.1:<the engine's port>; it takes the
+//   engine -- Admin → Sources with the extension engine not answering, then answering, then its extensions (v0.53.0;
+//   one tab since v0.54.0) on a 1,300-extension repository: the strip, the sources listed and folded, Turn on, Needs
+//   attention's Update, Browse to the catalogue's last extension, the 18+ switch, an extension's sheet, its languages
+//   and its closed Settings, Remove, Repositories and Languages (engineWalk.mjs). Needs up.sh with E2E_ENGINE=fake, and ENGINE=http://127.0.0.1:<the engine's port>; it takes the
 //   engine down and up itself.
 //
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
@@ -541,33 +542,42 @@ async function notices(width) {
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 }
 
-/** #115: a Test of a failing source shows the failing stage by name, on Providers and on Health. */
+/** #115: a Test of a failing source shows the failing stage by name, in Admin → Sources and on Health. */
 async function sources(width) {
   const wide = width >= 1024;
   await page.setViewport({ width, height: wide ? 800 : 844 });
   const tag = `${width}`;
+  // v0.54.0: one list of every source, each row opening its sheet, where Providers drew a card per source.
   const card = '[data-source-card="fake-a"]';
+  const openSheet = async () => {
+    await page.waitForSelector('[data-sources-row="fake-a"] [data-sources-open]', { timeout: 20_000 });
+    await page.$eval('[data-sources-row="fake-a"] [data-sources-open]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+    await page.waitForSelector(`${card} [data-source-test="fake-a"]`, { timeout: 10_000 });
+  };
   await script(FAKE_A, 'search', 0, 'error');
-  await go('/admin/?tab=Providers', 3000);
-  await page.waitForSelector(`${card} [data-source-test="fake-a"]`, { timeout: 20_000 });
-  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
+  await go('/admin/?tab=Sources', 3000);
+  await openSheet();
   await page.click(`${card} [data-source-test="fake-a"]`);
   const clock = await waitFor(() => page.$eval(`${card} [data-source-test="fake-a"]`, (b) => /Testing… \d+:\d\d of up to \d+:\d\d/.test(b.textContent || '') && b.textContent), 5000, 100);
   check(`${tag}: the running Test shows its clock against the limit`, !!clock, String(clock));
   const failed = await waitFor(() => page.$(`${card} [data-source-evidence="test"] [data-evidence-stage="search"][data-evidence-state="fail"]`), 60_000, 300);
-  check(`${tag}: Providers -> Test lists ✗ Search`, !!failed);
+  check(`${tag}: Sources -> Test opens Details on ✗ Search`, !!failed);
   const cardText = await page.$eval(card, (el) => el.textContent || '');
   check(`${tag}: never "Working normally." beside a failed step`, !/Working normally\./.test(cardText), cardText.slice(0, 200));
-  const mark = await waitFor(() => page.$eval(`${card} [data-status]`, (m) => (m.textContent?.trim() === 'Failing' ? m.getAttribute('data-status') : null)), 15_000, 300);
-  check(`${tag}: the card's mark reads Failing, in amber`, mark === 'warn', String(mark));
-  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
-  await shot(`${tag}-sources-1-providers-test`);
+  const mark = await waitFor(() => page.$eval(`${card} [data-source-status] [data-status]`, (m) => (/^Failing/.test(m.textContent?.trim() ?? '') ? m.getAttribute('data-status') : null)), 15_000, 300);
+  check(`${tag}: the sheet's mark reads Failing, in amber`, mark === 'warn', String(mark));
+  await shot(`${tag}-sources-1-sheet-test`);
 
-  await go('/admin/?tab=Providers', 3000);
+  await go('/admin/?tab=Sources', 3000);
+  // The row says it too, in its one line, before the sheet is opened.
+  const line = await waitFor(() => page.$eval('[data-sources-row="fake-a"] [data-source-line]', (e) => (/^Failing/.test(e.textContent || '') ? e.textContent : null)), 15_000, 300);
+  check(`${tag}: after a reload fake-a's row says Failing`, !!line, String(line));
+  await openSheet();
+  await page.$eval(`${card} [data-source-details] button`, (b) => b.click()).catch(() => {});
   const stored = await waitFor(() => page.$(`${card} [data-source-evidence="stored"] [data-evidence-stage="search"][data-evidence-state="fail"]`), 15_000, 300);
-  check(`${tag}: after a reload the card still says ✗ Search`, !!stored);
-  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
-  await shot(`${tag}-sources-2-providers-reload`);
+  check(`${tag}: after a reload the sheet's Details still say ✗ Search`, !!stored);
+  await shot(`${tag}-sources-2-sheet-reload`);
+  await page.keyboard.press('Escape');
 
   await go('/admin/?tab=Health', 4000);
   const hc = '[data-health-check="sources"]';
@@ -587,14 +597,21 @@ async function sources(width) {
   await page.$eval(fakeA, (el) => el.scrollIntoView({ block: 'center' }));
   await shot(`${tag}-sources-3-health`);
 
-  // Search works again: the row's one key is Test, it records the pass, and the finding goes.
+  // Search works again: the row's Test records the pass, and the finding goes. Its one key is Test -- or, when fake-a
+  // is some series' main source, Replace (v0.54.0), with Test in its ⋯ menu.
   await script(FAKE_A, 'search', 0, 'ok');
+  const primary = await page.evaluate((sel) => document.querySelector(`${sel} button[data-health-primary]`)?.getAttribute('data-health-action') ?? null, fakeA);
+  check(`${tag}: the Health row's one key is Test, or Replace for a main source`, primary === 'test' || primary === 'replace_source', String(primary));
+  if (primary !== 'test') {
+    await page.$eval(`${fakeA} [data-health-more]`, (b) => b.click());
+    await waitFor(() => page.$('[data-menu-item="test"]'), 5000, 100);
+  }
   const pressed = await page.evaluate((sel) => {
-    const b = document.querySelector(`${sel} button[data-health-primary][data-health-action="test"]`);
+    const b = document.querySelector(`${sel} button[data-health-primary][data-health-action="test"]`) ?? document.querySelector('[data-menu-item="test"]');
     b?.click();
     return !!b;
   }, fakeA);
-  check(`${tag}: the Health row's one key is Test`, pressed);
+  check(`${tag}: ...and its Test can be pressed`, pressed);
   const gone = await waitFor(() => page.evaluate((hc) => !document.querySelector(`${hc} [data-source-group] [data-source-row="fake-a"]`), hc), 60_000, 500);
   check(`${tag}: a passing Test from Health clears the finding`, !!gone);
   await shot(`${tag}-sources-4-health-cleared`);
@@ -1035,7 +1052,7 @@ async function numbering(width) {
   };
 
   if (!wide) {
-    // The engine answering, and its Webtoons.com switched on: a fresh engine's sources start off (Admin -> Extensions),
+    // The engine answering, and its Webtoons.com switched on: a fresh engine's sources start off (Admin -> Sources),
     // so an add from one begins with an admin's yes -- given over the API here, as the notices phase adds Walk Tale.
     const up = await fetch(`${ENGINE}/__mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'up' }) }).catch(() => null);
     check(`${tag}: the fake extension engine answers at ${ENGINE}`, !!up?.ok, 'start up.sh with E2E_ENGINE=fake, or set ENGINE');
@@ -1056,7 +1073,7 @@ async function numbering(width) {
     })).catch(() => null);
     check(`${tag}: ...with both readings side by side: ${IST.posts} chapters by posting order, ${IST.numbers} by the source's numbers`,
       both?.posts === IST.posts && both.numbers === IST.numbers && both.text.includes(String(IST.posts)) && both.text.includes(String(IST.numbers)), JSON.stringify(both));
-    check(`${tag}: ...and an admin's way to the source's own settings`, n?.href === `/admin/?tab=Extensions&settings=${WT}`, String(n?.href));
+    check(`${tag}: ...and an admin's way to the source's own settings`, n?.href === `/admin/?tab=Sources&settings=${WT}`, String(n?.href));
     const all = () => page.$eval('[role="dialog"] select option[value="all"]', (o) => o.textContent).catch(() => null);
     check(`${tag}: All fetches every post`, (await all()) === `All (${IST.posts})`, String(await all()));
     check(`${tag}: no sideways scroll`, await noSideScroll());
@@ -1162,7 +1179,7 @@ async function numbering(width) {
       check(`${tag}: ...naming Istrevelia, with Review renumbering and Keep the source’s numbers`,
         !!row && row.text.includes('Istrevelia') && row.keys.includes('renumber') && row.keys.includes('keep_numbers'), JSON.stringify(row));
       check(`${tag}: ...its Open leads to the series' plan, and Source settings to the extension's own`,
-        !!row?.links.some((h) => h.includes(`id=${s.id}`) && h.includes('numbering=review')) && row.links.includes(`/admin/?tab=Extensions&settings=${WT}`),
+        !!row?.links.some((h) => h.includes(`id=${s.id}`) && h.includes('numbering=review')) && row.links.includes(`/admin/?tab=Sources&settings=${WT}`),
         JSON.stringify(row?.links));
       await page.evaluate((hc) => document.querySelector(`${hc} [data-health-action="renumber"]`)?.click(), hc);
       const over = await waitFor(() => overlayBox('[data-numbering-plan]'), 20_000);
@@ -1256,17 +1273,18 @@ async function numbering(width) {
   await everyFile('every file is back on the number the source gives it', 0, IST.set);
   check(`${tag}: a series an admin put on the source's numbers carries no notice`, !!(await waitFor(async () => !(await page.$('[data-numbering-notice]')), 10_000)));
 
-  // 10. Admin -> Extensions -> Webtoons.com: its sheet's Settings (v0.53.0; a Settings key on its row before), a
+  // 10. Admin -> Sources -> Webtoons.com: its sheet's Settings (v0.53.0; a Settings key on its row before), a
   // disclosure closed until pressed since round 2. Its sequential-numbering switch moves the source's numbers under
-  // every series that uses them -- Istrevelia again -- so it says so before it is touched, and asks again.
-  await go('/admin/?tab=Extensions&view=installed', 3500);
-  const opened = await waitFor(() => page.evaluate(() => {
-    const b = document.querySelector('[data-ext-row="eu.kanade.tachiyomi.extension.all.webtoons"] [data-ext-open]');
+  // every series that uses them -- Istrevelia again -- so it says so before it is touched, and asks again. (Admin ->
+  // Extensions' Installed list until v0.54.0; a row of Your sources since, its sheet the source's.)
+  await go('/admin/?tab=Sources', 3500);
+  const opened = await waitFor(() => page.evaluate((id) => {
+    const b = document.querySelector(`[data-sources-row="${CSS.escape(id)}"] [data-sources-open]`);
     b?.scrollIntoView({ block: 'center' });
     b?.click();
     return !!b;
-  }), 15_000);
-  check(`${tag}: Webtoons.com's row in Admin -> Extensions opens its sheet`, !!opened);
+  }, `sw:${WT}`), 15_000);
+  check(`${tag}: Webtoons.com's row in Admin -> Sources opens its sheet`, !!opened);
   const toggle = await waitFor(() => page.evaluate(() => {
     const b = document.querySelector('[data-ext-sheet="eu.kanade.tachiyomi.extension.all.webtoons"] [data-ext-settings-toggle]');
     if (!b || b.getAttribute('aria-expanded') !== 'false') return null;

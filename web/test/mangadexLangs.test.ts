@@ -1,12 +1,13 @@
-// The MangaDex card's decisions (v0.52.0, #123; lib/mangadexLangs.ts): what one tap on a language sends, when
-// turning one off asks first, and that quick taps are saved one at a time in tap order. The card itself
-// (components/MangadexCard.tsx) only wires these to its chips; the server half is bff/test/mangadexLangs.int.test.ts.
+// The MangaDex languages' decisions (v0.52.0, #123; lib/mangadexLangs.ts): what one tap on a language sends, when
+// turning one off asks first, and that quick taps are saved one at a time in tap order. The chips themselves
+// (components/MangadexCard.tsx, in Admin → Sources since v0.54.0) only wire these up; the server half is
+// bff/test/mangadexLangs.int.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { MANGADEX_LANGUAGES_HREF, offCost, opensMangadexLanguages, serial, toggleLang } from '../lib/mangadexLangs';
-import { groupProviders, type ProviderSrc } from '../lib/providerGroups';
+import { initialView } from '../lib/sourcesPanel';
 
 const AVAILABLE = ['en', 'es-419', 'es', 'pt-BR', 'pt', 'fr', 'zh-Hans', 'zh-Hant'];
 
@@ -22,12 +23,16 @@ test("one tap turns a language on or off, and the list keeps the picker's order,
 test('turning off a language that series came from asks first, with its name and how many; an unused one does not', () => {
   // Reintroduce by asking for every language (or none): "a language with no series asks anyway" or "3 series would
   // stop updating unasked" fails.
-  const md = (id: string, name: string, used: number): ProviderSrc =>
-    ({ id, name, lang: null, used, status: 'ok', extension: { pkgName: 'mangadex', name: 'MangaDex' } });
-  const [g] = groupProviders([md('mangadex', 'MangaDex', 40), md('mangadex-es-419', 'MangaDex (ES-419)', 3), md('mangadex-fr', 'MangaDex (FR)', 0)]);
-  assert.deepEqual(offCost(g, 'es-419'), { name: 'MangaDex (ES-419)', used: 3 }, '3 series would stop updating unasked');
-  assert.equal(offCost(g, 'fr'), null, 'a language with no series asks anyway');
-  assert.equal(offCost(g, 'pt-BR'), null, 'a language not registered yet has nothing to lose');
+  // MangaDex's sources as the sources overview lists them (v0.54.0): main and followed series, both stop updating.
+  // Count only one of them (`main`): "2 series would stop updating unasked" fails.
+  const md = (id: string, name: string, main: number, followed: number) => ({ id, name, main, followed });
+  const sources = [md('mangadex', 'MangaDex', 40, 2), md('mangadex-es-419', 'MangaDex (ES-419)', 1, 2), md('mangadex-fr', 'MangaDex (FR)', 0, 0), md('mangadex-pt', 'MangaDex (PT)', 0, 2)];
+  assert.deepEqual(offCost(sources, 'es-419'), { name: 'MangaDex (ES-419)', used: 3 }, '3 series would stop updating unasked');
+  assert.deepEqual(offCost(sources, 'pt'), { name: 'MangaDex (PT)', used: 2 }, '2 series would stop updating unasked');
+  assert.equal(offCost(sources, 'fr'), null, 'a language with no series asks anyway');
+  assert.equal(offCost(sources, 'pt-BR'), null, 'a language not registered yet has nothing to lose');
+  // An older answer's one count.
+  assert.deepEqual(offCost([{ id: 'mangadex-fr', name: 'MangaDex (FR)', used: 4 }], 'fr'), { name: 'MangaDex (FR)', used: 4 });
 });
 
 test('quick taps are saved one at a time, in tap order, and a refused save does not stop the next', async () => {
@@ -52,21 +57,22 @@ test('quick taps are saved one at a time, in tap order, and a refused save does 
   assert.deepEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
 });
 
-test("the add dialog's link opens Providers at the MangaDex card, its languages unfolded (v0.52.0)", () => {
-  // An edition with no source in another language says "Turn on more MangaDex languages in Admin → Providers", and
-  // the link lands on the card's language chips, not at the top of a long tab. Reintroduce the bare
-  // `/admin/?tab=Providers`: "the link does not name the card" fails; start the card folded: "the card does not
-  // unfold" fails.
+test("the add dialog's link opens Sources at the MangaDex languages, unfolded (v0.52.0)", () => {
+  // An edition with no source in another language says "Turn on more MangaDex languages in Admin → Sources", and
+  // the link lands on the language chips, not at the top of a long tab. Reintroduce the bare `/admin/?tab=Sources`:
+  // "the link does not name the card" fails; start the languages folded: "the card does not unfold" fails.
   const at = new URL(MANGADEX_LANGUAGES_HREF, 'http://x');
   assert.equal(at.pathname, '/admin/');
-  assert.equal(at.searchParams.get('tab'), 'Providers');
+  assert.equal(at.searchParams.get('tab'), 'Sources', 'the link names the tab by its old name');
   assert.equal(opensMangadexLanguages(at.searchParams), true);
-  assert.equal(opensMangadexLanguages(new URLSearchParams('tab=Providers')), false, 'every visit to Providers unfolds it');
+  assert.equal(opensMangadexLanguages(new URLSearchParams('tab=Sources')), false, 'every visit to Sources unfolds it');
+  // The languages are in Add sources: the address opens that view (lib/sourcesPanel.ts initialView).
+  assert.equal(initialView(at.searchParams), 'add', 'the link lands on Your sources, where the languages are not');
   const src = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
   const dialog = src('components/AddSeriesDialog.tsx');
   assert.equal(dialog.match(/<Link href=\{MANGADEX_LANGUAGES_HREF\}/g)?.length, 2, 'the link does not name the card (none found, or one under the list)');
-  assert.doesNotMatch(dialog, /href="\/admin\/\?tab=Providers"/, 'the link does not name the card');
+  assert.doesNotMatch(dialog, /href="\/admin\/\?tab=(Providers|Sources)"/, 'the link does not name the card');
   const card = src('components/MangadexCard.tsx');
-  assert.match(card, /const \[arrived\] = useState\(\(\) => opensMangadexLanguages\(params\)\);\s*const \[open, setOpen\] = useState\(arrived\);/, 'the card does not unfold');
+  assert.match(card, /const \[arrived\] = useState\(\(\) => !always && opensMangadexLanguages\(params\)\);\s*const \[unfolded, setUnfolded\] = useState\(arrived\);/, 'the card does not unfold');
   assert.match(card, /if \(arrived\) cardRef\.current\?\.scrollIntoView\(/, 'the card is not brought on screen');
 });

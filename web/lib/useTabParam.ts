@@ -27,9 +27,9 @@ import { readTab, withTab } from './tabParam';
  * lib/I18nProvider.tsx), which used to reset the profile to You from the very tab holding the language
  * picker. The tab is in the URL now, so the remount reads it straight back.
  */
-export function useTabParam<T extends string>(tabs: readonly T[], fallback: T): [T, (t: T) => void] {
+export function useTabParam<T extends string>(tabs: readonly T[], fallback: T, aliases?: Readonly<Record<string, T>>): [T, (t: T) => void] {
   const params = useSearchParams();
-  const [tab, setTabState] = useState<T>(() => readTab(params.get('tab'), tabs, fallback));
+  const [tab, setTabState] = useState<T>(() => readTab(params.get('tab'), tabs, fallback, aliases));
   const setTab = (t: T) => {
     setTabState(t);
     window.history.replaceState(null, '', withTab(window.location.href, t, fallback));

@@ -28,9 +28,10 @@ import { seriesHref } from '@/lib/healthLinks';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import {
   amberNote, bulkOutcome, decideRefusal, earlierRuns, findReviewFirst, findRunState, findSlotState, findSummary, findWhyLine,
-  greenToFollow, groupResults, lineUpText, notTriedIds, setFindReviewFirst, toMs, type FindProposal, type FindResult, type FindRun,
-  type FindRunSummary, type FindStatus,
+  greenToFollow, greenToPromote, groupResults, isReplace, lineUpText, notTriedIds, promoteOutcome, promoteRefusal, setFindReviewFirst, toMs,
+  type FindProposal, type FindResult, type FindRun, type FindRunSummary, type FindStatus,
 } from '@/lib/findSources';
+import { replaceRunTitle } from '@/lib/jobs';
 import { FIND_KEY, codeOf, fetchFind, fetchFindRun, useFindRun, useFindRuns } from '@/lib/useFindRun';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
@@ -60,7 +61,8 @@ export function FindRunRow({ run, onStop, stopping, label }: { run: FindRun; onS
   const running = run.status === 'running';
   const spec: ActionSpec = {
     id: 'find-run',
-    label: label ?? tr('Other-source search'),
+    // v0.54.0: a Replace run is named for what it does.
+    label: label ?? (isReplace(run) ? replaceRunTitle() : tr('Other-source search')),
     what: whenLine(run),
     state: findRunState(run, { onStop, stopping, status: label === undefined }),
     ...(running && onStop ? { onRun: onStop, buttonProps: { 'data-find-stop': '' } as ActionSpec['buttonProps'] } : {}),
@@ -80,7 +82,18 @@ export function FindResultRow({ r, onOpen }: { r: FindResult; onOpen: () => void
       {r.title
         ? <Link href={seriesHref(r.seriesId)} onClick={onOpen} className="block truncate text-sm text-fog-100 hover:text-accent" dir="auto">{r.title}</Link>
         : <p data-find-hidden className="truncate text-sm text-fog-500">{tr('Hidden by the 18+ filter')}</p>}
-      {r.followed.length > 0
+      {/* v0.54.0, Replace: the series' new main source, "from → to", the arrow pointing the reading way. */}
+      {r.promoted ? (
+        <p className="mt-0.5 text-[11px] text-fog-400" data-find-promoted={r.promoted.via}>
+          <span className="sr-only">{tr('From {from} to {to}', { from: `\u2068${r.promoted.fromName}\u2069`, to: `\u2068${r.promoted.toName}\u2069` })}</span>
+          <span aria-hidden className="flex min-w-0 items-center gap-1.5">
+            <bdi className="min-w-0 truncate">{r.promoted.fromName}</bdi>
+            <span className="inline-block shrink-0 rtl:-scale-x-100">→</span>
+            <bdi className="min-w-0 truncate text-fog-200">{r.promoted.toName}</bdi>
+            {r.promoted.via === 'search' && <span className="shrink-0 text-fog-500">· {tr('New source found')}</span>}
+          </span>
+        </p>
+      ) : r.followed.length > 0
         ? r.followed.map((f) => (
           <p key={f.sourceId} className="mt-0.5 flex min-w-0 gap-1.5 text-[11px] text-fog-400">
             <bdi className="truncate text-fog-200">{f.name}</bdi>
@@ -179,7 +192,7 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
   }
   return (
     <OnBody>
-      <Sheet title={tr('Other-source search')} onClose={onClose} overBottomNav>
+      <Sheet title={run && isReplace(run) ? replaceRunTitle() : tr('Other-source search')} onClose={onClose} overBottomNav>
         <div data-find-results ref={top} className="pb-2">
           {openId && (
             <div className="mb-2">
@@ -204,6 +217,7 @@ export function FindResultsSheet({ onClose, poll = true }: { onClose: () => void
               )}
               {/* Keyed by the run: a press's state belongs to the run it was made in. */}
               {g.review.length > 0 && <ReviewGroup key={run.id} run={run} rows={g.review} onOpen={onClose} onAddEdition={addOrOpen} />}
+              <Group id="moved" title={tr('New main source')} rows={g.moved} onOpen={onClose} />
               <Group id="found" title={tr('New sources')} rows={g.found} onOpen={onClose} />
               <Group id="nothing" title={tr('Nothing found')} rows={g.nothing} onOpen={onClose} />
               {/* Its own key, not the shared "Skipped" (v0.52.0): the heading is about series, which several languages
@@ -297,20 +311,23 @@ export type EditionAsk = EditionOffer & { source: string; title: string };
  */
 function useReviewActions(runId: string, onFollowed?: () => void, onAddEdition?: (ask: EditionAsk) => void) {
   const qc = useQueryClient();
-  const [pending, setPending] = useState<Record<string, 'follow' | 'dismiss'>>({});
+  // v0.54.0: `promote` is a Replace review's Make main (POST …/find/:runId/promote), beside Follow and Skip.
+  const [pending, setPending] = useState<Record<string, 'follow' | 'dismiss' | 'promote'>>({});
   const [refusals, setRefusals] = useState<Record<string, string>>({});
   // The refusals that come with an edition to add instead (language_differs), by the same key.
   const [offers, setOffers] = useState<Record<string, EditionOffer>>({});
   const [bulk, setBulk] = useState<ActionState>(IDLE);
   const key = (seriesId: string, sourceId: string) => `${seriesId}\n${sourceId}`;
   /** The refusal in words and the edition it offers, or null once it is done. */
-  const post = async (kind: 'follow' | 'dismiss', seriesId: string, sourceId: string): Promise<{ why: string; offer: EditionOffer | null } | null> => {
+  const post = async (kind: 'follow' | 'dismiss' | 'promote', seriesId: string, sourceId: string): Promise<{ why: string; offer: EditionOffer | null } | null> => {
     try {
       await api(`/api/admin/sources/find/${encodeURIComponent(runId)}/${kind}`, { method: 'POST', json: { seriesId, sourceId } });
       return null;
     } catch (e) {
       return {
-        why: decideRefusal(codeOf(e)) ?? msgOf(e, kind === 'follow' ? tr('Could not follow that source') : tr('Could not skip that match')),
+        // Make main's refusals are the main-source switch's, said by the server itself (lib/mainSource.ts).
+        why: (kind === 'promote' ? promoteRefusal(codeOf(e)) : decideRefusal(codeOf(e)))
+          ?? msgOf(e, kind === 'follow' ? tr('Could not follow that source') : kind === 'promote' ? tr('Could not change the main source') : tr('Could not skip that match')),
         offer: editionOffer(e),
       };
     }
@@ -327,12 +344,12 @@ function useReviewActions(runId: string, onFollowed?: () => void, onAddEdition?:
       return next;
     });
   };
-  const decide = async (kind: 'follow' | 'dismiss', seriesId: string, sourceId: string) => {
+  const decide = async (kind: 'follow' | 'dismiss' | 'promote', seriesId: string, sourceId: string) => {
     const k = key(seriesId, sourceId);
     setPending((p) => ({ ...p, [k]: kind }));
     const out = await post(kind, seriesId, sourceId);
     said(k, out);
-    if (!out && kind === 'follow') onFollowed?.();
+    if (!out && kind !== 'dismiss') onFollowed?.();
     await qc.refetchQueries({ queryKey: FIND_KEY }).catch(() => {});
     setPending((p) => { const next = { ...p }; delete next[k]; return next; });
   };
@@ -350,22 +367,44 @@ function useReviewActions(runId: string, onFollowed?: () => void, onAddEdition?:
     await qc.refetchQueries({ queryKey: FIND_KEY }).catch(() => {});
     setBulk({ kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, ...bulkOutcome(followed, refused) });
   };
-  return { pending, refusals, offers, onAddEdition, bulk, key, decide, followAll };
+  // v0.54.0, a Replace review's Make all green main: each series' suggested source, one at a time, under the same checks
+  // as a single press.
+  const promoteAll = async (items: Array<{ seriesId: string; sourceId: string }>) => {
+    const at = Date.now();
+    let moved = 0, refused = 0;
+    for (const [i, it] of items.entries()) {
+      setBulk({ kind: 'working', startedAt: at, step: tr('Making {done} of {total} main…', { done: i + 1, total: items.length }), progress: i / items.length });
+      const out = await post('promote', it.seriesId, it.sourceId);
+      said(key(it.seriesId, it.sourceId), out);
+      if (out) refused++; else moved++;
+    }
+    if (moved) onFollowed?.();
+    await qc.refetchQueries({ queryKey: FIND_KEY }).catch(() => {});
+    setBulk({ kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, ...promoteOutcome(moved, refused) });
+  };
+  return { pending, refusals, offers, onAddEdition, bulk, key, decide, followAll, promoteAll };
 }
 type ReviewActions = ReturnType<typeof useReviewActions>;
 
 /** One match: our cover beside its cover, its title and source, what it lists and how it lines up, then the keys. */
-function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: ReviewActions }) {
+function ProposalRow({ r, p, act, replace = false }: { r: FindResult; p: FindProposal; act: ReviewActions; replace?: boolean }) {
   const k = act.key(r.seriesId, p.sourceId);
   const pressed = act.pending[k];
   const why = act.refusals[k];
   const offer = act.offers[k];
   const note = amberNote(p);
-  const busy = (kind: 'follow' | 'dismiss'): ActionState => (pressed === kind ? { kind: 'working', startedAt: Date.now() } : IDLE);
+  const busy = (kind: 'follow' | 'dismiss' | 'promote'): ActionState => (pressed === kind ? { kind: 'working', startedAt: Date.now() } : IDLE);
+  // v0.54.0, a Replace review: the match becomes the series' main source, one per series -- once one has, the rest of
+  // its matches offer nothing.
+  const settled = replace && !!r.proposals?.some((x) => x.state === 'promoted');
   const keys: ActionSpec[] = [
-    { id: 'follow', label: tr('Follow'), what: tr('Follow this source for this series'), primary: p.verdict === 'green', state: busy('follow'),
-      disabled: act.bulk.kind === 'working', onRun: () => { void act.decide('follow', r.seriesId, p.sourceId); },
-      buttonProps: { 'data-review-follow': p.sourceId } as ActionSpec['buttonProps'] },
+    replace
+      ? { id: 'promote', label: tr('Make main'), what: tr('Make this source the series’ main source'), state: busy('promote'),
+        disabled: act.bulk.kind === 'working', onRun: () => { void act.decide('promote', r.seriesId, p.sourceId); },
+        buttonProps: { 'data-review-promote': p.sourceId } as ActionSpec['buttonProps'] }
+      : { id: 'follow', label: tr('Follow'), what: tr('Follow this source for this series'), primary: p.verdict === 'green', state: busy('follow'),
+        disabled: act.bulk.kind === 'working', onRun: () => { void act.decide('follow', r.seriesId, p.sourceId); },
+        buttonProps: { 'data-review-follow': p.sourceId } as ActionSpec['buttonProps'] },
     { id: 'skip', label: tr('Skip'), what: tr('Skip this match for good'), state: busy('dismiss'),
       disabled: act.bulk.kind === 'working', onRun: () => { void act.decide('dismiss', r.seriesId, p.sourceId); },
       buttonProps: { 'data-review-skip': p.sourceId } as ActionSpec['buttonProps'] },
@@ -386,11 +425,17 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
           <bdi className="truncate text-fog-200">{p.sourceName}</bdi>
           <span className="shrink-0 tabular-nums text-fog-500">{p.chapters === 1 ? tr('1 chapter') : tr('{n} chapters', { n: p.chapters })}</span>
         </p>
+        {/* v0.54.0, Replace: a source the series already follows, or one the search found. */}
+        {replace && p.kind && (
+          <p className="mt-0.5 text-[11px] text-fog-500" data-review-kind={p.kind}>
+            {p.kind === 'follower' ? tr('A source it already follows') : tr('Found by searching')}{p.promote ? ` · ${tr('Suggested')}` : ''}
+          </p>
+        )}
         <p className={`mt-0.5 text-[11px] tabular-nums ${p.verdict === 'green' ? 'text-fog-400' : 'text-amber-300/90'}`}>{lineUpText(p)}</p>
         {note && !p.state && <p data-amber-note className="mt-0.5 text-[11px] leading-relaxed text-amber-300/90">{note}</p>}
         {p.state
-          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : tr('Skipped for good')}</p>
-          : <ActionKeys actions={keys} className="mt-1.5" />}
+          ? <p data-review-state={p.state} className="mt-1 text-[11px] text-fog-300">{p.state === 'followed' ? tr('Followed') : p.state === 'promoted' ? tr('Made main') : tr('Skipped for good')}</p>
+          : !settled && <ActionKeys actions={keys} className="mt-1.5" />}
         {why && !p.state && <ActionStatus state={{ kind: 'refused', reason: why }} />}
         {/* Refused for its language (v0.52.0): the match is this work in another language, which an edition holds --
             to add, or the work's own when it has one that may follow the source ("Open the Spanish edition"). */}
@@ -410,7 +455,7 @@ function ProposalRow({ r, p, act }: { r: FindResult; p: FindProposal; act: Revie
  * the series, leaves it out. A series hidden by the 18+ filter keeps its row and offers nothing to decide: the server
  * sends no title or cover of its matches, and nobody follows what they could not look at.
  */
-function ReviewSeries({ r, act, head = true, onOpen }: { r: FindResult; act: ReviewActions; head?: boolean; onOpen?: () => void }) {
+function ReviewSeries({ r, act, head = true, onOpen, replace = false }: { r: FindResult; act: ReviewActions; head?: boolean; onOpen?: () => void; replace?: boolean }) {
   return (
     <li data-review-series={r.seriesId} className="min-w-0 py-2">
       {head && (r.title
@@ -418,7 +463,7 @@ function ReviewSeries({ r, act, head = true, onOpen }: { r: FindResult; act: Rev
         : <p data-find-hidden className="truncate text-sm text-fog-500">{tr('Hidden by the 18+ filter')}</p>)}
       {r.title && (
         <ul role="list" className="divide-y divide-ink-800/50">
-          {r.proposals!.map((p) => <ProposalRow key={p.sourceId} r={r} p={p} act={act} />)}
+          {r.proposals!.map((p) => <ProposalRow key={p.sourceId} r={r} p={p} act={act} replace={replace} />)}
         </ul>
       )}
     </li>
@@ -438,26 +483,37 @@ function ReviewGroup({ run, rows, onOpen, onAddEdition }: {
   run: FindRun; rows: FindResult[]; onOpen: () => void; onAddEdition?: (ask: EditionAsk) => void;
 }) {
   const act = useReviewActions(run.id, undefined, onAddEdition);
-  const greens = greenToFollow(run);
+  // v0.54.0: a Replace run's review makes a source main, where a Find run's follows one.
+  const replace = isReplace(run);
+  const greens = replace ? greenToPromote(run) : greenToFollow(run);
   return (
     <section data-find-group="review" aria-labelledby="find-review" className="mt-4">
       <h3 id="find-review" className="flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wider text-fog-500">
         {tr('To review')}<span className="tabular-nums text-fog-600">{rows.length}</span>
       </h3>
       <p className="mt-1 text-[11px] leading-relaxed text-fog-500">
-        {tr('Nothing is followed until you choose. Green matches are the ones an automatic search would follow; amber ones need a look first.')}
+        {replace
+          ? tr('Nothing moves until you choose. Each series’ suggested source is the one Replace would have made its main source; amber ones need a look first.')
+          : tr('Nothing is followed until you choose. Green matches are the ones an automatic search would follow; amber ones need a look first.')}
       </p>
       {greens.length > 0 && (
         <div className="mt-2">
-          <button type="button" className="btn-key btn-key-primary" disabled={act.bulk.kind === 'working'} data-review-follow-green
-            onClick={() => { void act.followAll(greens); }}>
-            {tr('Follow all green')} · {greens.length}
-          </button>
+          {replace ? (
+            <button type="button" className="btn-key" disabled={act.bulk.kind === 'working'} data-review-promote-green
+              onClick={() => { void act.promoteAll(greens); }}>
+              {tr('Make all green main')} · {greens.length}
+            </button>
+          ) : (
+            <button type="button" className="btn-key btn-key-primary" disabled={act.bulk.kind === 'working'} data-review-follow-green
+              onClick={() => { void act.followAll(greens); }}>
+              {tr('Follow all green')} · {greens.length}
+            </button>
+          )}
         </div>
       )}
       <ActionStatus state={act.bulk} />
       <ul role="list" className="divide-y divide-ink-800/70">
-        {rows.map((r) => <ReviewSeries key={r.seriesId} r={r} onOpen={onOpen} act={act} />)}
+        {rows.map((r) => <ReviewSeries key={r.seriesId} r={r} onOpen={onOpen} act={act} replace={replace} />)}
       </ul>
     </section>
   );

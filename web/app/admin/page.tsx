@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabParam } from '@/lib/useTabParam';
 import { AdminSettings } from '@/components/AdminSettings';
@@ -13,8 +13,7 @@ import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
-import { SourcesExplainer } from '@/components/SourcesExplainer';
+import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
 import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { ActionStatus } from '@/components/ActionList';
@@ -22,7 +21,7 @@ import { RepairRunProvider } from '@/lib/useRepairRun';
 import { FindRunProvider } from '@/lib/useFindRun';
 import { FindRunCard } from '@/components/FindSources';
 import { checkTitle } from '@/lib/healthCopy';
-import { checkNote, checkSummary, diagnosisFix, diagnosisReason, itemDetail, itemTitle } from '@/lib/said';
+import { checkNote, checkSummary, itemDetail, itemTitle } from '@/lib/said';
 import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
 import { Backdrop, Img } from '@/components/ui';
@@ -30,45 +29,16 @@ import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
-import { onText } from '@/lib/counted';
 import type { HealthCheck, Series } from '@/lib/types';
-import { groupProviders, providerStatus, MANGADEX_GROUP, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
-import { MangadexCard, UnstatedLanguageCard } from '@/components/MangadexCard';
-import { adultShown } from '@/lib/adult';
-import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
-import { ExtensionsPanel } from '@/components/ExtensionsPanel';
-import type { ExtStatus } from '@/lib/extensions';
+import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
+import { SourcesPanel } from '@/components/SourcesPanel';
+import { OVERVIEW_KEY, SOURCES_TAB_ALIASES, overviewUrl, splitSources, type SourcesOverview } from '@/lib/sourcesPanel';
 import { StatusEdge, StatusMark } from '@/components/StatusMark';
-import { TONE_SURFACE, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
+import { TONE_SURFACE, healthMark } from '@/lib/status';
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
-import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
-import { SourceEvidence } from '@/components/SourceEvidence';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
-import { checkAllLabel, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
-import { useTicker } from '@/lib/ticker';
-
-/**
- * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
- *
- * Since v0.42.0 that route honours the "Show 18+" reveal like any other listing (issue #64), which is right
- * for Discover and wrong here — this console is where a provider is tested, unblocked or switched off, and
- * an admin cannot act on a row that is not on the page. On the install this was written against twelve of
- * fourteen sources are adult, so with the reveal off the Providers tab would show two of them and the tile
- * beside it would say "2".
- *
- * ⚠️ The parameter is added only when the reveal is OFF, never unconditionally: lib/api.ts appends its own
- * `adult=1` when it is on, and two copies of the parameter arrive as an ARRAY, which `hideAdult` on the
- * server reads as "not '1'" — i.e. hidden. Consulted at request time rather than captured, because flipping
- * the reveal invalidates every query and this one is then rebuilt.
- *
- * It also carries its own query key. `['sources']` is the browsing list several screens share, and two
- * shapes under one key is how a revealed answer gets replayed to a screen that asked for a hidden one.
- * A prefix match means the existing `invalidateQueries({ queryKey: ['sources'] })` calls still reach it.
- */
-const allSourcesUrl = () => (adultShown() ? '/api/sources' : '/api/sources?adult=1');
-const ALL_SOURCES_KEY = ['sources', 'all'] as const;
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -76,7 +46,7 @@ const ALL_SOURCES_KEY = ['sources', 'all'] as const;
  * The previous shell put all ten in one horizontally scrolling pill row, which is a list rather than an
  * information architecture: "Overview" and "Sessions" were peers, and on a laptop the last three scrolled off
  * the edge where nobody found them. Extensions had no entry at all -- it rendered inside Providers, which is
- * why nobody found that either.
+ * why nobody found that either. Since v0.54.0 the two are one Sources tab.
  */
 const GROUPS = [
   // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
@@ -85,7 +55,9 @@ const GROUPS = [
   { id: 'server',  label: 'Server',  tabs: keys('Overview', 'Tasks', 'Settings') },
   { id: 'people',  label: 'People',  tabs: keys('Members', 'Sessions', 'Activity') },
   { id: 'content', label: 'Content', tabs: keys('Library', 'Health', 'Art') },
-  { id: 'sources', label: 'Sources', tabs: keys('Providers', 'Extensions') },
+  // v0.54.0: ONE tab for every source, where Providers and Extensions were two halves of one list (SourcesPanel.tsx).
+  // Their old names and links land on it (lib/sourcesPanel.ts SOURCES_TAB_ALIASES).
+  { id: 'sources', label: 'Sources', tabs: keys('Sources') },
 ] as const;
 // The group labels themselves, for the same reason.
 const _GROUP_LABELS = keys('Server', 'People', 'Content', 'Sources');
@@ -111,7 +83,7 @@ function AdminInner() {
   const router = useRouter();
   // In the URL rather than in state: a refresh, the back button and every deep link used to land on
   // Overview, and `/admin/?tab=Settings` is the address the docs can now give (lib/useTabParam.ts).
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview', SOURCES_TAB_ALIASES);
   // Uchiyomi Desktop has no Members or Sessions (lib/desktop.ts). The rail never lists them, and a deep link
   // or an old bookmark to one lands on Overview rather than on a panel whose every request answers 404.
   // `GROUPS` and the line above stay as they are: only what ConsoleNav receives is filtered.
@@ -124,8 +96,7 @@ function AdminInner() {
     <>
       {tab === 'Overview' && <Overview onTab={setTab} />}
       {tab === 'Members' && <Members />}
-      {tab === 'Providers' && <Providers onTab={setTab} />}
-      {tab === 'Extensions' && <ExtensionsPanel onProviders={() => setTab('Providers')} />}
+      {tab === 'Sources' && <SourcesPanel />}
       {tab === 'Art' && <ArtReview />}
       {tab === 'Health' && <Health />}
       {tab === 'Library' && <LibraryPanel />}
@@ -285,7 +256,7 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
   // Not asked on desktop, where the route answers 404: there is no Sessions tab for the tile to open.
   const desktop = isDesktop();
   const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions'), enabled: !desktop });
-  const { data: sources } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
+  const { data: sources } = useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(overviewUrl()) });
 
   const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
   const activity: any[] = stats?.activity ?? [];
@@ -353,7 +324,8 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
         <TabTile label={tr('Sessions')} value={String(sessions?.content?.length ?? 0)}
           sub={sessions?.content?.[0] ? relativeTime(sessions.content[0].last_seen) : undefined} onClick={() => onTab('Sessions')} />
       )}
-      <TabTile label={tr('Providers')} value={String(sources?.content?.length ?? 0)} onClick={() => onTab('Providers')} />
+      {/* The sources that are on, as Admin → Sources' "Your sources" counts them. */}
+      <TabTile label={tr('Sources')} value={String(sources ? splitSources(sources.sources).on.length : 0)} onClick={() => onTab('Sources')} />
       {/* Activity's headline is a time rather than a count: "how long since anything happened" is the
           question, and eight rows of audit cannot answer "how many". */}
       <TabTile label={tr('Activity')} value={latest ? relativeTime(latest.at) : '0'}
@@ -536,442 +508,6 @@ function Members() {
         />
       )}
     </div>
-  );
-}
-
-/** One row of GET /api/admin/sources: the stored health plus #115's evidence (bff routes/admin.ts). */
-interface AdminSourceRow {
-  source_id: string;
-  last_error?: string | null;
-  consecutive?: number;
-  /** The open, confirmed, current failures per stage. */
-  failing?: Array<{ stage: string; since: string; error: string | null; kind: string; by: string; streak: number }>;
-  /** The last deliberate live check, or null when there has been none. */
-  live?: (LiveVerdict & { code: string | null }) | null;
-  /** One line per stage, what was last seen there. */
-  evidence?: StageLine[];
-}
-
-function Providers({ onTab }: { onTab: (t: Tab) => void }) {
-  const router = useRouter();
-  const toast = useToast();
-  const qc = useQueryClient();
-  const { data: srcs } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
-  const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: AdminSourceRow[]; testMs?: number }>('/api/admin/sources'), refetchInterval: 10000 });
-  const hmap = new Map((health?.content || []).map((h) => [h.source_id, h]));
-  // Health reads the same evidence, and the header's mark reads Health's summary: a Test, a block cleared or a
-  // source switched off here must not leave either of them saying what they said before (#115).
-  const invalHealth = () => { qc.invalidateQueries({ queryKey: ['admin-health'] }); qc.invalidateQueries({ queryKey: ['health-summary'] }); };
-  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast(tr('Failed'), 'error'); } };
-  const { data: custom } = useQuery({ queryKey: ['admin-custom'], queryFn: () => api<{ content: any[] }>('/api/admin/sources/custom') });
-  const customIds = new Set((custom?.content || []).map((c: any) => c.id));
-  const [reloading, setReloading] = useState(false);
-  const reload = async () => {
-    setReloading(true);
-    try {
-      const r = await api<{ available: number }>('/api/admin/sources/reload', { method: 'POST' });
-      toast(r.available === 1 ? tr('Reloaded — 1 source available') : tr('Reloaded — {n} sources available', { n: r.available }), 'success');
-      qc.invalidateQueries({ queryKey: ['sources'] });
-      qc.invalidateQueries({ queryKey: ['admin-sources'] });
-    } catch { toast(tr('Reload failed'), 'error'); }
-    setReloading(false);
-  };
-  const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); invalHealth(); };
-  const [eng, setEng] = useState<'auto' | 'madara' | 'manganato' | 'mangathemesia'>('auto');
-  // The (i) beside "Add a site": what a source, an extension and a site by URL are, in the explainer the
-  // reader-facing sheets share. This panel is where the words are first met by whoever runs the server.
-  const [explaining, setExplaining] = useState(false);
-  const [sname, setSname] = useState('');
-  const [sbase, setSbase] = useState('');
-  const [adding, setAdding] = useState(false);
-  type Smoke = { ok: boolean; timedOut?: boolean; checks: { name: string; ok: boolean; detail: string }[] };
-  const [smoke, setSmoke] = useState<{ name: string; res: Smoke } | null>(null);
-  const addSite = async () => {
-    if (!sname.trim() || !sbase.trim()) return;
-    setAdding(true); setSmoke(null);
-    const nm = sname.trim();
-    try {
-      const r = await api<{ engine?: string; smoke?: Smoke }>('/api/admin/sources/custom', { json: { engine: eng, name: nm, base: sbase.trim() } });
-      const eng2 = eng === 'auto' && r.engine ? ` (${r.engine})` : '';
-      if (r.smoke) setSmoke({ name: nm, res: r.smoke });
-      if (r.smoke && r.smoke.ok) toast(`Added ${nm}${eng2} — verified ✓`, 'success');
-      else if (r.smoke) toast(`Added ${nm}${eng2}, but some checks failed — see below`, 'error');
-      else toast(`Added ${nm}${eng2}`, 'success');
-      setSname(''); setSbase(''); inval();
-    }
-    catch (e: any) { toast(msgOf(e, "Couldn't add — check the URL or pick the engine manually"), 'error'); }
-    setAdding(false);
-  };
-  // A live verdict per source, kept until the panel is left. The stored error can be months older than the
-  // running container, so a test result always wins the display.
-  const [sweep, setSweep] = useState<any>(null);
-  const [checking, setChecking] = useState(false);
-  // Where the sweep has got to, from its GET: "Checking 7 of 40 · Manga Ball (EN)" on the button.
-  const [progress, setProgress] = useState<SourceCheckProgress | null>(null);
-  const sweepDone = (r: any) => {
-    setSweep(r);
-    const t = sweepToast(r);
-    toast(t.text, t.type);
-    inval();
-  };
-  // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts). A sweep already
-  // running when the tab opens -- the daily one, or one another tab started -- is followed too, so the button shows
-  // where it is instead of offering a second run the server would refuse. ONE owner of its answer per visit, and
-  // none once the tab is left (checkAllSession): a press kept polling after a tab switch, and the next visit's
-  // follower then gave the same notice a second time.
-  const checkRun = useRef<CheckAllSession | null>(null);
-  useEffect(() => {
-    const run = checkAllSession(api, {
-      progress: (p) => { setChecking(true); setProgress(p); },
-      done: sweepDone,
-      failed: (e) => toast(msgOf(e, tr('Could not run the check')), 'error'),
-      idle: () => { setChecking(false); setProgress(null); },
-    });
-    checkRun.current = run;
-    void run.follow();
-    return () => run.leave();
-    // Once per visit to the tab: the session owns the rest.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
-  const checkAll = () => {
-    setChecking(true);
-    void checkRun.current?.press();
-  };
-
-  const [tested, setTested] = useState<Map<string, TestAnswer & { probe?: { finalUrl?: string } }>>(new Map());
-  const [testingId, setTestingId] = useState<string | null>(null);
-  // When the running Test began, for its clock against the server's own limit (`testMs`): a Test can take most
-  // of a minute on a slow or protected site, and a button that only said "Testing…" for that long read as stuck.
-  const [testFrom, setTestFrom] = useState(0);
-  const now = useTicker(!!testingId);
-  const testSource = async (id: string) => {
-    setTestingId(id);
-    setTestFrom(Date.now());
-    try {
-      const r = await api<TestAnswer & { probe?: { finalUrl?: string } }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
-      setTested((m) => new Map(m).set(id, r));
-      toast(r.ok ? tr('That source is working') : (diagnosisReason(r.diagnosis) || tr('That source is still failing')), r.ok ? 'success' : 'error');
-      inval();
-    } catch (e: any) {
-      toast(msgOf(e, tr('Could not test that source')), 'error');
-    }
-    setTestingId(null);
-  };
-  /** The one-click half of a moved site: the probe already found where it went. */
-  const moveSite = async (id: string) => {
-    const to = tested.get(id)?.probe?.finalUrl;
-    if (!to) return;
-    const origin = (() => { try { return new URL(to).origin; } catch { return null; } })();
-    if (!origin) return;
-    try {
-      const r = await api<any>(`/api/admin/sources/custom/${encodeURIComponent(id)}`, { method: 'PATCH', json: { base: origin } });
-      toast(r.smoke?.ok ? `Moved to ${origin}, verified` : `Moved to ${origin}`, r.smoke?.ok ? 'success' : 'error');
-      setTested((m) => { const n = new Map(m); n.delete(id); return n; });
-      inval();
-    } catch (e: any) { toast(msgOf(e, 'Could not update the address'), 'error'); }
-  };
-
-  const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
-
-  // The public status, overlaid with what only the admin rows know: a confirmed failure at a step reads
-  // 'failing' instead of the 'ok' the public status keeps until a cooldown (#115).
-  const list = ((srcs?.content || []) as ProviderSrc[]).map((s) => ({ ...s, status: providerStatus(s.status as any, hmap.get(s.id)) }));
-  // One card per extension PACKAGE rather than per source: a multi-language extension is one install that
-  // exposes one source per language, and 3Hentai alone put twenty-nine near-identical cards here, enabled
-  // or not. A package with a single variant, and every engine, pack and custom site, renders the card it
-  // always did. Which packages are unfolded lives here, not in storage: collapsed is the useful default and
-  // the panel is opened to look, not to keep.
-  const groups = groupProviders(list);
-  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
-  const toggleGroup = (key: string) => setUnfolded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-
-  /**
-   * What is known about this source, through the one component Health's rows use as well (SourceEvidence): the
-   * Test that just ran here, else what the server kept -- the last Test or daily check and the stage lines -- so a
-   * reload does not wipe the verdict. Then the cooldown's raw error, last and small. Shared by the full card and
-   * the compact variant row, so a language variant inside a folded package can be tested and read the same way.
-   *
-   * ⚠️ "Working normally." comes only from a Test that passed (lib/sourceEvidence.ts answerView). It used to be
-   * the fallback for any diagnosis without a reason, which put it under a failed Search (#115).
-   */
-  function evidenceOf(s: ProviderSrc, st: ProviderStatus) {
-    const h = hmap.get(s.id);
-    const t = tested.get(s.id);
-    const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
-    const cooldown = h?.last_error && unwell
-      ? <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
-      : null;
-    if (t) {
-      return (
-        <>
-          <SourceEvidence answer={t} onMove={customIds.has(s.id) ? () => moveSite(s.id) : undefined} />
-          {cooldown}
-        </>
-      );
-    }
-    const failing = !!h?.failing?.length;
-    if (h && (h.live || failing)) {
-      return (
-        <>
-          {/* A card whose last check passed and that fails nowhere needs one line, not four. */}
-          <SourceEvidence lines={h.evidence} tested={h.live} failing={failing} compact={!failing && h.live?.state === 'pass'} />
-          {cooldown}
-        </>
-      );
-    }
-    return cooldown && <div className="mt-1.5">{cooldown}</div>;
-  }
-  /** Test / Clear block / Enable-Disable, plus the two custom-site buttons when the source is one. */
-  function controlsOf(s: ProviderSrc, st: string) {
-    return (
-      <>
-        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} data-source-test={s.id} className="btn-key tabular-nums">
-          {testingId === s.id ? testClock(now - testFrom, health?.testMs) : tr('Test')}
-        </button>
-        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', tr('Block cleared'))} className="btn-key">{tr('Clear block')}</button>}
-        {/* Translated since v0.52.0: every MangaDex language's row carries these, in English in every language before. */}
-        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? tr('Enabled') : tr('Disabled'))} className="btn-key">{st === 'disabled' ? tr('Enable') : tr('Disable')}</button>
-        {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
-      </>
-    );
-  }
-  // A glyph and the words, not a capsule around the server's own token: "ok" and "rate-limited" were shown
-  // as sent, in English in every language, and a blocked source and a healthy one differed only in tint.
-  const statusMark = (st: ProviderStatus) => <StatusMark {...sourceMark(st)} />;
-
-  /** The card every source has always had: one source, its status, its diagnosis, its controls. */
-  function sourceCard(s: ProviderSrc) {
-    const st: ProviderStatus = s.status ?? 'ok';
-    return (
-      <div key={s.id} data-source-card={s.id} className="card grad-border p-4">
-        <div className="flex items-center gap-2">
-          <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
-          {statusMark(st)}
-        </div>
-        {evidenceOf(s, st)}
-        <div className="mt-2 flex flex-wrap gap-1.5">{controlsOf(s, st)}</div>
-      </div>
-    );
-  }
-
-  /**
-   * One language of a provider that has several: its code, status and series count on one line with the full
-   * card's controls, and its evidence below. Rows wrap rather than scroll: at 390 px the language, status and count
-   * sit on one line and the buttons drop below. An extension package's rows, and the MangaDex card's.
-   */
-  function variantRow(s: ProviderSrc) {
-    const st: ProviderStatus = s.status ?? 'ok';
-    return (
-      <li key={s.id} className="py-2">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
-          {statusMark(st)}
-          <span className="text-[11px] text-fog-500">{s.used === 1 ? tr('1 series') : tr('{n} series', { n: s.used ?? 0 })}</span>
-          <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
-        </div>
-        {evidenceOf(s, st)}
-      </li>
-    );
-  }
-
-  /**
-   * One extension package with several language variants: a header that says how many languages, how many
-   * are on and the unhappiest status among them (so a blocked language colours the card even folded), and
-   * on unfold one compact row per variant carrying the same controls the full card has.
-   */
-  function packageCard(g: ProviderGroup) {
-    const isOpen = unfolded.has(g.key);
-    return (
-      <div key={g.key} className="card grad-border p-4">
-        <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={isOpen} className="flex w-full items-center gap-2 text-start">
-          <span className="min-w-0 flex-1 text-sm text-fog-100">
-            {g.name}
-            <span className="ms-2 text-[11px] text-fog-500">
-              {g.languages.length === 1 ? tr('1 language') : tr('{n} languages', { n: g.languages.length })} · {onText(g.on)}
-            </span>
-          </span>
-          {statusMark(g.worst)}
-          <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
-        </button>
-        {isOpen && <ul className="mt-2 divide-y divide-ink-800">{g.sources.map(variantRow)}</ul>}
-      </div>
-    );
-  }
-
-  return (
-    <div className="board">
-      <div className="full flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-fog-400">{tr('{n} sources in {m} providers', { n: list.length, m: groups.length })}</p>
-        <div className="flex gap-1.5">
-          {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
-          <button onClick={checkAll} disabled={checking} data-source-check-all className="btn-key tabular-nums">
-            {checking ? checkAllLabel(progress) : `🔍 ${tr('Check all now')}`}
-          </button>
-          {/* Translated like its neighbour: it stayed English beside a translated "Check all now". */}
-          <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? tr('Reloading…') : `↻ ${tr('Reload sources')}`}</button>
-        </div>
-      </div>
-      {sweep && (
-        <div className="full rounded-xl border border-ink-700 bg-ink-850/60 p-3">
-          <p className="text-xs text-fog-300">
-            {sweep.sources.length === 1 ? tr('Checked 1 source.') : tr('Checked {n} sources.', { n: sweep.sources.length })}{' '}
-            {sweepToast(sweep).text}
-          </p>
-          {sweep.sources.filter((v: any) => v.action).map((v: any) => (
-            // The SOURCE moved; Uchiyomi followed it ("{name}: followed its move" had the source follow itself).
-            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('moved to a new address, which Uchiyomi now uses')}</p>
-          ))}
-          {sweep.needsAttention.map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {diagnosisFix(v) || diagnosisReason(v)}</p>
-          ))}
-          {/* Our own deadline, not a verdict on the site: named, never counted as failing. */}
-          {(sweep.inconclusive || []).map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-fog-500"><span className="text-fog-300">{v.name}</span>: {tr('could not finish in time — not proof it is broken')}</p>
-          ))}
-        </div>
-      )}
-
-      {/* Add a site (Madara / Manganato engines — most manga aggregators) */}
-      <div className="card grad-border wide p-4">
-        <div className="mb-2 flex items-center gap-1.5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Add a site')}</p>
-          {/* 32px to tap, the same as the sheets' (i); the negative margins keep the eyebrow row 20px tall so
-              the label does not drop. At h-5 this was a 20px target on a phone, a quarter the size of the
-              (i) one tap away in the Sources sheet. */}
-          <button type="button" onClick={() => setExplaining(true)} aria-label={tr('What are sources and extensions?')}
-            className="-my-1.5 grid h-8 w-8 place-items-center rounded-full text-fog-500 transition hover:text-fog-200">
-            <IcInfo width={14} height={14} />
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <select value={eng} onChange={(e) => setEng(e.target.value as any)} className="field w-auto">
-            <option value="auto">{tr('Auto-detect')}</option>
-            <option value="madara">{tr('Madara (WordPress)')}</option>
-            <option value="mangathemesia">{tr('MangaThemesia')}</option>
-            <option value="manganato">{tr('Manganato')}</option>
-          </select>
-          <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className="field min-w-[110px] flex-1" />
-          <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className="field min-w-[170px] flex-[2]" />
-          <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-key btn-key-primary">{adding ? 'Adding…' : 'Add'}</button>
-        </div>
-        <p className="mt-1.5 text-[11px] text-fog-500">Just paste a site&apos;s homepage URL — the engine is auto-detected (or pick it). Picked up instantly, no restart. Works for sites on the Madara, MangaThemesia, or Manganato engines.</p>
-        {smoke && (
-          <div className={`mt-2.5 rounded-xl border p-2.5 ${smoke.res.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-400">
-              {smoke.res.ok ? `✓ ${smoke.name} verified — search, chapters & pages all work`
-                : smoke.res.timedOut ? `${smoke.name}: verification timed out — slow or heavily protected site (added anyway)`
-                : `${smoke.name}: some checks failed — this site may be only partly supported`}
-            </p>
-            <ul className="space-y-1">
-              {smoke.res.checks.map((c, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs">
-                  <span className={c.ok ? 'text-emerald-400' : 'text-red-400'}>{c.ok ? '✓' : '✗'}</span>
-                  <span className="text-fog-200">{c.name}</span>
-                  <span className="text-fog-500">— {c.detail}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {/* Beside Add a site: the sites added there say no language of their own (v0.52.0). */}
-      <UnstatedLanguageCard />
-
-      {/* Extension sources live on their own tab; this is the door to it. The whole Extensions card used to
-          render here as well as there, so the catalogue's search field, its language list and its 1,400 rows
-          appeared twice in the console and the `Search extensions` field sat on the Providers tab. */}
-      <ExtensionsLink onTab={onTab} />
-
-      {/* Import a list of titles. One entry point, the reviewed flow on its own page: the textarea that used
-          to sit under it here added the FIRST cross-source hit with no review, which is the "wrong manga" an
-          admin then had to find and remove. POST /api/admin/import still exists for scripts (docs/api.md). */}
-      <div className="card grad-border wide p-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Import a list')}</p>
-        <p className="mb-3 text-[11px] text-fog-500">
-          {tr('Bring your library over from another app: import a list → review matches → add. A Mihon / Tachiyomi backup, a public MangaDex list, or pasted titles; every match is shown before anything is added.')}
-        </p>
-        <button onClick={() => router.push('/admin/import/')} className="btn-key btn-key-primary w-full">
-          {tr('Import and review matches →')}
-        </button>
-      </div>
-
-      {list.length === 0 ? (
-        <div className="card grad-border full p-6 text-center">
-          <p className="text-sm font-semibold text-fog-100">{tr('No sources installed')}</p>
-          {/* Desktop has no SOURCES_DIR to mount anything at: its ways to a source are this tab and the engine. */}
-          {isDesktop() ? (
-            <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">{tr('Add a site above, or download the extension engine under Extensions and turn on an extension source. With none, Uchiyomi reads only the library you already own.')}</p>
-          ) : (
-            <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
-          )}
-        </div>
-      ) : (
-        <>
-          {/* MangaDex is one card with its languages in it (v0.52.0, #123), even while English is all that is on. */}
-          {groups.map((g) => (g.key === MANGADEX_GROUP
-            ? <MangadexCard key={g.key} group={g} row={variantRow} mark={statusMark} onSaved={inval} />
-            : g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
-        </>
-      )}
-
-      {explaining && <SourcesExplainer onClose={() => setExplaining(false)} />}
-    </div>
-  );
-}
-
-/**
- * What the desktop shell says about the extension engine download, or null anywhere but the desktop app's
- * own window (the server build, a browser tab, the desktop app in server mode) -- so every caller's other arm
- * is exactly what it rendered before. Follows the shell's progress events while mounted.
- */
-function useDesktopEngineState(): EngineStatus['state'] | null {
-  const [st, setSt] = useState<EngineStatus['state'] | null>(null);
-  useEffect(() => {
-    const b = bridge();
-    if (!b?.engine) return;
-    let live = true;
-    b.engine.status?.().then((x) => { if (live) setSt(x?.state ?? null); }).catch(() => {});
-    const off = b.engine.onStatus?.((x) => { if (live) setSt(x?.state ?? null); });
-    return () => { live = false; if (typeof off === 'function') off(); };
-  }, []);
-  return st;
-}
-
-/**
- * The Providers tab's door to the Extensions tab: one line of status and a chevron, the whole card a
- * button. It reads the same status query the Extensions tab does (same key, same url), so the count here
- * is the count there, and a click is a tab switch rather than a navigation -- the `?tab=` in the URL
- * follows it.
- */
-function ExtensionsLink({ onTab }: { onTab: (t: Tab) => void }) {
-  const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
-  const engine = useDesktopEngineState();
-  const down = !!status && (!status.configured || !status.reachable);
-  const sub = !status ? tr('Loading…')
-    // ⚠️ On desktop the engine is a download nobody has made yet, and "isn't running" read as a fault on the
-    // very first visit. The shell knows which it is; the server only knows it cannot reach it.
-    : down && engine === 'absent' ? tr('Not installed yet — download it under Extensions')
-    : down && engine === 'downloading' ? tr('Downloading the extension engine…')
-    : down && engine === 'installing' ? tr('Installing the extension engine…')
-    : down && (engine === 'starting' || engine === 'running') ? tr('Starting the extension engine…')
-    : down && engine === 'failed' ? tr('The extension engine could not be installed.')
-    // #72: why, on the server build: switched off on purpose, never set up, or set up and not answering.
-    : down && status.off === 'switch' ? tr('Extensions are turned off')
-    : down && status.off === 'unset' ? tr('No extension engine is set up')
-    : down ? tr('The extension engine isn’t answering')
-    : status.enabled === 1 ? tr('1 source enabled')
-    : tr('{n} sources enabled', { n: status.enabled ?? 0 });
-  return (
-    <button type="button" onClick={() => onTab('Extensions')}
-      className="card grad-border wide flex w-full items-center gap-3 p-4 text-start transition hover:bg-ink-800/60">
-      <span className="min-w-0 flex-1">
-        <span className="block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</span>
-        <span className="block text-sm text-fog-200">{sub}</span>
-      </span>
-      <IcChevronRight width={18} height={18} aria-hidden className="shrink-0 text-fog-500 rtl:-scale-x-100" />
-    </button>
   );
 }
 

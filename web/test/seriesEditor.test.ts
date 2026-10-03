@@ -281,5 +281,8 @@ test('the picture over the page is called a banner everywhere, and its words are
   assert.doesNotMatch(admin, /toast\('Failed to apply'/, 'Content → Art fails in English');
   assert.doesNotMatch(read('app/page.tsx'), /<SectionTitle>Because you read \{/, 'the home page says "Because you read" in English');
   // Arabic letters are joined: letter-spacing pulls them apart (the Source health group head already says so).
-  assert.match(read('components/ExtensionsPanel.tsx'), /tracking-wider text-fog-500 rtl:tracking-normal">\{title\}<\/h3>/, 'the Extensions group head spaces Arabic letters apart');
+  // Admin → Sources' heads (v0.54.0; Extensions' group heads before): every letter-spaced one is plain in Arabic.
+  const heads = [...read('components/SourcesPanel.tsx').matchAll(/className="([^"]*\btracking-(?:wider|widest|\[[^\]]+\])[^"]*)"/g)].map((m) => m[1]);
+  assert.ok(heads.length >= 2, 'the Sources heads are not where this test looks');
+  for (const c of heads) assert.match(c, /\brtl:tracking-normal\b/, `a Sources head spaces Arabic letters apart: ${c}`);
 });

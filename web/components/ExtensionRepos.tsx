@@ -1,5 +1,6 @@
 'use client';
-// Extension repositories (v0.45.0, a sheet of its own since v0.53.0): where Admin → Extensions' catalogue comes from.
+// Extension repositories (v0.45.0, a sheet of its own since v0.53.0): where the extension catalogue comes from (Admin →
+// Sources → Add sources since v0.54.0).
 // Uchiyomi never hosts extensions: the catalogue is what the repositories the operator adds here list, and the
 // engine does the fetching. Rarely touched once set, so it is a sheet behind Browse's Repositories key -- except on a
 // first visit with none, when the form IS the next step and stands on Browse itself (RepoForm).

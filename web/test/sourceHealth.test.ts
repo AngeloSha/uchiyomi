@@ -91,6 +91,32 @@ test('ONE key per row: Clear block for a cooldown it can clear, Test for the res
   assert.equal(primaryOf(ROWS[7]), null, 'nor does a switched-off one');
 });
 
+test('Replace leads wherever it is offered, the switched-off fold included, and opens the Replace dialog', () => {
+  // v0.54.0: aqua sat in "Switched off by you", still the main source of 195 series, with nothing to press but Test.
+  // The server offers `replace_source` on a source that is off or failing and some series' main (and on the
+  // frozen-series rows); it is the row's one key wherever it is. Reintroduce primaryOf without its first line: "a
+  // failing main source leads with Test" fails; move the line after the fold check: "the switched-off fold offers no
+  // Replace" does.
+  const failing = item({ sourceId: 'manhuaus', title: 'Manhuaus', group: 'affected', state: 'failing', stage: 'pages', series: 48,
+    actions: ['test', 'disable', 'replace_source', 'find_sources', 'ignore'], findSeries: 48, key: 'source:manhuaus' });
+  const aqua = item({ sourceId: 'aqua', title: 'Aqua Manga', group: 'off', state: 'off', offBy: 'admin', info: true, series: 195,
+    actions: ['test', 'replace_source'], findSeries: 195, key: 'source:aqua' });
+  assert.equal(primaryOf(failing), 'replace_source', 'a failing main source leads with Test');
+  assert.equal(primaryOf(aqua), 'replace_source', 'the switched-off fold offers no Replace');
+  assert.equal(primaryOf({ ...ROWS[0], actions: [...(ROWS[0].actions ?? []), 'replace_source'] }), 'replace_source', 'Clear block outranks Replace');
+  // Drawn: the row's one key reads Replace, filled; Test and the rest are in its ⋯ menu.
+  const html = render({ ...CHECK, items: [failing] });
+  const row = rowsOf(html)[0];
+  assert.match(row, /<button type="button" data-health-action="replace_source" data-health-primary="" class="btn-key btn-key-primary [^"]*"[^>]*><span>Replace<\/span><\/button>/,
+    'the row\'s key is not Replace');
+  // The key opens the dialog Admin → Sources opens, on <body>, for this source.
+  const keys = code(read('components/HealthActions.tsx'));
+  assert.match(keys, /case 'replace_source':\s*return \{ \.\.\.base, primary: true, label: tr\('Replace'\), onRun: \(\) => setAsking\('replace'\) \};/);
+  assert.match(keys, /\{asking === 'replace' && item\.sourceId && \(\s*<OnBody>\s*<ReplaceDialog sourceId=\{item\.sourceId\}/, 'Replace opens no dialog, or one inside the card');
+  // Its glossary entry, with what it does before the press.
+  assert.match(read('lib/healthCopy.ts'), /replace_source: \{\s*label: \(\) => tr\('Replace'\),\s*what: /, 'the key glossary has no Replace');
+});
+
 test('a row says its state in a word, why, and how many series use it', () => {
   assert.equal(stateWord(ROWS[0]), 'Rate-limited');
   assert.match(stateReason(ROWS[0]), /^trying again in (19|20) minutes$/);
@@ -124,6 +150,12 @@ test('a row says its state in a word, why, and how many series use it', () => {
   assert.equal(tileLetters('fake-b'), 'FB');
   assert.equal(tileLetters('مانجا'), 'م');
   assert.equal(tileLetters('2024'), '2', 'no letter at all: the avatar\'s rule');
+  // v0.54.0, Admin → Sources lists every source: a name that starts with its number is the number and the letter after
+  // it, the language suffix left out -- the avatar's rule drew "3(" for "3Hentai (EN)". Reintroduce the words-only rule:
+  // these fail.
+  assert.equal(tileLetters('3Hentai (EN)'), '3H', 'a name that starts with its number draws its suffix');
+  assert.equal(tileLetters('1Manga.co'), '1M');
+  assert.equal(tileLetters('24h manga'), '2H', 'a name led by a number keeps only its first digit');
 });
 
 test('Turn off all asks about the failing sources nothing uses, in words that agree with the count', () => {
@@ -131,8 +163,10 @@ test('Turn off all asks about the failing sources nothing uses, in words that ag
   assert.deepEqual(bulkTargets([{ ...ROWS[4], actions: ['test'] }]), [], 'only a row that can still be turned off');
   assert.equal(turnOffAllLabel(5), 'Turn off all 5');
   assert.equal(turnOffAllLabel(1), 'Turn off', 'one source: the row\'s own verb, never "Turn off all 1"');
-  assert.equal(turnOffQuestion(5), 'Turn off these 5 sources? No series uses them. You can turn them back on in Providers.');
-  assert.equal(turnOffQuestion(1), 'Turn off this source? No series uses it. You can turn it back on in Providers.');
+  // v0.54.0: they come back on in Admin → Sources, whatever switched them off (Providers before, which could not turn
+  // an extension's source back on).
+  assert.equal(turnOffQuestion(5), 'Turn off these 5 sources? No series uses them. You can turn them back on in Admin → Sources.');
+  assert.equal(turnOffQuestion(1), 'Turn off this source? No series uses it. You can turn it back on in Admin → Sources.');
   assert.equal(turnOffOutcome(5, 0), '5 sources turned off');
   assert.equal(turnOffOutcome(1, 0), '1 source turned off');
   assert.equal(turnOffOutcome(3, 2), '3 sources turned off · 2 sources could not be turned off');
@@ -258,12 +292,13 @@ test('the glossary is at the foot, behind a link, no longer above the list', () 
   const main = slice(body, 'export function SourceHealthBody(', 'function Group(');
   assert.ok(!main.includes('<HealthCardActions'), 'the glossary is drawn in the card\'s body, above or among the groups');
   assert.match(slice(body, 'function Foot(', ''), /\{open === 'legend' && \(\s*<div id="health-sources-legend">\s*<HealthCardActions check=\{check\}/);
-  // The switched-off fold points where each comes back on. Reintroduce the one Providers link for every row: "an
-  // extension's source is sent to Providers, which cannot turn it on" fails.
+  // The switched-off fold points where they come back on: Admin → Sources since v0.54.0, which turns on every kind --
+  // where Providers and Extensions were two links, and Providers could not turn an extension's source on.
+  // Reintroduce either old link: "a switched-off source is sent to a tab that is gone" fails.
   const fold = slice(main, "<Fold id=\"off\"", '</Fold>');
-  assert.match(fold, /off\.some\(\(r\) => !r\.it\.offBy \|\| r\.it\.offBy === 'admin'\) && \(\s*<a href="\/admin\/\?tab=Providers"/, 'Providers is linked for a source that came back on elsewhere');
-  assert.match(fold, /off\.some\(\(r\) => r\.it\.offBy === 'extension' \|\| r\.it\.offBy === 'language'\) && \(\s*<a href="\/admin\/\?tab=Extensions"/,
-    'an extension\'s source is sent to Providers, which cannot turn it on');
+  assert.match(fold, /<a href="\/admin\/\?tab=Sources" data-source-turn-on="sources" [^>]*>\{tr\('Turn sources back on in Admin → Sources'\)\}/, 'the fold does not say where they come back on');
+  assert.equal((fold.match(/<a href=/g) ?? []).length, 1, 'the fold has more than one way back');
+  assert.doesNotMatch(fold, /tab=(Providers|Extensions)/, 'a switched-off source is sent to a tab that is gone');
 });
 
 test('the card stays a Health card: no capsules, its rows findable, names in their own direction', () => {
