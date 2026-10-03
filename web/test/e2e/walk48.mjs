@@ -14,7 +14,8 @@
 //   5. the same made through the UI: a theme change in the reader's sheet pins the look but not the
 //      direction, Profile → Settings → Right to left then reaches the title, and a direction chosen in the
 //      sheet for one title is kept;
-//   6. the admin's direction in Edit details is what Series default follows, and Automatic hands it back.
+//   6. the admin's direction in Edit details is what Series default follows, and Automatic hands it back. Since
+//      v0.53.0 it is a row of segments on the dialog's Reading tab that saves as it is picked (no Save details key).
 //
 // Needs an instance of its OWN and its library folder, into which it writes its two series
 // (`seed.py --rtl`) before asking the server to scan:
@@ -88,7 +89,10 @@ const [PLAIN_1] = await books(PLAIN);
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'], defaultViewport: { width: WIDTH, height: 900 } });
 const page = await browser.newPage();
 const serverErrors = [];
+const consoleErrors = [];
 page.on('response', (r) => { if (r.status() >= 500) serverErrors.push(`${r.status()} ${r.url()}`); });
+page.on('pageerror', (e) => consoleErrors.push(`pageerror ${e.message}`));
+page.on('console', (m) => { if (m.type() === 'error' && !/401|auth\/me|Failed to load resource/.test(m.text())) consoleErrors.push(m.text()); });
 await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
 await page.waitForSelector('input[type=password]', { timeout: 30000 });
 await sleep(2500); // the form renders again once /auth/config answers; typing before that is lost
@@ -220,15 +224,29 @@ try {
   await page.goto(`${BASE}/series/?id=${MANGA}`, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(2500);
   await page.evaluate(() => { [...document.querySelectorAll('button')].find((x) => x.textContent?.includes('Edit details'))?.click(); });
-  await sleep(1000);
-  const DIR_SELECT = 'select:has(option[value="RIGHT_TO_LEFT"])';
-  const sel = await page.$eval(DIR_SELECT, (el) => { el.scrollIntoView({ block: 'center' }); return { value: el.value, auto: el.options[0].textContent }; }).catch(() => null);
+  await page.waitForSelector('[data-series-editor]', { timeout: 10000 }).catch(() => {});
+  await page.click('[data-edit-tab="reading"]').catch(() => {});
+  await sleep(600);
+  // v0.53.0: segments on the Reading tab. Automatic says what it reads as, and the line under the help what said so.
+  const DIRS = '[data-series-editor] [role="radiogroup"][aria-label="Reading direction"] [role="radio"]';
+  const dir = await page.evaluate((sel) => {
+    const radios = [...document.querySelectorAll(sel)];
+    return {
+      auto: radios[0]?.textContent?.trim(), checked: radios.find((r) => r.getAttribute('aria-checked') === 'true')?.textContent?.trim(),
+      said: document.querySelector('[data-series-editor] [data-auto-direction]')?.textContent?.trim(),
+    };
+  }, DIRS);
   await page.screenshot({ path: `${OUT}/11-edit-details.png` });
   check('Edit details says what Automatic is and what said so',
-    sel?.value === '' && sel?.auto === 'Automatic — Right to left, from the chapter files', JSON.stringify(sel));
-  await page.select(DIR_SELECT, 'LEFT_TO_RIGHT');
-  check('Save details is there', (await clickText('Save details')) === 1);
-  await sleep(1500);
+    dir.auto === 'Automatic · Right to left' && dir.checked === dir.auto && dir.said === 'Automatic — Right to left, from the chapter files', JSON.stringify(dir));
+  check('there is no Save details key: a direction saves as it is picked', (await clickText('Save details')) === 0);
+  await page.evaluate((sel) => [...document.querySelectorAll(sel)].find((r) => r.textContent?.trim() === 'Left to right')?.click(), DIRS);
+  let said = null;
+  for (let i = 0; i < 60 && !said; i++) {
+    await sleep(100);
+    said = await page.$eval('[data-edit-save]', (e) => (['saved', 'error'].includes(e.getAttribute('data-edit-save')) ? e.getAttribute('data-edit-save') : null)).catch(() => null);
+  }
+  check('...and says Saved', said === 'saved', String(said));
   m = await openAndTurn(MANGA_1, '12-admin-ltr');
   check("Series default follows the admin's Left to right", m.dir === 'ltr' && m.left === m.width, JSON.stringify(m));
   await api(`/api/admin/series/${MANGA}/meta`, { method: 'PUT', body: JSON.stringify({ title: 'Right To Left', readingDirection: null }) });
@@ -238,6 +256,7 @@ try {
   check('the walk ran to the end', false, String(e?.stack || e));
 }
 check('no 5xx along the way', serverErrors.length === 0, serverErrors.slice(0, 5).join(' | '));
+check('no console errors along the way', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | '));
 await browser.close();
 const failed = results.filter((ok) => !ok).length;
 console.log(`\n${results.length - failed}/${results.length} ok, ${failed} failure(s)`);

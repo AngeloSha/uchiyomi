@@ -245,17 +245,34 @@ const NOT_CENTRED: Record<string, string> = {
   'components/ReaderSettings.tsx': 'a full-width bottom sheet: the notices rise above it (above-sheet)',
   'components/CommandPalette.tsx': 'anchored at the top, over the notices (z-[70])',
 };
+/**
+ * Centred panels wider than the column's arithmetic allows, which stay clear of it the other way: from lg up they end
+ * 7 rem above the bottom edge (`lg:pb-28` on their overlay), over the corner a docked notice takes -- one card, two
+ * lines at most, 1.5 rem up. The test below holds each to that class.
+ */
+const CLEAR_OF_THE_CORNER: Record<string, string> = {
+  'components/SeriesEditor.tsx': 'Edit details (v0.53.0), about 880 px wide with the art in a column',
+};
+/** A max-w-* class in rem: Tailwind's named steps, and an arbitrary px or rem width. */
+const maxWidthRem = (w: string): number | null => {
+  const named = MAX_W[w];
+  if (named) return named;
+  const m = /^\[(\d+(?:\.\d+)?)(px|rem)\]$/.exec(w);
+  return m ? Number(m[1]) / (m[2] === 'px' ? 16 : 1) : null;
+};
 function widestCentredPanel(): { rem: number; where: string } {
   let widest = { rem: 0, where: '' };
   for (const f of walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')))) {
     const rel = f.slice(ROOT.length + 1);
-    if (NOT_CENTRED[rel]) continue;
+    if (NOT_CENTRED[rel] || CLEAR_OF_THE_CORNER[rel]) continue;
     const src = code(readFileSync(f, 'utf8'));
     for (const m of src.matchAll(/\saria-modal="true"/g)) {
-      // The tag's own class list and the next few lines, where Modal's and Sheet's panels are.
+      // The tag's own class list and the next few lines, where Modal's and Sheet's panels are. An arbitrary width
+      // counts too (v0.53.0): a panel written as `max-w-[880px]` is as wide as a named step would make it.
       const near = src.slice(Math.max(0, m.index! - 400), m.index! + 1200);
-      for (const w of near.matchAll(/(?<![\w-])(?:sm:|md:|lg:)?max-w-(xs|sm|md|lg|xl|2xl|3xl|4xl|5xl)\b/g)) {
-        if (MAX_W[w[1]] > widest.rem) widest = { rem: MAX_W[w[1]], where: `${rel}: max-w-${w[1]}` };
+      for (const w of near.matchAll(/(?<![\w-])(?:sm:|md:|lg:)?max-w-(xs|sm|md|lg|xl|2xl|3xl|4xl|5xl|\[\d+(?:\.\d+)?(?:px|rem)\])(?![\w-])/g)) {
+        const rem = maxWidthRem(w[1]);
+        if (rem != null && rem > widest.rem) widest = { rem, where: `${rel}: max-w-${w[1]}` };
       }
     }
   }
@@ -288,6 +305,13 @@ test('from lg up the column beside a centred dialog never reaches it', () => {
     assert.ok(width >= 11 * rem, `the column is ${width}px at ${vw} px -- too narrow to read`);
   }
   for (const rel of Object.keys(NOT_CENTRED)) assert.match(code(read(rel)), /\saria-modal="true"/, `${rel} is no longer a dialog: drop it from NOT_CENTRED`);
+  // The wider ones end above the corner from lg up. Reintroduce Edit details' overlay without `lg:pb-28`: "Edit
+  // details reaches into the notices' corner" fails -- and walk49's notices phase sees the card on its panel.
+  for (const [rel, what] of Object.entries(CLEAR_OF_THE_CORNER)) {
+    const src = code(read(rel));
+    assert.match(src, /\saria-modal="true"/, `${rel} is no longer a dialog: drop it from CLEAR_OF_THE_CORNER`);
+    assert.match(src, /className="fixed inset-0 [^"]*\blg:pb-28\b/, `${what} reaches into the notices' corner from lg up (${rel})`);
+  }
 });
 
 test('the tones: an error is a problem, a success the accent\'s done, anything else neutral', () => {

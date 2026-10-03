@@ -115,6 +115,30 @@ test('editing a series over HTTP', { skip }, async (t) => {
       assert.equal(o.age_rating, 13);
     });
 
+    await t.test('a picture as large as Edit details takes is uploaded, not refused for its size (v0.53.0)', async () => {
+      // The dialog says "Images up to 11 MB" and turns larger ones away itself; base64 in JSON makes a 10.5 MB picture
+      // a 14 MB body, which the route's old flat 12 MB limit answered with a 413. A PNG stored rather than deflated,
+      // so its size is its pixels: 2048 x 1792 x 3 bytes. Reintroduce `bodyLimit: 12 * 1024 * 1024` on the art
+      // route: "a 10.5 MB picture" answers 413.
+      const sharp = (await import('sharp')).default;
+      const { ART_MAX_BYTES, artFile } = await import('../src/lib/seriesArt');
+      const { existsSync } = await import('node:fs');
+      const [w, h] = [2048, 1792];
+      const noise = Buffer.alloc(w * h * 3);
+      for (let i = 0; i < noise.length; i++) noise[i] = (i * 2654435761) >>> 24;
+      const png = await sharp(noise, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+      assert.ok(png.length > 10 * 1024 * 1024 && png.length <= ART_MAX_BYTES, `the picture is ${png.length} bytes, not between 10 MB and the limit`);
+      const r = await app.inject({
+        method: 'PUT', url: `/api/admin/series/${S}/art`, headers: auth,
+        payload: { kind: 'banner', mode: 'upload', dataUrl: `data:image/png;base64,${png.toString('base64')}` },
+      });
+      assert.equal(r.statusCode, 200, `a 10.5 MB picture answered ${r.statusCode}: ${r.body.slice(0, 200)}`);
+      assert.ok(existsSync(artFile(S, 'banner')), 'the upload was not stored');
+      assert.equal((await q<{ banner: string }>('SELECT banner FROM series_overrides WHERE series_id = $1', [S]))[0]?.banner, 'upload');
+      await app.inject({ method: 'PUT', url: `/api/admin/series/${S}/art`, headers: auth, payload: { kind: 'banner', mode: 'reset' } });
+      assert.ok(!existsSync(artFile(S, 'banner')), 'a reset left the upload behind');
+    });
+
     await t.test('a rating outside the scale is refused, not crashed on', async () => {
       // 400 and 500 look the same to a user and completely different to whoever has to fix it.
       for (const bad of [19, -1, 3.5]) {

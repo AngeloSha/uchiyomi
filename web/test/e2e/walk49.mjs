@@ -35,8 +35,8 @@
 //        constant), and above the library's, which wraps to two;
 //     3. a Modal over that bar (Delete from server): one card docked in the nav band, clear of the title --
 //        and from lg up clear of the whole panel;
-//     4. a hand-rolled centred dialog (Edit details, Check now) and a Sheet (Sources & translations, Check
-//        now), the same;
+//     4. Edit details (a dialog of its own, a bottom sheet on a phone since v0.53.0; Check now on its Updates tab)
+//        and a Sheet (Sources & translations, Check now), the same;
 //     5. the reader: above the chapter sheet and the settings sheet, which run to the bottom edge;
 //     6. under the system's reduced motion: no turning ring (a still one), no draining hairline -- and the
 //        turn and the hairline are there without it.
@@ -380,8 +380,9 @@ async function notices(width) {
   check(`${tag}: a hovered notice stays, fully drawn`, s.cards.length > 0 && s.cards.every((c) => c.opacity === 1), fmt(s));
   await shot(`${tag}-2-above-select-bar`);
 
-  // 3. a Modal over the select bar
-  await press('Delete from server');
+  // 3. a Modal over the select bar. The bar's key says what it removes since v0.52.0 ("Remove 2 chapters"; the
+  // confirmation it opens is still Delete from server): pressing the old words found no key, and no dialog opened.
+  await press('Remove 2 chapters');
   await sleep(700);
   await holdNotice(); // docked in the nav band now, away from the mouse
   await sleep(200);
@@ -430,16 +431,19 @@ async function notices(width) {
   await releaseMouse();
   await sleep(300);
 
-  // 4. Edit details (a hand-rolled centred dialog) and Sources & translations (a Sheet), each with Check now
+  // 4. Edit details (a dialog of its own; Check now is on its Updates tab) and Sources & translations (a Sheet), each
+  // with Check now
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
+  await press('Updates', '[role="dialog"]');
+  await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.length > 0, 5000);
   await sleep(500);
   s = await scene();
   check(`${tag}: Check now in Edit details says it is checking, with a ring`, s.cards.some((c) => c.busy && /Checking for new chapters/.test(c.text || '')), fmt(s));
-  checkOverDialog(s, `${tag}: Edit details (a centred dialog)`, wide);
+  checkOverDialog(s, `${tag}: Edit details (its own dialog)`, wide);
   await shot(`${tag}-4-edit-details`);
   await page.keyboard.press('Escape');
   await page.evaluate(() => document.querySelector('[role="dialog"]')?.parentElement?.click());
@@ -513,6 +517,8 @@ async function notices(width) {
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
+  await press('Updates', '[role="dialog"]');
+  await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.some((c) => c.busy), 5000);
   s = await scene();
@@ -523,6 +529,8 @@ async function notices(width) {
   await go(`/series/?id=${tale.id}`);
   await press('Edit details');
   await sleep(700);
+  await press('Updates', '[role="dialog"]');
+  await sleep(300);
   await press('Check for new chapters now', '[role="dialog"]');
   await waitFor(async () => (await scene()).cards.some((c) => c.busy), 5000);
   s = await scene();

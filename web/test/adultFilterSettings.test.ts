@@ -8,6 +8,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { metaBody, seedMeta } from '../lib/seriesMeta';
+import type { Series } from '../lib/types';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -62,18 +64,27 @@ test('a toggle is saved from local state, and a failed save puts the chip back',
 test('the edit dialog seeds "Always show" from the override and sends it on save', () => {
   // The route leaves the flag alone when the field is absent, so a dialog that did not know about it would
   // be harmless -- but one that sent `false` without seeding it would clear every exemption on a retitle.
-  // Reintroduce by `useState(false)`: "the checkbox is not seeded" fails.
-  // Raw, not `code()`: this page has `/*` inside string literals, which the comment stripper would eat.
-  const src = read('app/series/page.tsx');
-  assert.match(src, /const \[adultExempt, setAdultExempt\] = useState\(series\.overrides\?\.adultExempt === true\);/, 'the checkbox is not seeded from the override');
-  // `adultExempt` then whatever follows it (readingDirection since v0.48.0): what matters is that it is sent.
-  assert.match(src, /ageRating: ageRating === '' \? null : Number\(ageRating\), adultExempt[,} ]/, 'the save does not send the flag');
-  assert.match(src, /checked=\{adultExempt\} onChange=\{\(e\) => setAdultExempt\(e\.target\.checked\)\}/);
+  // Since v0.53.0 the dialog (components/SeriesEditor.tsx) seeds and sends through lib/seriesMeta.ts, driven here
+  // with plain values. Reintroduce by seeding `adultExempt: false` there: "the switch is not seeded" fails.
+  const base: Series = {
+    id: 's_1', libraryId: 'lib', name: 'Kept', booksCount: 1, booksReadCount: 0, booksUnreadCount: 1, booksInProgressCount: 0,
+    metadata: { title: 'Kept' },
+    overrides: { title: null, summary: null, cover: null, banner: null, author: null, status: null, genres: null, ageRating: null, adultExempt: true },
+  };
+  assert.equal(seedMeta(base).adultExempt, true, 'the switch is not seeded from the override');
+  assert.equal(seedMeta({ ...base, overrides: undefined }).adultExempt, false);
+  // Every save carries it, a retitle included: the whole object goes up on each one.
+  assert.equal(metaBody({ ...seedMeta(base), title: 'Renamed' }).adultExempt, true, 'the save does not send the flag');
+  // And the switch is wired to that save, not to a copy of the flag of its own.
+  const editor = read('components/SeriesEditor.tsx');
+  assert.match(editor, /<SwitchRow label=\{tr\('Always show'\)\} on=\{meta\.adultExempt\}/, 'the switch does not show the seeded flag');
+  assert.match(editor, /onChange=\{\(adultExempt\) => save\(\{ adultExempt \}\)\}/, 'flipping the switch does not save it');
 });
 
 test('every new string is in all eight locale files', () => {
-  // settingsConsole.test.ts already scans AdminSettings.tsx; the dialog's two strings live in the series
-  // page, which no locale test reads. Reintroduce by deleting "Always show" from public/locales/ar.json.
+  // settingsConsole.test.ts already scans AdminSettings.tsx; the dialog's two strings live in Edit details
+  // (components/SeriesEditor.tsx since v0.53.0), which no locale test of its own reads. Reintroduce by deleting
+  // "Always show" from public/locales/ar.json.
   const keys = [
     '18+ filter', 'No genres yet.', 'Always show',
     'Sources to treat as adult, on top of the ones their extension already declares.',
@@ -81,7 +92,7 @@ test('every new string is in all eight locale files', () => {
     'Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.',
   ];
   for (const k of keys) {
-    assert.ok(read('components/AdminSettings.tsx').includes(`tr('${k}')`) || read('app/series/page.tsx').includes(`tr('${k}')`),
+    assert.ok(['components/AdminSettings.tsx', 'components/SeriesEditor.tsx'].some((f) => read(f).includes(`tr('${k}')`)),
       `"${k}" is no longer rendered -- update this list`);
   }
   const files = readdirSync(join(ROOT, 'public/locales')).filter((f) => f.endsWith('.json'));

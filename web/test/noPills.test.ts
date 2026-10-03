@@ -60,6 +60,8 @@ const SURFACES = [
   // v0.53.0, Health → Source health decluttered: its groups, folds, compact rows and Turn off all, and their words.
   'components/SourceHealthBody.tsx',
   'lib/sourceHealth.ts',
+  // v0.53.0, Edit details redone: its keys, its genre tags and its close key.
+  'components/SeriesEditor.tsx',
   // v0.53.0, Admin → Extensions redesigned: an extension's sheet, the languages and repositories sheets, the pieces
   // the rows share and the words they say. Browse's filter row keeps its chips: ExtensionsPanel.tsx is sliced below.
   'components/ExtensionSheet.tsx',

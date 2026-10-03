@@ -8080,7 +8080,11 @@ paths:
         - admin
       summary: Set a series' cover or banner (upload, URL, or a candidate).
       operationId: putApiAdminSeriesIdArt
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
+        image of up to 11 MB as a base64 data URL; the body may be up to about 14.7 MB to carry one (v0.53.0; 12 MB
+        before, which refused pictures between 9 and 11 MB). `url` stores the address the art is fetched from, and
+        `reset` hands the art back to the automatic source.
       parameters:
         - name: id
           in: path
@@ -8088,29 +8092,41 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [kind, mode]
               properties:
-                cover:
+                kind:
                   type: string
-                banner:
+                  enum: [cover, banner]
+                mode:
                   type: string
+                  enum: [url, upload, reset]
+                url:
+                  type: string
+                  format: uri
+                  description: For `url`.
+                dataUrl:
+                  type: string
+                  description: For `upload`, `data:image/...;base64,...`.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: Malformed body or parameter, or an upload that is no readable image (`bad_image`)
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "413":
+          description: The body is over the limit (a picture over 11 MB)
   /api/admin/art/overview:
     get:
       tags:

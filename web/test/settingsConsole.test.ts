@@ -515,7 +515,8 @@ test('a row never grows wider than its card at 390 px', () => {
   // dropping `min-w-0` from the section: "the section lets its content widen the grid column" fails.
   const src = code(read('components/settings.tsx'));
   const row = slice(src, 'export function Row(', 'export function SwitchRow(');
-  const control = /<div className="([^"]*)">\s*\{children\}\s*<SaveState status=\{status \?\? IDLE\} \/>/.exec(row);
+  // The SaveState is the row's own unless a SaveScope says it in one place for the surface (v0.53.0, Edit details).
+  const control = /<div className="([^"]*)">\s*\{children\}\s*\{!scoped && <SaveState status=\{status \?\? IDLE\} \/>\}/.exec(row);
   assert.ok(control, 'the inline Row has no control block holding children + SaveState');
   assert.doesNotMatch(control[1], /\bshrink-0\b/, 'the control block cannot wrap');
   for (const cls of ['ms-auto', 'max-w-full', 'flex-wrap', 'justify-end']) assert.match(control[1], new RegExp(`\\b${cls}\\b`), `the control block lost ${cls}`);

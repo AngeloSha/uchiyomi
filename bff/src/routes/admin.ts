@@ -46,7 +46,7 @@ import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import sharp from 'sharp';
-import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
+import { ART_BODY_LIMIT, ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
@@ -2597,8 +2597,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic.
-  app.put('/api/admin/series/:id/art', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
+  // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic. The body
+  // limit fits the largest picture Edit details takes once it is base64 (lib/seriesArt.ts ART_BODY_LIMIT).
+  app.put('/api/admin/series/:id/art', { bodyLimit: ART_BODY_LIMIT }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
