@@ -74,7 +74,7 @@ import { assess, gapsOf } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
 // question the page answers or the button and the page disagree about whether there is anything to do.
-import { solverBlaming } from './health';
+import { solverBlaming, gapsAnswered, type StoredGaps } from './health';
 import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
 import { withOrigin } from './downloadActivity';
@@ -1362,8 +1362,8 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   // will ever fill, and the button said "Fill now" and did nothing. The nightly keeps both filters.
   // Reintroduce by putting `s.auto_update AND` back for a named series: "Fill now fetches a gap a followed
   // source already lists, even with updates paused" in repair.int.test.ts looks at no series at all.
-  const candidates = await q<{ id: string; title: string; folder: string }>(
-    `SELECT s.id, s.title, s.folder FROM lib_series s
+  const candidates = await q<{ id: string; title: string; folder: string; checked: Date | null; result: StoredGaps | null }>(
+    `SELECT s.id, s.title, s.folder, s.gaps_checked_at AS checked, s.gaps_result AS result FROM lib_series s
       WHERE ${opts.seriesId ? '' : 's.auto_update AND '}${visibleToAll('s')}
         ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
@@ -1383,7 +1383,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   // One small indexed read per candidate. It is the only way to apply the override and tombstone rules
   // (lib/libraryNumbers.ts) per series, and a few hundred of them once a night is not a load worth
   // flattening into a query nobody can read.
-  const ranked: Array<{ id: string; title: string; folder: string; have: number[]; missing: number; gapNums: number[] }> = [];
+  const ranked: Array<{ id: string; title: string; folder: string; have: number[]; missing: number; gapNums: number[]; checkedAt: number }> = [];
   for (const s of candidates) {
     const have = await haveNumbers(s.id);
     const gaps = gapsOf(have);
@@ -1392,9 +1392,19 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
     const archive = archiving.get(s.id);
     if (archive && gapNums.every((n) => archive.numbers.has(n))) continue;
-    ranked.push({ ...s, have, missing: gapNums.length, gapNums });
+    // v0.55.0: "asked, and nobody has them", under a week old with nothing landed since, is still the answer -- the
+    // very rule that greys the Health row (health.ts gapsAnswered). The nightly asked again the moment its 24-hour
+    // stamp ran out, so the same handful of holes nobody can fill took the night's searches night after night. A person
+    // naming the series (Fill now) asks whatever the answer was. Reintroduce by dropping it: "the gaps rotate" in
+    // repair.int.test.ts finds the fresh answer searched again.
+    if (!opts.seriesId && gapsAnswered(s.result, s.checked, have.length)) continue;
+    ranked.push({ id: s.id, title: s.title, folder: s.folder, have, missing: gapNums.length, gapNums, checkedAt: s.checked ? new Date(s.checked).getTime() : 0 });
   }
-  ranked.sort((a, b) => b.missing - a.missing);
+  // Least recently checked first (never checked before all), then the emptiest (v0.55.0). Biggest-first alone took the
+  // five biggest holes every night: when those were unfillable they were searched again and again and a smaller hole
+  // was never reached. Reintroduce by sorting by `missing` alone: "the gaps rotate" in repair.int.test.ts finds the
+  // most recently checked series taken ahead of one never checked.
+  ranked.sort((a, b) => a.checkedAt - b.checkedAt || b.missing - a.missing);
   const take = ranked.slice(0, REPAIR_GAPS_MAX);
   planned('gaps', take.length);
   if (opts.seriesId && !take.length) {

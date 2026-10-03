@@ -317,7 +317,7 @@ const hiddenPart = (n: number): Part | null => (n > 0 ? joined('sentence', say('
  * release, and a health page that can throw because a stored row predates a field is a health page that
  * disappears exactly when something is wrong. Nothing here is trusted beyond being read.
  */
-interface StoredGaps {
+export interface StoredGaps {
   at?: string;
   have_count?: number;
   scanned?: number;
@@ -427,6 +427,28 @@ function gapConclusion(g: StoredGaps): string {
 const ANSWERED = new Set(['no_candidate', 'cap', 'off', 'posting_order']);
 
 /**
+ * When a series' stored gap conclusion was reached: gaps_result.at, else the stamp for a result that predates `at`.
+ * ⚠️ Not the stamp first: it is written before the search (lib/repair.ts stepGaps), so while a run is on the series it
+ * is new and the stored result is still the previous run's -- last week's answer read as tonight's.
+ */
+export function gapsCheckedAt(g: StoredGaps | null | undefined, stamp: string | Date | null | undefined): Date | null {
+  if (g?.at && Number.isFinite(Date.parse(g.at))) return new Date(g.at);
+  return stamp ? new Date(stamp) : null;
+}
+
+/**
+ * "Asked, and the answer was no", and still the answer: one of the ANSWERED verdicts, reached under GAPS_FRESH_MS ago,
+ * with nothing landed since (`haveCount`, what the series holds now). Health greys such a row; the repair's gap step
+ * (v0.55.0) does not ask again until it is no longer fresh -- it used to, every night, for the same few series.
+ */
+export function gapsAnswered(
+  g: StoredGaps | null | undefined, stamp: string | Date | null | undefined, haveCount: number, now = Date.now(),
+): boolean {
+  const checked = gapsCheckedAt(g, stamp);
+  return !!g && !!checked && now - checked.getTime() < GAPS_FRESH_MS && ANSWERED.has(String(g.why)) && g.have_count === haveCount;
+}
+
+/**
  * Missing runs of chapter numbers: either the source never had them, or a download failed.
  *
  * Computed by `gapsOf`, the same function the fill dialog uses, and nothing else. There used to be a second
@@ -449,19 +471,14 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
     const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
-    // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped: the stamp is
-    // written before the search (lib/repair.ts stepGaps), so while a run is on this series the stamp is
-    // new and the stored result is still the previous run's -- and greyed "fresh" on the stamp, last
-    // week's answer read as tonight's. The stamp is the fallback for a result that predates `at`.
-    const checked = g?.at && Number.isFinite(Date.parse(g.at)) ? new Date(g.at)
-      : r.s.gapsCheckedAt ? new Date(r.s.gapsCheckedAt) : null;
+    // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped (gapsCheckedAt says why).
+    const checked = gapsCheckedAt(g, r.s.gapsCheckedAt);
     const fresh = !!checked && Date.now() - checked.getTime() < GAPS_FRESH_MS;
-    // A conclusion is about the library as it was when the search ran. One more chapter has landed since,
-    // so the hole may have moved: ask again rather than keep showing last night's answer.
-    const unchanged = !!g && g.have_count === r.s.numbers.length;
-    // "Asked, and the answer was no." A cooldown is NOT in the list (ANSWERED), deliberately and for the same
-    // reason the repair will not confirm a short chapter on one: not having asked is not an answer.
-    const answered = !!g && ANSWERED.has(String(g.why));
+    // "Asked, and the answer was no", still fresh, and nothing landed since -- a conclusion is about the library as it
+    // was when the search ran, and one more chapter may have moved the hole (gapsAnswered, which the repair's gap step
+    // reads too). A cooldown is NOT an answer (ANSWERED), for the same reason the repair will not confirm a short
+    // chapter on one: not having asked is not an answer.
+    const answeredFresh = gapsAnswered(g, r.s.gapsCheckedAt, r.s.numbers.length);
     // Every missing chapter is already listed on a source we follow, so this is the chapter sweep's job.
     // ⚠️ Still only while the conclusion is fresh: a hole the sweep was going to fetch a fortnight ago and
     // still has not is a finding again, not a promise.
@@ -477,7 +494,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // below the boundary, or a paused archive, its "not listed" and "paused" assertions read archiving.
     const takes = r.gaps.map((x) => archiveTakes(r.s.archive ?? undefined, x.lo, x.hi));
     const archived = !!r.s.archive && !r.s.archive.paused && r.gaps.every((x, i) => takes[i] === x.count);
-    const info = archived || (fresh && ((answered && unchanged) || sweepsIt));
+    const info = archived || answeredFresh || (fresh && sweepsIt);
     const what = g ? gapConclusion(g) : null;
     // What Fill now will do that the row would not otherwise say: fetch at once, at normal pace, numbers the
     // archive was going to fetch slowly (it passes ignoreArchiveBoundary, lib/repair.ts), and fetch a paused
