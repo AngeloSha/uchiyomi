@@ -68,22 +68,23 @@ let updatesSeen: { at: number; n: number } | null = null;
 /**
  * Extensions with an update waiting: the engine's own word, asked briefly and kept half a minute (a section that is
  * open polls); when it does not answer in time, the last extension check's (server_settings.extension_last_result: what
- * was waiting and was not updated).
+ * was waiting and was not updated) -- kept as long, so an engine that is away costs one wait, not one a poll.
  */
 async function updatesWaiting(): Promise<number> {
   if (!suwayomiConfigured()) return 0;
   if (updatesSeen && Date.now() - updatesSeen.at < UPDATES_KEEP_MS) return updatesSeen.n;
+  let n: number;
   try {
-    const n = (await withTimeout(listExtensions(), UPDATES_MS)).filter((e) => e.installed && e.hasUpdate).length;
-    updatesSeen = { at: Date.now(), n };
-    return n;
+    n = (await withTimeout(listExtensions(), UPDATES_MS)).filter((e) => e.installed && e.hasUpdate).length;
   } catch {
     const r = await q<{ last: { updatesAvailable?: string[]; updated?: Array<{ name: string }> } | null }>(
       'SELECT extension_last_result AS last FROM server_settings WHERE id = 1').catch(() => []);
     const last = r[0]?.last;
     const done = new Set((last?.updated ?? []).map((u) => u.name));
-    return (last?.updatesAvailable ?? []).filter((name) => !done.has(name)).length;
+    n = (last?.updatesAvailable ?? []).filter((name) => !done.has(name)).length;
   }
+  updatesSeen = { at: Date.now(), n };
+  return n;
 }
 
 /** Tests: forget the engine's last answer. */
