@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.53.1 — 2026-10-03
+
+**Find other sources asks the sources you can see, and learns a series' other names before it searches.** Both, and a
+repair for installs whose other names could not be read, are **@TIGamingTV**'s
+([#141](https://github.com/AngeloSha/uchiyomi/pull/141)).
+
+### Find other sources finds manhwa again
+
+- **Sources marked 18+.** A run asked a source that flags itself adult only for a series rated 18+, the background
+  hunt's rule. Most manhwa extensions flag themselves adult, so on a library that reads them nearly every series ended
+  with *no other source could be asked* or *no match*. A run, and a review's **Follow**, now ask every source the admin
+  who started it may see, as Discover and following a source by hand already do. The background hunt keeps its rule.
+- **Other names before the search.** A series added before v0.49.1 has no other names stored, so it was searched
+  under its own title alone, and a manhwa whose sites each romanise it another way matched nothing. A run now first
+  takes the names its description lists, and only when that gives none, its main source's description: once, with a
+  time limit, and never while that source is switched off, cooling down or already failed in the run. They are kept
+  like any other name, so a name you removed stays removed.
+- When a series has no source to ask, the server log now says why, by count.
+
+### Upgrading
+
+- **The database:** an install that ran the fork build of PR #119 kept that build's `series_alt_titles`, which every
+  read failed on, so no other names showed and none were searched. It is brought to the right shape on first start.
+  On any other install nothing changes, and v0.53.0 still starts.
+
 ## v0.53.0 — 2026-10-03
 
 **Three screens that had grown cluttered are redone around what you do on them: Admin → Extensions, Health's Source
