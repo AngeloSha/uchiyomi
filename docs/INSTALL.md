@@ -119,7 +119,7 @@ extension engine is not part of it.
 | Container | Role |
 |---|---|
 | `uchiyomi` | the app: the API, the PWA it serves, and the embedded Postgres database |
-| `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config, and since v0.37.0 so does the extension engine |
+| `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config, and since v0.37.0 so does the extension engine. trawl or Byparr can take its place, and since v0.55.4 a second solver can stand by as a backup ([the Cloudflare solver](CONFIGURATION.md#the-cloudflare-solver)) |
 | `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work once you add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container). Optional: `EXTENSION_ENGINE=0` in `.env` and `docker compose up -d` leave it out and keep its data ([turning it off](extensions.md#turning-it-off)) |
 
 ```bash
