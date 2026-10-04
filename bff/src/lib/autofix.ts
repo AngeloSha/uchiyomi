@@ -536,9 +536,15 @@ export function scrubAutofixRun(r: AutofixRun | null, hide: boolean, named: Read
  * (GET /api/admin/tasks/repair/runs) sends for a Fix everything row, which Recent repairs reads without asking for the
  * run by its id. Reintroduce by sending it as stored: "an admin who hides 18+ reads no adult title in the repair's
  * answers" in repairRoutes.int.test.ts finds the merged title in the history.
+ * Never `tried`, for anyone: the run's own memory of the packages it searched in vain, for the next runs (recentlyTried),
+ * which since v0.55.1 names every series each was searched for -- 18+ ones too, whoever reads it -- and which nothing in
+ * the web reads. The run's own routes never had it (fromRow). Reintroduce by keeping it: "a kept run's `tried` is in no
+ * answer" in repairRoutes.int.test.ts finds it in the history.
  */
 export function scrubAutofixRecord<R>(r: R, hide: boolean, named: ReadonlySet<string> = new Set()): R {
-  return r && hide && typeof r === 'object' ? scrubbed(r as Scrubbable, named) as R : r;
+  if (!r || typeof r !== 'object') return r;
+  const { tried: _tried, ...record } = r as Scrubbable & { tried?: unknown };
+  return (hide ? scrubbed(record, named) : record) as R;
 }
 
 /** GET /api/admin/health/autofix: the run going now, and the newest finished one. */

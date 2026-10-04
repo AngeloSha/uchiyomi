@@ -586,8 +586,8 @@ merged-away one included -- and so is one written before v0.55.1, with no ids, w
 Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly runs. Since v0.55.1 the extensions phase says
 what it did in one `done` line, `autofix.done.tried` {n, names, more} (the packages tried, naming those kept) or, when
 it kept none, `autofix.done.triedNone` {n} (`autofix.done.installed` and `autofix.done.uninstalled` stay for runs kept
-from before), and a kept run's `result.tried` lists the packages it searched in vain as `{pkg, lang, series}`, the
-series each was searched for (`{pkg, lang}` before).
+from before). What a run keeps of the packages it searched in vain, for the next runs (`tried`, naming the series each
+was searched for), is in no route's answer.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's

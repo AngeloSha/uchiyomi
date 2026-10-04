@@ -490,6 +490,46 @@ test('Fix everything\'s lines are held to the series they name, for an admin who
   }
 });
 
+test('a kept Fix everything run\'s `tried`, which names series, is in no answer (v0.55.1)', { skip }, async () => {
+  // Lane C keeps the packages a run searched in vain WITH the series each was searched for (`tried: [{pkg, lang,
+  // series}]`), for the next runs' "never twice in a month" (lib/autofix.ts recentlyTried). The history sent the record as
+  // stored, so every admin -- one who hides 18+ too -- read the ids of every series the run looked for, and nothing in the
+  // web reads it. Reintroduce by sending it as stored (scrubAutofixRecord keeping `tried`): "the history leaves
+  // `tried` out" fails, with the reveal on and off.
+  const { clearRunDigest } = await import('../src/lib/repairRuns');
+  const tried = [{ pkg: 'eu.kanade.tachiyomi.extension.en.rrpackage', lang: 'en', series: [S] }];
+  const record = { phaseIndex: 9, log: [], tried, summary: { green: true, again: false, clears: [], needsYou: [], done: [] } };
+  const [{ id }] = await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result)
+     VALUES (gen_random_uuid(), now() + interval '2 minutes', now() + interval '2 minutes', 'manual', 'autofix', '{}'::jsonb, 'done', 5, $1::jsonb) RETURNING id`,
+    [JSON.stringify(record)]);
+  clearRunDigest();
+  const get = async (url: string) => {
+    const r = await app.inject({ method: 'GET', url, headers: { authorization: adminTok } });
+    assert.equal(r.statusCode, 200, r.body);
+    return r.json();
+  };
+  try {
+    for (const url of [`/api/admin/tasks/repair/runs?id=${id}`, `/api/admin/tasks/repair/runs?adult=1&id=${id}`]) {
+      const result = (await get(url)).content[0].result;
+      assert.equal(result.phaseIndex, 9, `PREMISE: the planted record (${url})`);
+      assert.ok(!('tried' in result), `the history leaves \`tried\` out (${url})`);
+    }
+    for (const url of [`/api/admin/health/autofix/${id}`, `/api/admin/health/autofix/${id}?adult=1`]) {
+      assert.ok(!('tried' in (await get(url))), `the run's own route leaves it out (${url})`);
+    }
+    const newest = await get('/api/admin/health/autofix');
+    assert.equal(newest.last?.id, id, 'PREMISE: the planted run is the newest');
+    assert.ok(!('tried' in newest.last), 'and so does the newest run\'s');
+    // Kept all the same: the next run reads it from the row.
+    const [row] = await q<{ result: any }>('SELECT result FROM repair_runs WHERE id = $1', [id]);
+    assert.deepEqual(row.result.tried, tried, 'the record keeps it for the next runs');
+  } finally {
+    await q('DELETE FROM repair_runs WHERE id = $1', [id]);
+    clearRunDigest();
+  }
+});
+
 test("the Tasks line's origin is null while the history has not caught up with the run it shows", { skip }, async () => {
   // The integration-1 review: the run check had no test of its own -- removed, the test above still passed. A result
   // naming a run the history's newest full run is not (the history lags a run that has just written the Tasks line)
