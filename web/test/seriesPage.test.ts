@@ -345,3 +345,15 @@ test('a work in two languages switches edition under the title, on the phone and
   assert.match(page, /\{editions && <EditionChips editions=\{editions\} onAdd=\{addLanguage\} className="mt-3 lg:hidden" \/>\}/, 'the phone has no switcher');
   assert.match(page, /seed=\{\{ kind: 'edition', of: id, title, \.\.\.addingLang \}\}/, '"+ Language" does not open the add dialog for this series');
 });
+
+test('a file holding a range of chapters holds every number in it on the series page (v0.55.2, #150)', () => {
+  // `Batman 01-07`: its 2 to 7 are not grey rows, not "not here", not hollow chips, and "Mark previous as read" from
+  // chapter 5 does not mark a `03-07` file read. Reintroduce `new Set(allBooks.map((b) => b.number))` for
+  // haveNumbers: the first assertion fails; `x.number < b.number` for Mark previous: the last one does.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /const haveNumbers = useMemo\(\(\) => heldBy\(allBooks\), \[allBooks\]\);/, 'the page\'s held numbers ignore range files');
+  assert.match(page, /const liveNumbers = useMemo\(\(\) => heldBy\(allBooks\.filter\(\(b\) => !b\.pruned\)\), \[allBooks\]\);/,
+    'the sheet\'s solid chips ignore range files');
+  assert.match(page, /\.filter\(\(x\) => lastOf\(x\) < b\.number && !x\.readProgress\?\.completed\)/,
+    'Mark previous as read marks a range file that runs past this chapter');
+});

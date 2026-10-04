@@ -32,11 +32,46 @@ export type RunWhy = 'floor' | 'archive';
 const collapses = (g: Pick<Ghost, 'why'>): g is Ghost & { why: RunWhy } => g.why === 'floor' || g.why === 'archive';
 
 /**
+ * The numbers some books hold, as a test: a book's own number, and every number inside a file holding a range
+ * (v0.55.2, #150: `Batman 01-07` holds 1 to 7). The server's rule (bff lib/chapterRanges.ts heldBy), for the lists
+ * the page draws: a number a range file holds is never a ghost, never "not here", never a hollow chip.
+ */
+export function heldBy(books: ReadonlyArray<Pick<Book, 'number' | 'numberEnd'>>): { has(n: number): boolean } {
+  const exact = new Set<number>();
+  const ranges: Array<[number, number]> = [];
+  for (const b of books) {
+    exact.add(b.number);
+    if (b.numberEnd != null && b.numberEnd > b.number) ranges.push([b.number, b.numberEnd]);
+  }
+  return { has: (n: number) => exact.has(n) || ranges.some(([a, z]) => n >= a && n <= z) };
+}
+
+/** The last chapter a book holds: the end of its range, else its number. */
+export const lastOf = (b: Pick<Book, 'number' | 'numberEnd'>): number => (b.numberEnd != null && b.numberEnd > b.number ? b.numberEnd : b.number);
+
+/**
+ * The whole numbers some books hold something at: each book's, and every one inside a range. Counted in steps from
+ * the start, never by `w++` on the number itself: past 2^53 a float's `+ 1` is the same float, and a chapter numbered
+ * 1e20 looped for ever. A thousand steps at most, as the server bounds a range (bff lib/naming.ts MAX_RANGE).
+ */
+export function wholesHeld(books: ReadonlyArray<Pick<Book, 'number' | 'numberEnd'>>): Set<number> {
+  const out = new Set<number>();
+  for (const b of books) {
+    const w = Math.floor(b.number);
+    out.add(w);
+    const steps = Math.min(1000, Math.floor(lastOf(b)) - w);
+    for (let k = 1; k <= steps; k++) out.add(w + k);
+  }
+  return out;
+}
+
+/**
  * The rows of the chapter list, in the list's direction.
  *
  *   * a number that has a book is a book row and NEVER a ghost, whatever the listing says -- the server
  *     applies the same rule, and this is the belt to its braces, because a stale listing that raced a
- *     download would otherwise show "Ch. 12" twice, once grey;
+ *     download would otherwise show "Ch. 12" twice, once grey. A number inside a file holding a range is
+ *     that book's (heldBy);
  *   * consecutive `floor` ghosts collapse into ONE run row. A "Latest 25 of 200" series has 175 numbers
  *     below its floor, and opening its page to 175 grey rows saying "not here yet" would bury the 25 that
  *     are. One line naming the range is what that situation needs -- and a run whose key (its lowest
@@ -55,7 +90,9 @@ const collapses = (g: Pick<Ghost, 'why'>): g is Ghost & { why: RunWhy } => g.why
  * its own rows is a footer.
  */
 export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll: boolean, expandedRuns: ReadonlySet<number> = new Set()): Row[] {
-  const have = new Set(books.map((b) => b.number));
+  // Reintroduce `new Set(books.map((b) => b.number))`: "a range file's numbers are no ghost rows" in
+  // chapterRows.test.ts finds 2 to 6 listed grey under `Batman 01-07`.
+  const have = heldBy(books);
   const missing = ghosts.filter((g) => Number.isFinite(g.number) && !have.has(g.number));
   const floor = missing.filter(collapses).sort((a, b) => a.number - b.number);
   let rest = missing.filter((g) => !collapses(g));
@@ -80,7 +117,7 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
   if (!showAll && rest.length > GHOST_CAP) {
     // Nearest the top of what is on disk first; at equal distance the higher number, since a reader moves
     // forward. With nothing on disk at all "the top" is the highest ghost, which keeps the newest.
-    const top = books.length ? Math.max(...books.map((b) => b.number)) : Math.max(...rest.map((g) => g.number));
+    const top = books.length ? Math.max(...books.map(lastOf)) : Math.max(...rest.map((g) => g.number));
     const ranked = [...rest].sort((a, b) => Math.abs(a.number - top) - Math.abs(b.number - top) || b.number - a.number);
     hidden = rest.length - GHOST_CAP;
     rest = ranked.slice(0, GHOST_CAP);

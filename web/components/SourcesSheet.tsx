@@ -409,7 +409,7 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
   blocked: boolean;
   serverBlocked: boolean;
   /** Numbers with a chapter row on this server: those chips are solid, the rest dimmed. */
-  haveNumbers: Set<number>;
+  haveNumbers: { has(n: number): boolean };
   seriesStatus?: string | null;
   controls?: React.ReactNode;
   /** Close the sheet and scroll the page to that chapter's row. */
@@ -494,7 +494,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   error: unknown;
   isLoading: boolean;
   /** Numbers with a LIVE chapter row here (not a tombstone): the chips for these are solid. */
-  haveNumbers: Set<number>;
+  haveNumbers: { has(n: number): boolean };
   /** When the listing behind the figures was last checked, for a source row that carries no time of its own. */
   checkedAt: string | null;
   onSaved: () => void;

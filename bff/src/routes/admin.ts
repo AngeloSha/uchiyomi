@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
 import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
 import numberingRoutes from './numbering';
+import { lastNumber } from '../lib/chapterRanges';
 import findSourcesRoutes from './findSources';
 import autoHeroRoutes from './autoHero';
 import { content as komga } from '../lib/backend';
@@ -1237,14 +1238,17 @@ export default async function adminRoutes(app: FastifyInstance) {
         `SELECT s.chapter_floor AS floor,
                 (SELECT max(n) FROM (SELECT l.number::float8 AS n FROM series_listing l WHERE l.series_id = s.id
                                      UNION ALL
-                                     SELECT COALESCE(ov.number, bk.number)::float8 FROM lib_books bk LEFT JOIN book_overrides ov ON ov.book_id = bk.id
+                                     SELECT (${lastNumber('bk', 'ov')})::float8 FROM lib_books bk LEFT JOIN book_overrides ov ON ov.book_id = bk.id
                                       WHERE bk.series_id = s.id) x) AS top
            FROM lib_series s WHERE s.id = $1`, [id]);
       const previous = prev?.floor == null ? null : Number(prev.floor);
       if (b.data.chapterFloor === 'caught_up' && prev?.top == null) {
         return reply.code(409).send({ error: 'nothing_listed', message: 'No chapter of this series is listed or here yet. Check for new chapters first.' });
       }
-      // A hair above the newest number, as the "Nothing yet" add floors: `chapter_floor` is inclusive from below.
+      // A hair above the newest number, as the "Nothing yet" add floors: `chapter_floor` is inclusive from below. A file
+      // holding a range is as new as its END (lib/chapterRanges.ts): caught up past `Batman 01-07` is past 7.
+      // Reintroduce the start above: "Mark caught up floors the series above a range file's end" in
+      // chapterRanges.int.test.ts finds the floor at 1.001.
       caughtUp = { floor: b.data.chapterFloor === 'caught_up' ? Number(prev!.top) + 0.001 : b.data.chapterFloor, previous };
     }
     const detail: Record<string, unknown> = { id };

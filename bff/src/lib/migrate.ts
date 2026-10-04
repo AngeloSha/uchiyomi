@@ -1428,6 +1428,12 @@ SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
 -- 1, and its scan reads every file by the first number again -- rule-2 rows included -- until v0.55.2's next scan reads
 -- those by rule 2 once more.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS name_rule smallint NOT NULL DEFAULT 1;
+-- number_end: the last chapter of a file that holds several, "Batman 01-07 (1987).cbz" -- number 1, number_end 7 --
+-- written by the scan for a rule-2 file, NULL for one chapter (lib/chapterRanges.ts says what each reader does with
+-- one). Deliberately no CHECK that it is above number: a v0.55.1 scan after a rollback rewrites number by the first
+-- number in the name and never meets this column, and a CHECK would make that UPDATE, and its folder, fail. A stored
+-- end not above the number is read as no range instead, until v0.55.2's next scan writes both again.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS number_end real;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -23,11 +23,15 @@
 // that hole -- the post is gone, and no other site's numbers line up with posting order -- so it counts as held:
 // a gap on the Health page and a search for the repair would be a finding nobody could ever clear.
 //
+// And one about a file (v0.55.2, #150): a file holding a range of chapters, `Batman 01-07`, holds every whole number
+// from its start to its end (lib/chapterRanges.ts), so a hand-collected 01-07 never reads as six missing chapters.
+//
 // The SELECT is exported as well as the helper because the repair reads it per series inside a loop that
 // already holds the row, and because a caller joining it into a larger query must get the same rules rather
 // than a hand-written copy of them.
 import { q } from './db';
 import { heldBooks } from './chapterCleanup';
+import { rangeEnd } from './chapterRanges';
 
 /**
  * The held numbers of ONE series, as SQL. `$1` is the series id; the alias is the books table's, so a
@@ -37,11 +41,18 @@ import { heldBooks } from './chapterCleanup';
  * gapsOf disagree with itself.
  * Reintroduce the books alone (drop the UNION): "a post the source deleted is a hole, not a gap" in
  * health.int.test.ts reads the hole as a gap.
+ * The second branch is each range's whole numbers after its start, which the first already gives: `01-07` is 1, then
+ * 2 to 7. Reintroduce by dropping it: "a file holding chapters 1 to 7 is no gap" in chapterRanges.int.test.ts finds
+ * a gap of six.
  */
 export const HAVE_SQL = (alias = 'b'): string =>
   `SELECT COALESCE(o.number, ${alias}.number)::float8 AS number
      FROM lib_books ${alias} LEFT JOIN book_overrides o ON o.book_id = ${alias}.id
     WHERE ${alias}.series_id = $1 AND ${heldBooks(alias)}
+   UNION ALL
+   SELECT generate_series(floor(${alias}.number)::numeric + 1, floor(${rangeEnd(alias, 'o')})::numeric)::float8 AS number
+     FROM lib_books ${alias} LEFT JOIN book_overrides o ON o.book_id = ${alias}.id
+    WHERE ${alias}.series_id = $1 AND ${heldBooks(alias)} AND ${rangeEnd(alias, 'o')} IS NOT NULL
    UNION ALL
    SELECT hole.number::float8 AS number
      FROM series_post_numbers hole JOIN lib_series hs ON hs.id = hole.series_id

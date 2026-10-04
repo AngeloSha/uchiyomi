@@ -19,6 +19,7 @@
 //      leaderboard and Wrapped must not inflate from it.
 //   5. Reconciliation never makes a just-landed file due for the read-chapter cleanup.
 import { q, tx } from './db';
+import { holds, rangeEnd } from './chapterRanges';
 
 /** A statement runner: the module-level `q`, or the scoped one a `tx` callback is handed. */
 type Run = <R = any>(text: string, params?: any[]) => Promise<R[]>;
@@ -34,6 +35,8 @@ export const LISTING_MARK_MAX = 500;
 /** One chapter in the order the leading run is walked: a real row (tombstones included) or a ghost. */
 export interface RunEntry {
   number: number;
+  /** A real row holding a range of chapters (lib/chapterRanges.ts): its last one. Absent for one chapter. */
+  end?: number | null;
   /** read_progress.completed for a real row (null = never opened); for a ghost, true when marked, else null. */
   completed: boolean | null;
   ghost: boolean;
@@ -45,9 +48,9 @@ export interface RunEntry {
  * listing dropped it, or a chapter landed and has not been reconciled yet) plays no part, because only
  * numbers in `ghosts` are looked up.
  */
-export function mergeRun(real: Array<{ number: number; completed: boolean | null }>, ghosts: number[], marks: Set<number>): RunEntry[] {
+export function mergeRun(real: Array<{ number: number; end?: number | null; completed: boolean | null }>, ghosts: number[], marks: Set<number>): RunEntry[] {
   const all: RunEntry[] = [
-    ...real.map((r) => ({ number: Number(r.number), completed: r.completed, ghost: false })),
+    ...real.map((r) => ({ number: Number(r.number), end: r.end == null ? null : Number(r.end), completed: r.completed, ghost: false })),
     ...ghosts.map((number) => ({ number, completed: marks.has(number) ? true : null, ghost: true })),
   ];
   // Stable, so real rows sharing a number keep the (number, file) order the caller read them in. A ghost can
@@ -55,6 +58,12 @@ export function mergeRun(real: Array<{ number: number; completed: boolean | null
   if (ghosts.length) all.sort((a, b) => a.number - b.number);
   return all;
 }
+
+/**
+ * How far a chapter row takes a reader who finished it: its number, or the END of a range it holds -- finishing
+ * `Batman 01-07` is reading chapter 7 (v0.55.2, lib/chapterRanges.ts). A ghost is one number.
+ */
+export const reached = (r: Pick<RunEntry, 'number' | 'end'>): number => (r.end != null && r.end > r.number ? r.end : r.number);
 
 /**
  * How far this reader has read without a gap: the number Mihon turns into `last_chapter_read`, and the one
@@ -83,6 +92,10 @@ export function mergeRun(real: Array<{ number: number; completed: boolean | null
  *
  * Returns the raw number (it may be fractional, e.g. 12.5); the tracker push floors it, so a run that ends
  * on a fractional mark never tells a tracker about the whole chapter after it.
+ *
+ * A finished range row takes both walks to its END (`reached`): read 01-07, the run is 7 and a marked ghost 8 is the
+ * next chapter, not a hole. Reintroduce `= r.number` in both walks: "the run Mihon reads ends at the range's end" in
+ * chapterRanges.int.test.ts reads 1.
  */
 export function continuousRun(all: RunEntry[]): number {
   let skip = 0;
@@ -90,13 +103,13 @@ export function continuousRun(all: RunEntry[]): number {
     // A chapter nobody can read cannot be the thing that says how far this reader has got.
     if (r.ghost) continue;
     if (r.completed !== true) break;
-    skip = r.number;
+    skip = reached(r);
   }
   let strict = 0;
   for (const r of all) {
     if (r.completed !== true) break;
     if (r.ghost && Math.floor(r.number) > Math.floor(strict) + 1) break;
-    strict = r.number;
+    strict = reached(r);
   }
   return Math.max(skip, strict);
 }
@@ -135,9 +148,9 @@ export async function marksFor(userId: string, seriesId: string, run: Run = q): 
  * the file, over EVERY row including tombstones -- a pruned chapter's row is what this reader's history refers
  * to. The Komga progress endpoint and the tracker push both read it, so they walk the same list.
  */
-export async function realRows(userId: string, seriesId: string): Promise<Array<{ number: number; completed: boolean | null }>> {
-  return q<{ number: number; completed: boolean | null }>(
-    `SELECT COALESCE(ov.number, b.number) AS number, rp.completed
+export async function realRows(userId: string, seriesId: string): Promise<Array<{ number: number; end: number | null; completed: boolean | null }>> {
+  return q<{ number: number; end: number | null; completed: boolean | null }>(
+    `SELECT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end, rp.completed
        FROM lib_books b
        LEFT JOIN book_overrides ov ON ov.book_id = b.id
        LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $2
@@ -147,10 +160,13 @@ export async function realRows(userId: string, seriesId: string): Promise<Array<
   );
 }
 
-/** The override-aware "this series holds a chapter with this number" test, tombstones included. */
+/**
+ * The override-aware "this series holds a chapter with this number" test, tombstones included -- a number inside a
+ * file holding a range among them (lib/chapterRanges.ts), so no mark is minted on a chapter a file here holds.
+ */
 const HELD = (seriesCol: string, numberCol: string) => `EXISTS (
   SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-   WHERE b.series_id = ${seriesCol} AND COALESCE(ov.number, b.number) = ${numberCol})`;
+   WHERE b.series_id = ${seriesCol} AND ${holds('b', 'ov', numberCol)})`;
 
 export interface MarkResult {
   /** New listing_progress rows this call wrote (a number already marked is not counted again). */
@@ -279,6 +295,11 @@ export async function unmarkNumbers(userId: string, seriesId: string, numbers: n
  * ⚠️ OVERRIDE-AWARE, as every ghost comparison is: matched on the raw number, a renumbered chapter would keep a
  * ghost mark forever beside its own row.
  *
+ * ⚠️ Never onto a file holding a range (v0.55.2, lib/chapterRanges.ts). A mark is one chapter; `Batman 01-07` landing
+ * after a reader ticked 1 is not 1 to 7 read, and absence is never a read (rule 1 above). The marks inside it stay,
+ * inert: they are no ghost's any more, so nothing reads them. Reintroduce by dropping the range test: "a mark is
+ * never a range file read" in chapterRanges.int.test.ts finds the file completed.
+ *
  * Two statements rather than one DELETE ... RETURNING feeding the INSERT: when two files share a number (two
  * groups' copies), a DELETE USING returns one join row per MARK, so only one copy would be marked. The INSERT
  * marks every copy, which is what "I have read chapter 57" means. No reading_events row.
@@ -296,7 +317,7 @@ export async function reconcileListingProgress(opts: { run?: Run; seriesId?: str
          FROM listing_progress lp
          JOIN lib_books b ON b.series_id = lp.series_id
          LEFT JOIN book_overrides ov ON ov.book_id = b.id
-        WHERE COALESCE(ov.number, b.number) = lp.number ${only}
+        WHERE COALESCE(ov.number, b.number) = lp.number AND ${rangeEnd('b', 'ov')} IS NULL ${only}
        ON CONFLICT (user_id, book_id) DO UPDATE
          SET completed = true,
              page = GREATEST(read_progress.page, EXCLUDED.page),
@@ -308,7 +329,7 @@ export async function reconcileListingProgress(opts: { run?: Run; seriesId?: str
     await qq(
       `DELETE FROM listing_progress lp
         USING lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-        WHERE b.series_id = lp.series_id AND COALESCE(ov.number, b.number) = lp.number ${only}`,
+        WHERE b.series_id = lp.series_id AND COALESCE(ov.number, b.number) = lp.number AND ${rangeEnd('b', 'ov')} IS NULL ${only}`,
       params,
     );
     return moved.length;

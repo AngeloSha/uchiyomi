@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, countsAsBehind, mergeRows, openableChapters, runLabel, whyLabel, type Row } from '../lib/chapterRows';
+import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, countsAsBehind, heldBy, mergeRows, openableChapters, runLabel, wholesHeld, whyLabel, type Row } from '../lib/chapterRows';
 import type { Book, Ghost } from '../lib/types';
 
 const book = (number: number, over: Partial<Book> = {}): Book =>
@@ -272,4 +272,28 @@ test("a paused archive's chapters are not \"being archived slowly\": nothing is 
   assert.match(page, /archivePaused = !!listing\?\.archive && \(listing\.archive\.state === 'paused'\s*\|\|/, 'its own pause');
   assert.match(page, /\|\| \(serverJobs\?\.archive \? serverJobs\.archive\.paused : listing\.archive\.pausedForAll === true\)\);/,
     'everyone\'s pause, for a viewer who may not download too');
+});
+
+test("a range file's numbers are no ghost rows (v0.55.2, #150)", () => {
+  // `Batman 01-07` is one book holding 1 to 7: the sources' 2 to 6 are that book's, not grey rows under it -- the
+  // server never sends them (bff lib/chapterRanges.ts), and this is the belt to its braces. Reintroduce
+  // `new Set(books.map((b) => b.number))` in mergeRows: 2 to 6 come back as ghosts.
+  const books = [book(1, { numberEnd: 7 }), book(8)];
+  const ghosts = [ghost(2), ghost(3), ghost(4), ghost(5), ghost(6), ghost(9)];
+  assert.deepEqual(numbersOf(mergeRows(books, ghosts, true, false)), ['b1', 'b8', 'g9']);
+  assert.deepEqual(numbersOf(mergeRows(books, ghosts, false, false)), ['g9', 'b8', 'b1']);
+});
+
+test('heldBy: a book holds its number, and a range file every number from its start to its end', () => {
+  const held = heldBy([book(1, { numberEnd: 7 }), book(8), book(10, { numberEnd: null })]);
+  for (const n of [1, 2, 3.5, 7, 8, 10]) assert.equal(held.has(n), true, `${n} is held`);
+  for (const n of [0, 7.5, 9, 11]) assert.equal(held.has(n), false, `${n} is not held`);
+});
+
+test('wholesHeld: every whole number a range file holds, and a huge chapter number does not hang it', () => {
+  // Reintroduce the plain `for (let w = floor(start); w <= floor(end); w++)`: the 1e20 chapter never ends the loop, and
+  // this file never finishes (no test timeout can stop a loop that never yields); drop the range's steps and 2 to 7 are
+  // missing.
+  assert.deepEqual([...wholesHeld([book(1, { numberEnd: 7 }), book(8.5)])].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual([...wholesHeld([book(1e20)])], [1e20]);
 });

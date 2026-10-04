@@ -16,6 +16,7 @@ import { withGate } from './gate';
 import { ADAPTERS, PROVIDERS, type Provider } from './trackerProviders';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
+import { lastNumber } from './chapterRanges';
 export type { Provider } from './trackerProviders';
 
 
@@ -188,7 +189,10 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
     // N+1, a chapter nobody had read, and a push is effectively irreversible.
     // Reintroduce by casting without floor(): "a completed 12.6 tells the tracker 12" in trackers.int.test.ts
     // reads 13.
-    `SELECT floor(COALESCE(MAX(COALESCE(ov.number, b.number)) FILTER (WHERE rp.completed), 0))::int AS chapters,
+    // A completed file holding a range counts its END (v0.55.2, lib/chapterRanges.ts): finishing `Batman 01-07` is
+    // reading chapter 7, and AniList is told 7, not 1. `total`/`done` stay counts of files: the file is read or not.
+    // Reintroduce the start: "finishing a range file tells the tracker its end" in chapterRanges.int.test.ts reads 1.
+    `SELECT floor(COALESCE(MAX(${lastNumber('b', 'ov')}) FILTER (WHERE rp.completed), 0))::int AS chapters,
             count(*)::int AS total,
             count(*) FILTER (WHERE rp.completed)::int AS done
        FROM lib_books b

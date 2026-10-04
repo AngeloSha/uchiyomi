@@ -21,7 +21,7 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
@@ -824,16 +824,17 @@ function SeriesInner() {
 
   // Numbers with a chapter row here: the sheet's chapter chips are solid for these, and a ghost on one of
   // them is a stale listing's, never a row (mergeRows applies the same rule; this keeps the filter's count
-  // honest too).
+  // honest too). A file holding a range holds every number in it (heldBy, v0.55.2).
   const allBooks = useMemo(() => books?.content ?? [], [books]);
-  const haveNumbers = useMemo(() => new Set(allBooks.map((b) => b.number)), [allBooks]);
-  // The whole numbers the series holds something at, for a covered row's caption (GhostRow `wholeHere`).
-  const haveWholes = useMemo(() => new Set([...haveNumbers].map((n) => Math.floor(n))), [haveNumbers]);
+  const haveNumbers = useMemo(() => heldBy(allBooks), [allBooks]);
+  // The whole numbers the series holds something at, for a covered row's caption (GhostRow `wholeHere`): each of a
+  // range's too (wholesHeld).
+  const haveWholes = useMemo(() => wholesHeld(allBooks), [allBooks]);
   // The sheet's solid chips are the LIVE rows only: a tombstone keeps its row (the ghost dedupe above is
   // right to count it -- the number is not "missing", it was deleted on purpose) but has no pages, and a
   // solid chip promises pages. Reintroduce by passing `haveNumbers` to the sheet: the chip for a pruned
   // number is solid, and tapping it lands on "Deleted from the server".
-  const liveNumbers = useMemo(() => new Set(allBooks.filter((b) => !b.pruned).map((b) => b.number)), [allBooks]);
+  const liveNumbers = useMemo(() => heldBy(allBooks.filter((b) => !b.pruned)), [allBooks]);
   const visibleGhosts = useMemo(() => (showGhosts ? ghosts.filter((g) => !haveNumbers.has(g.number)) : []), [showGhosts, ghosts, haveNumbers]);
   // The names the filter offers: the groups route's, or -- when it answered with nothing (a series scanned
   // from disk, a route that is not there) -- whatever the chapters on disk name, so a hand-built library
@@ -1048,7 +1049,9 @@ function SeriesInner() {
   };
   const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
     if (mode === 'previous') {
-      const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
+      // Every chapter before this one, a file holding a range only when ALL of it is (its end, v0.55.2): marking
+      // before chapter 5 must not mark a `03-07` file's 5 to 7 read.
+      const prev = (books?.content ?? []).filter((x) => lastOf(x) < b.number && !x.readProgress?.completed);
       if (!prev.length) { toast(tr('Nothing before this chapter is unread')); return; }
       // One card, in one language: the result takes the busy card's place (the same key), so both are translated.
       toast(markingText(prev.length), 'info', { busy: true, key: 'mark-read' });

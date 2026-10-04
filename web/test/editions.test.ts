@@ -43,6 +43,11 @@ test('the reader opens the same chapter in the other edition, else that edition\
   assert.deepEqual(readerTarget(12.5, books, 'es'), { kind: 'book', id: 'b12.5' }, 'the exact chapter');
   assert.deepEqual(readerTarget(14.2, books, 'es'), { kind: 'series', href: '/series/?id=es&ch=14' }, 'a chapter it lacks: its page, at the number');
   assert.deepEqual(readerTarget(13, books, 'es'), { kind: 'series', href: '/series/?id=es&ch=13' }, 'a chapter deleted from the server has no pages to open');
+  // A chapter held inside a file holding a range there (v0.55.2): that file. Reintroduce the exact match alone: the
+  // reader is sent to the series page for a chapter the edition holds.
+  const ranged = [{ id: 'r', number: 1, numberEnd: 7 }, { id: 'b8', number: 8 }];
+  assert.deepEqual(readerTarget(3, ranged, 'es'), { kind: 'book', id: 'r' }, 'a chapter inside a range file opens that file');
+  assert.deepEqual(readerTarget(8, ranged, 'es'), { kind: 'book', id: 'b8' });
 });
 
 test('the Library caption is every language\'s code, the shown edition marked', () => {

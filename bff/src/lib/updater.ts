@@ -26,6 +26,7 @@ import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
+import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 
 /**
  * Why a series produced nothing this run.
@@ -422,14 +423,18 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Override-aware under posting order: a book in a root the renumber could not rename carries its posting number
   // in book_overrides (lib/numbering.ts), and its raw number is the source's, which means another post now.
   // Source-numbered series compare the raw number, as they always have: these numbers came out of a listing.
-  const heldRows = await q<{ number: number; pruned_at: string | null }>(posting
-    ? `SELECT COALESCE(ov.number, b.number) AS number, b.pruned_at FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+  // A file holding a range (v0.55.2, lib/chapterRanges.ts) holds every number in it, `Batman 01-07` 1 to 7: none of
+  // them is fetched or counted behind. Reintroduce by testing the start alone: "the sweep does not fetch what a
+  // range file holds" in chapterRanges.int.test.ts queues 2 to 7.
+  const heldRows = await q<{ number: number; end: number | null; pruned_at: string | null }>(posting
+    ? `SELECT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end, b.pruned_at
+         FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
         WHERE b.series_id=$1 AND ${heldBooks('b')}`
-    : `SELECT number, pruned_at FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
-  const have = new Set(heldRows.map((r) => Number(r.number)));
+    : `SELECT b.number, ${rawRangeEnd('b')} AS end, b.pruned_at FROM lib_books b WHERE b.series_id=$1 AND ${heldBooks('b')}`, [seriesId]);
+  const have = heldBy(heldRows);
   // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
   // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
-  const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
+  const live = heldBy(heldRows.filter((r) => r.pruned_at == null));
   // A covered number is another site's split of a chapter (R2, R3): not this sweep's to fetch, and not "behind" either.
   const missing = wanted.filter((c) => !have.has(c.number) && !covered.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, releases.length, missing.length);

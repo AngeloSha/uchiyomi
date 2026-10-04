@@ -89,6 +89,7 @@ import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
 import { haveNumbers } from '../lib/libraryNumbers';
+import { heldBy, isRange, rangeEnd, rawRangeEnd } from '../lib/chapterRanges';
 import {
   addNumbering, numberingFor, numberedChapters, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
   type NumberingChoice,
@@ -1403,16 +1404,19 @@ export async function addSeriesFromSource(opts: {
    * before this existed. Fetching twice is the old bug; skipping a chapter nobody holds would be a new one.
    */
   // Under posting order (a series removed and added back), override-aware as the sweep's is: a book in a root the
-  // renumber could not rename holds its posting number in book_overrides (lib/numbering.ts).
-  const have = new Set((await q<{ number: number }>(
+  // renumber could not rename holds its posting number in book_overrides (lib/numbering.ts). A file holding a range
+  // (v0.55.2, lib/chapterRanges.ts) holds every number in it, as in the sweep's. Reintroduce the start alone: "an add
+  // of a series a range file already holds downloads nothing it holds" in chapterRanges.int.test.ts queues 2 to 5.
+  const have = heldBy(await q<{ number: number; end: number | null }>(
     numbered.applied === 'posting_order'
-      ? `SELECT DISTINCT COALESCE(ov.number, b.number) AS number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+      ? `SELECT DISTINCT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end
+           FROM lib_books b JOIN lib_series s ON s.id = b.series_id
            LEFT JOIN book_overrides ov ON ov.book_id = b.id
           WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`
-      : `SELECT DISTINCT b.number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+      : `SELECT DISTINCT b.number, ${rawRangeEnd('b')} AS end FROM lib_books b JOIN lib_series s ON s.id = b.series_id
           WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`,
     [folder],
-  ).catch(() => [])).map((r) => Number(r.number)));
+  ).catch(() => []));
   const toFetch = selected.filter((c) => !have.has(c.number));
 
   // "Latest 25 of 200" leaves 1..175 on the source that we do not hold, and the updater treats every
@@ -2583,13 +2587,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // would send the person to a row with no pages behind it.
     // Override-aware under posting order, as the sweep's have-set is (lib/updater.ts): a book the renumber could
     // not rename holds its posting number in book_overrides, and its raw number is some other post's now.
-    const here = new Set((await q<{ number: number }>(
+    // A number inside a live range file is here too (lib/chapterRanges.ts): the range rows come along whatever they
+    // start at, and heldBy asks each of them. Reintroduce the exact number: "a fetch of a number a range file holds is
+    // already here" in chapterRanges.int.test.ts starts a download of 3.
+    const here = heldBy(await q<{ number: number; end: number | null }>(
       s.numbering === 'posting_order'
-        ? `SELECT COALESCE(ov.number, b.number) AS number FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-            WHERE b.series_id = $1 AND COALESCE(ov.number, b.number) = ANY($2::real[]) AND b.pruned_at IS NULL`
-        : 'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+        ? `SELECT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end
+             FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+            WHERE b.series_id = $1 AND (COALESCE(ov.number, b.number) = ANY($2::real[]) OR ${rangeEnd('b', 'ov')} IS NOT NULL)
+              AND b.pruned_at IS NULL`
+        : `SELECT b.number, ${rawRangeEnd('b')} AS end FROM lib_books b
+            WHERE b.series_id = $1 AND (b.number = ANY($2::real[]) OR ${isRange('b')}) AND b.pruned_at IS NULL`,
       [seriesId, numbers],
-    )).map((r) => Number(r.number)));
+    ));
 
     const chapters: Array<SourceChapter & { pinned?: boolean }> = [];
     // Health is per source, asked once per source rather than once per number.

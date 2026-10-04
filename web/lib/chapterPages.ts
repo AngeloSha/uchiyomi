@@ -28,9 +28,16 @@ export function pageSlice<T>(rows: readonly T[], page: number, size = CHAPTER_PA
   return rows.slice(p * size, p * size + size);
 }
 
-/** The chapter numbers a row stands for, top to bottom as the list shows them; none for "show all". */
+/**
+ * The chapter numbers a row stands for, top to bottom as the list shows them; none for "show all". A file holding a
+ * range stands for its start and its end (v0.55.2), so a page ending on `Batman 95-100` reads "…–100".
+ */
 export function rowNumbers(r: Row, asc: boolean): number[] {
-  if (r.kind === 'book') return [r.book.number];
+  if (r.kind === 'book') {
+    const { number, numberEnd } = r.book;
+    if (numberEnd == null || !(numberEnd > number)) return [number];
+    return asc ? [number, numberEnd] : [numberEnd, number];
+  }
   if (r.kind === 'ghost') return [r.ghost.number];
   if (r.kind === 'run') return asc ? [r.from, r.to] : [r.to, r.from];
   return [];

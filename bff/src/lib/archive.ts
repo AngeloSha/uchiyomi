@@ -46,6 +46,7 @@ import { busyFolders } from './bulkNewest';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
 import { copyToChapter, type ListingCopy } from './seriesListing';
 import { heldBooks } from './chapterCleanup';
+import { holds } from './chapterRanges';
 import { seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { notInLibrary } from './downloadCensus';
 import { visible, visibleToAll, sourceAllowedFor, Params, type ViewCtx } from './visibility';
@@ -276,14 +277,16 @@ export type EnqueueOutcome = 'queued' | 'already' | 'nothing' | 'unrouted' | 'de
  * not blocked), strictly below the boundary IN THE LISTING'S OWN TYPE (both are real: against a numeric, a
  * floor of 45.3 would count chapter 45.3 as below itself), under the sweep's retry cap, and with no held book of
  * that number -- override-aware, as the ghost rows are (lib/seriesListing.ts listingFor), and by the sweep's own
- * held rule, so a Delete-files tombstone is not fetched back and a verify-marked missing file is.
+ * held rule, so a Delete-files tombstone is not fetched back and a verify-marked missing file is. A number inside a
+ * file holding a range is held (lib/chapterRanges.ts `holds`), as the ghost rows have it. Reintroduce the plain
+ * equality: "the slow archive leaves a range file's chapters out" in chapterRanges.int.test.ts counts seven left.
  */
 function eligibleSql(l: string, a: string, capParam: string): string {
   return `${l}.status = 'available' AND ${l}.number < ${a}.boundary
     AND COALESCE((SELECT f.attempts FROM chapter_failures f WHERE f.series_id = ${l}.series_id AND f.number = ${l}.number), 0) < ${capParam}
     AND NOT EXISTS (
       SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-       WHERE b.series_id = ${l}.series_id AND COALESCE(ov.number, b.number) = ${l}.number AND ${heldBooks('b')})`;
+       WHERE b.series_id = ${l}.series_id AND ${holds('b', 'ov', `${l}.number`)} AND ${heldBooks('b')})`;
 }
 
 /**
@@ -366,7 +369,7 @@ async function directionOf(seriesId: string, listedMin: number | null): Promise<
     `SELECT min(l.number) AS n FROM series_listing l
       WHERE l.series_id = $1 AND EXISTS (
         SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-         WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number AND ${heldBooks('b')})`,
+         WHERE b.series_id = l.series_id AND ${holds('b', 'ov', 'l.number')} AND ${heldBooks('b')})`,
     [seriesId]);
   return directionFor({ heldMin: h?.n == null ? null : Number(h.n), listedMin });
 }
@@ -1111,7 +1114,7 @@ async function finishSeries(seriesId: string, now: number): Promise<boolean> {
       WHERE l.series_id = $1 AND l.number < a.boundary
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-           WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number AND ${heldBooks('b')})`,
+           WHERE b.series_id = l.series_id AND ${holds('b', 'ov', 'l.number')} AND ${heldBooks('b')})`,
     [seriesId]);
   // One statement: the row ends and, when the series' floor is still the one the archive started from, the
   // floor goes with it -- nothing is left below it for it to keep out of the sweep, and the capped numbers are
