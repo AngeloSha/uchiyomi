@@ -268,6 +268,23 @@ test('the solver that answered a site last is asked first, for that site only, u
   assert.equal(backup.asked.length, backupAsked, 'the main answered last, so it is asked first now');
 });
 
+test('a solver that was only busy keeps its sites: the main is asked first again', async () => {
+  // A busy main has not failed at the site, and the owner's main (trawl) holds one browser by default: one queue
+  // would move every site it was asked about to the backup for six hours. Reintroduce the move on any failure (drop
+  // the busy check in solveNow): the second request goes to the backup first.
+  const { cfGet, setSolverTiming } = await load();
+  setSolverTiming({ busyWaitMs: 1 });
+  const main = await fakeSolver('main');
+  const backup = await fakeSolver('backup');
+  main.reply = busy;
+  use(main.url, backup.url);
+  assert.equal(await cfGet('https://queue.example/1'), '<html>backup</html>', 'the busy main\'s request was answered by the backup');
+  assert.equal(main.asked.length, 3);
+  main.reply = (b) => ({ json: solved(b.url, '<html>main</html>') });
+  assert.equal(await cfGet('https://queue.example/2'), '<html>main</html>', 'the main, free again, was asked first and answered');
+  assert.equal(backup.asked.length, 1, 'the backup was not asked first');
+});
+
 test("an image fetch sends the cookie and user agent of the solver that solved its origin, one solver's pair whole", async () => {
   // A cf_clearance is good only with the user agent (and address) of the browser that earned it.
   const { cfGet, cfSession } = await load();

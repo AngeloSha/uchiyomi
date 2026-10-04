@@ -186,7 +186,8 @@ speaks it works. (Extension sources are fetched by the extension engine, which h
   main does not answer with a page — it cannot be reached, it runs out of time, it answers with an error, an empty
   page or something that is not its JSON, or it stays busy — is sent once, unchanged, to the backup. The solver that
   answered a site last is asked first for that site for the next six hours, so a site the main cannot get past does
-  not wait for the main to fail every time; after that the main is asked first again and gets its sites back. Cookies
+  not wait for the main to fail every time (a solver that was only busy keeps its sites); after that the main is asked
+  first again and gets its sites back. Cookies
   and the user agent are kept per solver and site, and a site's images go with the pair of the solver that solved it
   (a `cf_clearance` cookie only works with the user agent that earned it).
 - A solver that answers **HTTP 429 itself is busy**, not the site refusing: trawl does that when every browser it has

@@ -1,11 +1,12 @@
 // Thin client for FlareSolverr (headless-Chrome Cloudflare solver) and the solvers that speak its /v1 (trawl, Byparr).
-// Returns solved page HTML, and keeps the latest cf_clearance cookies + user-agent per origin so the downloader can
-// fetch images directly afterwards.
+// Returns solved page HTML, and keeps the latest cf_clearance cookies + user-agent per solver and origin so the
+// downloader can fetch images directly afterwards.
 //
 // v0.55.4: an optional BACKUP solver (FLARESOLVERR_FALLBACK_URL). A request the main solver does not answer with a
 // page -- it cannot be reached, it ran out of time, it answered with an error, an empty page or something that is not
-// its JSON -- is sent once, unchanged, to the backup. Every error keeps the `flaresolverr:` prefix whichever solver said
-// it: to Health (solverBlaming) and the diagnosis it means "the solver", never FlareSolverr in particular.
+// its JSON, or it stayed busy -- is sent once, unchanged, to the backup, and each site is asked first of the solver that
+// answered it last (lastWon). Every error keeps the `flaresolverr:` prefix whichever solver said it: to Health
+// (solverBlaming) and the diagnosis it means "the solver", never FlareSolverr in particular.
 //
 // Both addresses are read when asked rather than once at load: production sets them before the server starts, and a
 // test can point them at fakes of its own.
@@ -111,7 +112,11 @@ async function solveNow(cmd: 'request.get' | 'request.post', url: string, postDa
   for (const solver of askingOrder(site)) {
     const a = await ask(solver, cmd, url, postData);
     if ('solution' in a) {
-      if (site !== null) lastWon.set(site, { solver, at: Date.now() });
+      // A site moves to the solver that answered it only when the one asked before it failed AT it. One that was only
+      // busy keeps its sites: a moment's queue at the main (trawl's one browser) would otherwise hand them all to the
+      // backup for hours. Reintroduce the move on any failure: "a solver that was only busy keeps its sites" in
+      // solverBackup.test.ts finds the backup asked first.
+      if (site !== null && !(failed.length && failed.every((f) => f.busy))) lastWon.set(site, { solver, at: Date.now() });
       return a.solution;
     }
     failed.push(a);
