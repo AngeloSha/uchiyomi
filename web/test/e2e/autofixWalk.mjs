@@ -505,11 +505,16 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     check('autofix: Fail Walk\'s chapter 4 downloaded, its failure gone', failed === '0/1', failed);
     const after = await findings();
     // v0.55.1: fake-c's two rows stay until a download through it succeeds -- its Source health row and its refused
-    // chapter -- which the end said clear by themselves.
+    // chapter -- which the end said clear by themselves. The refused chapter is no finding: a source whose every failing
+    // chapter was refused for room is a statement on Chapters that would not download, the card green (v0.55.1's last
+    // Health change, which came after this walk last ran; it asked for the amber row it took away).
+    const failures = (await health()).checks.find((c) => c.id === 'chapter-failures');
     check(`autofix: Health after the run: only ${NEEDS.join(', ')}, and fake-c's rate limit, have a finding; every other card is green`,
-      JSON.stringify(Object.keys(after).sort()) === JSON.stringify([...NEEDS, 'sources', 'chapter-failures'].sort())
-      && JSON.stringify(after.sources) === JSON.stringify(['fake-c']) && JSON.stringify(after['chapter-failures']) === JSON.stringify(['fake-c']),
+      JSON.stringify(Object.keys(after).sort()) === JSON.stringify([...NEEDS, 'sources'].sort()) && JSON.stringify(after.sources) === JSON.stringify(['fake-c']),
       JSON.stringify(after));
+    check('autofix: ...and fake-c\'s refused chapter waits on Chapters that would not download: a statement, the card green',
+      failures?.status === 'ok' && JSON.stringify(failures.items.map((i) => [i.title, !!i.info])) === JSON.stringify([['fake-c', true]]),
+      JSON.stringify(failures && { status: failures.status, items: failures.items.map((i) => [i.title, i.info]) }));
     check('autofix: ...and Twice Short and Odd Mark are what is left on theirs', JSON.stringify(after['saved-twice']) === JSON.stringify(['Twice Short'])
       && JSON.stringify(after.outliers) === JSON.stringify(['Odd Mark']) && JSON.stringify(after.numbering) === JSON.stringify(['Number Held']), JSON.stringify(after));
     const ignored = sql('SELECT count(*) FROM health_ignored');
