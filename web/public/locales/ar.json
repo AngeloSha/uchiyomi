@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3192
+    "strings": 3201
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3195,5 +3195,14 @@
   "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "كثيرًا ما تنشر المصادر تنويهات للقرّاء كفصل قصير مرقّم بعد أحدث فصل، مثل 100.5. لكل نوع مفعّل، تُخفى من المكتبة والقارئ وOPDS وMihon الفصولُ المرقّمة مثل 12.5 التي فيها 3 صفحات أو أقل؛ أما الأطول منها، وما لم تُعَدّ صفحاته بعد، فتبقى. ولا يُنزَّل فصل يذكر المصدر أنه بهذا القصر. لا يُحذف شيء: إيقاف النوع يُظهرها من جديد. يمكن لسلسلة أن تتجاوز هذا من لوحة المصادر والترجمات الخاصة بها.",
   "Uchiyomi's built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.": "بقي مساعد Cloudflare المدمج في Uchiyomi مشغولًا بصفحات أخرى. سيلحق بالعمل من تلقاء نفسه. أغلق Uchiyomi وأعد فتحه إن تكرّر ذلك.",
   "The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).": "بقيت أداة حل Cloudflare مشغولة: كانت كل متصفحاتها قيد الاستخدام مهما انتظر Uchiyomi. ستلحق بالعمل من تلقاء نفسها؛ وإن تكرّر ذلك، فامنحها متصفحات أكثر (trawl: BROWSER_POOL_SIZE)، أو دع Uchiyomi يطلب منها صفحات أقل في الوقت نفسه (SOLVER_CONCURRENCY).",
-  "The solver got past the site's check, but the site still refuses this server's address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.": "تجاوزت أداة الحل فحص الموقع، لكن الموقع ما زال يرفض عنوان هذا الخادم: عادةً حظرٌ لعناوين IP التابعة لمراكز البيانات، ولا تتجاوزه أي أداة لحل التحديات. وحدها شبكة أخرى تتجاوزه (trawl: RESIDENTIAL_PROXY_URL). غيّر مسار الاتصال الصادر أو استغنِ عن المصدر."
+  "The solver got past the site's check, but the site still refuses this server's address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.": "تجاوزت أداة الحل فحص الموقع، لكن الموقع ما زال يرفض عنوان هذا الخادم: عادةً حظرٌ لعناوين IP التابعة لمراكز البيانات، ولا تتجاوزه أي أداة لحل التحديات. وحدها شبكة أخرى تتجاوزه (trawl: RESIDENTIAL_PROXY_URL). غيّر مسار الاتصال الصادر أو استغنِ عن المصدر.",
+  "Main solver": "أداة الحل الرئيسية",
+  "Backup solver": "أداة الحل الاحتياطية",
+  "The main solver is not answering; the backup is solving": "أداة الحل الرئيسية لا تستجيب؛ والاحتياطية هي التي تحلّ",
+  "the backup is not answering": "أداة الحل الاحتياطية لا تستجيب",
+  "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "كل طلب لا تستطيع أداة الحل الرئيسية الإجابة عنه يذهب إلى الاحتياطية، فتستمر المصادر في العمل؛ لكن كلًّا منها ينتظر أولًا إخفاق الرئيسية.",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "أداة حل Cloudflare الرئيسية لا تستجيب، والاحتياطية تحلّ مكانها في الأثناء: تحقّق من أن حاويتها تعمل",
+  "The backup Cloudflare solver is not answering: check that its container is running": "أداة حل Cloudflare الاحتياطية لا تستجيب: تحقّق من أن حاويتها تعمل",
+  "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "أداة الحل الرئيسية لا تستجيب؛ والاحتياطية تحلّ مكانها في الأثناء. أعد تشغيل حاوية أداة الحل الرئيسية؛ إعادة الضبط من هنا لن تغيّر شيئًا.",
+  "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "أداة الحل الاحتياطية لا تستجيب. أعد تشغيل حاويتها؛ إعادة الضبط من هنا لن تغيّر شيئًا."
 }

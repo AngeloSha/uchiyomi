@@ -693,6 +693,21 @@ test('a stopped run leaves what it did not reach to the next run, never to Needs
     'Run again exactly while the next run has something to continue');
 });
 
+/**
+ * af-cf, behind Cloudflare, the main source of its series and failing at its chapter list, with a recorded error that
+ * names the solver; a working follower beside it. Seeded once: the two solver tests below each start from it.
+ */
+async function seedCloudflareSeries(): Promise<void> {
+  if (!(await seriesRow(S.cf))) {
+    catalog.get(GOOD)!.set(T.cf, range(1, 3));
+    await seedSeries('cf', { source: CF });
+    await seedBook('cf', 1, { src: CF });
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,$3,$4)`, [S.cf, GOOD, `${GOOD}::${T.cf}`, T.cf]);
+  }
+  await q(`INSERT INTO source_health (source_id, status, stages, last_error) VALUES ($1,'ok',$2::jsonb,'flaresolverr: connection refused')
+           ON CONFLICT (source_id) DO UPDATE SET status = 'ok', stages = EXCLUDED.stages, last_error = EXCLUDED.last_error`, [CF, failedAt('chapters')]);
+}
+
 test('a solver that is down: the sources behind it are left alone, and it is Needs you', { skip }, async () => {
   // Reintroduce by Testing and Replacing whatever fails (drop solverSpeaksFor in lib/autofix.ts sources): af-cf is
   // tested and its series moved for a failure that is the solver's.
@@ -700,11 +715,7 @@ test('a solver that is down: the sources behind it are left alone, and it is Nee
   try {
     const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
     forgetSolverPing();
-    catalog.get(GOOD)!.set(T.cf, range(1, 3));
-    await seedSeries('cf', { source: CF });
-    await seedBook('cf', 1, { src: CF });
-    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,$3,$4)`, [S.cf, GOOD, `${GOOD}::${T.cf}`, T.cf]);
-    await q(`INSERT INTO source_health (source_id, status, stages, last_error) VALUES ($1,'ok',$2::jsonb,'flaresolverr: connection refused')`, [CF, failedAt('chapters')]);
+    await seedCloudflareSeries();
     const started = autofix.startAutofix(adminId);
     assert.ok('runId' in started);
     await autofix.autofixSettled();
@@ -720,6 +731,43 @@ test('a solver that is down: the sources behind it are left alone, and it is Nee
     solverReady = true;
     const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
     forgetSolverPing();
+  }
+});
+
+/**
+ * v0.55.4: with a backup solver (FLARESOLVERR_FALLBACK_URL), "the solver is up" is at least one answering. The main down
+ * and the backup solving is not a solver that is down: the sources behind it are Tested like any other (a failure there
+ * is the site's again), and Needs you names the main. Reintroduce the main's ping as the whole of it (solverPing's top
+ * level in flaresolverr.ts): af-cf is left alone with "solver_down" in the log. Reintroduce the two-way split in
+ * summarise: Needs you reads that the solver keeps failing.
+ */
+test('with the main solver down and the backup solving: the sources behind them are tested, and Needs you names the main', { skip }, async () => {
+  const backup = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ msg: 'FlareSolverr is ready!', version: '3.4.6' }));
+  });
+  await new Promise<void>((go) => backup.listen(0, '127.0.0.1', go));
+  const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+  solverReady = false;
+  process.env.FLARESOLVERR_FALLBACK_URL = `http://127.0.0.1:${(backup.address() as AddressInfo).port}`;
+  try {
+    forgetSolverPing();
+    await seedCloudflareSeries();
+    assert.equal((await seriesRow(S.cf)).source_id, CF, 'PREMISE: af-cf is the main source of its series');
+    const started = autofix.startAutofix(adminId);
+    assert.ok('runId' in started);
+    await autofix.autofixSettled();
+    const r = await autofix.autofixRun(started.runId);
+    assert.ok(!r?.log?.some((l: any) => l.code === 'autofix.item.skipped' && l.params?.why === 'solver_down'), 'the run took the solver for down');
+    const tested = await q(`SELECT 1 FROM audit_log WHERE event = 'source.test' AND detail->>'runId' = $1 AND detail->>'source' = $2`, [started.runId, CF]);
+    assert.equal(tested.length, 1, 'af-cf was Tested: the backup is solving, so its failure is the site\'s');
+    const solverNeed = r?.summary?.needsYou.find((n: any) => n.check === 'solver');
+    assert.equal(solverNeed?.said.code, 'autofix.needs.mainSolverDown', 'Needs you names the main solver');
+  } finally {
+    solverReady = true;
+    delete process.env.FLARESOLVERR_FALLBACK_URL;
+    forgetSolverPing();
+    await new Promise<void>((go) => backup.close(() => go()));
   }
 });
 

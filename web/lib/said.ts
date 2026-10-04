@@ -472,6 +472,12 @@ const WORDS: Record<string, (p: P) => string | null> = {
     : tr('It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default 64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.')),
   'solver.behind': () => tr('a newer solver is out; Cloudflare changes often break older ones'),
   'solver.inside': () => tr('its last failure happened inside the solver'),
+  // v0.55.4, a backup solver: the card lists both, each titled by what it is.
+  'solver.main': () => tr('Main solver'),
+  'solver.backup': () => tr('Backup solver'),
+  'solver.backupSolving': () => tr('The main solver is not answering; the backup is solving'),
+  'solver.backupQuiet': () => tr('the backup is not answering'),
+  'solver.backupNote': () => tr('Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.'),
 
   // ---- Version
   'version.offRunning': (p) => tr('Running v{version} — update checks are off', { version: str(p, 'version') }),
@@ -856,6 +862,13 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.needs.solverFailing': () => (isDesktop()
     ? tr('Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi')
     : tr('The Cloudflare solver answers but keeps failing: restart its container')),
+  // v0.55.4: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
+  'autofix.needs.mainSolverDown': () => (isDesktop()
+    ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
+    : tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running')),
+  'autofix.needs.backupSolverDown': () => (isDesktop()
+    ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
+    : tr('The backup Cloudflare solver is not answering: check that its container is running')),
   'autofix.needs.engine': () => tr('The extension engine needs a look'),
   'autofix.needs.foldersTwice': () => (isDesktop()
     ? tr('Uchiyomi’s library folder and the manga folder you added are inside each other: keep them side by side')

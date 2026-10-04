@@ -1573,6 +1573,83 @@ test('trawl answering at its root is trawl, named and held against its own relea
   }
 });
 
+/**
+ * v0.55.4, a backup solver (FLARESOLVERR_FALLBACK_URL): the card lists both solvers, the main first, each with its state,
+ * and is amber whenever one does not answer -- the main ("the backup is solving"), the backup (it would not answer when
+ * needed), or both (the solver-down card it always was, which Fix everything's Needs you reads by its first code).
+ * Reintroduce the card without rows (`rows = []` in solverHealth): "the card lists both solvers" fails; its status from
+ * the sources blaming the solver alone: "status and items disagree" (a finding on an ok card); the main's ping as the
+ * whole of the solver's (solverPing's top level): "the main down, the backup solving" reads the solver-down card.
+ */
+test('with a backup, the card lists both solvers and says which one is not answering', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { solverHealth } = await import('../src/lib/health');
+  const { resetSolverVersionCache } = await import('../src/lib/solverVersion');
+  const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+  await migrate();
+  const MAIN = 'http://main-solver.test:8191', BACKUP = 'http://backup-solver.test:8191';
+  const saved = { main: process.env.FLARESOLVERR_URL, backup: process.env.FLARESOLVERR_FALLBACK_URL };
+  process.env.FLARESOLVERR_URL = MAIN;
+  process.env.FLARESOLVERR_FALLBACK_URL = BACKUP;
+  const up = { main: true, backup: true };
+  const realFetch = globalThis.fetch;
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  const refused = () => Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
+  globalThis.fetch = (async (u: any) => {
+    const url = String(u);
+    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.7.0' });
+    if (url.startsWith('https://api.github.com/')) return json({ tag_name: 'v3.6.0' });
+    // The owner's plan: trawl as the main, FlareSolverr kept as the backup.
+    if (url.startsWith(MAIN)) return up.main ? json({ msg: 'TRAWL is ready!', version: '1.7.0' }) : refused();
+    if (url.startsWith(BACKUP)) return up.backup ? json({ msg: 'FlareSolverr is ready!', version: '3.4.6' }) : refused();
+    return realFetch(u);
+  }) as typeof fetch;
+  const card = async (main: boolean, backup: boolean) => {
+    up.main = main; up.backup = backup;
+    forgetSolverPing();
+    const c = await solverHealth();
+    await assertSaid([c]);
+    assert.equal(c.items.filter((i: any) => !i.info).length === 0, c.status === 'ok', 'status and items disagree');
+    return c;
+  };
+  resetSolverVersionCache();
+  try {
+    let c = await card(true, true);
+    assert.equal(c.status, 'ok');
+    assert.equal(c.summary, 'Ready (trawl v1.7.0)');
+    assert.deepEqual(c.items.map((i: any) => [i.title, i.detail, !!i.info]), [
+      ['Main solver', `Ready (trawl v1.7.0) · ${MAIN}`, true],
+      ['Backup solver', `Ready (FlareSolverr v3.4.6) — v3.6.0 is available · ${BACKUP}`, true],
+    ], 'the card lists both solvers, each with its kind, its version and its own newer release');
+
+    c = await card(false, true);
+    assert.equal(c.status, 'warn', 'the main down, the backup solving: amber');
+    assert.equal(c.summary, 'The main solver is not answering; the backup is solving', 'the main down, the backup solving');
+    assert.match(c.note ?? '', /goes to the backup/);
+    assert.deepEqual(c.items.map((i: any) => [i.title, i.detail, !!i.info]), [
+      ['Main solver', `not answering (ECONNREFUSED) · ${MAIN}`, false],
+      ['Backup solver', `Ready (FlareSolverr v3.4.6) — v3.6.0 is available · ${BACKUP}`, true],
+    ]);
+
+    c = await card(true, false);
+    assert.equal(c.status, 'warn', 'a backup that would not answer turns the card amber');
+    assert.equal(c.summary, 'Ready (trawl v1.7.0); the backup is not answering');
+    assert.deepEqual(c.items.map((i: any) => [i.title, !!i.info]), [['Main solver', true], ['Backup solver', false]]);
+
+    c = await card(false, false);
+    assert.equal(c.status, 'warn');
+    assert.equal(c.summarySaid![0].code, 'solver.down', 'both down: the solver-down card, by its first code');
+    assert.equal(c.summary, `Not answering at ${MAIN} (ECONNREFUSED); the backup is not answering`);
+    assert.deepEqual(c.items.map((i: any) => [i.title, !!i.info]), [['Main solver', false], ['Backup solver', false]]);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (saved.main === undefined) delete process.env.FLARESOLVERR_URL; else process.env.FLARESOLVERR_URL = saved.main;
+    if (saved.backup === undefined) delete process.env.FLARESOLVERR_FALLBACK_URL; else process.env.FLARESOLVERR_FALLBACK_URL = saved.backup;
+    resetSolverVersionCache();
+    forgetSolverPing();
+  }
+});
+
 // ---- v0.54.0: Replace, where a main source is off or failing ---------------------------------------------------
 //
 // aqua went offline and was switched off while it stayed the main source of 195 series: Source health offered Find other

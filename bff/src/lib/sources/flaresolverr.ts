@@ -270,23 +270,38 @@ export function resetSolverSessions(): { sessions: number; unsolvable: number } 
 export const solverUrl = (): string => mainUrl();
 
 /**
- * Is the Cloudflare solver alive?
+ * Are the Cloudflare solvers alive?
  *
  * Worth asking directly, because when it is not, every source behind it fails and each one records the
  * failure against ITSELF. The operator sees four broken sites and no hint that one container explains all
  * four. This turns that into a single line on the health page.
+ *
+ * v0.55.4: the main and the backup, side by side, each in `main` / `backup`. The top level is the solver that would
+ * solve now -- the main when it answers, else the backup when it does, else the main's failure -- so `ok` means at least
+ * one answers, which is what the repair's solver step and Fix everything take "the solver is up" to mean. The extension
+ * engine's helper is pointed at the main alone, and reads `main` (engineHealth.ts). Reintroduce the main's answer as
+ * the whole of it: "with the main down and the backup answering, the reset still runs" in repair.int.test.ts fails.
  */
-export async function solverPing(timeoutMs = 5000): Promise<SolverPing> {
+export async function solverPing(timeoutMs = 5000): Promise<SolversPing> {
+  const at = backupSolverUrl();
+  const [m, b] = await Promise.all([pingOne(mainUrl(), timeoutMs), at ? pingOne(at, timeoutMs) : null]);
+  const main = { ...m, url: mainUrl() };
+  const backup = b && { ...b, url: at };
+  const now: SolverAt = !main.ok && backup?.ok ? backup : main;
+  return { ok: now.ok, version: now.version, error: now.error, kind: now.kind, main, backup };
+}
+
+async function pingOne(base: string, timeoutMs: number): Promise<SolverPing> {
   try {
     // FlareSolverr greets at its root with a readiness sentence rather than a status field ("FlareSolverr is ready!").
     // `redirect: 'manual'`: a solver that redirects its root (Byparr, #144: to its API docs) is not followed onto HTML.
-    const r = await fetch(`${mainUrl()}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+    const r = await fetch(`${base}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
     const j: any = r.ok ? await r.json().catch(() => null) : null;
     if (j && /ready/i.test(String(j.msg || ''))) return { ok: true, version: j.version, kind: kindOf(String(j.msg)) };
     // Byparr (#144), a FlareSolverr-compatible solver: the same /v1 for solving, but it says it is up at /health. Its
     // version is Byparr's, never compared with FlareSolverr's releases (`kind`, read by solverHealth). Reintroduce the
     // root alone: "Byparr answering at /health is a working solver" in health.int.test.ts reads it as down.
-    const h = await fetch(`${mainUrl()}/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' }).catch(() => null);
+    const h = await fetch(`${base}/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' }).catch(() => null);
     if (h?.ok) {
       const hj: any = await h.json().catch(() => null);
       return { ok: true, version: typeof hj?.version === 'string' ? hj.version : undefined, kind: 'other' };
@@ -313,10 +328,14 @@ function kindOf(greeting: string): SolverKind {
 
 /** What a ping found: FlareSolverr itself, trawl, or another solver speaking its /v1 (Byparr, #144). */
 export interface SolverPing { ok: boolean; version?: string; error?: string; kind?: SolverKind }
+/** One solver's ping, and the address it answered (or did not) at. */
+export interface SolverAt extends SolverPing { url: string }
+/** Both solvers' pings (solverPing): the top level is the one that would solve now. `backup` null: none configured. */
+export interface SolversPing extends SolverPing { main: SolverAt; backup: SolverAt | null }
 
 /** How long one ping answers for everyone who asks. */
 export const PING_SHARED_MS = 10_000;
-let shared: { at: number; p: Promise<SolverPing> } | null = null;
+let shared: { at: number; p: Promise<SolversPing> } | null = null;
 
 /**
  * `solverPing`, asked once for everyone who asks within PING_SHARED_MS (concurrent callers share the one in flight).
@@ -326,7 +345,7 @@ let shared: { at: number; p: Promise<SolverPing> } | null = null;
  * the page said "can get past Cloudflare" in one row beside "not answering" in the other (v0.49.1). The repair's
  * solver step still pings for itself: it decides whether to clear anything, and that wants the answer of now.
  */
-export function solverPingShared(now: number = Date.now()): Promise<SolverPing> {
+export function solverPingShared(now: number = Date.now()): Promise<SolversPing> {
   if (shared && now - shared.at < PING_SHARED_MS) return shared.p;
   const p = solverPing();
   shared = { at: now, p };

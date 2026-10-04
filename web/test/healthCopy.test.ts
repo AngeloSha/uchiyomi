@@ -333,7 +333,16 @@ test('the solver card says what to do while the solver is down, the desktop way 
   assert.match(solverDownLine(false), /Restart its container/);
   assert.match(solverDownLine(true), /Quit and reopen Uchiyomi/);
   assert.doesNotMatch(solverDownLine(true), /container/, 'the desktop app is told to restart a container');
-  assert.match(read('components/HealthActions.tsx'), /what: solverDownLine\(isDesktop\(\)\)/, 'the solver-down row does not pick its words by platform');
+  assert.match(read('components/HealthActions.tsx'), /what: solverDownLine\(isDesktop\(\), solverQuiet\(check\)\)/, 'the solver-down row does not pick its words by platform, and by which solver');
+});
+
+test('with a backup solver, the card names the one that is not answering', () => {
+  // v0.55.4 (FLARESOLVERR_FALLBACK_URL). Reintroduce one line for every case (drop `which` in solverDownLine): "the main
+  // is named" reads "The solver is not answering" beside a backup that is solving.
+  assert.match(solverDownLine(false, 'main'), /^The main solver is not answering; the backup is solving meanwhile\./, 'the main is named');
+  assert.match(solverDownLine(false, 'backup'), /^The backup solver is not answering\./, 'the backup is named');
+  assert.match(solverDownLine(false, 'all'), /^The solver is not answering\./);
+  assert.match(solverDownLine(true, 'main'), /Quit and reopen Uchiyomi/, 'the desktop app has one helper, and its words');
 });
 
 test('Fix everything says how many cards need a look in one whole sentence per count', () => {

@@ -170,8 +170,22 @@ export function stepFindings(check: HealthCheck | undefined, step: RepairStep): 
  * with no items stays expandable for it.
  */
 export function solverDown(check: HealthCheck): boolean {
-  return check.id === 'solver' && check.status !== 'ok'
-    && !check.items.some((it) => (it.actions ?? []).includes('solver_reset'));
+  return solverQuiet(check) !== null;
+}
+
+/**
+ * Which solver the card says is not answering, while it offers no reset (solverDown): `all` of them -- the one there is,
+ * or both -- or, with a backup (v0.55.4, FLARESOLVERR_FALLBACK_URL), only the `main` (the backup is solving: the card
+ * opens on "solver.backupSolving") or only the `backup` (the card's summary says "solver.backupQuiet" after a ready
+ * main). Null while the card is fine or offers its reset. Reintroduce one answer for every case: "the main down, the
+ * backup solving" in repairRun.test.ts reads that the solver is not answering.
+ */
+export function solverQuiet(check: HealthCheck): 'all' | 'main' | 'backup' | null {
+  if (check.id !== 'solver' || check.status === 'ok' || check.items.some((it) => (it.actions ?? []).includes('solver_reset'))) return null;
+  const said = (check.summarySaid ?? []).map((p) => p.code);
+  if (said[0] === 'solver.backupSolving') return 'main';
+  if (said[0] !== 'solver.down' && said.includes('solver.backupQuiet')) return 'backup';
+  return 'all';
 }
 
 /** Fix all issues' plan: every page step some finding offers, with how many findings offer it. */

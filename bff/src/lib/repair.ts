@@ -574,6 +574,9 @@ function rangeText(nums: number[]): string[] {
  * what escalates the NEXT cooldown from 15 minutes to 75. A day of quiet should reset that escalation.
  * ⚠️ A day, not "lapsed at all": a source that refuses us every single night must keep its memory, or the
  * nightly would hand it a clean slate a few hours before it earns the same block again.
+ *
+ * v0.55.4: with a backup solver, "the solver answers" is at least one of the two answering (solverPing's `ok`): the
+ * backup solves what the main cannot, so the cooldowns are worth clearing; the reset clears both solvers' jars.
  */
 async function stepSolver(r: RepairResult, log?: Log): Promise<void> {
   here({ kind: 'solver', phase: 'pinging' });

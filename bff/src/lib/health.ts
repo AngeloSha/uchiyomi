@@ -16,7 +16,7 @@ import { visibleToAll } from './visibility';
 import { latestSolverVersion } from './solverVersion';
 import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
-import { solverPingShared, solverUrl } from './sources/flaresolverr';
+import { solverPingShared, solverUrl, type SolverAt, type SolverPing } from './sources/flaresolverr';
 import { getSource } from './sources';
 import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
@@ -1620,10 +1620,56 @@ export async function solverBlaming(): Promise<string[]> {
 /** Lives in lib/said.ts now, with the sentence it is part of; re-exported for the callers that import it here. */
 export { solverVersionLabel } from './said';
 
+/**
+ * A solver's newest release, bare ('3.5.2'), when its kind publishes the ones it is compared with -- FlareSolverr's own,
+ * trawl's own (v0.55.4) -- else null.
+ *
+ * ⚠️ Advisory only, and it must stay that way: `latestSolverVersion` answers null when GitHub is
+ * unreachable, rate-limited or unrecognisable, and `isBehind` answers false whenever either side cannot be
+ * parsed. Being out of date is worth SAYING; it is never worth turning a working solver into a warning,
+ * and a health page must not be able to fail because github.com is having an afternoon.
+ * The release's tag ('v3.5.2': githubRelease.ts reads tag_name), bare. The summary and the row's title put their
+ * own "v" before it, and read "vv3.5.2". Reintroduce the tag as it is: "the solver's newer release is named with
+ * one v" in health.int.test.ts fails.
+ * Compared only with the solver's own releases: another solver's version (Byparr, #144) is not FlareSolverr's, and would
+ * read as years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails. trawl
+ * (v0.55.4) is held against its own: against FlareSolverr's, "trawl answering at its root is trawl" fails.
+ */
+async function latestOf(p: SolverPing): Promise<string | null> {
+  return p.kind === 'flaresolverr' || p.kind === 'trawl'
+    ? (await latestSolverVersion(Date.now(), p.kind))?.replace(/^v/i, '') ?? null
+    : null;
+}
+
+/**
+ * One solver's row when there are two (v0.55.4, FLARESOLVERR_FALLBACK_URL): titled by what it is, the main or the
+ * backup, with its state and its address. Answering, it is listed for reference (`info`), with its kind, its version
+ * and a newer release when there is one; not answering, it is a finding. The desktop app never has a backup, and its
+ * helper's address carries its token: no address is printed there.
+ */
+async function solverRow(p: SolverAt, role: 'main' | 'backup'): Promise<HealthItem> {
+  const head = say(role === 'main' ? 'solver.main' : 'solver.backup');
+  const where = isDesktop() ? null : joined('dot', say('text', { text: p.url }));
+  if (!p.ok) return { title: head.text, titleSaid: saidOf(head), ...detailOf([say('solver.notAnswering', { error: p.error || null }), where]) };
+  const latest = await latestOf(p);
+  return {
+    title: head.text,
+    titleSaid: saidOf(head),
+    ...detailOf([say('solver.ready', { version: p.version ?? null, latest: isBehind(p.version, latest) ? latest : null, kind: p.kind }), where]),
+    info: true,
+  };
+}
+
 export async function solverHealth(): Promise<HealthCheck> {
   // The ping the extension engine row reads too (engineHealth.ts): the two rows cannot disagree about the solver.
   const ping = await solverPingShared();
   const blaming = await solverBlaming();
+  // v0.55.4: with a backup the card lists both solvers, the main first, and says which one is not answering: the main
+  // (amber, "the backup is solving"), the backup (amber, a backup that would not answer when needed), or both (the
+  // solver-down card it always was). Without one it is the card it always was. Reintroduce the card without the rows:
+  // "with a backup, the card lists both solvers" in health.int.test.ts finds none.
+  const rows = ping.backup ? await Promise.all([solverRow(ping.main, 'main'), solverRow(ping.backup, 'backup')]) : [];
+  const backupQuiet = ping.backup && !ping.backup.ok ? say('solver.backupQuiet') : null;
 
   const url = solverUrl();
   if (!ping.ok) {
@@ -1635,17 +1681,17 @@ export async function solverHealth(): Promise<HealthCheck> {
       // ⚠️ Desktop: the helper's address carries its access token as the path, so it is named, never
       // printed (a screenshot in a bug report would hand the token to anyone who reads it) -- nor sent as a
       // parameter for the page to print.
-      ...summaryOf([say('solver.down', { url: isDesktop() ? undefined : url, error })]),
+      ...summaryOf([say('solver.down', { url: isDesktop() ? undefined : url, error }), backupQuiet]),
       ...noteOf([say('solver.downNote')]),
       // The solver itself is the first item, not just the sources blaming it. Every other check on this page
       // holds "no items means ok", and a solver that is simply absent has nothing to list -- so without this
       // it would report a warning with an empty body, which reads as a page bug rather than a finding.
       items: [
-        {
+        ...(rows.length ? rows : [{
           title: forDesktop(url, 'Cloudflare helper'),
           ...(isDesktop() ? { titleSaid: saidOf(say('solver.helper')) } : {}),
           ...detailOf([say('solver.notAnswering', { error })]),
-        },
+        }]),
         // No "Reset solver sessions" chip while it is down. The reset clears what THIS process remembers
         // about a solver that is answering; on one that is not, it would be a button that reports success
         // and changes nothing, which is worse than no button. The repair's solver step refuses for the
@@ -1654,34 +1700,31 @@ export async function solverHealth(): Promise<HealthCheck> {
       ],
     };
   }
-  // ⚠️ Advisory only, and it must stay that way: `latestSolverVersion` answers null when GitHub is
-  // unreachable, rate-limited or unrecognisable, and `isBehind` answers false whenever either side cannot be
-  // parsed. Being out of date is worth SAYING; it is never worth turning a working solver into a warning,
-  // and a health page must not be able to fail because github.com is having an afternoon.
-  // The release's tag ('v3.5.2': githubRelease.ts reads tag_name), bare. The summary and the row's title put their
-  // own "v" before it, and read "vv3.5.2". Reintroduce the tag as it is: "the solver's newer release is named with
-  // one v" in health.int.test.ts fails.
-  // Compared only with the solver's own releases: another solver's version (Byparr, #144) is not FlareSolverr's, and would
-  // read as years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails. trawl
-  // (v0.55.4) is held against its own: against FlareSolverr's, "trawl answering at its root is trawl" fails.
-  const latest = ping.kind === 'flaresolverr' || ping.kind === 'trawl'
-    ? (await latestSolverVersion(Date.now(), ping.kind))?.replace(/^v/i, '') ?? null
-    : null;
+  // The solver that would solve now (the main, or the backup while the main does not answer), compared with its releases.
+  const latest = await latestOf(ping);
   const behind = isBehind(ping.version, latest);
+  const mainQuiet = !ping.main.ok;
   return {
     id: 'solver',
     title: 'Cloudflare solver',
-    status: blaming.length ? 'warn' : 'ok',
-    ...summaryOf([blaming.length
-      ? say('solver.blaming', { n: blaming.length })
-      // Named by its kind (v0.55.4), except on the desktop app: its helper greets as FlareSolverr and is Uchiyomi's own.
-      : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null, kind: isDesktop() ? undefined : ping.kind })]),
-    ...noteOf([blaming.length > 0 && say('solver.failingNote')]),
+    // A row that does not answer is a finding (solverRow), and turns the card amber with the sources blaming it.
+    status: blaming.length || rows.some((r) => !r.info) ? 'warn' : 'ok',
+    ...summaryOf(mainQuiet
+      ? [say('solver.backupSolving')]
+      : [blaming.length
+        ? say('solver.blaming', { n: blaming.length })
+        // Named by its kind (v0.55.4), except on the desktop app: its helper greets as FlareSolverr and is Uchiyomi's own.
+        : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null, kind: isDesktop() ? undefined : ping.kind }),
+      backupQuiet]),
+    ...noteOf(mainQuiet
+      ? [say('solver.backupNote'), blaming.length > 0 && joined('sentence', say('solver.failingNote'))]
+      : [blaming.length > 0 && say('solver.failingNote')]),
     items: [
-      // `info`: this row and `status: 'ok'` coexist on purpose, see the note above. Without the flag it
+      ...rows,
+      // `info`: this row and `status: 'ok'` coexist on purpose, see latestOf. Without the flag it
       // contradicted the page's "no items means ok" rule, and the health test could only hold that rule
-      // because no test machine ever had an out-of-date solver.
-      ...(behind
+      // because no test machine ever had an out-of-date solver. With two solvers each row says its own.
+      ...(behind && !rows.length
         ? [{ title: `v${ping.version} → v${latest}`, ...detailOf([say('solver.behind')]), info: true }]
         : []),
       // The solver answers, so the stale part is what this process remembers about it: a cf_clearance

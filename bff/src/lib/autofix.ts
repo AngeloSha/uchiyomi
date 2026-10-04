@@ -1461,9 +1461,17 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
 
   const solverCheck = by.get('solver');
   if (solverCheck && solverCheck.status !== 'ok') {
-    // Down is the operator's whatever the run did; answering but failing is the solver step's to reset first.
-    if (solverCheck.summarySaid?.[0]?.code === 'solver.down') need('solver', say('autofix.needs.solverDown'));
-    else needAfter(['solver'], 'solver', 1, say('autofix.needs.solverFailing'));
+    // Down is the operator's whatever the run did; answering but failing is the solver step's to reset first. With a
+    // backup (v0.55.4) one of the two may be down while the other solves: that one is the operator's too, by name.
+    // Reintroduce the two-way split: "with the main down and the backup solving" in autofix.int.test.ts reads that the
+    // solver keeps failing.
+    const said = (solverCheck.summarySaid ?? []).map((p) => p.code);
+    if (said[0] === 'solver.down') need('solver', say('autofix.needs.solverDown'));
+    else if (said[0] === 'solver.backupSolving') need('solver', say('autofix.needs.mainSolverDown'));
+    else {
+      if (said.includes('solver.backupQuiet')) need('solver', say('autofix.needs.backupSolverDown'));
+      if (said[0] === 'solver.blaming') needAfter(['solver'], 'solver', 1, say('autofix.needs.solverFailing'));
+    }
   }
   // The engine: what the solver phase connects (its Cloudflare helper) is the run's until that phase has run; the rest
   // -- an engine that is down, an older one -- is the operator's.

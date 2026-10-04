@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3192
+    "strings": 3201
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3195,5 +3195,14 @@
   "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "Источники часто публикуют объявления для читателей в виде короткой главы с номером после последней, например 100.5. Если тип включён, главы с номерами вроде 12.5, в которых 3 страницы или меньше, скрываются из библиотеки, читалки, OPDS и Mihon; более длинные и ещё не подсчитанные остаются. Такую главу не скачивают, если по данным источника в ней так мало страниц. Ничего не удаляется: если выключить тип, они снова появятся. Серия может переопределить это в своей панели «Источники и переводы».",
   "Uchiyomi's built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.": "Встроенный помощник Cloudflare в Uchiyomi был занят другими страницами. Он наверстает сам. Закройте и снова откройте Uchiyomi, если это повторяется.",
   "The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).": "Решатель Cloudflare оставался занят: все его браузеры были заняты, сколько бы Uchiyomi ни ждал. Он наверстает сам; если это повторяется, дайте ему больше браузеров (trawl: BROWSER_POOL_SIZE) или пусть Uchiyomi запрашивает у него меньше страниц одновременно (SOLVER_CONCURRENCY).",
-  "The solver got past the site's check, but the site still refuses this server's address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.": "Решатель прошёл проверку сайта, но сайт по-прежнему отказывает адресу этого сервера: обычно это блокировка IP-адресов дата-центров, которую не обходит ни один решатель проверок. Обойти её может только другая сеть (trawl: RESIDENTIAL_PROXY_URL). Смените исходящий IP-адрес или откажитесь от этого источника."
+  "The solver got past the site's check, but the site still refuses this server's address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.": "Решатель прошёл проверку сайта, но сайт по-прежнему отказывает адресу этого сервера: обычно это блокировка IP-адресов дата-центров, которую не обходит ни один решатель проверок. Обойти её может только другая сеть (trawl: RESIDENTIAL_PROXY_URL). Смените исходящий IP-адрес или откажитесь от этого источника.",
+  "Main solver": "Основной решатель",
+  "Backup solver": "Резервный решатель",
+  "The main solver is not answering; the backup is solving": "Основной решатель не отвечает; работает резервный",
+  "the backup is not answering": "резервный решатель не отвечает",
+  "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "Каждый запрос, на который не может ответить основной решатель, уходит к резервному, так что источники продолжают работать; но каждый сначала ждёт, пока основной не даст сбой.",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "Основной решатель Cloudflare не отвечает, а пока работает резервный: проверьте, запущен ли его контейнер",
+  "The backup Cloudflare solver is not answering: check that its container is running": "Резервный решатель Cloudflare не отвечает: проверьте, запущен ли его контейнер",
+  "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "Основной решатель не отвечает; пока работает резервный. Перезапустите контейнер основного решателя: сброс отсюда ничего не изменит.",
+  "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "Резервный решатель не отвечает. Перезапустите его контейнер: сброс отсюда ничего не изменит."
 }

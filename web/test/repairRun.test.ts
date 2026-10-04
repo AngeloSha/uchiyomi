@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   blockedReason, cardBody, cardRecord, cardStepState, endedRunIds, itemBody, kindOfBody, pageBody, pagePlan,
-  recordFor, runTouches, solverDown, type RepairLiveRun, type RepairRunRecord, type RepairStatus,
+  recordFor, runTouches, solverDown, solverQuiet, type RepairLiveRun, type RepairRunRecord, type RepairStatus,
 } from '../lib/repairRun';
 import type { HealthCheck, HealthItem } from '../lib/types';
 
@@ -138,4 +138,19 @@ test('the solver card is "down" only while no finding offers the reset: then it 
     'a solver that answers, with rows to reset, reads as down');
   assert.equal(solverDown(check({ status: 'ok', items: [{ title: 'v1 → v2', detail: 'a newer solver is out', info: true }] })), false, 'a ready solver reads as down');
   assert.equal(solverDown(check({ id: 'sources', status: 'problem' })), false, 'another check reads as the solver');
+});
+
+test('with a backup solver the card says which one is not answering: the main, the backup, or all of them', () => {
+  // v0.55.4 (bff lib/health.ts solverHealth): the summary's codes say which. Reintroduce one answer for every case
+  // (`return 'all'` alone in solverQuiet): "the main down, the backup solving" reads that the solver is not answering.
+  const check = (codes: string[], over: Partial<HealthCheck> = {}): HealthCheck => ({
+    id: 'solver', title: 'Cloudflare solver', status: 'warn', summary: '', items: [], summarySaid: codes.map((code) => ({ code })), ...over,
+  });
+  assert.equal(solverQuiet(check(['solver.backupSolving'])), 'main', 'the main down, the backup solving');
+  assert.equal(solverQuiet(check(['solver.ready', 'solver.backupQuiet'])), 'backup', 'the main ready, the backup not answering');
+  assert.equal(solverQuiet(check(['solver.down', 'solver.backupQuiet'])), 'all', 'both down: the solver-down card it always was');
+  assert.equal(solverQuiet(check(['solver.down'])), 'all', 'one solver, down');
+  assert.equal(solverQuiet(check(['solver.ready'], { status: 'ok' })), null, 'both answering');
+  assert.equal(solverQuiet(check(['solver.blaming', 'solver.backupQuiet'], { items: [{ title: 'MangaDex', detail: 'd', sourceId: 'mangadex', actions: ['solver_reset'] }] })), null,
+    'a card that offers its reset is not down');
 });
