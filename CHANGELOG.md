@@ -1,42 +1,5 @@
 # Changelog
 
-## Unreleased
-
-**Notice chapters can be hidden.** Many sources post announcements for readers as a chapter numbered after the
-latest one with a fraction, such as 100.1 or 100.5. **Admin → Settings → Notice chapters** has one switch per
-series type (Manga, Manhwa, Manhua, Webtoon, Comic and Unknown / other), all off by default. A series can
-override its type's switch in its **Sources & translations** sheet.
-
-### Notice chapters
-
-- For a type that is switched on, every chapter numbered with a fraction is hidden for everyone, admins
-  included:
-  - from the chapter list, the reader's next and previous, Continue Reading, Updates, history, bookmarks,
-    offline downloads and OPDS;
-  - from the Komga-compatible API that the Mihon extension reads;
-  - from chapter counts and unread badges, Mihon's read-up-to and *Completed*, and what AniList, MyAnimeList
-    and Kitsu are told. An unread 100.5 no longer keeps a series you have read to the end from being finished.
-- New notice chapters are not downloaded by the updater or the slow archive, and they are not counted as
-  missing.
-- Nothing is deleted. Switching a type or a series off shows its notice chapters again on the next request.
-  Any that were never downloaded are fetched at the next check.
-- **Series type.** Series now have a type, worked out from (most trusted first):
-  1. a genre naming the origin;
-  2. MangaDex's original language;
-  3. AniList's country of origin;
-  4. a Webtoon genre.
-
-  A series tagged both Manhwa and Webtoon is a manhwa. You can override the type under **Series type** in
-  *Edit details* → **Reading**. Existing series are typed from their genres on the first boot. A series is also typed
-  whenever MangaDex or AniList is asked about its reading direction.
-- **API.**
-  - `PATCH /api/admin/settings {hideNoticeTypes}`
-  - `PATCH /api/admin/series/:id {hideNotices}`
-  - `PUT /api/admin/series/:id/meta {seriesType}`
-  - Admin-only `seriesType`, `detectedType`, `hideNotices`, `hideNoticesEffective` and `hiddenNotices` on
-    `GET /api/series/:id`.
-- **OPDS** now lists a chapter under the admin's renumber, as the app and the Komga-compatible API already did.
-
 ## v0.55.1 — 2026-10-04
 
 **Fix everything no longer mistakes a busy site for a broken one, and it keeps looking for an extension that carries
