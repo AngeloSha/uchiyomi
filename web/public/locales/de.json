@@ -3171,8 +3171,8 @@
   "Tried {n} extensions: none of the series were there": "{n} Erweiterungen ausprobiert: Keine der Serien war dort",
   "Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.": "Ersetzt kaputte Quellen, holt fehlende und kaputte Kapitel und findet neue Quellen – dafür probiert es bei Bedarf zuerst die beliebtesten Erweiterungen aus.",
   "No source": "Keine Quelle",
-  "The engine’s limit of 1 source is full.": "Das Quellenlimit der Engine von 1 Quelle ist ausgeschöpft.",
-  "The engine’s limit of {n} sources is full.": "Das Quellenlimit der Engine von {n} Quellen ist ausgeschöpft.",
+  "The engine’s limit of 1 source is full.": "Das Quellenlimit der Engine ist mit 1 Quelle ausgeschöpft.",
+  "The engine’s limit of {n} sources is full.": "Das Quellenlimit der Engine ist mit {n} Quellen ausgeschöpft.",
   "Turn off a source you don’t use, or raise {name}.": "Schalte eine Quelle ab, die du nicht nutzt, oder erhöhe {name}.",
   "Turn off a source you don’t use.": "Schalte eine Quelle ab, die du nicht nutzt."
 }

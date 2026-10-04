@@ -3169,7 +3169,7 @@
   "Tried {n} extensions and kept {names}": "إضافات جُرّبت: {n}، وأُبقي على {names}",
   "Tried 1 extension: none of the series were there": "جُرّبت إضافة واحدة: لم تكن أي من السلاسل فيها",
   "Tried {n} extensions: none of the series were there": "إضافات جُرّبت: {n}، ولم تكن أي من السلاسل فيها",
-  "Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.": "يستبدل المصادر المعطّلة، ويجلب الفصول الناقصة والتالفة، ويجد مصادر جديدة، مجرّبًا الإضافات الأكثر رواجًا أولًا إن لزم الأمر.",
+  "Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.": "يستبدل المصادر المتعطّلة، ويجلب الفصول الناقصة والتالفة، ويجد مصادر جديدة، مجرّبًا الإضافات الأكثر رواجًا أولًا إن لزم الأمر.",
   "No source": "بلا مصدر",
   "The engine’s limit of 1 source is full.": "حدّ المصادر في المحرّك ممتلئ (مصدر واحد).",
   "The engine’s limit of {n} sources is full.": "حدّ المصادر في المحرّك ممتلئ ({n}).",
