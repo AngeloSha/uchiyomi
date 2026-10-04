@@ -7,6 +7,7 @@ import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromAniList } from '../lib/seriesType';
+import { noticeBook, noticeShown } from '../lib/noticeChapters';
 import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
@@ -280,8 +281,18 @@ const bookFileAbs = async (id: string, ctx: ViewCtx): Promise<string | null> => 
 };
 // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
 // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
+// The cover chapter's, unless that is a notice chapter the admin hides (lib/noticeChapters.ts), which has no pages to
+// give anyone: then the lowest chapter that is shown, picked the way the scan picks the cover (lib/library.ts, live
+// first). Reintroduce by reading cover_book_id alone: "a hidden notice as the cover chapter" in
+// noticeSurfaces.int.test.ts finds the series' cover a 404.
 const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
-  const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
+  const s = await one<{ cover_book_id: string }>(
+    `SELECT CASE WHEN ${noticeBook('s.cover_book_id')} THEN (
+              SELECT b.id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+               WHERE b.series_id = s.id AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
+               ORDER BY (b.pruned_at IS NOT NULL), b.number ASC, b.file ASC LIMIT 1)
+            ELSE s.cover_book_id END AS cover_book_id
+       FROM lib_series s WHERE s.id = $1`, [id]);
   const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id, ctx) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
   const first = await cbzPageAt(abs, 0);

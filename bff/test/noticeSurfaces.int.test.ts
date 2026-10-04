@@ -90,6 +90,7 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
   });
   await app.register((await import('../src/routes/opds')).default);
   await app.register((await import('../src/routes/catalog')).default);
+  await app.register((await import('../src/routes/images')).default);
   await app.ready();
   const opds = { authorization: basic(USER, await auth.issueOpdsToken(uid)) };
   const asUser = { authorization: `Bearer ${app.jwt.sign({ sub: uid, role: 'user' })}` };
@@ -120,6 +121,25 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
       const on = await get(`/opds/series/${S}`, opds);
       assert.deepEqual(feedIds(on.body), ['b_nts_1', 'b_nts_2', 'b_nts_3', 'b_nts_9'], 'the two-page 2.5 is still in the OPDS feed');
       await hide([]);
+    });
+
+    await t.test('a hidden notice as the cover chapter: the cover comes from the first chapter shown', async () => {
+      // A series whose lowest chapter is a two-page notice (the scan makes the lowest live chapter the cover chapter).
+      // Each width is its own cache entry, so each request below really draws the cover.
+      await q(`UPDATE lib_series SET cover_book_id = 'b_nts_25' WHERE id = $1`, [S]);
+      try {
+        // Images take the OPDS token as a reader app sends it (routes/images.ts authorizeImageRequest).
+        const off = await get(`/img/lib/series/${S}/thumb`, opds);
+        assert.equal(off.statusCode, 200, `with every switch off the cover is the cover chapter's first page (${off.statusCode})`);
+        await hide(['manhwa']);
+        // Reintroduce by reading cover_book_id alone: the notice is hidden, its pages are nobody's, and this is a 404.
+        const on = await get(`/img/lib/series/${S}/thumb?w=800`, opds);
+        assert.equal(on.statusCode, 200, `the series lost its cover to a hidden notice (${on.statusCode})`);
+        assert.equal(on.headers['content-type'], 'image/webp');
+      } finally {
+        await hide([]);
+        await q(`UPDATE lib_series SET cover_book_id = NULL WHERE id = $1`, [S]);
+      }
     });
 
     await t.test('Updates count real chapters across a switch, in chapter rows on both sides', async () => {
