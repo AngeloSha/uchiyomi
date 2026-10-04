@@ -93,7 +93,7 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
   const ENGINE = process.env.ENGINE;
   const NET = process.env.E2E_NET;
   if (!ENGINE || !NET) {
-    check('autofix: ENGINE and E2E_NET are set', false, 'up.sh with E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=1, and E2E_NET=<its network> on the walk');
+    check('autofix: ENGINE and E2E_NET are set', false, 'up.sh with E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=2, and E2E_NET=<its network> on the walk');
     return;
   }
   const appPort = Number(new URL(base).port || 80);
@@ -662,8 +662,9 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     check('autofix: ...which fetched Fail Late\'s chapter 4', lateNow === '0/1', String(lateNow));
 
     // ---- 6. Free a slot: a series left over the source limit opens its source's sheet ----------------------------------
-    // Under a limit of one, Gap Scans' English source holds the slot. Webtoons.com switched on and some series reading
-    // through it: the registration puts the used sources first, in the engine's order, and Webtoons.com is the one over.
+    // Under the limit of two, Gap Scans' and Grove Reader's English sources hold the slots. Webtoons.com switched on and
+    // some series reading through it: the registration puts the used sources first, in the engine's order, and
+    // Webtoons.com is the one over.
     await call(`/api/admin/extensions/sources/${WT}`, { method: 'POST', json: { enabled: true } });
     const lib = sql(`SELECT library_id FROM lib_series WHERE id = ${lit(ID['Gap Only'])}`);
     sql(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)

@@ -1182,8 +1182,8 @@ const POP_RELEASE = 'https://github.com/keiyoushi/extensions/releases/download/f
 /**
  * The standard installation with Gap Scans in the repository, not installed: what Health's Fix everything installs by
  * itself to fill a gap no installed source has (web/test/e2e/autofixWalk.mjs; fakeEngine.mjs --extra v55). Its sources
- * come FIRST in the engine's order, so that under a source limit of one a series on Webtoons.com is the one left over --
- * Free a slot's case -- while Gap Scans keeps its place.
+ * come FIRST in the engine's order, the POP packages' next, so that under the walk's source limit of two a series on
+ * Webtoons.com is the one left over -- Free a slot's case -- while the packages a run keeps hold their places.
  */
 export function autofixSeed() {
   const seed = defaultSeed();
