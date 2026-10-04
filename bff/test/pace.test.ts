@@ -348,7 +348,7 @@ test('a 429 in one MangaDex language slows every MangaDex language: the level be
 test('an image server is its registrable domain; addresses, private names and shared hosts are none', () => {
   // The owner's two sites: Mangakakalot's pages on imgs-2.2xstorage.com, Natomanga's on img-r1.2xstorage.com and
   // storage.waitst.com (measured 2026-09-02). Reintroduce the host name itself (`return host`): the two read apart.
-  assert.equal(serverOf('https://imgs-2.2xstorage.com/a/1.jpg'), '2xstorage.com');
+  assert.equal(serverOf('https://imgs-2.2xstorage.com/a/1.jpg'), '2xstorage.com', 'one CDN read as two hosts');
   assert.equal(serverOf('https://img-r1.2xstorage.com/b/2.webp'), '2xstorage.com');
   assert.equal(serverOf('https://storage.waitst.com/c/3.jpg'), 'waitst.com');
   assert.equal(serverOf('https://IMG.Site.co.uk./p.png'), 'site.co.uk', 'a country second level is a suffix; case and a trailing dot fold');
@@ -364,7 +364,7 @@ test('an image server is its registrable domain; addresses, private names and sh
 
 test('two sources whose pages come from one image server share one key, one level and one rest', () => {
   // Natomanga and Mangakakalot: two sites, one CDN, and each was asked at full speed while the other was being refused.
-  // Reintroduce by returning `g` from rateKeyOf (no joins): Mangakakalot reads level 0 after Natomanga's 429.
+  // Reintroduce by returning `g` from rateKeyOf (no joins): the two are two keys, and `one key` fails.
   notePageHosts({ id: 'nato' }, ['https://img-r1.2xstorage.com/x/1.jpg', 'https://storage.waitst.com/x/2.jpg']);
   noteRateLimited('nato', 5000);
   assert.equal(paceLevel('kakalot'), 0, 'not joined before its pages were seen');
@@ -410,6 +410,6 @@ test("a proxy's pages join nothing: every extension's pages are on the engine", 
   notePageHosts({ id: 'sw:1', pagesProxied: true }, ['https://engine.myhost.com/api/v1/manga/1/chapter/1/page/0']);
   notePageHosts({ id: 'sw:2', pagesProxied: true }, ['https://engine.myhost.com/api/v1/manga/2/chapter/1/page/0']);
   noteRateLimited('sw:1');
-  assert.equal(rateKeyOf('sw:2'), 'sw:2');
+  assert.equal(rateKeyOf('sw:2'), 'sw:2', "the engine's address joined two extensions");
   assert.equal(paceLevel('sw:2'), 0);
 });

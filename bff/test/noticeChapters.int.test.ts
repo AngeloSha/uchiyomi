@@ -412,7 +412,7 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
         // The listed fractions go with them, the long and the uncounted alike: only 102 is missing from HW.
         // Reintroduce by dropping the branch from listedIsNotice: 102.5 and 103.5 are still missing chapters.
         const ghosts = (await get(`/api/series/${HW}/listing`, asMember)).json().content.map((g: any) => g.number);
-        assert.deepEqual(ghosts, [102]);
+        assert.deepEqual(ghosts, [102], 'a listed fraction is still a missing chapter while every fraction is hidden');
         const a = (await get(`/api/series/${PG}`, asAdmin)).json();
         assert.equal(a.hideNoticeShortOnly, false, 'the sheet is told which rule its switch hides by');
         assert.equal(a.hiddenNotices, 5, '7.5, 8.5, 9.5, 12.5 and 44.5');

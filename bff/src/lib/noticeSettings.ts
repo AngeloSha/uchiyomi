@@ -33,8 +33,8 @@ export async function hiddenCount(seriesId: string): Promise<number> {
  * in noticeChapters.int.test.ts lists its 1.5.
  *
  * v0.55.3: and which rule they hide by, "Only hide short ones" (hide_notice_short_only): on, the default, also on a
- * failed read. Reintroduce by leaving it out: "short only off: every chapter numbered like 12.5" in
- * noticeChapters.int.test.ts still lists the twenty-page 12.5 after the PATCH.
+ * failed read. Reintroduce by leaving it out: "only short ones ships on, and the settings route turns it off" in
+ * noticeChapters.int.test.ts finds the queries built by the old rule after the PATCH.
  */
 export async function refreshNoticesActive(): Promise<void> {
   const r = await one<{ active: boolean; short_only: boolean | null }>(
