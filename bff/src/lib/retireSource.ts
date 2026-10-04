@@ -4,7 +4,8 @@
 // still read through froze them -- a site added by address was deleted with no check at all, and every series from it
 // read "no longer installed" -- so a source is retired only once no series has it as its main source (`in_use`, with
 // how many: "Replace it first"). Its follows go first, with their listing rows, as an unfollow takes them: a follow
-// on a retired source is a listing row nothing can fetch through and a sweep ask that never answers. Then:
+// on a retired source is a listing row nothing can fetch through and a sweep ask that never answers. The chapters it
+// failed for those series go to each one's main source (v0.55.3, as an unfollow sends them). Then:
 //   - `off`: switched off (source_health.disabled), as Turn off does -- loaded, never asked;
 //   - `remove`, a site added by address: out of sites.json and the registry, its health row pruned;
 //   - `remove`, an extension's source: switched off in the extension (suwayomi_sources.enabled), which unregisters it.
@@ -16,6 +17,7 @@
 import type { FastifyRequest } from 'fastify';
 import { q } from './db';
 import { logAudit } from './audit';
+import { refileFailures } from './chapterFailures';
 import { setDisabled, pruneOrphanedHealth } from './sourceHealth';
 import { mainSourceCounts } from './findScope';
 import { readSites, writeSites } from './sources/customSites';
@@ -44,6 +46,11 @@ export async function retireSource(
   const dropped = await q<{ series_id: string }>('DELETE FROM series_sources WHERE source_id = $1 RETURNING series_id', [sourceId]);
   if (dropped.length) {
     await q('DELETE FROM series_listing WHERE source_id = $1 AND series_id = ANY($2::text[])', [sourceId, dropped.map((r) => r.series_id)]);
+    // And what it failed for them is each one's main source's to retry (v0.55.3, lib/chapterFailures.ts): failures
+    // follow the series, never staying under a source it no longer reads. Reintroduce by dropping it: "the chapters a
+    // retired source failed are filed under each series' main source" in retireSource.int.test.ts finds chapter 10
+    // under the retired site.
+    await refileFailures(q, dropped.map((r) => r.series_id)).catch(() => 0);
   }
   let done: 'turned_off' | 'removed' | 'switched_off' = 'turned_off';
   if (o.how === 'remove') {

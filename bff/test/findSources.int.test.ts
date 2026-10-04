@@ -830,6 +830,29 @@ test("Replace promotes each series' best working follower without searching, dro
   }
 });
 
+test('Replace files the chapters the replaced source failed under the source it moved the series to; a source still followed keeps its own (v0.55.3)', { skip }, async () => {
+  // The owner's third Fix everything run: Replace had moved two series off AllManga onto Natomanga, and their 32 failed
+  // chapters stayed filed under AllManga -- a source neither series used any more, which Health listed and the end
+  // called "chapters no source can download". Reintroduce by dropping the refile in lib/mainSource.ts switchMainSource:
+  // chapter 13 stays under fs-main, capped.
+  await series('f1', 'Rho One'); await follows('f1', [['fs-off', { fresh: true }], ['fs-a', { fresh: true }]]);
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at) VALUES
+             ($1, 13, $2, 'error', 'no page urls', 3, now() - interval '1 hour', now() - interval '3 days'),
+             ($1, 14, 'fs-off', 'error', 'HTTP 500', 2, now() - interval '1 hour', now() - interval '2 days')`, [S('f1'), MAIN]);
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  assert.equal(await mainOf('f1'), 'fs-a', 'PREMISE: Replace moved the series onto its working follower');
+  assert.deepEqual(await followersOf('f1'), ['fs-off'], 'PREMISE: the switched-off follower is still followed');
+  const rows = await q(`SELECT number::float8 AS n, source_id, status, reason, attempts, first_at < now() - interval '2 days 12 hours' AS old
+                          FROM chapter_failures WHERE series_id = $1 ORDER BY number`, [S('f1')]);
+  assert.deepEqual(rows.map((x: any) => [x.n, x.source_id, x.status, x.reason, x.attempts, x.old]), [
+    [13, 'fs-a', 'moved', 'no page urls', 0, true],
+    [14, 'fs-off', 'error', 'HTTP 500', 2, false],
+  ], 'the replaced source\'s chapter is the new main\'s, tried again from the start, failing since it first did; a source the series still follows keeps its own');
+});
+
 test('a Replace run names the source it replaces, on its card and in its summary', { skip }, async () => {
   // A Replace dialog opened again for a source while its run goes shows that run, not the offer to start one: the web
   // finds it by the run's source (components/ReplaceDialog.tsx), on Admin → Sources, on Health, or after a reload.
@@ -925,6 +948,31 @@ test('a source that starts failing while it is judged is followed, never promote
   assert.equal(await mainOf('o'), MAIN, 'a source failing by the switch is never made the main source');
   assert.deepEqual(await followersOf('o'), ['fs-adult'], 'PREMISE: the search followed it while it could still update the series');
   assert.equal(by[S('o')].why, 'no_answer', 'and the series says its source did not answer for it');
+});
+
+test('the dead followers Replace drops to make room take their failed chapters to the main source, promoted or not (v0.55.3)', { skip }, async () => {
+  // Omega Manhwa follows two dead sources -- the cap -- and only fs-adult carries it: one is dropped to follow fs-adult,
+  // which starts failing while it is judged and is never promoted (above). The dropped source's failed chapter goes to
+  // the series' main source all the same: failures follow the series (lib/chapterFailures.ts), not the switch alone.
+  // Reintroduce by dropping the refile in makeRoom (lib/findSources.ts): chapter 13 stays under fs-nowhere.
+  await series('o', 'Omega Manhwa'); await follows('o', [['fs-nowhere'], ['fs-off']]);
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ('fs-off', true)`);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at) VALUES
+             ($1, 13, 'fs-nowhere', 'error', 'HTTP 500', 3, now() - interval '1 hour', now() - interval '3 days'),
+             ($1, 14, 'fs-off', 'error', 'HTTP 404', 1, now() - interval '1 hour', now() - interval '2 days')`, [S('o')]);
+  onList = async (id) => {
+    if (id !== 'fs-adult') return;
+    await q(`INSERT INTO source_health (source_id, stages) VALUES ('fs-adult', $1::jsonb) ON CONFLICT (source_id) DO UPDATE SET stages = EXCLUDED.stages`,
+      [JSON.stringify({ pages: { failAt: new Date().toISOString(), failBy: 'test', streak: 1, kind: 'error', error: 'HTTP 500' } })]);
+  };
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  assert.equal(await mainOf('o'), MAIN, 'PREMISE: never promoted');
+  assert.deepEqual(await followersOf('o'), ['fs-off', 'fs-adult'], 'PREMISE: the source not loaded made room for fs-adult');
+  const rows = await q(`SELECT number::float8 AS n, source_id, status, attempts FROM chapter_failures WHERE series_id = $1 ORDER BY number`, [S('o')]);
+  assert.deepEqual(rows.map((x: any) => [x.n, x.source_id, x.status, x.attempts]), [[13, MAIN, 'moved', 0], [14, 'fs-off', 'error', 1]],
+    'the dropped follower\'s chapter is the main source\'s, tried again from the start; the follower kept keeps its own');
 });
 
 test('a Replace run Fix everything starts never promotes onto a source it is replacing too (v0.55.1)', { skip }, async () => {

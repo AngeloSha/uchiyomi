@@ -1541,7 +1541,9 @@ without you pressing anything. Since v0.48.3:
     impossibly, and applies the renumbering plans that are safe. Since v0.55.1 it tries extensions one at a time, with
     no limit of its own, until the series are found or its time is up — the next run carries on down the list — the
     ones your series' translation groups name first, then the most downloaded (the download counts its extension
-    repository publishes on GitHub, read at most once a day), then the most recently updated; an 18+ extension only
+    repository publishes on GitHub, read at most once a day; since v0.55.3 counted over the week after each release,
+    when it is downloaded, so MangaDex or Mangakakalot comes before a webcomic rebuilt last week — every extension is
+    still tried, the least downloaded last), then the most recently updated; an 18+ extension only
     for a series rated 18+, after the others. One that has none of the series is removed straight away, and is not
     tried for the same series again for a month. The end says it in one line: *Tried 14 extensions and kept Ember
     Pages*. A site that asked Uchiyomi to slow down is not broken (since v0.55.1): the run never replaces it, never
@@ -1597,6 +1599,12 @@ another tab.
   was refused with HTTP 429 (*too many requests*), *Chapters that would not download* lists that source greyed and
   says *2 chapters wait for a site that asked for a pause, and are tried again by themselves*; the card stays green
   for it. One chapter failing any other way keeps the source a finding.
+- **Failed chapters follow the series** (v0.55.3). A chapter that failed on a source the series no longer uses — moved
+  off it by **Replace**, **Make main** or Fix everything, unfollowed, or a source turned off — is filed under the
+  series' main source and tried there again from the start, keeping when it first failed; its row reads *from a source
+  the series no longer uses*, with why it failed there. While the main source asks for a pause, those chapters wait
+  greyed like the ones it refused for room. Before, they stayed under the old source, which nothing asks any more, and
+  every Fix everything listed them as chapters no source can download.
 - **While any repair runs** — yours, another admin's, the nightly — a strip at the top of the page says what it is
   (*Repairing: Gap fill*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
   what it is on, how long it has been going and usually takes, and the searches it has left, with **Stop**, which

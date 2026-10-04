@@ -401,6 +401,12 @@ test('a line is joined the reader\'s way, and a code this build does not know le
     const params = { status: 'from_a_newer_server', until: ISO, n: 2, series: 1, since: ISO, tries: 3, capped: 0, cap: 5, title: 'Walk Tale', number: 3, reason: null };
     assert.equal(saidText([{ code, params }], 'the English'), 'the English', `${code}: an unknown status is worded`);
   }
+  // v0.55.3, the ledger's own `moved`: a chapter filed under the main source from one the series no longer uses (bff
+  // lib/chapterFailures.ts refileFailures), with why it failed there. Reintroduce by leaving it to statusText: the row's
+  // whole line is the server's English.
+  const moved = { n: 2, series: 1, since: ISO, tries: 0, capped: 0, cap: 5, title: 'Walk Tale', number: 7, status: 'moved', reason: 'no page urls' };
+  assert.match(saidText([{ code: 'failures.detail', params: moved }], 'the English'),
+    /; latest: "Walk Tale" ch 7 \(from a source the series no longer uses: no page urls\)$/, 'a chapter filed under the main source is not worded');
   assert.equal(saidText([{ code: 'sources.status', params: { status: 'rate_limited' } }]), 'Rate-limited');
   assert.equal(saidText(undefined, 'from an older server'), 'from an older server');
   // The joins, as the server's English writes them.

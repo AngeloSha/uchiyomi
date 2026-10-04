@@ -7,11 +7,15 @@
 // people use, then what is kept up:
 //   1. a translation group of the series is the extension's name (lib/autofix.ts counts the series that name it);
 //   2. how often the extension is downloaded: its release files -- the apk and the jar the repository's index points
-//      at, which Keiyoushi's index puts on GitHub Releases -- per day since their release was published, read at most
-//      once a day (lib/githubRelease.ts releaseAssets), the last answer kept while GitHub cannot be reached;
+//      at, which Keiyoushi's index puts on GitHub Releases -- per day since their release was published, over at most
+//      a week (v0.55.3, MAX_DAYS), read at most once a day (lib/githubRelease.ts releaseAssets), the last answer kept
+//      while GitHub cannot be reached;
 //   3. the rest: the most updated first (versionCode), then by name.
 // An 18+ package comes after every other of its rank, and is tried only for a series rated 18+ (lib/autofix.ts).
 // No site is named here: the counts are the repository's own.
+// The order only: every package is still tried, the least downloaded last (v0.55.3, the owner's choice). A floor was
+// weighed and not built: an extension for every language -- xkcd, League of Legends, Cubari -- is downloaded by the
+// readers of every language, and no number of downloads a day skips those without skipping sites people read through.
 import { releaseAssets, type ReleaseAsset } from './githubRelease';
 
 /** What ranks a package: its own facts (lib/sources/suwayomi/extensions.ts) and how many targets' groups name it. */
@@ -51,11 +55,21 @@ export interface PackageFiles {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * The most days a release's downloads are spread over (v0.55.3). A release is downloaded mostly in its first days --
+ * every reader who has the extension takes the update -- and then hardly at all: Keiyoushi's releases of 2026-10-04
+ * held a median of ~2,800 downloads at under six days old and ~3,700 at a month. Divided by every day since, the same
+ * extension read five times less popular rebuilt a month ago than last week: Manganato's 41,167 over 29.5 days read
+ * 1,395 a day, below xkcd's 10,323 over 5.6 days (1,836), and MangaDex, Mangakakalot and Weeb Central were tried
+ * after webcomics rebuilt that week. Over at most a week, each reads its readership: Manganato 5,881, xkcd 1,843.
+ */
+const MAX_DAYS = 7;
 const fileName = (url: string): string => decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
 
 /**
  * Each package's downloads a day: its apk's and its jar's download counts together, over the days since their release
- * was published -- at least one, so a release an hour old is not counted twenty-four times over. Its files are found by
+ * was published -- at least one, so a release an hour old is not counted twenty-four times over, and at most MAX_DAYS,
+ * so a release a month old is not counted thirty times under. Its files are found by
  * their addresses when the engine gives them as GitHub release files, else by the apk's name (and the jar beside it) in
  * the releases of the GitHub repository its index is served from: an engine that gives no addresses still names the
  * apk. A package found neither way, or whose repository GitHub has never told us about, is left out, and the ranking
@@ -91,7 +105,9 @@ export async function downloadsPerDay(list: readonly PackageFiles[], now = Date.
       const t = a.publishedAt ? Date.parse(a.publishedAt) : NaN;
       if (Number.isFinite(t)) published = Math.min(published, t);
     }
-    if (seen) out.set(w.pkg, downloads / Math.max(1, Number.isFinite(published) ? (now - published) / DAY_MS : 1));
+    // Reintroduce the uncapped days (drop the Math.min): "a release a month old is counted over a week" in
+    // extensionRank.test.ts reads Manganato below xkcd.
+    if (seen) out.set(w.pkg, downloads / Math.min(MAX_DAYS, Math.max(1, Number.isFinite(published) ? (now - published) / DAY_MS : 1)));
   }
   return out;
 }

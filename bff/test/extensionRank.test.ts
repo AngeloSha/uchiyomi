@@ -2,8 +2,9 @@
 //
 // v0.55.0 tried three a run and, when no translation group named one, the first three by name: the owner's first run
 // installed en.akaicomic, all.akuma and en.alandal and found nothing. The owner asked for no cap and the popular first.
-// These pin the order -- the series' groups, then downloads a day from the repository's GitHub releases, then the
-// version code, then the name, an 18+ package after the others of its rank -- and what the counts are when GitHub
+// These pin the order -- the series' groups, then downloads a day from the repository's GitHub releases (over at most a
+// week since the release, v0.55.3), then the version code, then the name, an 18+ package after the others of its rank
+// -- and what the counts are when GitHub
 // answers, when it fails after answering once (the last answer), and when it never has (nothing: the version decides).
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -78,6 +79,34 @@ test('downloads a day: the apk and the jar together, over the days since their r
   assert.equal(per.get('en.named'), 21_174 / 2, 'found by its apk\'s name in the releases of its index\'s repository');
   await downloadsPerDay(pkgs, NOW + 60_000);
   assert.equal(calls, 1, 'asked at most once a day');
+});
+
+test('a release a month old is counted over a week, not every day since: the most read come first (v0.55.3)', async () => {
+  // Keiyoushi's own counts on 2026-10-04: Manganato's apk (release 4217666-0, 12.6 days old) and jar (19c8e5f-0, 29.5
+  // days old), xkcd's two (bdcf84f, 5.6 days old). A release is downloaded mostly in its first days, as its readers
+  // update: divided by every day since, Manganato's 41,167 read 1,395 a day and came after xkcd's 10,323 (1,836 a day).
+  // Reintroduce the uncapped days (drop the Math.min in downloadsPerDay): Manganato reads 1,395, ranked after xkcd.
+  const { downloadsPerDay, rankPackages } = await import('../src/lib/extensionRank');
+  const at = (days: number) => new Date(NOW - days * DAY).toISOString();
+  const nato = { apk: url('tachiyomi-en.manganelo-v1.6.22.apk', '4217666-0'), jar: url('tachiyomi-en.manganelo-v1.6.22.jar', '19c8e5f-0') };
+  const xkcd = { apk: url('tachiyomi-all.xkcd-v1.6.0.apk', 'bdcf84f'), jar: url('tachiyomi-all.xkcd-v1.6.0.jar', 'bdcf84f') };
+  const listed = [
+    { published_at: at(12.6), assets: [{ browser_download_url: nato.apk, download_count: 25_254 }] },
+    { published_at: at(29.5), assets: [{ browser_download_url: nato.jar, download_count: 15_913 }] },
+    { published_at: at(5.6), assets: [{ browser_download_url: xkcd.apk, download_count: 6_931 }, { browser_download_url: xkcd.jar, download_count: 3_392 }] },
+  ];
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response(JSON.stringify(listed), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const per = await downloadsPerDay([
+    { pkgName: 'en.manganelo', apkUrl: nato.apk, jarUrl: nato.jar },
+    { pkgName: 'all.xkcd', apkUrl: xkcd.apk, jarUrl: xkcd.jar },
+  ], NOW);
+  assert.equal(per.get('en.manganelo'), 41_167 / 7, 'a release a month old: its downloads over a week');
+  assert.ok(Math.abs(per.get('all.xkcd')! - 10_323 / 5.6) < 1e-6, 'one under a week old: over the days since, as before');
+  const order = rankPackages(['en.manganelo', 'all.xkcd'].map((pkg) => ({ pkgName: pkg, name: pkg, named: 0, nsfw: false, perDay: per.get(pkg) ?? null, versionCode: null })));
+  assert.deepEqual(order.map((x) => x.pkgName), ['en.manganelo', 'all.xkcd'], 'the site more people read is tried first');
 });
 
 test('GitHub failing: the last answer stands; never answered: nothing, and the version decides', async () => {

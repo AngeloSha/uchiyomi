@@ -582,6 +582,97 @@ test("the owner's damage is undone by the next run: a series on a source failing
   }
 });
 
+test('failures follow the series: what a Replaced source failed waits on a rate-limited new main, and is fetched through a working one (v0.55.3)', { skip }, async () => {
+  // The owner's third run (2026-10-04): Replace had moved two series off AllManga -- failing at its pages -- onto
+  // Natomanga, which lists every one of their chapters and was rate-limiting. Their 32 failed chapters stayed filed
+  // under AllManga: Health listed them there, the failures step skips a source failing at its pages, and every run ended
+  // with "36 chapters no source can download". Filed under the new main by the switch (lib/chapterFailures.ts
+  // refileFailures, from lib/mainSource.ts), they are its own: on a rate-limited one they wait for its pause -- Health's
+  // row says waiting, the end says it clears by itself -- and through a working one the failures step fetches them.
+  // Reintroduce by dropping the refile in switchMainSource: both series' rows stay under af-allmanga2, switched off by
+  // Replace, and are Needs you. By dropping the `moved` clause of Health's waiting count (lib/health.ts
+  // chapterFailures): af-kakalot2's row is a finding.
+  const AM = 'af-allmanga2', KK = 'af-kakalot2';
+  const waits = 's_af_fwait', lands = 's_af_fland';
+  const TW = 'Fix Follow Wait', TL = 'Fix Follow Land';
+  catalog.set(AM, new Map([[TW, range(1, 7)], [TL, range(1, 7)]]));
+  catalog.set(KK, new Map([[TW, range(1, 7)]]));
+  catalog.get(GOOD)!.set(TL, range(1, 7));
+  sources.registerAdapter({
+    ...adapter(AM),
+    async getPageUrls() { throw new Error('suwayomi: Timed out waiting for WebView after 20s'); },
+  } as any);
+  sources.registerAdapter(adapter(KK) as any);
+  const at = new Date().toISOString();
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error, stages) VALUES
+             ($1, 'ok', 0, NULL, NULL, $2::jsonb),
+             ($3, 'rate_limited', 5, now() - interval '10 minutes', '0/32 pages downloaded (HTTP 429)', $4::jsonb)`, [
+    AM, JSON.stringify({
+      search: { okAt: at, okBy: 'test', streak: 0 }, chapters: { okAt: at, okBy: 'test', streak: 0 },
+      pages: { failAt: at, failBy: 'test', since: new Date(Date.now() - 86_400_000).toISOString(), streak: 39, kind: 'error', error: 'suwayomi: Timed out waiting for WebView after 20s' },
+    }),
+    KK, JSON.stringify({ images: { failAt: at, failBy: 'traffic', streak: 5, kind: 'rate_limited', error: '0/32 pages downloaded (HTTP 429)' } }),
+  ]);
+  for (const [id, title] of [[waits, TW], [lands, TL]]) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+             VALUES ($1,'T!af',$2,$3,0,$4,$5,$6,true)`, [id, title, `T!af/${id}`, LIB, AM, `${AM}::${title}`]);
+    for (const n of range(1, 5)) {
+      const file = `T!af/${id}/Chapter ${n}.cbz`;
+      cbz(join(DL, file), 3, title);
+      await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, pages_checked_at, root, source_id, mtime)
+               VALUES ($1,$2,'T!af',$3,$4,$5,3,now(),$6,$7,1000)`, [`b_${id}_${n}`, id, file, n, `Chapter ${n}`, DL, AM]);
+    }
+    // AllManga listed all seven -- its chapter lists answer -- and chapters 6 and 7 failed at its pages, three times
+    // each: capped.
+    for (const n of range(1, 7)) {
+      await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status) VALUES ($1,$2,$3,$4::jsonb,'available')`,
+        [id, n, AM, JSON.stringify({ sourceId: cid(AM, title, n), source: AM, number: n })]);
+    }
+    for (const n of [6, 7]) {
+      await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+               VALUES ($1, $2, $3, 'error', 'no page urls', 3, now() - interval '1 hour', now() - interval '3 days')`, [id, n, AM]);
+    }
+  }
+  // One follows the source that works, which Replace makes its main without a search; the other is found on the
+  // rate-limited one by search, which a source that only asked for room may take (v0.55.1).
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,$3,$4)`, [lands, GOOD, `${GOOD}::${TL}`, TL]);
+  const natoBefore = natoAsked;
+  try {
+    const started = autofix.startAutofix(adminId);
+    assert.ok('runId' in started);
+    await autofix.autofixSettled();
+    const done = await autofix.autofixRun((started as any).runId);
+    assert.equal(done?.status, 'done');
+    assert.deepEqual([(await seriesRow(waits)).source_id, (await seriesRow(lands)).source_id], [KK, GOOD],
+      'PREMISE: Replace moved them off the source failing at its pages');
+
+    const ledger = await q(`SELECT number::float8 AS n, source_id, status, attempts, first_at < now() - interval '2 days' AS old
+                              FROM chapter_failures WHERE series_id = $1 ORDER BY number`, [waits]);
+    assert.deepEqual(ledger.map((r: any) => [r.n, r.source_id, r.status, r.attempts, r.old]), [[6, KK, 'moved', 0, true], [7, KK, 'moved', 0, true]],
+      'filed under the rate-limited new main, not tried there yet, failing since they first did');
+    assert.equal(natoAsked, natoBefore, 'PREMISE: nothing asked af-nato meanwhile');
+    for (const n of [6, 7]) assert.ok(existsSync(join(DL, `T!af/${lands}`, `Chapter ${n}.cbz`)), `chapter ${n} came through the working new main`);
+    assert.deepEqual(await q('SELECT number FROM chapter_failures WHERE series_id = $1', [lands]), [], 'and its rows went when they landed');
+
+    const { runHealthChecks } = await import('../src/lib/health');
+    const card = (await runHealthChecks()).checks.find((c) => c.id === 'chapter-failures')!;
+    assert.equal(card.items.some((i) => i.sourceId === AM), false, 'Health no longer lists them under the source the series left');
+    const row = card.items.find((i) => i.sourceId === KK);
+    assert.equal(row?.info, true, `the rate-limited new main's row is waiting, not failing: ${JSON.stringify(row)}`);
+
+    const failures = done!.summary!.needsYou.find((n) => n.check === 'chapter-failures');
+    assert.equal(failures?.said.params?.n, 1, "Needs you counts only af-down's chapter, never the ones waiting on the new main");
+    assert.ok(done!.summary!.clears.some((c) => c.said.code === 'autofix.clears.cooldown' && c.said.params?.name === `Fix ${KK}`),
+      'they clear by themselves when the new main\'s pause ends');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[waits, lands]]).catch(() => {});
+    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[AM, KK]]).catch(() => {});
+    catalog.get(GOOD)!.delete(TL);
+    sources.unregisterAdapter(AM);
+    sources.unregisterAdapter(KK);
+  }
+});
+
 test('one Fix everything at a time, and never beside a repair, a Find or a sweep', { skip }, async () => {
   // Reintroduce by dropping a refusal: busyWith() in lib/autofix.ts (each `running` below), runtime.autofixing in
   // repair.ts runRepair ("a repair refuses beside it") or in findSources.ts startFind ("so does a Find").

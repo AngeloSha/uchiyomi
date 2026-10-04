@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3189
+    "strings": 3190
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3192,5 +3192,6 @@
   "Hidden now: {n}.": "当前已隐藏：{n} 章。",
   "Following the switch for {type} in Settings.": "跟随设置中“{type}”的开关。",
   "Notice chapters": "公告章节",
-  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "来源常把给读者的公告发成编号在最新章节之后的短章节，例如 100.5。对每个已开启的类型，编号如 12.5 且不超过 3 页的章节会在书库、阅读器、OPDS 和 Mihon 中隐藏；更长的章节以及尚未统计页数的章节会保留。来源已标明这么短的章节不会下载。不会删除任何内容：关闭该类型即可重新显示。单个系列可在其“来源与翻译”面板中覆盖此设置。"
+  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "来源常把给读者的公告发成编号在最新章节之后的短章节，例如 100.5。对每个已开启的类型，编号如 12.5 且不超过 3 页的章节会在书库、阅读器、OPDS 和 Mihon 中隐藏；更长的章节以及尚未统计页数的章节会保留。来源已标明这么短的章节不会下载。不会删除任何内容：关闭该类型即可重新显示。单个系列可在其“来源与翻译”面板中覆盖此设置。",
+  "from a source the series no longer uses": "来自作品已不再使用的来源"
 }

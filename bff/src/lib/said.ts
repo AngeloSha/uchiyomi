@@ -170,8 +170,8 @@ const EN = {
     'until the nightly repair gives it another chance a week later; "Retry now" does that for this source at once, ' +
     'and "Find missing chapters" on the series still fetches it on purpose. ' +
     'A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.',
-  // `status` is the ledger's (lib/chapterFailures.ts): incomplete, error, or the source's own status; `reason` the
-  // downloader's own words.
+  // `status` is the ledger's (lib/chapterFailures.ts): incomplete, error, or the source's own status -- or, since v0.55.3,
+  // moved (filed under the main source from one the series no longer uses); `reason` the downloader's own words.
   'failures.detail': ({ n, series, since, tries, capped, cap, title, number, status, reason }: {
     n: number; series: number; since: string; tries: number; capped: number; cap: number;
     title: string; number: number; status: string; reason: string | null;

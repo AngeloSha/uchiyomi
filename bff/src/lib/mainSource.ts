@@ -16,9 +16,10 @@
 //     and a second switch all wait their turn. The promoted row leaves series_sources;
 //   - the old main stays as the LAST follower (the `created_at` default) when it still carries the series -- usable or
 //     cooling (lib/sourceStanding.ts) -- and the cap has room, or is dropped with its listing rows (the unfollow's rule)
-//     and its ledger rows reset, so a chapter capped against it gets its tries from the new main
-//     (chapter_failures is keyed by number, not by source: it would otherwise stay capped against a source the series
-//     no longer reads);
+//     and its ledger rows filed under the new main, their tries starting again (v0.55.3, lib/chapterFailures.ts
+//     refileFailures), so a chapter capped against it gets its tries from the new main, and Health and Fix everything
+//     read it as the new main's (chapter_failures is keyed by number, not by source: it would otherwise stay capped
+//     against a source the series no longer reads);
 //   - the series' language is pinned when it was only inferred from the main source and the new one says otherwise
 //     (lib/seriesLang.ts effectiveLang): the language guard, editions, Komga's `language` and Edit details all read it,
 //     and a switch must not change it by the way. An edition always states its language, so the (work, language)
@@ -47,6 +48,7 @@ import { editionFollowing } from './editions';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { carries, standingOf, standingRows } from './sourceStanding';
 import { say, type Part } from './said';
+import { refileFailures } from './chapterFailures';
 
 /** What becomes of the old main: `auto` keeps it while it still carries the series; `keep` and `drop` decide. */
 export type OldMain = 'auto' | 'keep' | 'drop';
@@ -145,7 +147,7 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
     && (opts.old === 'keep' || (opts.old !== 'drop' && carries(standingOf(from, standing.get(from)))));
 
   // ---- the switch, under the series row's lock ----
-  type Done = { r: MainSwitched; promoted: { coverage: number | null; added_by: string | null } };
+  type Done = { r: MainSwitched; promoted: { coverage: number | null; added_by: string | null }; failuresMoved: number };
   const out = await tx<Done | MainRefused>(async (qq) => {
     const [row] = await qq<Row>(`SELECT ${ROW} FROM lib_series WHERE id = $1 FOR UPDATE`, [seriesId]);
     if (!row || row.deleted_at || row.merged_into) return refuse('not_found');
@@ -192,17 +194,22 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
       // The unfollow's rule: the rows a dropped source carried go with it, or a member could still fetch through it.
       // Reintroduce by dropping it: "a switched-off old main is dropped" finds its listing rows.
       listingDropped = (await qq('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2 RETURNING number', [seriesId, from])).length;
-      // Chapters capped against the old main get their tries from the new one (the repair's reset shape, first_at
-      // kept). Reintroduce by dropping it: "its capped chapters get another try" finds chapter 7 capped.
-      await qq(`UPDATE chapter_failures SET attempts = 0, first_at = COALESCE(first_at, at), at = now()
-                 WHERE series_id = $1 AND source_id = $2`, [seriesId, from]);
     }
+    // Failures follow the series (v0.55.3, lib/chapterFailures.ts): the chapters a dropped old main failed -- and any
+    // row still filed under a source the series no longer uses -- are the new main's now, filed under it with their
+    // tries starting again (the repair's reset shape, first_at kept). v0.54.0 reset them where they were: the sweep
+    // tried them through the new main, but Health listed them under a source the series no longer reads, and Fix
+    // everything's failures step, which skips a source failing at its pages, left them to "Needs you" run after run.
+    // A kept old main is still the series' own: its rows stay as they are. Reintroduce by dropping it: "its capped
+    // chapters get another try, filed under the new main" in mainSource.int.test.ts finds chapter 7 capped, under ms-a.
+    const failuresMoved = await refileFailures(qq, [seriesId]);
     return {
       r: {
         ok: true as const, from, fromRef: pre.source_series_id, to, toRef: promoted.source_series_id,
         old: kept ? 'kept' as const : 'dropped' as const, ...(langPinned ? { langPinned } : {}), listingDropped,
       },
       promoted: { coverage: promoted.coverage, added_by: promoted.added_by },
+      failuresMoved,
     };
   });
   if ('refused' in out) return out;
@@ -211,6 +218,7 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
     detail: {
       id: seriesId, title: pre.title, from, fromRef: pre.source_series_id, to, toRef: out.r.toRef, old: out.r.old,
       coverage: out.promoted.coverage, addedBy: out.promoted.added_by, ...(out.r.langPinned ? { langPinned: out.r.langPinned } : {}),
+      ...(out.failuresMoved ? { failuresMoved: out.failuresMoved } : {}),
       via: opts.via, ...(opts.runId ? { runId: opts.runId } : {}),
     },
     req: opts.req,

@@ -500,6 +500,51 @@ test("migrate: v0.55.2's data migration types a series from its genres, and only
   }
 });
 
+test("migrate: v0.55.3's data migration files a failed chapter under its series' main source when the series no longer uses its own", { skip }, async () => {
+  // The owner's library (2026-10-04): Replace had moved two series off AllManga onto Natomanga, and their 32 failed
+  // chapters stayed filed under AllManga (attempts reset to 0 by v0.54.0's switch) -- listed there by Health, and
+  // "chapters no source can download" at the end of every Fix everything run. Each row: its series' main source, the
+  // sources it follows, the source the row is filed under, and its tries.
+  const SEED: Record<string, [string | null, string[], string, number]> = {
+    // The owner's: neither the main source nor followed -- the new main's now.
+    't-ff-orphan': ['t-ff-nato', [], 't-ff-allmanga', 0],
+    't-ff-capped': ['t-ff-nato', ['t-ff-kakalot'], 't-ff-allmanga', 3],
+    // Its own source, failing or not: a row under the main source, or under a source it follows, stays as it is.
+    // Reintroduce by dropping the main-source test (`f.source_id <> s.source_id`): t-ff-main's row reads `moved`, its
+    // tries reset. By dropping the series_sources test: t-ff-follower's row moves.
+    't-ff-main': ['t-ff-allmanga', [], 't-ff-allmanga', 3],
+    't-ff-follower': ['t-ff-nato', ['t-ff-allmanga'], 't-ff-allmanga', 2],
+    // No main source to give it to: left where it is.
+    't-ff-nomain': [null, [], 't-ff-allmanga', 1],
+  };
+  const ids = Object.keys(SEED);
+  try {
+    for (const [id, [main, follows, under, attempts]] of Object.entries(SEED)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id) VALUES ($1, 'test', 'T', $1, $2, $3)`,
+        [id, main, main ? `${main}|${id}` : null]);
+      for (const f of follows) await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [id, f, `${f}|${id}`]);
+      await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+               VALUES ($1, 7, $2, 'error', 'no page urls', $3, now() - interval '1 day', now() - interval '3 days')`, [id, under, attempts]);
+    }
+    // Reintroduce by leaving the step out of DATA_MIGRATIONS: every row stays under t-ff-allmanga.
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.55.3-failures-follow-the-series'`);
+    await migrate();
+    const rows = await q<{ series_id: string; source_id: string; status: string; reason: string; attempts: number; old: boolean }>(
+      `SELECT series_id, source_id, status, reason, attempts, first_at < now() - interval '2 days' AS old FROM chapter_failures WHERE series_id = ANY($1)`, [ids]);
+    assert.deepEqual(Object.fromEntries(rows.map((r) => [r.series_id, [r.source_id, r.status, r.reason, r.attempts, r.old]])), {
+      't-ff-orphan': ['t-ff-nato', 'moved', 'no page urls', 0, true],
+      't-ff-capped': ['t-ff-nato', 'moved', 'no page urls', 0, true],
+      't-ff-main': ['t-ff-allmanga', 'error', 'no page urls', 3, true],
+      't-ff-follower': ['t-ff-allmanga', 'error', 'no page urls', 2, true],
+      't-ff-nomain': ['t-ff-allmanga', 'error', 'no page urls', 1, true],
+    }, 'the data migration filed the wrong rows, or the wrong way');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.55.3-failures-follow-the-series'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
+});
+
 test('migrate: an edition v0.51.0 merged away after a rollback gives its language back at the next boot', { skip }, async () => {
   // The rollback drill's find: v0.51.0's merge sets merged_into and leaves work_id and lang alone, so the absorbed
   // French row kept its slot in lib_series_work_lang_idx, and v0.52.0 then refused a new French edition of the
