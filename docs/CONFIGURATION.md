@@ -37,6 +37,12 @@ released and shows the answer under Admin → Health. It is a `GET` of a public 
 IP address, exactly as it would if you opened that page in a browser, and nothing else. Nothing about your
 install is sent. Being a version behind is never treated as a fault — it will not turn anything amber.
 
+When **Fix everything** has to try extensions (since v0.55.1), it ranks them by how often each is downloaded: at most
+once a day it reads the public releases list of the repository your extensions come from on GitHub (Keiyoushi's puts
+each extension's files there), the same kind of `GET` with nothing about your install in it. When GitHub cannot be
+reached it uses the last answer, else each extension's version. Set `GITHUB_API_URL` to send both GitHub reads to a
+mirror instead of `https://api.github.com` (the browser tests point it at a stand-in).
+
 **Count this server in the anonymous install count** — *off by default.* Nobody can see how many people
 self-host this, so nobody — including whoever wrote it — knows whether a release reached twenty people or two
 hundred. If you turn this on, once a day your server sends this, and nothing else, to `uchiyomi.com`:

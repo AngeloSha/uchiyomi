@@ -24,6 +24,12 @@
 const TTL_MS = 24 * 60 * 60_000;
 /** Long enough to be worth having, short enough that a hanging GitHub cannot hold a health check open. */
 const TIMEOUT_MS = 4000;
+/**
+ * GitHub's API, or what GITHUB_API_URL names in its place (v0.55.1): a mirror, or a test rig's stand-in -- the browser
+ * walk's fake engine answers the releases list there, so Fix everything's popular-first order is driven end to end.
+ * Read once, at load, as the install count's own address is (installPing.ts).
+ */
+const API = (process.env.GITHUB_API_URL || 'https://api.github.com/').replace(/\/+$/, '');
 
 const cache = new Map<string, { at: number; version: string | null }>();
 
@@ -63,7 +69,7 @@ export async function latestRelease(repo: string, now = Date.now()): Promise<str
   if (hit && now - hit.at < TTL_MS) return hit.version;
   let version: string | null = null;
   try {
-    const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    const r = await fetch(`${API}/repos/${repo}/releases/latest`, {
       headers: { accept: 'application/vnd.github+json', 'user-agent': 'uchiyomi' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -100,7 +106,7 @@ export async function releaseAssets(repo: string, now = Date.now()): Promise<Map
   if (hit && now - hit.at < TTL_MS) return hit.assets;
   let assets = hit?.assets ?? null;
   try {
-    const r = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`, {
+    const r = await fetch(`${API}/repos/${repo}/releases?per_page=100`, {
       headers: { accept: 'application/vnd.github+json', 'user-agent': 'uchiyomi' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
