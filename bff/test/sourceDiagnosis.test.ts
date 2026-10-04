@@ -53,6 +53,18 @@ test('THE MIS-DIAGNOSIS: "challenge" in a solver error must not read as the site
   }
 });
 
+test("a solver still busy is the solver's capacity, never the site's rate limit", async () => {
+  // v0.55.4: trawl answers its own HTTP 429 when no browser of its pool frees up; the client asks again, then the
+  // backup, and then fails with SOLVER_BUSY. Reintroduce by dropping its rule: the words match nothing and read as
+  // `unknown`; by putting "429" back in them, the rate-limit rule names a site that never said a word.
+  const { SOLVER_BUSY } = await import('../src/lib/sources/flaresolverr');
+  const d = diagnose(facts({ lastError: SOLVER_BUSY }));
+  assert.equal(d.code, 'solver_timeout', 'a solver code');
+  assert.equal(d.fixSaid?.code, 'fix.solverBusy');
+  assert.match(d.fix, /BROWSER_POOL_SIZE/, 'the fix is the solver\'s own capacity');
+  assert.equal(d.reason, REASONS.solver_timeout);
+});
+
 test('a bare timeout refuses to guess, because it covers three different faults', () => {
   // `withTimeout` throws this after discarding everything the adapter knew. On this install the same seven
   // characters were written by a moved domain, a 403 at the CDN, and a dead solver. `classify` maps it to

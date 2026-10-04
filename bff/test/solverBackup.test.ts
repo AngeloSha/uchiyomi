@@ -70,7 +70,7 @@ function use(main: string, backup?: string): void {
 }
 
 beforeEach(async () => {
-  (await load()).setSolverTiming({ attemptMs: 95_000 });
+  (await load()).setSolverTiming({ attemptMs: 95_000, busyWaitMs: 3_000 });
 });
 after(async () => {
   for (const f of fakes) await f.close();
@@ -173,4 +173,59 @@ test('no backup, or a backup at the main\'s own address: the main is asked once,
   use(main.url, '  ');
   await assert.rejects(cfGet('https://site.example/z'));
   assert.equal(main.asked.length, 3);
+});
+
+// ---- a solver that is busy (its own HTTP 429) --------------------------------------------------------------------
+
+/** trawl's answer when no browser of its pool frees up in time (apps/api/src/routes/v1.ts, 1.7.0). */
+const busy = (): Reply => ({ status: 429, json: { status: 'error', message: 'Browser pool exhausted: all browsers are busy', solution: { url: '', status: 0, headers: {}, response: '', cookies: [], userAgent: '' } } });
+
+test("a solver's own 429 is busy: it is asked again, twice, a moment apart, then the backup", async () => {
+  // Reintroduce the solver's 429 as an ordinary failure (drop the 429 branch in ask()): the main is asked once, not three
+  // times. Reintroduce no pause between the tries: "a pause before each try" fails.
+  const { cfGet, setSolverTiming } = await load();
+  setSolverTiming({ busyWaitMs: 60 });
+  const main = await fakeSolver('main');
+  const backup = await fakeSolver('backup');
+  const at: number[] = [];
+  main.reply = () => { at.push(Date.now()); return busy(); };
+  use(main.url, backup.url);
+
+  assert.equal(await cfGet('https://site.example/busy'), '<html>backup</html>');
+  assert.equal(main.asked.length, 3, 'the busy main was asked three times: once, then twice again');
+  assert.ok(at[1] - at[0] >= 55 && at[2] - at[1] >= 115, `a pause before each try, the second twice the first: ${at[1] - at[0]} ms, ${at[2] - at[1]} ms`);
+  assert.equal(backup.asked.length, 1, 'then the backup, once');
+
+  // Busy for a moment only: the second try answers, and the backup is not needed.
+  let tries = 0;
+  main.reply = (b) => (++tries === 1 ? busy() : { json: solved(b.url, '<html>main</html>') });
+  assert.equal(await cfGet('https://site.example/busy-once'), '<html>main</html>');
+  assert.equal(backup.asked.length, 1, 'the backup was not asked');
+});
+
+test('a solver still busy fails in our own words: no cooldown and no rate limit for a site that said nothing', async () => {
+  // classify() is what turns an error into a site's cooldown (reportFail) and RATE_LIMIT_WORDS into a rate limit
+  // (noteStage, isRateLimit). Reintroduce "429" in SOLVER_BUSY: both assertions on the site fail. Reintroduce the first
+  // failure before the busy one (`failed[0]` in solveNow): the second case reads the main's "fetch failed", which
+  // classify() files as the site being down.
+  const { cfGet, setSolverTiming, SOLVER_BUSY } = await load();
+  const { classify } = await import('../src/lib/sourceHealth');
+  const { isRateLimit } = await import('../src/lib/sourceEvidence');
+  setSolverTiming({ busyWaitMs: 1 });
+  const main = await fakeSolver('main');
+  main.reply = busy;
+
+  use(main.url);
+  const err = await cfGet('https://site.example/full').then(() => null, (e: Error) => e);
+  assert.equal(err?.message, SOLVER_BUSY, 'the error is ours, not the pool\'s');
+  assert.equal(classify(err), null, 'the site is not cooled down for the solver being busy');
+  assert.equal(isRateLimit({ kind: 'error', error: err!.message }), false, 'nor read as asking us to slow down');
+
+  // The main cannot be reached and the backup is busy: still the busy words, never the connection error.
+  use(NOWHERE, main.url);
+  const both = await cfGet('https://site.example/full-2').then(() => null, (e: Error) => e);
+  assert.equal(both?.message, SOLVER_BUSY, 'a main that cannot be reached and a busy backup: the busy words');
+
+  // The SITE's 429 is the site's: trawl says it in its own answer, and classify() reads a rate limit there, as ever.
+  assert.equal(classify(new Error('flaresolverr: Tier 3 failed (http-429). Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.')), 'rate_limited');
 });

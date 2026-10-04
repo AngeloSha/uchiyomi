@@ -65,36 +65,62 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
  * solverBackup.test.ts reads the backup's connection error.
  */
 async function solveNow(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
-  const failed: Array<{ error: Error; said: boolean }> = [];
+  const failed: Array<{ error: Error; said: boolean; busy?: boolean }> = [];
   for (const solver of solvers()) {
     const a = await ask(solver, cmd, url, postData);
     if ('solution' in a) return a.solution;
     failed.push(a);
   }
-  throw (failed.find((f) => f.said) ?? failed[0]).error;
+  // A busy solver before a connection error (SOLVER_BUSY, below): it is the one that names no site.
+  throw (failed.find((f) => f.said) ?? failed.find((f) => f.busy) ?? failed[0]).error;
 }
 
 /** What asking one solver came to: a page, or why not -- `said` when the solver itself answered (above). */
-type Asked = { solution: Solution } | { error: Error; said: boolean };
+type Asked = { solution: Solution } | { error: Error; said: boolean; busy?: boolean };
 
-/** Test seam: how long one solver may take with one request before it counts as not answering (the backup is next). */
+/**
+ * A solver's own HTTP 429 is the solver being BUSY, never the site refusing (v0.55.4).
+ *
+ * trawl answers it when none of its browsers (BROWSER_POOL_SIZE, one by default) frees up within its
+ * BROWSER_ACQUIRE_TIMEOUT_MS (15 s): "Browser pool exhausted: all browsers are busy". A site's own 429 comes inside an
+ * answer -- `solution.status`, or trawl's "Tier 3 failed (http-429)" -- where classify() reads it as the rate limit it
+ * is. So the same solver is asked again, BUSY_RETRIES times a few seconds apart, then the backup; a solver still busy
+ * after that fails in words of our own, which classify() files as nothing: no cooldown and no rate limit for a site that
+ * never said a word. Reintroduce the solver's 429 as an ordinary failure (drop the 429 branch in `ask`): "a solver's
+ * own 429 is busy" in solverBackup.test.ts finds the main asked once and its pool's words as the error.
+ */
+export const SOLVER_BUSY = 'flaresolverr: solver busy (every one of its browsers stayed in use)';
+const BUSY_RETRIES = 2;
+
+/**
+ * Test seam: how long one solver may take with one request before it counts as not answering (the backup is next), and
+ * the pause before a busy solver is asked again (doubled the second time).
+ */
 let attemptMs = 95_000;
-export function setSolverTiming(t: { attemptMs?: number }): void {
+let busyWaitMs = 3_000;
+export function setSolverTiming(t: { attemptMs?: number; busyWaitMs?: number }): void {
   if (t.attemptMs !== undefined) attemptMs = t.attemptMs;
+  if (t.busyWaitMs !== undefined) busyWaitMs = t.busyWaitMs;
 }
 
 async function ask(solver: string, cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Asked> {
   let r: Response;
-  try {
-    r = await fetch(`${solver}/v1`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cmd, url, postData, maxTimeout: 60000 }),
-      signal: AbortSignal.timeout(attemptMs),
-    });
-  } catch (e) {
-    // Not reachable, or no answer in time: nothing about the site.
-    return { error: e as Error, said: false };
+  for (let busy = 0; ; busy++) {
+    try {
+      r = await fetch(`${solver}/v1`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cmd, url, postData, maxTimeout: 60000 }),
+        signal: AbortSignal.timeout(attemptMs),
+      });
+    } catch (e) {
+      // Not reachable, or no answer in time: nothing about the site.
+      return { error: e as Error, said: false };
+    }
+    if (r.status !== 429) break;
+    await r.text().catch(() => '');
+    if (busy >= BUSY_RETRIES) return { error: new Error(SOLVER_BUSY), said: false, busy: true };
+    await new Promise((go) => setTimeout(go, busyWaitMs * (busy + 1)));
   }
   // A solver's errors are JSON too (FlareSolverr's HTTP 500 carries {status: 'error', message}). Anything else -- a
   // proxy's error page, a web server at the wrong address -- is the solver's address failing, never the site.

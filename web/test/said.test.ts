@@ -221,6 +221,8 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     ['crash', facts('flaresolverr: Error solving the challenge. Message: Service /app/chromedriver unexpectedly exited.')],
     ['down', facts("flaresolverr: HTTPConnectionPool(host='localhost', port=1): Max retries exceeded with url: /session")],
     ['solver timeout', facts('flaresolverr: Error solving the challenge. Timeout after 60.0 seconds.')],
+    // v0.55.4: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
+    ['solver busy', facts('flaresolverr: solver busy (every one of its browsers stayed in use)')],
     ['bypass', facts('suwayomi: java.io.IOException: Cloudflare bypass currently disabled')],
     ['engine login', facts('suwayomi 401')],
     ['engine down', facts('suwayomi unreachable: ECONNREFUSED')],
@@ -559,6 +561,8 @@ test('on the desktop app, every platform wording says Uchiyomi, never a containe
   const DESKTOP = [
     'solver.down', 'solver.downNote', 'solver.failingNote', 'cap.note', 'cap.title', 'cap.detail', 'frozen.overLimit',
     'fix.solverCrash', 'fix.solverDown', 'fix.bypassOff', 'fix.engineLogin', 'fix.engineDown', 'fix.solverBroken',
+    // v0.55.4: the desktop helper is never busy, but its words would still be a restart.
+    'fix.solverBusy',
     // v0.52.0 (#134): the desktop app chooses its folders; nothing is mounted there.
     'nested.note',
   ];

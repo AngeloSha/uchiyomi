@@ -153,7 +153,7 @@ export type FixCode =
   | 'fix.extensionFailed' | 'fix.timeout' | 'fix.disabled' | 'fix.moved' | 'fix.unreachableAt' | 'fix.cdnAnswered403'
   | 'fix.nothingToDo' | 'fix.solverBroken' | 'fix.markupChanged' | 'fix.unknownLive' | 'fix.unnumbered'
   | 'fix.emptySearch' | 'fix.emptyChapters' | 'fix.emptyPages' | 'fix.testTimeout' | 'fix.tooSlow' | 'fix.unknown'
-  | 'fix.unexplained' | 'fix.siteOffline';
+  | 'fix.unexplained' | 'fix.siteOffline' | 'fix.solverBusy';
 
 /** A fix: its English, and its code with what fills it. */
 interface Fix { text: string; said: Said }
@@ -219,6 +219,17 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
   [/timeout after [\d.]+ seconds|error solving the challenge/i, () =>
     D('solver_timeout', NEEDS_ADMIN,
       fixed('fix.solverTimeout', 'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
+      'admin')],
+
+  // A solver that stayed BUSY through its tries and the backup (v0.55.4, sources/flaresolverr.ts SOLVER_BUSY: trawl's
+  // own 429 when no browser of its pool frees up). The solver ran out of room, not the site of patience: a solver code,
+  // with the solver's own capacity as the fix. The words are ours, so no rule below can read them as the site's.
+  [/\bsolver busy\b/i, () =>
+    D('solver_timeout', NEEDS_ADMIN,
+      fixed('fix.solverBusy', forDesktop(
+        'The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).',
+        "Uchiyomi's built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.",
+      )),
       'admin')],
 
   // Suwayomi's own CloudflareInterceptor throws exactly these words when the ENGINE's FlareSolverr

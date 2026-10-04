@@ -921,6 +921,10 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('Uchiyomi\'s built-in Cloudflare helper is not answering. Quit and reopen Uchiyomi to restart it.')
     : tr('The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.')),
   'fix.solverTimeout': () => tr('The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
+  // v0.55.4: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
+  'fix.solverBusy': () => (isDesktop()
+    ? tr('Uchiyomi\'s built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.')
+    : tr('The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).')),
   'fix.bypassOff': () => (isDesktop()
     ? tr('The extension engine isn\'t using Uchiyomi\'s built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.')
     : tr('The extension engine\'s own Cloudflare bypass is switched off. On the Suwayomi engine\'s container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.')),
