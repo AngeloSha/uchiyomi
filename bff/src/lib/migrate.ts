@@ -1429,6 +1429,10 @@ ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS series_type_from text;
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS hide_notices     boolean;
 ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS series_type      text;
 ALTER TABLE server_settings  ADD COLUMN IF NOT EXISTS hide_notice_types jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- The chapters whose file number has a fraction, by series: the few rows a notice can be among (lib/noticeChapters.ts
+-- mayBeNotice, hiddenBookCount), so the hidden counts and the read-progress roll-ups do not visit every chapter of
+-- the library while a switch is on (about 1,800 of 48,000 on the owner's). Partial and small; nothing else reads it.
+CREATE INDEX IF NOT EXISTS lib_books_fraction_idx ON lib_books (series_id) WHERE number <> floor(number);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

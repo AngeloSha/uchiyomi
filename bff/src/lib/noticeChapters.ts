@@ -68,6 +68,16 @@ export const bookIsNotice = (b: string, num: string): string => `(${isFractional
   `COALESCE(NULLIF(${b}.pages, 0), (SELECT ${listedPages('lp_nt.copies')} FROM series_listing lp_nt
     WHERE lp_nt.series_id = ${b}.series_id AND lp_nt.number = ${num}))`)})`;
 
+/**
+ * A NECESSARY condition for bookIsNotice on the lib_books row `b`, in a form indexes serve: its file's number has a
+ * fraction (lib_books_fraction_idx holds just those rows, lib/migrate.ts v0.55.2), or an override gives it one
+ * (book_overrides' handful, by primary key). It changes no answer -- bookIsNotice still decides -- it only lets the
+ * planner skip the whole numbers without visiting them. On the review's 48k-chapter library a read-progress roll-up
+ * went through every chapter to find the 170 notices, and the Library grid's estimate crossed jit_above_cost.
+ */
+const mayBeNotice = (b: string): string => `(${b}.number <> floor(${b}.number)
+     OR ${b}.id = ANY(ARRAY(SELECT bo_nt.book_id FROM book_overrides bo_nt WHERE bo_nt.number <> floor(bo_nt.number))))`;
+
 /** Is the series_listing row `l` a notice, whether or not its series hides them? What the listing says of it. */
 export const listedIsNotice = (l: string): string => `(${isFractional(`${l}.number`)} AND ${isShort(listedPages(`${l}.copies`))})`;
 
@@ -105,7 +115,7 @@ export const noticeBook = (bookId: string): string => (!active ? 'false' : `EXIS
   SELECT 1 FROM lib_books nb_nt
     JOIN lib_series ns_nt ON ns_nt.id = nb_nt.series_id
     LEFT JOIN book_overrides nov_nt ON nov_nt.book_id = nb_nt.id
-   WHERE nb_nt.id = ${bookId}
+   WHERE nb_nt.id = ${bookId} AND ${mayBeNotice('nb_nt')}
      AND ${noticeHidden('ns_nt', 'nb_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`);
 
 /**
@@ -119,10 +129,22 @@ export const noticeListed = (l: string): string => (!active ? 'false' : `EXISTS 
  * How many of series `s`'s lib_books rows are hidden notices: what lib_series.books_count -- a stored count of every
  * row -- is short of, read at query time so the count is right again the moment the switch goes off. 0 for a series
  * that does not hide, without counting anything.
+ *
+ * Two counts that partition the candidates by the file's own number, so each is served by an index rather than by
+ * every chapter of the series: the files numbered with a fraction (lib_books_fraction_idx, by series), and the
+ * whole-numbered files an override gives a fraction (book_overrides). Every series the Library grid sorts runs this;
+ * as one count over all its chapters the planner priced the grid past jit_above_cost (the review: 9.9 -> 67 ms).
+ * Reintroduce the single count: "the hidden counts are read through the fractional index" in
+ * noticeChapters.int.test.ts finds the series index instead.
  */
 export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(*) FROM lib_books hb_nt LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
-   WHERE hb_nt.series_id = ${s}.id AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
+   WHERE hb_nt.series_id = ${s}.id AND hb_nt.number <> floor(hb_nt.number)
+     AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
+) + (
+  SELECT count(*) FROM lib_books hb_nt JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
+   WHERE hb_nt.id = ANY(ARRAY(SELECT bo_nt.book_id FROM book_overrides bo_nt WHERE bo_nt.number <> floor(bo_nt.number)))
+     AND hb_nt.series_id = ${s}.id AND hb_nt.number = floor(hb_nt.number) AND ${bookIsNotice('hb_nt', 'hov_nt.number')}
 ) ELSE 0 END)::int`;
 
 /**

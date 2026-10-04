@@ -342,6 +342,29 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       }
     });
 
+    await t.test('the hidden counts are read through the fractional index, not every chapter', async () => {
+      // On the review's 48k-chapter library a single count over all of a series' chapters, run for every series the
+      // grid sorts, priced the Library grid past jit_above_cost, and every read-progress roll-up visited every chapter
+      // to find 170 notices. The plan the indexes allow, whatever this small table's statistics prefer.
+      // Reintroduce the single count in hiddenBookCount, or drop mayBeNotice from noticeBook: lib_books_fraction_idx
+      // is not in the plan.
+      const { tx } = await import('../src/lib/db');
+      const { hiddenBookCount, noticeBook } = await import('../src/lib/noticeChapters');
+      await setTypes(['manhwa']);
+      try {
+        const [count, rollup] = await tx(async (qq) => {
+          await qq('SET LOCAL enable_seqscan = off');
+          const plan = async (sql: string) => (await qq(`EXPLAIN ${sql}`)).map((r: any) => r['QUERY PLAN']).join('\n');
+          return [await plan(`SELECT ${hiddenBookCount('s')} FROM lib_series s`),
+            await plan(`SELECT series_id, count(*) FROM read_progress WHERE NOT ${noticeBook('read_progress.book_id')} GROUP BY series_id`)];
+        });
+        assert.match(count, /lib_books_fraction_idx/, `the hidden count visits every chapter:\n${count}`);
+        assert.match(rollup, /lib_books_fraction_idx/, `the roll-up visits every chapter:\n${rollup}`);
+      } finally {
+        await setTypes([]);
+      }
+    });
+
     await t.test("a series' own switch alone turns the hide on, and nothing hides once it is back", async () => {
       // Every type off: the queries are the previous release's (lib/noticeChapters.ts `active`) until something hides.
       const { noticesActive } = await import('../src/lib/noticeChapters');
