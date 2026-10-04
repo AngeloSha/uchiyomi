@@ -3,6 +3,7 @@ import { pool, one } from './db';
 import { env } from '../env';
 import { MANGADEX_LANGS } from './lang';
 import { typeFromGenres } from './seriesTypeSignals';
+import { REFILE_FAILURES_SQL } from './chapterFailures';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -1642,6 +1643,16 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
         [typed.map((t) => t.id), typed.map((t) => t.type), typed.map((t) => t.from)],
       );
     },
+  },
+
+  // v0.55.3, failures follow the series: every failed chapter filed under a source its series no longer uses -- neither
+  // its main source nor one it follows -- is filed under its main source, its tries starting again, as a main-source
+  // switch does from now on (lib/chapterFailures.ts REFILE_FAILURES_SQL, the same statement, so the two cannot
+  // disagree). Live, Replace had left 32 such rows under AllManga for two series now on Natomanga. One UPDATE, and no
+  // column: a v0.55.2 rollback reads the rows as any others, and its next failure of the chapter writes its own status.
+  {
+    id: 'v0.55.3-failures-follow-the-series',
+    run: async (c) => { await c.query(REFILE_FAILURES_SQL, [null]); },
   },
 
 ];

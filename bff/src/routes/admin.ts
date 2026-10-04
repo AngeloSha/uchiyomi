@@ -71,6 +71,7 @@ import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
+import { refileFailures } from '../lib/chapterFailures';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
@@ -1592,6 +1593,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Reintroduce by dropping this DELETE: "unfollowing a source takes its listing rows with it" in
     // chapterActions.int.test.ts still finds the number listed.
     await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [id, sourceId]).catch(() => {});
+    // Failures follow the series (v0.55.3, lib/chapterFailures.ts): what this source failed is the main source's to
+    // retry now, filed under it with its tries starting again -- never left under a source the series no longer reads,
+    // where Health listed it and Fix everything called it a person's. Best effort, as the listing's DELETE.
+    // Reintroduce by dropping it: "unfollowing a source files the chapters it failed under the main source" in
+    // mainSource.int.test.ts finds chapter 6 under ms-c, capped.
+    await refileFailures(q, [id]).catch(() => 0);
     // The DELETE is the guarantee; the rewrite is the courtesy. A number both sources listed whose CHOSEN
     // copy was the follower's went with the rows above, so until the next check it is neither a ghost nor
     // fetchable even though the primary lists it. A listing pass with nothing to download (maxNew 0) puts

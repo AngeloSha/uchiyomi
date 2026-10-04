@@ -3,7 +3,8 @@
 // aqua went offline and stayed the main source of 195 series: nothing could move a series off it, so every count,
 // filter, queue and Health row kept naming it. These pin what a switch moves and what it keeps: the pair moves and the
 // promoted row leaves the followers; a working old main stays as the last follower, a dead one goes with its listing
-// rows and its chapters capped against it get another try; the language a series reads as does not change by the way;
+// rows and its chapters capped against it get another try, filed under the new main (v0.55.3); the language a series
+// reads as does not change by the way;
 // the follower cap holds; and every refusal leaves the main source as it was.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
@@ -139,6 +140,11 @@ test('a follower becomes the main source, and a working old main stays as the la
   // the old main: ms-a is gone.
   await series('one', 'ms-a', ['ms-c', 'ms-b']);
   await q(`UPDATE lib_series SET source_checked_at = '2026-09-01T00:00:00Z', source_chapters = 7, source_missing = 0 WHERE id = $1`, [S('one')]);
+  // A chapter the old main failed, capped (v0.55.3): kept as a follower, the old main is still the series' own source,
+  // and its rows stay as they are. Reintroduce by moving every row off a source that is not the main (drop the
+  // series_sources test in lib/chapterFailures.ts REFILE_FAILURES_SQL): chapter 8 is filed under ms-b, its tries reset.
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+           VALUES ($1, 8, 'ms-a', 'error', 'HTTP 500', 3, now() - interval '1 hour', now() - interval '2 days')`, [S('one')]);
   holdListings();
   try {
     const r = await post(S('one'), { sourceId: 'ms-b' });
@@ -155,6 +161,8 @@ test('a follower becomes the main source, and a working old main stays as the la
     assert.deepEqual(await followers(S('one')), ['ms-c', 'ms-a'], 'the new main is no longer followed, and the old one is the last follower');
     const demoted = (await q('SELECT source_series_id, added_by, coverage FROM series_sources WHERE series_id = $1 AND source_id = $2', [S('one'), 'ms-a']))[0];
     assert.deepEqual([demoted.source_series_id, demoted.added_by, demoted.coverage], ['ms-a|one', adminId, null], 'kept with its ref, as the admin\'s follow');
+    const kept = (await q('SELECT source_id, status, attempts FROM chapter_failures WHERE series_id = $1', [S('one')]))[0];
+    assert.deepEqual([kept?.source_id, kept?.status, kept?.attempts], ['ms-a', 'error', 3], 'a row under a source the series still follows stays as it is');
     const audit = (await q(`SELECT user_id, detail FROM audit_log WHERE event = 'series.main_source' AND detail->>'id' = $1`, [S('one')]));
     assert.equal(audit.length, 1, 'one audit line');
     assert.equal(audit[0].user_id, adminId);
@@ -168,9 +176,10 @@ test('a follower becomes the main source, and a working old main stays as the la
   }
 });
 
-test('a switched-off old main is dropped with its listing rows, and its capped chapters get another try', { skip }, async () => {
-  // Reintroduce by dropping the listing DELETE: ms-a's rows remain. By dropping the ledger reset: chapter 7 stays capped
-  // against the source the series no longer reads, and is not fetched.
+test('a switched-off old main is dropped with its listing rows, and its capped chapters get another try, filed under the new main', { skip }, async () => {
+  // Reintroduce by dropping the listing DELETE: ms-a's rows remain. By dropping the refile (lib/mainSource.ts, v0.55.3;
+  // v0.54.0 reset the row where it was): chapter 7 stays capped against the source the series no longer reads, under
+  // it, and is not fetched.
   const { setDisabled } = await import('../src/lib/sourceHealth');
   const { CHAPTER_RETRY_CAP } = await import('../src/lib/updater');
   await series('two', 'ms-a', ['ms-b']);
@@ -193,6 +202,13 @@ test('a switched-off old main is dropped with its listing rows, and its capped c
     assert.deepEqual(await followers(S('two')), [], 'it is no longer followed');
     assert.equal((await q(`SELECT count(*)::int AS n FROM series_listing WHERE series_id = $1 AND source_id = 'ms-a'`, [S('two')]))[0].n, 0,
       'its listing rows went with it, as an unfollow takes them');
+    // Failures follow the series (v0.55.3): Health and Fix everything read the chapter as the new main's, not tried
+    // there yet, with why it failed where it was.
+    const moved = (await q('SELECT source_id, status, reason, attempts FROM chapter_failures WHERE series_id = $1', [S('two')]))[0];
+    assert.deepEqual([moved?.source_id, moved?.status, moved?.reason, moved?.attempts], ['ms-b', 'moved', '3 of 9 pages', 0],
+      'its failed chapter is filed under the new main, its tries starting again');
+    const audit = (await q(`SELECT detail FROM audit_log WHERE event = 'series.main_source' AND detail->>'id' = $1`, [S('two')]))[0]?.detail;
+    assert.equal(audit?.failuresMoved, 1, 'and the audit line says how many moved');
     await settle(S('two'));
 
     const up = await updateSeries(S('two'), 5);
@@ -206,6 +222,30 @@ test('a switched-off old main is dropped with its listing rows, and its capped c
   } finally {
     await settle(S('two'));
     await setDisabled('ms-a', false);
+  }
+});
+
+test('unfollowing a source files the chapters it failed under the main source; another follower keeps its own (v0.55.3)', { skip }, async () => {
+  // Failures follow the series (lib/chapterFailures.ts): a source the series no longer follows is not where its failed
+  // chapters wait. Reintroduce by dropping the refile in the unfollow route (routes/admin.ts): chapter 6 stays under
+  // ms-c, capped -- and capped, the sweep never asks the main source for it.
+  await series('un', 'ms-a', ['ms-c', 'ms-b']);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at) VALUES
+             ($1, 6, 'ms-c', 'error', 'HTTP 500', 3, now() - interval '1 hour', now() - interval '3 days'),
+             ($1, 7, 'ms-b', 'incomplete', '3 of 9 pages', 2, now() - interval '1 hour', now() - interval '2 days')`, [S('un')]);
+  holdListings();
+  try {
+    const r = await app.inject({ method: 'DELETE', url: `/api/admin/series/${S('un')}/sources/ms-c`, headers: auth });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual(await followers(S('un')), ['ms-b'], 'PREMISE: ms-c is no longer followed');
+    const rows = await q(`SELECT number::float8 AS n, source_id, status, reason, attempts, first_at < now() - interval '2 days 12 hours' AS old
+                            FROM chapter_failures WHERE series_id = $1 ORDER BY number`, [S('un')]);
+    assert.deepEqual(rows.map((x: any) => [x.n, x.source_id, x.status, x.reason, x.attempts, x.old]), [
+      [6, 'ms-a', 'moved', 'HTTP 500', 0, true],
+      [7, 'ms-b', 'incomplete', '3 of 9 pages', 2, false],
+    ], 'the unfollowed source\'s chapter is the main source\'s now, tried again from the start; a source still followed keeps its own');
+  } finally {
+    await settle(S('un'));
   }
 });
 

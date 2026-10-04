@@ -101,6 +101,7 @@ import { renumberRunning } from './numbering';
 import { runsInside } from './updater';
 import { switchMainSource, type MainRefusal } from './mainSource';
 import { retireSource } from './retireSource';
+import { refileFailures } from './chapterFailures';
 import { deadFollowers, rankFollowers, replaceCounts, replaceFacts, type RankedFollower, type SeriesFacts, type SkipWhy } from './replaceSource';
 import { MIN_COVERAGE } from './fill';
 import { carries, standingsOf, type Standing } from './sourceStanding';
@@ -781,15 +782,16 @@ async function findFor(
 
 /**
  * Room under the follower cap for one more follow: as many of the series' dead followers as it takes, worst first
- * (failing, then not loaded, then switched off), each with its listing rows as an unfollow takes them, and each
- * written into `dropped`. The cap is counted as followJudged counts it, every row. Nothing is dropped while there is
- * room.
+ * (failing, then not loaded, then switched off), each with its listing rows as an unfollow takes them and its failed
+ * chapters filed under the main source (v0.55.3), and each written into `dropped`. The cap is counted as followJudged
+ * counts it, every row. Nothing is dropped while there is room.
  */
 async function makeRoom(
   seriesId: string, dead: ReadonlyArray<{ sourceId: string; name: string }>, dropped: Array<{ sourceId: string; name: string }>,
 ): Promise<void> {
   const [{ n }] = await q<{ n: number }>('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [seriesId]);
   let over = Number(n) - MAX_FOLLOWERS + 1;
+  let made = 0;
   for (const d of dead) {
     if (over <= 0) break;
     if (dropped.some((x) => x.sourceId === d.sourceId)) continue;
@@ -798,7 +800,12 @@ async function makeRoom(
     await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [seriesId, d.sourceId]).catch(() => {});
     dropped.push({ sourceId: d.sourceId, name: d.name });
     over--;
+    made++;
   }
+  // What the dropped followers failed is the main source's to retry (v0.55.3, lib/chapterFailures.ts), whether or not
+  // the series is then moved: a source the run follows here can still fail to become its main. Reintroduce by dropping
+  // it: "the dead followers Replace drops to make room" in findSources.int.test.ts finds chapter 13 under fs-nowhere.
+  if (made) await refileFailures(q, [seriesId]).catch(() => 0);
 }
 
 /**

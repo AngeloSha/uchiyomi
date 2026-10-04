@@ -2,7 +2,8 @@
 //
 // The owner: "can u remove any extension/providers that are not working good for me". Removing a site added by address
 // used to happen at once with no check, and every series from it froze; these pin that a source is retired only once no
-// series has it as its main source, that its follows go with their listing rows, and what "remove" means for each kind:
+// series has it as its main source, that its follows go with their listing rows (and, since v0.55.3, what it failed for
+// them to each series' main source), and what "remove" means for each kind:
 // a site leaves the list, an extension's source is switched off in its extension, anything else is only turned off.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
@@ -152,6 +153,25 @@ test("an extension's source is switched off in its extension; a built-in or a pa
   assert.equal(await isDisabled(PACK), true);
   const def = await retire(MAIN, {});
   assert.equal(def.statusCode, 409, 'still a main source: refused whatever is asked');
+});
+
+test("the chapters a retired source failed are filed under each series' main source; another follower keeps its own (v0.55.3)", { skip }, async () => {
+  // Failures follow the series (lib/chapterFailures.ts): its follows go with the retirement, and so does every reason to
+  // keep its failed chapters under it. Reintroduce by dropping the refile in retireSource: chapter 10 stays under the
+  // retired site, capped.
+  await series('e', MAIN, [SITE, SITE2]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at) VALUES
+             ($1, 10, $2, 'error', 'HTTP 500', 3, now() - interval '1 hour', now() - interval '3 days'),
+             ($1, 11, $3, 'error', 'HTTP 404', 1, now() - interval '1 hour', now() - interval '2 days')`, [S('e'), SITE, SITE2]);
+  const r = await retire(SITE, { how: 'off' });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().followsDropped, 1, 'PREMISE: its follow went');
+  const rows = await q(`SELECT number::float8 AS n, source_id, status, reason, attempts, first_at < now() - interval '2 days 12 hours' AS old
+                          FROM chapter_failures WHERE series_id = $1 ORDER BY number`, [S('e')]);
+  assert.deepEqual(rows.map((x: any) => [x.n, x.source_id, x.status, x.reason, x.attempts, x.old]), [
+    [10, MAIN, 'moved', 'HTTP 500', 0, true],
+    [11, SITE2, 'error', 'HTTP 404', 1, false],
+  ], 'the retired source\'s chapter is the main source\'s now, tried again from the start; a source still followed keeps its own');
 });
 
 test("the custom site's delete is refused while it is some series' main source", { skip }, async () => {

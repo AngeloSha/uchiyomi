@@ -799,7 +799,11 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
             count(*) FILTER (WHERE f.attempts >= ${CHAPTER_RETRY_CAP})::int AS capped,
             -- v0.55.1: refused for room (HTTP 429, lib/downloader.ts records it as rate_limited). A source whose every
             -- failing chapter is one of these is waiting, not failing: Fix everything says it clears by itself.
-            count(*) FILTER (WHERE f.status = 'rate_limited')::int AS limited,
+            -- v0.55.3: so is a chapter filed here from a source its series no longer uses (status moved,
+            -- lib/chapterFailures.ts refileFailures) while this source rests -- rate-limited, or in a cooldown: never
+            -- tried here, it waits for the same pause. The owner's 32 AllManga chapters, on a rate-limited Natomanga.
+            count(*) FILTER (WHERE f.status = 'rate_limited'
+                                OR (f.status = 'moved' AND (h.status = 'rate_limited' OR h.blocked_until > now())))::int AS limited,
             (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
             (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
             (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
@@ -815,9 +819,11 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     sourceId: r.source_id,
     key: `source:${r.source_id}`,
     members: r.failing ?? [],
-    // Every chapter here was refused for room: a statement, not a finding, as Fix everything's "clears by itself" says
-    // it. One chapter failing any other way keeps the row a finding. Reintroduce by dropping it: "chapters refused only
-    // for room are waiting, not failing" in health.int.test.ts finds the card amber.
+    // Every chapter here was refused for room, or waits for this source's pause (v0.55.3): a statement, not a finding,
+    // as Fix everything's "clears by itself" says it. One chapter failing any other way keeps the row a finding.
+    // Reintroduce by dropping it: "chapters refused only for room are waiting, not failing" in health.int.test.ts finds
+    // the card amber; by dropping the `moved` clause above, "failures follow the series" in autofix.int.test.ts finds
+    // the new main's row a finding.
     ...(r.limited > 0 && r.limited === r.chapters ? { info: true } : {}),
     // One chip, and it is the repair's failures step for THIS source: it clears the attempt counts whatever
     // their age and re-checks up to ten of the source's series. The nightly does the same thing on its own

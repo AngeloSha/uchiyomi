@@ -44,6 +44,44 @@ export const reasonOf = (e: any): string => {
  */
 const statusOf = (e: any): string => e?.blockStatus ?? (e?.pages !== undefined ? 'incomplete' : 'error');
 
+/**
+ * Failures follow the series (v0.55.3): a row filed under a source the series no longer uses -- neither its main source
+ * nor one it follows -- is its main source's to retry, and is filed under it, its tries starting again. Live: Replace
+ * moved two series off AllManga onto Natomanga, which lists every one of their chapters, and their 32 failed chapters
+ * stayed filed under AllManga -- failing at its pages, switched off, followed by nothing. Health listed them there, the
+ * failures step skips a source that fails at its pages, and every Fix everything run said "36 chapters no source can
+ * download" though Natomanga could, once its rate limit passed.
+ * Every way a series stops using a source files them: a main-source switch (lib/mainSource.ts: Replace, Make main, Fix
+ * everything), the unfollow route, a retirement (lib/retireSource.ts), Replace making room (lib/findSources.ts
+ * makeRoom) -- and, once, for the rows already left behind, the v0.55.3 data migration (lib/migrate.ts).
+ * `status` becomes `moved` -- not tried at this source yet -- and the reason stays: why it failed where it was. When it
+ * first failed stays too (Health's "failing since"). The key is (series, number) alone, one row per chapter whatever
+ * the source, so a row moves where it is and never meets another. A series with no main source keeps its rows where
+ * they are: there is nowhere to move them.
+ * Reintroduce by dropping the NOT EXISTS: a row under a source the series still follows moves too ("a row under a
+ * source the series still follows stays as it is" in mainSource.int.test.ts; t-ff-follower in migrate.int.test.ts).
+ * By dropping `f.source_id <> s.source_id`: a row under the main source itself reads moved, its tries reset
+ * (t-ff-main).
+ */
+export const REFILE_FAILURES_SQL = `
+  UPDATE chapter_failures f
+     SET source_id = s.source_id, status = 'moved', attempts = 0, first_at = COALESCE(f.first_at, f.at), at = now()
+    FROM lib_series s
+   WHERE s.id = f.series_id AND s.source_id IS NOT NULL AND f.source_id <> s.source_id
+     AND NOT EXISTS (SELECT 1 FROM series_sources ss WHERE ss.series_id = f.series_id AND ss.source_id = f.source_id)
+     AND ($1::text[] IS NULL OR f.series_id = ANY($1::text[]))
+  RETURNING f.series_id`;
+
+/**
+ * Re-file the rows of these series (every series: null) under their main source, as REFILE_FAILURES_SQL says; `run` is
+ * the query to do it with -- a transaction's own, when the caller holds one. How many rows moved.
+ */
+export async function refileFailures(
+  run: (sql: string, params?: any[]) => Promise<unknown[]>, seriesIds: readonly string[] | null,
+): Promise<number> {
+  return (await run(REFILE_FAILURES_SQL, [seriesIds ? [...seriesIds] : null])).length;
+}
+
 export async function noteChapterFailure(f: ChapterFailure): Promise<void> {
   const e: any = f.err;
   const status = statusOf(e);

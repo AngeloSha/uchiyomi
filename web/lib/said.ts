@@ -133,9 +133,14 @@ const withStatus = (p: P, say: (status: string) => string): string | null => {
   return status === null ? null : say(status);
 };
 
-/** What the chapter-failure ledger records (bff lib/chapterFailures.ts statusOf): its own two, or a source status. */
+/**
+ * What the chapter-failure ledger records (bff lib/chapterFailures.ts statusOf): its own two, or a source status; since
+ * v0.55.3 also `moved`, a chapter filed under the series' main source from one it no longer uses (refileFailures), not
+ * tried there yet -- the reason beside it is why it failed where it was.
+ */
 const failureStatus = (s: unknown): string | null =>
-  s === 'incomplete' ? tr('pages missing') : s === 'error' ? tr('failed') : statusText(s);
+  s === 'incomplete' ? tr('pages missing') : s === 'error' ? tr('failed')
+    : s === 'moved' ? tr('from a source the series no longer uses') : statusText(s);
 
 /** "A, B and 3 more": the names a sentence lists, and how many it left out. */
 const namesText = (p: P): string => {
