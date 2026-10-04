@@ -1417,13 +1417,13 @@ SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
     ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id
  WHERE library_paths.library_id <> EXCLUDED.library_id;
 
--- Notice chapters (lib/noticeChapters.ts, lib/seriesType.ts). Sources post notices for readers as chapter N.x after
--- their latest chapter N; the admin may hide every chapter numbered with a fraction, per series type, and override
--- that per series. series_type: manga, manhwa, manhua, webtoon or comic as learned (NULL = unknown), with
--- series_type_from naming the evidence (lib/seriesTypeSignals.ts SERIES_TYPE_FROM); series_overrides.series_type is
--- the admin's word. lib_series.hide_notices: the series' own switch, NULL = its type's. server_settings.
--- hide_notice_types: the types whose notice chapters are hidden, empty = off (the default). All nullable or
--- defaulted, so the previous release boots on this schema and simply shows every chapter.
+-- v0.55.2 (#147): notice chapters (lib/noticeChapters.ts, lib/seriesType.ts). Sources post notices for readers as
+-- chapter N.x after their latest chapter N; the admin may hide every chapter numbered with a fraction, per series
+-- type, and override that per series. series_type: manga, manhwa, manhua, webtoon or comic as learned (NULL =
+-- unknown), with series_type_from naming the evidence (lib/seriesTypeSignals.ts SERIES_TYPE_FROM);
+-- series_overrides.series_type is the admin's word. lib_series.hide_notices: the series' own switch, NULL = its
+-- type's. server_settings.hide_notice_types: the types whose notice chapters are hidden, empty = off (the default).
+-- All nullable or defaulted, so the previous release boots on this schema and simply shows every chapter.
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS series_type      text;
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS series_type_from text;
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS hide_notices     boolean;
@@ -1590,12 +1590,12 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
     },
   },
 
-  // Notice chapters: the type of every series whose genres name one (lib/seriesTypeSignals.ts typeFromGenres), so
-  // the per-type switches mean something on the first boot rather than after every series is rescanned. The same
-  // table in SQL: an origin genre (in its order) beats Webtoon. The admin's genre override counts, as everywhere.
-  // Only series nothing has typed yet. One UPDATE.
+  // v0.55.2 (#147), notice chapters: the type of every series whose genres name one (lib/seriesTypeSignals.ts
+  // typeFromGenres), so the per-type switches mean something on the first boot rather than after every series is
+  // rescanned. The same table in SQL: an origin genre (in its order) beats Webtoon. The admin's genre override counts,
+  // as everywhere. Only series nothing has typed yet. One UPDATE.
   {
-    id: 'notice-chapters-series-type-from-genres',
+    id: 'v0.55.2-series-type-from-genres',
     run: async (c) => {
       const table = GENRE_TYPE_TABLE.flatMap(([type, names], rank) => names.map((n) => ({ type, n, rank })));
       await c.query(
