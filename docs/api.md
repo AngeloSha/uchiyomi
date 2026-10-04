@@ -801,7 +801,8 @@ or only listed.
 A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` when nothing is known), with
 `detectedType {type, from}` naming the evidence. Most trusted first, the evidence is:
 
-1. `genre`: a genre naming the origin.
+1. `genre`: a genre naming one origin. A genre list naming several (a site's whole genre menu) is no evidence,
+   and neither is `Manga` alone, which many sites file everything under.
 2. `source`: MangaDex's original language.
 3. `anilist`: the country of origin.
 4. `webtoon`: a Webtoon genre with nothing better.

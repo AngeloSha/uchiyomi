@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  typeFromGenres, typeFromLanguage, typeFromCountry, typeFromAniListMatch, SERIES_TYPE_FROM, GENRE_TYPE_TABLE,
+  typeFromGenres, typeFromLanguage, typeFromCountry, typeFromAniListMatch, SERIES_TYPE_FROM,
 } from '../src/lib/seriesTypeSignals';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,14 +17,24 @@ test('a genre naming the origin beats a Webtoon genre, whatever the order', () =
   assert.deepEqual(typeFromGenres(['Webtoon', 'Manhwa']), { type: 'manhwa', from: 'genre' });
   assert.deepEqual(typeFromGenres(['Action', 'manhua ']), { type: 'manhua', from: 'genre' });
   assert.deepEqual(typeFromGenres(['Comic']), { type: 'comic', from: 'genre' });
-  // "Manga" is what many sites call the whole medium: the more specific origin wins.
-  assert.deepEqual(typeFromGenres(['Manga', 'Manhwa']), { type: 'manhwa', from: 'genre' });
-  assert.deepEqual(typeFromGenres(['Manga']), { type: 'manga', from: 'genre' });
+  assert.deepEqual(typeFromGenres(['Japanese', 'Action']), { type: 'manga', from: 'genre' });
   // A Webtoon genre alone is the weakest evidence there is.
   assert.deepEqual(typeFromGenres(['Web  Comic']), { type: 'webtoon', from: 'webtoon' });
   assert.equal(typeFromGenres(['Action', 'Romance']), null);
   assert.equal(typeFromGenres([]), null);
   assert.equal(typeFromGenres(null), null);
+});
+
+test('a genre menu, or a lone Manga, is no evidence', () => {
+  // On the owner's library 19 of 240 typed series became manhwa from a site's whole genre menu (JoJo Part 7), and the
+  // Korean Dungeon Defense became manga from "Manga" alone -- below a genre neither MangaDex nor AniList could outrank.
+  // Reintroduce by taking the first origin named: the menus read manhwa, the lone Manga manga.
+  assert.equal(typeFromGenres(['Action', 'Manga', 'Manhwa', 'Manhua']), null, 'a genre menu decided the type');
+  assert.equal(typeFromGenres(['Manga', 'Manhwa']), null, 'two origins decided the type');
+  assert.equal(typeFromGenres(['Manga', 'Manhwa', 'Manhua', 'Webtoon']), null, 'a menu with Webtoon in it is no Webtoon evidence either');
+  assert.equal(typeFromGenres(['Action', 'Manga']), null, 'a lone generic Manga decided the type');
+  // The medium's name beside a Webtoon genre says only the Webtoon, the weakest evidence.
+  assert.deepEqual(typeFromGenres(['Manga', 'Webtoon']), { type: 'webtoon', from: 'webtoon' });
 });
 
 test('the original language and the country of origin', () => {
@@ -44,9 +54,8 @@ test('AniList speaks only for an entry that is visibly this series', () => {
   assert.equal(typeFromAniListMatch('x', null), null);
 });
 
-test('the evidence ranks, least trusted first, and the backfill table keeps the origin genres ahead of Webtoon', () => {
+test('the evidence ranks, least trusted first', () => {
   assert.deepEqual([...SERIES_TYPE_FROM], ['webtoon', 'anilist', 'source', 'genre']);
-  assert.equal(GENRE_TYPE_TABLE[GENRE_TYPE_TABLE.length - 1][0], 'webtoon');
 });
 
 test('a fraction, and a listed notice: a fraction its copies say is 3 pages or fewer', () => {

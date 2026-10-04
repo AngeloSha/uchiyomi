@@ -28,39 +28,42 @@ export function isKnownSeriesType(v: unknown): v is KnownSeriesType {
  *            tagged Webtoon as often as Manhwa or Manhua, and the origin is what the switch is about.
  *   anilist  AniList's country of origin, from an entry that is visibly this series.
  *   source   the followed source's own word: MangaDex's original language.
- *   genre    a genre naming the origin (Manga, Manhwa, Manhua, Comic), from the source or the files.
+ *   genre    a genre naming one origin (Manhwa, Manhua, Comic, Japanese), from the source or the files.
  */
 export const SERIES_TYPE_FROM = ['webtoon', 'anilist', 'source', 'genre'] as const;
 export type SeriesTypeFrom = (typeof SERIES_TYPE_FROM)[number];
 
-/**
- * Genre spellings that name a type, lowercased and trimmed. The origin ones are tried in this order, so a series
- * tagged both "Manga" and "Manhwa" -- sites use "Manga" for the whole medium -- is the more specific Manhwa.
- */
+/** Genre spellings that name an origin, lowercased and trimmed. */
 const ORIGIN_GENRES: ReadonlyArray<[KnownSeriesType, readonly string[]]> = [
   ['manhwa', ['manhwa', 'korean', 'korean webtoon']],
   ['manhua', ['manhua', 'chinese', 'chinese webtoon']],
   ['comic', ['comic', 'comics', 'western', 'western comic', 'american comic', 'oel']],
   ['manga', ['manga', 'japanese']],
 ];
+/** "Manga" alone says nothing: many sites file every title under it, Korean and Chinese ones included. */
+const GENERIC_GENRES: ReadonlySet<string> = new Set(['manga']);
 const WEBTOON_GENRES: readonly string[] = ['webtoon', 'webtoons', 'web comic', 'webcomic'];
-
-/** Exposed for the boot-time backfill, which applies the same table in SQL (lib/migrate.ts). */
-export const GENRE_TYPE_TABLE: ReadonlyArray<[KnownSeriesType, readonly string[]]> = [
-  ...ORIGIN_GENRES,
-  ['webtoon', WEBTOON_GENRES],
-];
 
 const norm = (g: unknown) => String(g ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
- * The type a genre list names, and how strongly. An origin genre beats a Webtoon one, whatever order they come
- * in: "Manhwa, Webtoon" is a manhwa. Nothing that names a type answers null.
+ * The type a genre list names, and how strongly: ONE origin, or a Webtoon genre with none.
+ *
+ * ⚠️ A list naming several origins is no evidence at all. Sites copy their whole genre menu onto a title -- "Manga,
+ * Manhwa, Manhua" -- and taking the most specific of them made 19 of 240 typed series on the owner's library manhwa
+ * (JoJo Part 7 among them) where MangaDex and AniList knew better, below a genre they could never outrank. Nor is a
+ * lone generic "Manga": Dungeon Defense, which is Korean, became manga that way. Both answer null, so the source and
+ * AniList decide. An origin still beats a Webtoon genre, whatever order they come in: "Manhwa, Webtoon" is a manhwa.
+ * Reintroduce by taking the first origin named: "a genre menu, or a lone Manga, is no evidence" in
+ * seriesTypeSignals.test.ts reads manhwa and manga.
  */
 export function typeFromGenres(genres: readonly unknown[] | null | undefined): { type: KnownSeriesType; from: SeriesTypeFrom } | null {
   const set = new Set((genres ?? []).map(norm).filter(Boolean));
   if (!set.size) return null;
-  for (const [type, names] of ORIGIN_GENRES) if (names.some((n) => set.has(n))) return { type, from: 'genre' };
+  const origins = ORIGIN_GENRES.filter(([, names]) => names.some((n) => set.has(n)));
+  if (origins.length > 1) return null;
+  const [origin] = origins;
+  if (origin && origin[1].some((n) => set.has(n) && !GENERIC_GENRES.has(n))) return { type: origin[0], from: 'genre' };
   if (WEBTOON_GENRES.some((n) => set.has(n))) return { type: 'webtoon', from: 'webtoon' };
   return null;
 }

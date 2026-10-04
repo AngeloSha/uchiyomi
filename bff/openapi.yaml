@@ -1709,9 +1709,10 @@ paths:
                     enum: [manga, manhwa, manhua, webtoon, comic, unknown]
                   detectedType:
                     description: >-
-                      Admins only. What the evidence says the series is and which evidence said it -- `genre`,
-                      `source` (MangaDex's original language), `anilist` (the country of origin) or `webtoon` (a
-                      Webtoon genre with no origin genre), most trusted first -- or null when nothing has.
+                      Admins only. What the evidence says the series is and which evidence said it -- `genre` (a
+                      genre naming one origin; a list naming several, or Manga alone, says nothing), `source`
+                      (MangaDex's original language), `anilist` (the country of origin) or `webtoon` (a Webtoon
+                      genre with no origin genre), most trusted first -- or null when nothing has.
                     oneOf:
                       - type: object
                         properties:

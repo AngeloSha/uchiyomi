@@ -34,7 +34,9 @@ const MG = 's_nt_manga';      // typed manga by hand (series_overrides)
 const KEEP = 's_nt_keep';     // a manhwa that switches the hide off for itself
 const SWEEP = 's_nt_sweep';   // followed from a fake source, for the updater
 const PG = 's_nt_pages';      // a manhwa whose fractional chapters are long, short and not counted
-const SERIES = [HW, MG, KEEP, SWEEP, PG];
+const DD = 's_nt_dd';         // Korean, filed under a lone generic "Manga"
+const JJ = 's_nt_jojo';       // Japanese, carrying a site's whole genre menu
+const SERIES = [HW, MG, KEEP, SWEEP, PG, DD, JJ];
 const ADMIN = 'nt-admin', MEMBER = 'nt-member';
 const SRC = 'nt-src';
 /** The chapter ids the sweep asked the fake source for pages of: what it tried to download. */
@@ -187,6 +189,22 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.equal(mg.overrides.seriesType, 'manga');
       // Members are not told any of it.
       assert.equal((await get(`/api/series/${HW}`, asMember)).json().seriesType, undefined);
+    });
+
+    await t.test('series types: a genre menu or a lone Manga is no evidence, so the source and AniList decide', async () => {
+      await series(DD, ['Action', 'Manga'], 0);
+      await series(JJ, ['Manga', 'Manhwa', 'Manhua'], 0);
+      const { learnTypeFromAniList } = await import('../src/lib/seriesType');
+      // What the add flow and the direction detector hand over: MangaDex's original language, AniList's country.
+      await learnTypeFromSource({ id: DD }, { genres: ['Action', 'Manga'], originalLanguage: 'ko' });
+      await learnTypeFromSource({ id: JJ }, { genres: ['Manga', 'Manhwa', 'Manhua'] });
+      await learnTypeFromAniList({ id: JJ }, JJ, { country: 'JP', titles: [JJ] });
+      // Reintroduce the first origin named (lib/seriesTypeSignals.ts typeFromGenres): DD reads manga from the genre,
+      // which MangaDex cannot outrank, and JJ manhwa, which AniList cannot.
+      const dd = (await get(`/api/series/${DD}`, asAdmin)).json();
+      assert.deepEqual([dd.seriesType, dd.detectedType], ['manhwa', { type: 'manhwa', from: 'source' }], 'a lone Manga outranked MangaDex');
+      const jj = (await get(`/api/series/${JJ}`, asAdmin)).json();
+      assert.deepEqual([jj.seriesType, jj.detectedType], ['manga', { type: 'manga', from: 'anilist' }], 'a genre menu outranked AniList');
     });
 
     await t.test('the settings route takes known types only, and reads them back', async () => {

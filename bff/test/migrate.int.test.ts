@@ -457,6 +457,8 @@ test("migrate: v0.55.2's data migration types a series from its genres, and only
     't-st-genre': [['Action', 'Manhwa'], null, null, null],
     't-st-webtoon': [['Webtoon', 'Romance'], null, null, null],
     't-st-none': [['Action'], null, null, null],
+    't-st-menu': [['Manga', 'Manhwa', 'Manhua', 'Action'], null, null, null],
+    't-st-lone-manga': [['Manga', 'Action'], null, null, null],
     't-st-admin-genres': [['Action'], ['Manhua'], null, null],
     't-st-typed': [['Manhwa'], null, ['manga', 'source'], null],
     't-st-admin-type': [['Manhwa'], null, null, 'comic'],
@@ -479,6 +481,10 @@ test("migrate: v0.55.2's data migration types a series from its genres, and only
       't-st-genre': ['manhwa/genre', null],
       't-st-webtoon': ['webtoon/webtoon', null],
       't-st-none': [null, null],
+      // typeFromGenres' own rule, not a copy of it in SQL: a genre menu, or "Manga" alone, is no evidence.
+      // Reintroduce the SQL table (the first origin named wins): manhwa/genre and manga/genre.
+      't-st-menu': [null, null],
+      't-st-lone-manga': [null, null],
       // The admin's genres are the series' genres, as everywhere.
       't-st-admin-genres': ['manhua/genre', null],
       // Only a series nothing has typed: MangaDex said manga, and a genre does not get to say otherwise here.

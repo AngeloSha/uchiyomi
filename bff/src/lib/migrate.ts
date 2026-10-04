@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool, one } from './db';
 import { env } from '../env';
 import { MANGADEX_LANGS } from './lang';
-import { GENRE_TYPE_TABLE } from './seriesTypeSignals';
+import { typeFromGenres } from './seriesTypeSignals';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -1592,28 +1592,22 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
 
   // v0.55.2 (#147), notice chapters: the type of every series whose genres name one (lib/seriesTypeSignals.ts
   // typeFromGenres), so the per-type switches mean something on the first boot rather than after every series is
-  // rescanned. The same table in SQL: an origin genre (in its order) beats Webtoon. The admin's genre override counts,
-  // as everywhere. Only series nothing has typed yet. One UPDATE.
+  // rescanned. typeFromGenres itself, in JS rather than a copy of its rule in SQL, so the two cannot disagree: a
+  // genre menu naming several origins, or a lone "Manga", types nothing here either. The admin's genre override
+  // counts, as everywhere. Only series nothing has typed yet: one read and one UPDATE.
   {
     id: 'v0.55.2-series-type-from-genres',
     run: async (c) => {
-      const table = GENRE_TYPE_TABLE.flatMap(([type, names], rank) => names.map((n) => ({ type, n, rank })));
+      const rows = (await c.query<{ id: string; genres: string[] | null }>(
+        `SELECT s.id, COALESCE(o.genres, s.genres) AS genres
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id WHERE s.series_type IS NULL`)).rows;
+      const typed = rows.flatMap((r) => { const t = typeFromGenres(r.genres); return t ? [{ id: r.id, ...t }] : []; });
+      if (!typed.length) return;
       await c.query(
-        `WITH m AS (
-           SELECT * FROM unnest($1::text[], $2::text[], $3::int[]) AS m(type, name, rank)
-         ), hit AS (
-           SELECT DISTINCT ON (s.id) s.id, m.type
-             FROM lib_series s
-             LEFT JOIN series_overrides o ON o.series_id = s.id
-             CROSS JOIN LATERAL unnest(COALESCE(o.genres, s.genres)) AS g
-             JOIN m ON m.name = regexp_replace(lower(btrim(g)), '\\s+', ' ', 'g')
-            WHERE s.series_type IS NULL
-            ORDER BY s.id, m.rank
-         )
-         UPDATE lib_series s SET series_type = hit.type,
-                series_type_from = CASE WHEN hit.type = 'webtoon' THEN 'webtoon' ELSE 'genre' END
-           FROM hit WHERE s.id = hit.id AND s.series_type IS NULL`,
-        [table.map((t) => t.type), table.map((t) => t.n), table.map((t) => t.rank)],
+        `UPDATE lib_series s SET series_type = v.type, series_type_from = v.src
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS v(id, type, src)
+          WHERE s.id = v.id AND s.series_type IS NULL`,
+        [typed.map((t) => t.id), typed.map((t) => t.type), typed.map((t) => t.from)],
       );
     },
   },

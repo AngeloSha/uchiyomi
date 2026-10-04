@@ -2217,12 +2217,14 @@ they reappear, those series can show as having new chapters.
 
 **Which type a series is** is worked out from, most trusted first:
 
-1. A genre naming its origin (Manga, Manhwa, Manhua, Comic).
+1. A genre naming its origin (Manhwa, Manhua, Comic, Japanese).
 2. The followed source: MangaDex's original language.
 3. AniList's country of origin.
 4. A Webtoon genre with none of the above.
 
-A series tagged both Manhwa and Webtoon is a manhwa. A series nothing speaks for is **Unknown / other**. You
+A series tagged both Manhwa and Webtoon is a manhwa. Genres that name several origins at once (some sites copy
+their whole genre menu, Manga, Manhwa and Manhua, onto every title) say nothing, and neither does Manga on its
+own, which many sites file everything under: the source and AniList decide those. A series nothing speaks for is **Unknown / other**. You
 can set the type by hand under **Series type** in *Edit details* → **Reading**.
 
 **One series** can override its type's switch with **Hide notice chapters** in its **Sources & translations**
