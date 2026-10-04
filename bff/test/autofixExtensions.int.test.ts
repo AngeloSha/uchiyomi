@@ -70,7 +70,7 @@ function seed(): FakeSeed {
       src(ID.velvetEn, 'Velvet Scans', 'en', PKG.velvet, [manga('Moon River')]),
       src(ID.velvetEs, 'Velvet Scans', 'es', PKG.velvet),
       src(ID.ember, 'Ember Pages', 'en', PKG.ember, [manga('Lost Song')]),
-      src(ID.cedar, 'Cedar Hub', 'en', PKG.cedar),
+      src(ID.cedar, 'Cedar Hub', 'en', PKG.cedar, [manga('Quiet Harbor')]),
       src(ID.amber, 'Amber Comics', 'en', PKG.amber),
       src(ID.dune, 'Dune Comics', 'en', PKG.dune, [manga('Time Story')]),
       src(ID.birch, 'Birch Reader', 'en', PKG.birch, [manga('Night Bloom')]),
@@ -410,4 +410,27 @@ test('a gap an earlier run filled is no reason to install; the same answer about
   await q('UPDATE lib_series SET gaps_checked_at = now(), gaps_result = $2::jsonb WHERE id = $1', [GAP, answer(4)]);
   const second = await runOnce();
   assert.ok((await installs(second.id)).length > 0, 'PREMISE: a fresh "nobody has it" about the series as it is sends the run looking');
+});
+
+test('with nothing left to try, the run\'s time running out is no reason to run again', { skip }, async () => {
+  // Ghost Story was searched for on every package in reach, in vain (above); Quiet Harbor is carried by Cedar Hub, the
+  // first left in the order. The run's time runs out once Cedar Hub is installed, and every package after it has already
+  // missed Ghost Story: nothing is left to try, so the phase ends as finished and Ghost Story is Needs you -- not a Run
+  // again that would try nothing. Reintroduce by asking the time before `forIt` in extensions(): Run again is offered.
+  await series('quiet', 'Quiet Harbor');
+  await only('ghost', 'quiet');
+  const installsSoFar = () => fake!.graphqlCalls('updateExtension').length;
+  const at = installsSoFar();
+  autofix.setAutofixTiming({ quietMs: 20, clock: () => Date.now() + (installsSoFar() > at ? 3 * 60 * 60 * 1000 : 0) });
+  let run;
+  try {
+    run = await runOnce();
+  } finally {
+    autofix.setAutofixTiming({ quietMs: 20 });
+  }
+  assert.deepEqual(await installs(run.id), [PKG.cedar], 'PREMISE: only Cedar Hub was left to try for these series');
+  assert.equal(await mainOf('quiet'), `sw:${ID.cedar}`, 'PREMISE: Quiet Harbor moved to it');
+  assert.equal(run.summary!.again, false, 'with nothing left to try, the run\'s time running out is no reason to run again');
+  assert.ok(!run.log!.some((l) => l.code === 'autofix.item.skipped' && l.params?.why === 'time'), 'the run was not cut short');
+  assert.ok(run.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'and the series nothing in reach carries is Needs you');
 });

@@ -1063,14 +1063,18 @@ async function extensions(a: Run): Promise<void> {
       for (const c of ranked) {
         if (!mine.length) break;
         if (halted(a)) return;
-        // Out of time with packages still to try: the next run continues down the list, so they are not Needs you yet.
-        if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
-        if (a.installs >= AUTOFIX_INSTALLS) { note(a, say('autofix.item.skipped', { why: 'installs' })); cutShort(a, 'extensions'); return; }
         // Never a package for a series it was searched for in vain within the month, nor an 18+ package for a series
-        // that is not rated 18+. Reintroduce the 18+ rule's absence: "an 18+ package only for a series rated 18+" in
-        // autofixExtensions.int.test.ts finds Rose Velvet installed for the clean series.
+        // that is not rated 18+. Reintroduce the 18+ rule's absence: "an 18+ package is never tried for a series not
+        // rated 18+" in autofixExtensions.int.test.ts finds Thorn Garden moved onto Rose Velvet.
         const forIt = mine.filter((t) => !tried(c.e.pkgName, t) && (!c.e.nsfw || t.adult));
         if (!forIt.length) continue;
+        // Out of time, or at AUTOFIX_INSTALLS, with a package still to try: the next run continues down the list, so the
+        // series are not Needs you yet. Asked only here: with nothing left to try the phase ends as finished, and what no
+        // package in reach carries is Needs you now, not a Run again that would try nothing. Reintroduce by asking before
+        // `forIt`: "with nothing left to try, the run's time running out is no reason to run again" in
+        // autofixExtensions.int.test.ts finds Run again offered.
+        if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'extensions'); return; }
+        if (a.installs >= AUTOFIX_INSTALLS) { note(a, say('autofix.item.skipped', { why: 'installs' })); cutShort(a, 'extensions'); return; }
         const r = await tryPackage(a, c.e, lang, forIt);
         if (r === 'full') return;
         mine = mine.filter((t) => !r.has(t.id));
@@ -1161,9 +1165,9 @@ async function tryPackage(a: Run, e: ExtensionInfo, lang: string, targets: Targe
     }
     // Series with a gap nobody had, and frozen series with no main to Replace: follow the new source, then a frozen one
     // makes it its main -- only while it can update the series (v0.55.1: a package installed before can bring back a
-    // source already failing; reintroduce by switching whatever it is: "a frozen series moves to a new source only
-    // while it can update it" in autofixExtensions.int.test.ts finds it moved) -- and a gap's missing chapters are
-    // fetched.
+    // source already failing; reintroduce by switching whatever it is: "a source failing at its page lists is never
+    // made its main source" in autofixExtensions.int.test.ts finds Pine Lake moved onto it) -- and a gap's missing
+    // chapters are fetched.
     if (loose.length && !halted(a) && await waitSweep(a)) {
       const r = await startFind({ seriesIds: loose.map((t) => t.id) }, a.by, a.ctx, undefined, { autofix: a.id, only: [entry.sourceId] });
       if ('runId' in r) {
@@ -1348,7 +1352,7 @@ function doneLines(a: Run): AutofixSummary['done'] {
     if (n <= 0) continue;
     const counted = a.counted;
     // v0.55.1: the extensions phase is one line however many it tried -- "Tried 14 extensions and kept Ember Pages" -- or,
-    // none kept, "Tried 14 extensions: none of them had the series"; what each one did is under Details.
+    // none kept, "Tried 14 extensions: none of the series were there"; what each one did is under Details.
     const said: Part | null = kind === 'replaced' ? say('autofix.done.replaced', { n, ...named(a.replacedNames) })
       : kind === 'installed' ? say('autofix.done.tried', { n: a.installs, ...named(a.keptPkgs.map((p) => p.name)) })
       : kind === 'uninstalled' ? (a.counts.installed ? null : say('autofix.done.triedNone', { n: a.installs }))
