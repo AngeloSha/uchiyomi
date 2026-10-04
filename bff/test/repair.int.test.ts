@@ -207,7 +207,7 @@ function resetCatalog(): void {
 before(async () => {
   if (!DSN) return;
   // The stub solver comes up FIRST, on a port the system picks, and FLARESOLVERR_URL names it before any module
-  // that reads it at load (lib/sources/flaresolverr.ts) is imported. A fixed port hung every other run that
+  // that reads it (lib/sources/flaresolverr.ts) is imported. A fixed port hung every other run that
   // shared the network namespace (the lanes' int suites all run beside one Postgres container).
   solver = createServer((_req, res) => {
     if (!solverReady) { res.writeHead(503); res.end('down'); return; }

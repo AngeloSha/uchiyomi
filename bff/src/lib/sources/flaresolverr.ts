@@ -1,6 +1,24 @@
-// Thin client for FlareSolverr (headless-Chrome Cloudflare solver). Returns solved page HTML, and keeps the
-// latest cf_clearance cookies + user-agent per origin so the downloader can fetch images directly afterwards.
-const FS = (process.env.FLARESOLVERR_URL || 'http://yomi-flaresolverr:8191').replace(/\/$/, '');
+// Thin client for FlareSolverr (headless-Chrome Cloudflare solver) and the solvers that speak its /v1 (trawl, Byparr).
+// Returns solved page HTML, and keeps the latest cf_clearance cookies + user-agent per origin so the downloader can
+// fetch images directly afterwards.
+//
+// v0.55.4: an optional BACKUP solver (FLARESOLVERR_FALLBACK_URL). A request the main solver does not answer with a
+// page -- it cannot be reached, it ran out of time, it answered with an error, an empty page or something that is not
+// its JSON -- is sent once, unchanged, to the backup. Every error keeps the `flaresolverr:` prefix whichever solver said
+// it: to Health (solverBlaming) and the diagnosis it means "the solver", never FlareSolverr in particular.
+//
+// Both addresses are read when asked rather than once at load: production sets them before the server starts, and a
+// test can point them at fakes of its own.
+const mainUrl = (): string => (process.env.FLARESOLVERR_URL || 'http://yomi-flaresolverr:8191').replace(/\/$/, '');
+
+/** The backup solver's address, or '' when there is none. The main's own address again is no backup. */
+export function backupSolverUrl(): string {
+  const b = (process.env.FLARESOLVERR_FALLBACK_URL ?? '').trim().replace(/\/$/, '');
+  return b && b !== mainUrl() ? b : '';
+}
+
+/** The solvers a request is asked of, in order: the main, then the backup if there is one. */
+const solvers = (): string[] => [mainUrl(), backupSolverUrl()].filter(Boolean);
 
 interface Solution { url: string; status: number; response: string; cookies: Array<{ name: string; value: string }>; userAgent: string }
 const sessions = new Map<string, { cookie: string; userAgent: string }>();
@@ -37,25 +55,62 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
   }
 }
 
+/**
+ * The request, asked of each solver in turn until one answers it with a page (v0.55.4: the main, then the backup).
+ *
+ * When every one failed, the caller is told what a solver SAID: an error in its own words, or a page that came back
+ * empty, is what it found at the site, and a backup that could not be reached at all says nothing about the site -- its
+ * "fetch failed" must not hide the main's "Cloudflare has blocked this request". With nothing said, the first failure,
+ * which is the main's. Reintroduce the last failure: "when both fail, the caller hears what a solver said" in
+ * solverBackup.test.ts reads the backup's connection error.
+ */
 async function solveNow(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
-  const r = await fetch(`${FS}/v1`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ cmd, url, postData, maxTimeout: 60000 }),
-    signal: AbortSignal.timeout(95000),
-  });
-  const j: any = await r.json();
-  if (j.status !== 'ok' || !j.solution) throw new Error(`flaresolverr: ${j.message || j.status}`);
+  const failed: Array<{ error: Error; said: boolean }> = [];
+  for (const solver of solvers()) {
+    const a = await ask(solver, cmd, url, postData);
+    if ('solution' in a) return a.solution;
+    failed.push(a);
+  }
+  throw (failed.find((f) => f.said) ?? failed[0]).error;
+}
+
+/** What asking one solver came to: a page, or why not -- `said` when the solver itself answered (above). */
+type Asked = { solution: Solution } | { error: Error; said: boolean };
+
+/** Test seam: how long one solver may take with one request before it counts as not answering (the backup is next). */
+let attemptMs = 95_000;
+export function setSolverTiming(t: { attemptMs?: number }): void {
+  if (t.attemptMs !== undefined) attemptMs = t.attemptMs;
+}
+
+async function ask(solver: string, cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Asked> {
+  let r: Response;
+  try {
+    r = await fetch(`${solver}/v1`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd, url, postData, maxTimeout: 60000 }),
+      signal: AbortSignal.timeout(attemptMs),
+    });
+  } catch (e) {
+    // Not reachable, or no answer in time: nothing about the site.
+    return { error: e as Error, said: false };
+  }
+  // A solver's errors are JSON too (FlareSolverr's HTTP 500 carries {status: 'error', message}). Anything else -- a
+  // proxy's error page, a web server at the wrong address -- is the solver's address failing, never the site.
+  const j: any = await r.json().catch(() => null);
+  if (!j || typeof j !== 'object') return { error: new Error('flaresolverr: the solver did not answer with its JSON'), said: false };
+  if (j.status !== 'ok' || !j.solution) return { error: new Error(`flaresolverr: ${j.message || j.status}`), said: true };
   const s: Solution = j.solution;
   try {
     const origin = new URL(s.url || url).origin;
     sessions.set(origin, { cookie: (s.cookies || []).map((c) => `${c.name}=${c.value}`).join('; '), userAgent: s.userAgent });
   } catch {}
-  return s;
+  return s.response ? { solution: s } : { error: emptyBody(s, url), said: true };
 }
 
 /**
- * The solved page, or a throw.
+ * An answer with no page in it, as a failure.
  *
  * This used to be `s.response || ''`. An empty body is never a legitimate page -- every caller parses it
  * straight into `[]` -- so a solver that answered with nothing was indistinguishable from a site with
@@ -66,23 +121,23 @@ async function solveNow(cmd: 'request.get' | 'request.post', url: string, postDa
  * Throwing routes it through the caller's existing catch, where `classify` finally has an HTTP status to
  * read. That status was always here: `Solution.status` carries what the ORIGIN answered, and discarding it
  * is why every caller had to call `classify(e)` with no second argument. The 403 that manhuaus.com and
- * manhuafast.net return on every request was arriving on this line and being thrown away.
+ * manhuafast.net return on every request was arriving on this line and being thrown away. Since v0.55.4 it is
+ * one solver's failure like any other, and the backup is asked; its cookies are kept all the same (cfSession).
  */
-function body(s: Solution, url: string): string {
-  if (s.response) return s.response;
+function emptyBody(s: Solution, url: string): Error {
   let host = url;
   try { host = new URL(s.url || url).host; } catch { /* the id is for humans; a bad URL must not mask the failure */ }
-  throw Object.assign(
+  return Object.assign(
     new Error(`flaresolverr: empty body (HTTP ${s.status ?? '?'}) from ${host}`),
     { status: s.status },
   );
 }
 
 export async function cfGet(url: string): Promise<string> {
-  return body(await solve('request.get', url), url);
+  return (await solve('request.get', url)).response;
 }
 export async function cfPost(url: string, postData: string): Promise<string> {
-  return body(await solve('request.post', url, postData), url);
+  return (await solve('request.post', url, postData)).response;
 }
 
 /** Cookie header + UA to fetch binaries (images) directly — FlareSolverr can't return binary bodies. */
@@ -130,8 +185,8 @@ export function resetSolverSessions(): { sessions: number; unsolvable: number } 
   return out;
 }
 
-/** Where the solver is expected to be. Exported so the health page can name it without re-deriving it. */
-export const solverUrl = (): string => FS;
+/** Where the main solver is expected to be. Exported so the health page can name it without re-deriving it. */
+export const solverUrl = (): string => mainUrl();
 
 /**
  * Is the Cloudflare solver alive?
@@ -144,13 +199,13 @@ export async function solverPing(timeoutMs = 5000): Promise<SolverPing> {
   try {
     // FlareSolverr greets at its root with a readiness sentence rather than a status field ("FlareSolverr is ready!").
     // `redirect: 'manual'`: a solver that redirects its root (Byparr, #144: to its API docs) is not followed onto HTML.
-    const r = await fetch(`${FS}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+    const r = await fetch(`${mainUrl()}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
     const j: any = r.ok ? await r.json().catch(() => null) : null;
     if (j && /ready/i.test(String(j.msg || ''))) return { ok: true, version: j.version, kind: kindOf(String(j.msg)) };
     // Byparr (#144), a FlareSolverr-compatible solver: the same /v1 for solving, but it says it is up at /health. Its
     // version is Byparr's, never compared with FlareSolverr's releases (`kind`, read by solverHealth). Reintroduce the
     // root alone: "Byparr answering at /health is a working solver" in health.int.test.ts reads it as down.
-    const h = await fetch(`${FS}/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' }).catch(() => null);
+    const h = await fetch(`${mainUrl()}/health`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' }).catch(() => null);
     if (h?.ok) {
       const hj: any = await h.json().catch(() => null);
       return { ok: true, version: typeof hj?.version === 'string' ? hj.version : undefined, kind: 'other' };

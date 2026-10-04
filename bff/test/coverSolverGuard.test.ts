@@ -16,7 +16,9 @@
 // Cloudflare-protected CDN that answers 403 without it.
 //
 // The fake FlareSolverr below records every URL it is asked to open, and the assertions are on that record:
-// a refused URL that still reached the solver is exactly the bug, even though the call rejects either way.
+// a refused URL that still reached the solver is exactly the bug, even though the call rejects either way. Since
+// v0.55.4 a backup solver (FLARESOLVERR_FALLBACK_URL) is asked whatever the main could not answer, so a fake backup
+// writes into the same record ("backup: <url>"): every guard stands in front of both.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
@@ -27,6 +29,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-char
 
 const asked: string[] = [];
 let solver: Server;
+let backup: Server;
 
 type Images = typeof import('../src/routes/images');
 let fetchCoverImage: Images['fetchCoverImage'];
@@ -59,19 +62,27 @@ const OTHER = {
   getPageUrls: async () => [],
 };
 
-before(async () => {
-  solver = createServer((req, res) => {
+/** A fake solver that refuses everything and records what it was asked to open, under `tag`. */
+async function fakeSolver(tag: string): Promise<Server> {
+  const srv = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
-      try { asked.push(String(JSON.parse(body).url)); } catch { asked.push('(unreadable request)'); }
+      try { asked.push(tag + String(JSON.parse(body).url)); } catch { asked.push(`${tag}(unreadable request)`); }
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ status: 'error', message: 'fake solver: refusing to solve' }));
     });
   });
-  await new Promise<void>((r) => solver.listen(0, '127.0.0.1', () => r()));
-  // flaresolverr.ts reads FLARESOLVERR_URL ONCE, at module load, so it is set before anything imports it.
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  return srv;
+}
+
+before(async () => {
+  solver = await fakeSolver('');
+  backup = await fakeSolver('backup: ');
+  // Set before anything imports flaresolverr.ts (which since v0.55.4 reads both when it asks).
   process.env.FLARESOLVERR_URL = `http://127.0.0.1:${(solver.address() as AddressInfo).port}`;
+  process.env.FLARESOLVERR_FALLBACK_URL = `http://127.0.0.1:${(backup.address() as AddressInfo).port}`;
 
   const images = await import('../src/routes/images');
   ({ fetchCoverImage, UnfetchableCoverUrl } = images);
@@ -84,7 +95,7 @@ before(async () => {
   assert.equal(loader.registerAdapter(OTHER as any), true, 'the second fake source registered');
 });
 
-after(() => { solver.close(); });
+after(() => { solver.close(); backup.close(); });
 beforeEach(() => { asked.length = 0; });
 
 const unfetchable = (e: unknown) => e instanceof UnfetchableCoverUrl;
@@ -93,6 +104,8 @@ test('the fake solver is really the one the app calls (so an empty record below 
   // Without this, every "the solver was never asked" assertion would pass against a solver nobody talks to.
   await cfSession('http://93.184.215.14/probe.jpg');
   assert.ok(asked.length > 0, 'cfSession reached the fake FlareSolverr');
+  // ...and the backup, once the main refused (v0.55.4): an empty record below covers both solvers.
+  assert.ok(asked.some((u) => u.startsWith('backup: ')), 'cfSession reached the fake backup after the main refused');
 });
 
 test('a bare Docker service name never reaches the solver', async () => {
