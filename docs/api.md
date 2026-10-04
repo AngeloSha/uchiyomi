@@ -692,8 +692,9 @@ everything), when a source is unfollowed (`DELETE /api/admin/series/:id/sources/
 drops a dead follower to make room, and once at the upgrade for the rows already left behind. A switch's
 `series.main_source` audit line carries `failuresMoved`. Before, the rows stayed under the old source: Health listed
 them there, Fix everything's failures step skipped a source failing at its pages, and its end called them chapters
-no source can download. A `moved` row on a source that is rate-limited or in a cooldown waits as a 429's does: a
-source whose every row waits is `info`, and Fix everything says it clears by itself, never `needsYou`.
+no source can download. A `moved` row on a source that is rate-limited, in a cooldown or downloading at a raised
+pace (`slowed`, below) waits as a 429's does: a source whose every row waits is `info`, and Fix everything says it
+clears by itself, never `needsYou`.
 
 **A site that keeps refusing is downloaded slowly, for hours** (since v0.55.3). A 429 raises the download pace level
 of the source's rate key (one more per 429, up to four): one chapter at a time, and gaps doubled per level between

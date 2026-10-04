@@ -1607,9 +1607,9 @@ another tab.
 - **Failed chapters follow the series** (v0.55.3). A chapter that failed on a source the series no longer uses — moved
   off it by **Replace**, **Make main** or Fix everything, unfollowed, or a source turned off — is filed under the
   series' main source and tried there again from the start, keeping when it first failed; its row reads *from a source
-  the series no longer uses*, with why it failed there. While the main source asks for a pause, those chapters wait
-  greyed like the ones it refused for room. Before, they stayed under the old source, which nothing asks any more, and
-  every Fix everything listed them as chapters no source can download.
+  the series no longer uses*, with why it failed there. While the main source asks for a pause, or downloads slowly
+  after one, those chapters wait greyed like the ones it refused for room. Before, they stayed under the old source,
+  which nothing asks any more, and every Fix everything listed them as chapters no source can download.
 - **While any repair runs** — yours, another admin's, the nightly — a strip at the top of the page says what it is
   (*Repairing: Gap fill*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
   what it is on, how long it has been going and usually takes, and the searches it has left, with **Stop**, which
