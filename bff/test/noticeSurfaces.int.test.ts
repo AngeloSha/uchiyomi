@@ -77,6 +77,12 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
              VALUES ($1, $2, 'T!nts', $3, $4, NULL, $5, $6)`, [id, S, `${id}.cbz`, n, pages, join(TMP, 'lib')]);
   }
   await q(`INSERT INTO book_overrides (book_id, number) VALUES ('b_nts_9', 0)`);
+  // What the sources list beyond the shelf: 5 and 6, twenty pages each, and the two-page notice 5.5 between them.
+  for (const [n, pages] of [[5, 20], [5.5, 2], [6, 20]]) {
+    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies)
+             VALUES ($1, $2, $3, 'src', '{}'::jsonb, 'available', $4::jsonb)`, [S, n, `Chapter ${n}`,
+      JSON.stringify([{ sourceId: `nts-${n}`, source: 'src', groups: [], scanlator: null, lang: null, pages, publishedAt: null }])]);
+  }
   const uid = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1, $1, 'x', 'user', 'password') RETURNING id`, [USER]))[0].id;
 
@@ -91,8 +97,11 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
   await app.register((await import('../src/routes/opds')).default);
   await app.register((await import('../src/routes/catalog')).default);
   await app.register((await import('../src/routes/images')).default);
+  await app.register((await import('../src/routes/personal')).default);
+  await app.register((await import('../src/routes/komgaCompat')).default);
   await app.ready();
   const opds = { authorization: basic(USER, await auth.issueOpdsToken(uid)) };
+  const komgaKey = { 'x-api-key': (await auth.issueApiToken(uid, 'nts', ['read'], null)).token };
   const asUser = { authorization: `Bearer ${app.jwt.sign({ sub: uid, role: 'user' })}` };
   let seq = 0;
   const get = (url: string, headers: Record<string, string>) =>
@@ -121,6 +130,84 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
       const on = await get(`/opds/series/${S}`, opds);
       assert.deepEqual(feedIds(on.body), ['b_nts_1', 'b_nts_2', 'b_nts_3', 'b_nts_9'], 'the two-page 2.5 is still in the OPDS feed');
       await hide([]);
+    });
+
+    await t.test('page bytes: off, a notice serves its pages on both routes; on, neither does, and nothing else changes', async () => {
+      const img = (id: string) => get(`/img/lib/books/${id}/page/1`, opds);
+      const pse = (id: string) => get(`/opds/book/${id}/page/0`, opds);
+      assert.deepEqual([(await img('b_nts_25')).statusCode, (await pse('b_nts_25')).statusCode], [200, 200],
+        "with every switch off the notice's pages are served");
+      await hide(['manhwa']);
+      try {
+        // Reintroduce by dropping the notice clause from visibleBookFile (lib/visibility.ts): both still serve it.
+        assert.deepEqual([(await img('b_nts_25')).statusCode, (await pse('b_nts_25')).statusCode], [404, 404],
+          'a hidden notice still hands out its pages');
+        assert.deepEqual([(await img('b_nts_2')).statusCode, (await pse('b_nts_2')).statusCode], [200, 200]);
+      } finally {
+        await hide([]);
+      }
+    });
+
+    await t.test('history: off, a notice read is in it; on, it is not', async () => {
+      await q(`INSERT INTO reading_events (user_id, series_id, book_id, page, completed) VALUES ($1, $2, 'b_nts_2', 1, true), ($1, $2, 'b_nts_25', 1, true)`, [uid, S]);
+      const read = async () => (await get('/api/history', asUser)).json().content.map((e: any) => e.book_id).sort();
+      try {
+        assert.deepEqual(await read(), ['b_nts_2', 'b_nts_25'], 'history changed with every switch off');
+        await hide(['manhwa']);
+        // Reintroduce by dropping the notice clause from /api/history (routes/personal.ts): 2.5 is still there.
+        assert.deepEqual(await read(), ['b_nts_2'], 'a hidden notice is still in history');
+      } finally {
+        await hide([]);
+        await q(`DELETE FROM reading_events WHERE user_id = $1`, [uid]);
+      }
+    });
+
+    await t.test('Continue Reading: off, the notice you are part-way through; on, the next chapter instead', async () => {
+      // 1, 2 and the renumbered 0 read; the notice 2.5 opened last and left part-way.
+      await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at) VALUES
+                 ($1, 'b_nts_1', $2, 1, true, now() - interval '3 hours'), ($1, 'b_nts_2', $2, 1, true, now() - interval '3 hours'),
+                 ($1, 'b_nts_9', $2, 1, true, now() - interval '3 hours'), ($1, 'b_nts_25', $2, 0, false, now() - interval '1 hour')`, [uid, S]);
+      const deck = async () => (await get('/api/home', asUser)).json().onDeck.map((b: any) => b.id);
+      try {
+        assert.deepEqual(await deck(), ['b_nts_25'], 'Continue Reading changed with every switch off');
+        await hide(['manhwa']);
+        // Reintroduce by dropping the notice clauses from the pick (routes/catalog.ts /api/home): the hidden 2.5 is
+        // picked, cannot be resolved, and the series drops out of the rail.
+        assert.deepEqual(await deck(), ['b_nts_3'], 'Continue Reading offers a hidden notice, or nothing');
+      } finally {
+        await hide([]);
+        await q(`DELETE FROM read_progress WHERE user_id = $1`, [uid]);
+      }
+    });
+
+    await t.test('ghost chapters: off, a listed notice is a ghost for Mihon; on, it is not', async () => {
+      await q(`UPDATE server_settings SET komga_ghost_chapters = true WHERE id = 1`);
+      const ghosts = async () => (await get(`/api/v1/series/${S}/books?unpaged=true`, komgaKey)).json().content
+        .filter((b: any) => String(b.id).startsWith('g_')).map((b: any) => b.number);
+      try {
+        assert.deepEqual(await ghosts(), [5, 5.5, 6], 'the ghosts changed with every switch off');
+        await hide(['manhwa']);
+        // Reintroduce by dropping the notice clause from lib/komgaGhosts.ts: 5.5 is still a ghost Mihon counts.
+        assert.deepEqual(await ghosts(), [5, 6], 'a hidden notice is still a ghost');
+      } finally {
+        await hide([]);
+        await q(`UPDATE server_settings SET komga_ghost_chapters = false WHERE id = 1`);
+      }
+    });
+
+    await t.test('the slow archive: off, a listed notice is its work; on, it is not', async () => {
+      const { archiveSummaryFor, invalidateArchiveView } = await import('../src/lib/archive');
+      await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 100)`, [S]);
+      const left = async () => { invalidateArchiveView(); return (await archiveSummaryFor(S, null))?.left; };
+      try {
+        assert.equal(await left(), 3, "5, 5.5 and 6 are the archive's to fetch with every switch off");
+        await hide(['manhwa']);
+        // Reintroduce by dropping the notice clause from the archive's work list (lib/archive.ts eligibleSql): 3.
+        assert.equal(await left(), 2, 'the archive still means to fetch the two-page 5.5');
+      } finally {
+        await hide([]);
+        await q(`DELETE FROM archive_queue WHERE series_id = $1`, [S]);
+      }
     });
 
     await t.test('a hidden notice as the cover chapter: the cover comes from the first chapter shown', async () => {
