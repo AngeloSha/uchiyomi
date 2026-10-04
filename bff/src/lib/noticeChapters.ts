@@ -29,7 +29,7 @@
 //
 // Pure: no database (seriesTypeSignals.test.ts imports it). The reads that need one are lib/noticeSettings.ts.
 import { SERIES_TYPES, isSeriesType, type SeriesType } from './seriesTypeSignals';
-import { rangeEnd } from './chapterRanges';
+import { holds, rangeEnd } from './chapterRanges';
 
 /** The most pages a notice has. One more and it is a chapter -- a part of one, a short extra -- and stays. */
 export const NOTICE_MAX_PAGES = 3;
@@ -160,10 +160,13 @@ export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices
 /**
  * How many notice chapters series `s` hides: every distinct number of a hidden saved chapter (its effective number),
  * and of a hidden number only its sources list. The admin's "Hidden now". Not `hiddenBookCount`: a notice the sources
- * say is short is never downloaded while hidden, so a count of files would miss those. A listed number with a saved
- * chapter is that chapter's, which its own pages judge.
+ * say is short is never downloaded while hidden, so a count of files would miss those. A listed number a saved file
+ * holds is that file's, which its own pages judge -- its own number, or one inside a range it holds
+ * (lib/chapterRanges.ts `holds`, as the missing-chapter rows have it): `01-07` holds a listed two-page 3.5, which no
+ * switch shows or hides.
  * Reintroduce by counting lib_books alone: "the hidden count includes notices that were never downloaded" in
- * noticeChapters.int.test.ts reads 2.
+ * noticeChapters.int.test.ts reads 2. Reintroduce the exact number for a listed one: "Hidden now" in
+ * noticeRanges.int.test.ts counts the 3.5 a range file holds.
  */
 export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(DISTINCT hn_nt.n) FROM (
@@ -174,7 +177,7 @@ export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotic
     SELECT hl_nt.number FROM series_listing hl_nt
      WHERE hl_nt.series_id = ${s}.id AND ${listedIsNotice('hl_nt')}
        AND NOT EXISTS (SELECT 1 FROM lib_books xb_nt LEFT JOIN book_overrides xov_nt ON xov_nt.book_id = xb_nt.id
-                        WHERE xb_nt.series_id = hl_nt.series_id AND COALESCE(xov_nt.number, xb_nt.number) = hl_nt.number)
+                        WHERE xb_nt.series_id = hl_nt.series_id AND ${holds('xb_nt', 'xov_nt', 'hl_nt.number')})
   ) hn_nt
 ) ELSE 0 END)::int`;
 

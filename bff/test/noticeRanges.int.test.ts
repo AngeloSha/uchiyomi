@@ -1,6 +1,7 @@
 // Notice chapters (#147, lib/noticeChapters.ts) beside files holding a range of chapters (#150, lib/chapterRanges.ts),
 // both new in v0.55.2. The notice rule reads a book's pages; a range is one file holding several chapters. A range is
-// never a notice, however few its pages.
+// never a notice, however few its pages, and with a type switched on every count -- the Library's, Mihon's, the
+// trackers', Health's, "Hidden now" and Updates -- agrees on what is left: the files shown, each range one of them.
 //
 // Through the real scanner (rule 2 reads `Solo 09.5-10.cbz` as 9.5 to 10) and the real routes.
 //
@@ -156,5 +157,85 @@ test('a range is never a notice, however short; an admin\'s number makes it one 
     }
   } finally {
     await setTypes([]);
+  }
+});
+
+test('notices and ranges together: the Library, Mihon, the trackers, Health and "Hidden now" count the same files', { skip }, async () => {
+  const { seriesProgressFor } = await import('../src/lib/trackers');
+  const { haveNumbers } = await import('../src/lib/libraryNumbers');
+  const { gapsOf } = await import('../src/lib/fill');
+  // What the sources list beside the shelf: a two-page 3.5 that the 01-07 file holds, a two-page 11.5 only they list,
+  // and a real 12 nobody has fetched.
+  for (const [n, pages] of [[3.5, 2], [11.5, 2], [12, 20]]) {
+    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies)
+             VALUES ($1, $2, $3, 'src', '{}'::jsonb, 'available', $4::jsonb)`, [S, n, `Chapter ${n}`,
+      JSON.stringify([{ sourceId: `nrg-${n}`, source: 'src', groups: [], scanlator: null, lang: null, pages, publishedAt: null }])]);
+  }
+  // The member has read every file but the notice.
+  for (const f of Object.keys(SHELF).filter((f) => f !== NOTICE)) {
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1, $2, $3, 1, true)`, [memberId, ids[f], S]);
+  }
+  const counts = async () => {
+    const s = (await get(`/api/series/${S}`, asMember)).json();
+    return [s.booksCount, s.booksReadCount, s.booksUnreadCount];
+  };
+  const readShelf = async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/series/search', headers: asMember,
+      payload: { size: 100, condition: { readStatus: { operator: 'is', value: 'READ' } } } });
+    assert.equal(r.statusCode, 200, r.body);
+    return r.json().content.some((s: any) => s.id === S);
+  };
+  const mihon = async () => {
+    const s = (await get(`/api/v1/series/${S}`, komgaKey)).json();
+    const p = (await get(`/api/v2/series/${S}/read-progress/tachiyomi`, komgaKey)).json();
+    return [s.booksCount, p.booksCount, p.booksReadCount, p.lastReadContinuousNumberSort, p.maxNumberSort];
+  };
+  const ghosts = async () => (await get(`/api/series/${S}/listing`, asMember)).json().content.map((g: any) => g.number);
+  try {
+    // Off: six files, the notice 8.5 among them and unread -- the run stops at 8 and the series is not finished.
+    assert.deepEqual(await counts(), [6, 5, 1]);
+    assert.equal(await readShelf(), false);
+    assert.deepEqual(await mihon(), [6, 6, 5, 8, 11]);
+    assert.deepEqual(await seriesProgressFor(memberId, S), { chapters: 11, finished: false });
+    assert.deepEqual(await ghosts(), [11.5, 12], 'the 01-07 file holds the listed 3.5');
+
+    await setTypes(['manhwa']);
+    // On: five files, every one read. The range 9.5-10 is one of them (never a notice), and counts once.
+    assert.deepEqual(await counts(), [5, 5, 0], 'the Library counts disagree');
+    assert.equal(await readShelf(), true, 'the Library\'s "read" filter disagrees with the series\' own counts');
+    assert.deepEqual(await mihon(), [5, 5, 5, 11, 11], 'Mihon reads another shelf');
+    assert.deepEqual(await seriesProgressFor(memberId, S), { chapters: 11, finished: true }, 'the trackers read another shelf');
+    // No gap: the ranges hold 2 to 7 and 10, the notices are held, saved or listed.
+    assert.deepEqual(gapsOf([...new Set(await haveNumbers(S))].sort((a, b) => a - b)).map((g) => [g.lo, g.hi]), []);
+    assert.deepEqual(await ghosts(), [12]);
+    // "Hidden now": the saved 8.5 and the listed 11.5. The listed 3.5 is the 01-07 file's -- the switch hides
+    // nothing there, on or off. Reintroduce the exact-number test in hiddenNoticeCount (lib/noticeChapters.ts): 3.
+    assert.equal((await get(`/api/series/${S}`, asAdmin)).json().hiddenNotices, 2, '"Hidden now" counts a number a range file holds');
+  } finally {
+    await setTypes([]);
+    await q('DELETE FROM read_progress WHERE user_id = $1', [memberId]);
+    await q('DELETE FROM series_listing WHERE series_id = $1', [S]);
+  }
+});
+
+test('Updates: a new range file is one new file, a new notice none, across the switch', { skip }, async () => {
+  await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1, $2)`, [memberId, S]);
+  const updates = async () => (await get('/api/updates', asMember)).json().content.map((u: any) => [u.series.id, u.newCount]);
+  try {
+    await setTypes(['manhwa']);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/updates/seen', headers: asMember })).statusCode, 200);
+    assert.deepEqual(await updates(), []);
+    // A file holding 12 to 14 and a two-page 14.5 arrive in one scan.
+    await shelve({ 'Solo 12-14.cbz': 20, 'Solo 14.5.cbz': 2 });
+    assert.deepEqual(await updates(), [[S, 1]], 'a new range is one new file, and a new notice is nothing new');
+    const home = (await get('/api/home', asMember)).json();
+    assert.equal(home.updatesCount, 1, "Home's badge disagrees with Updates");
+    assert.equal(home.favorites.find((f: any) => f.id === S)?.yomi?.newCount, 1, "the favourite's own new count disagrees");
+    await setTypes([]);
+    assert.deepEqual(await updates(), [[S, 2]], 'switched off, the new notice is new too');
+  } finally {
+    await setTypes([]);
+    await q('DELETE FROM favorites WHERE user_id = $1', [memberId]);
+    await q('DELETE FROM series_seen WHERE user_id = $1', [memberId]);
   }
 });
