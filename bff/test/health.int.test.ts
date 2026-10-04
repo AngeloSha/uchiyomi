@@ -1824,6 +1824,64 @@ test('a source downloading at a raised pace says so: a quiet row of its own, and
   }
 });
 
+test('a failed chapter moved onto a main that rests or downloads slowly waits; onto one at full speed it is a finding (v0.55.3, lanes F and G)', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // The owner's case: Replace moved two series off AllManga onto Natomanga, and their failed chapters followed them
+  // (status `moved`, lib/chapterFailures.ts refileFailures). Natomanga answered 429: its own row reads rate_limited, its
+  // cooldown long run out, and the moved chapters wait for its pause. Natomanga and Mangakakalot share one image server
+  // (2xstorage.com), so a 429 at Mangakakalot slows Natomanga too (lib/pace.ts, one key per image server) while
+  // Natomanga's own row reads ok: chapters moved onto it wait as well, one at a time in its queue. Onto a source at full
+  // speed they are a finding, as any failed chapter is. Reintroduce by dropping `f.source_id = ANY($1)` from Health's
+  // waiting count (lib/health.ts chapterFailures): "a moved chapter on a slowed main waits" fails; by dropping
+  // `h.status = 'rate_limited'`: "on the rate-limited one" fails.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { registerAdapter, unregisterAdapter } = await import('../src/lib/sources');
+  const pace = await import('../src/lib/pace');
+  await migrate();
+  const NATO = 'fg-natomanga', NATO2 = 'fg-natomanga2', KAKA = 'fg-mangakakalot', FAST = 'fg-fast';
+  const IDS = [NATO, NATO2, KAKA, FAST];
+  const SERIES = ['s_fg_limited', 's_fg_slowed', 's_fg_fast'];
+  for (const id of IDS) registerAdapter(stubSource(id) as any);
+  const clean = async () => {
+    await q('DELETE FROM chapter_failures WHERE series_id = ANY($1::text[])', [SERIES]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [SERIES]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
+  };
+  await clean();
+  for (const [id, main] of [[SERIES[0], NATO], [SERIES[1], NATO2], [SERIES[2], FAST]]) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, auto_update)
+             VALUES ($1, 'test', $1, $1, $2, 'x', true)`, [id, main]);
+    // Two chapters each, failed at AllManga's pages and moved onto the new main: not tried there yet.
+    await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+             VALUES ($1, 6, $2, 'moved', 'no page urls', 0, now(), now() - interval '3 days'),
+                    ($1, 7, $2, 'moved', 'no page urls', 0, now(), now() - interval '3 days')`, [id, main]);
+  }
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error) VALUES
+             ($1, 'rate_limited', 5, now() - interval '10 minutes', '0/113 pages downloaded (HTTP 429)'),
+             ($2, 'ok', 0, NULL, NULL), ($3, 'rate_limited', 1, now() + interval '15 minutes', '0/32 pages downloaded (HTTP 429)'),
+             ($4, 'ok', 0, NULL, NULL)`, [NATO, NATO2, KAKA, FAST]);
+  pace.clearPace();
+  // Both have shown their pages on one image server; then Mangakakalot's were refused.
+  pace.notePageHosts({ id: NATO2 }, ['https://imgs-2.2xstorage.com/a/1.jpg']);
+  pace.notePageHosts({ id: KAKA }, ['https://img-r1.2xstorage.com/b/1.jpg']);
+  pace.noteRateLimited(KAKA);
+  try {
+    assert.ok(pace.paceLevel(NATO2) > 0, 'PREMISE: a 429 at Mangakakalot slows Natomanga through their one image server');
+    assert.equal(pace.paceLevel(FAST), 0, 'PREMISE: the other new main downloads at full speed');
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-failures');
+    await assertSaid([c]);
+    const row = (id: string) => c.items.find((i: any) => i.sourceId === id);
+    assert.equal(row(NATO)?.info, true, `on the rate-limited one, its cooldown run out, they wait: ${JSON.stringify(row(NATO))}`);
+    assert.equal(row(NATO2)?.info, true, `a moved chapter on a slowed main waits: ${JSON.stringify(row(NATO2))}`);
+    assert.ok(row(FAST) && row(FAST).info !== true, 'onto a main at full speed they are a finding: nothing holds them back');
+  } finally {
+    pace.clearPace();
+    await clean();
+    for (const id of IDS) unregisterAdapter(id);
+  }
+});
+
 test('a series whose loaded main is off or failing, with no working follower, can no longer update; one with a working follower is reference; a cooling main is not listed', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   // Reintroduce by dropping the `OR ls.source_id = ANY($1)` clause from frozenSeries: the series on the switched-off main
   // is absent. Reintroduce "any loaded follower counts" (drop the standing test on followers): the series whose follower

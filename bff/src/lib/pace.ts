@@ -29,7 +29,7 @@
 // as well), joined (v0.55.3) with every source whose pages come from the same image server (notePageHosts). Natomanga
 // and Mangakakalot are two sites with one image CDN: each was asked at full speed while the other was being refused.
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getSource } from './sources/loader';
+import { getSource, listSources } from './sources/loader';
 
 /** The slowest we ever go: sixteen times the declared gap between chapters, and MAX_PAGE_GAP_MS inside one. */
 export const PACE_MAX_LEVEL = 4;
@@ -138,6 +138,15 @@ export function noteDownloaded(sourceId: string): void {
 /** 0 = full speed: the level of the source's rate key. Read by the download gate and fetchPages, and by Health's rows. */
 export function paceLevel(sourceId: string): number {
   return current(rateKeyOf(sourceId))?.level ?? 0;
+}
+
+/**
+ * The loaded sources downloading at a raised pace now, by id. Health reads them twice (lib/health.ts): Source health's
+ * `slowed` rows, and the failed chapters filed under a main source from one its series left (status `moved`), which
+ * wait on a slowed main as on one that rests. The levels live here, in memory, so a query is handed the ids.
+ */
+export function slowedSources(): string[] {
+  return listSources().map((a) => a.id).filter((id) => paceLevel(id) > 0);
 }
 
 /** How long a page request on the source's key must still wait, in ms: the rest of its last 429. 0 = none. */

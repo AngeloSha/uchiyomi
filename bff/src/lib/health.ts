@@ -17,7 +17,7 @@ import { latestSolverVersion } from './solverVersion';
 import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPingShared, solverUrl, type SolverAt, type SolverPing } from './sources/flaresolverr';
-import { getSource, listSources } from './sources';
+import { getSource } from './sources';
 import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
@@ -35,7 +35,7 @@ import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
 import { applyIgnores, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
-import { paceLevel } from './pace';
+import { slowedSources } from './pace';
 import { forDesktop, isDesktop } from './desktop';
 import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
 import { renumberRunning, type NumberingNote } from './numbering';
@@ -809,8 +809,12 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
             -- v0.55.3: so is a chapter filed here from a source its series no longer uses (status moved,
             -- lib/chapterFailures.ts refileFailures) while this source rests -- rate-limited, or in a cooldown: never
             -- tried here, it waits for the same pause. The owner's 32 AllManga chapters, on a rate-limited Natomanga.
+            -- Or while it downloads at a raised pace (the ids passed in, lib/pace.ts slowedSources): a 429 at it, or at
+            -- another source on its image server, holds the pace for an hour and more after its own status reads ok
+            -- again -- one chapter at a time, the moved ones in the queue with the rest.
             count(*) FILTER (WHERE f.status = 'rate_limited'
-                                OR (f.status = 'moved' AND (h.status = 'rate_limited' OR h.blocked_until > now())))::int AS limited,
+                                OR (f.status = 'moved' AND (h.status = 'rate_limited' OR h.blocked_until > now()
+                                                            OR f.source_id = ANY($1::text[]))))::int AS limited,
             (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
             (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
             (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
@@ -820,6 +824,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
        FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
        LEFT JOIN source_health h ON h.source_id = f.source_id
       GROUP BY f.source_id ORDER BY chapters DESC`,
+    [slowedSources()],
   ).catch(() => { readFailed = true; return [] as any[]; });
   const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
     title: sourceLabel(r.source_id),
@@ -830,7 +835,8 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     // as Fix everything's "clears by itself" says it. One chapter failing any other way keeps the row a finding.
     // Reintroduce by dropping it: "chapters refused only for room are waiting, not failing" in health.int.test.ts finds
     // the card amber; by dropping the `moved` clause above, "failures follow the series" in autofix.int.test.ts finds
-    // the new main's row a finding.
+    // the new main's row a finding; by dropping its `ANY($1)`, "a failed chapter moved onto a main that rests or
+    // downloads slowly waits" in health.int.test.ts finds the slowed main's row a finding.
     ...(r.limited > 0 && r.limited === r.chapters ? { info: true } : {}),
     // One chip, and it is the repair's failures step for THIS source: it clears the attempt counts whatever
     // their age and re-checks up to ten of the source's series. The nightly does the same thing on its own
@@ -1075,7 +1081,7 @@ const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1,
 export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   // v0.55.3: the sources downloading at a raised pace (lib/pace.ts), listed whether or not anything else is wrong: the
   // row is where an admin learns why their chapters come one at a time.
-  const slowed = listSources().map((a) => a.id).filter((id) => paceLevel(id) > 0);
+  const slowed = slowedSources();
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean; off_in: 'language' | 'extension' | null;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
