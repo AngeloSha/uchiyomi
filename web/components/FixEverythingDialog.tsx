@@ -142,7 +142,7 @@ function AskView({ af, checks, onClose }: { af: AutofixApi | null; checks: Healt
     onClose();
   };
   const lines = [
-    tr('Replaces broken sources, fetches missing and broken chapters, and finds new sources, installing up to 3 extensions if it has to.'),
+    tr('Replaces broken sources, fetches missing and broken chapters, and finds new sources, trying the most popular extensions first if it has to.'),
     tr('Merges duplicate series, deletes chapters saved twice or numbered impossibly, and applies safe renumbering. These can’t be undone.'),
     tr('What only you can fix is listed at the end.'),
   ];

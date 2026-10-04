@@ -184,6 +184,13 @@ export interface UpdateOpts {
    * running); any other plan stays held for an admin.
    */
   confirmRenumber?: boolean | 'clean';
+  /**
+   * v0.55.1, Fix everything's chapters phase: sources this run leaves alone as if they were in a cooldown -- cooling
+   * down or rate-limited when the phase began (lib/autofix.ts). Never asked for a listing, never downloaded from, never
+   * hunted: the owner's first run re-checked failed chapters through Natomanga and Mangakakalot while they answered
+   * 429, and 28 chapters failed again inside four minutes. Their chapters are the sweep's once the site is ready.
+   */
+  resting?: (sourceId: string) => boolean;
 }
 
 /**
@@ -289,7 +296,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
   let rawNumbering: SourceChapter[] | null = null;
   for (const f of followed) {
-    if (await blockedNow(f.source)) { blocked++; continue; }
+    if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
     // building the list and asking it, and that is a source that did not answer, not a crash.
     const adapter = getSource(f.source);
@@ -537,7 +544,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Asked only when there is something to download: a listing refresh (maxNew 0) costs no extra query.
   const adult = queue.length > 0 && maxNew > 0 ? await seriesIsAdult(seriesId) : false;
   const sweepRule = await sweepAllowedFor(adult);
-  const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true);
+  const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
   // No hunt under posting order: a source found for the purpose numbers these posts its own way.
   const huntBudget = opts.hunt === false || opts.newestOnly || posting ? null : (opts.hunt ?? { left: HUNT_MAX_PER_SWEEP });
   const meta = { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status };

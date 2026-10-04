@@ -470,9 +470,18 @@ export interface AutofixDrive {
   halt: () => boolean;
   budget: { left: number };
   onCurrent?: (cur: RepairCurrent | null, step: RepairStep | null) => void;
+  /**
+   * v0.55.1: the sources the pass leaves alone -- cooling down or rate-limited when it began (lib/autofix.ts). Their
+   * failed chapters are not reset, and nothing is listed, fetched or hunted through them (UpdateOpts.resting).
+   */
+  resting?: (sourceId: string) => boolean;
 }
 let driven: AutofixDrive | null = null;
 let drivenStep: RepairStep | null = null;
+/** A source the driven pass leaves alone (AutofixDrive.resting); never one outside Fix everything. */
+const resting = (sourceId: string): boolean => !!driven?.resting?.(sourceId);
+/** updateSeries' share of it, in a driven pass. */
+const restingOpt = (): { resting?: (sourceId: string) => boolean } => (driven?.resting ? { resting: driven.resting } : {});
 
 /** Why the run must stop now, if it must: the server going down, someone pressing Cancel, or Fix everything's own stop. */
 const halted = (): 'shutdown' | 'cancelled' | null =>
@@ -779,11 +788,14 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
  * their rows clear when their chapter lands, by the sweep or by a source a later run finds.
  * Reintroduce by resetting every source's rows: "the failures step resets only the sources that can be asked" in
  * autofix.int.test.ts finds the failing source's row reset.
+ * v0.55.1: nor a source the run leaves alone (AutofixDrive.resting: rate-limited now), and the re-checks list and
+ * fetch through none of them. Reintroduce by dropping `resting` here: "a 429 failure is not retried by the run" in
+ * autofix.int.test.ts finds its row reset.
  */
 async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Promise<RepairResult['stopped']> {
   const ledger = await q<{ source_id: string }>('SELECT DISTINCT source_id FROM chapter_failures').catch(() => []);
   const standing = await standingsOf(ledger.map((x) => x.source_id)).catch(() => new Map());
-  const askable = ledger.map((x) => x.source_id).filter((id) => standing.get(id) === 'usable');
+  const askable = ledger.map((x) => x.source_id).filter((id) => standing.get(id) === 'usable' && !resting(id));
   if (!askable.length) return undefined;
   const reset = await q<{ series_id: string }>(
     `UPDATE chapter_failures SET attempts = 0, first_at = COALESCE(first_at, at), at = now()
@@ -803,7 +815,7 @@ async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Pro
     series++;
     busyFolders.add(s.folder);
     try {
-      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled });
+      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled, ...restingOpt() });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -937,7 +949,9 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       continue;
     }
     here({ kind: 'series', seriesId, title: rows[0].title, phase: 'listing' });
-    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    const adultRule = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    // Never a source Fix everything leaves alone (v0.55.1, AutofixDrive.resting): no page list asked, no hunt there.
+    const allowed = (id: string) => adultRule(id) && !resting(id);
     // The sources this series is actually followed on -- the primary pair plus series_sources, exactly as
     // listingAlternates builds it (lib/updater.ts). A listing row's source is trusted only while the
     // series still follows it: a copy left behind by a source somebody unfollowed is not ours to ask.
@@ -952,7 +966,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       // The listing the copies come from is as old as the last sweep, and a source that has since fixed a
       // broken chapter would not be noticed. `maxNew: 0` downloads nothing: it is a listing refresh, the
       // same one the refetch route does, under the same kind of wall so a dead source costs ten seconds.
-      await withTimeout(updateSeries(seriesId, 0), LISTING_REFRESH_MS).catch(() => {});
+      await withTimeout(updateSeries(seriesId, 0, restingOpt()), LISTING_REFRESH_MS).catch(() => {});
 
       for (const book of rows) {
         { const h = halted(); if (h) { stopped = h; break series; } }
@@ -1581,7 +1595,8 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
 
     if (unlisted.size) {
       at('searching');
-      const allowed = await sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
+      const adultRule = await sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
+      const allowed = (id: string) => adultRule(id) && !resting(id);
       const found = await huntCandidates(s.id, {
         allowed, budget, reason: 'gap', force: !!opts.seriesId,
         // The candidate must be able to fill a hole nobody else lists. `assess` over the RAW list it
@@ -1657,7 +1672,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
       // below an active archive's boundary" in repair.int.test.ts fetches nothing.
       const up = await updateSeries(s.id, opts.autofix ? AUTOFIX_GAP_CHAPTERS : REPAIR_GAP_CHAPTERS, {
-        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId,
+        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId, ...restingOpt(),
       });
       const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
       // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the

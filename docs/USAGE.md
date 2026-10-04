@@ -1333,7 +1333,10 @@ server works out before anything moves:
 
 1. *184 already follow a working source: it becomes their main source.* At once, with no search.
 2. *The other 11 are searched for on your other sources.* One at a time, under their titles and other names, as
-   *Find other sources* does: a match is taken only when its title and chapter numbers line up.
+   *Find other sources* does: a match is taken only when its title and chapter numbers line up. Since v0.55.1 only a
+   source that can update the series is asked — working, or only cooling down after asking Uchiyomi to slow down —
+   so a series is never moved onto a source failing at its chapter or page lists or its images; with none to take
+   it, it stays where it was and says so.
 3. *Example Manga is turned off once nothing uses it.*
 
 A series numbered by posting order keeps its main source, and the dialog says how many. **Turn it off when done**
@@ -1502,9 +1505,17 @@ without you pressing anything. Since v0.48.3:
 - **Fix everything** (since v0.55.0, where *Fix all issues* was), beside **Re-check**, is there whenever any card
   has a finding. It asks one question:
   - **Fix it for me** (the default) runs one background run that tries every remedy on every card: it replaces
-    broken sources, fetches missing and broken chapters, finds new sources (installing up to 3 extensions if it has
-    to, and keeping only those that found something), merges duplicate series, deletes chapters saved twice or
-    numbered impossibly, and applies the renumbering plans that are safe. Merges and deletes cannot be undone. While it
+    broken sources, fetches missing and broken chapters, finds new sources (installing extensions if it has to, and
+    keeping only those that found something), merges duplicate series, deletes chapters saved twice or numbered
+    impossibly, and applies the renumbering plans that are safe. Since v0.55.1 it tries extensions one at a time, with
+    no limit of its own, until the series are found or its time is up — the next run carries on down the list — the
+    ones your series' translation groups name first, then the most downloaded (the download counts its extension
+    repository publishes on GitHub, read at most once a day), then the most recently updated; an 18+ extension only
+    for a series rated 18+, after the others. One that has none of the series is removed straight away, and is not
+    tried for the same series again for a month. The end says it in one line: *Tried 14 extensions and kept Ember
+    Pages*. A site that asked Uchiyomi to slow down is not broken (since v0.55.1): the run never replaces it, never
+    moves a series onto a source that cannot update it, and leaves the chapters a rate limit holds back to clear by
+    themselves. Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
     *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says how
@@ -1709,6 +1720,15 @@ sources responding normally* over any of these. The diagnosis tells the engine f
 server did not answer* means only that the engine could not be reached, timed out or refused Uchiyomi's login,
 while an extension that failed on its site, with the engine answering, reads *This source's extension reported an
 error*.
+
+**A rate limit is a cooldown, never a failure** (since v0.55.1). A site that answered *429* — *slow down* — at its
+chapter list, its page list or its images works; it asked Uchiyomi to wait. Its row reads *Rate limited* (until when,
+while the cooldown runs) and never offers **Replace**, its series still count as updating, and **Fix everything**
+leaves it alone: it never replaces it, never Tests it or clears its cooldown, retries none of its failed chapters and
+fetches nothing through it during the run, and lists what it holds back — and every chapter a rate limit failed —
+under what clears by itself, never under what needs you. Before, five refused image downloads in a row read as *Images
+failing*, Fix everything moved the series off a source whose searches and chapter lists answered fine, and its retries
+ran straight into the rate limit again.
 
 **A site that says it is offline** (since v0.49.1). A site that answers with its own maintenance page — a small page
 whose title says *temporarily offline*, *maintenance* or *be back soon*, with none of the site's own markup — reads

@@ -548,14 +548,24 @@ beside it are refused in turn (`POST /api/admin/sources/find` answers 409 `autof
 order, reuse what Health's own keys run: `preflight` (the engine and the solver), `scan` (the library scan and the
 page count), `solver` (the repair's solver step, interrupted renumbers finished, the engine's Cloudflare helper
 connected when Health's engine row offers it and `FLARESOLVERR_URL` is set), `sources` (failing, inconclusive and
-blocked sources Tested, a block cleared only after a passing Test; Replace with turnOff for every source some series
+blocked sources Tested, a block cleared only after a passing Test -- since v0.55.1 a source whose row is a rate limit
+is not Tested and a rate limit's cooldown is never cleared; Replace with turnOff for every source some series
 has as its main that is off, failing or uninstalled -- never for a setting or behind a solver that is down; failing
 sources nothing uses retired), `duplicates` (two-language pairs linked as editions; same-language copies merged only
 when their AniList entry, language and titles or chapter lists agree, keeping the copy that still updates), `numbering`
 (a renumbering plan applied only when the plan built at the apply is clean), `chapters` (the repair's failures, short
-and gap steps, uncapped but paced), `extensions` (up to `AUTOFIX_INSTALLS` extensions installed in the series'
-language for series no source carries or gaps nobody had, only that language's source switched on, kept only when a
-series now reads through it), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
+and gap steps, uncapped but paced; since v0.55.1 it leaves alone every source cooling down or rate-limited when it
+begins -- `status` stays `rate_limited` until a download succeeds -- resetting none of its failed chapters and listing,
+fetching or searching nothing through it; what such a source holds back, and every chapter a rate limit failed, is
+`clears` (`autofix.clears.cooldown` {name}, `at` the cooldown's end while one runs), never `needsYou`), `extensions`
+(extensions installed in the series' language for series no source carries or gaps nobody had, only that language's
+source switched on, kept only when a series now reads through it; since v0.55.1 one at a time with no cap unless
+`AUTOFIX_INSTALLS` sets one, until every such series is carried or the run's time is spent -- the next run continues
+down the list -- in this order: the series' own translation groups naming the package, then its downloads a day (its
+apk and jar on the repository's GitHub releases, read at most once a day, the last answer kept while GitHub cannot be
+reached), then its version code, then its name; an 18+ package only for a series rated 18+, after the others; never a
+package already searched in vain for that series within 30 days; a package that carries none removed at once, before
+the next is installed), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
 impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
 `GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
 `GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
@@ -573,7 +583,11 @@ audited as `library.autofix`. A line that names a series by title carries `param
 above, a line or a title naming a series their 18+ switch hides is left out -- judged on the series as it stands, a
 merged-away one included -- and so is one written before v0.55.1, with no ids, whatever it names. While one runs,
 `GET /api/sources/jobs` carries its card to admins (kind `autofix`, `done`/`total` its phases, `step` the phase).
-Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly runs.
+Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly runs. Since v0.55.1 the extensions phase says
+what it did in one `done` line, `autofix.done.tried` {n, names, more} (the packages tried, naming those kept) or, when
+it kept none, `autofix.done.triedNone` {n} (`autofix.done.installed` and `autofix.done.uninstalled` stay for runs kept
+from before), and a kept run's `result.tried` lists the packages it searched in vain as `{pkg, lang, series}`, the
+series each was searched for (`{pkg, lang}` before).
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
@@ -625,7 +639,7 @@ the two destructive ones, `delete` and `merge`, are the two the nightly repair n
 **Source health and the extension engine** (since v0.49.0). The `sources` check reads the per-stage evidence
 (#115): each of its items adds `evidence` (one line per stage, `search`, `chapters`, `pages`, `images`, each
 `{stage, state: 'ok' | 'fail' | 'unknown', at, by: 'test' | 'sweep' | 'traffic', kind: 'error' | 'empty' |
-'unnumbered', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' | 'inconclusive',
+'unnumbered' | 'site_offline' | 'rate_limited', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' | 'inconclusive',
 stage}`), `diagnosis` (`{code, reason, fix}`, the admin half) and `series` (how many series use the source), and
 its `title` is the source's name (its id only when no name is known). A confirmed failure — a failed live check, or
 three failures in a row at one stage from traffic — is a finding whether or not a series uses the source, and an
@@ -658,6 +672,15 @@ source has an extension's logo, which `GET /img/sources/icon/:id` serves. The su
 *Nothing is failing that your library uses* while quiet rows are listed. The status is decided as before: `warn`
 while any finding remains.
 
+**A rate limit is a cooldown, never a failure** (since v0.55.1). A stage failure in the words of an HTTP 429 (*0/32
+pages downloaded (HTTP 429)*, *too many requests*, the words `classify` files as `rate_limited`) is recorded with
+`kind: 'rate_limited'` in the per-stage evidence, and one recorded before as `error` is read the same way. It is
+never a current failure: its `sources` row is `blocked` with `cooldown.status: 'rate_limited'` (`until` null once the
+cooldown ran out or a passing Test cleared it, while the evidence stays open until a download succeeds), it never
+offers `replace_source`, the source's `standing` is `cooling` (so it still carries its series and is never a
+`frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
+refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
+
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
 source, `sw:<id>` for an extension). Findings: a numbering change waiting for review — the detector's proposal
@@ -679,7 +702,8 @@ sources the series follows), instead of leaving them to the archive.
 
 `GET /api/admin/sources` (admin) is every source's stored health, and since v0.49.0 adds, per source, `live`
 (the last Test or daily check: `{at, by, state, stage, code, checks}`, or `null`), `failing` (the stages whose
-failure is open, confirmed and not stale: `{stage, since, at, error, kind, by, streak}`) and `evidence` (the
+failure is open, confirmed and not stale: `{stage, since, at, error, kind, by, streak}`; since v0.55.1 never a rate
+limit, which is a cooldown) and `evidence` (the
 same stage lines as Health), plus a top-level `testMs`. The public `status` it carries is unchanged: Admin →
 Providers shows *Failing* by overlaying `failing` on it, while `GET /api/sources` stays one answer for every
 account.
@@ -1810,8 +1834,9 @@ takes its chapters from its numbering source alone), `renumber_pending`, `busy` 
 refresh is inside the series), `source_unavailable` (not loaded, switched off, or beyond the admin's age reach),
 `moved` (the main changed meanwhile) or `language_differs` (with `edition`, as the follow route answers it). Audited
 as `series.main_source` with `via: manual`. Each entry of `sources` (here, in the follow and unfollow answers and in
-`GET /api/series/:id`) carries `standing`: `usable`, `cooling`, `failing` (a confirmed failure at the chapter list,
-the pages or the images, or the site's own offline notice), `off` (switched off) or `not_loaded`.
+`GET /api/series/:id`) carries `standing`: `usable`, `cooling` (a cooldown, or since v0.55.1 a rate limit at the
+chapter list, the pages or the images), `failing` (a confirmed failure at the chapter list, the pages or the images,
+or the site's own offline notice), `off` (switched off) or `not_loaded`.
 `GET /api/admin/series/:id/check` now reports `waiting` alongside `added`: the number of missing chapters
 held back for a ranked group (omitted when none). The `frozen-series` health check lists a series whose
 primary is gone but which still follows a live source as information rather than a warning.
@@ -1916,9 +1941,13 @@ the best is the one that answered with its list within the week, then the one li
 numbers (in tenths), then the admin's source order, then the one furthest ahead, then the follow order -- a cooling
 one only after every usable one. A series with none is searched for as Find does, its dead followers (failing, not
 loaded, switched off) not counting against the cap and dropped -- worst first, with their listing rows -- only as far
-as a follow needs the room; the first source it follows becomes its main source. A series numbered by posting order
-(`posting_order`), waiting for a renumber (`renumber_pending`), no longer on the source (`moved`), or with a sweep, a
-check or a listing refresh inside it for 30 s (`busy`) is left alone. Each result adds `promoted: {from, fromName,
+as a follow needs the room; the first source it follows becomes its main source. Since v0.55.1 that search asks only
+a source that can update the series (`standing` usable or cooling), so a source failing at the chapter list, the
+pages or the images is neither followed nor made the main source, and the first source it followed that can still
+update it is promoted -- none can, and the series stays with `why: no_answer`; a Replace run Fix everything starts
+never promotes onto, nor searches, a source that run is replacing too (such a follower is `skipped` as `failing`). A
+series numbered by posting order (`posting_order`), waiting for a renumber (`renumber_pending`), no longer on the
+source (`moved`), or with a sweep, a check or a listing refresh inside it for 30 s (`busy`) is left alone. Each result adds `promoted: {from, fromName,
 to, toName, via: follower|search, old: dropped|kept}` (and then no `why`), `skipped: [{sourceId, name, why: off|
 failing|cooling|not_loaded|language|age}]` (the followers passed over) and `dropped: [{sourceId, name}]`. The run reads
 `mode: 'replace'` and `promoted` (counted from its results; in `recent` too), and in full `left` (the series on the

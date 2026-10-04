@@ -74,6 +74,8 @@ let openGate: () => void = () => {};
 /** When set, fs-a's chapter lists wait on it: a check that stays inside its series (v0.54.0, Replace's `busy`). */
 let listGate: Promise<void> | null = null;
 let openList: () => void = () => {};
+/** When set, every chapter list a fake gives runs it first: what changes while a candidate is being judged. */
+let onList: ((id: string) => Promise<void>) | null = null;
 
 function fake(id: string) {
   return {
@@ -89,6 +91,7 @@ function fake(id: string) {
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid.split('|')[1] }; },
     async listChapters(sid: string) {
       if (listGate && id === 'fs-a') await listGate;
+      if (onList) await onList(id);
       if (id === 'fs-nolist') throw new Error('fs-nolist: the chapter list did not load');
       if (id === 'fs-vanish') await q(`UPDATE lib_series SET deleted_at = now() WHERE title = 'Mu Vanishing'`);
       const c = CATALOGUE[id].find((x) => x.title === sid.split('|')[1]);
@@ -170,6 +173,7 @@ beforeEach(async () => {
   searches.length = 0;
   gate = null;
   listGate = null;
+  onList = null;
   runtime.updating = false;
   fsLib.setFindTiming({ paceMs: 0, wallMs: 10_000, quietMs: 20 });
   await q('DELETE FROM lib_series WHERE library_id = ANY($1)', [[LIB, ADULT_LIB]]);
@@ -877,6 +881,69 @@ test('a series with no working follower is searched, followed and promoted; one 
   assert.equal(by[S('e')].why, 'no_match', 'the search said why it found nothing');
   assert.equal(await mainOf('e'), MAIN, 'and that series stays where it was');
   assert.equal(run.promoted, 1);
+});
+
+test('Replace never moves a series onto a source that cannot update it; a source that is only cooling down can take it (v0.55.1)', { skip }, async () => {
+  // The owner's first Fix everything run (2026-10-03): AllManga failed at its page lists ("Timed out waiting for WebView
+  // after 20s", 39 in a row) and failed its own Test in that very run, yet Mangakakalot's Replace moved three series onto
+  // it -- the source the search followed first was promoted with no standing check. Reintroduce by asking every source
+  // in a Replace's search (drop `canTake` in findFor) and promoting progress[0]: Gamma Legend is followed and moved onto
+  // fs-b. A source asked to slow down still carries a series (lib/sourceStanding.ts `cooling`): Omega Manhwa moves.
+  await series('g', 'Gamma Legend'); // only fs-b carries it
+  await series('o', 'Omega Manhwa'); // only fs-adult carries it
+  const at = new Date().toISOString();
+  await q(`INSERT INTO source_health (source_id, status, stages) VALUES ('fs-b', 'ok', $1::jsonb), ('fs-adult', 'rate_limited', $2::jsonb)`, [
+    JSON.stringify({ pages: { failAt: at, failBy: 'test', streak: 39, kind: 'error', error: 'suwayomi: Timed out waiting for WebView after 20s' } }),
+    JSON.stringify({ images: { failAt: at, failBy: 'traffic', streak: 5, kind: 'error', error: '0/32 pages downloaded (HTTP 429)' } }),
+  ]);
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  const by = resultsBy((await state()).run);
+  assert.equal(await mainOf('g'), MAIN, 'a series whose only match is on a source failing at its page lists stays put');
+  assert.deepEqual(await followersOf('g'), [], 'and is not followed there either');
+  assert.equal(by[S('g')].why, 'no_match', 'and it says why');
+  assert.ok(!searches.includes('fs-b:Gamma Legend'), 'a source that cannot update it is not even asked');
+  assert.equal(await mainOf('o'), 'fs-adult', 'a match on a source that is only cooling down IS moved: cooling carries');
+  assert.equal(by[S('o')].promoted?.via, 'search');
+});
+
+test('a source that starts failing while it is judged is followed, never promoted (v0.55.1)', { skip }, async () => {
+  // What the search asked could update the series when it was asked; the switch reads the standing again. Reintroduce
+  // by promoting the first source followed, as v0.55.0 did (replaceFor's `progress[0]`): Omega Manhwa moves onto fs-adult,
+  // failing at its page lists by the time it is made the main source.
+  await series('o', 'Omega Manhwa'); // only fs-adult carries it
+  onList = async (id) => {
+    if (id !== 'fs-adult') return;
+    await q(`INSERT INTO source_health (source_id, stages) VALUES ('fs-adult', $1::jsonb) ON CONFLICT (source_id) DO UPDATE SET stages = EXCLUDED.stages`,
+      [JSON.stringify({ pages: { failAt: new Date().toISOString(), failBy: 'test', streak: 1, kind: 'error', error: 'HTTP 500' } })]);
+  };
+  const r = await post({ sourceId: MAIN, mode: 'replace' });
+  assert.equal(r.statusCode, 202, r.body);
+  await fsLib.findSettled();
+  const by = resultsBy((await state()).run);
+  assert.equal(await mainOf('o'), MAIN, 'a source failing by the switch is never made the main source');
+  assert.deepEqual(await followersOf('o'), ['fs-adult'], 'PREMISE: the search followed it while it could still update the series');
+  assert.equal(by[S('o')].why, 'no_answer', 'and the series says its source did not answer for it');
+});
+
+test('a Replace run Fix everything starts never promotes onto a source it is replacing too (v0.55.1)', { skip }, async () => {
+  // The owner's first run: AllManga's Replace moved a series onto Mangakakalot, which that run had been replacing a
+  // moment before. Reintroduce by ignoring `avoid` (replaceFor's follower ranking and findFor's Replace search): Rho One
+  // is promoted to fs-a, its first follower, and Alpha Tale is followed and moved onto fs-a, the first that carries it.
+  const { SYSTEM_CTX } = await import('../src/lib/visibility');
+  await series('r1', 'Rho One'); await follows('r1', [['fs-a', { fresh: true }], ['fs-b', { fresh: true }]]);
+  await series('a', 'Alpha Tale');
+  const started = await fsLib.startFind({ sourceId: MAIN }, adminId, SYSTEM_CTX, undefined, { mode: 'replace', avoid: ['fs-a'] });
+  assert.ok('runId' in started);
+  await fsLib.findSettled();
+  const by = resultsBy((await state()).run);
+  assert.equal(await mainOf('r1'), 'fs-b', 'a follower the run is replacing too is passed over');
+  assert.deepEqual(by[S('r1')].skipped, [{ sourceId: 'fs-a', name: 'Name fs-a', why: 'failing' }], 'and said so');
+  assert.equal(await mainOf('a'), 'fs-b', 'nor is it searched and promoted onto');
+  assert.ok(!searches.includes('fs-a:Alpha Tale'), 'it is not asked');
+  const scope = (await q('SELECT scope FROM source_find_runs WHERE id = $1', [(started as { runId: string }).runId]))[0].scope;
+  assert.deepEqual(scope.avoid, ['fs-a'], 'the run keeps what it avoided');
 });
 
 test('review first moves nothing, proposes what it would promote, and promote does exactly that', { skip }, async () => {

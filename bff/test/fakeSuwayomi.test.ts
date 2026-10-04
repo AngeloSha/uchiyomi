@@ -238,6 +238,8 @@ test('every query the shipping adapter sends is accepted, deprecated members and
   assert.equal(img.headers.get('content-type'), 'image/png');
 
   assert.equal((await ext.listExtensions(gql)).length, 4);
+  // v0.55.1: Fix everything's ranking reads each package's files and version apart from the catalogue.
+  assert.equal((await ext.extensionFacts(gql)).size, 4);
   assert.equal(await ext.refreshExtensions(gql), 4);
   assert.equal(await ext.setExtensionState(PKG.shelfTwo, 'install', gql), true);
   assert.deepEqual((await ext.sourcesOfExtension(PKG.webtoons, gql)).map((s) => s.id), [SOURCE_IDS.webtoons]);

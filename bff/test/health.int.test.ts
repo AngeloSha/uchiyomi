@@ -1538,6 +1538,74 @@ test("a source that is off or failing and is some series' main offers Replace; a
   }
 });
 
+test('images failing with 429 are a cooldown: no Replace, and its series still update; images failing with a 500 are failing (v0.55.1)', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // The owner's first Fix everything run (2026-10-03): Mangakakalot's image server answered 429 -- "0/32 pages
+  // downloaded (HTTP 429)", five in a row, recorded as an error before v0.55.1 -- so Source health read it failing,
+  // offered Replace, and Fix everything moved 14 series off a source whose searches and chapter lists answer fine. A rate
+  // limit is a cooldown: its row is the cooldown's, `rate_limited`, also once the cooldown ran out or a passing Test
+  // cleared it. Reintroduce by counting rate limits among the failing (lib/health.ts sourceTrouble's `failing`, or
+  // currentFailures in lib/sourceEvidence.ts): hl-limit reads failing with Replace offered, and its series is frozen.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks, frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { standingsOf } = await import('../src/lib/sourceStanding');
+  const { noteStage } = await import('../src/lib/sourceHealth');
+  await migrate();
+  const IDS = ['hl-limit', 'hl-limitnew', 'hl-err', 'hl-note'];
+  for (const id of IDS) registerAdapter(stubSource(id) as any);
+  const SERIES = ['s_hl_limit', 's_hl_limitnew', 's_hl_err'];
+  const clean = async () => {
+    await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [SERIES]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
+  };
+  await clean();
+  for (const id of SERIES) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id, auto_update)
+             VALUES ($1, 'test', $1, $1, 4, $2, 'x', true)`, [id, id.replace('s_hl_', 'hl-')]);
+  }
+  const images = (error: string, kind = 'error') =>
+    JSON.stringify({ images: { failAt: new Date(Date.now() - 60_000).toISOString(), failBy: 'traffic', streak: 5, kind, error } });
+  // As the owner's row was: rate limited, its cooldown over. And one recorded since v0.55.1, its cooldown cleared by a
+  // Test that passed (a Test fetches no image). And a source whose images fail with a server error.
+  await q(`INSERT INTO source_health (source_id, status, disabled, blocked_until, last_error, stages) VALUES
+             ('hl-limit', 'rate_limited', false, now() - interval '5 minutes', '0/32 pages downloaded (HTTP 429)', $1::jsonb),
+             ('hl-limitnew', 'ok', false, NULL, NULL, $2::jsonb),
+             ('hl-err', 'blocked', false, NULL, '0/32 pages downloaded (HTTP 500)', $3::jsonb)`,
+    [images('0/32 pages downloaded (HTTP 429)'), images('0/32 pages downloaded (HTTP 429)', 'rate_limited'), images('0/32 pages downloaded (HTTP 500)')]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
+    const row = (id: string) => c.items.find((i: any) => i.sourceId === id);
+    assert.equal(row('hl-limit').state, 'blocked', 'images failing with 429 are a cooldown, never a failure');
+    assert.equal(row('hl-limit').cooldown?.status, 'rate_limited');
+    assert.ok(!row('hl-limit').actions.includes('replace_source'), 'and a cooldown is never Replaced: it ends by itself');
+    assert.deepEqual([row('hl-limitnew').state, row('hl-limitnew').cooldown], ['blocked', { status: 'rate_limited', until: null }],
+      'a rate limit whose cooldown a Test cleared is still one');
+    assert.ok(!row('hl-limitnew').actions.includes('replace_source'));
+    assert.equal(row('hl-err').state, 'failing', 'images failing with a 500 are failing');
+    assert.ok(row('hl-err').actions.includes('replace_source'), 'and offer Replace');
+
+    const standing = await standingsOf(['hl-limit', 'hl-limitnew', 'hl-err']);
+    assert.deepEqual([standing.get('hl-limit'), standing.get('hl-limitnew'), standing.get('hl-err')], ['cooling', 'cooling', 'failing']);
+    const frozen = await frozenSeries(noIgnores(), 'up');
+    const listed = new Set(frozen.items.map((i: any) => i.seriesId));
+    assert.ok(!listed.has('s_hl_limit') && !listed.has('s_hl_limitnew'), 'a series on a rate-limited main can still update');
+    assert.ok(listed.has('s_hl_err'), 'one on a main whose images fail cannot');
+
+    // What ordinary use records from here on: a failure in the words of a rate limit is recorded as one. Reintroduce by
+    // dropping the rate-limit kind from noteStage (lib/sourceHealth.ts): it is recorded as an error.
+    await noteStage('hl-note', 'pages', 'fail', { error: 'suwayomi: HTTP error 429' });
+    await noteStage('hl-note', 'chapters', 'fail', { error: 'suwayomi: HTTP error 500' });
+    const noted = (await q(`SELECT stages FROM source_health WHERE source_id = 'hl-note'`))[0]?.stages;
+    assert.equal(noted?.pages?.kind, 'rate_limited', 'a 429 in ordinary use is recorded as a rate limit');
+    assert.equal(noted?.chapters?.kind, 'error');
+  } finally {
+    await clean();
+  }
+});
+
 test('a series whose loaded main is off or failing, with no working follower, can no longer update; one with a working follower is reference; a cooling main is not listed', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   // Reintroduce by dropping the `OR ls.source_id = ANY($1)` clause from frozenSeries: the series on the switched-off main
   // is absent. Reintroduce "any loaded follower counts" (drop the standing test on followers): the series whose follower

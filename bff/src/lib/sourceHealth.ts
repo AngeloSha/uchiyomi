@@ -3,7 +3,7 @@
 // report here from the one place that matters most — the chapter downloader.
 import { q, one } from './db';
 import { visibleToAll } from './visibility';
-import type { EvidenceBy, FailKind, Stage, Stages } from './sourceEvidence';
+import { RATE_LIMIT_WORDS, type EvidenceBy, type FailKind, type Stage, type Stages } from './sourceEvidence';
 import { isSiteOffline } from './sources/offline';
 
 export type SourceStatus = 'ok' | 'rate_limited' | 'blocked' | 'down';
@@ -42,7 +42,7 @@ export interface SourceHealth {
 /** Classify an error message / HTTP status into a health signal (or null if it's not a source-health issue). */
 export function classify(err: unknown, httpStatus?: number): SourceStatus | null {
   const m = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
-  if (httpStatus === 429 || /\b429\b|rate.?limit|too many requests|slow down/.test(m)) return 'rate_limited';
+  if (httpStatus === 429 || RATE_LIMIT_WORDS.test(m)) return 'rate_limited';
   if (httpStatus === 403 || /\b403\b|just a moment|cloudflare|challenge|cf-chl|forbidden|access denied|blocked/.test(m)) return 'blocked';
   if (httpStatus === 503 || httpStatus === 502 || httpStatus === 504 || /timeout|timed out|econn|enotfound|fetch failed|network|\b50[234]\b/.test(m)) return 'down';
   return null;
@@ -280,8 +280,12 @@ export async function noteStage(
   const rec = outcome === 'ok'
     ? { okAt: at, okBy: by, streak: 0 }
     // A site's own offline notice is a kind of its own (v0.49.1), read off the classified error's message: every
-    // caller hands its error over as a string, and none of them need learn to tell it apart.
-    : { failAt: at, failBy: by, error: String(opts.error || 'failed').slice(0, 300), kind: opts.kind ?? (isSiteOffline(opts.error) ? 'site_offline' : 'error') };
+    // caller hands its error over as a string, and none of them need learn to tell it apart. So is a site asking us to
+    // slow down (v0.55.1): a cooldown, never a failure (lib/sourceEvidence.ts isRateLimit), in classify()'s own words.
+    : {
+        failAt: at, failBy: by, error: String(opts.error || 'failed').slice(0, 300),
+        kind: opts.kind ?? (isSiteOffline(opts.error) ? 'site_offline' : RATE_LIMIT_WORDS.test(opts.error ?? '') ? 'rate_limited' : 'error'),
+      };
   await mergeStages(sourceId, { [stage]: rec }, undefined, outcome === 'fail').catch(() => {});
 }
 

@@ -464,7 +464,8 @@ components:
         switches, which also unloads it; `not_loaded`: no adapter by that id is loaded (uninstalled, a site removed,
         the extension engine away); `failing`: a confirmed, current failure at the chapter list, the page list or the
         images, or the site's own offline notice at any step (a search failure stops no update); `cooling`: inside a
-        cooldown, which ends by itself; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
+        cooldown, which ends by itself -- or, since v0.55.1, asked to slow down (HTTP 429) at the chapter list, the
+        page list or the images, a rate limit being a cooldown and never a failure; `usable`: none of those. Only a `usable` or `cooling` follower can be made the
         main source, and only those count as still carrying a series.
     Ghost:
       type: object
@@ -9093,7 +9094,9 @@ paths:
         chapter saved with placeholder pages is offered confirm_short only.
         Since v0.49.0 (#115) the `sources` check reads per-stage evidence: each item adds `evidence` [{stage:
         search | chapters | pages | images, state: ok | fail | unknown, at, by: test | sweep | traffic, kind:
-        error | empty | unnumbered, error}], `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
+        error | empty | unnumbered | site_offline | rate_limited, error}] (since v0.55.1 a rate limit -- a failure
+        in the words of an HTTP 429, recorded as `rate_limited`, or as `error` before -- is never a failure: the row
+        is `blocked`, `cooldown.status` `rate_limited`, without `replace_source`), `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
         stage} (the last live check), `diagnosis` {code, reason, fix} and `series` (how many series use the
         source), and is titled by the source's name. A confirmed failure (a failed Test or daily check, or three
         traffic failures in a row at one stage) is a finding even for a source no series uses; a test that ran
@@ -9263,15 +9266,23 @@ paths:
         extensions, files, recheck), each reusing what Health's own keys run: the library scan and page count; the
         repair's solver step, interrupted renumbers finished, and the engine's Cloudflare helper connected when
         Health's engine row offers it and FLARESOLVERR_URL is set; a Test of every failing, inconclusive or blocked
-        source (a block cleared only after a passing Test), Replace with turnOff of every off or failing source some
+        source (a block cleared only after a passing Test; since v0.55.1 a rate limit is neither Tested nor its
+        cooldown cleared), Replace with turnOff of every off or failing source some
         series has as its main (and of an uninstalled one) -- never for a setting (the engine, the source limit, a
         hidden language, a MangaDex language) nor behind a solver that is down -- and failing sources nothing uses
         retired; duplicate pairs in two languages linked as editions, and same-language copies merged only when their
         AniList entry, their language and their titles or chapter lists (70 %) agree, keeping the copy that still
         updates; renumbering plans applied only when the plan built at the apply is clean; the repair's failures,
-        short and gap steps uncapped but paced; up to AUTOFIX_INSTALLS extensions installed in a series' language for
-        series no source carries or gaps nobody had (only that language's source switched on, kept only when a series
-        now reads through it); the later copy of a chapter saved twice deleted when the kept copy is complete, and
+        short and gap steps uncapped but paced (since v0.55.1 leaving alone every source cooling down or rate-limited
+        when they begin: none of its failed chapters reset, nothing listed, fetched or searched through it, and what
+        it holds back -- with every chapter a rate limit failed -- said under `clears`, never `needsYou`); extensions
+        installed in a series' language for series no source carries or gaps nobody had (only that language's source
+        switched on, kept only when a series now reads through it; since v0.55.1 one at a time with no cap unless
+        AUTOFIX_INSTALLS sets one, until they are carried or the run's time is spent, the series' translation groups'
+        packages first, then the most downloaded a day on the repository's GitHub releases, then the most updated; an
+        18+ package only for a series rated 18+, after the others; never one searched in vain for the same series
+        within 30 days; a miss removed at once; said in one done line, `autofix.done.tried` or
+        `autofix.done.triedNone`); the later copy of a chapter saved twice deleted when the kept copy is complete, and
         impossible chapter numbers deleted, with the delete route's guards; then Health again and the summary. It
         never presses Ignore. Bounded by AUTOFIX_MAX_MINUTES and AUTOFIX_SEARCHES. Audited as `library.autofix`. 409
         `{error: busy, running}` beside another run (`autofix`), a repair (`repair`), a Find or Replace (`find`) or a
@@ -9862,7 +9873,8 @@ paths:
       tags:
         - admin
       summary: Every source with its stored health, cooldown, the last live verdict (`live`), its open, confirmed
-        failures per stage (`failing`) and one line per stage (`evidence`); `testMs` is how long one Test may take.
+        failures per stage (`failing`; since v0.55.1 never a rate limit, which is a cooldown) and one line per stage
+        (`evidence`); `testMs` is how long one Test may take.
       operationId: getApiAdminSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:
@@ -9999,9 +10011,12 @@ paths:
         source order, how far ahead it is, the follow order) becomes its main source at once, with no search and no
         pacing (as POST /api/admin/series/{id}/main-source does, the replaced source dropped from it); a series with
         none is searched for as above -- its dead followers not counting against the cap, and dropped only as far as a
-        follow needs the room -- and the first source it follows becomes its main source. A series numbered by
-        posting order, waiting for a renumber, moved off the source, or with a run inside it for 30 s is left alone
-        and says so. `turnOff: true` (Replace only, never with `review`): when the run ends done with no series left
+        follow needs the room -- and the first source it follows becomes its main source. Since v0.55.1 that search
+        asks only a source that can update the series (standing usable or cooling), and the first source followed
+        that can still update it is promoted (none can: the series stays, `why: no_answer`); a Replace run Fix
+        everything starts never promotes onto, nor searches, a source that run is replacing too (such a follower is
+        `skipped` as `failing`). A series numbered by posting order, waiting for a renumber, moved off the source,
+        or with a run inside it for 30 s is left alone and says so. `turnOff: true` (Replace only, never with `review`): when the run ends done with no series left
         on the source, it is switched off and dropped from every series' followers with their listing rows (audited
         `source.retire`). Review first proposes instead: POST .../find/{runId}/promote applies one. Each switch is
         audited as `series.main_source` with `via: replace` and the run's id; `source.find` adds `mode`, `promoted`,

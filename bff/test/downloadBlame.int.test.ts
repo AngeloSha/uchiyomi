@@ -54,6 +54,15 @@ function serveEmpty(empty: number[]) {
 
 const health = async () =>
   (await q(`SELECT status, consecutive, blocked_until FROM source_health WHERE source_id = $1`, [SRC]))[0] || null;
+/** The images stage as recorded: the note is written without waiting (`void noteStage`), so it is waited for here. */
+async function imagesStage(): Promise<{ kind?: string; error?: string } | null> {
+  for (let i = 0; i < 40; i++) {
+    const r = (await q(`SELECT stages -> 'images' AS images FROM source_health WHERE source_id = $1`, [SRC]))[0];
+    if (r?.images?.failAt) return r.images;
+    await new Promise((go) => setTimeout(go, 50));
+  }
+  return null;
+}
 
 before(async () => {
   if (!DSN) return;
@@ -162,6 +171,33 @@ test('a source that says 429 to everything is still eventually a refusal', { ski
   const h = await health();
   assert.ok(h, 'a sustained refusal still earns the cooldown');
   assert.equal(h.consecutive, 1);
+  // v0.55.1: and the images stage records it as what it is, a rate limit -- a cooldown, never a failure
+  // (lib/sourceEvidence.ts isRateLimit). Reintroduce by dropping the rate-limit kind from noteStage (lib/sourceHealth.ts):
+  // it is recorded as an error.
+  const images = await imagesStage();
+  assert.equal(images?.error, '0/110 pages downloaded (HTTP 429)');
+  assert.equal(images?.kind, 'rate_limited', 'the images stage records a rate limit');
+});
+
+/**
+ * v0.55.1: the stored words name the refusal the source was blamed for, never just the numerically worst page. They are
+ * what the per-stage evidence, Health and the diagnosis read: named by the worst page, a 429 beside a 500 read as a
+ * broken source, and Fix everything replaced a source that had only asked for room; a 403 beside a 429 read as a rate
+ * limit. Reintroduce `worstLabel(worst)` in lib/downloader.ts: this reads HTTP 500.
+ */
+test('a refused chapter names the refusal it was blamed for', { skip }, async () => {
+  globalThis.fetch = (async (u: any) => {
+    const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
+    return new Response('no', { status: i < 55 ? 500 : 403 });
+  }) as typeof fetch;
+  await downloadChapter({ sourceId: SRC, seriesFolder: 'B/S', chapter: { sourceId: 'c6b', number: 6.5 } })
+    .then(() => assert.fail('a chapter that never arrived must be refused'), () => {});
+  const h = (await q(`SELECT status, last_error FROM source_health WHERE source_id = $1`, [SRC]))[0];
+  assert.equal(h?.status, 'blocked', 'PREMISE: blamed as the 403 it was');
+  assert.equal(h?.last_error, '0/110 pages downloaded (HTTP 403)', 'a refused chapter names the refusal it was blamed for');
+  const images = await imagesStage();
+  assert.equal(images?.error, '0/110 pages downloaded (HTTP 403)');
+  assert.equal(images?.kind, 'error', 'a block is a failure, never a rate limit');
 });
 
 

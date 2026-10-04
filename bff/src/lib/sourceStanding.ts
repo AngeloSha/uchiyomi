@@ -12,14 +12,16 @@
 //   - `failing`: a confirmed, current failure (lib/sourceEvidence.ts) at a step an update needs -- the chapter list,
 //     the page list or the images -- or the site's own offline notice at any step. A search that fails stops
 //     nothing a sweep does: the series is read by its own id, never searched for;
-//   - `cooling`: inside a cooldown (blocked_until ahead). Minutes, and it clears itself;
+//   - `cooling`: inside a cooldown (blocked_until ahead), or asked to slow down (HTTP 429) at a step an update needs,
+//     confirmed and current, its cooldown over or cleared (v0.55.1). Minutes, and it clears itself: a rate limit is
+//     never a failure (lib/sourceEvidence.ts isRateLimit);
 //   - `usable`: none of those.
 //
 // Its imports stop at the database, the registry and the evidence rules, so health.ts can read it without the Find
 // run's import cycle (lib/findScope.ts says why that matters).
 import { q } from './db';
 import { getSource } from './sources';
-import { currentFailures, type Stages } from './sourceEvidence';
+import { currentFailures, currentRateLimits, type Stages } from './sourceEvidence';
 
 export type Standing = 'usable' | 'cooling' | 'failing' | 'off' | 'not_loaded';
 
@@ -38,12 +40,17 @@ const UPDATE_STAGES: ReadonlySet<string> = new Set(['chapters', 'pages', 'images
  * A source's standing from its row (absent: a source nothing has ever gone wrong with, nor been switched off).
  * Reintroduce a search-only failure as `failing` (drop the stage test): "a search failure stops nothing an update
  * needs" in sourceStanding.test.ts reads failing.
+ * A rate limit is `cooling` whether or not its cooldown is still running (v0.55.1): a Test that passed clears the
+ * cooldown and proves nothing about the images, and the evidence stays open until a download succeeds. Reintroduce by
+ * dropping the rate-limit line: "images failing with 429 are a cooldown" in sourceStanding.test.ts reads usable.
  */
 export function standingOf(id: string, row: StandingRow | null | undefined, now = Date.now()): Standing {
   if (row?.disabled) return 'off';
   if (!getSource(id)) return 'not_loaded';
+  // currentFailures leaves rate limits out: a site that asked for room is not failing (lib/sourceEvidence.ts).
   if (currentFailures(row?.stages, now).some((f) => UPDATE_STAGES.has(f.stage) || f.kind === 'site_offline')) return 'failing';
   if (row?.blocked_until && new Date(row.blocked_until).getTime() > now) return 'cooling';
+  if (currentRateLimits(row?.stages, now).some((f) => UPDATE_STAGES.has(f.stage))) return 'cooling';
   return 'usable';
 }
 

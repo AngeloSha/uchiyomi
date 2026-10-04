@@ -27,8 +27,11 @@ export interface StageLine {
   state: 'ok' | 'fail' | 'unknown';
   at: string | null;
   by: EvidenceBy | null;
-  /** `site_offline` (v0.49.1): the site answered with its own "temporarily offline" page. */
-  kind: 'error' | 'empty' | 'unnumbered' | 'site_offline' | null;
+  /**
+   * `site_offline` (v0.49.1): the site answered with its own "temporarily offline" page. `rate_limited` (v0.55.1): it
+   * asked to slow down (HTTP 429) -- a cooldown, never a failure; its row says the error as it was.
+   */
+  kind: 'error' | 'empty' | 'unnumbered' | 'site_offline' | 'rate_limited' | null;
   error: string | null;
 }
 

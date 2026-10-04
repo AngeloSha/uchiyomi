@@ -93,7 +93,7 @@ export interface Probe {
    * Where the live test just failed, and how (#115). Live evidence of the most specific kind: the stage, and the
    * error as it was thrown a moment ago. `timeout` is our own deadline and proves nothing by itself.
    */
-  failure?: { stage: Stage; kind: 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline'; error?: string | null };
+  failure?: { stage: Stage; kind: 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline' | 'rate_limited'; error?: string | null };
 }
 
 /** The stage as a phrase for the admin's fix sentence ("while listing pages"); never in a public `reason`. */
@@ -426,7 +426,8 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
     const fl = probe.failure;
     if (fl) {
       const word = STAGE_WORD[fl.stage];
-      if (fl.kind === 'error') {
+      // A rate limit (v0.55.1, lib/sourceEvidence.ts) is an error in the site's own words: the rules name it.
+      if (fl.kind === 'error' || fl.kind === 'rate_limited') {
         const e = fl.error || '';
         for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
         return D('unknown', NEEDS_ADMIN,

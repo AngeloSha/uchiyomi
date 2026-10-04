@@ -790,6 +790,13 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('Installed {names} (found 1 series)', { names: namesText(p) })
     : tr('Installed {names} (found {n} series)', { n: num(p, 'n'), names: namesText(p) })),
   'autofix.done.uninstalled': (p) => tr('Tried and removed {names}: none of the series were there', { names: namesText(p) }),
+  // v0.55.1: the extensions phase in one line -- `n` the extensions tried, `names` those kept -- or, none kept, how many.
+  'autofix.done.tried': (p) => (num(p, 'n') === 1
+    ? tr('Tried 1 extension and kept {names}', { names: namesText(p) })
+    : tr('Tried {n} extensions and kept {names}', { n: num(p, 'n'), names: namesText(p) })),
+  'autofix.done.triedNone': (p) => (num(p, 'n') === 1
+    ? tr('Tried 1 extension: none of the series were there')
+    : tr('Tried {n} extensions: none of the series were there', { n: num(p, 'n') })),
   'autofix.done.deletedTwice': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter saved twice') : tr('Deleted {n} chapters saved twice', { n: num(p, 'n') })),
   'autofix.done.deletedOdd': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter numbered impossibly') : tr('Deleted {n} chapters numbered impossibly', { n: num(p, 'n') })),
 
