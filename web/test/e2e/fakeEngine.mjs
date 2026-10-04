@@ -31,9 +31,13 @@
 //
 // --extra v55 (up.sh passes E2E_FAKE_EXTRA): one more extension in the repository, NOT installed -- Gap Scans, in two
 // languages, whose English source carries Gap Only with all twelve chapters (the fake sources leave out 6 and 7):
-// what Health's Fix everything installs by itself to fill a gap nobody else has (autofixWalk.mjs). Its sources come
-// first in the engine's order, so that under a source limit of one (E2E_MAX_SOURCES) a series on Webtoons.com is the
-// one left over the limit -- Free a slot's case -- and Gap Scans keeps its place. Other extras are the fake sources'.
+// what Health's Fix everything installs by itself to fill a gap nobody else has (autofixWalk.mjs). Since v0.55.1 also
+// six English packages ranked by their downloads (POP in the fixture), of which only the fifth -- and the 18+ one, the
+// most downloaded -- carries Pop Walk, and GitHub's releases list for their repository at GET
+// /__github/repos/<owner>/<repo>/releases (up.sh points the app's GITHUB_API_URL here). Their sources come first in the
+// engine's order, so that under the walk's source limit of two (E2E_MAX_SOURCES) a series on Webtoons.com is the one
+// left over the limit -- Free a slot's case -- while the packages a run keeps register. Other extras are the fake
+// sources'.
 import { startFakeEngine, autofixSeed, MODES, SOURCE_IDS } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
 
 const argv = new Map();

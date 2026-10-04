@@ -20,6 +20,10 @@
 //                                                                 temporarily offline" page, shaped like the one
 //                                                                 aqua has served since 2026-09-23 (v0.49.1's
 //                                                                 walk491). `ok` on "site" brings the site back.
+//   pages-error                                                   /pages only ("site", page 0): HTTP 500 for every
+//                                                                 chapter's page list while search and chapter lists
+//                                                                 answer -- the owner's AllManga (v0.55.1), whose page
+//                                                                 lists timed out in the engine's WebView for days.
 //
 // ⚠️ `offline` answers 200 on purpose, and in HTML: that is what made aqua hard to see. The adapter (bff
 // lib/sources/fake.ts) hands such a page to the product's own offlineNotice, which accepts it only while it is
@@ -109,6 +113,17 @@ const FIXES = EXTRA.has('v55')
     { sourceId: 'fail-late', title: 'Fail Late', first: 1, last: 4 },
   ]
   : [];
+// ⚠️ v0.55.1: what the owner's first Fix everything run met, for autofixWalk.mjs, each series on the fakes that serve it
+// alone (fake-c and fake-d are `--extra v551`, started by up.sh beside the v55 pair): fake-c answers searches and
+// chapter lists and refuses Limit Walk's images with 429 (Mangakakalot); fake-d's page lists fail (AllManga), and Moved
+// Walk -- on fake-c too -- is what an earlier run moved onto it; fake-d also lists Fix Search, which Replace must never
+// move there. fake-b carries Limit Walk as well, and Pop Walk, which the walk then leaves with no source at all (only an
+// extension carries it, the fifth by popularity). Twelve chapters each: a search judges them one way.
+const OWNER = [
+  ...(EXTRA.has('v55') && NAME === 'fake-b' ? [{ sourceId: 'limit-walk', title: 'Limit Walk', first: 1, last: 12 }, { sourceId: 'pop-walk', title: 'Pop Walk', first: 1, last: 12 }] : []),
+  ...(EXTRA.has('v551') && NAME === 'fake-c' ? [{ sourceId: 'limit-walk', title: 'Limit Walk', first: 1, last: 12 }, { sourceId: 'moved-walk', title: 'Moved Walk', first: 1, last: 12 }] : []),
+  ...(EXTRA.has('v551') && NAME === 'fake-d' ? [{ sourceId: 'moved-walk', title: 'Moved Walk', first: 1, last: 12 }, { sourceId: 'fix-search', title: 'Fix Search', first: 1, last: 12 }] : []),
+];
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
@@ -118,6 +133,7 @@ const SERIES = [
   ...(POSTS ? [{ sourceId: 'walk-istrevelia', title: 'Walk Istrevelia', first: 1, last: POSTS.length, posts: POSTS }] : []),
   ...SWAPS,
   ...FIXES,
+  ...OWNER,
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 
@@ -255,7 +271,7 @@ const server = http.createServer(async (req, res) => {
       const page = Number(body.page ?? 0);
       const behaviour = String(body.behaviour ?? body.behavior ?? '');
       if (!chapter || !Number.isInteger(page) || page < 0 || page > 12 ||
-          !/^(?:ok|error|offline|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
+          !/^(?:ok|error|offline|pages-error|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
         return sendJson(res, 400, { error: 'bad_script' });
       }
       scripts.set(keyOf(chapter, page), behaviour);
@@ -330,6 +346,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pagesMatch) {
       const chapter = decodeURIComponent(pagesMatch[1]);
       const row = begin(req, url, { route: 'pages', chapter });
+      if (behaviourFor('site', 0) === 'pages-error') { finish(row, 500); return sendJson(res, 500, { error: 'the fake site failed while listing pages' }); }
       const found = chapterFromId(chapter);
       const host = req.headers.host || `127.0.0.1:${PORT}`;
       const short = /^short:(\d+)$/.exec(behaviourFor(chapter, 0));
