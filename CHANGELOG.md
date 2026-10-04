@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.55.1 — 2026-10-04
+
+**Fix everything no longer mistakes a busy site for a broken one, and it keeps looking for an extension that carries
+your series until it finds one, the most popular first. Libraries can also hold several folders, and the Library can
+show the series with no source.** The first real Fix everything run moved series off a
+site that was only asking for a pause, and moved three of them onto a site that could not load pages. Both causes are
+fixed, and the next run undoes it.
+
+### Fix everything, after its first real run
+
+- **A site asking for a pause is not broken.** When a site answers *too many requests* (HTTP 429), its source now cools
+  down instead of failing: Health shows it as *Rate limited*, with no Replace, Fix everything never moves series off it,
+  and its chapters are listed as waiting for the site's pause (*Clears by itself* at the end of a run, and greyed on
+  Health's *Chapters that would not download*), not as failing.
+- **Replace never moves a series onto a source that cannot download it.** A source whose search works but whose pages
+  fail is never a destination, and one run never moves a series onto a source it is replacing. A series already moved
+  onto such a source is moved again, to one that carries it.
+- **Retries leave a site that asked for a pause alone,** so a run no longer makes its limit worse.
+- **Extensions: no cap, the most popular first.** Fix everything keeps trying extensions, one at a time, until the
+  series is found or the run's time is up, and the next run continues where it stopped. It tries first an extension
+  named after one of the series' own translation groups, then the most downloaded ones, from the extension
+  repository's own download counts on GitHub (read once a day), then the rest. An extension that finds nothing is
+  removed straight away, and it is not tried again for the same series for a month. 18+ extensions are tried only for
+  18+ series. The end says it in one line: *Tried 6 extensions and kept Gap Scans*.
+
+### Libraries with several folders
+
+- **A library can hold several folders** (Admin → Libraries): tick them in the folder browser, where a folder another
+  library holds says so. Saving moves their series in or out at once, and the dialog says how many before. The most
+  specific folder still wins. Suggested by **@Kedryn** ([#148](https://github.com/AngeloSha/uchiyomi/issues/148)).
+
+### "No source" in the Library's filters
+
+- **Main source → No source** lists the series with no source to download from: folders you added by hand, and
+  anything never matched to a site. Suggested by **@Kedryn** ([#149](https://github.com/AngeloSha/uchiyomi/issues/149)).
+
+### Smaller
+
+- Health names every source on *Series that can no longer update* by its name, never an id like `sw:2522…`.
+- A source the engine's source limit left out says so on its sheet (*The engine's limit of 40 sources is full*) and no
+  longer offers Replace. Health tells it apart from an extension that is no longer installed.
+- For an admin who hides 18+, Fix everything's lines now leave out only the 18+ series' names, not every series' name.
+- Deleting a library unpins the series it held by hand, and the move preview reads right in every language.
+- The repository no longer tracks a `web/node_modules` link that v0.55.0 committed by accident, which stopped
+  contributors from pulling.
+
+### Upgrading
+
+- **One new table,** `library_paths` (a library's folders), created and filled by itself. v0.55.0 runs on the same
+  database and files new folders by each library's first folder, so going back is one line of your compose file; the
+  next v0.55.1 start repairs whatever v0.55.0 changed in between.
+- **Settings** ([CONFIGURATION.md](docs/CONFIGURATION.md)): `AUTOFIX_INSTALLS` now defaults to no cap (`0` still
+  switches the extensions part off). New: `GITHUB_API_URL`, where the download counts are read.
+- **What leaves your server:** once a day, Fix everything reads the extension repository's download counts from
+  GitHub, the same place extensions are installed from. Nothing is sent.
+- **For scripts** ([api.md](docs/api.md)):
+  - `POST /api/series/search` takes `hasMainSource` (`isTrue`, `isFalse`), and `GET /api/library/sources` adds `none`.
+  - The libraries routes take and return `paths`, saves answer `moved`, a 409 names the library that holds a folder,
+    and a PATCH of an unknown library answers 404.
+  - `GET /api/admin/sources/overview` marks a source the limit left out with `overLimit`.
+  - Fix everything's lines that name a series carry `seriesIds`, and its history leaves out `tried`.
+  - Source health records a refusal for room as its own kind, `rate_limited`.
+
 ## v0.55.0 — 2026-10-03
 
 **Health's Fix all is now Fix everything, and it can do the whole job by itself: Fix it for me works through every
