@@ -3185,12 +3185,12 @@
   "Automatic — {type}, from AniList": "تلقائي — {type}، من AniList",
   "Automatic — {type}, from the source": "تلقائي — {type}، من المصدر",
   "Series type": "نوع السلسلة",
-  "What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.": "ما تتبعه مفاتيح فصول الإعلانات في الإعدادات. التلقائي يأخذه من التصنيفات، ثم المصدر، ثم AniList.",
-  "Notice chapters hidden": "أُخفيت فصول الإعلانات",
-  "Notice chapters shown": "أُظهرت فصول الإعلانات",
-  "Hide notice chapters (numbered like 12.5, with 3 pages or fewer) here, in Mihon and everywhere else. Switching this off shows them again.": "إخفاء فصول الإعلانات (المرقّمة مثل 12.5، وفيها 3 صفحات أو أقل) هنا وفي Mihon وفي كل مكان آخر. إيقاف هذا يُظهرها من جديد.",
+  "What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.": "هذا ما تتبعه مفاتيح فصول التنويهات في الإعدادات. في الوضع التلقائي يُؤخذ من التصنيفات، ثم من المصدر، ثم من AniList.",
+  "Notice chapters hidden": "أُخفيت فصول التنويهات",
+  "Notice chapters shown": "أُظهرت فصول التنويهات",
+  "Hide notice chapters (numbered like 12.5, with 3 pages or fewer) here, in Mihon and everywhere else. Switching this off shows them again.": "إخفاء فصول التنويهات (المرقّمة مثل 12.5، وفيها 3 صفحات أو أقل) هنا وفي Mihon وفي كل مكان آخر. إيقاف هذا الخيار يُظهرها من جديد.",
   "Hidden now: {n}.": "المخفي الآن: {n}.",
-  "Following the switch for {type} in Settings.": "يتبع مفتاح {type} في الإعدادات.",
-  "Notice chapters": "فصول الإعلانات",
-  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any not counted yet, stay. One a source lists as that short is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "كثيرًا ما تنشر المصادر إعلانات للقرّاء كفصل قصير مرقّم بعد أحدث فصل، مثل 100.5. لكل نوع مفعّل، تُخفى الفصول المرقّمة مثل 12.5 التي فيها 3 صفحات أو أقل من المكتبة والقارئ وOPDS وMihon؛ أما الأطول منها، وما لم تُعَدّ صفحاته بعد، فتبقى. ولا يُنزَّل فصل يذكر المصدر أنه بهذا القصر. لا يُحذف شيء: إيقاف النوع يُظهرها من جديد. يمكن لسلسلة أن تتجاوز هذا من لوحة المصادر والترجمات الخاصة بها."
+  "Following the switch for {type} in Settings.": "يتبع مفتاح «{type}» في الإعدادات.",
+  "Notice chapters": "فصول التنويهات",
+  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "كثيرًا ما تنشر المصادر تنويهات للقرّاء كفصل قصير مرقّم بعد أحدث فصل، مثل 100.5. لكل نوع مفعّل، تُخفى من المكتبة والقارئ وOPDS وMihon الفصولُ المرقّمة مثل 12.5 التي فيها 3 صفحات أو أقل؛ أما الأطول منها، وما لم تُعَدّ صفحاته بعد، فتبقى. ولا يُنزَّل فصل يذكر المصدر أنه بهذا القصر. لا يُحذف شيء: إيقاف النوع يُظهرها من جديد. يمكن لسلسلة أن تتجاوز هذا من لوحة المصادر والترجمات الخاصة بها."
 }
