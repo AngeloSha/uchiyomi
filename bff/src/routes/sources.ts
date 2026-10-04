@@ -98,6 +98,7 @@ import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromSource, learnTypeFromAniList } from '../lib/seriesType';
+import { noticeListed } from '../lib/noticeChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
@@ -2559,8 +2560,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const wholes = plain.map((n) => Math.floor(n));
       const expanded = (await q<{ number: number }>(
         // `number` as stored (real), not cast to float8: 12.1 read back through float8 is 12.100000381..., which
-        // then matches no listing row keyed by the real's own spelling.
-        'SELECT DISTINCT number FROM series_listing WHERE series_id = $1 AND floor(number) = ANY($2::float8[])',
+        // then matches no listing row keyed by the real's own spelling. Never a notice chapter the admin hides
+        // (lib/noticeChapters.ts): 12 is the chapters a person can see under 12, and the sweep does not fetch that
+        // one either. Reintroduce by dropping the clause: "a whole number leaves a hidden notice behind" in
+        // fetchWhole.int.test.ts downloads 30.5.
+        `SELECT DISTINCT l.number FROM series_listing l
+          WHERE l.series_id = $1 AND floor(l.number) = ANY($2::float8[]) AND NOT ${noticeListed('l')}`,
         [seriesId, wholes],
       )).map((r) => Number(r.number));
       const covered = new Set(expanded.map((n) => Math.floor(n)));

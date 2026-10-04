@@ -36,7 +36,8 @@ const SWEEP = 's_nt_sweep';   // followed from a fake source, for the updater
 const PG = 's_nt_pages';      // a manhwa whose fractional chapters are long, short and not counted
 const DD = 's_nt_dd';         // Korean, filed under a lone generic "Manga"
 const JJ = 's_nt_jojo';       // Japanese, carrying a site's whole genre menu
-const SERIES = [HW, MG, KEEP, SWEEP, PG, DD, JJ];
+const PARTS = 's_nt_parts';   // a manhwa whose chapter 1 exists only in short parts its sources list
+const SERIES = [HW, MG, KEEP, SWEEP, PG, DD, JJ, PARTS];
 const ADMIN = 'nt-admin', MEMBER = 'nt-member';
 const SRC = 'nt-src';
 /** The chapter ids the sweep asked the fake source for pages of: what it tried to download. */
@@ -311,6 +312,34 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       const ghosts = (await get(`/api/series/${HW}/listing`, asMember)).json().content.map((g: any) => g.number);
       assert.deepEqual(ghosts, [101.5, 102, 102.5, 103.5]);
       assert.equal((await get('/api/books/b_nt_1005', asMember)).statusCode, 200);
+    });
+
+    await t.test('a chapter that exists only in short parts is not a gap while they are hidden', async () => {
+      // 0 and 2 are here; chapter 1 exists only as 1.1, 1.2 and 1.3, a few pages each, which only the sources list.
+      await series(PARTS, ['Manhwa'], 2);
+      await learnTypeFromSource({ id: PARTS }, { genres: ['Manhwa'] });
+      await book('b_nt_pt0', PARTS, 0, 20);
+      await book('b_nt_pt2', PARTS, 2, 20);
+      for (const n of [0, 2]) await listed(PARTS, n, [20]);
+      for (const [n, p] of [[1.1, 2], [1.2, 2], [1.3, 3]]) await listed(PARTS, n, [p]);
+      const { haveNumbers } = await import('../src/lib/libraryNumbers');
+      const { gapsOf } = await import('../src/lib/fill');
+      const { runRepair } = await import('../src/lib/repair');
+      const holes = async () => gapsOf(await haveNumbers(PARTS)).map((g) => [g.lo, g.hi]);
+      // Off, the sweep fetches the parts, so the hole at 1 is the sweep's to fill: listed, and fetched next check.
+      assert.deepEqual(await holes(), [[1, 1]]);
+      await setTypes(['manhwa']);
+      try {
+        // On, the sweep never fetches them -- and a hole it "would fetch" was a finding nothing could clear. They are
+        // what they would be with the switch off: chapter 1 of the series. Reintroduce by dropping the hidden
+        // listing from HAVE_SQL (lib/libraryNumbers.ts): the hole is back, and Fill now leaves it to the sweep.
+        assert.deepEqual(await holes(), [], 'chapter 1, hidden in parts, is a gap');
+        const r = await runRepair(undefined, { only: ['gaps'], seriesId: PARTS, userId: null });
+        assert.ok(r, 'the repair did not start');
+        assert.deepEqual([r.gaps.series, r.gaps.sweep], [0, 0], 'Fill now found a hole and left it for a sweep that never fetches it');
+      } finally {
+        await setTypes([]);
+      }
     });
 
     await t.test("a series' own switch alone turns the hide on, and nothing hides once it is back", async () => {
