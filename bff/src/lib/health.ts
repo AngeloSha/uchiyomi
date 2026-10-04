@@ -1661,9 +1661,12 @@ export async function solverHealth(): Promise<HealthCheck> {
   // The release's tag ('v3.5.2': githubRelease.ts reads tag_name), bare. The summary and the row's title put their
   // own "v" before it, and read "vv3.5.2". Reintroduce the tag as it is: "the solver's newer release is named with
   // one v" in health.int.test.ts fails.
-  // Compared only for FlareSolverr itself: another solver's version (Byparr, #144) is not FlareSolverr's, and would read as
-  // years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails.
-  const latest = ping.kind === 'other' ? null : (await latestSolverVersion())?.replace(/^v/i, '') ?? null;
+  // Compared only with the solver's own releases: another solver's version (Byparr, #144) is not FlareSolverr's, and would
+  // read as years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails. trawl
+  // (v0.55.4) is held against its own: against FlareSolverr's, "trawl answering at its root is trawl" fails.
+  const latest = ping.kind === 'flaresolverr' || ping.kind === 'trawl'
+    ? (await latestSolverVersion(Date.now(), ping.kind))?.replace(/^v/i, '') ?? null
+    : null;
   const behind = isBehind(ping.version, latest);
   return {
     id: 'solver',
@@ -1671,7 +1674,8 @@ export async function solverHealth(): Promise<HealthCheck> {
     status: blaming.length ? 'warn' : 'ok',
     ...summaryOf([blaming.length
       ? say('solver.blaming', { n: blaming.length })
-      : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null })]),
+      // Named by its kind (v0.55.4), except on the desktop app: its helper greets as FlareSolverr and is Uchiyomi's own.
+      : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null, kind: isDesktop() ? undefined : ping.kind })]),
     ...noteOf([blaming.length > 0 && say('solver.failingNote')]),
     items: [
       // `info`: this row and `status: 'ok'` coexist on purpose, see the note above. Without the flag it

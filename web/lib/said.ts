@@ -164,8 +164,14 @@ const loopedTo = (p: P): string =>
 
 const engineVersion = (p: P): string => str(p, 'version').replace(/^v/i, '');
 
-/** "v3.4.6" for FlareSolverr, "uchiyomi-desktop-0.44.0" for the desktop helper (bff solverVersionLabel). */
-const solverVersion = (v: string): string => `${/^\d/.test(v) ? 'v' : ''}${v}`;
+/** The solvers Health names by their kind (v0.55.4, bff lib/said.ts solverName): names, never translated. */
+const solverName = (kind: string): string => (kind === 'flaresolverr' ? 'FlareSolverr' : kind === 'trawl' ? 'trawl' : '');
+/**
+ * "v3.4.6" for FlareSolverr, "uchiyomi-desktop-0.44.0" for the desktop helper (bff solverVersionLabel); with its kind
+ * (v0.55.4) the solver's name first, "FlareSolverr v3.4.6", "trawl v1.7.0". '' when there is neither.
+ */
+const solverVersion = (v: string, kind = ''): string =>
+  [solverName(kind), v ? `${/^\d/.test(v) ? 'v' : ''}${v}` : ''].filter(Boolean).join(' ');
 
 // ---- a diagnosis (bff lib/sourceDiagnosis.ts) -----------------------------------------------------------------
 
@@ -457,7 +463,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'solver.names': () => tr('failing, and its recorded error names the solver'),
   'solver.blaming': (p) => (num(p, 'n') === 1 ? tr('Answering, but 1 source recently failed inside it') : tr('Answering, but {n} sources recently failed inside it', { n: num(p, 'n') })),
   'solver.ready': (p) => {
-    const ready = p.version ? tr('Ready ({version})', { version: solverVersion(str(p, 'version')) }) : tr('Ready to solve challenges');
+    const label = solverVersion(str(p, 'version'), str(p, 'kind'));
+    const ready = label ? tr('Ready ({version})', { version: label }) : tr('Ready to solve challenges');
     return p.latest ? joinPart(ready, tr('v{version} is available', { version: str(p, 'latest') }), 'dash') : ready;
   },
   'solver.failingNote': () => (isDesktop()

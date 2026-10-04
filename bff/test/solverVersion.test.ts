@@ -87,3 +87,19 @@ test('a good answer is returned and then reused', async (t) => {
   assert.equal(await mod.latestSolverVersion(), 'v3.5.0');
   assert.equal(calls, 1);
 });
+
+test("trawl's releases are asked of trawl's own repository, and cached apart from FlareSolverr's", async (t) => {
+  // v0.55.4: trawl (#144) is held against its own releases, never FlareSolverr's 3.x. Reintroduce one repository for
+  // every kind (SOLVER_REPOS): trawl's question goes to FlareSolverr/FlareSolverr and answers v3.6.0.
+  mod.resetSolverVersionCache();
+  const asked: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (u: unknown) => {
+    asked.push(String(u));
+    return { ok: true, json: async () => ({ tag_name: String(u).includes('/repos/germondai/trawl/') ? 'v1.7.0' : 'v3.6.0' }) } as never;
+  });
+  assert.equal(await mod.latestSolverVersion(), 'v3.6.0', 'FlareSolverr, by default, as before');
+  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.7.0', "trawl's own latest release");
+  assert.deepEqual(asked.map((u) => new URL(u).pathname), ['/repos/FlareSolverr/FlareSolverr/releases/latest', '/repos/germondai/trawl/releases/latest']);
+  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.7.0');
+  assert.equal(asked.length, 2, 'each answer is cached for its own repository');
+});

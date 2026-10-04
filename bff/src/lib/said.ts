@@ -56,13 +56,18 @@ const minute = (iso: string) => new Date(iso).toISOString().slice(0, 16).replace
 type StageName = 'search' | 'chapters' | 'pages' | 'images';
 const STAGE_LABEL: Record<StageName, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
 
+/** The solvers Health names by their kind (v0.55.4, sources/flaresolverr.ts SolverKind): names, never translated. */
+const solverName = (kind?: string | null): string => (kind === 'flaresolverr' ? 'FlareSolverr' : kind === 'trawl' ? 'trawl' : '');
+
 /**
  * " (v3.4.6)" for FlareSolverr, whose versions are numbers; the desktop helper's is `uchiyomi-desktop-0.44.0`,
  * deliberately not semver-shaped (desktop/src/solver/server.ts), and read "vuchiyomi-desktop-…" with the v.
+ * v0.55.4: with its kind, the solver's name comes first -- " (FlareSolverr v3.4.6)", " (trawl v1.7.0)": a version alone
+ * no longer says which solver it is. A kind with no name (`other`) and none at all (the desktop helper) read as before.
  */
-export function solverVersionLabel(version?: string | null): string {
-  if (!version) return '';
-  return ` (${/^\d/.test(version) ? 'v' : ''}${version})`;
+export function solverVersionLabel(version?: string | null, kind?: string | null): string {
+  const label = [solverName(kind), version ? `${/^\d/.test(version) ? 'v' : ''}${version}` : ''].filter(Boolean).join(' ');
+  return label ? ` (${label})` : '';
 }
 /** The engine's version as its Health row says it: " (v2.3.2243)". */
 const engineVersion = (v?: string | null) => (v ? ` (v${v.replace(/^v/i, '')})` : '');
@@ -302,8 +307,9 @@ const EN = {
   'solver.notAnswering': ({ error }: { error: string | null }) => (error ? `not answering (${error})` : 'not answering'),
   'solver.names': () => 'failing, and its recorded error names the solver',
   'solver.blaming': ({ n }: { n: number }) => `Answering, but ${n} source${s(n, '', 's')} recently failed inside it`,
-  'solver.ready': ({ version, latest }: { version: string | null; latest: string | null }) =>
-    `Ready${solverVersionLabel(version)}${latest ? ` — v${latest} is available` : ''}`,
+  // `kind` (v0.55.4): which solver answered, named before its version; absent on the desktop app, whose helper is its own.
+  'solver.ready': ({ version, latest, kind }: { version: string | null; latest: string | null; kind?: string | null }) =>
+    `Ready${solverVersionLabel(version, kind)}${latest ? ` — v${latest} is available` : ''}`,
   'solver.failingNote': () => forDesktop(
     'It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default '
     + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.',

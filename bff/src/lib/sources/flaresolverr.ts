@@ -146,7 +146,7 @@ export async function solverPing(timeoutMs = 5000): Promise<SolverPing> {
     // `redirect: 'manual'`: a solver that redirects its root (Byparr, #144: to its API docs) is not followed onto HTML.
     const r = await fetch(`${FS}/`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
     const j: any = r.ok ? await r.json().catch(() => null) : null;
-    if (j && /ready/i.test(String(j.msg || ''))) return { ok: true, version: j.version, kind: 'flaresolverr' };
+    if (j && /ready/i.test(String(j.msg || ''))) return { ok: true, version: j.version, kind: kindOf(String(j.msg)) };
     // Byparr (#144), a FlareSolverr-compatible solver: the same /v1 for solving, but it says it is up at /health. Its
     // version is Byparr's, never compared with FlareSolverr's releases (`kind`, read by solverHealth). Reintroduce the
     // root alone: "Byparr answering at /health is a working solver" in health.int.test.ts reads it as down.
@@ -161,8 +161,22 @@ export async function solverPing(timeoutMs = 5000): Promise<SolverPing> {
   }
 }
 
-/** What a ping found: FlareSolverr itself, or another solver speaking its /v1 (Byparr, #144). */
-export interface SolverPing { ok: boolean; version?: string; error?: string; kind?: 'flaresolverr' | 'other' }
+/**
+ * Which solver answered, by the sentence it greets with (v0.55.4). trawl (#144, germondai/trawl) greets "TRAWL is
+ * ready!", which the old `/ready/i` test took for FlareSolverr: Health then held trawl's 1.7.0 against FlareSolverr's
+ * 3.x releases and said an update was out. Only these two are named; any other solver that answers (Byparr at
+ * /health, another one's greeting) is `other`, and is held against nobody's releases. Reintroduce `flaresolverr` for
+ * every greeting: "trawl answering at its root is trawl" in health.int.test.ts fails.
+ */
+export type SolverKind = 'flaresolverr' | 'trawl' | 'other';
+function kindOf(greeting: string): SolverKind {
+  if (/\bflaresolverr is ready\b/i.test(greeting)) return 'flaresolverr';
+  if (/\btrawl is ready\b/i.test(greeting)) return 'trawl';
+  return 'other';
+}
+
+/** What a ping found: FlareSolverr itself, trawl, or another solver speaking its /v1 (Byparr, #144). */
+export interface SolverPing { ok: boolean; version?: string; error?: string; kind?: SolverKind }
 
 /** How long one ping answers for everyone who asks. */
 export const PING_SHARED_MS = 10_000;

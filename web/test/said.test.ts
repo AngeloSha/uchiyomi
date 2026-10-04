@@ -52,6 +52,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   start: () => 176,
   // v0.55.0, Fix everything (bff lib/autofix.ts): a Test's verdict, the series a copy merged into, why a part was skipped.
   ok: (c) => c === 1, into: () => 'Walk Tale', why: () => 'time',
+  // v0.55.4, solver.ready: which solver answered (bff lib/sources/flaresolverr.ts SolverKind), named before its version.
+  kind: () => 'trawl',
 };
 
 /**

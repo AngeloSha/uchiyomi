@@ -1474,7 +1474,8 @@ test("the solver's newer release is named with one v", { skip: DSN ? false : 'se
   forgetSolverPing();
   try {
     const row = await solverHealth();
-    assert.equal(row.summary, 'Ready (v3.4.6) — v3.5.2 is available', 'the solver\'s newer release is named with one v');
+    // v0.55.4: FlareSolverr is named by its kind ("trawl answering at its root is trawl", below).
+    assert.equal(row.summary, 'Ready (FlareSolverr v3.4.6) — v3.5.2 is available', 'the solver\'s newer release is named with one v');
     assert.deepEqual(row.items.map((i) => i.title), ['v3.4.6 → v3.5.2']);
     assert.equal(englishOf(row.summarySaid), row.summary, 'the codes say the same');
   } finally {
@@ -1522,6 +1523,49 @@ test("Byparr answering at /health is a working solver, and never behind FlareSol
     assert.equal(row.status, 'ok');
     assert.equal(row.summary, 'Ready (v1.0.0)', "Byparr's own version is never behind FlareSolverr's releases");
     assert.equal(row.items.length, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetSolverVersionCache();
+    forgetSolverPing();
+  }
+});
+
+/**
+ * v0.55.4: trawl (#144) greets "TRAWL is ready!" at its root, and `solverPing` read every greeting with "ready" in it as
+ * FlareSolverr's: Health held trawl's 1.7.0 against FlareSolverr's 3.x releases and said an update was out. It is named
+ * by its greeting now, and held against its own releases. Reintroduce `flaresolverr` for every greeting (kindOf in
+ * flaresolverr.ts): "a TRAWL greeting is trawl" fails; compare it with FlareSolverr's releases (latestSolverVersion
+ * without the kind, in solverHealth): the summary names v3.6.0 as available.
+ */
+test('trawl answering at its root is trawl, named and held against its own releases', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { solverHealth } = await import('../src/lib/health');
+  const { resetSolverVersionCache } = await import('../src/lib/solverVersion');
+  const { forgetSolverPing, solverPing } = await import('../src/lib/sources/flaresolverr');
+  const { englishOf } = await import('../src/lib/said');
+  await migrate();
+  const realFetch = globalThis.fetch;
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  globalThis.fetch = (async (u: any) => {
+    const url = String(u);
+    // Each repository's own latest: trawl is current, FlareSolverr's is a number trawl's must never be held against.
+    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.7.0' });
+    if (url.startsWith('https://api.github.com/')) return json({ tag_name: 'v3.6.0' });
+    // trawl 1.7.0's own greeting, as the live one answered it (2026-10-04).
+    return json({ msg: 'TRAWL is ready!', version: '1.7.0', uptime: 7 });
+  }) as typeof fetch;
+  resetSolverVersionCache();
+  forgetSolverPing();
+  try {
+    const ping = await solverPing();
+    assert.equal(ping.ok, true);
+    assert.equal(ping.kind, 'trawl', 'a TRAWL greeting is trawl');
+    forgetSolverPing();
+    const row = await solverHealth();
+    assert.equal(row.status, 'ok');
+    assert.equal(row.summary, 'Ready (trawl v1.7.0)', "trawl is named, and is not behind FlareSolverr's releases");
+    assert.equal(englishOf(row.summarySaid), row.summary, 'the codes say the same');
+    assert.equal(row.items.length, 0, 'no "newer solver" row');
   } finally {
     globalThis.fetch = realFetch;
     resetSolverVersionCache();
