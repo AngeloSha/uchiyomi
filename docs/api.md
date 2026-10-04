@@ -563,7 +563,9 @@ source switched on, kept only when a series now reads through it; since v0.55.1 
 `AUTOFIX_INSTALLS` sets one, until every such series is carried or the run's time is spent -- the next run continues
 down the list -- in this order: the series' own translation groups naming the package, then its downloads a day (its
 apk and jar on the repository's GitHub releases, read at most once a day, the last answer kept while GitHub cannot be
-reached), then its version code, then its name; an 18+ package only for a series rated 18+, after the others; never a
+reached; since v0.55.3 over at most the week since their release, which is when a release is downloaded, so a site
+many read is no longer ranked under a webcomic rebuilt last week; no package is ever skipped for its count), then its
+version code, then its name; an 18+ package only for a series rated 18+, after the others; never a
 package already searched in vain for that series within 30 days; a package that carries none removed at once, before
 the next is installed), `files` (the later copy of a chapter saved twice deleted when the kept copy is complete,
 impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
@@ -680,6 +682,18 @@ cooldown ran out or a passing Test cleared it, while the evidence stays open unt
 offers `replace_source`, the source's `standing` is `cooling` (so it still carries its series and is never a
 `frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
 refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
+
+**Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
+`chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
+one it follows -- is filed under the series' main source, its attempts back to 0, its first failure (`firstAt`) and
+its reason kept, its status `moved` (`failures.detail`'s `status`, worded *from a source the series no longer uses*):
+when a main-source switch drops the old main (`POST /api/admin/series/:id/main-source`, a Replace run, Fix
+everything), when a source is unfollowed (`DELETE /api/admin/series/:id/sources/:sourceId`) or retired, when Replace
+drops a dead follower to make room, and once at the upgrade for the rows already left behind. A switch's
+`series.main_source` audit line carries `failuresMoved`. Before, the rows stayed under the old source: Health listed
+them there, Fix everything's failures step skipped a source failing at its pages, and its end called them chapters
+no source can download. A `moved` row on a source that is rate-limited or in a cooldown waits as a 429's does: a
+source whose every row waits is `info`, and Fix everything says it clears by itself, never `needsYou`.
 
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
@@ -1877,8 +1891,9 @@ judgement already made, and the sweep already merges its chapters, so the switch
 and the label, not which chapters arrive. The pair moves under the series row's lock and the promoted row leaves the
 followers. `old` says what becomes of the old main: `auto` (the default) keeps it as the last follower while it still
 carries the series (`standing` usable or cooling) and the follower cap has room; `keep` and `drop` decide. A dropped
-old main takes its listing rows with it, as an unfollow does, and the chapters capped against it get their tries back
-for the new main. A series whose language was only inferred from its main source is pinned to that language when
+old main takes its listing rows with it, as an unfollow does, and the chapters it failed are filed under the new main
+with their tries back (since v0.55.3, *Failed chapters follow the series*; before, they got their tries back under
+the old one). A series whose language was only inferred from its main source is pinned to that language when
 the new main would say otherwise (`langPinned`), so the language guard, its editions and Komga's `language` do not
 change by the way. Its last-check figures, folder, cover, reading direction and floor stay. It answers `{ok, from, to,
 old: kept|dropped, langPinned?, sources}` (read before the listing refresh it starts through the new main), **404**
