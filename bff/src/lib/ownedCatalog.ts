@@ -6,6 +6,7 @@ import { ViewCtx, Params, visible, browsable, ADULT_RATING } from './visibility'
 import { cleanDescription } from './htmlText';
 import { effectiveLang } from './seriesLang';
 import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
+import { rangeEnd, numberText } from './chapterRanges';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -77,6 +78,7 @@ const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
          b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size, b.missing_pages, b.chapter_name,
          COALESCE(ov.number, b.number) AS number,
+         ${rangeEnd('b', 'ov')} AS number_end,
          COALESCE(ov.title,  b.title)  AS title
     FROM lib_books b
     -- The join that was missing. This carried zero references to lib_series, so a book id alone opened a
@@ -161,6 +163,11 @@ function seriesDto(r: any) {
 
 function bookDto(r: any) {
   const num: number = r.number ?? 0;
+  // The last chapter of a file holding several (v0.55.2, #150: `Batman 01-07` is 1 to 7), null for one chapter
+  // (lib/chapterRanges.ts). `number`/`numberSort` stay the start -- the book's place in every order, and the number
+  // the Komga API hands Mihon -- while `metadata.number`, which is display only, says the whole range: "1–7".
+  // Reintroduce `String(num)` below: "the chapter list says the range" in chapterRanges.int.test.ts reads "1".
+  const end: number | null = r.number_end == null ? null : Number(r.number_end);
   // release date: the source's chapter date when stamped, else when the file landed in the library
   const released = r.published_at
     ? new Date(r.published_at).toISOString()
@@ -173,8 +180,9 @@ function bookDto(r: any) {
     seriesTitle: r.series_title ?? '',
     name: r.title,
     number: num,
+    numberEnd: end,
     media: { pagesCount: r.pages ?? 0, mediaType: 'application/vnd.comicbook+zip', status: 'READY' },
-    metadata: { title: r.title, number: String(num), numberSort: num, summary: '', releaseDate: released },
+    metadata: { title: r.title, number: numberText(num, end), numberSort: num, summary: '', releaseDate: released },
     // The chapter's own name as its source gave it (lib/library.ts chapterName), null when it had none. NOT
     // `name`/`metadata.title`, which are the filename's and keep saying so for every client that prints them.
     chapterName: r.chapter_name ?? null,

@@ -134,6 +134,36 @@ rather than adding something that opens to nothing. Uchiyomi is a manga reader, 
 
 Any folder depth works, and `ComicInfo.xml` is read when an archive carries one.
 
+### How a chapter's number is read
+
+Since v0.55.2 a file the scanner meets for the first time is numbered by these rules, in order:
+
+1. **A chapter word and its number win**: `Ch`, `Ch.`, `Chap`, `Chapt`, `Chapter`, `Cap`, `Cap.`, `Capitolo`,
+   `Capítulo`, `Chapitre` or `Kapitel`, in any case, with or without a dot or a space. `Vol 3 Chapter 12.cbz` is
+   chapter 12. Kavita's short form counts too, `v03 c012`, when the `c012` stands on its own; the `(c2c)` tag on
+   Western scans is not chapter 2.
+2. **Else `#` and its number**: `Batman #12 (1987).cbz` is 12.
+3. **Else the first number that is neither a year nor a volume's.** A year is four digits from 1900 to 2099 inside
+   `( )` or `[ ]`, so `Watchmen (1986) 01.cbz` is 1. A volume's number, right after `Vol`, `Volume`, `Tome`, `Band` or
+   a lone `v`, is passed over when another number follows it; `Tome 01.cbr` on its own is still 1.
+4. **A range**: a dash and a larger number right behind the chapter's, with no space around the dash, make one file
+   that holds several chapters. `Batman 01-07 (1987).cbz` holds chapters 1 to 7 and reads *Ch. 1–7*; `Ch. 1–7` works
+   the same way. Never when the second number is a year (`Batman 12-1987`) or the two are part of a date.
+5. **A name with nothing else**, `Watchmen (1986).cbz` or `Oneshot.cbz`, gets no number (0) and sorts by its name.
+
+The files Uchiyomi downloads itself are named `Chapter 12.cbz` and read exactly as before.
+
+**Chapters already in your library keep their numbers.** A chapter scanned before v0.55.2 goes on being read the
+old way, by the first number in its name, so nothing is renumbered behind your back and what your trackers were told
+stays true. A renamed file is a new file to the scanner and is read by the rules above. **Edit a chapter** (section
+4) fixes any number by hand, old or new.
+
+A file holding a range is one chapter row, and one file in the series' chapter count. Everything about *which*
+chapters you have counts every number in it: no gap is reported between 1 and 7, the updater does not fetch 2 to 7,
+and the sources' 2 to 7 are not listed as missing. Finishing it tells AniList and the other trackers 7, and *Mark
+caught up* and *Mark previous as read* go by its end. In Mihon it sorts as 1 and is named `1–7`. A renumber by posting
+order leaves it alone; Edit a chapter gives it one number instead.
+
 ---
 
 ## 4. A series & its chapters
@@ -239,9 +269,10 @@ says how many are in hand. The chips:
   and none of it touches
   your files. Anything you set here survives the next scan; anything you leave blank keeps following what
   the files say.
-- **Edit a chapter** from its row menu, if its number came out wrong. Numbers are read from the filename by
-  taking the first number in it, so `Vol 2 Ch 5.cbz` is read as chapter 2. Correcting it fixes the reading
-  order and what gets reported to a connected tracker.
+- **Edit a chapter** from its row menu, if its number came out wrong. Numbers are read from the filename (see *How
+  a chapter's number is read* in section 3), and a chapter scanned before v0.55.2 by the first number in it, so
+  its `Vol 2 Ch 5.cbz` is chapter 2. Correcting it fixes the reading order and what gets reported to a connected
+  tracker; on a file holding a range of chapters it gives the file that one number.
 - **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
   runs that check immediately instead of waiting for the next sweep (it is also in *Sources & translations*,
   as a chip under the *Sources* list).

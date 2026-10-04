@@ -49,6 +49,7 @@ import { logAudit } from './audit';
 import { updateSeries, runsInside } from './updater';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { say, saidOf, type Part, type Said } from './said';
+import { isRange } from './chapterRanges';
 
 /** How a series' chapters are numbered: by the source, or by posting order. NULL in the row is "automatic". */
 export type NumberingMode = 'source' | 'posting_order';
@@ -306,11 +307,15 @@ interface Built {
  * the plan is busy too.
  */
 async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly SourceChapter[], mode: RenumberMode, waiting = false): Promise<Built> {
+  // A file holding a range of chapters (v0.55.2, lib/chapterRanges.ts) is left out of every plan: it is no post, and a
+  // rename to `Chapter <n>.cbz` would throw away the name that says which chapters it holds. It keeps its file and its
+  // numbers whatever the series is numbered by. Reintroduce by planning it: "a renumber leaves a range file alone" in
+  // chapterRanges.int.test.ts finds it renamed.
   const books = await q<{ id: string; root: string; file: string; number: number; ov: number | null; title: string | null; chapter_name: string | null;
     chapter_name_source: string | null; published_at: Date | null; source_chapter_id: string | null; picked_at: Date | null; pruned_at: Date | null }>(
     `SELECT b.id, b.root, b.file, b.number::float8 AS number, o.number::float8 AS ov, b.title, b.chapter_name, b.chapter_name_source,
             b.published_at, b.source_chapter_id, b.picked_at, b.pruned_at
-       FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id WHERE b.series_id = $1`, [s.id]);
+       FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id WHERE b.series_id = $1 AND NOT ${isRange('b')}`, [s.id]);
   // Tried, not trusted from permission bits: a share can report writable and refuse the rename (lib/fsGuard.ts).
   const roots = new Map<string, boolean>();
   for (const b of books) if (!roots.has(b.root)) roots.set(b.root, (await writePreflight(b.root).catch(() => ({ ok: false }))).ok);

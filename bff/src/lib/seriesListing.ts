@@ -21,6 +21,7 @@ import { groupsOf, normGroup } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
+import { holds, isRange } from './chapterRanges';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { listedShown } from './noticeChapters';
 
@@ -237,6 +238,9 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
           WHERE b.series_id = $1 AND s.id = b.series_id
             AND (CASE WHEN s.numbering = 'posting_order'
                       THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END) = v.n
+            -- A file holding a range (lib/chapterRanges.ts) is not the chapter its start lists: no name of one
+            -- (chapterRanges.int.test.ts: "a range file took the name of the chapter its start lists").
+            AND NOT ${isRange('b')}
             AND (b.chapter_name IS NULL OR (b.chapter_name_source IS NOT NULL AND b.chapter_name_source <> $2))
             AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL`,
         params,
@@ -371,7 +375,9 @@ export function waitDaysLeftOf(copies: ListingCopy[], patienceMs: number, now = 
  * admin renumbered to 105 was a ghost at 105 here and a real row at 105 on the Komga surface, and
  * reconciliation (override-aware) moved the mark to the book while this page kept drawing an unmarked ghost.
  * Reintroduce by comparing `b.number = l.number`: "a renumbered chapter is not a ghost on the series page" in
- * listingProgress.int.test.ts finds 105 in the list.
+ * listingProgress.int.test.ts finds 105 in the list. A number inside a file holding a range is that file's
+ * (lib/chapterRanges.ts `holds`); reintroduce the plain equality and "a range file's numbers are no ghosts (the
+ * series page)" in chapterRanges.int.test.ts finds 2 to 7.
  *
  * `userId` names whose marks set `read`; without it no row is marked.
  */
@@ -391,7 +397,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
-           WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number)
+           WHERE b.series_id = l.series_id AND ${holds('b', 'ov', 'l.number')})
       ORDER BY l.number`,
     [seriesId, opts.userId ?? null],
   );

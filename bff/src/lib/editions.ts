@@ -19,6 +19,7 @@ import { canonLang, langLabel } from './lang';
 import { effectiveLang, followGuard } from './seriesLang';
 import { Params, visible, type ViewCtx } from './visibility';
 import { noticeShown, visibleBookCount } from './noticeChapters';
+import { lastNumber } from './chapterRanges';
 
 /** The module's q, or a transaction's own (db.ts tx). */
 type Qq = <R = any>(text: string, params?: any[]) => Promise<R[]>;
@@ -129,7 +130,11 @@ export interface EditionRow {
   booksCount: number;
   /** The edition the request is about. */
   current: boolean;
-  /** The viewer's highest finished chapter in this edition, or null: the switcher's "Español · ch. 12". */
+  /**
+   * The viewer's highest finished chapter in this edition, or null: the switcher's "Español · ch. 12". A finished file
+   * holding a range counts its end (lib/chapterRanges.ts); reintroduce the start and "the edition switcher says how
+   * far a reader got through a range file" in chapterRanges.int.test.ts reads 1.
+   */
   lastRead: number | null;
 }
 
@@ -145,7 +150,7 @@ export async function editionInfo(id: string, ctx: ViewCtx, userId: string | nul
   const rows = await q<{ id: string; work_id: string; lang: string | null; source_id: string | null; title: string; books_count: number | null; last_read: number | null }>(
     // Both figures leave out the notice chapters the edition hides (lib/noticeChapters.ts), as its own page does.
     `SELECT s.id, s.work_id, s.lang, s.source_id, COALESCE(o.title, s.title) AS title, ${visibleBookCount('s')} AS books_count,
-            (SELECT max(COALESCE(ov.number, b.number)) FROM read_progress rp
+            (SELECT max(${lastNumber('b', 'ov')}) FROM read_progress rp
                JOIN lib_books b ON b.id = rp.book_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
               WHERE rp.user_id = ${uid} AND rp.series_id = s.id AND rp.completed
                 AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}) AS last_read

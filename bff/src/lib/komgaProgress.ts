@@ -14,7 +14,8 @@
 import { q } from './db';
 import { ViewCtx, seriesVisible } from './visibility';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
-import { continuousRun, marksByOrigin, mergeRun, realRows } from './listingProgress';
+import { continuousRun, marksByOrigin, mergeRun, realRows, reached } from './listingProgress';
+import { holds } from './chapterRanges';
 
 /** What one Mihon PUT moved. Only `changed` and `ghostMarksAhead` are news for a tracker (markReadUpTo). */
 export interface MarkUpToResult {
@@ -45,8 +46,8 @@ export interface ReadProgressV2 {
  * the tracker's own MAX-based figure would mark chapter 3 read on the phone.
  *
  * ⚠️ Number-0 rule. 0 is also the protocol's "nothing read" sentinel (Komga returns 0F for an empty run), and
- * in this library number 0 is common: numFromName gives 0 to "Oneshot.cbz" / "Extra.cbz" and to anything else
- * without a digit. A run that ends on such a book cannot be expressed and reports 0 as well; Mihon then
+ * in this library number 0 is common: both name rules (lib/naming.ts) give 0 to "Oneshot.cbz" / "Extra.cbz" and
+ * to anything else without a digit, and rule 2 to a name with nothing but a year ("Watchmen (1986).cbz"). A run that ends on such a book cannot be expressed and reports 0 as well; Mihon then
  * marks its local number-0 chapters read (`chapterNumber <= 0`), which is what they are. The PUT side has the
  * matching rule (markReadUpTo).
  *
@@ -127,7 +128,10 @@ export async function readProgressDetail(ctx: ViewCtx, userId: string, seriesId:
     // A ghost is `completed: true` only when marked, and never false, so it counts as read or not at all.
     if (r.completed === true) read++;
     else if (r.completed === false) inProgress++;
-    if (r.number > max) max = r.number;
+    // A file holding a range raises the total to its END (lib/chapterRanges.ts): `Batman 01-07` is seven chapters of
+    // the series, and the tracker's total is what Mihon takes this for. Reintroduce `r.number`: Saga's in
+    // chapterRanges.int.test.ts reads 1.
+    if (reached(r) > max) max = reached(r);
   }
   // `rows.length` unless engaged, never `all.length` for everyone: see THE COUNTS ARE ENGAGED-ONLY above.
   const booksCount = rows.length + (engaged ? ghosts.length : 0);
@@ -221,7 +225,7 @@ export async function markReadUpTo(userId: string, seriesId: string, n: number):
               AND NOT EXISTS (
                 SELECT 1 FROM lib_books b
                   LEFT JOIN book_overrides ov ON ov.book_id = b.id
-                 WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number)
+                 WHERE b.series_id = l.series_id AND ${holds('b', 'ov', 'l.number')})
            ON CONFLICT (user_id, series_id, number) DO NOTHING
            RETURNING number
          ), done AS (

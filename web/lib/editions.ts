@@ -54,10 +54,12 @@ export function libraryCaption(langs: readonly string[], current: string | undef
  */
 export function readerTarget(
   number: number,
-  books: ReadonlyArray<{ id: string; number: number; pruned?: boolean }>,
+  books: ReadonlyArray<{ id: string; number: number; numberEnd?: number | null; pruned?: boolean }>,
   seriesId: string,
 ): { kind: 'book'; id: string } | { kind: 'series'; href: string } {
-  const hit = books.find((b) => b.number === number && !b.pruned);
+  // The chapter itself, else the file there holding a range it is in (v0.55.2: chapter 3 of `Batman 01-07`).
+  const hit = books.find((b) => b.number === number && !b.pruned)
+    ?? books.find((b) => !b.pruned && b.numberEnd != null && number > b.number && number <= b.numberEnd);
   return hit
     ? { kind: 'book', id: hit.id }
     : { kind: 'series', href: `/series/?id=${encodeURIComponent(seriesId)}&ch=${Math.floor(number)}` };

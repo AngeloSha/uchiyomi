@@ -9,6 +9,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
+import { isRange } from './chapterRanges';
 import { HUNT_MAX_SOURCES, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { visibleToAll } from './visibility';
 import { altTitlesFor } from './altTitles';
@@ -77,10 +78,13 @@ export async function borrowNamesFor(seriesId: string, opts: { now?: number; for
   if (!(await borrowingOn(s.borrow_names))) return { named: 0, why: 'off' };
 
   // Only LIVE chapters with no name at all. A borrowed name counts as a name: re-deciding it every night would
-  // let two donors fight over one row, and the chapter's own source replacing it is the heal's job.
-  const books = await q<{ id: string; number: number; chapter_name: string | null }>(
-    'SELECT id, number::float8 AS number, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [seriesId]).catch(() => []);
-  const nameless = books.filter((b) => !b.chapter_name);
+  // let two donors fight over one row, and the chapter's own source replacing it is the heal's job. Never a file
+  // holding a range (lib/chapterRanges.ts): `Batman 01-07` is not the chapter its start names. Reintroduce by keeping
+  // it: "a borrowed chapter name is never a range file's" in chapterRanges.int.test.ts names it "Borrowed 1".
+  const books = await q<{ id: string; number: number; chapter_name: string | null; range: boolean }>(
+    `SELECT b.id, b.number::float8 AS number, b.chapter_name, ${isRange('b')} AS range
+       FROM lib_books b WHERE b.series_id = $1 AND b.pruned_at IS NULL`, [seriesId]).catch(() => []);
+  const nameless = books.filter((b) => !b.chapter_name && !b.range);
   if (!nameless.length) return { named: 0, why: 'nothing_to_do' };
   const listed = (await q<{ number: number }>('SELECT DISTINCT number::float8 AS number FROM series_listing WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => Number(r.number));

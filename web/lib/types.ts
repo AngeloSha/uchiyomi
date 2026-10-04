@@ -238,6 +238,11 @@ export interface Book {
   seriesTitle: string;
   name: string;
   number: number;
+  /**
+   * The last chapter of a file holding several (v0.55.2, #150): `Batman 01-07` is `number` 1 and `numberEnd` 7, and
+   * `metadata.number` reads "1–7". Null or absent for one chapter. `number` stays the start: the book's place.
+   */
+  numberEnd?: number | null;
   media: { pagesCount: number; mediaType?: string; status?: string };
   metadata: BookMetadata;
   readProgress?: ReadProgress | null;

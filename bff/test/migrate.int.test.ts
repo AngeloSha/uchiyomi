@@ -632,3 +632,38 @@ test('migrate: v0.55.1 adds library_paths, seeded from libraries.path, and a v0.
     await q(`DELETE FROM libraries WHERE id = ANY($1)`, [IDS]);
   }
 });
+
+test('migrate: v0.55.2 reads every chapter already in a library by rule 1, and v0.55.1 keeps writing its rows', { skip }, async () => {
+  // #150: lib_books.name_rule says which rule reads a row's number out of its file name (lib/naming.ts numberByRule).
+  // Every row that exists when the column arrives is rule 1, the first number, as it always was; v0.55.1 boots on
+  // this schema and INSERTs without naming the column, so whatever it adds is rule 1 too. Reintroduce DEFAULT 2:
+  // "a v0.55.1 row" reads 2, and the next scan renumbers every chapter v0.55.1 added.
+  // number_end, a range's last chapter, is nullable with no default and no CHECK: v0.55.1's scan rewrites `number` and
+  // never meets it, and a CHECK against `number` would fail that UPDATE and its whole folder (lib/chapterRanges.ts).
+  const cols = await q<{ column_name: string; data_type: string; column_default: string | null; is_nullable: string }>(
+    `SELECT column_name, data_type, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'lib_books' AND column_name IN ('name_rule', 'number_end')
+      ORDER BY column_name`);
+  assert.deepEqual(cols.map((c) => [c.column_name, c.data_type, c.column_default, c.is_nullable]),
+    [['name_rule', 'smallint', '1', 'NO'], ['number_end', 'real', null, 'YES']]);
+  const checks = await q(`SELECT conname FROM pg_constraint WHERE conrelid = 'lib_books'::regclass AND contype = 'c'
+                             AND pg_get_constraintdef(oid) LIKE '%number_end%'`);
+  assert.deepEqual(checks, [], 'a CHECK on number_end would refuse what a v0.55.1 scan writes');
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-rule', 'test', 'T', 'T!rule-m/T')`);
+      // Exactly the INSERT v0.55.1's scan makes.
+      await c.query(`INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root)
+                     VALUES ('t-rule-b', 't-rule', 'test', 'T!rule-m/T/Vol 2 Ch 5.cbz', 2, 'Vol 2 Ch 5', 0, '/library')`);
+      const { rows } = await c.query(`SELECT name_rule, number_end FROM lib_books WHERE id = 't-rule-b'`);
+      assert.equal(rows[0].name_rule, 1, 'a v0.55.1 row is not rule 1');
+      assert.equal(rows[0].number_end, null, 'a v0.55.1 row holds a range');
+      // ...and its scan's UPDATE of a rule-2 range row, `number` rewritten under an untouched end, goes through.
+      await c.query(`UPDATE lib_books SET number_end = 7 WHERE id = 't-rule-b'`);
+      await c.query(`UPDATE lib_books SET number = 1987 WHERE id = 't-rule-b'`);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});
