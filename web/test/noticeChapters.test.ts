@@ -55,6 +55,20 @@ test('the sheet says how many it hides as a label, which reads right at 1 in eve
   }
 });
 
+test('the Settings page is called by its own name in every language', () => {
+  // fr said "Réglages" where its Settings page is "Paramètres": the sheet and Edit details point at a page by a name it
+  // does not carry. A stem, for languages that decline it (ru "в Настройках"). Reintroduce "Réglages": fr fails.
+  for (const lang of ['ar', 'de', 'es', 'fr', 'ja', 'pt-BR', 'ru', 'zh']) {
+    const loc = JSON.parse(read(`public/locales/${lang}.json`));
+    const settings: string = loc['Settings'];
+    const stem = settings.slice(0, Math.max(2, settings.length - 1));
+    for (const key of ['Following the switch for {type} in Settings.',
+      'What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.']) {
+      assert.ok(loc[key]?.includes(stem), `${lang}: "${loc[key]}" does not name the Settings page ("${settings}")`);
+    }
+  }
+});
+
 test('Edit details: the type is sent on every save, null for automatic, seeded from the override only', () => {
   const series = { name: 'x', metadata: {}, overrides: null } as any;
   assert.equal(seedMeta(series).seriesType, '', 'a detected type must not be seeded as an override');

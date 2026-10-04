@@ -76,7 +76,6 @@ function autoDirectionLabel(d: Series['detectedDirection']): string {
   return tr('Automatic — {direction}, from the source', { direction });
 }
 
-/** The Automatic choice itself, short enough for a segment: what it reads as now, a webtoon when nothing has said. */
 /**
  * What "Automatic" means for the type now, and what said so (bff lib/seriesType.ts): a genre, the source, AniList,
  * or a Webtoon genre with nothing better.
@@ -89,6 +88,7 @@ function autoTypeLabel(d: Series['detectedType']): string {
   return tr('Automatic — {type}, from the source', { type });
 }
 
+/** The Automatic choice itself, short enough for a segment: what it reads as now, a webtoon when nothing has said. */
 function autoDirectionChoice(d: Series['detectedDirection']): string {
   const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1] ?? DIRECTION_LABELS[2];
   return tr('Automatic · {direction}', { direction: tr(label) });
