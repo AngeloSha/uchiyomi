@@ -42,13 +42,13 @@ const cjk = (): boolean => /^(ja|zh)/.test(activeLocale());
 const arabic = (): boolean => activeLocale() === 'ar';
 const intlTag = (): string => `${activeLocale()}-u-nu-latn`;
 /** A list's separator: "A, B" / "A、B" / "A، B". */
-const listSep = (): string => (cjk() ? '、' : arabic() ? '، ' : ', ');
+export const listSep = (): string => (cjk() ? '、' : arabic() ? '، ' : ', ');
 /**
  * Between two clauses of one sentence, as a comma joins them. A list's mark everywhere but in Chinese, whose "、"
  * separates listed nouns only: a clause there takes "，" (the v0.49.1 translation review). Japanese "、" is the comma
  * of clauses too.
  */
-const clauseSep = (): string => (/^zh/.test(activeLocale()) ? '，' : listSep());
+export const clauseSep = (): string => (/^zh/.test(activeLocale()) ? '，' : listSep());
 const cap = (s: string): string => {
   const first = s.charAt(0);
   try { return first.toLocaleUpperCase(activeLocale()) + s.slice(1); } catch { return first.toUpperCase() + s.slice(1); }

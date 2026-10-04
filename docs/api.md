@@ -1316,7 +1316,8 @@ name}`), and nothing is saved. `GET /api/admin/libraries` gives each library its
 that does not exist is **404** `not_found`. Every save moves the series it reaches in its own transaction: each series
 that is not filed by hand (`POST /api/admin/series/:id/library`) and sits under a folder the library held before the
 save or holds after it goes to the library holding the longest folder its own folder is in, across every library's
-folders, or to the default library `lib`. `DELETE /api/admin/libraries/:id` also moves what the library holds by hand.
+folders, or to the default library `lib`. `DELETE /api/admin/libraries/:id` also moves what the library holds by hand,
+which is filed by hand nowhere after that: it goes where its folder says, and the folder rule takes it from then on.
 All three answer `moved`, the number of series that changed library. `GET
 /api/admin/libraries/preview?paths=…&paths=…` runs the same statement without saving and answers `{path, paths,
 series, sample}` (the series an admin can see, and up to 20 of their titles), and **409** for a folder another library

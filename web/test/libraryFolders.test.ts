@@ -8,8 +8,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { setActiveDict } from '../lib/i18n';
+import { setActiveLocale } from '../lib/format';
 import {
-  addFolder, foldersOf, heldByOthers, heldByText, moreFoldersText, previewQuery, sameFolders, toggleFolder, typedFolder,
+  addFolder, foldersOf, heldByOthers, heldByText, moreFoldersText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder,
   wouldMoveText,
 } from '../lib/libraryFolders';
 
@@ -82,6 +83,35 @@ test('the card says the first folder and how many more, a count said as a pair',
     // The name is isolated (FSI … PDI), so an Arabic line keeps a Latin library's name whole.
     assert.equal(heldByText('Picks 18+'), 'H:\u2068Picks 18+\u2069');
   } finally { setActiveDict({}); }
+});
+
+test('the preview names its titles the reader\'s way, and a list that goes on ends on "…" alone', () => {
+  // v0.55.1 integration: the line read "…, including Tales of Demons and Gods, Martial Peak…. No files are deleted." in
+  // every language. Reintroduce the full stop after "…" (`'period'` whatever the list): "an ellipsis takes no full stop
+  // after it" fails. Reintroduce `.join(', ')`: "an Arabic line joins its titles with the Arabic comma" fails.
+  setActiveDict({ including: 'including', 'No files are deleted.': 'No files are deleted.' });
+  const fsi = (t: string) => `\u2068${t}\u2069`;
+  const five = ['Tales of Demons and Gods', 'Martial Peak', 'Solo Leveling', 'Omniscient Reader', 'Eleceed'];
+  try {
+    setActiveLocale('en');
+    assert.equal(previewText(5, five),
+      `5 series would move, including ${fsi('Tales of Demons and Gods')}, ${fsi('Martial Peak')}, ${fsi('Solo Leveling')}… No files are deleted.`,
+      'an ellipsis takes no full stop after it');
+    assert.equal(previewText(2, five.slice(0, 2)), `2 series would move, including ${fsi('Tales of Demons and Gods')}, ${fsi('Martial Peak')}. No files are deleted.`);
+    assert.equal(previewText(1, []), '1 series would move. No files are deleted.', 'a preview with no titles');
+    setActiveLocale('ar');
+    assert.equal(previewText(5, five),
+      `5 series would move، including ${fsi('Tales of Demons and Gods')}، ${fsi('Martial Peak')}، ${fsi('Solo Leveling')}… No files are deleted.`,
+      'an Arabic line joins its titles with the Arabic comma');
+    setActiveLocale('ja');
+    assert.equal(previewText(2, five.slice(0, 2)), `2 series would move、including ${fsi('Tales of Demons and Gods')}、${fsi('Martial Peak')}。No files are deleted.`,
+      'a Japanese line takes its own marks');
+    setActiveLocale('zh');
+    assert.match(previewText(2, five.slice(0, 2)), /would move，including .+、.+。No files/, 'Chinese: a clause comma, then the list mark');
+  } finally { setActiveDict({}); setActiveLocale('en'); }
+  // The dialog draws the line, and nothing of its own around it.
+  const dialog = slice(code(read('app/admin/page.tsx')), 'function LibraryDialog(', 'function LibrariesSection(');
+  assert.match(dialog, /data-library-preview=\{preview\.series\}>\s*\{previewText\(preview\.series, preview\.sample\)\}\s*<\/p>/, 'the dialog builds the line itself');
 });
 
 test('the dialog keeps a list of folders, sends `paths`, and the browser\'s rows are checks, not "Use"', () => {

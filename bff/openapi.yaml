@@ -8359,7 +8359,8 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Every series it
         holds, filed by hand or not, goes to the library holding the longest folder its own folder is in, or to the
-        default; `moved` counts them (since v0.55.1). The default library cannot be removed (400 `cannot_delete`).
+        default, and one filed by hand is no longer pinned there; `moved` counts them (since v0.55.1). The default
+        library cannot be removed (400 `cannot_delete`).
       parameters:
         - name: id
           in: path

@@ -674,10 +674,21 @@ test('several folders per library (#148)', { skip }, async (t) => {
     });
 
     await t.test('removing a library releases its series to the libraries that hold them', async () => {
+      // Gamma, under Elsewhere, is filed into the nested library by hand first.
+      const pin = await send('POST', '/api/admin/series/s_lm_c/library', { libraryId: NESTED });
+      assert.equal(pin.statusCode, 200, pin.body);
       const r = await send('DELETE', `/api/admin/libraries/${NESTED}`);
       assert.equal(r.statusCode, 200, r.body);
       assert.deepEqual(await placesOf(q), { s_lm_a: 'lib', s_lm_b: PICKS, s_lm_c: 'lib' });
       assert.equal((await q('SELECT 1 FROM library_paths WHERE library_id = $1', [NESTED])).length, 0, 'its folders outlived it');
+      // v0.55.1 integration: what it held by hand is filed by hand nowhere now. Reintroduce by moving it pinned
+      // (applyMoves in lib/libraryFolders.ts setting the library alone): Gamma stays pinned in the default library, and
+      // no library's folder can reach it again.
+      const [gamma] = await q<{ library_pinned: boolean }>('SELECT library_pinned FROM lib_series WHERE id = $1', ['s_lm_c']);
+      assert.equal(gamma.library_pinned, false, 'a series the removed library held by hand is still pinned');
+      const take = await send('PATCH', `/api/admin/libraries/${PICKS}`, { paths: ['Manga/Seinen', 'Elsewhere'] });
+      assert.equal(take.statusCode, 200, take.body);
+      assert.equal(await libOf(q, 's_lm_c'), PICKS, 'and the library holding its folder takes it');
     });
   } finally {
     await app.close();

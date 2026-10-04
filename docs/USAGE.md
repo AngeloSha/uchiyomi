@@ -1989,7 +1989,8 @@ narrows them.
 
 **Filing a series by hand.** Edit any series and set **Library**, or select several on the Library page and
 use **Move to library**. A series filed by hand stays put: rescans, newly created libraries and changing an
-existing one's folders all leave it alone. Set it back to **Automatic** to hand it to the folder rule again.
+existing one's folders all leave it alone. Set it back to **Automatic** to hand it to the folder rule again;
+removing the library you filed it into does that too (since v0.55.1).
 
 Nothing changes until you declare something. A fresh install and an upgraded one both start with a single
 library covering the whole root, no reading progress moves, no files are touched, and removing a library

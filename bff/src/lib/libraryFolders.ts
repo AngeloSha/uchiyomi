@@ -111,10 +111,15 @@ export async function previewMoves(qq: Qq, id: string | null, paths: string[]): 
 /**
  * Move every series the save reaches, inside the save's transaction and BEFORE its library_paths rows are rewritten
  * (they are what it held before). Answers how many series changed library, removed ones included.
+ *
+ * A series filed by hand into a library being removed is filed by hand nowhere now: it goes where its folder says, no
+ * longer pinned, so the next save of the library holding its folder takes it like any other (v0.55.1 integration). It
+ * kept `library_pinned`, and with it no library's folders could ever reach it again.
  */
 export async function applyMoves(qq: Qq, id: string, paths: string[], removing = false): Promise<number> {
   const moved = await qq(
-    `${MOVES} UPDATE lib_series s SET library_id = m.goes FROM moves m WHERE s.id = m.id AND m.goes <> m.was RETURNING s.id`,
+    `${MOVES} UPDATE lib_series s SET library_id = m.goes, library_pinned = s.library_pinned AND NOT ($3::boolean AND m.was = $1)
+       FROM moves m WHERE s.id = m.id AND m.goes <> m.was RETURNING s.id`,
     [id, paths, removing]);
   return moved.length;
 }

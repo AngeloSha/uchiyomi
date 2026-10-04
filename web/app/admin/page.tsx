@@ -15,7 +15,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
-import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, sameFolders, toggleFolder, typedFolder, wouldMoveText } from '@/lib/libraryFolders';
+import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
 import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
@@ -1226,10 +1226,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
 
         {preview && (
           <p className="mt-3 text-[11px] leading-relaxed text-fog-500" data-library-preview={preview.series}>
-            {wouldMoveText(preview.series)}
-            {preview.sample.length > 0 && <>, {tr('including')} {preview.sample.slice(0, 3).map((s, i) => (
-              <span key={s}>{i > 0 && ', '}<bdi>{s}</bdi></span>))}{preview.sample.length > 3 ? '…' : ''}</>}
-            . {tr('No files are deleted.')}
+            {previewText(preview.series, preview.sample)}
           </p>
         )}
 

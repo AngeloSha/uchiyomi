@@ -9,6 +9,7 @@
  * folder is in, so a folder may sit inside another library's; only the same folder twice is refused.
  */
 import { t as tr } from './i18n';
+import { clauseSep, joinPart, listSep } from './said';
 
 /** A library as GET /api/admin/libraries lists it, as far as its folders go. */
 export interface LibraryFolderRow { id: string; name: string; path: string; paths?: string[] }
@@ -80,3 +81,17 @@ export const heldByText = (name: string): string => tr('Held by {name}', { name:
 /** What the preview promises, said as a pair. */
 export const wouldMoveText = (n: number): string =>
   (n === 1 ? tr('1 series would move') : tr('{n} series would move', { n }));
+
+/**
+ * The preview's line: what the save would move, up to three of the titles, and that no file is deleted -- punctuated
+ * the reader's way (lib/said.ts). The titles are joined with the list's own mark ("A, B" / "A、B" / "A، B"), each
+ * isolated (FSI … PDI) so an Arabic line keeps a Latin title whole, after the language's own comma; a list that goes on
+ * ends on "…", which ends its sentence too. It read "…, including Tales of Demons and Gods, Martial Peak…. No files are
+ * deleted." -- an ellipsis and a full stop, with English commas -- in every language.
+ */
+export function previewText(n: number, sample: readonly string[]): string {
+  const goesOn = sample.length > 3;
+  const titles = sample.slice(0, 3).map((s) => `\u2068${s}\u2069`).join(listSep());
+  const moved = sample.length ? `${wouldMoveText(n)}${clauseSep()}${tr('including')} ${titles}${goesOn ? '…' : ''}` : wouldMoveText(n);
+  return joinPart(moved, tr('No files are deleted.'), goesOn ? 'sentence' : 'period');
+}
