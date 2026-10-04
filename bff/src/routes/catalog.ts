@@ -34,8 +34,8 @@ import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
 import { effectiveLang } from '../lib/seriesLang';
 import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
-import { noticeBook, isFractionalNumber } from '../lib/noticeChapters';
-import { noticeTypes, hiddenCount, seriesHidesNotices } from '../lib/noticeSettings';
+import { noticeBook, noticeListed } from '../lib/noticeChapters';
+import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { join } from 'node:path';
 
 
@@ -700,17 +700,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/groups', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    // A notice chapter the admin hides (lib/noticeChapters.ts) is nobody's release here either.
-    const shown = (await seriesHidesNotices(id)) ? (n: number) => !isFractionalNumber(n) : () => true;
-    const rows = (await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]))
-      .filter((r) => shown(Number(r.number)));
+    // A notice chapter the admin hides (lib/noticeChapters.ts) is nobody's release here either: a listed number by
+    // what the listing says of it, a file by its own pages.
+    const rows = await q<{ number: number; copies: ListingCopy[] }>(
+      `SELECT l.number, l.copies FROM series_listing l WHERE l.series_id = $1 AND NOT ${noticeListed('l')}`, [id]);
     const copies: StatCopy[] = [];
     for (const r of rows) for (const c of r.copies ?? []) copies.push({ ...c, number: Number(r.number) });
     // Live rows only: a tombstone's group is a file that is no longer here, and "3 on this server" has to
     // count what a reader can open.
-    const onDisk = (await q<{ number: number; scanlator: string | null }>(
-      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]))
-      .filter((b) => shown(Number(b.number)));
+    const onDisk = await q<{ number: number; scanlator: string | null }>(
+      `SELECT b.number, b.scanlator FROM lib_books b
+        WHERE b.series_id = $1 AND b.pruned_at IS NULL AND b.scanlator IS NOT NULL AND NOT ${noticeBook('b.id')}`, [id]);
     return { checkedAt: await checkedAtOf(id), content: groupStats(copies, onDisk.map((b) => ({ number: Number(b.number), scanlator: b.scanlator }))) };
   });
 
@@ -735,11 +735,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    // Not the versions of a notice chapter the admin hides (lib/noticeChapters.ts).
-    const shown = (await seriesHidesNotices(id)) ? (n: number) => !isFractionalNumber(n) : () => true;
-    const rows = (await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
-      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]))
-      .filter((r) => shown(Number(r.number)));
+    // Not the versions of a notice the admin hides, by what the listing says of it (lib/noticeChapters.ts).
+    const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
+      `SELECT l.number, l.title, l.source_id, l.status, l.chosen, l.copies FROM series_listing l
+        WHERE l.series_id = $1 AND NOT ${noticeListed('l')} ORDER BY l.number`, [id]);
     const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
       'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
     const booksOf = new Map<number, typeof books>();

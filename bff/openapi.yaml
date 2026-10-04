@@ -1720,9 +1720,9 @@ paths:
                       - type: "null"
                   hideNotices:
                     description: >-
-                      Admins only. This series' own notice-chapter switch: true hides every chapter numbered with a
-                      fraction (100.1, 100.5), false shows them; null follows its type's switch
-                      (`hideNoticeTypes` on PATCH /api/admin/settings).
+                      Admins only. This series' own notice-chapter switch: true hides its notice chapters (numbered
+                      with a fraction, like 100.5, and 3 pages or fewer), false shows them; null follows its type's
+                      switch (`hideNoticeTypes` on PATCH /api/admin/settings).
                     type: [boolean, "null"]
                   hideNoticesEffective:
                     description: Admins only. Whether this series' notice chapters are hidden once its type's switch is applied.
@@ -6272,14 +6272,17 @@ paths:
                     type: string
                     enum: [manga, manhwa, manhua, webtoon, comic, unknown]
                   description: >-
-                    Notice chapters: the series types whose chapters numbered with a fraction (100.1, 100.5 -- the
-                    notices many sources post after their latest chapter) are hidden, replaced whole. Empty, the
-                    default, is off. A hidden chapter is left out of every chapter list, count, badge and feed, the
-                    reader's next and previous, OPDS, the Komga-compatible API and what the trackers are told, and
-                    the sweep and the slow archive do not download new ones. Nothing is deleted: taking a type off
-                    the list shows its chapters again on the next request, and the next check fetches those never
-                    downloaded. A series' own switch (`hideNotices` on PATCH /api/admin/series/{id}) outranks its
-                    type's; its type is `seriesType` on GET /api/series/{id}. Read back as `hide_notice_types`.
+                    Notice chapters: the series types whose notice chapters are hidden, replaced whole. A notice is
+                    a chapter numbered with a fraction (100.5 -- the notices many sources post after their latest
+                    chapter) whose page count is known and is 3 or fewer: a saved chapter's own counted pages, else
+                    what its sources list. A longer one is a chapter in parts and stays, and so does one nobody has
+                    counted yet. Empty, the default, is off. A hidden chapter is left out of every chapter list,
+                    count, badge and feed, the reader's next and previous, OPDS, the Komga-compatible API and what
+                    the trackers are told, and the sweep and the slow archive do not download one its sources list
+                    as that short. Nothing is deleted: taking a type off the list shows its chapters again on the
+                    next request, and the next check fetches those never downloaded. A series' own switch
+                    (`hideNotices` on PATCH /api/admin/series/{id}) outranks its type's; its type is `seriesType`
+                    on GET /api/series/{id}. Read back as `hide_notice_types`.
       security:
         - bearer: []
       responses:
@@ -6764,9 +6767,10 @@ paths:
                     - type: "null"
                 hideNotices:
                   description: >-
-                    Notice chapters for this series: true hides every chapter numbered with a fraction (100.1, 100.5)
-                    everywhere and does not download new ones, false shows them, null follows its type's switch
-                    (`hideNoticeTypes` on PATCH /api/admin/settings). Applied on the next request; nothing is deleted.
+                    Notice chapters for this series: true hides every chapter numbered with a fraction that has 3
+                    pages or fewer (100.5, as `hideNoticeTypes` describes) everywhere and does not download one its
+                    sources list as that short, false shows them, null follows its type's switch (`hideNoticeTypes`
+                    on PATCH /api/admin/settings). Applied on the next request; nothing is deleted.
                   type: [boolean, "null"]
       security:
         - bearer: []

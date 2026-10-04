@@ -26,7 +26,7 @@ import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
-import { isFractionalNumber } from './noticeChapters';
+import { isListedNotice } from './noticeChapters';
 import { seriesHidesNotices } from './noticeSettings';
 
 /**
@@ -412,13 +412,20 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // fetches below the boundary.
   const archiveBoundary = s.archive_boundary == null || opts.ignoreArchiveBoundary ? -Infinity : Number(s.archive_boundary);
   const floor = Math.max(s.chapter_floor == null ? -Infinity : Number(s.chapter_floor), archiveBoundary);
-  // Notice chapters the admin hides (lib/noticeChapters.ts): every number with a fraction, for a series whose type
-  // or own switch says so. Not fetched, not "behind", not in the count of what the sources list -- the sweep leaves
-  // them in the listing, so the series page and Mihon show them again the moment the switch goes off, and the next
-  // sweep fetches them then. Reintroduce by dropping `notice`: "the sweep fetches no notice chapter" in
-  // noticeChapters.int.test.ts finds 100.5 downloaded.
+  // Notice chapters the admin hides (lib/noticeChapters.ts), for a series whose type or own switch says so: a number
+  // with a fraction that its copies say is NOTICE_MAX_PAGES pages or fewer (the most any copy says, as the listing
+  // reads it). Not fetched, not "behind", not in the count of what the sources list -- the sweep leaves them in the
+  // listing, so the series page and Mihon show them again the moment the switch goes off, and the next sweep fetches
+  // them then. A fractional number its copies say nothing about, or say is longer, is fetched like any chapter: it
+  // may be a real one in parts, and once it is here its own counted pages decide. Reintroduce by dropping `notice`:
+  // "the sweep skips only a notice its source says is short" in noticeChapters.int.test.ts finds 2.5 asked for; by
+  // going back to any fraction, it finds 3.5 and 4.5 never asked.
   const hidesNotice = await seriesHidesNotices(seriesId);
-  const notice = (n: number) => hidesNotice && isFractionalNumber(n);
+  const pagesOf = new Map<number, unknown[]>();
+  if (hidesNotice) {
+    for (const c of tagged) { const l = pagesOf.get(c.number); if (l) l.push(c.pages); else pagesOf.set(c.number, [c.pages]); }
+  }
+  const notice = (n: number) => hidesNotice && isListedNotice(n, pagesOf.get(n) ?? []);
   const wanted = releases.filter((c) => c.number >= floor && !notice(c.number));
   // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
   // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)

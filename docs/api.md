@@ -790,8 +790,8 @@ flag changes nothing on `/api/*` proper, where `?adult=1` remains the reveal.
 
 ## Notice chapters
 
-Many sources post announcements for readers as a chapter numbered after the latest with a fraction: 100.1,
-100.5. An admin can hide them per series type. `PATCH /api/admin/settings {hideNoticeTypes: [...]}` takes any of
+Many sources post announcements for readers as a short chapter numbered after the latest with a fraction: 100.5.
+An admin can hide them per series type. `PATCH /api/admin/settings {hideNoticeTypes: [...]}` takes any of
 `manga`, `manhwa`, `manhua`, `webtoon`, `comic` and `unknown`, replaced whole. It is read back as
 `hide_notice_types`, and an empty list (the default) is off. A single series overrides its type's switch with
 `PATCH /api/admin/series/:id {hideNotices: true | false | null}`, where `null` follows the type. The answer
@@ -808,8 +808,13 @@ A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` wh
 
 `PUT /api/admin/series/:id/meta {seriesType}` overrides the type, and `null` goes back to automatic.
 
-For a series that hides them, every chapter whose effective number (the admin's renumber when there is one) is
-not a whole number is left out of everything:
+**What is a notice.** A chapter whose effective number (the admin's renumber when there is one) is not a whole
+number, and whose page count is known and is 3 or fewer. A saved chapter's own counted pages decide; a chapter not
+counted yet (a page count is stamped when somebody opens it, or by the nightly repair) goes by the most pages any
+copy its sources list says it has. A longer one is a chapter in parts (78.1 … 78.9) and stays, and so does one
+nobody knows the length of. A number only the sources list is judged by what they say.
+
+For a series that hides them, every notice is left out of everything:
 
 - **Chapter reads:** the chapter list, `GET /api/books/:id` (404), next and previous, pages, the offline manifest,
   Continue Reading, Updates, history and bookmarks.
@@ -817,7 +822,8 @@ not a whole number is left out of everything:
 - **Listings:** the series page's missing-chapter rows, groups and versions.
 - **External surfaces:** OPDS, the Komga-compatible API and the tracker push.
 - **Downloads:** the updater, the slow archive and `source_missing`. Neither the updater nor the slow archive
-  downloads one.
+  downloads one its sources list as that short; a fractional chapter they say nothing about is fetched like any
+  chapter, and hidden once it is counted.
 
 Nothing is deleted, and the listing keeps every number. Turning a switch off applies on the next request, and
 the next check downloads what it no longer hides.
@@ -2370,11 +2376,11 @@ reading event is written, so a sync from the phone does not count towards streak
 Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
 
 **Notice chapters** (opt-in, *Settings → Notice chapters*, `hideNoticeTypes`, off by default). Many sources post
-announcements as a chapter numbered after the latest with a fraction (100.1, 100.5). For a series that hides them,
-every chapter whose effective number is not whole is absent from this API: not in `/api/v1/series/:id/books`, a
-404 by id, not counted in `booksCount` or the read counts, and not a ghost. `readProgressV2`'s run skips them,
-so an unread 100.5 does not stop `lastReadContinuousNumberSort` at 100. Switching it off lists them again on the
-next request. See *Notice chapters* below.
+announcements as a short chapter numbered after the latest with a fraction (100.5). For a series that hides them,
+every such chapter of 3 pages or fewer is absent from this API: not in `/api/v1/series/:id/books`, a 404 by id,
+not counted in `booksCount` or the read counts, and not a ghost. `readProgressV2`'s run skips them, so an unread
+100.5 does not stop `lastReadContinuousNumberSort` at 100. Switching it off lists them again on the next request.
+See *Notice chapters* above.
 
 **Ghost chapters** (opt-in, *Settings → Show missing chapters in Mihon*, `komgaGhostChapters`, off by
 default). Mihon takes a series' chapter total from the list this API answers, so a library running the

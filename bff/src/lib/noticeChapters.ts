@@ -1,12 +1,20 @@
 // Notice chapters: the chapters a source numbers N.x to tell readers something.
 //
-// Many sites post an announcement -- a hiatus, a season break, a recruitment call -- as a chapter numbered after
-// the latest real one with a fraction: 100.1, 100.5. The admin may hide every chapter whose number is not whole,
-// per series type (Settings, server_settings.hide_notice_types) and per series (lib_series.hide_notices, NULL =
-// the type's switch). A hidden chapter is gone from everything a person or a client reads -- the chapter list,
-// next/previous, the counts and badges, Home, Updates, history, OPDS, the Komga-compatible API Mihon reads and
-// what the trackers are told -- and the sweep does not download new ones (lib/updater.ts). Nothing is deleted:
-// switching it off shows every one again at once, and the next sweep fetches those never downloaded.
+// Many sites post an announcement -- a hiatus, a season break, a recruitment call -- as a short chapter numbered
+// after the latest real one with a fraction: "Ch. 44.5 - Notice!". The admin may hide them per series type
+// (Settings, server_settings.hide_notice_types) and per series (lib_series.hide_notices, NULL = the type's switch).
+// A hidden chapter is gone from everything a person or a client reads -- the chapter list, next/previous, the
+// counts and badges, Home, Updates, history, OPDS, the Komga-compatible API Mihon reads and what the trackers are
+// told -- and the sweep does not download one the source already says is that short (lib/updater.ts). Nothing is
+// deleted: switching it off shows every one again at once, and the next sweep fetches those never downloaded.
+//
+// ⚠️ A NOTICE IS SHORT, NOT MERELY FRACTIONAL (the owner's rule, v0.55.2). A chapter numbered with a fraction is a
+// notice only when its page count is KNOWN and is NOTICE_MAX_PAGES or fewer: a saved chapter's own counted pages,
+// else what the sources list for its number. On the owner's library, of 1,759 chapters numbered N.x about 170 had 3
+// pages or fewer -- the notices -- and about 1,500 had 6 or more: real chapters posted in parts. Any fraction would
+// have hidden 779 chapters in 94 series with Manhwa switched on (118 of Omniscient Reader's). Not known is shown:
+// a chapter nobody has counted yet is a chapter until it is counted (the repair counts them nightly, the reader and
+// OPDS when they open one).
 //
 // Off by default (an empty list and NULL everywhere), and while nothing hides, nothing costs anything: every fragment
 // below is then a constant (`active`), so every query is the one the previous release ran.
@@ -14,10 +22,15 @@
 // ⚠️ The ONE definition. Every query that needs the rule interpolates a fragment from here, so "which chapters
 // are notices" and "which series hide them" cannot drift apart between the chapter list and the counts. No
 // fragment binds a parameter: they are interpolated into queries whose parameter lists are written by hand, as
-// browsable() in lib/visibility.ts is. Everything they read comes from the database itself.
+// browsable() in lib/visibility.ts is. Everything they read comes from the database itself. Two kinds of row are
+// judged: a saved chapter (lib_books, `bookIsNotice`) by its own counted pages, else the listing's for its number;
+// and a number only the sources list (series_listing, `listedIsNotice`) by what the listing says.
 //
 // Pure: no database (seriesTypeSignals.test.ts imports it). The reads that need one are lib/noticeSettings.ts.
 import { SERIES_TYPES, isSeriesType, type SeriesType } from './seriesTypeSignals';
+
+/** The most pages a notice has. One more and it is a chapter -- a part of one, a short extra -- and stays. */
+export const NOTICE_MAX_PAGES = 3;
 
 /**
  * Does anything hide notices at all -- a type switched on, or a series switched on for itself? While nothing does, every
@@ -33,6 +46,31 @@ export const noticesActive = (): boolean => active;
 /** Is this number a fraction? NULL is not. `real` holds 100 exactly, so floor() compares cleanly. */
 export const isFractional = (num: string): string => `(${num} IS NOT NULL AND ${num} <> floor(${num}))`;
 
+/** Is a page count (an SQL expression, NULL when nobody knows) short enough for a notice? Not known is not. */
+const isShort = (pages: string): string => `COALESCE(${pages} <= ${NOTICE_MAX_PAGES}, false)`;
+
+/**
+ * The most pages any copy of a listed number says it has (`copies`: a series_listing.copies expression), NULL when
+ * none says. The most, so one group's two-page teaser does not make a notice of another group's real chapter. A copy
+ * saying 0 knows nothing (an adapter that does not count), and anything not a JSON array is no copies at all.
+ */
+export const listedPages = (copies: string): string =>
+  `NULLIF((SELECT max(CASE WHEN jsonb_typeof(c_nt->'pages') = 'number' THEN GREATEST((c_nt->>'pages')::numeric, 0) END)
+             FROM jsonb_array_elements(CASE WHEN jsonb_typeof(${copies}) = 'array' THEN ${copies} ELSE '[]'::jsonb END) c_nt), 0)`;
+
+/**
+ * Is the lib_books row `b`, numbered `num` (its EFFECTIVE number: the admin's renumber when there is one, as booksSrc
+ * reads it), a notice -- whether or not its series hides them? Its own counted pages, else what the listing says of
+ * its number (a chapter is counted when somebody opens it, or by the nightly repair). The cheap tests first: a whole
+ * number never reaches the listing.
+ */
+export const bookIsNotice = (b: string, num: string): string => `(${isFractional(num)} AND ${isShort(
+  `COALESCE(NULLIF(${b}.pages, 0), (SELECT ${listedPages('lp_nt.copies')} FROM series_listing lp_nt
+    WHERE lp_nt.series_id = ${b}.series_id AND lp_nt.number = ${num}))`)})`;
+
+/** Is the series_listing row `l` a notice, whether or not its series hides them? What the listing says of it. */
+export const listedIsNotice = (l: string): string => `(${isFractional(`${l}.number`)} AND ${isShort(listedPages(`${l}.copies`))})`;
+
 /** The type a series is, for alias `s` of lib_series: the admin's override, else what was learned, else unknown. */
 export const seriesTypeSql = (s: string): string =>
   `COALESCE((SELECT o_nt.series_type FROM series_overrides o_nt WHERE o_nt.series_id = ${s}.id), ${s}.series_type, 'unknown')`;
@@ -46,14 +84,18 @@ export const hidesNotices = (s: string): string =>
      COALESCE((SELECT st_nt.hide_notice_types FROM server_settings st_nt WHERE st_nt.id = 1), '[]'::jsonb) ? ${seriesTypeSql(s)},
      false)`;
 
-/**
- * Is a chapter of series `s`, numbered `num`, hidden? `num` must be the EFFECTIVE number (the admin's renumber
- * when there is one), as booksSrc reads it. The cheap test first: a whole number never reaches the subqueries.
- */
-export const noticeHidden = (s: string, num: string): string => (active ? `(${isFractional(num)} AND ${hidesNotices(s)})` : 'false');
+/** Is the lib_books row `b` of series `s`, numbered `num` (the effective number), a notice that series hides? */
+export const noticeHidden = (s: string, b: string, num: string): string =>
+  (active ? `(${bookIsNotice(b, num)} AND ${hidesNotices(s)})` : 'false');
 
 /** The negation, for a WHERE that keeps what is shown. */
-export const noticeShown = (s: string, num: string): string => (active ? `NOT ${noticeHidden(s, num)}` : 'true');
+export const noticeShown = (s: string, b: string, num: string): string => (active ? `NOT ${noticeHidden(s, b, num)}` : 'true');
+
+/** Is the series_listing row `l` of series `s` a notice that series hides? */
+export const listedHidden = (s: string, l: string): string => (active ? `(${listedIsNotice(l)} AND ${hidesNotices(s)})` : 'false');
+
+/** The negation, for a WHERE over the listing that keeps what is shown. */
+export const listedShown = (s: string, l: string): string => (active ? `NOT ${listedHidden(s, l)}` : 'true');
 
 /**
  * Is the lib_books row `bookId` (an SQL expression) a hidden notice? Self-contained, for queries that hold only a
@@ -64,14 +106,14 @@ export const noticeBook = (bookId: string): string => (!active ? 'false' : `EXIS
     JOIN lib_series ns_nt ON ns_nt.id = nb_nt.series_id
     LEFT JOIN book_overrides nov_nt ON nov_nt.book_id = nb_nt.id
    WHERE nb_nt.id = ${bookId}
-     AND ${noticeHidden('ns_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`);
+     AND ${noticeHidden('ns_nt', 'nb_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`);
 
 /**
- * Is number `num` of series `seriesId` (both SQL expressions) a hidden notice? Self-contained, for queries over
- * series_listing that hold no lib_series alias: the archive's work list.
+ * Is the series_listing row `l` a hidden notice? Self-contained, for queries over the listing that hold no lib_series
+ * alias: the archive's work list.
  */
-export const noticeNumber = (seriesId: string, num: string): string => (!active ? 'false' : `EXISTS (
-  SELECT 1 FROM lib_series nl_nt WHERE nl_nt.id = ${seriesId} AND ${noticeHidden('nl_nt', num)})`);
+export const noticeListed = (l: string): string => (!active ? 'false' : `EXISTS (
+  SELECT 1 FROM lib_series nl_nt WHERE nl_nt.id = ${l}.series_id AND ${listedHidden('nl_nt', l)})`);
 
 /**
  * How many of series `s`'s lib_books rows are hidden notices: what lib_series.books_count -- a stored count of every
@@ -80,23 +122,28 @@ export const noticeNumber = (seriesId: string, num: string): string => (!active 
  */
 export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(*) FROM lib_books hb_nt LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
-   WHERE hb_nt.series_id = ${s}.id AND ${isFractional('COALESCE(hov_nt.number, hb_nt.number)')}
+   WHERE hb_nt.series_id = ${s}.id AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
 ) ELSE 0 END)::int`;
 
 /**
- * How many notice chapters series `s` hides: every distinct fractional number it has, on disk (the effective number)
- * or only listed by its sources. The admin's "N hidden now". Not `hiddenBookCount`: most notices are never
- * downloaded -- the sweep skips them while hidden -- so a count of files read 0 for nearly every series.
+ * How many notice chapters series `s` hides: every distinct number of a hidden saved chapter (its effective number),
+ * and of a hidden number only its sources list. The admin's "Hidden now". Not `hiddenBookCount`: a notice the sources
+ * say is short is never downloaded while hidden, so a count of files would miss those. A listed number with a saved
+ * chapter is that chapter's, which its own pages judge.
  * Reintroduce by counting lib_books alone: "the hidden count includes notices that were never downloaded" in
- * noticeChapters.int.test.ts reads 0.
+ * noticeChapters.int.test.ts reads 2.
  */
 export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(DISTINCT hn_nt.n) FROM (
     SELECT COALESCE(hov_nt.number, hb_nt.number) AS n FROM lib_books hb_nt
-      LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id WHERE hb_nt.series_id = ${s}.id
+      LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
+     WHERE hb_nt.series_id = ${s}.id AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
     UNION ALL
-    SELECT hl_nt.number FROM series_listing hl_nt WHERE hl_nt.series_id = ${s}.id
-  ) hn_nt WHERE ${isFractional('hn_nt.n')}
+    SELECT hl_nt.number FROM series_listing hl_nt
+     WHERE hl_nt.series_id = ${s}.id AND ${listedIsNotice('hl_nt')}
+       AND NOT EXISTS (SELECT 1 FROM lib_books xb_nt LEFT JOIN book_overrides xov_nt ON xov_nt.book_id = xb_nt.id
+                        WHERE xb_nt.series_id = hl_nt.series_id AND COALESCE(xov_nt.number, xb_nt.number) = hl_nt.number)
+  ) hn_nt
 ) ELSE 0 END)::int`;
 
 /** books_count as a reader sees it. */
@@ -105,10 +152,27 @@ export const visibleBookCount = (s: string): string => (active ? `GREATEST(0, ${
 /** A whole number? The JS twin of `isFractional`, for lists already in memory (the sweep, the listing). */
 export const isFractionalNumber = (n: number): boolean => Number.isFinite(n) && n !== Math.floor(n);
 
+/** The JS twin of `listedPages`: the most pages any copy says it has, null when none says. */
+export function listedPagesOf(pages: Iterable<unknown>): number | null {
+  let most = 0;
+  for (const p of pages) if (typeof p === 'number' && Number.isFinite(p) && p > most) most = p;
+  return most > 0 ? most : null;
+}
+
+/**
+ * The JS twin of `listedIsNotice`, for the sweep, which decides on the copies in hand: is a listed number, whose
+ * copies say `pages`, a notice? Only when they say it is short; a number they say nothing about is fetched like any
+ * chapter, and judged by its own pages once it is here.
+ */
+export const isListedNotice = (n: number, pages: Iterable<unknown>): boolean => {
+  if (!isFractionalNumber(n)) return false;
+  const most = listedPagesOf(pages);
+  return most != null && most <= NOTICE_MAX_PAGES;
+};
+
 /** The configured types, tidied: known types only, each once, in SERIES_TYPES order. Anything else is empty. */
 export function sanitiseNoticeTypes(values: unknown): SeriesType[] {
   if (!Array.isArray(values)) return [];
   const want = new Set(values.filter(isSeriesType));
   return SERIES_TYPES.filter((t) => want.has(t));
 }
-

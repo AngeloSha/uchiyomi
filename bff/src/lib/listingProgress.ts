@@ -146,7 +146,7 @@ export async function realRows(userId: string, seriesId: string): Promise<Array<
       WHERE b.series_id = $1
         -- Not a notice chapter the admin hides (lib/noticeChapters.ts): Mihon never sees one, so an unread 100.5
         -- must not stop the run at 100, nor count toward the total or the tracker's "finished".
-        AND ${noticeShown('s', 'COALESCE(ov.number, b.number)')}
+        AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
       ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`,
     [seriesId, userId],
   );

@@ -29,7 +29,7 @@
 // that belongs on a phone credential. This module reads the same table and takes five columns.
 import { q, one } from './db';
 import { seriesVisible, type ViewCtx } from './visibility';
-import { noticeShown } from './noticeChapters';
+import { listedShown } from './noticeChapters';
 
 /**
  * A `covered` listing row (v0.50.0, lib/partAlias.ts R2) is another site's split of a chapter this server holds:
@@ -45,7 +45,7 @@ export const NOT_COVERED = "l.status <> 'covered'";
  * would list it, and the highest notice would be the total the trackers read. Reads the series as `s`. Built per
  * query, not once at load: it is a constant while nothing hides.
  */
-const notNotice = () => noticeShown('s', 'l.number');
+const notNotice = () => listedShown('s', 'l');
 
 /**
  * Is the opt-in on?

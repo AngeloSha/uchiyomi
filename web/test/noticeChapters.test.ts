@@ -26,6 +26,15 @@ test('Admin → Settings: the section comes after the pinned ones and saves the 
   assert.match(section, /SERIES_TYPES\.map/);
 });
 
+test('both switches say what they hide: the short x.y chapters, not every fraction', () => {
+  // The owner's rule (v0.55.2): only a chapter numbered like 12.5 with 3 pages or fewer is a notice. Reintroduce the
+  // PR's text ("every chapter numbered with a fraction"): neither matches.
+  const settings = read('components/AdminSettings.tsx');
+  const section = settings.slice(settings.indexOf('function NoticeChaptersSection('));
+  assert.match(section, /chapters numbered like 12\.5 with 3 pages or fewer are hidden/, 'the Settings text does not say what it hides');
+  assert.match(read('components/SourcesSheet.tsx'), /numbered like 12\.5, with 3 pages or fewer/, 'the series switch does not say what it hides');
+});
+
 test('the Sources & translations sheet: what applies, its own choice, and the way back to the type', () => {
   const src = read('components/SourcesSheet.tsx');
   assert.match(src, /method: 'PATCH', json: \{ hideNotices: on \}/);

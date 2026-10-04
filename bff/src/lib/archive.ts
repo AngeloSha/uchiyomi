@@ -60,7 +60,7 @@ import {
   shownGlobalWait,
   type ArchiveDirection, type GlobalWait, type SeriesWait, type SourceState, type DoneNote, type Attention,
 } from './archivePlan';
-import { noticeNumber } from './noticeChapters';
+import { noticeListed } from './noticeChapters';
 
 /** The import-time context: no origin, no slow pace. Every timer and kick is armed through it (see the header). */
 const atRoot = AsyncLocalStorage.snapshot();
@@ -285,8 +285,9 @@ function eligibleSql(l: string, a: string, capParam: string): string {
     AND NOT EXISTS (
       SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
        WHERE b.series_id = ${l}.series_id AND COALESCE(ov.number, b.number) = ${l}.number AND ${heldBooks('b')})
-    -- Not a notice chapter the admin hides (lib/noticeChapters.ts): the sweep does not fetch those, nor does this.
-    AND NOT ${noticeNumber(`${l}.series_id`, `${l}.number`)}`;
+    -- Not a notice the admin hides, by what the listing says of it (lib/noticeChapters.ts): the sweep does not fetch
+    -- those, nor does this.
+    AND NOT ${noticeListed(l)}`;
 }
 
 /**
@@ -1112,7 +1113,7 @@ async function finishSeries(seriesId: string, now: number): Promise<boolean> {
             count(*) FILTER (WHERE l.status = 'blocked')::int AS blocked
        FROM series_listing l JOIN archive_queue a ON a.series_id = l.series_id
       WHERE l.series_id = $1 AND l.number < a.boundary
-        AND NOT ${noticeNumber('l.series_id', 'l.number')}
+        AND NOT ${noticeListed('l')}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
            WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number AND ${heldBooks('b')})`,

@@ -2189,11 +2189,11 @@ button (**Save scanlator defaults**), because a half-typed list is not something
 
 ### Notice chapters
 
-Many sources post announcements for readers (a hiatus, a season break, a schedule change) as a chapter
-numbered after the latest one with a fraction: **100.1**, **100.5**. **Admin → Settings → Notice chapters**
-has one switch per series type: **Manga**, **Manhwa**, **Manhua**, **Webtoon**, **Comic** and **Unknown /
-other**. All are off by default. For a type that is switched on, every chapter whose number is not a whole
-number is hidden:
+Many sources post announcements for readers (a hiatus, a season break, a schedule change) as a short chapter
+numbered after the latest one with a fraction: **100.5**, often a page or two. **Admin → Settings → Notice
+chapters** has one switch per series type: **Manga**, **Manhwa**, **Manhua**, **Webtoon**, **Comic** and
+**Unknown / other**. All are off by default. For a type that is switched on, every chapter numbered like 12.5
+that has **3 pages or fewer** is hidden:
 
 - **Everywhere you read.** It is hidden from the chapter list, the reader's next and previous, Continue Reading,
   Updates, history, bookmarks, OPDS, offline downloads and the Komga-compatible API that the Mihon extension
@@ -2201,8 +2201,15 @@ number is hidden:
 - **From the counts.** It is not counted in chapter totals or unread badges, in Mihon's *read up to* and
   *Completed*, or in what AniList, MyAnimeList and Kitsu are told. An unread 100.5 therefore no longer keeps a
   series you have read to the end from being finished.
-- **From downloads.** Neither the updater nor the slow archive downloads new ones, and they are not counted as
-  missing.
+- **From downloads.** Neither the updater nor the slow archive downloads one its sources list as 3 pages or
+  fewer, and those are not counted as missing.
+
+**Only short ones.** A chapter numbered with a fraction is a notice only when its page count is known and is 3 or
+fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
+one; most sites do not). A longer one is a chapter posted in parts (78.1 … 78.9) and stays, and so does one whose
+length nobody knows yet. A chapter's pages are counted the first time anyone opens it, and the nightly repair
+counts the rest, so a notice from a site that lists no page counts is downloaded, shown until it is counted, and
+hidden from then on.
 
 Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
 rescan. Any that were never downloaded are fetched at the next check. Because the chapter count goes up when
@@ -2220,11 +2227,8 @@ can set the type by hand under **Series type** in *Edit details* → **Reading**
 
 **One series** can override its type's switch with **Hide notice chapters** in its **Sources & translations**
 sheet. The sheet also says how many chapters that hides right now, and **Use the server default** puts the
-series back under its type's switch. Use this for a series whose x.5 chapters are real content, such as a long
-chapter posted in two parts.
-
-The rule is any fraction. It takes no notice of the chapter title or page count, so a series numbered in
-parts (78.1 … 78.9) loses those parts while its type's switch is on, unless you switch it off for that series.
+series back under its type's switch. Use this for a series whose short x.5 chapters are real content (a
+webtoon whose parts are a few long strips each), or to hide one series' notices while its type's switch is off.
 
 ### Notifications
 

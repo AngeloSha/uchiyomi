@@ -1,5 +1,6 @@
-// Notice chapters (lib/noticeChapters.ts): an admin may hide every chapter numbered with a fraction -- the notices
-// sources post as 100.1, 100.5 -- per series type, and per series over its type. Off by default.
+// Notice chapters (lib/noticeChapters.ts): an admin may hide the notices sources post as short chapters numbered with
+// a fraction -- 100.1, 100.5, with 3 pages or fewer -- per series type, and per series over its type. Off by default.
+// A fractional chapter that is longer, or whose pages nobody knows yet, is a chapter (the owner's rule, v0.55.2).
 //
 // Over HTTP against the real routes, because the rule has to hold on every surface at once -- the app's chapter
 // list, counts, next/previous and missing-chapter rows, the Komga-compatible API Mihon reads, and what the
@@ -32,7 +33,8 @@ const HW = 's_nt_manhwa';     // typed manhwa by its genres
 const MG = 's_nt_manga';      // typed manga by hand (series_overrides)
 const KEEP = 's_nt_keep';     // a manhwa that switches the hide off for itself
 const SWEEP = 's_nt_sweep';   // followed from a fake source, for the updater
-const SERIES = [HW, MG, KEEP, SWEEP];
+const PG = 's_nt_pages';      // a manhwa whose fractional chapters are long, short and not counted
+const SERIES = [HW, MG, KEEP, SWEEP, PG];
 const ADMIN = 'nt-admin', MEMBER = 'nt-member';
 const SRC = 'nt-src';
 /** The chapter ids the sweep asked the fake source for pages of: what it tried to download. */
@@ -65,7 +67,9 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
     async search() { return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: SRC, title: sid }; },
     async listChapters() {
-      return [1, 2, 2.5, 3].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `nt-c${n}` }));
+      // 2.5 is a notice by the source's own count; 3.5 is twenty pages, a chapter in parts; 4.5 nobody has counted.
+      const pages: Record<number, number> = { 2.5: 2, 3.5: 20 };
+      return [1, 2, 2.5, 3, 3.5, 4.5].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `nt-c${n}`, pages: pages[n] }));
     },
     // Nothing downloads: the test is which chapters the sweep TRIES.
     async getPageUrls(chId: string) { asked.push(chId); throw new Error('no pages here'); },
@@ -88,10 +92,18 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
     await learnTypeFromSource({ id }, { genres: [...genres] });
   }
   await q(`INSERT INTO series_overrides (series_id, series_type) VALUES ($1, 'manga')`, [MG]);
+  await series(PG, ['Manhwa'], 8);
+  await learnTypeFromSource({ id: PG }, { genres: ['Manhwa'] });
 
-  const book = (id: string, sid: string, n: number) =>
+  const book = (id: string, sid: string, n: number, pages = 3) =>
     q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root)
-       VALUES ($1,$2,'T!nt',$3,$4,$5,3,$6)`, [id, sid, `${id}.cbz`, n, `Chapter ${n}`, ROOT]);
+       VALUES ($1,$2,'T!nt',$3,$4,$5,$6,$7)`, [id, sid, `${id}.cbz`, n, `Chapter ${n}`, pages, ROOT]);
+  /** A series_listing row whose copies say these page counts (null: a copy that does not say). */
+  const listed = (sid: string, n: number, pages: Array<number | null> = []) =>
+    q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies)
+       VALUES ($1,$2,$3,'src','{}'::jsonb,'available',$4::jsonb)`, [sid, n, `Chapter ${n}`, JSON.stringify(pages.map((p, i) => ({
+      sourceId: `${sid}-${n}-${i}`, source: 'src', groups: [], scanlator: null, lang: null, pages: p, publishedAt: null,
+    })))]);
   // HW: 99, 100, the notice 100.5, a file that parsed as 0 and was renumbered to the notice 100.1, and a file that
   // parsed as 100.2 and was renumbered to 101 -- the effective number decides, both ways.
   await book('b_nt_99', HW, 99);
@@ -104,11 +116,20 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
   await book('b_nt_m15', MG, 1.5);
   await book('b_nt_k1', KEEP, 1);
   await book('b_nt_k15', KEEP, 1.5);
-  // What the sources list for HW: two numbers it does not hold, one of them a notice.
-  for (const n of [99, 100, 100.5, 101, 101.5, 102]) {
-    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status)
-             VALUES ($1,$2,$3,'src','{}'::jsonb,'available')`, [HW, n, `Chapter ${n}`]);
-  }
+  // What the sources list for HW: four numbers it does not hold. 101.5 is a notice by the listing's own count;
+  // 102.5 is twenty pages, a chapter in parts; nobody says how long 103.5 is.
+  for (const n of [99, 100, 101, 102]) await listed(HW, n);
+  await listed(HW, 100.5, [2]);
+  await listed(HW, 101.5, [2, null]);
+  await listed(HW, 102.5, [20]);
+  await listed(HW, 103.5, [null]);
+  // PG, the review's numbers: the two-page 44.5 is a notice and the twenty-page 12.5 a chapter. 7.5 was never counted
+  // and nothing lists it, so nobody knows: shown. 8.5 was never counted either, and its copies say two pages: hidden.
+  // 9.5 likewise, but one copy says eighteen: the most any copy says decides, so it is a chapter.
+  for (const [id, n, pages] of [['b_nt_p7', 7, 20], ['b_nt_p75', 7.5, 0], ['b_nt_p85', 8.5, 0], ['b_nt_p95', 9.5, 0],
+    ['b_nt_p12', 12, 20], ['b_nt_p125', 12.5, 20], ['b_nt_p44', 44, 20], ['b_nt_p445', 44.5, 2]] as const) await book(id, PG, n, pages);
+  await listed(PG, 8.5, [2]);
+  await listed(PG, 9.5, [2, 18]);
 
   const admin = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x','admin','password') RETURNING id`, [ADMIN]))[0].id;
@@ -153,6 +174,7 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.deepEqual(s[0].t, [], 'the setting must ship off');
       assert.deepEqual(await numbers(HW), [99, 100, 100.1, 100.5, 101]);
       assert.equal((await get(`/api/series/${HW}`, asMember)).json().booksCount, 5);
+      assert.deepEqual(await numbers(PG), [7, 7.5, 8.5, 9.5, 12, 12.5, 44, 44.5]);
     });
 
     await t.test('series types: from the genres (origin beats Webtoon), and by hand', async () => {
@@ -194,9 +216,23 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.equal(a.hiddenNotices, 3);
     });
 
+    await t.test('only a short chapter is a notice: two pages hidden, twenty shown, not counted shown', async () => {
+      // The owner's library: of 1,759 x.y chapters about 170 had 3 pages or fewer and about 1,500 had 6 or more.
+      // Reintroduce any fraction (drop the page test from bookIsNotice): 12.5, 7.5 and 9.5 go too.
+      assert.deepEqual(await numbers(PG), [7, 7.5, 9.5, 12, 12.5, 44], 'the short chapters, and only they, are hidden');
+      assert.equal((await get(`/api/series/${PG}`, asMember)).json().booksCount, 6);
+      assert.equal((await get('/api/books/b_nt_p445', asMember)).statusCode, 404, 'the two-page 44.5 is still there by id');
+      assert.equal((await get('/api/books/b_nt_p125', asMember)).statusCode, 200, 'the twenty-page 12.5 is gone by id');
+      // Counted at last -- the reader opened it, or the repair did -- 7.5 turns out to be a two-page notice.
+      await q(`UPDATE lib_books SET pages = 2 WHERE id = 'b_nt_p75'`);
+      assert.deepEqual(await numbers(PG), [7, 9.5, 12, 12.5, 44]);
+      await q(`UPDATE lib_books SET pages = 0 WHERE id = 'b_nt_p75'`);
+    });
+
     await t.test('the missing-chapter rows, and other types untouched', async () => {
       const ghosts = (await get(`/api/series/${HW}/listing`, asMember)).json().content.map((g: any) => g.number);
-      assert.deepEqual(ghosts, [102], 'the listed notice 101.5 is not missing; it is not a chapter here');
+      assert.deepEqual(ghosts, [102, 102.5, 103.5],
+        'the listed two-page 101.5 is not missing; it is not a chapter here -- but the long 102.5 and the uncounted 103.5 are');
       assert.deepEqual(await numbers(MG), [1, 1.5], 'manga is not switched on');
       assert.deepEqual(await numbers(KEEP), [1, 1.5], "a series' own off beats its type's on");
     });
@@ -231,16 +267,18 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.deepEqual(await numbers(MG), [1, 1.5]);
     });
 
-    await t.test('the sweep does not download a hidden notice, nor count it as missing', async () => {
+    await t.test('the sweep skips only a notice its source says is short, and does not count it as missing', async () => {
       asked.length = 0;
       await updateSeries(SWEEP, 10);
-      assert.deepEqual([...asked].sort(), ['nt-c1', 'nt-c2', 'nt-c3'], 'the notice 2.5 is never fetched');
+      // The twenty-page 3.5 and the uncounted 4.5 are fetched like any chapter: the sweep cannot know 4.5 is a notice
+      // until it is here and counted.
+      assert.deepEqual([...asked].sort(), ['nt-c1', 'nt-c2', 'nt-c3', 'nt-c3.5', 'nt-c4.5'], 'the two-page 2.5, and only it, is never fetched');
       const s = await q<{ source_chapters: number; source_missing: number }>('SELECT source_chapters, source_missing FROM lib_series WHERE id = $1', [SWEEP]);
-      assert.equal(s[0].source_missing, 3);
-      assert.equal(s[0].source_chapters, 3);
+      assert.equal(s[0].source_missing, 5);
+      assert.equal(s[0].source_chapters, 5);
       // Kept in the listing, so switching off shows it at once and the next sweep fetches it.
       const listed = await q<{ number: number }>('SELECT number FROM series_listing WHERE series_id = $1 ORDER BY number', [SWEEP]);
-      assert.deepEqual(listed.map((r) => Number(r.number)), [1, 2, 2.5, 3]);
+      assert.deepEqual(listed.map((r) => Number(r.number)), [1, 2, 2.5, 3, 3.5, 4.5]);
       await setTypes([]);
       asked.length = 0;
       await q('DELETE FROM chapter_failures WHERE series_id = $1', [SWEEP]);
@@ -253,7 +291,7 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.deepEqual(await numbers(HW), [99, 100, 100.1, 100.5, 101]);
       assert.equal((await get(`/api/series/${HW}`, asMember)).json().booksCount, 5);
       const ghosts = (await get(`/api/series/${HW}/listing`, asMember)).json().content.map((g: any) => g.number);
-      assert.deepEqual(ghosts, [101.5, 102]);
+      assert.deepEqual(ghosts, [101.5, 102, 102.5, 103.5]);
       assert.equal((await get('/api/books/b_nt_1005', asMember)).statusCode, 200);
     });
 

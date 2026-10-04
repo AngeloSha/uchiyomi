@@ -1418,8 +1418,8 @@ SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
  WHERE library_paths.library_id <> EXCLUDED.library_id;
 
 -- v0.55.2 (#147): notice chapters (lib/noticeChapters.ts, lib/seriesType.ts). Sources post notices for readers as
--- chapter N.x after their latest chapter N; the admin may hide every chapter numbered with a fraction, per series
--- type, and override that per series. series_type: manga, manhwa, manhua, webtoon or comic as learned (NULL =
+-- a short chapter N.x after their latest chapter N; the admin may hide every chapter numbered with a fraction that
+-- has 3 pages or fewer, per series type, and override that per series. series_type: manga, manhwa, manhua, webtoon or comic as learned (NULL =
 -- unknown), with series_type_from naming the evidence (lib/seriesTypeSignals.ts SERIES_TYPE_FROM);
 -- series_overrides.series_type is the admin's word. lib_series.hide_notices: the series' own switch, NULL = its
 -- type's. server_settings.hide_notice_types: the types whose notice chapters are hidden, empty = off (the default).

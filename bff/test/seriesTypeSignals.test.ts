@@ -8,7 +8,8 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  isFractionalNumber, sanitiseNoticeTypes, noticeHidden, noticeShown, noticeBook, noticeNumber, visibleBookCount, setNoticesActive,
+  isFractionalNumber, isListedNotice, listedPagesOf, sanitiseNoticeTypes, noticeHidden, noticeShown, noticeBook, noticeListed, listedHidden, listedShown,
+  visibleBookCount, setNoticesActive,
 } from '../src/lib/noticeChapters';
 
 test('a genre naming the origin beats a Webtoon genre, whatever the order', () => {
@@ -48,11 +49,21 @@ test('the evidence ranks, least trusted first, and the backfill table keeps the 
   assert.equal(GENRE_TYPE_TABLE[GENRE_TYPE_TABLE.length - 1][0], 'webtoon');
 });
 
-test('a notice is any number with a fraction', () => {
+test('a fraction, and a listed notice: a fraction its copies say is 3 pages or fewer', () => {
   for (const n of [100.1, 100.5, 0.5, 12.01]) assert.equal(isFractionalNumber(n), true, String(n));
   for (const n of [100, 0, -1, NaN, Infinity]) assert.equal(isFractionalNumber(n), false, String(n));
   // As Postgres hands a `real` back: 100.1 is 100.0999984741211, still a fraction.
   assert.equal(isFractionalNumber(Math.fround(100.1)), true);
+  // The sweep's half of the owner's rule (the listing's, lib/noticeChapters.ts listedIsNotice, is the same).
+  assert.equal(isListedNotice(44.5, [2]), true, 'a two-page 44.5 is a notice');
+  assert.equal(isListedNotice(44.5, [3, undefined]), true, 'three pages is still a notice');
+  assert.equal(isListedNotice(12.5, [20]), false, 'a twenty-page 12.5 is a chapter in parts');
+  assert.equal(isListedNotice(7.5, [undefined, null, 0]), false, 'nobody knows how long 7.5 is: fetched, and judged once counted');
+  // The most any copy says: one group's two-page teaser is not another group's eighteen-page chapter.
+  assert.equal(isListedNotice(9.5, [2, 18]), false);
+  assert.equal(isListedNotice(44, [1]), false, 'a whole number is never a notice');
+  assert.equal(listedPagesOf([0, -4, 'x', 2]), 2);
+  assert.equal(listedPagesOf([]), null);
 });
 
 test('the stored list keeps known types only, once each, in order', () => {
@@ -66,16 +77,19 @@ test('while nothing hides, every fragment is a constant: each query is the one t
   // 10 -> 118 ms, every reader page 0.47 -> 1.17 ms, because the planner prices a per-series count and a per-row EXISTS
   // whether or not they can match. Reintroduce by dropping the `active` gate: every one of these is SQL again.
   const off = {
-    hidden: noticeHidden('s', 'b.number'), shown: noticeShown('s', 'b.number'), book: noticeBook('b.id'),
-    number: noticeNumber('l.series_id', 'l.number'), count: visibleBookCount('s'),
+    hidden: noticeHidden('s', 'b', 'b.number'), shown: noticeShown('s', 'b', 'b.number'), book: noticeBook('b.id'),
+    listedHidden: listedHidden('s', 'l'), listedShown: listedShown('s', 'l'), listed: noticeListed('l'), count: visibleBookCount('s'),
   };
-  assert.deepEqual(off, { hidden: 'false', shown: 'true', book: 'false', number: 'false', count: 's.books_count' });
+  assert.deepEqual(off, {
+    hidden: 'false', shown: 'true', book: 'false', listedHidden: 'false', listedShown: 'true', listed: 'false', count: 's.books_count',
+  });
   setNoticesActive(true);
   try {
     // And the real thing the moment anything hides.
-    assert.match(noticeShown('s', 'b.number'), /^NOT \(/);
+    assert.match(noticeShown('s', 'b', 'b.number'), /^NOT \(/);
+    assert.match(listedShown('s', 'l'), /^NOT \(/);
     assert.match(noticeBook('b.id'), /^EXISTS \(/);
-    assert.match(noticeNumber('l.series_id', 'l.number'), /^EXISTS \(/);
+    assert.match(noticeListed('l'), /^EXISTS \(/);
     assert.match(visibleBookCount('s'), /^GREATEST\(0, s\.books_count - /);
   } finally {
     setNoticesActive(false);
@@ -94,7 +108,7 @@ test('the server reads whether anything hides before it serves a request', () =>
 test('the SQL fragment tests the fraction before it reads any setting, and binds nothing', () => {
   setNoticesActive(true);
   try {
-    const sql = noticeHidden('s', 'b.number');
+    const sql = noticeHidden('s', 'b', 'b.number');
     assert.ok(sql.indexOf('floor(b.number)') < sql.indexOf('server_settings'), 'the cheap test must come first');
     assert.doesNotMatch(sql, /\$\d/, 'a fragment interpolated into hand-numbered queries must not bind');
   } finally {

@@ -287,7 +287,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
           -- CBZ that 404s.
           AND b.pruned_at IS NULL
           -- Nor a notice chapter the admin hides (lib/noticeChapters.ts).
-          AND ${noticeShown('s', 'COALESCE(ov.number, b.number)')}
+          AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
         ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
     // A page count of 0 means "never counted", not "no pages". The scanner counts most archives, but a
     // streaming link with count 0 is a link a reader cannot use, so the unknowns get counted here, once,
