@@ -17,11 +17,50 @@ export function backupSolverUrl(): string {
   return b && b !== mainUrl() ? b : '';
 }
 
-/** The solvers a request is asked of, in order: the main, then the backup if there is one. */
+/** The solvers configured, the main first. */
 const solvers = (): string[] => [mainUrl(), backupSolverUrl()].filter(Boolean);
 
 interface Solution { url: string; status: number; response: string; cookies: Array<{ name: string; value: string }>; userAgent: string }
+
+/**
+ * Each solver's cookie jar and user agent, per origin it solved (v0.55.4: keyed by solver AND origin, `jarKey`), and
+ * whose pair an origin's plain fetches send: the solver that solved it last (`solvedBy`).
+ *
+ * A cf_clearance belongs to the browser that earned it -- its user agent, its address -- so an image fetch must send one
+ * solver's cookie with that same solver's user agent, never one's cookie with the other's agent: Cloudflare refuses the
+ * mix. Reintroduce one jar per origin (drop the solver from `jarKey`): "the reset clears both solvers' jars" in
+ * solverBackup.test.ts counts one pair where two solvers each solved the site.
+ */
 const sessions = new Map<string, { cookie: string; userAgent: string }>();
+const solvedBy = new Map<string, string>();
+const jarKey = (solver: string, origin: string): string => `${solver} ${origin}`;
+const sessionOf = (origin: string) => {
+  const solver = solvedBy.get(origin);
+  return solver === undefined ? undefined : sessions.get(jarKey(solver, origin));
+};
+
+/**
+ * Per site (the origin a request names), the solver that answered it last with a page, and when (v0.55.4).
+ *
+ * That solver is asked first for rememberMs: without it every request for a site the main cannot solve would wait for
+ * the main to fail -- up to its whole attempt -- before the backup answered as it did a moment ago. After that the main
+ * is asked first again, so a main that has recovered gets its sites back. In memory only, like the jars: a restart, or
+ * a solver reset, starts from the main. Reintroduce the fixed order (`solvers()` in solveNow): "the solver that answered
+ * a site last is asked first" in solverBackup.test.ts finds the main asked again.
+ */
+const lastWon = new Map<string, { solver: string; at: number }>();
+
+/** The solvers a request for `site` is asked of, in order: the one that answered it last, then the rest, main first. */
+function askingOrder(site: string | null): string[] {
+  const all = solvers();
+  const won = site === null ? undefined : lastWon.get(site);
+  if (!won) return all;
+  if (Date.now() - won.at > rememberMs || !all.includes(won.solver)) {
+    lastWon.delete(site!);
+    return all;
+  }
+  return [won.solver, ...all.filter((x) => x !== won.solver)];
+}
 
 /**
  * How many solves may be in flight at once.
@@ -56,7 +95,8 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
 }
 
 /**
- * The request, asked of each solver in turn until one answers it with a page (v0.55.4: the main, then the backup).
+ * The request, asked of each solver in turn until one answers it with a page (v0.55.4: the main, then the backup, or
+ * first the one that answered this site last -- askingOrder).
  *
  * When every one failed, the caller is told what a solver SAID: an error in its own words, or a page that came back
  * empty, is what it found at the site, and a backup that could not be reached at all says nothing about the site -- its
@@ -65,10 +105,15 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
  * solverBackup.test.ts reads the backup's connection error.
  */
 async function solveNow(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
+  let site: string | null = null;
+  try { site = new URL(url).origin; } catch { /* asked as it is, and remembered under nothing */ }
   const failed: Array<{ error: Error; said: boolean; busy?: boolean }> = [];
-  for (const solver of solvers()) {
+  for (const solver of askingOrder(site)) {
     const a = await ask(solver, cmd, url, postData);
-    if ('solution' in a) return a.solution;
+    if ('solution' in a) {
+      if (site !== null) lastWon.set(site, { solver, at: Date.now() });
+      return a.solution;
+    }
     failed.push(a);
   }
   // A busy solver before a connection error (SOLVER_BUSY, below): it is the one that names no site.
@@ -93,14 +138,17 @@ export const SOLVER_BUSY = 'flaresolverr: solver busy (every one of its browsers
 const BUSY_RETRIES = 2;
 
 /**
- * Test seam: how long one solver may take with one request before it counts as not answering (the backup is next), and
- * the pause before a busy solver is asked again (doubled the second time).
+ * Test seam: how long one solver may take with one request before it counts as not answering (the backup is next), the
+ * pause before a busy solver is asked again (doubled the second time), and how long the solver that answered a site
+ * last is asked first (lastWon).
  */
 let attemptMs = 95_000;
 let busyWaitMs = 3_000;
-export function setSolverTiming(t: { attemptMs?: number; busyWaitMs?: number }): void {
+let rememberMs = 6 * 60 * 60_000;
+export function setSolverTiming(t: { attemptMs?: number; busyWaitMs?: number; rememberMs?: number }): void {
   if (t.attemptMs !== undefined) attemptMs = t.attemptMs;
   if (t.busyWaitMs !== undefined) busyWaitMs = t.busyWaitMs;
+  if (t.rememberMs !== undefined) rememberMs = t.rememberMs;
 }
 
 async function ask(solver: string, cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Asked> {
@@ -130,7 +178,8 @@ async function ask(solver: string, cmd: 'request.get' | 'request.post', url: str
   const s: Solution = j.solution;
   try {
     const origin = new URL(s.url || url).origin;
-    sessions.set(origin, { cookie: (s.cookies || []).map((c) => `${c.name}=${c.value}`).join('; '), userAgent: s.userAgent });
+    sessions.set(jarKey(solver, origin), { cookie: (s.cookies || []).map((c) => `${c.name}=${c.value}`).join('; '), userAgent: s.userAgent });
+    solvedBy.set(origin, solver);
   } catch {}
   return s.response ? { solution: s } : { error: emptyBody(s, url), said: true };
 }
@@ -176,7 +225,7 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
   // Only the side effect matters here: `solve` stores the cookie jar before it returns, so an empty body
   // (which now throws) has still given us what we came for. Before `cfGet` could throw this was a bare
   // await, and letting it throw now would fail image downloads that used to succeed.
-  if (!sessions.has(origin) && Date.now() - (unsolvable.get(origin) || 0) > RESOLVE_AFTER_MS) {
+  if (!sessionOf(origin) && Date.now() - (unsolvable.get(origin) || 0) > RESOLVE_AFTER_MS) {
     // The origin ROOT is the cheap way in and works for a normal site. An image CDN is not a normal site:
     // `imgs-2.2xstorage.com/` and `storage.waitst.com/` both answer 403 with an access-denied page, which
     // FlareSolverr reports as a block, so `solve` threw BEFORE caching anything. The session was therefore
@@ -185,10 +234,11 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
     //
     // So fall back to the URL we are actually about to fetch. That one exists, so it can be solved.
     await cfGet(`${origin}/`).catch(() => cfGet(url)).catch(() => {});
-    if (sessions.has(origin)) unsolvable.delete(origin);
+    if (sessionOf(origin)) unsolvable.delete(origin);
     else unsolvable.set(origin, Date.now());
   }
-  return sessions.get(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
+  // One solver's pair, whole: the one that solved this origin last (`solvedBy`).
+  return sessionOf(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
 }
 
 /**
@@ -203,10 +253,15 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
  * ⚠️ In-process state only. The app has no access to the solver container (or any container) and must
  * never get any: that is a security boundary, not a missing feature. A solver that is genuinely wedged is
  * for the operator's `docker restart`; this resets only what THIS process remembers about it.
+ *
+ * v0.55.4: both solvers' -- every (solver, origin) pair is counted and cleared -- and which solver answered each site
+ * last, so the next request starts from the main again (an operator who restarted the main has it back at once).
  */
 export function resetSolverSessions(): { sessions: number; unsolvable: number } {
   const out = { sessions: sessions.size, unsolvable: unsolvable.size };
   sessions.clear();
+  solvedBy.clear();
+  lastWon.clear();
   unsolvable.clear();
   return out;
 }

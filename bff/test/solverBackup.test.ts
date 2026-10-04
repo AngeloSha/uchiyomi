@@ -92,9 +92,10 @@ test('a main that answers with an error: the same request goes to the backup, on
   assert.equal(backup.asked[0], main.asked[0], 'with exactly the request the main was sent');
   assert.deepEqual(JSON.parse(backup.asked[0]), { cmd: 'request.get', url: 'https://site.example/manga/a/', maxTimeout: 60000 });
 
-  // A POST (madara's chapter list) goes the same way, its empty body and all.
-  await cfPost('https://site.example/manga/a/ajax/chapters/', '');
-  assert.deepEqual(JSON.parse(backup.asked[1]), { cmd: 'request.post', url: 'https://site.example/manga/a/ajax/chapters/', postData: '', maxTimeout: 60000 });
+  // A POST (madara's chapter list) goes the same way, its empty body and all. Another site: this one's answer is now
+  // the backup's to give first (the next test but one).
+  await cfPost('https://post.example/manga/a/ajax/chapters/', '');
+  assert.deepEqual(JSON.parse(backup.asked[1]), { cmd: 'request.post', url: 'https://post.example/manga/a/ajax/chapters/', postData: '', maxTimeout: 60000 });
   assert.equal(backup.asked[1], main.asked[1]);
 });
 
@@ -106,26 +107,27 @@ test('a main that cannot be reached, does not answer in time, answers something 
   const backup = await fakeSolver('backup');
   setSolverTiming({ attemptMs: 400 });
 
+  // A site each: the backup that answered one is asked first for it after (the per-site memory, below).
   use(NOWHERE, backup.url);
-  assert.equal(await cfGet('https://site.example/unreachable'), '<html>backup</html>', 'a main nothing listens at');
+  assert.equal(await cfGet('https://unreachable.example/'), '<html>backup</html>', 'a main nothing listens at');
 
   const hangs = await fakeSolver('hangs');
   hangs.reply = () => ({ hang: true });
   use(hangs.url, backup.url);
   const t0 = Date.now();
-  assert.equal(await cfGet('https://site.example/slow'), '<html>backup</html>', 'a main that never answers');
+  assert.equal(await cfGet('https://slow.example/'), '<html>backup</html>', 'a main that never answers');
   assert.ok(Date.now() - t0 < 5_000, 'it was given up on after its attempt\'s time');
   assert.equal(hangs.asked.length, 1);
 
   const proxy = await fakeSolver('proxy');
   proxy.reply = () => ({ status: 502, raw: '<html><body>502 Bad Gateway</body></html>' });
   use(proxy.url, backup.url);
-  assert.equal(await cfGet('https://site.example/proxied'), '<html>backup</html>', 'a main whose answer is not its JSON');
+  assert.equal(await cfGet('https://proxied.example/'), '<html>backup</html>', 'a main whose answer is not its JSON');
 
   const empty = await fakeSolver('empty');
   empty.reply = (b) => ({ json: solved(b.url, '') });
   use(empty.url, backup.url);
-  assert.equal(await cfGet('https://site.example/empty'), '<html>backup</html>', 'a main that answers an empty page');
+  assert.equal(await cfGet('https://empty.example/'), '<html>backup</html>', 'a main that answers an empty page');
   assert.equal(backup.asked.length, 4, 'the backup answered all four');
 });
 
@@ -199,7 +201,7 @@ test("a solver's own 429 is busy: it is asked again, twice, a moment apart, then
   // Busy for a moment only: the second try answers, and the backup is not needed.
   let tries = 0;
   main.reply = (b) => (++tries === 1 ? busy() : { json: solved(b.url, '<html>main</html>') });
-  assert.equal(await cfGet('https://site.example/busy-once'), '<html>main</html>');
+  assert.equal(await cfGet('https://busy-once.example/'), '<html>main</html>');
   assert.equal(backup.asked.length, 1, 'the backup was not asked');
 });
 
@@ -228,4 +230,81 @@ test('a solver still busy fails in our own words: no cooldown and no rate limit 
 
   // The SITE's 429 is the site's: trawl says it in its own answer, and classify() reads a rate limit there, as ever.
   assert.equal(classify(new Error('flaresolverr: Tier 3 failed (http-429). Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.')), 'rate_limited');
+});
+
+// ---- per site: the solver that answered last, and its own cookies -------------------------------------------------
+
+const sleep = (ms: number) => new Promise((go) => setTimeout(go, ms));
+
+test('the solver that answered a site last is asked first, for that site only, until the memory runs out', async () => {
+  // Reintroduce the fixed order (`solvers()` for askingOrder in solveNow): the main is asked again for the walled site.
+  // Reintroduce no expiry (drop the rememberMs check): "after the memory runs out the main is asked first again" fails.
+  const { cfGet, setSolverTiming } = await load();
+  const main = await fakeSolver('main');
+  const backup = await fakeSolver('backup');
+  // The main cannot get past one site's wall; it answers every other.
+  main.reply = (b) => (new URL(b.url).hostname === 'walled.example' ? refused(TIMEOUT) : { json: solved(b.url, '<html>main</html>') });
+  use(main.url, backup.url);
+
+  assert.equal(await cfGet('https://walled.example/1'), '<html>backup</html>');
+  const mainAsked = main.asked.length;
+  assert.equal(await cfGet('https://walled.example/2'), '<html>backup</html>');
+  assert.equal(main.asked.length, mainAsked, 'the backup, which answered this site last, was asked first');
+  assert.equal(await cfGet('https://open.example/1'), '<html>main</html>', 'another site still goes to the main first');
+  assert.equal(main.asked.length, mainAsked + 1);
+
+  setSolverTiming({ rememberMs: 30 });
+  await sleep(60);
+  assert.equal(await cfGet('https://walled.example/3'), '<html>backup</html>');
+  assert.equal(main.asked.length, mainAsked + 2, 'after the memory runs out the main is asked first again');
+
+  // The one remembered fails and the other answers: that one is remembered instead.
+  setSolverTiming({ rememberMs: 60_000 });
+  backup.reply = () => refused(BLOCKED);
+  main.reply = (b) => ({ json: solved(b.url, '<html>main</html>') });
+  assert.equal(await cfGet('https://walled.example/4'), '<html>main</html>', 'the backup was asked first and failed; the main answered');
+  const backupAsked = backup.asked.length;
+  assert.equal(await cfGet('https://walled.example/5'), '<html>main</html>');
+  assert.equal(backup.asked.length, backupAsked, 'the main answered last, so it is asked first now');
+});
+
+test("an image fetch sends the cookie and user agent of the solver that solved its origin, one solver's pair whole", async () => {
+  // A cf_clearance is good only with the user agent (and address) of the browser that earned it.
+  const { cfGet, cfSession } = await load();
+  const main = await fakeSolver('main');
+  const backup = await fakeSolver('backup');
+  const pair = (who: string) => (b: any): Reply => ({ json: solved(b.url, `<html>${who}</html>`, { cookies: [{ name: 'cf_clearance', value: who }], userAgent: `UA-${who}` }) });
+  main.reply = (b) => (new URL(b.url).hostname === 'cdn-b.example' ? refused(TIMEOUT) : pair('main')(b));
+  backup.reply = pair('backup');
+  use(main.url, backup.url);
+
+  await cfGet('https://cdn-a.example/page');
+  await cfGet('https://cdn-b.example/page');
+  assert.deepEqual(await cfSession('https://cdn-a.example/1.jpg'), { cookie: 'cf_clearance=main', userAgent: 'UA-main' }, 'the main solved this one');
+  assert.deepEqual(await cfSession('https://cdn-b.example/1.jpg'), { cookie: 'cf_clearance=backup', userAgent: 'UA-backup' }, 'the backup solved that one');
+
+  // The main cannot solve cdn-a any longer and the backup does: from then on its images go with the backup's pair.
+  main.reply = () => refused(TIMEOUT);
+  await cfGet('https://cdn-a.example/page-2');
+  assert.deepEqual(await cfSession('https://cdn-a.example/2.jpg'), { cookie: 'cf_clearance=backup', userAgent: 'UA-backup' });
+});
+
+test("the reset clears both solvers' jars and which solver answered each site, and the main is asked first again", async () => {
+  // Reintroduce one jar per origin (drop the solver from jarKey): two solvers' pairs for one site count as one. Leave
+  // `lastWon` alone in resetSolverSessions: the backup is still asked first after the reset.
+  const { cfGet, resetSolverSessions } = await load();
+  resetSolverSessions();
+  const main = await fakeSolver('main');
+  const backup = await fakeSolver('backup');
+  use(main.url, backup.url);
+  await cfGet('https://both.example/1');                 // the main solves it
+  main.reply = () => refused(TIMEOUT);
+  await cfGet('https://both.example/2');                 // the main fails it and the backup solves it
+  assert.deepEqual(resetSolverSessions(), { sessions: 2, unsolvable: 0 }, "both solvers' pairs for the site, counted and cleared");
+
+  main.reply = (b) => ({ json: solved(b.url, '<html>main</html>') });
+  const mainAsked = main.asked.length;
+  assert.equal(await cfGet('https://both.example/3'), '<html>main</html>', 'after the reset the main is asked first again');
+  assert.equal(main.asked.length, mainAsked + 1);
+  assert.equal(backup.asked.length, 1, 'and the backup not at all');
 });
