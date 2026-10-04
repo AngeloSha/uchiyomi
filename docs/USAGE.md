@@ -2212,8 +2212,9 @@ counts the rest, so a notice from a site that lists no page counts is downloaded
 hidden from then on.
 
 Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
-rescan. Any that were never downloaded are fetched at the next check. Because the chapter count goes up when
-they reappear, those series can show as having new chapters.
+rescan. Any that were never downloaded are fetched at the next check. **Updates** keeps counting only what came
+since you last looked: switching a type on does not swallow a favourite's next chapter, switching it off does
+not announce its old notices as new, and a notice stops being new once its pages are counted.
 
 **Which type a series is** is worked out from, most trusted first:
 

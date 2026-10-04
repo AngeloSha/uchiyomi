@@ -81,15 +81,31 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1, $1, 'x', 'user', 'password') RETURNING id`, [USER]))[0].id;
 
   const app = Fastify();
+  await app.register((await import('@fastify/cookie')).default);
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register((await import('@fastify/rate-limit')).default, { global: false });
   app.setErrorHandler((err: any, _req: any, reply: any) => {
     if (err instanceof ZodError) return reply.code(400).send({ error: 'bad_request' });
     return reply.code(err.statusCode || 500).send({ error: err.message || 'error' });
   });
   await app.register((await import('../src/routes/opds')).default);
+  await app.register((await import('../src/routes/catalog')).default);
   await app.ready();
   const opds = { authorization: basic(USER, await auth.issueOpdsToken(uid)) };
-  const get = (url: string, headers: Record<string, string>) => app.inject({ method: 'GET', url, headers });
+  const asUser = { authorization: `Bearer ${app.jwt.sign({ sub: uid, role: 'user' })}` };
+  let seq = 0;
+  const get = (url: string, headers: Record<string, string>) =>
+    app.inject({ method: 'GET', url, headers, remoteAddress: `10.82.0.${++seq & 255}` });
+  /** A chapter landing as a scan lands it: the row, and the series' stored count of rows. */
+  const land = async (id: string, n: number, pages: number) => {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root) VALUES ($1, $2, 'T!nts', $3, $4, NULL, $5, $6)`,
+      [id, S, `${id}.cbz`, n, pages, join(TMP, 'lib')]);
+    await q(`UPDATE lib_series SET books_count = books_count + 1 WHERE id = $1`, [S]);
+  };
+  const unland = async (ids: string[]) => {
+    const gone = await q(`DELETE FROM lib_books WHERE id = ANY($1) RETURNING id`, [ids]);
+    await q(`UPDATE lib_series SET books_count = books_count - $2 WHERE id = $1`, [S, gone.length]);
+  };
 
   try {
     await t.test('OPDS: off, the chapter feed is v0.55.1\'s -- every chapter, by the number on the file; on, the notice goes', async () => {
@@ -104,6 +120,45 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
       const on = await get(`/opds/series/${S}`, opds);
       assert.deepEqual(feedIds(on.body), ['b_nts_1', 'b_nts_2', 'b_nts_3', 'b_nts_9'], 'the two-page 2.5 is still in the OPDS feed');
       await hide([]);
+    });
+
+    await t.test('Updates count real chapters across a switch, in chapter rows on both sides', async () => {
+      await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1, $2)`, [uid, S]);
+      const updates = async () => (await get('/api/updates', asUser)).json().content.map((u: any) => [u.series.id, u.newCount]);
+      const markSeen = async () => assert.equal((await app.inject({ method: 'POST', url: '/api/updates/seen', headers: asUser })).statusCode, 200);
+      try {
+        // Seen with the type switched on, then switched off: the two-page 2.5 is old, not new. Reintroduce the
+        // count a reader sees (booksCount) in series_seen: it is announced as one new chapter.
+        await hide(['manhwa']);
+        await markSeen();
+        assert.deepEqual(await updates(), []);
+        await hide([]);
+        assert.deepEqual(await updates(), [], 'switching the hide off announced an old notice as new');
+        // Seen with it off, then switched on: the favourite's next chapter is new. Reintroduced, the seen count stands
+        // above what is left and swallows it -- the favourite drops out of Updates.
+        await markSeen();
+        await hide(['manhwa']);
+        assert.deepEqual(await updates(), []);
+        await land('b_nts_4', 4, 20);
+        assert.deepEqual(await updates(), [[S, 1]], "the hide swallowed a favourite's next chapter");
+        const home = (await get('/api/home', asUser)).json();
+        assert.equal(home.updatesCount, 1, "Home's badge disagrees with Updates");
+        assert.equal(home.favorites.find((f: any) => f.id === S)?.yomi?.newCount, 1, "the favourite's own new count disagrees");
+        // A chapter numbered 4.5 lands before anyone has counted it: a chapter, and new, until it is counted at two
+        // pages -- then a notice, and nothing new about it. Reintroduce a plain difference of rows: it stays new.
+        await land('b_nts_45', 4.5, 0);
+        assert.deepEqual(await updates(), [[S, 2]]);
+        await q(`UPDATE lib_books SET pages = 2 WHERE id = 'b_nts_45'`);
+        assert.deepEqual(await updates(), [[S, 1]], 'a notice counted at two pages is still announced as new');
+        // Off again, nothing has been read: the uncounted 4.5 did come since, and is new again; the old 2.5 is not.
+        await hide([]);
+        assert.deepEqual(await updates(), [[S, 2]]);
+      } finally {
+        await hide([]);
+        await unland(['b_nts_4', 'b_nts_45']);
+        await q(`DELETE FROM favorites WHERE user_id = $1`, [uid]);
+        await q(`DELETE FROM series_seen WHERE user_id = $1`, [uid]);
+      }
     });
   } finally {
     await app.close();

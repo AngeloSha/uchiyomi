@@ -11,7 +11,7 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
-import { enrichSeries } from '../lib/enrich';
+import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
@@ -147,12 +147,13 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const { seriesId } = z.object({ seriesId: z.string().min(1) }).parse(req.body);
     await q('INSERT INTO favorites (user_id, series_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [uid, seriesId]);
-    // baseline the updates feed at the current chapter count so old chapters don't show as "new"
+    // baseline the updates feed at the current chapter count so old chapters don't show as "new" -- every chapter
+    // row, hidden notices included (lib/enrich.ts seenCounts)
     const s = await komga.series(vc(req), seriesId).catch(() => null);
     if (s) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`,
-        [uid, seriesId, (s as any).booksCount ?? 0],
+        [uid, seriesId, (await seenCounts([s as any])).get(seriesId) ?? 0],
       );
     }
     return reply.send({ ok: true, favorite: true });

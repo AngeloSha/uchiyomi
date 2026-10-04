@@ -17,7 +17,7 @@ import { sourceLabel } from '../lib/health';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
-import { enrichSeries, seriesSeen } from '../lib/enrich';
+import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
@@ -383,14 +383,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = favAll.filter((id) => favShown.has(id)).slice(0, 20);
     const favorites = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
 
-    // updates badge: favorites with new chapters since last seen (self-heal missing baselines)
+    // updates badge: favorites with new chapters since last seen (self-heal missing baselines). Counted in every
+    // chapter row, hidden notices included (lib/enrich.ts seenCounts), on both sides.
     const seenMap = await seriesSeen(uid, favorites.map((s) => s.id));
+    const counts = await seenCounts(favorites);
+    const since = await newSinceSeen(seenMap, counts);
     let updatesCount = 0;
     for (const s of favorites) {
       if (seenMap.has(s.id)) {
-        if ((s.booksCount ?? 0) > (seenMap.get(s.id) ?? 0)) updatesCount++;
+        if ((since.get(s.id) ?? 0) > 0) updatesCount++;
       } else {
-        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, s.booksCount ?? 0]);
+        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, counts.get(s.id) ?? 0]);
       }
     }
 
@@ -425,11 +428,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id', async (req) => {
     const { id } = req.params as { id: string };
     const series = await komga.series(vc(req), id);
-    // opening a series marks its new chapters as seen
+    // opening a series marks its new chapters as seen -- in every chapter row, hidden notices included (lib/enrich.ts
+    // seenCounts)
     await q(
       `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
        ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = EXCLUDED.seen_books_count, seen_at = now()`,
-      [userIdOf(req), id, series.booksCount ?? 0],
+      [userIdOf(req), id, (await seenCounts([series])).get(id) ?? 0],
     );
     const out: any = (await enrichSeries(req, [series]))[0];
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
@@ -521,13 +525,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = favRows.filter((id) => shown.has(id));
     const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
     const seenMap = await seriesSeen(uid, favSeries.map((s) => s.id));
+    // Counted in every chapter row, hidden notices included, on both sides (lib/enrich.ts seenCounts): a notice
+    // switch must neither swallow a favourite's next chapters nor announce its old notices as new.
+    const counts = await seenCounts(favSeries);
+    const fresh = await newSinceSeen(seenMap, counts);
     const out: { series: any; newCount: number }[] = [];
     for (const s of favSeries) {
       if (!seenMap.has(s.id)) {
-        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, s.booksCount ?? 0]);
+        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, counts.get(s.id) ?? 0]);
         continue;
       }
-      const newCount = Math.max(0, (s.booksCount ?? 0) - (seenMap.get(s.id) ?? 0));
+      const newCount = fresh.get(s.id) ?? 0;
       if (newCount > 0) out.push({ series: (await enrichSeries(req, [s]))[0], newCount });
     }
     // newest chapter date per series: source release date when stamped, else the file's mtime
@@ -548,11 +556,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
     const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
+    const counts = await seenCounts(favSeries);
     for (const s of favSeries) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
          ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = EXCLUDED.seen_books_count, seen_at = now()`,
-        [uid, s.id, s.booksCount ?? 0],
+        [uid, s.id, counts.get(s.id) ?? 0],
       );
     }
     return { ok: true };
