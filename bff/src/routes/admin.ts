@@ -663,9 +663,11 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       unstatedLang: z.string().min(1).max(35).optional(),
       /**
-       * Notice chapters (lib/noticeChapters.ts): the series types whose chapters numbered with a fraction (100.1,
-       * 100.5) are hidden everywhere and not downloaded, replaced whole. Empty is off, the default. A series' own
-       * switch (`hideNotices` on PATCH /api/admin/series/:id) outranks its type's.
+       * Notice chapters (lib/noticeChapters.ts): the series types whose notice chapters are hidden everywhere, replaced
+       * whole. A notice is numbered with a fraction (100.5) and has 3 pages or fewer, known -- a longer one, one not
+       * counted yet and a file holding a range of chapters are chapters -- and one its sources list as that short is
+       * not downloaded. Empty is off, the default. A series' own switch (`hideNotices` on PATCH
+       * /api/admin/series/:id) outranks its type's.
        */
       hideNoticeTypes: z.array(z.enum(SERIES_TYPES)).max(SERIES_TYPES.length).optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
