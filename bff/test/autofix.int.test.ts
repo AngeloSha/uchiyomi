@@ -433,8 +433,8 @@ test('Fix everything: one run over a library with something wrong on every card'
     const row = (await q(`SELECT attempts FROM chapter_failures WHERE series_id = $1 AND number = 4`, [S.nato]))[0];
     assert.equal(row?.attempts, 3, 'a 429 failure is not retried by the run');
     assert.equal(natoAsked, 0, "and nothing was fetched through the source that is rate-limiting");
-    assert.ok(run.summary.clears.some((c: any) => c.said.code === 'autofix.clears.cooldown' && c.said.params?.name === `Fix ${NATO}`),
-      `it is said to clear by itself: ${JSON.stringify(run.summary.clears)}`);
+    const cooling = run.summary.clears.filter((c: any) => c.said.code === 'autofix.clears.cooldown' && c.said.params?.name === `Fix ${NATO}`);
+    assert.equal(cooling.length, 1, `it is said to clear by itself, once, though two cards name it: ${JSON.stringify(run.summary.clears)}`);
     const failures = run.summary.needsYou.find((n: any) => n.check === 'chapter-failures');
     assert.equal(failures?.said.params?.n, 1, 'and Needs you counts only the chapter no source can download (af-down\'s)');
   });

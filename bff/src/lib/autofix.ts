@@ -1384,7 +1384,15 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const needsYou: AutofixSummary['needsYou'] = [];
   const clears: AutofixSummary['clears'] = [];
   const need = (check: string, p: Part, action: NeedsYouAction = healthKey(check)) => needsYou.push({ check, said: saidOf(p), action });
-  const clear = (p: Part, at?: string | null) => clears.push({ said: saidOf(p), ...(at ? { at } : {}) });
+  // One line per thing: a source cooling down is named by its Source health row and by its failed chapters' row, and is
+  // said once, with its cooldown's end if either knows it. Reintroduce by pushing every line: "a 429 failure is not
+  // retried by the run" in autofix.int.test.ts finds af-nato cooling down twice.
+  const clear = (p: Part, at?: string | null) => {
+    const said = saidOf(p);
+    const same = clears.find((c) => c.said.code === said.code && JSON.stringify(c.said.params ?? {}) === JSON.stringify(said.params ?? {}));
+    if (same) { if (at && !same.at) same.at = at; return; }
+    clears.push({ said, ...(at ? { at } : {}) });
+  };
   /** Findings a run did not get to (stopped, or out of time, searches, Tests or installs): the next one continues. */
   let leftover = 0;
   /** `n` findings of a card the phases named work on: a person's once all of them ran to their end, else the next run's. */
