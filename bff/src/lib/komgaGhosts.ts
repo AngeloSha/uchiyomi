@@ -42,9 +42,10 @@ export const NOT_COVERED = "l.status <> 'covered'";
 
 /**
  * A notice chapter the admin hides (lib/noticeChapters.ts) is no chapter of the series, so no ghost either: Mihon
- * would list it, and the highest notice would be the total the trackers read. Reads the series as `s`.
+ * would list it, and the highest notice would be the total the trackers read. Reads the series as `s`. Built per
+ * query, not once at load: it is a constant while nothing hides.
  */
-const NOT_NOTICE = noticeShown('s', 'l.number');
+const notNotice = () => noticeShown('s', 'l.number');
 
 /**
  * Is the opt-in on?
@@ -149,7 +150,7 @@ export async function ghostBooksFor(seriesId: string): Promise<GhostBook[]> {
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${NOT_NOTICE}
+      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -187,7 +188,7 @@ export async function ghostBookById(id: string, ctx: ViewCtx): Promise<GhostBook
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND l.number = $2::real AND ${NOT_COVERED} AND ${NOT_NOTICE}
+      WHERE l.series_id = $1 AND l.number = $2::real AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -219,7 +220,7 @@ export async function ghostNumbers(seriesId: string): Promise<number[]> {
     `SELECT l.number
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${NOT_NOTICE}
+      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

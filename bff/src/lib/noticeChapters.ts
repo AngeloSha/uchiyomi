@@ -8,8 +8,8 @@
 // what the trackers are told -- and the sweep does not download new ones (lib/updater.ts). Nothing is deleted:
 // switching it off shows every one again at once, and the next sweep fetches those never downloaded.
 //
-// Off by default (an empty list and NULL everywhere): every fragment below is then false for every row, and costs
-// one uncorrelated read of server_settings per query.
+// Off by default (an empty list and NULL everywhere), and while nothing hides, nothing costs anything: every fragment
+// below is then a constant (`active`), so every query is the one the previous release ran.
 //
 // ⚠️ The ONE definition. Every query that needs the rule interpolates a fragment from here, so "which chapters
 // are notices" and "which series hide them" cannot drift apart between the chapter list and the counts. No
@@ -18,6 +18,17 @@
 //
 // Pure: no database (seriesTypeSignals.test.ts imports it). The reads that need one are lib/noticeSettings.ts.
 import { SERIES_TYPES, isSeriesType, type SeriesType } from './seriesTypeSignals';
+
+/**
+ * Does anything hide notices at all -- a type switched on, or a series switched on for itself? While nothing does, every
+ * fragment below is a constant and a query is exactly the one the previous release ran: same plan, same cost. (Not
+ * cheap otherwise: the planner prices the per-series count and the per-row EXISTS whether or not they run, which crossed
+ * jit_above_cost on the Library grid.) Kept by lib/noticeSettings.ts refreshNoticesActive, at boot and after a switch.
+ */
+let active = false;
+export const setNoticesActive = (on: boolean): void => { active = on; };
+/** The flag itself, for code that works on lists in memory and would otherwise ask the database for nothing. */
+export const noticesActive = (): boolean => active;
 
 /** Is this number a fraction? NULL is not. `real` holds 100 exactly, so floor() compares cleanly. */
 export const isFractional = (num: string): string => `(${num} IS NOT NULL AND ${num} <> floor(${num}))`;
@@ -39,28 +50,28 @@ export const hidesNotices = (s: string): string =>
  * Is a chapter of series `s`, numbered `num`, hidden? `num` must be the EFFECTIVE number (the admin's renumber
  * when there is one), as booksSrc reads it. The cheap test first: a whole number never reaches the subqueries.
  */
-export const noticeHidden = (s: string, num: string): string => `(${isFractional(num)} AND ${hidesNotices(s)})`;
+export const noticeHidden = (s: string, num: string): string => (active ? `(${isFractional(num)} AND ${hidesNotices(s)})` : 'false');
 
 /** The negation, for a WHERE that keeps what is shown. */
-export const noticeShown = (s: string, num: string): string => `NOT ${noticeHidden(s, num)}`;
+export const noticeShown = (s: string, num: string): string => (active ? `NOT ${noticeHidden(s, num)}` : 'true');
 
 /**
  * Is the lib_books row `bookId` (an SQL expression) a hidden notice? Self-contained, for queries that hold only a
  * book id: read_progress, bookmarks, history. A book id that names nothing is not hidden.
  */
-export const noticeBook = (bookId: string): string => `EXISTS (
+export const noticeBook = (bookId: string): string => (!active ? 'false' : `EXISTS (
   SELECT 1 FROM lib_books nb_nt
     JOIN lib_series ns_nt ON ns_nt.id = nb_nt.series_id
     LEFT JOIN book_overrides nov_nt ON nov_nt.book_id = nb_nt.id
    WHERE nb_nt.id = ${bookId}
-     AND ${noticeHidden('ns_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`;
+     AND ${noticeHidden('ns_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`);
 
 /**
  * Is number `num` of series `seriesId` (both SQL expressions) a hidden notice? Self-contained, for queries over
  * series_listing that hold no lib_series alias: the archive's work list.
  */
-export const noticeNumber = (seriesId: string, num: string): string => `EXISTS (
-  SELECT 1 FROM lib_series nl_nt WHERE nl_nt.id = ${seriesId} AND ${noticeHidden('nl_nt', num)})`;
+export const noticeNumber = (seriesId: string, num: string): string => (!active ? 'false' : `EXISTS (
+  SELECT 1 FROM lib_series nl_nt WHERE nl_nt.id = ${seriesId} AND ${noticeHidden('nl_nt', num)})`);
 
 /**
  * How many of series `s`'s lib_books rows are hidden notices: what lib_series.books_count -- a stored count of every
@@ -89,7 +100,7 @@ export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotic
 ) ELSE 0 END)::int`;
 
 /** books_count as a reader sees it. */
-export const visibleBookCount = (s: string): string => `GREATEST(0, ${s}.books_count - ${hiddenBookCount(s)})`;
+export const visibleBookCount = (s: string): string => (active ? `GREATEST(0, ${s}.books_count - ${hiddenBookCount(s)})` : `${s}.books_count`);
 
 /** A whole number? The JS twin of `isFractional`, for lists already in memory (the sweep, the listing). */
 export const isFractionalNumber = (n: number): boolean => Number.isFinite(n) && n !== Math.floor(n);

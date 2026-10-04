@@ -54,7 +54,7 @@ import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSour
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { sanitiseNoticeTypes } from '../lib/noticeChapters';
-import { seriesHidesNotices, hiddenCount } from '../lib/noticeSettings';
+import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
@@ -746,9 +746,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       setUnstatedLang(lang);
     }
     if (b.hideNoticeTypes !== undefined) {
-      // Read live by every query (lib/noticeChapters.ts): the next request lists, counts and sweeps by it.
+      // Read live by every query (lib/noticeChapters.ts): the next request lists, counts and sweeps by it -- once the
+      // in-process flag that says whether anything hides at all has been read again, here.
       await q('UPDATE server_settings SET hide_notice_types = $1::jsonb, updated_at = now() WHERE id = 1',
         [JSON.stringify(sanitiseNoticeTypes(b.hideNoticeTypes))]);
+      await refreshNoticesActive();
     }
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
@@ -1307,8 +1309,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     let notices: { hideNotices: boolean | null; hideNoticesEffective: boolean; hiddenNotices: number } | undefined;
     if (b.data.hideNotices !== undefined) {
       // Nothing to move: every read applies the switch as it stands (lib/noticeChapters.ts), and the next sweep
-      // fetches what it no longer hides. Answered with what applies now and how many chapters that hides.
+      // fetches what it no longer hides. Answered with what applies now and how many chapters that hides. A series'
+      // own switch alone can turn the hide on, so the flag that says whether anything hides is read again first.
       await q('UPDATE lib_series SET hide_notices = $2 WHERE id = $1', [id, b.data.hideNotices]);
+      await refreshNoticesActive();
       detail.hideNotices = b.data.hideNotices;
       const effective = await seriesHidesNotices(id);
       notices = { hideNotices: b.data.hideNotices, hideNoticesEffective: effective, hiddenNotices: effective ? await hiddenCount(id) : 0 };

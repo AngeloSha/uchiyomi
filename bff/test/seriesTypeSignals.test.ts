@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import {
   typeFromGenres, typeFromLanguage, typeFromCountry, typeFromAniListMatch, SERIES_TYPE_FROM, GENRE_TYPE_TABLE,
 } from '../src/lib/seriesTypeSignals';
-import { isFractionalNumber, sanitiseNoticeTypes, noticeHidden } from '../src/lib/noticeChapters';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  isFractionalNumber, sanitiseNoticeTypes, noticeHidden, noticeShown, noticeBook, noticeNumber, visibleBookCount, setNoticesActive,
+} from '../src/lib/noticeChapters';
 
 test('a genre naming the origin beats a Webtoon genre, whatever the order', () => {
   // The user's rule: a series tagged both is the origin one. Reintroduce by testing Webtoon first: this reads webtoon.
@@ -57,8 +61,43 @@ test('the stored list keeps known types only, once each, in order', () => {
   assert.deepEqual(sanitiseNoticeTypes(null), []);
 });
 
+test('while nothing hides, every fragment is a constant: each query is the one the previous release ran', () => {
+  // The review measured the fragments' cost with every switch off: the Library grid 9.5 -> 84 ms, Continue Reading
+  // 10 -> 118 ms, every reader page 0.47 -> 1.17 ms, because the planner prices a per-series count and a per-row EXISTS
+  // whether or not they can match. Reintroduce by dropping the `active` gate: every one of these is SQL again.
+  const off = {
+    hidden: noticeHidden('s', 'b.number'), shown: noticeShown('s', 'b.number'), book: noticeBook('b.id'),
+    number: noticeNumber('l.series_id', 'l.number'), count: visibleBookCount('s'),
+  };
+  assert.deepEqual(off, { hidden: 'false', shown: 'true', book: 'false', number: 'false', count: 's.books_count' });
+  setNoticesActive(true);
+  try {
+    // And the real thing the moment anything hides.
+    assert.match(noticeShown('s', 'b.number'), /^NOT \(/);
+    assert.match(noticeBook('b.id'), /^EXISTS \(/);
+    assert.match(noticeNumber('l.series_id', 'l.number'), /^EXISTS \(/);
+    assert.match(visibleBookCount('s'), /^GREATEST\(0, s\.books_count - /);
+  } finally {
+    setNoticesActive(false);
+  }
+});
+
+test('the server reads whether anything hides before it serves a request', () => {
+  // Off at boot whatever the database says, a restarted server would show every notice chapter until somebody
+  // flipped a switch. Reintroduce by dropping the call from main(): this finds no refresh before listen().
+  const src = readFileSync(join(__dirname, '..', 'src', 'server.ts'), 'utf8');
+  const main = src.slice(src.indexOf('async function main()'));
+  const at = main.indexOf('await refreshNoticesActive()');
+  assert.ok(at > 0 && at < main.indexOf('.listen('), 'main() does not refresh the notice flag before listening');
+});
+
 test('the SQL fragment tests the fraction before it reads any setting, and binds nothing', () => {
-  const sql = noticeHidden('s', 'b.number');
-  assert.ok(sql.indexOf('floor(b.number)') < sql.indexOf('server_settings'), 'the cheap test must come first');
-  assert.doesNotMatch(sql, /\$\d/, 'a fragment interpolated into hand-numbered queries must not bind');
+  setNoticesActive(true);
+  try {
+    const sql = noticeHidden('s', 'b.number');
+    assert.ok(sql.indexOf('floor(b.number)') < sql.indexOf('server_settings'), 'the cheap test must come first');
+    assert.doesNotMatch(sql, /\$\d/, 'a fragment interpolated into hand-numbered queries must not bind');
+  } finally {
+    setNoticesActive(false);
+  }
 });

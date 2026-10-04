@@ -344,8 +344,9 @@ function sortSql(sort?: string, perUser = false): string {
  * per-user filter or sort is actually asked for, so the ordinary "everything, A to Z" query is unchanged.
  *
  * userId is always $1 when present, because condSql pushes its own parameters as it walks the tree.
+ * Built per query, not once: the notice fragment in it is a constant while nothing hides (lib/noticeChapters.ts).
  */
-const MINE_CTE = `WITH mine AS (
+const mineCte = () => `WITH mine AS (
   SELECT series_id,
          count(*) FILTER (WHERE completed)::int     AS done,
          count(*) FILTER (WHERE NOT completed)::int AS started,
@@ -600,7 +601,7 @@ export const owned = {
    * enrichSeries runs after LIMIT/OFFSET, so post-filtering would return short pages, a totalElements that
    * disagrees with them, and an infinite scroll that stops early.
    *
-   * MINE_CTE needs the user id as $1, so it is pushed before anything else and the visibility predicate
+   * mineCte needs the user id as $1, so it is pushed before anything else and the visibility predicate
    * follows. Nothing here counts placeholders by hand.
    */
   searchSeries: async (ctx: ViewCtx, body: any, pg = 0, size = 40, sort?: string) => {
@@ -608,8 +609,8 @@ export const owned = {
     const wantsUser = !!ctx.userId
       && (collapse || JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite/i.test(sort || ''));
     const p = new Params();
-    const cte = wantsUser ? MINE_CTE : '';
-    if (wantsUser) p.add(ctx.userId); // MINE_CTE reads $1
+    const cte = wantsUser ? mineCte() : '';
+    if (wantsUser) p.add(ctx.userId); // mineCte reads $1
     const src = browseSrc(ctx, p);
     const from = wantsUser
       ? `${src} LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id`

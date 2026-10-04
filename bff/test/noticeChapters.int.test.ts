@@ -257,6 +257,20 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       assert.equal((await get('/api/books/b_nt_1005', asMember)).statusCode, 200);
     });
 
+    await t.test("a series' own switch alone turns the hide on, and nothing hides once it is back", async () => {
+      // Every type off: the queries are the previous release's (lib/noticeChapters.ts `active`) until something hides.
+      const { noticesActive } = await import('../src/lib/noticeChapters');
+      assert.equal(noticesActive(), false, 'with every switch off the fragments must be constants');
+      const on = await app.inject({ method: 'PATCH', url: `/api/admin/series/${MG}`, headers: asAdmin, payload: { hideNotices: true } });
+      assert.equal(on.statusCode, 200, on.body);
+      // Reintroduce by dropping refreshNoticesActive after the series PATCH (routes/admin.ts): 1.5 is still listed.
+      assert.deepEqual(await numbers(MG), [1], "a series' own switch hid nothing while every type was off");
+      assert.equal(noticesActive(), true);
+      await app.inject({ method: 'PATCH', url: `/api/admin/series/${MG}`, headers: asAdmin, payload: { hideNotices: null } });
+      assert.deepEqual(await numbers(MG), [1, 1.5]);
+      assert.equal(noticesActive(), false, 'nothing hides any more, so the fragments must be constants again');
+    });
+
     await t.test('the type can be set by hand and cleared back to automatic', async () => {
       const put = (body: Record<string, unknown>) => app.inject({ method: 'PUT', url: `/api/admin/series/${HW}/meta`, headers: asAdmin,
         payload: { title: null, summary: null, author: null, status: null, genres: null, ...body } });
