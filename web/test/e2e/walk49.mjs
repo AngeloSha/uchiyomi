@@ -126,10 +126,21 @@
 //   Library's Main source "No source", which shows exactly the series with no main source, with src=- in the address
 //   that a reload keeps.
 //
+//   filenames -- v0.55.2, #150, on a plain up.sh stack with LIB naming its library folder (filenamesWalk.mjs): at 1280,
+//   390 and 390 in Arabic, a folder collected by hand -- `Batman #12 (1987)`, `Vol 3 Chapter 12`, `Watchmen (1986)`,
+//   `Batman 01-07`, `Chapter 12 - Episode #5` -- scanned: the series page says 12, 12, 0, "Ch. 1–7" and 12, Health's
+//   gaps name 8 to 11 and nothing the range holds, reading the range in the reader takes Mihon's read-up-to to 7, and a
+//   rescan changes nothing.
+//
+//   noticechapters -- v0.55.2, #147, on a plain up.sh stack with LIB (noticeChaptersWalk.mjs): at 1280, 390 and 390 in
+//   Arabic, Admin -> Settings -> Notice chapters switches Manhwa on and a hand-collected manhwa's two-page 2.5 leaves
+//   the series page, the reader and every count while its twenty-page 3.5 stays; switched off, all of it is back; and
+//   the Library grid's request takes as long off as it did before the switch was ever on.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   libraries, nosource, replace, autofix, engine. The engine phase resets the fake engine and takes it down, so nothing that needs it can follow; a
-//   sources run that stops half-way leaves fake-a's search failing, which only the engine phase then meets, and it
-//   never searches.
+//   libraries, nosource, filenames, noticechapters, replace, autofix, engine. The engine phase resets the fake engine
+//   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
+//   failing, which only the engine phase then meets, and it never searches.
 //
 // Screenshots go to $OUT (default shots49). LOOK at them: every check here is geometry, and geometry passes on
 // a card that is transparent, clipped or unreadable.
@@ -172,7 +183,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'replace', 'autofix', 'engine'];
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1416,6 +1427,16 @@ try {
   if (PHASES.includes('nosource')) {
     const { noSourceWalk } = await import('./librariesWalk.mjs');
     await noSourceWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
+  }
+  // v0.55.2: #150, chapter numbers from the names of a library collected by hand, and #147, notice chapters
+  // (filenamesWalk.mjs, noticeChaptersWalk.mjs; a plain up.sh stack, and LIB naming its library folder).
+  if (PHASES.includes('filenames')) {
+    const { filenamesWalk } = await import('./filenamesWalk.mjs');
+    await filenamesWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN, lib: process.env.LIB });
+  }
+  if (PHASES.includes('noticechapters')) {
+    const { noticeChaptersWalk } = await import('./noticeChaptersWalk.mjs');
+    await noticeChaptersWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN, lib: process.env.LIB });
   }
   // v0.54.0: Replace a source, Make main, Turn off all and the old tabs' addresses (replaceWalk.mjs; up.sh with
   // E2E_ENGINE=fake E2E_FAKE_EXTRA=v54, and E2E_NET on this command). Before engine, which takes the engine down.
