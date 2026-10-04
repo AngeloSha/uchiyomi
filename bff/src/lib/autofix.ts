@@ -60,7 +60,7 @@ import { extensionFacts, listExtensions, setExtensionState, sourcesOfExtension, 
 import { downloadsPerDay, rankPackages } from './extensionRank';
 import { seriesIsAdult } from './sourceHunt';
 import { adoptExtensionSources, getHiddenLangs, setSourcesEnabled } from './sources/suwayomi/langs';
-import { wouldFit } from './sources/suwayomi/register';
+import { lastSuwayomiLoad, leftOutByLimit, retrySuwayomiNow, wouldFit } from './sources/suwayomi/register';
 import { ourSolverUrl } from './sources/suwayomi/engineSolver';
 import { connectEngineSolver, engineProbe } from './extensionEngine';
 import { extensionEngineCheck } from './engineHealth';
@@ -574,6 +574,16 @@ export async function autofixRun(id: string): Promise<AutofixRun | null> {
 async function preflight(a: Run): Promise<void> {
   now(a, say('autofix.now.checking'));
   a.engine = !suwayomiConfigured() ? 'none' : (await engineProbe().catch(() => ({ reachable: false }))).reachable ? 'up' : 'down';
+  // An engine that answers, with no registration since it came back (the retry waits up to five minutes): its sources
+  // are registered first, as Check again does (v0.55.1). Every engine source this run finds not loaded is read against
+  // the last registration -- the source limit only when that left it out (register.ts leftOutByLimit), else it is no
+  // longer installed -- and without one every extension source reads as gone: Replaced, and its series sent to the
+  // extensions phase. Reintroduce by not registering: "an engine that answers with no registration since" in
+  // autofixUnloaded.int.test.ts finds the series moved off its working source.
+  if (a.engine === 'up' && !lastSuwayomiLoad()?.reachable) {
+    const r = await retrySuwayomiNow().catch(() => null);
+    if (!r?.reachable) a.engine = 'down';
+  }
   a.solver = !solverUrl() ? 'none' : (await solverPing().catch(() => ({ ok: false }))).ok ? 'up' : 'down';
   if (a.solver === 'down') note(a, say('autofix.item.skipped', { why: 'solver_down' }));
   if (a.engine === 'down') note(a, say('autofix.item.skipped', { why: 'engine_down' }));
@@ -747,7 +757,7 @@ async function sources(a: Run): Promise<void> {
 }
 
 /** Why a main source that cannot update its series is left to a person: a setting, never the site. Null: Replace it. */
-type MainFacts = { id: string; name: string; n: number; standing: string; offBy: string | null; enabledRow: boolean };
+type MainFacts = { id: string; name: string; n: number; standing: string; offBy: string | null };
 function configCause(a: Run, m: MainFacts): string | null {
   if (m.standing === 'off') return m.offBy === 'language' ? 'language' : null;
   if (m.standing === 'failing') return null;
@@ -755,7 +765,12 @@ function configCause(a: Run, m: MainFacts): string | null {
   // removed site), which Replace is for.
   if (isSwAdapterId(m.id) && a.engine !== 'up') return 'engine';
   if (mangadexLangOf(m.id)) return 'mangadex';
-  if (isSwAdapterId(m.id) && m.enabledRow) return 'limit';
+  // The limit only when the last registration left this source out for want of room (v0.55.1), as Health reads it
+  // (lib/health.ts frozenSeries): switched on and not loaded alone is also an extension the engine no longer offers --
+  // "no longer installed" on Health, with Replace -- which this left on its source as a setting, run after run.
+  // Reintroduce v0.55.0's reading (switched on here: the limit): "a source the engine no longer offers is Replaced" in
+  // autofixUnloaded.int.test.ts finds no Replace of it.
+  if (leftOutByLimit(m.id)) return 'limit';
   return null;
 }
 
@@ -767,10 +782,8 @@ async function mainFacts(a: Run): Promise<MainFacts[]> {
   if (!mains.length) return [];
   const ids = mains.map((m) => m.source_id);
   const rows = await standingRows(ids);
-  const extra = new Map((await q<{ id: string; off_by: string | null; enabled_row: boolean }>(
-    `SELECT i.id, ${EXTENSION_OFF_BY('i.id')} AS off_by,
-            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE '${SW_PREFIX}' || ss.source_id = i.id AND ss.enabled) AS enabled_row
-       FROM unnest($1::text[]) AS i(id)`, [ids]).catch(() => [])).map((r) => [r.id, r]));
+  const extra = new Map((await q<{ id: string; off_by: string | null }>(
+    `SELECT i.id, ${EXTENSION_OFF_BY('i.id')} AS off_by FROM unnest($1::text[]) AS i(id)`, [ids]).catch(() => [])).map((r) => [r.id, r]));
   const names = new Map((await q<{ id: string; name: string }>(
     `SELECT '${SW_PREFIX}' || source_id AS id, name FROM suwayomi_sources WHERE '${SW_PREFIX}' || source_id = ANY($1::text[])`, [ids]).catch(() => []))
     .map((r) => [r.id, r.name]));
@@ -780,7 +793,7 @@ async function mainFacts(a: Run): Promise<MainFacts[]> {
     if (standing !== 'off' && standing !== 'failing' && standing !== 'not_loaded') continue;
     out.push({
       id: m.source_id, name: getSource(m.source_id)?.name ?? names.get(m.source_id) ?? m.source_id, n: Number(m.n), standing,
-      offBy: extra.get(m.source_id)?.off_by ?? null, enabledRow: !!extra.get(m.source_id)?.enabled_row,
+      offBy: extra.get(m.source_id)?.off_by ?? null,
     });
   }
   // The most series first: one Replace moves the most.
@@ -995,6 +1008,8 @@ async function extensionTargets(a: Run): Promise<Target[]> {
   for (const [list, kind] of [[ids, 'frozen'], [gaps.map((g) => g.id), 'gap']] as const) {
     for (const id of list) {
       const r = byId.get(id);
+      // Once, as its frozen self: a series with no working source can have a gap nobody had too. Reintroduce by listing
+      // it twice: "the package is asked about it once" in autofixUnloaded.int.test.ts finds a second Find run.
       if (!r || out.some((t) => t.id === id)) continue;
       const lang = (await seriesLanguage(id).catch(() => null))?.lang;
       // A series in a language the admin hides is theirs to decide: switching one of its sources on would undo it.

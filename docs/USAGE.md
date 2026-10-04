@@ -1515,7 +1515,9 @@ without you pressing anything. Since v0.48.3:
     tried for the same series again for a month. The end says it in one line: *Tried 14 extensions and kept Ember
     Pages*. A site that asked Uchiyomi to slow down is not broken (since v0.55.1): the run never replaces it, never
     moves a series onto a source that cannot update it, and leaves the chapters a rate limit holds back to clear by
-    themselves. Merges and deletes cannot be undone. While it
+    themselves. A source the extension source limit left out keeps its series too (it needs a slot, which the end lists
+    under what needs you), while one the engine no longer offers is replaced like any broken source (since v0.55.1).
+    Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says
     *Fixing everything*, and so does its card under Library → Downloads → *Server tasks*. At the end it says how
