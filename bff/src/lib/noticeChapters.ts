@@ -69,7 +69,7 @@ export const listedPages = (copies: string): string =>
  * Never a file holding a range of chapters (v0.55.2, #150, lib/chapterRanges.ts): `Chapter 12.5-13.cbz` is a part and
  * a chapter in one file, however few its pages, and hiding it would hide chapter 13 with it. An admin's number makes
  * such a file one chapter (rangeEnd reads the override), and that chapter is judged like any other. Reintroduce by
- * dropping the range test: "a range is never a notice" in noticeRanges.int.test.ts finds the two-page 12.5-13 gone.
+ * dropping the range test: "a range is never a notice" in noticeRanges.int.test.ts finds the two-page 9.5-10 gone.
  */
 export const bookIsNotice = (b: string, ov: string): string => {
   const num = `COALESCE(${ov}.number, ${b}.number)`;

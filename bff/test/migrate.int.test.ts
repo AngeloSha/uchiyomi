@@ -640,7 +640,8 @@ test('migrate: lib_books.created_at is when a row was first scanned, and v0.55.1
   const cols = await q<{ data_type: string; column_default: string | null; is_nullable: string }>(
     `SELECT data_type, column_default, is_nullable FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'lib_books' AND column_name = 'created_at'`);
-  assert.deepEqual(cols.map((c) => [c.data_type, c.column_default, c.is_nullable]), [['timestamp with time zone', 'now()', 'NO']]);
+  assert.deepEqual(cols.map((c) => [c.data_type, c.column_default, c.is_nullable]), [['timestamp with time zone', 'now()', 'NO']],
+    'created_at is not NOT NULL DEFAULT now(): a v0.55.1 INSERT would leave it empty, or fail');
   await withClient(async (c) => {
     await c.query('BEGIN');
     try {
