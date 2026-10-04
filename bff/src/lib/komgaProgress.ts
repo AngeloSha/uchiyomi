@@ -46,8 +46,8 @@ export interface ReadProgressV2 {
  * the tracker's own MAX-based figure would mark chapter 3 read on the phone.
  *
  * ⚠️ Number-0 rule. 0 is also the protocol's "nothing read" sentinel (Komga returns 0F for an empty run), and
- * in this library number 0 is common: numFromName gives 0 to "Oneshot.cbz" / "Extra.cbz" and to anything else
- * without a digit. A run that ends on such a book cannot be expressed and reports 0 as well; Mihon then
+ * in this library number 0 is common: both name rules (lib/naming.ts) give 0 to "Oneshot.cbz" / "Extra.cbz" and
+ * to anything else without a digit, and rule 2 to a name with nothing but a year ("Watchmen (1986).cbz"). A run that ends on such a book cannot be expressed and reports 0 as well; Mihon then
  * marks its local number-0 chapters read (`chapterNumber <= 0`), which is what they are. The PUT side has the
  * matching rule (markReadUpTo).
  *

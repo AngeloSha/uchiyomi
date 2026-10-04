@@ -337,9 +337,9 @@ components:
             titleLock: { type: boolean }
             summary: { type: string }
             summaryLock: { type: boolean }
-            number: { type: string }
+            number: { type: string, description: "The display string: the chapter number, or \"1–7\" for a file holding chapters 1 to 7 (since v0.55.2)." }
             numberLock: { type: boolean }
-            numberSort: { type: number }
+            numberSort: { type: number, description: "The override-aware chapter number; a file holding a range sorts at its start." }
             numberSortLock: { type: boolean }
             releaseDate: { type: [string, "null"], description: "`yyyy-MM-dd` (the source's chapter date, else the file's time) or null." }
             releaseDateLock: { type: boolean }
@@ -370,7 +370,8 @@ components:
         LEADING run of completed chapters ordered by the override-aware number (chapters 1, 2 and 4 read
         reports 2; nothing read reports 0, and so does a run that ends on -- or starts with an unread --
         number-0 chapter); `maxNumberSort` is the highest chapter number. Mihon truncates the latter to its chapter total and derives UNREAD / READING /
-        COMPLETED from the counts.
+        COMPLETED from the counts. A file holding a range of chapters (since v0.55.2) counts its end in both: finished,
+        "Batman 01-07" ends the run at 7.
       required: [booksCount, booksReadCount, booksUnreadCount, booksInProgressCount, lastReadContinuousNumberSort, maxNumberSort]
       properties:
         booksCount: { type: integer }
@@ -2111,6 +2112,13 @@ paths:
                     items:
                       type: integer
                       minimum: 1
+                  numberEnd:
+                    type: [number, "null"]
+                    description: >-
+                      Since v0.55.2: the last chapter of a file that holds several, read from a name like
+                      "Batman 01-07 (1987).cbz"; null for one chapter, and for a file an admin gave one number.
+                      `number` and `metadata.numberSort` stay the start (1), and `metadata.number` reads the
+                      range ("1–7"). Every number from the start to the end counts as held.
         "401":
           description: Not authenticated
         "404":

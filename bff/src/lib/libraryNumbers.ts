@@ -10,8 +10,8 @@
 // Two rules, and both of them are somebody else's rule quoted rather than restated:
 //
 //   - `book_overrides.number` wins over `lib_books.number`. The raw number is DERIVED from the filename by
-//     numFromName (see the book_overrides note in lib/migrate.ts), and the override is the manual escape
-//     hatch for when that parse is wrong. A renumber that the rest of the product honours but this query
+//     the row's name rule (lib/naming.ts numberByRule; the book_overrides note in lib/migrate.ts), and the
+//     override is the manual escape hatch for when that parse is wrong. A renumber that the rest of the product honours but this query
 //     does not is a finding that cannot be cleared.
 //   - `heldBooks()` (lib/chapterCleanup.ts) decides what a tombstone means. A cleanup or Delete-files
 //     tombstone is HELD -- the bytes went on purpose and the sweep must not fetch them back every night,

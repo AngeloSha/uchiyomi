@@ -1842,11 +1842,14 @@ export default async function adminRoutes(app: FastifyInstance) {
   /**
    * Correct one chapter's number or title.
    *
-   * Chapter numbers are parsed out of filenames by numFromName(), which takes the first number it finds, so
-   * "Vol 2 Ch 5.cbz" is chapter 2. That misorders the reader and is what gets reported to a tracker.
+   * Chapter numbers are parsed out of filenames by the row's name rule (lib/naming.ts numberByRule). Rule 1,
+   * numFromName, takes the first number it finds, so a "Vol 2 Ch 5.cbz" scanned before v0.55.2 is chapter 2.
+   * That misorders the reader and is what gets reported to a tracker. A number set here on a file holding a range
+   * of chapters makes it that one chapter (lib/chapterRanges.ts).
    *
    * Deliberately one chapter at a time. A bulk re-parse with a smarter rule would renumber hundreds at once,
-   * and every renumbered chapter that is already COMPLETED changes what AniList is told. The response
+   * and every renumbered chapter that is already COMPLETED changes what AniList is told -- which is why rule 2
+   * reads only the files the scanner meets from v0.55.2 on. The response
    * reports how many people have finished this chapter so the UI can say so before the change is made
    * rather than after.
    */

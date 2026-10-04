@@ -948,6 +948,14 @@ missing placeholder. `GET /api/books/:id/download-manifest` copies the same opti
 each affected entry in `pages`, so offline readers preserve the evidence. A complete chapter has
 `missingPages: null` and no page-level `missing` keys.
 
+Since v0.55.2 every chapter object carries `numberEnd: number | null`: the last chapter of a file that holds
+several, read from a name like `Batman 01-07 (1987).cbz` (USAGE, *How a chapter's number is read*), null for one
+chapter. `number` and `metadata.numberSort` stay the start, 1 there, which is where the book sorts, and
+`metadata.number` says the whole range, `"1–7"`. An admin's number (`PUT /api/admin/books/:id/meta`) gives the file
+that one number and `numberEnd: null`. Every number from the start to the end counts as held: no gap, ghost or
+fetch is offered inside it, and finishing the file tells the trackers its end. The download manifest's `number` is
+the same display string.
+
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
 sweep, or **Check now**) that this server has no row for, each with the reason —
@@ -2272,7 +2280,8 @@ never a guessed *Ongoing*. The `status` filter runs the same table the other way
 series stored as *Completed*. On a chapter, `number`, `metadata.numberSort` and
 the progress endpoint's numbers are **one quantity**, the override-aware chapter number, unrounded: the
 extension makes it the chapter number and Mihon compares and `PUT`s it back in that unit; `metadata.number`
-is the display string. The scanlation group rides as an author with role `translator`, which the extension
+is the display string — `1–7` for a file holding chapters 1 to 7 (since v0.55.2), whose `numberSort` is its start,
+1. The progress endpoint counts such a file's end: finished, it ends the run at 7, and `maxNumberSort` reaches 7. The scanlation group rides as an author with role `translator`, which the extension
 turns back into the scanlator. `media.status` is `READY` for a chapter whose file is on the server and
 `ERROR` for a tombstone (both `READY` under *ghost chapters* below). The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
 `KomgaSeries`, `KomgaBook`, `KomgaPageDto`, `KomgaReadProgressV2` and `KomgaUser`, and
