@@ -9,7 +9,7 @@
 //   disclosure, open by itself after a Test, whose answer it is;
 // - its keys: Replace (the one filled key) while it cannot serve the series it is main to, Test with its clock, Clear
 //   block in a cooldown, Turn off / Turn on -- asking first when series use it -- and, for a site added by address,
-//   Remove;
+//   Remove; a source the engine's limit left out (v0.55.1) has no Replace, and one line on how to make room instead;
 // - "Used by 195 series ›", the Library filtered to them;
 // - what its kind has: an extension's languages, settings, Update and Remove extension (components/ExtensionSheet.tsx);
 //   MangaDex's languages (components/MangadexCard.tsx); a site's address, with Update address.
@@ -21,11 +21,12 @@ import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
+import { isDesktop } from '@/lib/desktop';
 import { diagnosisReason } from '@/lib/said';
 import { useTicker } from '@/lib/ticker';
 import { testClock, type TestAnswer } from '@/lib/sourceEvidence';
 import {
-  failingSince, libraryHref, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
+  failingSince, libraryHref, limitLine, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
   usedBy, usedByLink, type OverviewSource, type SheetKey, type SourceEvidenceRow, type SourcesOverview,
 } from '@/lib/sourcesPanel';
 import { extSourceIdOf } from '@/lib/sourcePrefs';
@@ -99,6 +100,8 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
   const row = s ? evidence.get(s.id) : undefined;
   const says = s ? sourceSays(s, failingSince(row)) : null;
   const keys = s ? sheetKeys(s, overview?.attention) : [];
+  // Not loaded because the engine's source limit is full (v0.55.1): why, and the way to room, where Replace was.
+  const limit = s ? limitLine(s, isDesktop()) : null;
   const offByAdmin = new Set((overview?.sources ?? []).filter((x) => x.kind === 'extension' && x.offBy === 'admin')
     .map((x) => extSourceIdOf(x.id)).filter((x): x is string => !!x));
 
@@ -217,6 +220,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
               <StatusMark tone={says.tone} label={says.word} size="md" />
               {says.reason && <span className="text-fog-400">— {says.reason}</span>}
             </p>
+            {limit && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-limit>{limit}</p>}
             <div className="mt-3 flex flex-wrap items-center gap-2" data-source-keys>
               {keys.includes('replace') && key('replace', tr('Replace'), () => onReplace(s), 'btn-key btn-key-primary')}
               {keys.includes('test') && key('test', busy === 'test' ? testClock(now - testFrom, testMs) : tr('Test'), test, 'btn-key', { 'data-source-test': s.id })}

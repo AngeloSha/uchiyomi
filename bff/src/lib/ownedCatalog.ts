@@ -286,6 +286,16 @@ function condSql(cond: any, params: any[], hasUser = false): string {
                  OR EXISTS (SELECT 1 FROM series_sources src_f WHERE src_f.series_id = sv.id AND src_f.source_id = $${n}))`;
     return cond.anySource.operator === 'isNot' ? `NOT ${ex}` : ex;
   }
+  // #149: whether a series has a main source at all, in Komga's boolean shape (`isTrue` / `isFalse`, no value).
+  // `isFalse` is the Library's "No source": a folder added by hand, or a series never matched to a site -- an empty
+  // `source_id`, whatever it follows. A key of its own, never `mainSource` with a magic id: a site added by address
+  // takes its id from the name the admin gives it, so any word may be a real source's id, and an older server would
+  // answer that with an empty grid where an unknown key is a 400. `sv` carries source_id (SERIES_SRC, since v0.52.0).
+  if (cond.hasMainSource && typeof cond.hasMainSource === 'object') {
+    const op = cond.hasMainSource.operator;
+    if (op !== 'isTrue' && op !== 'isFalse') throw new UnsupportedFilter(`hasMainSource:${op}`);
+    return op === 'isFalse' ? '(sv.source_id IS NULL)' : '(sv.source_id IS NOT NULL)';
+  }
 
   throw new UnsupportedFilter(Object.keys(cond).filter((k) => k !== 'operator')[0] || 'unknown');
 }
@@ -523,6 +533,19 @@ export const owned = {
          FROM used u GROUP BY u.source_id ORDER BY count(DISTINCT u.series_id) DESC, u.source_id`,
       p.values as any[],
     );
+  },
+
+  /**
+   * How many of the viewer's series have no main source (#149): the Library's "No source" chip. Counted over browseSrc
+   * like librarySources, with the search's own predicate (condSql `hasMainSource: isFalse`), so the number beside the
+   * chip is what tapping it returns. Reintroduce a predicate of its own that also asks series_sources: "the No source
+   * count is what its search returns" in sourceFilters.int.test.ts finds the series that follows a source counted out.
+   */
+  seriesWithoutSource: async (ctx: ViewCtx) => {
+    const p = new Params();
+    const src = browseSrc(ctx, p);
+    const where = condSql({ hasMainSource: { operator: 'isFalse' } }, p.values as any[]);
+    return (await one<{ n: number }>(`SELECT count(*)::int AS n FROM ${src} WHERE ${where}`, p.values as any[]))?.n ?? 0;
   },
 
   genres: async (ctx: ViewCtx) => {

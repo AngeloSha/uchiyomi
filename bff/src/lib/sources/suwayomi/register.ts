@@ -86,6 +86,19 @@ export async function usedSourceIds(): Promise<Set<string>> {
 let offered: Set<string> | null = null;
 
 /**
+ * The engine's ids of the sources the last load left out because SUWAYOMI_MAX_SOURCES was full (v0.55.1): switched on,
+ * offered, and not registered for want of room -- not broken, and nothing Replace would fix. Health's frozen check and
+ * the sources overview both read it, so the over-limit row's Free a slot lands on a sheet that says so. Empty until a
+ * load reaches the engine, and after one that does not: then no extension source is loaded, for the engine's reason.
+ */
+let leftOut = new Set<string>();
+
+/** Whether the last load left this source (`sw:<id>`) out because the source limit was full. */
+export function leftOutByLimit(adapterId: string | null | undefined): boolean {
+  return !!adapterId?.startsWith(SW_PREFIX) && leftOut.has(adapterId.slice(SW_PREFIX.length));
+}
+
+/**
  * Whether switching these engine sources on keeps every switched-on source under SUWAYOMI_MAX_SOURCES (v0.55.0), the
  * question Fix everything asks before it switches on the source of an extension it installed (lib/autofix.ts). Counted
  * as the next registration counts them: the switched-on sources the engine offered at the last load, plus these. A new
@@ -151,6 +164,8 @@ export async function loadSuwayomiSources(
 }
 
 async function load(list: () => Promise<RemoteSource[]>, quiet: boolean): Promise<LoadResult> {
+  // What this load leaves out replaces what the last one did, and a load that registers nothing leaves nothing out.
+  leftOut = new Set();
   if (!suwayomiConfigured()) return { configured: false, reachable: false, available: 0, registered: 0, skipped: 0 };
 
   let remote: RemoteSource[];
@@ -177,14 +192,17 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean): Promis
 
   let registered = 0;
   let skipped = 0;
+  const out = new Set<string>();
   for (const s of wanted) {
-    // Cap registrations rather than silently letting search fan out forever. Say what was dropped.
+    // Cap registrations rather than silently letting search fan out forever. Say what was dropped, and which.
     if (registered >= env.SUWAYOMI_MAX_SOURCES) {
       skipped++;
+      out.add(String(s.id));
       continue;
     }
     if (registerAdapter(makeSuwayomiAdapter(s))) registered++;
   }
+  leftOut = out;
   if (skipped) {
     console.warn(
       `[sources] suwayomi: registered ${registered} source(s); skipped ${skipped} over the SUWAYOMI_MAX_SOURCES limit of ${env.SUWAYOMI_MAX_SOURCES}`,

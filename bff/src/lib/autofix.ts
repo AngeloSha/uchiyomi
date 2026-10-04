@@ -120,7 +120,8 @@ export interface AutofixRun {
   phaseIndex: number;
   /** Asked to stop and winding down to its next safe point: every viewer's "Stopping…", not only the one who pressed. */
   stopping?: boolean;
-  current?: { title?: string; done?: number; of?: number; said?: Said };
+  /** "Now: …": what it is on; with a title, `seriesIds` the series the title names (since v0.55.1, for the 18+ rule). */
+  current?: { title?: string; seriesIds?: string[]; done?: number; of?: number; said?: Said };
   summary?: AutofixSummary;
   log?: Said[];
 }
@@ -166,7 +167,7 @@ interface Run {
   phase: AutofixPhase | null;
   phaseIndex: number;
   phaseMs: Partial<Record<AutofixPhase, number>>;
-  current: { title?: string; done?: number; of?: number; said?: Said } | null;
+  current: { title?: string; seriesIds?: string[]; done?: number; of?: number; said?: Said } | null;
   /** What the repair's step is on, while one runs: read live into `current`. */
   repairCur: RepairCurrent | null;
   stop: boolean;
@@ -231,8 +232,11 @@ function did(a: Run, kind: DoneKind, n: number, item?: Part): void {
     if (list.length < ITEMS_MAX) list.push(saidOf(item));
   }
 }
-/** "Now: …" -- what the run is on, with a title and how far, when it is on a list. */
-function now(a: Run, p: Part | null, extra: { title?: string; done?: number; of?: number } = {}): void {
+/**
+ * "Now: …" -- what the run is on, with a title and how far, when it is on a list. A title comes with the series it names
+ * (`seriesIds`), which is what an admin who hides 18+ is held to (scrubbed).
+ */
+function now(a: Run, p: Part | null, extra: { title?: string; seriesIds?: string[]; done?: number; of?: number } = {}): void {
   a.current = p ? { said: saidOf(p), ...extra } : null;
   a.card.current = undefined;
 }
@@ -441,10 +445,15 @@ const fromRow = (r: RunRow): AutofixRun => ({
 /** The run going now, as the routes answer it: read from memory, which is ahead of its row. */
 async function liveView(a: Run): Promise<AutofixRun> {
   const by = a.by ? (await one<{ username: string }>('SELECT username FROM users WHERE id::text = $1', [a.by]).catch(() => null))?.username ?? null : null;
-  // The repair's step, while one runs, says which series and how far: read live, as its own status route does.
+  // The repair's step, while one runs, says which series and how far: read live, as its own status route does. Its title
+  // comes with the series it names, never the phase's own (an empty list: one the 18+ rule cannot hold to a series).
   const cur = a.repairCur;
   const current = a.current
-    ? { ...a.current, ...(cur?.title ? { title: cur.title } : {}), ...(cur?.done !== undefined ? { done: cur.done } : {}), ...(cur?.of !== undefined ? { of: cur.of } : {}) }
+    ? {
+      ...a.current,
+      ...(cur?.title ? { title: cur.title, seriesIds: cur.seriesId ? [cur.seriesId] : [] } : {}),
+      ...(cur?.done !== undefined ? { done: cur.done } : {}), ...(cur?.of !== undefined ? { of: cur.of } : {}),
+    }
     : undefined;
   return {
     id: a.id, status: 'running', startedAt: new Date(a.startedAt).toISOString(), by, phase: a.phase, phaseIndex: a.phaseIndex,
@@ -455,24 +464,45 @@ async function liveView(a: Run): Promise<AutofixRun> {
 }
 
 /**
- * Said lines that name a series by its title: left out for an admin who hides 18+ (the repair history's rule for its
- * notes -- they carry no id to hold each title to the listing rule).
+ * Said lines that name a series by its title, and the "Now:" title. For an admin who hides 18+, each is held to the series
+ * it names (`seriesIds`, since v0.55.1): left out when that admin's reach hides one of them (visibility.ts nameableIds --
+ * their libraries, age cap and the 18+ switch, whatever became of the series since), kept otherwise. v0.55.0 dropped
+ * them all, adult or not. A line from before v0.55.1 carries no ids to hold its title to, and keeps that rule: left out.
  */
 const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
   'autofix.item.notRenumbered', 'autofix.item.deleted']);
-const untitled = (l: { code: string }) => !TITLED.has(l.code);
+/** The series a line or a "Now:" names: its `seriesIds`, else null -- written before v0.55.1, or naming none. */
+const namedBy = (ids: unknown): string[] | null =>
+  (Array.isArray(ids) && ids.length > 0 && ids.every((x) => typeof x === 'string' && x !== '') ? (ids as string[]) : null);
 type Scrubbable = { current?: AutofixRun['current']; log?: Said[]; summary?: AutofixSummary };
-function scrubbed<R extends Scrubbable>(r: R): R {
+function scrubbed<R extends Scrubbable>(r: R, named: ReadonlySet<string>): R {
+  // Reintroduce v0.55.0's rule (every titled line left out): "a line naming a series that is not 18+ is kept" in
+  // autofixScrub.test.ts fails, and the history in repairRoutes.int.test.ts loses the renumbered line.
+  const shown = (ids: unknown): boolean => !!namedBy(ids)?.every((id) => named.has(id));
+  const keep = (l: Said): boolean => !TITLED.has(l.code) || shown(l.params?.seriesIds);
   return {
     ...r,
-    ...(r.current ? { current: { ...r.current, title: undefined } } : {}),
-    ...(r.log ? { log: r.log.filter(untitled) } : {}),
-    ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(untitled) } : d)) } } : {}),
+    ...(r.current ? { current: shown(r.current.seriesIds) ? r.current : { ...r.current, title: undefined } } : {}),
+    ...(r.log ? { log: r.log.filter(keep) } : {}),
+    ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(keep) } : d)) } } : {}),
   };
 }
-/** A run as an admin who hides 18+ reads it (`hide`): no line that names a series, and no "Now:" title. */
-export function scrubAutofixRun(r: AutofixRun | null, hide: boolean): AutofixRun | null {
-  return r && hide ? scrubbed(r) : r;
+/**
+ * Every series a run's titled lines and its "Now:" name -- of a run, or of a kept record as the repair history reads it --
+ * what a route asks nameableIds about, in one query.
+ */
+export function autofixSeriesIds(run: unknown): string[] {
+  if (!run || typeof run !== 'object') return [];
+  const r = run as Scrubbable;
+  const lines = [...(r.log ?? []), ...(r.summary?.done ?? []).flatMap((d) => d.items ?? [])];
+  return [...lines.filter((l) => TITLED.has(l.code)).flatMap((l) => namedBy(l.params?.seriesIds) ?? []), ...(namedBy(r.current?.seriesIds) ?? [])];
+}
+/**
+ * A run as an admin who hides 18+ reads it (`hide`): no line and no "Now:" title naming a series outside `named` -- the
+ * ones their reach shows (visibility.ts nameableIds over autofixSeriesIds) -- nor one from before v0.55.1 naming any.
+ */
+export function scrubAutofixRun(r: AutofixRun | null, hide: boolean, named: ReadonlySet<string> = new Set()): AutofixRun | null {
+  return r && hide ? scrubbed(r, named) : r;
 }
 /**
  * A kept run's record (repair_runs.result: `{phaseIndex, summary?, log, tried?}`) the same way: what the repair history
@@ -480,8 +510,8 @@ export function scrubAutofixRun(r: AutofixRun | null, hide: boolean): AutofixRun
  * run by its id. Reintroduce by sending it as stored: "an admin who hides 18+ reads no adult title in the repair's
  * answers" in repairRoutes.int.test.ts finds the merged title in the history.
  */
-export function scrubAutofixRecord<R>(r: R, hide: boolean): R {
-  return r && hide && typeof r === 'object' ? scrubbed(r as Scrubbable) as R : r;
+export function scrubAutofixRecord<R>(r: R, hide: boolean, named: ReadonlySet<string> = new Set()): R {
+  return r && hide && typeof r === 'object' ? scrubbed(r as Scrubbable, named) as R : r;
 }
 
 /** GET /api/admin/health/autofix: the run going now, and the newest finished one. */
@@ -554,7 +584,7 @@ async function solver(a: Run): Promise<void> {
     for (const [i, s] of journals.entries()) {
       if (halted(a)) return;
       if (renumberRunning(s.id) || runsInside(s.id) > 0) continue;
-      now(a, say('autofix.now.solver'), { title: s.title, done: i, of: journals.length });
+      now(a, say('autofix.now.solver'), { title: s.title, seriesIds: [s.id], done: i, of: journals.length });
       await updateSeries(s.id, 0).catch(() => null);
       const still = await one<{ j: boolean }>('SELECT renumber_plan IS NOT NULL AS j FROM lib_series WHERE id = $1', [s.id]).catch(() => null);
       if (still && !still.j) did(a, 'resumedRenumber', 1);
@@ -743,7 +773,7 @@ async function duplicates(a: Run): Promise<void> {
   await held(async () => {
     for (const [i, row] of rows.entries()) {
       if (halted(a)) return;
-      now(a, say('autofix.now.duplicates'), { title: row.title, done: i, of: rows.length });
+      now(a, say('autofix.now.duplicates'), { title: row.title, seriesIds: row.seriesIds, done: i, of: rows.length });
       const ids = row.seriesIds!;
       if (row.actions?.includes('link_editions')) {
         const r = await linkPair(ids[0], ids[1]).catch(() => null);
@@ -751,7 +781,7 @@ async function duplicates(a: Run): Promise<void> {
           await logAudit('series.edition_link', {
             userId: a.by, detail: { id: r.joiner.id, title: r.joiner.title, of: r.of.id, ofTitle: r.of.title, lang: r.lang, via: 'autofix', runId: a.id },
           });
-          did(a, 'linked', 1, say('autofix.item.linked', { a: r.joiner.title, b: r.of.title }));
+          did(a, 'linked', 1, say('autofix.item.linked', { a: r.joiner.title, b: r.of.title, seriesIds: [r.joiner.id, r.of.id] }));
         }
         continue;
       }
@@ -798,7 +828,7 @@ async function mergeCopies(a: Run, ids: readonly string[]): Promise<void> {
   for (const other of copies.slice(1)) {
     if (halted(a)) return;
     if (!(await sameSeries(keep, other))) {
-      note(a, say('autofix.item.notMerged', { a: keep.title, b: other.title }));
+      note(a, say('autofix.item.notMerged', { a: keep.title, b: other.title, seriesIds: [keep.id, other.id] }));
       continue;
     }
     if (await mergeRefusal(other.id, keep.id)) continue;
@@ -806,7 +836,7 @@ async function mergeCopies(a: Run, ids: readonly string[]): Promise<void> {
     await logAudit('series.merge', {
       userId: a.by, detail: { from: other.id, fromTitle: other.title, into: keep.id, intoTitle: keep.title, ...r, via: 'autofix', runId: a.id },
     });
-    did(a, 'merged', 1, say('autofix.item.merged', { from: other.title, into: keep.title }));
+    did(a, 'merged', 1, say('autofix.item.merged', { from: other.title, into: keep.title, seriesIds: [other.id, keep.id] }));
   }
 }
 
@@ -827,10 +857,10 @@ async function numbering(a: Run): Promise<void> {
       if (halted(a)) return;
       // A download or a check inside it: not judged now, so neither applied nor a person's -- the next run's.
       if (folderBusy(s.folder) || runsInside(s.id) > 0) { a.numberingBusy++; continue; }
-      now(a, say('autofix.now.renumbering'), { title: s.title, done: i, of: rows.length });
+      now(a, say('autofix.now.renumbering'), { title: s.title, seriesIds: [s.id], done: i, of: rows.length });
       const r = await updateSeries(s.id, 0, { confirmRenumber: 'clean' }).catch(() => null);
-      if (r?.renumber?.state === 'applied') did(a, 'renumbered', 1, say('autofix.item.renumbered', { title: s.title }));
-      else note(a, say('autofix.item.notRenumbered', { title: s.title }));
+      if (r?.renumber?.state === 'applied') did(a, 'renumbered', 1, say('autofix.item.renumbered', { title: s.title, seriesIds: [s.id] }));
+      else note(a, say('autofix.item.notRenumbered', { title: s.title, seriesIds: [s.id] }));
     }
   });
 }
@@ -1158,9 +1188,11 @@ async function files(a: Run): Promise<void> {
         ids.push(...g.later.map((b) => b.id));
       }
       if (!ids.length) continue;
-      now(a, say('autofix.now.files'), { title: series.title });
+      now(a, say('autofix.now.files'), { title: series.title, seriesIds: [series.seriesId] });
       const r = await deleteChapterFiles(series.seriesId, ids, { userId: a.by, via: 'autofix', runId: a.id });
-      if ('applied' in r && r.applied) did(a, 'deletedTwice', r.applied, say('autofix.item.deleted', { title: series.title, n: r.applied }));
+      if ('applied' in r && r.applied) {
+        did(a, 'deletedTwice', r.applied, say('autofix.item.deleted', { title: series.title, n: r.applied, seriesIds: [series.seriesId] }));
+      }
     }
     // Impossible numbers: the Health check's own findings (an ignored one is left), every such chapter of each series.
     const report = await runHealthChecks().catch(() => null);
@@ -1174,9 +1206,9 @@ async function files(a: Run): Promise<void> {
         `SELECT b.id FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id
           WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2`, [it.seriesId, limit]).catch(() => []);
       if (!books.length) continue;
-      now(a, say('autofix.now.files'), { title: it.title });
+      now(a, say('autofix.now.files'), { title: it.title, seriesIds: [it.seriesId!] });
       const r = await deleteChapterFiles(it.seriesId!, books.map((b) => b.id), { userId: a.by, via: 'autofix', runId: a.id });
-      if ('applied' in r && r.applied) did(a, 'deletedOdd', r.applied, say('autofix.item.deleted', { title: it.title, n: r.applied }));
+      if ('applied' in r && r.applied) did(a, 'deletedOdd', r.applied, say('autofix.item.deleted', { title: it.title, n: r.applied, seriesIds: [it.seriesId!] }));
     }
   });
 }

@@ -384,7 +384,8 @@ test('Fix everything: one run over a library with something wrong on every card'
     const [ea, eb] = [await seriesRow(S.edA), await seriesRow(S.edB)];
     assert.ok(ea.work_id && ea.work_id === eb.work_id, 'the two languages are editions of one work now');
     const merged = run.summary.done.find((d: any) => d.kind === 'merged');
-    assert.deepEqual(merged?.items?.[0], { code: 'autofix.item.merged', params: { from: T.dupB, into: T.dupA } }, 'each merge named with both titles');
+    assert.deepEqual(merged?.items?.[0], { code: 'autofix.item.merged', params: { from: T.dupB, into: T.dupA, seriesIds: [S.dupB, S.dupA] } },
+      'each merge named with both titles, and the series they are');
   });
 
   await t.test('numbering: only a clean plan is applied', async () => {
@@ -405,6 +406,22 @@ test('Fix everything: one run over a library with something wrong on every card'
     assert.equal((await book(`b_${S.twiceMark}_5.1`)).pruned_at, null, 'a bookmarked chapter is never deleted');
     assert.ok((await book(`b_${S.oddGap}_9001`)).pruned_at, 'the impossible number went');
     assert.equal((await book(`b_${S.oddMark}_7777`)).pruned_at, null, 'unless somebody bookmarked it');
+  });
+
+  await t.test('every line that names a series carries the ids of the series it names (v0.55.1)', async () => {
+    // What an admin who hides 18+ is held to, line by line (lib/autofix.ts scrubbed): v0.55.0's lines carried titles
+    // alone, so every one of them was left out for any admin without the reveal. Reintroduce by dropping `seriesIds`
+    // from any of the six say() calls: that code's line "names a series it carries no id of".
+    const titleOf = new Map((Object.keys(S) as Array<keyof typeof S>).map((k) => [S[k], T[k]]));
+    const titled = run.log.filter((l: any) => /^autofix\.item\.(linked|merged|notMerged|renumbered|notRenumbered|deleted)$/.test(l.code));
+    const codes = new Set(titled.map((l: any) => l.code));
+    for (const c of ['linked', 'merged', 'notMerged', 'renumbered', 'notRenumbered', 'deleted']) assert.ok(codes.has(`autofix.item.${c}`), `PREMISE: the run said ${c}`);
+    for (const l of titled) {
+      const ids: unknown = l.params.seriesIds;
+      assert.ok(Array.isArray(ids) && ids.length > 0, `${l.code} names a series it carries no id of: ${JSON.stringify(l.params)}`);
+      const named = [l.params.a, l.params.b, l.params.from, l.params.into, l.params.title].filter((x) => typeof x === 'string').sort();
+      assert.deepEqual((ids as string[]).map((id) => titleOf.get(id)).sort(), named, `${l.code}: its ids are not the series its titles name`);
+    }
   });
 
   await t.test('what is left reaches Needs you, each with its key, and nothing is ignored', async () => {

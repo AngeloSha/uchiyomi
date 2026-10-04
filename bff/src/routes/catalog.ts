@@ -173,10 +173,16 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // Komga would refuse. Each source is named as Health and Providers name it (#115): the registered adapter, then
   // the name the engine gave an extension source that is not loaded now, then the id. A source that is only ever
   // followed, never a main source, read as a raw `sw:4709…` while the engine was down or the source was off.
+  // `none` (#149): the series with no main source at all, the Main source filter's "No source" -- counted over the same
+  // series as the rest. Beside `content` rather than a row of it: a row is a source, and no id can mean "none" (a site
+  // added by address takes its id from its name). Never counted on Komga, so the chip never offers a condition there.
   app.get('/api/library/sources', async (req) => {
-    if (!OWNED) return { content: [] };
-    const rows = await owned.librarySources(vc(req));
-    return { content: rows.map((r) => ({ id: r.id, name: sourceLabel(r.id, r.engine_name), main: r.main, any: r.any, installed: !!getSource(r.id) })) };
+    if (!OWNED) return { content: [], none: 0 };
+    const [rows, none] = await Promise.all([owned.librarySources(vc(req)), owned.seriesWithoutSource(vc(req))]);
+    return {
+      content: rows.map((r) => ({ id: r.id, name: sourceLabel(r.id, r.engine_name), main: r.main, any: r.any, installed: !!getSource(r.id) })),
+      none,
+    };
   });
 
   // What everyone in the household is reading (cross-user, last 14 days).

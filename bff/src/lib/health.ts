@@ -22,7 +22,7 @@ import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { mangadexLangOf } from './sources/mangadexLangs';
-import { lastSuwayomiLoad } from './sources/suwayomi/register';
+import { lastSuwayomiLoad, leftOutByLimit } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
@@ -887,12 +887,18 @@ export async function frozenSeries(
     const st = standingOf(id, mainRows.get(id), now);
     if (st === 'off' || st === 'failing') down.set(id, st);
   }
-  const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
+  const rows = await q<{
+    id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean;
+    engine_name: string | null;
+  }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
     // finding from one that is gone: the fix is a button, not a reinstall.
     `SELECT ls.id, ls.title, ls.source_id, ls.books_count,
             EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND NOT ss.enabled) AS switched_off,
-            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND ss.enabled) AS still_enabled
+            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND ss.enabled) AS still_enabled,
+            -- The engine's name for an extension source that is not registered now (sourceLabel): over the limit, switched
+            -- off, or waiting for the engine -- the sources of this check that read as sw:2522… otherwise.
+            (SELECT sn.name FROM suwayomi_sources sn WHERE 'sw:' || sn.source_id = ls.source_id LIMIT 1) AS engine_name
        FROM lib_series ls
       WHERE ls.auto_update AND ${visibleToAll('ls')}
         AND (ls.source_id IS NULL OR ls.source_series_id IS NULL OR ls.source_id NOT IN (SELECT source_id FROM suwayomi_sources WHERE enabled)
@@ -930,7 +936,10 @@ export async function frozenSeries(
   const frozen = affected.filter((r) => !followed.has(r.id));
   const covered = affected.filter((r) => followed.has(r.id));
   // Why a series' source cannot reach it. Enabled yet unregistered is the third case: dropped by
-  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see. A MangaDex language comes first
+  // SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see -- since v0.55.1 only when the last
+  // load says it left that source out (register.ts leftOutByLimit), which the sources overview reads too: switched on
+  // and unregistered alone also reads an extension the engine no longer offers as over the limit, and its Free a slot
+  // then landed on a sheet that offered Replace. A MangaDex language comes first
   // (v0.52.0): its adapter is unregistered only by switching the language off, so "no longer installed" was wrong
   // and sent the admin looking for an extension; the reason names the language and where it is switched back on.
   // A loaded main that is switched off says so as one that is unloaded does; one that is failing says whether it is
@@ -944,7 +953,9 @@ export async function frozenSeries(
     }
     const mdOff = mangadexLangOf(r.source_id);
     if (mdOff) return say('frozen.mangadexOff', { n: p.n, lang: mdOff });
-    return r.switched_off ? say('frozen.switchedOff', p) : r.still_enabled ? say('frozen.overLimit', p) : say('frozen.uninstalled', p);
+    return r.switched_off ? say('frozen.switchedOff', p)
+      : r.still_enabled && leftOutByLimit(r.source_id) ? say('frozen.overLimit', p)
+      : say('frozen.uninstalled', p);
   };
   // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
   // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
@@ -965,11 +976,16 @@ export async function frozenSeries(
   // switched off. Reintroduce by offering Replace again: "the engine being off is the reason" in health.int.test.ts
   // finds replace_source on the over-limit row.
   const overLimit = (r: typeof rows[number]): boolean =>
-    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled;
+    unrouted(r) && !engineWhy(r) && !mangadexLangOf(r.source_id) && !r.switched_off && r.still_enabled && leftOutByLimit(r.source_id);
   const keysFor = (r: typeof rows[number], actions: HealthAction[]) =>
     (overLimit(r) && r.source_id ? { sourceId: r.source_id, actions: ['free_slot'] as HealthAction[] } : sourceKeys(r, actions));
+  // v0.55.1: the source by name, as the rest of Health names it (sourceLabel): the row of a source over the limit read
+  // "its source sw:2522… is over the source limit", and a switched-off one "its source sw:4709… is switched off".
+  // Reintroduce `source: r.source_id`: "a switched-off source is said to be switched off" and "the engine is the
+  // reason" in health.int.test.ts read the id.
+  const named = (r: typeof rows[number]): string => (r.source_id ? sourceLabel(r.source_id, r.engine_name) : '');
   const found: HealthItem[] = frozen.map((r) => {
-    const p = { n: r.books_count, source: r.source_id ?? '' };
+    const p = { n: r.books_count, source: named(r) };
     return {
       seriesId: r.id,
       title: r.title,
@@ -991,8 +1007,8 @@ export async function frozenSeries(
       seriesId: r.id,
       title: r.title,
       ...detailOf([stall
-        ? say('frozen.followingDown', { source: r.source_id!, state: stall, names: followed.get(r.id)! })
-        : say('frozen.following', { source: r.source_id, names: followed.get(r.id)! })]),
+        ? say('frozen.followingDown', { source: named(r), state: stall, names: followed.get(r.id)! })
+        : say('frozen.following', { source: r.source_id ? named(r) : null, names: followed.get(r.id)! })]),
       info: true,
       ...keysFor(r, ['replace_source']),
     });

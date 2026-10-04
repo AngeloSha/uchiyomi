@@ -77,9 +77,12 @@ the left of the grid; on a phone it opens from **Filters** at the top. Genres ar
 how many series each holds, and formats (Manhwa, Manhua, Webtoon…) are kept separate from moods like Horror
 and Romance. Picking two genres shows series that are in **both**. With more than one source in the
 library, two more sections appear: **Main source** shows the series added from a source, and **Any source**
-the series that read from it at all, as their main source or a followed one. For a source that went away, an admin
-can filter by it under **Main source**, then **Select** → **Select all** → **More** → **Find other sources**
-(section 4); *Select all* takes what the grid has loaded, so scroll to the end first. Each cover shows a **NEW** ribbon when
+the series that read from it at all, as their main source or a followed one. **Main source** ends on **No source**
+(since v0.55.1, [#149](https://github.com/AngeloSha/uchiyomi/issues/149)) while some series have no main source —
+folders you added by hand, and anything never matched to a site — and then appears with a single source too. For a
+source that went away, or for the series with none, an admin can filter by it under **Main source**, then **Select** →
+**Select all** → **More** → **Find other sources** (section 4); *Select all* takes what the grid has loaded, so scroll
+to the end first. Each cover shows a **NEW** ribbon when
 there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
 filters currently show.
 
@@ -1683,7 +1686,10 @@ When an extension server is configured there is one more check, *Extension sourc
 more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register. Since v0.55.0 a series under *Series
 that can no longer update* whose source is over that limit offers **Free a slot** instead of *Replace* — the source
 works, it is only not loaded — which opens that source in **Admin → Sources**, where switching off a source no
-series uses makes room for it.
+series uses makes room for it. Since v0.55.1 the row names the source as the rest of Health does (the extension's own
+name, not `sw:2522…`), and the source's sheet says why it is not loaded — *The engine’s limit of 25 sources is full.
+Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES.* — with no *Replace*. A source switched on that the
+engine no longer offers at all reads *no longer installed*, with *Replace*, rather than over the limit.
 
 **Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
 Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote

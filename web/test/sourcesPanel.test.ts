@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setActiveLocale } from '../lib/format';
 import { setActiveDict } from '../lib/i18n';
 import {
-  attentionRows, initialView, needsAttention, replaceLine, replacePlan, rowAction, settingsTarget, sheetKeys, splitSources, turnOffQuestion,
+  attentionRows, initialView, limitLine, needsAttention, replaceLine, replacePlan, rowAction, settingsTarget, sheetKeys, splitSources, turnOffQuestion,
   type OverviewSource, type ReplacePreview, type SourcesOverview,
 } from '../lib/sourcesPanel';
 import { makeMainQuestion, mayMakeMain } from '../lib/mainSource';
@@ -358,6 +358,31 @@ test('the sheet\'s keys by state and kind: Replace only for a dead main source, 
   const fine = sheet({ id: 'mangaread' });
   assert.deepEqual([...slice(fine, 'data-source-keys', '</div>').matchAll(/data-source-key="([a-z-]+)"/g)].map((m) => m[1]), ['test', 'turn-off']);
   assert.doesNotMatch(fine, /data-source-key="remove"|data-source-address/, 'a built-in offers what only a site has');
+});
+
+test('a source the engine\'s limit left out is not broken: no Replace on its sheet, one line on making room (v0.55.1)', () => {
+  // Health's Free a slot lands on this sheet, and its filled key was Replace: the wrong fix, since the source works and
+  // is only not loaded. Reintroduce Replace for it (drop `!s.overLimit` in sheetKeys): "a source over the limit offers
+  // Replace" fails; drop the line from the sheet: "the sheet does not say why it is not loaded" fails.
+  const over = src('sw:2522', { name: 'Manga Ball (EN)', kind: 'extension', standing: 'not_loaded', state: 'ok', main: 12, overLimit: { limit: 25 } });
+  assert.deepEqual(sheetKeys(over, OVERVIEW.attention), [], 'a source over the limit offers Replace');
+  assert.deepEqual(sheetKeys({ ...over, overLimit: null }, OVERVIEW.attention), ['replace'], 'not loaded for another reason, Replace stays');
+  assert.equal(limitLine(over, false), 'The engine’s limit of 25 sources is full. Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES.');
+  assert.equal(limitLine({ overLimit: { limit: 1 } }, false), 'The engine’s limit of 1 source is full. Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES.');
+  assert.equal(limitLine(over, true), 'The engine’s limit of 25 sources is full. Turn off a source you don’t use.',
+    'the desktop app is told to raise a variable it has no file for');
+  assert.equal(limitLine(src('sw:9', { standing: 'not_loaded' }), false), null, 'a source not loaded for another reason has no such line');
+  // Drawn: no key at all (it is not loaded, so neither Test nor Turn off), the line under its state, and none of it amber
+  // but the state's own mark.
+  const html = withQueries(createElement(SourceSheet, {
+    target: { id: over.id }, overview: { ...OVERVIEW, sources: [...OVERVIEW.sources, over] }, evidence: new Map(), testMs: 53_000,
+    status: undefined, actions: ACTIONS, installed: [], hiddenLangs: [], onClose: noop, onReplace: noop, onLanguages: noop, onChanged: noop,
+  }));
+  assert.deepEqual([...slice(html, 'data-source-keys', '</div>').matchAll(/data-source-key="([a-z-]+)"/g)].map((m) => m[1]), [], 'its sheet draws a key');
+  assert.doesNotMatch(html, /btn-key-primary/, 'Replace is the filled key of a source over the limit');
+  assert.match(html, /<p class="mt-1\.5 text-\[12px\] leading-relaxed text-fog-400" data-source-limit="true">The engine’s limit of 25 sources is full\. Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES\.<\/p>/,
+    'the sheet does not say why it is not loaded');
+  assert.match(html, />Not loaded</, 'PREMISE: its state says it is not loaded');
 });
 
 test('Turn off asks first inside the sheet when series use the source, with words that are true', () => {

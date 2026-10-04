@@ -49,7 +49,7 @@ import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
@@ -73,7 +73,7 @@ import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
-import { autofixRun, autofixState, scrubAutofixRecord, scrubAutofixRun, startAutofix, stopAutofix } from '../lib/autofix';
+import { autofixRun, autofixSeriesIds, autofixState, scrubAutofixRecord, scrubAutofixRun, startAutofix, stopAutofix } from '../lib/autofix';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
@@ -430,6 +430,16 @@ async function listable(req: FastifyRequest, ids: Array<string | undefined>): Pr
   const list = ids.filter((x): x is string => !!x);
   if (!list.length) return new Set();
   return browsableIds(list, await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) }));
+}
+/**
+ * Which of these series this admin may see named in Fix everything's lines and its "Now:" (v0.55.1): their reach, judged
+ * on each series as it stands whatever became of it since -- a merge names the series it merged away (visibility.ts
+ * nameableIds). Asked only for an admin who hides 18+: with the reveal on, an admin's reach is everything. One query,
+ * and none when there is nothing to ask.
+ */
+async function nameable(req: FastifyRequest, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  return nameableIds(ids, await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) }));
 }
 const scrubTarget = (t: RunTarget, ok: Set<string>): RunTarget =>
   (t.seriesId && !ok.has(t.seriesId) ? { ...t, label: undefined } : t);
@@ -965,13 +975,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Reintroduce by sending them as stored: "an admin who hides 18+ reads no adult title" in
     // repairRoutes.int.test.ts finds the title in the history.
     const noNotes = hideAdult(req);
+    // A Fix everything run's record (v0.55.0) names series in its lines, by title: since v0.55.1 each line with the ids of
+    // the series it names, held to them as its own routes hold it (lib/autofix.ts scrubAutofixRecord), since Recent
+    // repairs reads it from here.
+    const named = noNotes ? await nameable(req, content.flatMap((r) => (r.kind === 'autofix' ? autofixSeriesIds(r.result) : []))) : undefined;
     return {
       content: content.map((r) => ({
         ...r,
         target: scrubTarget(r.target, ok),
-        // A Fix everything run's record (v0.55.0) names series in its lines, by title alone, as `notes` do: the same
-        // rule as its own routes (lib/autofix.ts scrubAutofixRecord), since Recent repairs reads it from here.
-        result: r.kind === 'autofix' ? scrubAutofixRecord(r.result, noNotes) : scrubResult(r.result, ok),
+        result: r.kind === 'autofix' ? scrubAutofixRecord(r.result, noNotes, named) : scrubResult(r.result, ok),
         ...(noNotes ? { notes: null } : {}),
       })),
     };
@@ -3227,7 +3239,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/health/autofix', async (req) => {
     const st = await autofixState();
     const hide = hideAdult(req);
-    return { run: scrubAutofixRun(st.run, hide), last: scrubAutofixRun(st.last, hide) };
+    const named = hide ? await nameable(req, [...autofixSeriesIds(st.run), ...autofixSeriesIds(st.last)]) : undefined;
+    return { run: scrubAutofixRun(st.run, hide, named), last: scrubAutofixRun(st.last, hide, named) };
   });
   /** One run, live or kept (repair_runs keeps them as it keeps repairs); 404 when none has that id. */
   app.get('/api/admin/health/autofix/:runId', async (req, reply) => {
@@ -3235,7 +3248,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!runId || runId.length > 64) return reply.code(400).send({ error: 'bad_request' });
     const r = await autofixRun(runId);
     if (!r) return reply.code(404).send({ error: 'not_found' });
-    return scrubAutofixRun(r, hideAdult(req));
+    const hide = hideAdult(req);
+    return scrubAutofixRun(r, hide, hide ? await nameable(req, autofixSeriesIds(r)) : undefined);
   });
   /**
    * Stop the run at its next safe point -- between series, steps, sources or pairs, never inside a merge, a delete or a

@@ -430,6 +430,66 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
   }
 });
 
+test('Fix everything\'s lines are held to the series they name, for an admin who hides 18+ (v0.55.1)', { skip }, async () => {
+  // v0.55.0 left out every line naming a series by title for an admin without the reveal, adult or not. Each now carries
+  // the ids of the series it names (`seriesIds`), and only a line naming a series that admin's reach hides goes -- in
+  // the history, the run's own route and the newest run's. Judged on the series as it stands: a merge names the series
+  // it merged away, which no listing shows any more. Reintroduce v0.55.0's rule in lib/autofix.ts scrubbed: "a line
+  // naming a series that is not 18+ is kept" fails; nameableIds -> browsableIds in admin.ts nameable: "a merge of a
+  // series that is not 18+ is still said" fails; drop `named` from the newest run's route: "the newest run" fails.
+  const { clearRunDigest } = await import('../src/lib/repairRuns');
+  const LIB = 'rr-adult-lib2', AS = 's_rr_adult2', M = 's_rr_merged', D = 's_rr_deleted_adult';
+  await q(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,$1,$1,18) ON CONFLICT (id) DO UPDATE SET age_rating = 18`, [LIB]);
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[AS, M, D]]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, library_id) VALUES ($1,'test','Rr Adult Two',$1,$2)`, [AS, LIB]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, library_id, deleted_at) VALUES ($1,'test','Rr Deleted Adult',$1,$2, now())`, [D, LIB]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, merged_into) VALUES ($1,'test','Rr Merged Away',$1,$2)`, [M, S]);
+  const line = (code: string, params: Record<string, unknown>) => ({ code, params });
+  const renumbered = line('autofix.item.renumbered', { title: 'Repair Routes Fixture', seriesIds: [S] });
+  const merged = line('autofix.item.merged', { from: 'Rr Merged Away', into: 'Repair Routes Fixture', seriesIds: [M, S] });
+  const linked = line('autofix.item.linked', { a: 'Rr Adult Two', b: 'Repair Routes Fixture', seriesIds: [AS, S] });
+  const deleted = line('autofix.item.deleted', { title: 'Rr Deleted Adult', n: 2, seriesIds: [D] });
+  const gone = line('autofix.item.renumbered', { title: 'Rr Gone Altogether', seriesIds: ['s_rr_gone'] });
+  const legacy = line('autofix.item.merged', { from: 'Rr Legacy', into: 'Repair Routes Fixture' });
+  const tested = line('autofix.item.tested', { name: 'rr-src', ok: true });
+  const all = [renumbered, merged, linked, deleted, gone, legacy, tested];
+  const record = {
+    phaseIndex: 9, log: all,
+    summary: { green: true, again: false, clears: [], needsYou: [],
+      done: [{ kind: 'merged', n: 1, said: { code: 'autofix.done.merged', params: { n: 1 } }, items: [renumbered, merged, linked] }] },
+  };
+  const [{ id }] = await q<{ id: string }>(
+    `INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, target, status, ms, result)
+     VALUES (gen_random_uuid(), now() + interval '1 minute', now() + interval '1 minute', 'manual', 'autofix', '{}'::jsonb, 'done', 5, $1::jsonb) RETURNING id`,
+    [JSON.stringify(record)]);
+  clearRunDigest();
+  const get = async (url: string) => {
+    const r = await app.inject({ method: 'GET', url, headers: { authorization: adminTok } });
+    assert.equal(r.statusCode, 200, r.body);
+    return r.json();
+  };
+  try {
+    const hidden = (await get(`/api/admin/tasks/repair/runs?id=${id}`)).content[0].result;
+    assert.ok(hidden.log.some((l: any) => l.code === 'autofix.item.renumbered' && l.params.seriesIds?.[0] === S), 'a line naming a series that is not 18+ is kept');
+    assert.ok(hidden.log.some((l: any) => l.code === 'autofix.item.merged' && l.params.from === 'Rr Merged Away'), 'a merge of a series that is not 18+ is still said');
+    assert.deepEqual(hidden.log, [renumbered, merged, tested], 'the history: what is left out is what names an 18+ series, one gone, or carries no ids');
+    assert.deepEqual(hidden.summary.done[0].items, [renumbered, merged], 'the history: the done lines\' items');
+    // The run's own route, and the newest run's: the same rule.
+    assert.deepEqual((await get(`/api/admin/health/autofix/${id}`)).log, [renumbered, merged, tested], 'the run\'s own route');
+    const newest = await get('/api/admin/health/autofix');
+    assert.equal(newest.last?.id, id, 'PREMISE: the planted run is the newest');
+    assert.deepEqual(newest.last.log, [renumbered, merged, tested], 'the newest run');
+    // The same admin with the reveal on reads every line, the 18+ ones and the old one included.
+    assert.deepEqual((await get(`/api/admin/tasks/repair/runs?adult=1&id=${id}`)).content[0].result.log, all, 'the reveal shows every line');
+    assert.deepEqual((await get(`/api/admin/health/autofix/${id}?adult=1`)).log, all);
+  } finally {
+    await q('DELETE FROM repair_runs WHERE id = $1', [id]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[AS, M, D]]);
+    await q('DELETE FROM libraries WHERE id = $1', [LIB]);
+    clearRunDigest();
+  }
+});
+
 test("the Tasks line's origin is null while the history has not caught up with the run it shows", { skip }, async () => {
   // The integration-1 review: the run check had no test of its own -- removed, the test above still passed. A result
   // naming a run the history's newest full run is not (the history lags a run that has just written the Tasks line)

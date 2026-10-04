@@ -63,7 +63,16 @@ export const STATUSES = [
 export interface LibrarySource { id: string; name: string; main: number; any: number; installed: boolean }
 
 /**
- * The sources, one query for the panel and the page's active-filter chips (react-query shares it).
+ * Main source's "No source" (#149) in the `src` URL param: the series with no main source -- folders added by hand, and
+ * anything never matched to a site. A value no source id can be (a site added by address is named by letters and
+ * digits, an extension's source is `sw:` and digits, MangaDex `mangadex…`), in the same param as the sources, so the
+ * choice stays single like the section's: picking a source replaces it, picking it replaces the source.
+ */
+export const NO_SOURCE = '-';
+
+/**
+ * The sources, one query for the panel and the page's active-filter chips (react-query shares it), and `none`: how many
+ * of the viewer's series have no main source (#149), 0 from a server too old to say, or on Komga.
  *
  * ⚠️ Keyed UNDER ['library'], because that is the key everything that changes the shelf invalidates: the select
  * bar's settle() after a bulk action, pull to refresh, the header's refresh, an add, a series edit. Keyed
@@ -74,7 +83,8 @@ export interface LibrarySource { id: string; name: string; main: number; any: nu
 export function useLibrarySources() {
   return useQuery({
     queryKey: ['library', 'sources'],
-    queryFn: () => api<{ content: LibrarySource[] }>('/api/library/sources').then((r) => r.content ?? []),
+    queryFn: () => api<{ content: LibrarySource[]; none?: number }>('/api/library/sources')
+      .then((r) => ({ sources: r.content ?? [], none: r.none ?? 0 })),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -85,16 +95,22 @@ const SOURCE_HEAD = 10;
 /**
  * One source filter: every source with its count, single choice, a tap on the chosen one clears it. The
  * chosen source is always listed, even past the head, so a reload never leaves it filtering with no control.
+ * Main source ends on "No source" (#149) while series have none, or while it is chosen: after the sources and never
+ * behind "Show all", the one choice that is not a source.
  */
-function SourceSection({ title, help, rows, count, value, onPick }: {
-  title: string; help: string; rows: LibrarySource[]; count: (s: LibrarySource) => number; value: string; onPick: (id: string) => void;
+function SourceSection({ title, help, rows, none, count, value, onPick }: {
+  title: string; help: string; rows: LibrarySource[];
+  /** How many series have no main source: Main source's alone. */
+  none?: number;
+  count: (s: LibrarySource) => number; value: string; onPick: (id: string) => void;
 }) {
   const [all, setAll] = useState(false);
   const listed = rows.filter((s) => count(s) > 0).sort((a, b) => count(b) - count(a) || a.name.localeCompare(b.name));
   const head = all ? listed : listed.slice(0, SOURCE_HEAD);
   const shown = head.some((s) => s.id === value) || !value ? head : [...head, ...listed.filter((s) => s.id === value)];
   const hidden = listed.length - shown.length;
-  if (!listed.length) return null;
+  const noneShown = none !== undefined && (none > 0 || value === NO_SOURCE);
+  if (!listed.length && !noneShown) return null;
   return (
     <section>
       <Eyebrow>{title}</Eyebrow>
@@ -107,6 +123,12 @@ function SourceSection({ title, help, rows, count, value, onPick }: {
             {s.name}<span className="ms-1 tabular-nums text-fog-600">{count(s)}</span>
           </button>
         ))}
+        {noneShown && (
+          <button type="button" onClick={() => onPick(value === NO_SOURCE ? '' : NO_SOURCE)} aria-pressed={value === NO_SOURCE}
+            className={`chip text-xs ${value === NO_SOURCE ? 'chip-active' : ''}`} data-source-none>
+            {tr('No source')}<span className="ms-1 tabular-nums text-fog-600">{none}</span>
+          </button>
+        )}
       </Chips>
       {hidden > 0 && (
         <button type="button" onClick={() => setAll(true)} className="mt-2 text-xs text-accent">{tr('Show all')} ({hidden})</button>
@@ -170,13 +192,15 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
   genres: string[];
   lib: string;
   libs: LibraryRow[];
-  /** The `src` URL param: only series ADDED from this source. */
+  /** The `src` URL param: only series ADDED from this source, or NO_SOURCE: the series with no main source. */
   mainSrc: string;
   /** The `anysrc` URL param: series that read from this source at all, main or followed. */
   anySrc: string;
   onSet: (k: string, v: string) => void;
 }) {
-  const { data: sources } = useLibrarySources();
+  const { data: counted } = useLibrarySources();
+  const sources = counted?.sources ?? [];
+  const none = counted?.none ?? 0;
   const [q, setQ] = useState('');
   const [showAll, setShowAll] = useState(false);
 
@@ -270,15 +294,17 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
         </Chips>
       </section>
 
-      {/* Only with more than one source to choose between. Empty on a Komga backend (no sources there), so
-          neither section renders and no condition a Komga server would refuse is ever sent. */}
-      {(sources?.length ?? 0) > 1 && (
-        <>
-          <SourceSection title={tr('Main source')} help={tr('Series added from this source.')}
-            rows={sources!} count={(s) => s.main} value={mainSrc} onPick={(id) => onSet('src', id)} />
-          <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a followed one.')}
-            rows={sources!} count={(s) => s.any} value={anySrc} onPick={(id) => onSet('anysrc', id)} />
-        </>
+      {/* Only with a choice to make: two sources, or for Main source one source and series with none (#149), whose
+          "No source" makes two -- a library with no source at all has nothing to narrow. Empty on a Komga backend (no
+          sources there, and `none` is 0), so neither section renders and no condition a Komga server would refuse is
+          ever sent. */}
+      {(sources.length > 1 || (sources.length > 0 && (none > 0 || mainSrc === NO_SOURCE))) && (
+        <SourceSection title={tr('Main source')} help={tr('Series added from this source.')}
+          rows={sources} none={none} count={(s) => s.main} value={mainSrc} onPick={(id) => onSet('src', id)} />
+      )}
+      {sources.length > 1 && (
+        <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a followed one.')}
+          rows={sources} count={(s) => s.any} value={anySrc} onPick={(id) => onSet('anysrc', id)} />
       )}
 
       {formats.length > 0 && (

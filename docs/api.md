@@ -237,10 +237,13 @@ below, because the engine has to re-read its repositories before "an update is a
 `GET /api/admin/sources/overview` (admin, since v0.54.0) is every source the server knows, of every kind, in one
 answer -- the one Sources section's list: `{sources, attention}`. Each source is `{id, name, kind: builtin|mangadex|
 site|extension|pack, lang, pkgName? (extensions), standing, offBy, state, stage, cooldown, offline, main, followed,
-withBackup, lastTestedAt, icon, address? (sites)}`: `state`, `stage`, `cooldown` and `offBy` are Source health's own
-(`ok` when Health has nothing to say), `standing` the series' Sources sheet's, `main` the series whose main source it
+withBackup, lastTestedAt, icon, address? (sites), overLimit?}`: `state`, `stage`, `cooldown` and `offBy` are Source
+health's own (`ok` when Health has nothing to say), `standing` the series' Sources sheet's, `main` the series whose main source it
 is, `followed` the series that follow it without it being their main, `withBackup` of `main` the series a working
-follower would take over (the Replace preview's count), `offline` a confirmed site-offline notice. `attention` is
+follower would take over (the Replace preview's count), `offline` a confirmed site-offline notice, and `overLimit`
+(since v0.55.1) `{limit}` on an extension's source the last registration left out because `SUWAYOMI_MAX_SOURCES` was
+full -- switched on, offered by the engine, not loaded: not broken, and nothing Replace fixes (Health's frozen row for
+its series offers `free_slot` by the same record, and the web's sheet says so with no Replace). `attention` is
 `{replace, failingUnused, updates}`: the sources off or failing that are some series' main source, the findings on
 sources no series uses (Health's `unused` group), and installed extensions with an update waiting. The sources in
 `attention` come first, then by `main + followed`, then by name; switched-off sources last. The engine's own state
@@ -564,11 +567,13 @@ get to: stopped, or out of time, searches, Tests or installs -- `clears` says "t
 `done` one line per kind of thing done (at most twelve, with `items`), `clears` what ends by itself (with `at`),
 `needsYou` what only a person can do, each with its one action (`{kind: 'health', check}`, `{kind: 'open', href}` or
 `{kind: 'settings', key}`), and only once every phase that works on that card ran to its end. Runs are kept in the
-repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`; for an
-admin who hides 18+, here and on the routes above, without the lines that name a series by title) and audited as
-`library.autofix`; while one runs, `GET /api/sources/jobs` carries its card to admins (kind `autofix`,
-`done`/`total` its phases, `step` the phase). Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly
-runs.
+repair history (`GET /api/admin/tasks/repair/runs`, kind `autofix`, with `result` `{phaseIndex, summary, log}`) and
+audited as `library.autofix`. A line that names a series by title carries `params.seriesIds`, the series it names, and
+`current` carries `seriesIds` beside its `title` (since v0.55.1): for an admin who hides 18+, here and on the routes
+above, a line or a title naming a series their 18+ switch hides is left out -- judged on the series as it stands, a
+merged-away one included -- and so is one written before v0.55.1, with no ids, whatever it names. While one runs,
+`GET /api/sources/jobs` carries its card to admins (kind `autofix`, `done`/`total` its phases, `step` the phase).
+Settings' `nightlyMode` (`repair` | `autofix`) chooses what the nightly runs.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
@@ -834,13 +839,16 @@ DELETE /api/series/:id/listing-progress
 **Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
 backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
 by id) and `anySource` (that, or a source it follows as a fallback). Both take `is` / `isNot`, and a source whose
-extension is gone still filters.
-`GET /api/library/sources` lists `{id, name, main, any, installed}` for every source the viewer's library
-comes from, busiest first: `main` counts the series added from it, `any` the series that read from it at all.
-It is counted over what the viewer may list, so the numbers match the filtered grid, and it is empty on a
-Komga backend. `name` is the one Health uses: the loaded source's, else the name the extension engine gave it,
-else the id; `installed` is false while a source is not loaded (its extension gone or switched off, or the
-engine down).
+extension is gone still filters. Since v0.55.1 (#149) a third, `hasMainSource`, in Komga's boolean shape
+(`{operator: isTrue|isFalse}`, no value): `isFalse` is the series with no main source at all -- folders added by hand,
+and anything never matched to a site -- whatever sources they follow. Any other operator is 400 `unsupported_filter`.
+`GET /api/library/sources` answers `{content, none}`: `content` lists `{id, name, main, any, installed}` for every
+source the viewer's library comes from, busiest first -- `main` counts the series added from it, `any` the series
+that read from it at all -- and `none` (since v0.55.1) counts the series with no main source, what `hasMainSource:
+isFalse` returns. Both are counted over what the viewer may list, so the numbers match the filtered grid; on a Komga
+backend `content` is empty and `none` 0. `name` is the one Health uses: the loaded source's, else the name the
+extension engine gave it, else the id; `installed` is false while a source is not loaded (its extension gone or
+switched off, or the engine down).
 
 **Language editions of one work** (since v0.52.0, #72). Blue Lock in English and in Spanish are two series —
 each with its own folder, chapters, sources and reading progress — linked as editions of one work. Every series
@@ -1856,7 +1864,10 @@ it is usable or cooling down -- with `replace_source` and `find_sources`; a seri
 `info` (`frozen.followingDown` {source, state, names}) with `replace_source`. A main that is only cooling down is not
 listed. Since v0.55.0 a row whose source is dropped by `SUWAYOMI_MAX_SOURCES` (`frozen.overLimit`) carries `free_slot`
 in their place, with `sourceId`: the client opens Admin → Sources on it to free a slot (no server action), since the
-source itself works.
+source itself works. Since v0.55.1 that is a source the last registration left out for want of room, the record the
+sources overview's `overLimit` reads; one switched on that the engine no longer offers reads `frozen.uninstalled`. Since v0.55.1 the `source` of every `frozen.*` sentence names the source as the rest of Health
+does -- the loaded source's name, else the name the extension engine gave it, else its id -- where it was the id
+(`sw:2522…` for a source over the limit); `sourceId` stays the key every action uses.
 
 **Review first** (since v0.51.0, #132; @TIGamingTV's idea from PR #133). `POST /api/admin/sources/find` with
 `review: true` runs the same search and the same judgement, follows nothing, and keeps what it found: the run

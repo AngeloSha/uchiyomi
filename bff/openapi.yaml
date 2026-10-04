@@ -112,7 +112,10 @@ components:
   schemas:
     AutofixSaid:
       type: object
-      description: A sentence as a code the client words (bff lib/said.ts `autofix.*`), never English from the server.
+      description: >-
+        A sentence as a code the client words (bff lib/said.ts `autofix.*`), never English from the server. Since v0.55.1
+        a line that names a series by title (`autofix.item.linked`, `merged`, `notMerged`, `renumbered`, `notRenumbered`,
+        `deleted`) also carries `params.seriesIds`, the series it names.
       required: [code]
       properties:
         code: { type: string }
@@ -129,7 +132,10 @@ components:
         each with its count, its line and up to 20 `items`), `clears` (what ends by itself, with `at` where there is a
         time) and `needsYou` (per check, each with its one action: `open` {href}, `health` {check} or `settings` {key};
         a card is listed there only once every phase that works on it ran to its end in this run). `log` is the detail,
-        newest last, at most 200 lines. For an admin who hides 18+, the lines that name a series by title are left out.
+        newest last, at most 200 lines. For an admin who hides 18+, a line naming a series by title is left out when
+        their 18+ switch hides one of the series it names (`params.seriesIds`, since v0.55.1, judged on the series as it
+        stands, a merged-away one included), and `current.title` the same way by `current.seriesIds`; a line written
+        before v0.55.1, with no ids, is left out whatever it names.
       required: [id, status, startedAt, by, phase, phaseIndex]
       properties:
         id: { type: string }
@@ -147,6 +153,7 @@ components:
           type: object
           properties:
             title: { type: string }
+            seriesIds: { type: array, items: { type: string }, description: "Since v0.55.1: the series `title` names." }
             done: { type: integer }
             of: { type: integer }
             said: { $ref: '#/components/schemas/AutofixSaid' }
@@ -1364,13 +1371,16 @@ paths:
       summary: The sources the viewer's library comes from, with series counts -- the library's source filters (since v0.49.2).
       operationId: getApiLibrarySources
       description: >-
-        `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
+        `{content: [{id, name, main, any, installed}], none}`, busiest first: `main` counts the series added from
         the source, `any` the series that read from it at all (added from it, or following it as a fallback).
+        `none` (since v0.55.1, #149) counts the series with no main source at all -- folders added by hand, and
+        anything never matched to a site: what `hasMainSource: isFalse` returns in POST /api/series/search, the
+        Library's "No source".
         Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
         the ones the filtered grid shows. `name` is the one Health uses: the loaded source's, else the name the
         extension engine gave it, else the id. `installed` is false for a source that is not loaded now (its
-        extension is gone or switched off, or the engine is down); its series still filter. Empty on a Komga
-        backend. Use the ids as `mainSource` / `anySource` in POST /api/series/search.
+        extension is gone or switched off, or the engine is down); its series still filter. On a Komga backend
+        `content` is empty and `none` 0. Use the ids as `mainSource` / `anySource` in POST /api/series/search.
       parameters:
         - name: adult
           in: query
@@ -1516,8 +1526,10 @@ paths:
         read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
         (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
         `genre`, `author`, and -- owned library only, since v0.49.2 -- `mainSource` (the source a series was added
-        from, by id) and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
-        `unsupported_filter`."
+        from, by id) and `anySource` (that, or a source it follows as a fallback); since v0.55.1 (#149)
+        `hasMainSource` in Komga's boolean shape (`{operator: isTrue|isFalse}`, no value), `isFalse` being the series
+        with no main source at all, whatever they follow. An unknown key is 400 `unsupported_filter`, and so is
+        `hasMainSource` with any other operator."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -6339,7 +6351,9 @@ paths:
         mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
         {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
         dropped when this viewer may not list that series. `notes` names series by title alone, with no id to
-        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1.
+        hold each one to the 18+ hide, so it is null unless the request carries ?adult=1. A Fix everything run
+        (kind `autofix`, since v0.55.0) keeps `result` {phaseIndex, summary, log}, held to the 18+ hide line by
+        line as GET /api/admin/health/autofix holds it (AutofixRun).
       parameters:
         - name: limit
           in: query
@@ -9052,11 +9066,16 @@ paths:
         loaded) and the action `replace_source`, which makes that follower its main source. A main that is only
         cooling down is not listed.
         Since v0.55.0 a `frozen-series` row whose source is dropped by SUWAYOMI_MAX_SOURCES (`frozen.overLimit`: an
-        extension's source, switched on, the engine answering, and not registered) carries the action `free_slot` in
+        extension's source, switched on, the engine answering, and not registered -- since v0.55.1 only one the last
+        registration left out for want of room, as the sources overview's `overLimit` says; one the engine no longer
+        offers reads `frozen.uninstalled`) carries the action `free_slot` in
         place of `replace_source` and `find_sources`, with `sourceId` and no `findSeries`: the client opens Admin ->
-        Sources on that source, where a slot can be freed (no server action). A `chapter-gaps` row is about the holes
-        at or above the series' "Latest N" start (lib_series.chapter_floor) alone -- `numbers` and the count are
-        theirs, and `gaps.alsoBelowFloor` {n, start} says how many more lie before it -- and a series whose every hole
+        Sources on that source, where a slot can be freed (no server action). Since v0.55.1 the `source` of every
+        `frozen.*` sentence names the source as the rest of Health does (the loaded source's name, else the name the
+        extension engine gave it, else its id), where it was the id; `sourceId` stays the key.
+        A `chapter-gaps` row is about the holes at or above the series' "Latest N" start (lib_series.chapter_floor)
+        alone -- `numbers` and the count are theirs, and `gaps.alsoBelowFloor` {n, start} says how many more lie
+        before it -- and a series whose every hole
         lies before its start is an `info` row with no actions and the detail `gaps.belowFloor` {n, start, ranges}
         (`start` is the first chapter it was started from), counted in the summary by `gaps.beforeStart` {n}: nothing
         fetches below the start unasked, so neither the repair's gap step nor Fill now works on those holes.
@@ -9197,8 +9216,9 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `{run, last}`:
         `run` the live run (null when none), `last` the newest finished one, both AutofixRun. A run still recorded as
-        running after a restart reads `interrupted`. For an admin who hides 18+, lines naming a series by title are
-        left out of `log` and of the done lines' `items`, and `current.title` with them.
+        running after a restart reads `interrupted`. For an admin who hides 18+, a line naming a series their 18+
+        switch hides is left out of `log` and of the done lines' `items`, and `current.title` with it (since v0.55.1
+        by the series each names, `seriesIds`; a line from before v0.55.1, with none, is left out whatever it names).
       security:
         - bearer: []
       responses:
@@ -10161,7 +10181,8 @@ paths:
         nothing to say about it. `standing` is lib/sourceStanding.ts's (SeriesSource.standing). `main` counts the series
         whose main source it is, `followed` the series that follow it without it being their main source, and
         `withBackup`, of `main`, the series a working follower would take over -- the Replace preview's own count.
-        `offline`: a confirmed failure that is the site's own offline notice. `attention` is what the section leads
+        `offline`: a confirmed failure that is the site's own offline notice. `overLimit` (since v0.55.1): `{limit}` on
+        a source the extension engine's source limit left out. `attention` is what the section leads
         with: `replace` (off or failing, and some series' main source -- Health's replace_source rule), `failingUnused`
         (Health's `unused` group: a finding on a source no series uses) and `updates` (installed extensions with an
         update waiting: the engine asked briefly and kept 30 s, else the last extension check's). Ordered: the
@@ -10209,6 +10230,16 @@ paths:
                         lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
                         icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
                         address: { type: string, description: A site added by address only. }
+                        overLimit:
+                          type: object
+                          required: [limit]
+                          properties:
+                            limit: { type: integer, minimum: 1, description: SUWAYOMI_MAX_SOURCES. }
+                          description: >-
+                            Since v0.55.1, only on an extension's source the last registration left out because
+                            SUWAYOMI_MAX_SOURCES was full: switched on, offered by the engine, and not loaded. Not broken,
+                            and nothing Replace fixes -- Health's frozen-series row for its series offers `free_slot` by the
+                            same record.
                   attention:
                     type: object
                     required: [replace, failingUnused, updates]

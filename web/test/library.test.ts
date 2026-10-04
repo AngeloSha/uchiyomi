@@ -490,6 +490,45 @@ test('src is the main source and anysrc any source, from the URL to the search, 
   assert.match(page, /\{anysrc && \(\s*<button onClick=\{\(\) => setParam\('anysrc', ''\)\}[^>]*>\s*\{tr\('Any: \{name\}', \{ name: sourceName\(anysrc\) \}\)\} ×/, "the Any chip clears something else");
 });
 
+test('Main source offers "No source" (#149): its own condition, a sentinel no source id can be, single choice, counted', () => {
+  // Kedryn's ask: the series without a source, to fix them. The sentinel rides `src`, so the badge, the grid's key and
+  // the active chip carry it as they carry a source (the pins above), and a source picked replaces it. Reintroduce by
+  // sending it as a source (`if (src) all.push({ mainSource: … })` alone): "No source is sent as a source id" fails --
+  // an older server would answer an empty grid; gate Main source on two sources again: "one source and series with no
+  // source show no No source" fails; drop `none={none}`: "Main source is not handed the No source count" fails.
+  const panel = code(read('components/LibraryFilters.tsx'));
+  const page = code(read('app/library/page.tsx'));
+  const sentinel = /export const NO_SOURCE = '([^']*)';/.exec(panel)?.[1];
+  assert.ok(sentinel, 'could not find the No source sentinel');
+  // Not a site added by address (letters and digits), an extension's source (sw:…), MangaDex (mangadex…), nor nothing.
+  for (const id of [/^[a-z0-9]+$/, /^sw:/, /^mangadex/, /^$/]) assert.doesNotMatch(sentinel!, id, `No source's sentinel could be a source id: ${sentinel}`);
+  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(page)![2];
+  assert.match(fn, /if \(src === NO_SOURCE\) all\.push\(\{ hasMainSource: \{ operator: 'isFalse' \} \}\);\s*else if \(src\) all\.push\(\{ mainSource: \{ operator: 'is', value: src \} \}\);/,
+    'No source is sent as a source id');
+  // The section: Main source with one source and series that have none; Any source still with two. Evaluated.
+  const gate = /\{\(([^\n]*)\) && \(\s*<SourceSection title=\{tr\('Main source'\)\}/.exec(panel)?.[1];
+  assert.ok(gate, 'could not find the Main source section\'s gate');
+  const shows = (n: number, none: number, mainSrc = '') =>
+    new Function('sources', 'none', 'mainSrc', 'NO_SOURCE', `return ${gate};`)(Array.from({ length: n }), none, mainSrc, sentinel) as boolean;
+  assert.equal(shows(1, 3), true, 'one source and series with no source show no No source');
+  assert.equal(shows(1, 0, sentinel), true, 'a chosen No source with nothing left in it keeps its chip');
+  assert.equal(shows(2, 0), true);
+  assert.equal(shows(1, 0), false, 'one source and nothing without one: nothing to choose');
+  assert.equal(shows(0, 5), false, 'a library with no source at all has nothing to narrow');
+  assert.match(panel, /\{sources\.length > 1 && \(\s*<SourceSection title=\{tr\('Any source'\)\}/, 'Any source still needs two sources');
+  assert.match(panel, /<SourceSection title=\{tr\('Main source'\)\}[\s\S]{0,120}?rows=\{sources\} none=\{none\} count=\{\(s\) => s\.main\} value=\{mainSrc\} onPick=\{\(id\) => onSet\('src', id\)\} \/>/,
+    'Main source is not handed the No source count');
+  assert.match(panel, /<SourceSection title=\{tr\('Any source'\)\}[\s\S]{0,140}?rows=\{sources\} count=\{\(s\) => s\.any\}/, 'Any source has a No source of its own');
+  // The chip: single choice in `src`, a tap on the chosen one clears it, its count beside it as a source's is.
+  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function Eyebrow('));
+  assert.match(section, /const noneShown = none !== undefined && \(none > 0 \|\| value === NO_SOURCE\);/, 'No source is offered with nothing in it, or not while chosen');
+  assert.match(section, /<button type="button" onClick=\{\(\) => onPick\(value === NO_SOURCE \? '' : NO_SOURCE\)\} aria-pressed=\{value === NO_SOURCE\}[\s\S]*?\{tr\('No source'\)\}<span className="ms-1 tabular-nums text-fog-600">\{none\}<\/span>/,
+    'the No source chip does not write the sentinel into src, or has no count');
+  // The active chip says it in words, never the sentinel; the count comes from the same query as the sources.
+  assert.match(page, /const sourceName = \(id: string\) => \(id === NO_SOURCE \? tr\('No source'\) : libSources\?\.sources\.find/, 'the active chip reads the sentinel');
+  assert.match(panel, /\.then\(\(r\) => \(\{ sources: r\.content \?\? \[\], none: r\.none \?\? 0 \}\)\)/, 'the count is not read, or an older server\'s missing one is not 0');
+});
+
 test('in Japanese and Chinese the source filters use those files\' full-width brackets and colon, and ja says any once', () => {
   // Both files write （） and ： (Library: {fs} is ライブラリ：{fs} and 书库：{fs}); PR #124's strings had ( ) and :.
   // And the Japanese section title said すべてのソース, "all sources", over chips whose active form says いずれか：,

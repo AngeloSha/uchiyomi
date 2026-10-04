@@ -15,7 +15,7 @@ import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
-import { LibraryFilters, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
+import { LibraryFilters, NO_SOURCE, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { t as tr } from '@/lib/i18n';
@@ -35,8 +35,10 @@ function conditionFrom(read: string, status: string, genres: string[], lib: stri
   const all: any[] = [];
   if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
   // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
-  // it reads from -- added from it, or following it as a fallback.
-  if (src) all.push({ mainSource: { operator: 'is', value: src } });
+  // it reads from -- added from it, or following it as a fallback. Main source's "No source" (#149) is a condition of its
+  // own, never `mainSource` with the sentinel: an older server would answer that with an empty grid, not a 400.
+  if (src === NO_SOURCE) all.push({ hasMainSource: { operator: 'isFalse' } });
+  else if (src) all.push({ mainSource: { operator: 'is', value: src } });
   if (anysrc) all.push({ anySource: { operator: 'is', value: anysrc } });
   if (read) all.push({ readStatus: { operator: 'is', value: read } });
   if (status) all.push({ status: { operator: 'is', value: status } });
@@ -61,7 +63,7 @@ function LibraryInner() {
   const src = params.get('src') || '';
   const anysrc = params.get('anysrc') || '';
   const { data: libSources } = useLibrarySources();
-  const sourceName = (id: string) => libSources?.find((x) => x.id === id)?.name || id;
+  const sourceName = (id: string) => (id === NO_SOURCE ? tr('No source') : libSources?.sources.find((x) => x.id === id)?.name || id);
   const { data: allLibs } = useLibraries();
   // The 18+ filter can hide series by genre on an install with no 18+ library; the reveal must still render.
   const adultFilter = useAdultFilterConfigured();
