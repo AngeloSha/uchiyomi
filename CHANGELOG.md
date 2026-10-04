@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.55.2 — 2026-10-04
+
+**Hand-collected comics get the right chapter numbers from their file names, and the notice "chapters" some sites post
+can be hidden.** Both apply only from now on or only when you switch them on: nothing already in your library is
+renumbered, and nobody's read status changes on upgrading.
+
+### Chapter numbers from file names
+
+For files added from now on:
+- **A chapter word wins:** `Vol 3 Chapter 12.cbz` is chapter 12, not 3 (*Ch*, *Chapter*, *Cap*, *Capitolo*,
+  *Capítulo*, *Chapitre*, *Kapitel* and their short forms).
+- **Otherwise `#` makes the number the chapter:** `Batman #12 (1987).cbz` is 12.
+- **A year is never the chapter:** a 4-digit year in `( )` or `[ ]` is skipped. A name with only a year, like
+  `Watchmen (1986).cbz`, gets no chapter number and sorts by name.
+- **A range is one file holding several chapters:** `Batman 01-07.cbz` shows as *Ch. 1–7*. Chapters 2 to 6 don't count
+  as missing, and finishing it tells your tracker 7.
+
+Files the downloader saves (`Chapter 12.cbz`) read exactly as before, and *Edit number & title* still overrides any
+chapter. Suggested by **@Kedryn** ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)).
+
+### Notice chapters, if you switch them on
+
+- Some sites post an announcement (a hiatus, a delay) as a short chapter numbered after the latest one, like *100.5*.
+  **Admin → Settings → Notice chapters** has a switch for each series type: Manga, Manhwa, Manhua, Webtoon, Comic and
+  other. For each type switched on, chapters numbered like 12.5 with **3 pages or fewer** are hidden from the library,
+  the reader, Updates, OPDS and Mihon, and one a site lists as that short isn't downloaded.
+- Longer ones stay, because those are real chapters a site split into parts, and so does any chapter whose pages
+  haven't been counted yet. Nothing is deleted: switching a type off shows them all again.
+- A series can override its type in its *Sources & translations* sheet, which also shows how many are hidden.
+- *Edit details* has a **Series type**, filled in automatically from the series' genres, then its source, then AniList.
+- All the switches are off by default, and while they're off it costs nothing.
+- Contributed by **@TIGamingTV** ([#147](https://github.com/AngeloSha/uchiyomi/pull/147)). The page rule was added at
+  merge: on a real library, about 170 of 1,759 chapters numbered like 12.5 were notices of 3 pages or fewer, while about
+  1,500 were real chapters of 6 pages or more.
+
+### Upgrading
+
+- **Database changes, all additive and made by themselves:**
+  - new columns on series (`series_type`, `series_type_from`, `hide_notices`) and series overrides (`series_type`);
+  - one on server settings (`hide_notice_types`);
+  - three on chapter files: `name_rule` (which rule read the name, so existing chapters keep theirs), `number_end` (a
+    range's last chapter) and `created_at`;
+  - one index.
+
+  On first start, every series without a type gets one from its genres. v0.55.1 runs on the same database, so going
+  back is one line of your compose file; while it runs it reads every file name the old way.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET` and `PATCH /api/admin/settings` carry `hideNoticeTypes`.
+  - Series carry `seriesType`, `hideNotices`, `hideNoticesEffective` and `hiddenNotices`.
+  - A chapter that holds a range carries `numberEnd`, and its number reads like *1–7*.
+
 ## v0.55.1 — 2026-10-04
 
 **Fix everything no longer mistakes a busy site for a broken one, and it keeps looking for an extension that carries
