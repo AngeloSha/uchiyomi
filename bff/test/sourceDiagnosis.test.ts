@@ -53,6 +53,34 @@ test('THE MIS-DIAGNOSIS: "challenge" in a solver error must not read as the site
   }
 });
 
+// --- trawl's own failures (v0.55.4) ----------------------------------------------------------------------------
+// ⚠️ Not from a production last_error: the side-by-side benchmark on the owner's pages (2026-10-04) had trawl answer all
+// fourteen, so these are trawl 1.7.0's own messages, read from its source (apps/api/src/routes/v1.ts, packages/tiers
+// orchestrator.ts and tiers/3.ts), in the shape the client stores them: `flaresolverr: <message>`. Without a residential
+// proxy, a wall its browser cannot pass ends as "Tier 3 failed (<reason>). Set RESIDENTIAL_PROXY_URL …".
+const TRAWL_TIER4 = 'Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.';
+const trawl = (reason: string) => `flaresolverr: Tier 3 failed (${reason}). ${TRAWL_TIER4}`;
+
+test("trawl's own failures are named for what broke", () => {
+  // Reintroduce by dropping each addition to its rule in sourceDiagnosis.ts: the challenge timeout reads as an unsolved
+  // challenge (cf_challenge), the IP block as one too (its "cf_clearance"), the start-up as unknown, and the unknown host
+  // as unknown.
+  const code = (err: string) => diagnose(facts({ lastError: err })).code;
+  assert.equal(code(trawl('cloudflare-challenge-timeout')), 'solver_timeout', 'its browser ran out of time on the wall');
+  const blocked = diagnose(facts({ lastError: trawl('datacenter-ip-blocked (cf_clearance obtained but redirect never completed — needs residential proxy)') }));
+  assert.equal(blocked.code, 'edge_403', 'past the challenge, and the site still refuses this address');
+  assert.equal(blocked.fixSaid?.code, 'fix.ipBlocked');
+  assert.match(blocked.fix, /RESIDENTIAL_PROXY_URL/);
+  assert.equal(code('flaresolverr: Browser pool initializing, retry in a few seconds'), 'solver_down', 'the solver is still starting');
+  assert.equal(code(trawl('page.goto: NS_ERROR_UNKNOWN_HOST')), 'unreachable', "Firefox's words for a host that does not resolve");
+  assert.equal(code(trawl('browser network error (about:neterror)')), 'unreachable');
+  assert.equal(code('flaresolverr: the solver did not answer with its JSON'), 'solver_down', 'no solver at that address');
+  // What the existing rules already read right, held here so a new rule above them cannot take it.
+  assert.equal(code(trawl('cloudflare-persistent')), 'cf_challenge', 'the wall held');
+  assert.equal(code(trawl('http-403')), 'edge_403');
+  assert.equal(code(trawl('http-429')), 'rate_limited', "the SITE's 429, in trawl's answer");
+});
+
 test("a solver still busy is the solver's capacity, never the site's rate limit", async () => {
   // v0.55.4: trawl answers its own HTTP 429 when no browser of its pool frees up; the client asks again, then the
   // backup, and then fails with SOLVER_BUSY. Reintroduce by dropping its rule: the words match nothing and read as

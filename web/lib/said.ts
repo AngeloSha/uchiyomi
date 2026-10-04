@@ -943,6 +943,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   }), tr('It may be busy with a slow site or a long chapter list; re-test, and if it keeps happening, check the engine\'s own log.'), 'sentence'),
   'fix.challenge': () => tr('A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.'),
   'fix.cdnRefuses': () => tr('The site\'s CDN is refusing this server outright with a 403. A challenge solver cannot fix that; it is usually a datacentre-IP block. Change egress or drop the source.'),
+  // v0.55.4: trawl got past the challenge, and the site still refused this server's address.
+  'fix.ipBlocked': () => tr('The solver got past the site\'s check, but the site still refuses this server\'s address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.'),
   'fix.rateLimited': () => tr('The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.'),
   'fix.unreachable': () => tr('The address could not be reached at all. Check the URL. The site may be gone.'),
   'fix.siteTimeout': (p) => joinPart(byStage(p, {

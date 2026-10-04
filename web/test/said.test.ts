@@ -223,6 +223,7 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     ['solver timeout', facts('flaresolverr: Error solving the challenge. Timeout after 60.0 seconds.')],
     // v0.55.4: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
     ['solver busy', facts('flaresolverr: solver busy (every one of its browsers stayed in use)')],
+    ['ip blocked', facts('flaresolverr: Tier 3 failed (datacenter-ip-blocked (cf_clearance obtained but redirect never completed — needs residential proxy)). Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.')],
     ['bypass', facts('suwayomi: java.io.IOException: Cloudflare bypass currently disabled')],
     ['engine login', facts('suwayomi 401')],
     ['engine down', facts('suwayomi unreachable: ECONNREFUSED')],
