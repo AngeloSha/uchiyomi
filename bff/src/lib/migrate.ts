@@ -1391,6 +1391,30 @@ UPDATE lib_series s SET work_id = NULL
 -- Fix everything (lib/autofix.ts). Its runs are repair_runs rows of kind 'autofix', so there is no table. One column with
 -- a default: v0.54.x boots on this schema and never reads it, and going back runs its own nightly repair as it always did.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS nightly_mode text NOT NULL DEFAULT 'repair';
+
+-- v0.55.1 (#148): a library holds one or more folders. One row per folder, and a folder belongs to one library at most;
+-- a series belongs to the library holding the longest folder its own folder is in, across every library's folders
+-- (lib/library.ts libraryIdFor). The default library 'lib' holds none: its empty path still means "everything no other
+-- library holds". libraries.path stays, holding the library's FIRST folder, the one the admin listed first: v0.55.0
+-- reads only that column, so after a rollback it boots on this schema, never meets the table, and still files new
+-- folders by each library's first one.
+CREATE TABLE IF NOT EXISTS library_paths (
+  library_id text NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  path       text PRIMARY KEY
+);
+CREATE INDEX IF NOT EXISTS library_paths_library_idx ON library_paths (library_id);
+-- Seeded from libraries.path, and put right at every boot after a rollback (in steady state both match nothing).
+-- A library whose first folder is not among its rows was re-pathed by v0.55.0, which knew only that one folder: its
+-- rows are what it held before, and they go. Then every library holds its own first folder -- v0.55.0 created or
+-- re-pathed it there, checking only libraries.path for a duplicate, and has filed that folder into it since -- taking
+-- it from a library that held it as a further folder.
+DELETE FROM library_paths lp USING libraries l
+ WHERE l.id = lp.library_id AND l.path <> ''
+   AND NOT EXISTS (SELECT 1 FROM library_paths x WHERE x.library_id = l.id AND x.path = l.path);
+INSERT INTO library_paths (library_id, path)
+SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
+    ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id
+ WHERE library_paths.library_id <> EXCLUDED.library_id;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

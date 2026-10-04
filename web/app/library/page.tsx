@@ -13,6 +13,8 @@ import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
+import { LibraryFolders } from '@/components/LibraryFolders';
+import { foldersOf } from '@/lib/libraryFolders';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -634,7 +636,7 @@ function MoveToLibrary({ n, busy, onClose, onPick }: {
 }) {
   const { data } = useQuery({
     queryKey: ['admin-libraries'],
-    queryFn: () => api<{ content: { id: string; name: string; path: string; age_rating: number | null }[] }>('/api/admin/libraries'),
+    queryFn: () => api<{ content: { id: string; name: string; path: string; paths?: string[]; age_rating: number | null }[] }>('/api/admin/libraries'),
   });
   return (
     <Modal title={tr('File {n} series', { n })} onClose={onClose}>
@@ -644,7 +646,7 @@ function MoveToLibrary({ n, busy, onClose, onPick }: {
             className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60 disabled:opacity-50">
             <span className="min-w-0">
               <span className="block truncate text-sm text-fog-100">{l.name}</span>
-              <span className="block truncate font-mono text-[11px] text-fog-500">{l.path || tr('everything not in another library')}</span>
+              <LibraryFolders paths={foldersOf(l)} className="text-[11px] text-fog-500" />
             </span>
             {l.age_rating != null && <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">{l.age_rating}+</span>}
           </button>

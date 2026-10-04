@@ -9,7 +9,8 @@ import autoHeroRoutes from './autoHero';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
-import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
+import { persistScan, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
+import { applyMoves, heldElsewhere, lockLibrarySaves, previewMoves, setFolders, storedFolders, underSql, LIBRARY_MAX_FOLDERS } from '../lib/libraryFolders';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
 import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
@@ -2223,7 +2224,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!series) return reply.code(404).send({ error: 'not_found' });
 
     if (b.data.libraryId === null) {
-      const libs = await q<{ id: string; path: string }>('SELECT id, path FROM libraries');
+      const libs = await libraryRows();
       await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
         [id, libraryIdFor(series.folder, libs)]);
       await logAudit('series.library', { userId: userIdOf(req), detail: { id, libraryId: null }, req });
@@ -2257,7 +2258,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const skipped = b.data.seriesIds.filter((id) => !found.some((f) => f.id === id)).map((id) => ({ id }));
 
     if (b.data.libraryId === null) {
-      const libs = await q<{ id: string; path: string }>('SELECT id, path FROM libraries');
+      const libs = await libraryRows();
       for (const s of found) {
         await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
           [s.id, libraryIdFor(s.folder, libs)]);
@@ -2283,6 +2284,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     return r;
   });
 
+  /** The 409 for a folder another library holds: which folder, and whose, named in the message too. */
+  const heldAnswer = (held: { path: string; id: string; name: string }) => ({
+    error: 'duplicate', message: `"${held.name}" already covers ${held.path}.`, path: held.path, library: { id: held.id, name: held.name },
+  });
+
   // ---- libraries ----
   //
   // Declared, never inferred from disk. The obvious rule (each top-level folder is a library) is wrong on a
@@ -2290,8 +2296,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   // library into several named after scrapers. Library zero covers the whole root and always exists.
 
   app.get('/api/admin/libraries', async () => {
-    const rows = await q<{ id: string; name: string; path: string; age_rating: number | null; n: number; pinned: number; members: string[] }>(
+    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; n: number; pinned: number; members: string[] }>(
+      // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
       `SELECT l.id, l.name, l.path, l.age_rating,
+              (SELECT coalesce(array_agg(lp.path ORDER BY lp.path <> l.path, lp.path), '{}') FROM library_paths lp
+                WHERE lp.library_id = l.id) AS paths,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${visibleToAll('s')}) AS n,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND s.library_pinned
                  AND ${visibleToAll('s')}) AS pinned,
@@ -2308,7 +2317,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Candidate subdirectories: folders that hold series but are not yet a library. Annotated where the name
     // matches a known source, because that is the case an admin should NOT usually promote.
     const sources = new Set((await q<{ source: string }>('SELECT DISTINCT source FROM lib_series')).map((r) => r.source));
-    const taken = new Set(rows.map((r) => r.path).filter(Boolean));
+    const taken = new Set(rows.flatMap((r) => r.paths));
     // EVERY ancestor of every series folder, not just the first segment. The top level of a real library
     // root holds source names written by the downloader -- which this list then flags as such -- so offering
     // only that level meant the one folder an admin actually wanted was unreachable.
@@ -2334,9 +2343,10 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ⚠️ Every typed library path in the four routes below goes through toStoredRel (a `\` typed on Windows is a
   // separator, and the database stores `/`: lib/relPath.ts) and, on the desktop, diskSpelling -- NTFS and
-  // APFS find `manga/seinen` for `Manga/Seinen`, but lib_series.folder and libraries.path are compared as
+  // APFS find `manga/seinen` for `Manga/Seinen`, but lib_series.folder and a library's folders are compared as
   // exact strings with the on-disk spelling, so the typed case would match nothing. Both are identities on
-  // the server.
+  // the server. The folder browser does it here; the preview, create and edit take every folder through
+  // storedFolders (lib/libraryFolders.ts).
 
   /**
    * The folders that actually exist, at any depth.
@@ -2381,7 +2391,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       const rows = await q<{ p: string; n: number }>(
         `SELECT p, count(*)::int AS n
            FROM unnest($1::text[]) AS p
-           JOIN lib_series s ON (s.folder = p OR s.folder LIKE p || '/%') AND ${visibleToAll('s')}
+           JOIN lib_series s ON ${underSql('s.folder', 'p')} AND ${visibleToAll('s')}
           GROUP BY p`,
         [prefixes],
       );
@@ -2398,71 +2408,66 @@ export default async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  /** What promoting a path WOULD do, without doing it. Same habit as the chapter-override route. */
+  /**
+   * What promoting a path WOULD do, without doing it. Same habit as the chapter-override route.
+   *
+   * The statement the save runs, short of its UPDATE (lib/libraryFolders.ts), or the preview promises something other
+   * than what happens. With `id` it is an edit of that library, and counts what leaves it as well as what comes in.
+   * `paths` (repeated, since v0.55.1) is every folder the library would hold; `path` alone is one. A folder another
+   * library holds is refused as the save refuses it.
+   */
   app.get('/api/admin/libraries/preview', async (req, reply) => {
-    const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], toStoredRel(String((req.query as { path?: string }).path ?? '')).trim());
-    if (!path) return reply.code(400).send({ error: 'bad_request' });
-    // Exactly the predicate the create and re-path handlers use, or the preview promises something other
-    // than what happens. `library_id = 'lib'` was right when libraries could not nest: it now understates a
-    // nested library by every series the enclosing one holds, and a re-path by all of its own.
-    const claimable = `NOT s.library_pinned
-      AND (s.folder = $1 OR s.folder LIKE $1 || '/%')
-      AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($1::text)
-      AND ${visibleToAll('s')}`;
-    const rows = await q<{ id: string; title: string }>(
-      `SELECT id, title FROM lib_series s WHERE ${claimable} ORDER BY title LIMIT 20`, [path],
-    );
-    const total = await one<{ n: number }>(
-      `SELECT count(*)::int n FROM lib_series s WHERE ${claimable}`, [path],
-    );
-    return { path, series: total?.n ?? 0, sample: rows.map((r) => r.title) };
+    const qs = req.query as { path?: string; paths?: string | string[]; id?: string };
+    const raw = qs.paths !== undefined ? [qs.paths].flat() : qs.path !== undefined ? [qs.path] : [];
+    if (!raw.length || raw.length > LIBRARY_MAX_FOLDERS) return reply.code(400).send({ error: 'bad_request' });
+    const paths = await storedFolders(raw.map(String));
+    if (!paths) return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
+    const held = await heldElsewhere(q, qs.id || '', paths);
+    if (held) return reply.code(409).send(heldAnswer(held));
+    return { path: paths[0], paths, ...(await previewMoves(q, qs.id || null, paths)) };
   });
 
   app.post('/api/admin/libraries', async (req, reply) => {
     const b = z.object({
       name: z.string().min(1).max(80),
       // relative, posix, no escaping the root. Containment is checked again at the filesystem layer.
-      path: z.string().min(1).max(300),
+      path: z.string().min(1).max(300).optional(),
+      // Every folder it holds (v0.55.1, #148), the first being the one `path` names alone -- what a rollback to v0.55.0
+      // reads. Several, so one library can be "these source folders" without the ones kept apart.
+      paths: z.array(z.string().min(1).max(300)).min(1).max(LIBRARY_MAX_FOLDERS).optional(),
       // Accepted here so creating a rated library is ONE request. The UI used to POST the library and then
       // PATCH the rating, which meant a failed second call left a library that silently showed everything
       // to everyone under a "Created" toast.
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const typed = toStoredRel(b.data.path).replace(/^\/+/, '').replace(/\/+$/, '').trim();
-    if (!typed || typed.includes('..') || typed.startsWith('/')) {
-      return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
-    }
-    const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
-    // Nesting is allowed. libraryIdFor() resolves the MOST SPECIFIC library containing a folder, so
-    // `Manga/Seinen` inside `Manga` is unambiguous -- and refusing it blocked the obvious thing an admin
-    // wants, which is to carve a big library into parts. Only an exact duplicate is refused, because two
-    // libraries on the same path have no rule to separate them.
-    const dup = await one<{ name: string }>(`SELECT name FROM libraries WHERE path = $1`, [path]);
-    if (dup) {
-      return reply.code(409).send({ error: 'duplicate', message: `"${dup.name}" already covers that folder.` });
-    }
+    const raw = b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
+    if (!raw) return reply.code(400).send({ error: 'bad_request' });
+    const paths = await storedFolders(raw);
+    if (!paths) return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
     const id = `lib_${randomBytes(8).toString('hex')}`;
-    await tx(async (qq) => {
+    const out = await tx(async (qq) => {
+      await lockLibrarySaves(qq);
+      // Nesting is allowed. libraryIdFor() resolves the MOST SPECIFIC folder containing a series, so
+      // `Manga/Seinen` inside `Manga` is unambiguous -- and refusing it blocked the obvious thing an admin
+      // wants, which is to carve a big library into parts. Only a folder another library holds is refused.
+      // Checked under the lock, so two saves cannot both take one folder.
+      const held = await heldElsewhere(qq, id, paths);
+      if (held) return { held };
       await qq(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,$2,$3,$4)`,
-        [id, b.data.name.trim(), path, b.data.ageRating ?? null]);
+        [id, b.data.name.trim(), paths[0], b.data.ageRating ?? null]);
       // Reassignment is deliberate and happens here, not in a scan: the scanner keeps an existing folder in
-      // the library it is already in, precisely so it can never re-mint an id by recomputing.
-      //
-      // Two conditions rather than `library_id = 'lib'`. Claiming from any LESS SPECIFIC library is what
-      // makes nesting work -- a new `Manga/Seinen` takes from `Manga`, and never the other way. Skipping
-      // pinned rows is what makes a hand-move stick: an admin who put one series here on purpose should not
-      // have it taken back by a folder rule they were working around.
-      await qq(
-        `UPDATE lib_series s SET library_id = $1
-          WHERE NOT s.library_pinned
-            AND (s.folder = $2 OR s.folder LIKE $2 || '/%')
-            AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($2::text)`,
-        [id, path],
-      );
+      // the library it is already in, precisely so it can never re-mint an id by recomputing. The longest folder
+      // wins, so a new `Manga/Seinen` takes from `Manga` and never the other way, and a pinned series stays put:
+      // an admin who filed one somewhere on purpose should not have it taken back by a folder rule they were
+      // working around (lib/libraryFolders.ts).
+      const moved = await applyMoves(qq, id, paths);
+      await setFolders(qq, id, paths);
+      return { moved };
     });
-    await logAudit('library.create', { userId: userIdOf(req), detail: { id, path }, req });
-    return { ok: true, id };
+    if (out.held) return reply.code(409).send(heldAnswer(out.held));
+    await logAudit('library.create', { userId: userIdOf(req), detail: { id, paths, moved: out.moved }, req });
+    return { ok: true, id, moved: out.moved };
   });
 
   app.patch('/api/admin/libraries/:id', async (req, reply) => {
@@ -2471,6 +2476,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       name: z.string().min(1).max(80).optional(),
       // Changing the path used to mean delete-and-recreate, which also dropped every access grant on it.
       path: z.string().max(300).optional(),
+      // Every folder it holds, replaced whole (v0.55.1, #148); `path` alone is one. Ignored for the default library,
+      // whose empty path is "everything no other library holds".
+      paths: z.array(z.string().max(300)).min(1).max(LIBRARY_MAX_FOLDERS).optional(),
       // A default its series inherit. null clears it.
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
       // Who may see it. See the note below: this is not simply "insert a row".
@@ -2478,44 +2486,34 @@ export default async function adminRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
+    // Folders are checked before anything is written, so a refused save changes nothing.
+    const raw = id === 'lib' ? null : b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
+    const paths = raw && await storedFolders(raw);
+    if (raw && !paths) return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
+    if (!(await one('SELECT 1 FROM libraries WHERE id = $1', [id]))) return reply.code(404).send({ error: 'not_found' });
+
+    let moved = 0;
+    if (paths) {
+      // In one transaction: what the old folders held that the new ones do not goes to whichever library DOES
+      // hold it, resolved as the scanner would -- not blindly to the default, which would tear a nested library's
+      // contents out of its parent -- and what the new ones hold comes in (lib/libraryFolders.ts).
+      const out = await tx(async (qq) => {
+        await lockLibrarySaves(qq);
+        const held = await heldElsewhere(qq, id, paths);
+        if (held) return { held };
+        const n = await applyMoves(qq, id, paths);
+        await setFolders(qq, id, paths);
+        return { moved: n };
+      });
+      if (out.held) return reply.code(409).send(heldAnswer(out.held));
+      moved = out.moved ?? 0;
+    }
+
     if (b.data.name !== undefined) {
       await q('UPDATE libraries SET name = $2 WHERE id = $1', [id, b.data.name.trim()]);
     }
     if (b.data.ageRating !== undefined) {
       await q('UPDATE libraries SET age_rating = $2 WHERE id = $1', [id, b.data.ageRating]);
-    }
-
-    if (b.data.path !== undefined && id !== 'lib') {
-      const typed = toStoredRel(b.data.path).replace(/^\/+/, '').replace(/\/+$/, '').trim();
-      if (!typed || typed.includes('..') || typed.startsWith('/')) {
-        return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
-      }
-      const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
-      const dup = await one<{ name: string }>('SELECT name FROM libraries WHERE path = $1 AND id <> $2', [path, id]);
-      if (dup) return reply.code(409).send({ error: 'duplicate', message: `"${dup.name}" already covers that folder.` });
-
-      await tx(async (qq) => {
-        // Anything it holds that the new path does not cover goes back to whichever library DOES cover it,
-        // resolved the same way the scanner would -- not blindly to the default, which would tear a nested
-        // library's contents out of its parent.
-        await qq(
-          `UPDATE lib_series s SET library_id = COALESCE((
-             SELECT l.id FROM libraries l
-              WHERE l.id <> $1 AND (l.path = '' OR s.folder = l.path OR s.folder LIKE l.path || '/%')
-              ORDER BY length(l.path) DESC LIMIT 1), 'lib')
-            WHERE s.library_id = $1 AND NOT s.library_pinned
-              AND NOT (s.folder = $2 OR s.folder LIKE $2 || '/%')`,
-          [id, path],
-        );
-        await qq('UPDATE libraries SET path = $2 WHERE id = $1', [id, path]);
-        await qq(
-          `UPDATE lib_series s SET library_id = $1
-            WHERE NOT s.library_pinned
-              AND (s.folder = $2 OR s.folder LIKE $2 || '/%')
-              AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($2::text)`,
-          [id, path],
-        );
-      });
     }
 
     /**
@@ -2559,8 +2557,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
     }
 
-    await logAudit('library.update', { userId: userIdOf(req), detail: { id, ...b.data }, req });
-    return { ok: true };
+    await logAudit('library.update', { userId: userIdOf(req), detail: { id, ...b.data, moved }, req });
+    return { ok: true, moved };
   });
 
   app.delete('/api/admin/libraries/:id', async (req, reply) => {
@@ -2568,30 +2566,26 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (id === 'lib') {
       return reply.code(400).send({ error: 'cannot_delete', message: 'The default library cannot be removed.' });
     }
-    await tx(async (qq) => {
-      // Back to whichever library still covers each folder -- the enclosing one for a nested library, the
+    const moved = await tx(async (qq) => {
+      await lockLibrarySaves(qq);
+      // Back to whichever library still holds each folder -- the enclosing one for a nested library, the
       // default otherwise. Sending everything to the default would tear a nested library's contents out of
-      // its parent on delete, which is not what "remove this library" means.
+      // its parent on delete, which is not what "remove this library" means. What it held by hand moves too.
       //
       // The FK is RESTRICT on purpose: read_progress cascades from lib_series, so a cascading library delete
       // would destroy reading history two hops away.
-      await qq(
-        `UPDATE lib_series s SET library_id = COALESCE((
-           SELECT l.id FROM libraries l
-            WHERE l.id <> $1 AND (l.path = '' OR s.folder = l.path OR s.folder LIKE l.path || '/%')
-            ORDER BY length(l.path) DESC LIMIT 1), 'lib')
-          WHERE s.library_id = $1`,
-        [id],
-      );
+      const n = await applyMoves(qq, id, [], true);
       // Whoever was granted this one specifically. Taking their row away can leave them with none at all,
       // and none means every library -- so removing a shelf would quietly hand them the whole collection.
       const granted = await qq<{ user_id: string }>('SELECT user_id FROM user_libraries WHERE library_id = $1', [id]);
       await qq('DELETE FROM user_libraries WHERE library_id = $1', [id]);
       for (const g of granted) await keepRestricted(qq, g.user_id);
+      // Its library_paths rows go with it (ON DELETE CASCADE).
       await qq('DELETE FROM libraries WHERE id = $1', [id]);
+      return n;
     });
-    await logAudit('library.delete', { userId: userIdOf(req), detail: { id }, req });
-    return { ok: true };
+    await logAudit('library.delete', { userId: userIdOf(req), detail: { id, moved }, req });
+    return { ok: true, moved };
   });
 
   // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic. The body

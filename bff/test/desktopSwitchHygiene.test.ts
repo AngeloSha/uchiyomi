@@ -244,11 +244,16 @@ test('the desktop-only filesystem rules sit behind isDesktop(), with the server 
 });
 
 test('typed library paths are stored with `/`, and on desktop in the spelling the disk has', () => {
-  // The folder browser, the preview, creating a library and re-pathing one (routes/admin.ts), and the rename
-  // destination (lib/libraryAdmin.ts). Reintroduce by dropping toStoredRel from any one: `Manga\Seinen` typed
-  // on Windows is stored with a backslash and `folder LIKE path || '/%'` matches no series under it.
+  // The folder browser (routes/admin.ts); every folder the preview, creating a library and re-pathing one take, since
+  // v0.55.1 through lib/libraryFolders.ts storedFolders; and the rename destination (lib/libraryAdmin.ts). Reintroduce
+  // by dropping toStoredRel from any one: `Manga\Seinen` typed on Windows is stored with a backslash and the prefix
+  // test matches no series under it.
   const admin = code(read('routes/admin.ts'));
-  assert.equal(admin.match(/toStoredRel\(/g)?.length, 4, 'a typed library path in routes/admin.ts skips toStoredRel');
-  assert.equal(admin.match(/await diskSpelling\(\[LIBRARY_ROOT, DL_ROOT\],\s/g)?.length, 4, 'a typed library path skips diskSpelling');
+  assert.equal(admin.match(/toStoredRel\(/g)?.length, 1, 'the folder browser in routes/admin.ts skips toStoredRel');
+  assert.equal(admin.match(/await diskSpelling\(\[LIBRARY_ROOT, DL_ROOT\],\s/g)?.length, 1, 'the folder browser skips diskSpelling');
+  const folders = code(read('lib/libraryFolders.ts'));
+  assert.match(folders, /const typed = trimTrailingSlashes\(toStoredRel\(r\)\.replace\(/, 'a library\'s folder skips toStoredRel');
+  assert.match(folders, /const path = await diskSpelling\(\[LIBRARY_ROOT, DL_ROOT\], typed\);/, 'a library\'s folder skips diskSpelling');
+  assert.equal(admin.match(/await storedFolders\(/g)?.length, 3, 'the preview, the create or the edit takes a folder without storedFolders');
   assert.match(code(read('lib/libraryAdmin.ts')), /const typed = toStoredRel\(newFolder\)\.replace\(/, 'the rename destination skips toStoredRel');
 });

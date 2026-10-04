@@ -617,11 +617,16 @@ export interface LibraryRow { id: string; path: string }
  * part-downloaded here is one shelf, and both copies land in the same library by construction.
  *
  * Library zero has path '' and therefore prefixes everything, which is why an install that has never
- * declared a library behaves exactly as it did before this existed.
+ * declared a library behaves exactly as it did before this existed. It holds no folder of its own (libraryRows), so
+ * it is also the answer when no row contains this folder.
  *
  * Longest path wins, which is also what makes NESTING unambiguous: a series under `Manga/Seinen` belongs to
  * that library rather than to `Manga`, and deleting the inner one returns it to `Manga` rather than to the
  * default. Nested libraries used to be refused out of caution even though this rule already handled them.
+ *
+ * A library may hold several folders (v0.55.1, #148): `libs` has one row per (library, folder), and the longest
+ * folder wins across all of them, so `Comics/Marvel` held by one library beats `Comics` held by another however
+ * many other folders either holds.
  *
  * Only consulted for a folder the scanner has not seen before: an existing row keeps the library it is in,
  * so an admin's hand-move is never recomputed away.
@@ -633,6 +638,17 @@ export function libraryIdFor(folderRel: string, libs: LibraryRow[]): string {
     if (!best || l.path.length > best.path.length) best = l;
   }
   return best?.id ?? 'lib';
+}
+
+/**
+ * Every folder a declared library holds, one row per (library, folder): what libraryIdFor reads (v0.55.1, #148).
+ *
+ * `libraries.path` is only a library's FIRST folder, kept for a rollback to v0.55.0, so reading it here would file
+ * every series under a library's other folders into the default library. Every caller that assigns a library by
+ * folder reads this: the scan, a "nothing yet" add (routes/sources.ts) and unpinning (routes/admin.ts).
+ */
+export function libraryRows(): Promise<LibraryRow[]> {
+  return q<LibraryRow>('SELECT library_id AS id, path FROM library_paths');
 }
 
 /**
@@ -820,7 +836,7 @@ async function scanOnce(): Promise<ScanResult> {
   // must never be offered as the answer for a different folder.
   const onDisk = walks.flatMap((w) => w.found.map((f) => f.folderRel));
   // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
-  const libs = await q<LibraryRow>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+  const libs = await libraryRows();
   for (const { root, found: foundInRoot } of walks) {
     for (const found of foundInRoot) {
       const { folderRel, folderAbs, source: srcName, chapters: files } = found;

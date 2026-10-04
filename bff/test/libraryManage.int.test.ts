@@ -20,23 +20,37 @@
 //      lock someone out of their own library, and it is the reason this file exists.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
+// A real library root, for the folder browser's counts: two folders whose names differ by one character.
+const LM_ROOT = mkdtempSync(join(tmpdir(), 'yomi-libmanage-'));
 if (DSN) {
   process.env.DATABASE_URL = DSN;
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
   process.env.LIBRARY_BACKEND = 'owned';
+  process.env.LIBRARY_ROOT = LM_ROOT;
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
-const OUTER = 'lib_t_outer';
-const INNER = 'lib_t_inner';
+// Minted by POST /api/admin/libraries (lib_<hex>), as every library is: the outer one, and the inner one, which a
+// subtest deletes and a later one declares again. MADE is every id the file declared, for cleanup.
+let OUTER = '';
+let INNER = '';
+const MADE: string[] = [];
+/** The folders this file declares libraries on: one a crashed run left holding any of them is taken away first. */
+const LM_PATHS = ['Manga', 'Manga/Seinen', 'Manga/Shounen', 'Manga/Josei', 'Manga/Seinen/Plain', 'Elsewhere', 'Lm Other/Place',
+  'Lm_Wild', 'Lm%', 'Lm Thief', 'Lm Twice', 'Lm Nope'];
+/** Where every one of SERIES is, by id. */
+const placesOf = async (q: any): Promise<Record<string, string>> => Object.fromEntries(
+  (await q('SELECT id, library_id FROM lib_series WHERE id = ANY($1)', [SERIES])).map((r: any) => [r.id, r.library_id]));
+/** The series whose library differs between two placesOf. */
+const movedBetween = (a: Record<string, string>, b: Record<string, string>) => Object.keys(b).filter((id) => a[id] !== b[id]).sort();
 const SERIES = ['s_lm_a', 's_lm_b', 's_lm_c'] as const;
 const FOLDERS: Record<string, string> = {
   s_lm_a: 'Manga/Shounen/Alpha',   // outer only
@@ -53,7 +67,8 @@ async function setup() {
   await migrate();
   await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [SERIES]).catch(() => {});
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
-  await q('DELETE FROM libraries WHERE id = ANY($1)', [[OUTER, INNER]]).catch(() => {});
+  await q(`DELETE FROM libraries WHERE id <> 'lib' AND (path = ANY($1)
+             OR id IN (SELECT library_id FROM library_paths WHERE path = ANY($1)))`, [LM_PATHS]).catch(() => {});
   await q(`DELETE FROM users WHERE username LIKE 'lm-%'`).catch(() => {});
 
   for (const id of SERIES) {
@@ -80,13 +95,21 @@ async function setup() {
   await app.ready();
   const auth = { authorization: `Bearer ${app.jwt.sign({ sub: admin, role: 'admin' })}` };
 
-  return { q, free, bound, app, auth };
+  /** Declare a library through the route, as the dialog does, and answer the id it minted. */
+  const declare = async (name: string, path: string): Promise<string> => {
+    const r = await app.inject({ method: 'POST', url: '/api/admin/libraries', headers: auth, payload: { name, path } });
+    assert.equal(r.statusCode, 200, `declaring ${path}: ${r.body}`);
+    MADE.push(r.json().id);
+    return r.json().id;
+  };
+
+  return { q, free, bound, app, auth, declare };
 }
 
 async function cleanup(q: any) {
   await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [SERIES]).catch(() => {});
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
-  await q('DELETE FROM libraries WHERE id = ANY($1)', [[OUTER, INNER]]).catch(() => {});
+  await q('DELETE FROM libraries WHERE id = ANY($1)', [MADE]).catch(() => {});
   await q(`DELETE FROM users WHERE username LIKE 'lm-%'`).catch(() => {});
 }
 
@@ -94,38 +117,28 @@ const libOf = async (q: any, id: string) =>
   (await q<{ library_id: string }>('SELECT library_id FROM lib_series WHERE id = $1', [id]))[0].library_id;
 
 test('library management', { skip }, async (t) => {
-  const { q, free, bound, app, auth } = await setup();
+  const { q, free, bound, app, auth, declare } = await setup();
   const { content } = await import('../src/lib/backend');
   const { libraryIdFor } = await import('../src/lib/library');
 
   try {
     await t.test('NESTING: the most specific library wins', async () => {
-      const libs = [{ id: 'lib', path: '' }, { id: OUTER, path: 'Manga' }, { id: INNER, path: 'Manga/Seinen' }];
-      assert.equal(libraryIdFor('Manga/Shounen/Alpha', libs), OUTER, 'only the outer contains it');
-      assert.equal(libraryIdFor('Manga/Seinen/Beta', libs), INNER, 'both contain it; the deeper one wins');
+      const libs = [{ id: 'lib', path: '' }, { id: 'outer', path: 'Manga' }, { id: 'inner', path: 'Manga/Seinen' }];
+      assert.equal(libraryIdFor('Manga/Shounen/Alpha', libs), 'outer', 'only the outer contains it');
+      assert.equal(libraryIdFor('Manga/Seinen/Beta', libs), 'inner', 'both contain it; the deeper one wins');
       assert.equal(libraryIdFor('Elsewhere/Gamma', libs), 'lib', 'neither contains it');
-      assert.equal(libraryIdFor('Manga', libs), OUTER, 'the library folder itself belongs to it');
+      assert.equal(libraryIdFor('Manga', libs), 'outer', 'the library folder itself belongs to it');
     });
 
+    // Through the route from here on. These used to run a copy of the handler's claim SQL, so changing the handler
+    // could not fail them.
     await t.test('creating a nested library takes only from less specific ones', async () => {
-      await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Outer','Manga')`, [OUTER]);
-      await q(
-        `UPDATE lib_series s SET library_id = $1
-          WHERE NOT s.library_pinned AND (s.folder = $2 OR s.folder LIKE $2 || '/%')
-            AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($2::text)`,
-        [OUTER, 'Manga'],
-      );
+      OUTER = await declare('Outer', 'Manga');
       assert.equal(await libOf(q, 's_lm_a'), OUTER);
       assert.equal(await libOf(q, 's_lm_b'), OUTER);
       assert.equal(await libOf(q, 's_lm_c'), 'lib', 'a series outside the path must not be claimed');
 
-      await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Inner','Manga/Seinen')`, [INNER]);
-      await q(
-        `UPDATE lib_series s SET library_id = $1
-          WHERE NOT s.library_pinned AND (s.folder = $2 OR s.folder LIKE $2 || '/%')
-            AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($2::text)`,
-        [INNER, 'Manga/Seinen'],
-      );
+      INNER = await declare('Inner', 'Manga/Seinen');
       assert.equal(await libOf(q, 's_lm_b'), INNER, 'the inner library should have taken it from the outer');
       assert.equal(await libOf(q, 's_lm_a'), OUTER, 'and left the rest of the outer alone');
     });
@@ -136,14 +149,16 @@ test('library management', { skip }, async (t) => {
 
       // A library is created whose path contains a pinned series -> must not claim it.
       await q('UPDATE lib_series SET library_id = $2, library_pinned = true WHERE id = $1', ['s_lm_a', INNER]);
-      await q(
-        `UPDATE lib_series s SET library_id = $1
-          WHERE NOT s.library_pinned AND (s.folder = $2 OR s.folder LIKE $2 || '/%')
-            AND length((SELECT l.path FROM libraries l WHERE l.id = s.library_id)) < length($2::text)`,
-        [OUTER, 'Manga'],
-      );
+      const shounen = await declare('Shounen', 'Manga/Shounen');
       assert.equal(await libOf(q, 's_lm_a'), INNER,
         'a pinned series was taken back by the folder rule, so the hand-move silently undid itself');
+      // Nor does re-pathing the library whose folder holds it.
+      const r = await app.inject({ method: 'PATCH', url: `/api/admin/libraries/${OUTER}`, headers: auth, payload: { path: 'Manga' } });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(await libOf(q, 's_lm_a'), INNER, 'saving the outer library took a pinned series back');
+      const del = await app.inject({ method: 'DELETE', url: `/api/admin/libraries/${shounen}`, headers: auth });
+      assert.equal(del.statusCode, 200, del.body);
+      assert.equal(await libOf(q, 's_lm_a'), INNER, 'removing a library moved a series pinned elsewhere');
 
       // And a rescan must not recompute it either.
       const libs = [{ id: 'lib', path: '' }, { id: OUTER, path: 'Manga' }, { id: INNER, path: 'Manga/Seinen' }];
@@ -155,18 +170,12 @@ test('library management', { skip }, async (t) => {
 
     await t.test('deleting a nested library returns its series to the ENCLOSING one', async () => {
       assert.equal(await libOf(q, 's_lm_b'), INNER);
-      await q(
-        `UPDATE lib_series s SET library_id = COALESCE((
-           SELECT l.id FROM libraries l
-            WHERE l.id <> $1 AND (l.path = '' OR s.folder = l.path OR s.folder LIKE l.path || '/%')
-            ORDER BY length(l.path) DESC LIMIT 1), 'lib')
-          WHERE s.library_id = $1`,
-        [INNER],
-      );
+      const r = await app.inject({ method: 'DELETE', url: `/api/admin/libraries/${INNER}`, headers: auth });
+      assert.equal(r.statusCode, 200, r.body);
       assert.equal(await libOf(q, 's_lm_b'), OUTER,
         'sending it to the default would tear a nested library out of its parent on delete');
       assert.equal(await libOf(q, 's_lm_c'), 'lib', 'and a series outside every path goes to the default');
-      await q('DELETE FROM libraries WHERE id = $1', [INNER]);
+      assert.equal((await q('SELECT 1 FROM libraries WHERE id = $1', [INNER])).length, 0, 'the library is gone');
     });
 
     await t.test('RATINGS INHERIT from the library, and a series still beats it', async () => {
@@ -243,8 +252,7 @@ test('library management', { skip }, async (t) => {
       // pinning each one -- and that it says what it skipped rather than quietly applying to fewer series
       // than were ticked.
       // The delete test above removed the inner library; this one needs the nested shape back.
-      await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Inner','Manga/Seinen')
-               ON CONFLICT (id) DO UPDATE SET path = EXCLUDED.path`, [INNER]);
+      INNER = await declare('Inner', 'Manga/Seinen');
       await q('UPDATE lib_series SET library_pinned = false, library_id = $2 WHERE id = ANY($1)',
         [SERIES, 'lib']);
 
@@ -314,25 +322,71 @@ test('library management', { skip }, async (t) => {
     });
 
     await t.test('the preview promises what the create actually does', async () => {
-      // The preview is the only thing anyone reads before committing, so it has to run the SAME predicate as
-      // the handler. Its first version asked for `library_id = 'lib'`, which was right when libraries could
-      // not nest and now reports 0 for a nested library whose series the enclosing one already holds.
-      await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Inner','Manga/Seinen')
-               ON CONFLICT (id) DO UPDATE SET path = EXCLUDED.path`, [INNER]);
+      // The preview is the only thing anyone reads before committing, so it has to run the SAME statement as
+      // the handler (lib/libraryFolders.ts). Its first version asked for `library_id = 'lib'`, which was right when
+      // libraries could not nest and reported 0 for a nested library whose series the enclosing one already holds.
+      const gone = await app.inject({ method: 'DELETE', url: `/api/admin/libraries/${INNER}`, headers: auth });
+      assert.equal(gone.statusCode, 200, gone.body);
       await q(`UPDATE lib_series SET library_pinned = false, library_id = $2 WHERE id = ANY($1)`, [SERIES, OUTER]);
+      const preview = async (query: string) =>
+        (await app.inject({ method: 'GET', url: `/api/admin/libraries/preview?${query}`, headers: auth })).json();
 
-      const pv = (await app.inject({
-        method: 'GET', url: '/api/admin/libraries/preview?path=' + encodeURIComponent('Manga/Seinen'), headers: auth,
-      })).json();
+      // A pinned series is never promised, because the handler will not take it.
+      await q('UPDATE lib_series SET library_pinned = true WHERE id = $1', ['s_lm_b']);
+      assert.equal((await preview('path=' + encodeURIComponent('Manga/Seinen'))).series, 0,
+        'the preview counted a series the handler would leave alone');
+      await q('UPDATE lib_series SET library_pinned = false WHERE id = $1', ['s_lm_b']);
+
+      const pv = await preview('path=' + encodeURIComponent('Manga/Seinen'));
       assert.equal(pv.series, 1, 'a nested library reported 0 because the preview only looked at the default library');
       assert.deepEqual(pv.sample, ['s_lm_b']);
+      // And the create moves exactly that. Reintroduce a predicate of the preview's own (the old `library_id = 'lib'`):
+      // it promises 0 here while the create moves Beta.
+      let before = await placesOf(q);
+      INNER = await declare('Inner', 'Manga/Seinen');
+      assert.deepEqual(movedBetween(before, await placesOf(q)), ['s_lm_b'], 'the create moved something the preview did not promise');
 
-      // And a pinned series is never promised, because the handler will not take it.
-      await q('UPDATE lib_series SET library_pinned = true WHERE id = $1', ['s_lm_b']);
-      assert.equal((await app.inject({
-        method: 'GET', url: '/api/admin/libraries/preview?path=' + encodeURIComponent('Manga/Seinen'), headers: auth,
-      })).json().series, 0, 'the preview counted a series the handler would leave alone');
-      await q('UPDATE lib_series SET library_pinned = false WHERE id = $1', ['s_lm_b']);
+      // An edit, both ways at once: the inner library moving from Manga/Seinen to Manga/Shounen gives Beta back to the
+      // outer one and takes Alpha from it. Reintroduce the claim alone (no release): Beta stays, and both counts drop.
+      const edit = await preview(`id=${INNER}&path=` + encodeURIComponent('Manga/Shounen'));
+      assert.deepEqual([edit.series, edit.sample], [2, ['s_lm_a', 's_lm_b']], 'the preview of an edit is not what leaves and what comes');
+      before = await placesOf(q);
+      const r = await app.inject({ method: 'PATCH', url: `/api/admin/libraries/${INNER}`, headers: auth, payload: { path: 'Manga/Shounen' } });
+      assert.equal(r.statusCode, 200, r.body);
+      const after = await placesOf(q);
+      assert.deepEqual(movedBetween(before, after), ['s_lm_a', 's_lm_b'], 'the edit moved something other than what the preview promised');
+      assert.equal(r.json().moved, 2);
+      assert.deepEqual([after.s_lm_a, after.s_lm_b], [INNER, OUTER], 'Alpha came in and Beta went back to the enclosing library');
+      // And back, for what follows.
+      const back = await app.inject({ method: 'PATCH', url: `/api/admin/libraries/${INNER}`, headers: auth, payload: { path: 'Manga/Seinen' } });
+      assert.equal(back.json().moved, 2, back.body);
+      assert.deepEqual([await libOf(q, 's_lm_a'), await libOf(q, 's_lm_b')], [OUTER, INNER]);
+    });
+
+    await t.test('a folder name with _ or % in it is a name, not a pattern', async () => {
+      // The claim used `LIKE path || '/%'`, so a library on Lm_Wild also took LmXWild/Zeta (`_` is any one character)
+      // and one on Lm% took everything under any folder starting Lm. Reintroduce the LIKE in underSql: Zeta moves.
+      await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES
+                 ('s_lm_zeta','T!lm','s_lm_zeta','LmXWild/Zeta',1), ('s_lm_eta','T!lm','s_lm_eta','Lm_Wild/Eta',1)`);
+      try {
+        const wild = await declare('Wild', 'Lm_Wild');
+        const any = await declare('Any', 'Lm%');
+        assert.equal(await libOf(q, 's_lm_eta'), wild, 'a series really under Lm_Wild was not claimed');
+        assert.equal(await libOf(q, 's_lm_zeta'), 'lib', 'LmXWild/Zeta was claimed by a library on Lm_Wild or Lm%');
+        // The folder browser counts the same way. Reintroduce the LIKE in its count: Lm_Wild counts 2.
+        mkdirSync(join(LM_ROOT, 'Lm_Wild'), { recursive: true });
+        mkdirSync(join(LM_ROOT, 'LmXWild'), { recursive: true });
+        const root = (await app.inject({ method: 'GET', url: '/api/admin/libraries/folders', headers: auth })).json();
+        assert.deepEqual(root.folders.filter((f: any) => f.name.startsWith('Lm')).map((f: any) => [f.name, f.series]),
+          [['Lm_Wild', 1], ['LmXWild', 1]], 'a folder counted series under another folder its name matches as a pattern');
+        for (const l of [wild, any]) {
+          const r = await app.inject({ method: 'DELETE', url: `/api/admin/libraries/${l}`, headers: auth });
+          assert.equal(r.statusCode, 200, r.body);
+        }
+        assert.equal(await libOf(q, 's_lm_eta'), 'lib', 'removing the library did not release its series');
+      } finally {
+        await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [['s_lm_zeta', 's_lm_eta']]);
+      }
     });
 
     await t.test('browsing folders refuses to leave the root, and 404s a path that is not there', async () => {
@@ -381,8 +435,6 @@ test('library management', { skip }, async (t) => {
 
     await t.test('WIDENING 2: deleting a library a member was confined to must not unrestrict them', async () => {
       const { viewCtxFor } = await import('../src/lib/visibility');
-      await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Inner','Manga/Seinen')
-               ON CONFLICT (id) DO UPDATE SET path = EXCLUDED.path`, [INNER]);
       await q('DELETE FROM user_libraries WHERE user_id = $1', [bound]);
       await q('INSERT INTO user_libraries (user_id, library_id) VALUES ($1,$2)', [bound, INNER]);
 
@@ -463,6 +515,169 @@ test('library management', { skip }, async (t) => {
       assert.equal(row.name, 'Grown-ups');
       assert.equal(row.age_rating, 18, 'the UI cannot show a rating it is not sent');
       assert.ok(Array.isArray(row.members), 'nor who can see it');
+    });
+  } finally {
+    await app.close();
+    await cleanup(q);
+  }
+});
+
+after(() => rmSync(LM_ROOT, { recursive: true, force: true }));
+
+test('unpinning files a series by every folder a library holds (#148)', { skip }, async () => {
+  // Automatic again means the folder rule decides, and the rule reads every folder a library holds -- not only the
+  // first, which is all libraries.path keeps. Reintroduce by reading `SELECT id, path FROM libraries` in the single
+  // route: Gamma goes to the default library; in the bulk route: Beta does.
+  const { q, app, auth } = await setup();
+  try {
+    // Its first folder holds nothing; the series are under its second and third.
+    const made = await app.inject({ method: 'POST', url: '/api/admin/libraries', headers: auth,
+      payload: { name: 'Two', paths: ['Lm Other/Place', 'Elsewhere', 'Manga/Seinen'] } });
+    assert.equal(made.statusCode, 200, made.body);
+    const TWO = made.json().id;
+    MADE.push(TWO);
+    await q('UPDATE lib_series SET library_id = $2, library_pinned = true WHERE id = ANY($1)', [SERIES, 'lib']);
+
+    const one = await app.inject({ method: 'POST', url: '/api/admin/series/s_lm_c/library', headers: auth, payload: { libraryId: null } });
+    assert.equal(one.statusCode, 200, one.body);
+    assert.equal(await libOf(q, 's_lm_c'), TWO, 'Elsewhere/Gamma is under the library\'s second folder');
+
+    const bulk = await app.inject({ method: 'POST', url: '/api/admin/series/library', headers: auth,
+      payload: { seriesIds: ['s_lm_a', 's_lm_b'], libraryId: null } });
+    assert.equal(bulk.statusCode, 200, bulk.body);
+    assert.equal(await libOf(q, 's_lm_b'), TWO, 'Manga/Seinen/Beta is under the library\'s third folder');
+    assert.equal(await libOf(q, 's_lm_a'), 'lib', 'Manga/Shounen/Alpha is under none of its folders');
+  } finally {
+    await app.close();
+    await cleanup(q);
+  }
+});
+
+test('several folders per library (#148)', { skip }, async (t) => {
+  // @Kedryn: "i want 'Uchiyomi manga' to have all those listed folders BUT '18 porn comics' and 'comix'". A library
+  // holds a list of folders; adding one moves its series in, removing one moves them back out to whichever library
+  // holds them now, and a series filed by hand stays where it was filed. Alpha is under Manga/Shounen, Beta under
+  // Manga/Seinen, Gamma under Elsewhere.
+  const { q, app, auth } = await setup();
+  const { libraryIdFor } = await import('../src/lib/library');
+  const send = (method: 'POST' | 'PATCH' | 'DELETE', url: string, payload?: object) =>
+    app.inject({ method, url, headers: auth, ...(payload ? { payload } : {}) });
+  const preview = async (id: string, paths: string[]) => (await app.inject({ method: 'GET', headers: auth,
+    url: `/api/admin/libraries/preview?id=${id}&` + paths.map((p) => 'paths=' + encodeURIComponent(p)).join('&') }));
+  const listed = async (id: string) => (await app.inject({ method: 'GET', url: '/api/admin/libraries', headers: auth }))
+    .json().content.find((l: any) => l.id === id);
+  let PICKS = '';
+  let NESTED = '';
+  try {
+    await t.test('a library declared on two folders holds the series of both', async () => {
+      const r = await send('POST', '/api/admin/libraries', { name: 'Nested', paths: ['Manga'] });
+      assert.equal(r.statusCode, 200, r.body);
+      NESTED = r.json().id;
+      MADE.push(NESTED);
+      const p = await send('POST', '/api/admin/libraries', { name: 'Picks', paths: ['Manga/Shounen', 'Lm Other/Place'] });
+      assert.equal(p.statusCode, 200, p.body);
+      PICKS = p.json().id;
+      MADE.push(PICKS);
+      assert.deepEqual(await placesOf(q), { s_lm_a: PICKS, s_lm_b: NESTED, s_lm_c: 'lib' });
+      const row = await listed(PICKS);
+      // Reintroduce by answering libraries.path alone: no `paths`, and the dialog cannot show the second folder.
+      assert.deepEqual([row.path, row.paths], ['Manga/Shounen', ['Manga/Shounen', 'Lm Other/Place']], 'GET does not carry every folder, first first');
+    });
+
+    await t.test('adding folders moves their series in, and leaves a series filed by hand where it was filed', async () => {
+      const pin = await send('POST', '/api/admin/series/s_lm_c/library', { libraryId: 'lib' });
+      assert.equal(pin.statusCode, 200, pin.body);
+      const want = ['Manga/Shounen', 'Lm Other/Place', 'Manga/Seinen', 'Elsewhere'];
+      const pv = await preview(PICKS, want);
+      assert.equal(pv.statusCode, 200, pv.body);
+      // Reintroduce by previewing the first folder only: the preview promises nothing for Beta.
+      assert.deepEqual([pv.json().series, pv.json().sample], [1, ['s_lm_b']], 'the preview does not sum every folder');
+      const before = await placesOf(q);
+      const r = await send('PATCH', `/api/admin/libraries/${PICKS}`, { paths: want });
+      assert.equal(r.statusCode, 200, r.body);
+      const after = await placesOf(q);
+      assert.deepEqual(movedBetween(before, after), ['s_lm_b'], 'the save moved something other than what the preview promised');
+      assert.equal(r.json().moved, 1);
+      assert.equal(after.s_lm_c, 'lib', 'a series filed by hand was taken by a folder added to another library');
+      assert.deepEqual((await listed(PICKS)).paths, ['Manga/Shounen', 'Elsewhere', 'Lm Other/Place', 'Manga/Seinen']);
+    });
+
+    await t.test('ROLLBACK: libraries.path stays the first folder, which is what v0.55.0 files by', async () => {
+      // v0.55.0 reads libraries.path and nothing else (lib/library.ts at v0.55.0: `SELECT id, path FROM libraries`).
+      // Reintroduce by writing the last folder there in setFolders: v0.55.0 would file a new Manga/Shounen series
+      // into the nested library.
+      const [row] = await q<{ path: string }>('SELECT path FROM libraries WHERE id = $1', [PICKS]);
+      assert.equal(row.path, 'Manga/Shounen', 'libraries.path is not the first folder');
+      const v0550 = await q<{ id: string; path: string }>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+      assert.equal(libraryIdFor('Manga/Shounen/New Title', v0550), PICKS, 'v0.55.0 would not file a new folder by the first one');
+    });
+
+    await t.test('removing a folder moves its series back out, to the library that holds them now', async () => {
+      const want = ['Lm Other/Place', 'Manga/Seinen', 'Elsewhere'];
+      const pv = await preview(PICKS, want);
+      assert.deepEqual([pv.json().series, pv.json().sample], [1, ['s_lm_a']], pv.body);
+      const r = await send('PATCH', `/api/admin/libraries/${PICKS}`, { paths: want });
+      assert.equal(r.statusCode, 200, r.body);
+      // Not to the default: the nested library holds Manga, and Manga/Shounen/Alpha is in it.
+      assert.deepEqual(await placesOf(q), { s_lm_a: NESTED, s_lm_b: PICKS, s_lm_c: 'lib' });
+      assert.equal((await q<{ path: string }>('SELECT path FROM libraries WHERE id = $1', [PICKS]))[0].path, 'Lm Other/Place',
+        'the first folder went and libraries.path still names it');
+    });
+
+    await t.test('a folder another library holds is refused, by name, and nothing is saved', async () => {
+      // Reintroduce by checking libraries.path alone (v0.55.0's duplicate check): Manga/Seinen, a second folder of
+      // Picks, is not seen as held, and the save dies on library_paths' key with a 500 that names nobody.
+      const r = await send('POST', '/api/admin/libraries', { name: 'Thief', paths: ['Lm Thief', 'Manga/Seinen'] });
+      assert.equal(r.statusCode, 409, r.body);
+      assert.deepEqual([r.json().error, r.json().path, r.json().library?.id], ['duplicate', 'Manga/Seinen', PICKS], r.body);
+      assert.match(r.json().message, /"Picks" already covers Manga\/Seinen/);
+      assert.equal((await q(`SELECT 1 FROM libraries WHERE name = 'Thief'`)).length, 0, 'the refused library was created');
+      // An edit too, and its name is not half-saved.
+      const e = await send('PATCH', `/api/admin/libraries/${NESTED}`, { name: 'Renamed', paths: ['Manga', 'Elsewhere'] });
+      assert.equal(e.statusCode, 409, e.body);
+      assert.equal(e.json().library?.name, 'Picks');
+      assert.equal((await listed(NESTED)).name, 'Nested', 'a refused save renamed the library');
+      assert.deepEqual((await listed(NESTED)).paths, ['Manga']);
+      // And the preview refuses it as the save would, rather than guessing between two libraries on one folder.
+      assert.equal((await preview(NESTED, ['Manga', 'Elsewhere'])).statusCode, 409);
+    });
+
+    await t.test('every folder is checked as `path` always was, and `path` alone is still one folder', async () => {
+      for (const paths of [['Manga', '../etc'], ['Manga', ' /etc'], []]) {
+        const r = await send('PATCH', `/api/admin/libraries/${NESTED}`, { paths });
+        assert.equal(r.statusCode, 400, `${JSON.stringify(paths)}: ${r.body}`);
+      }
+      assert.equal((await send('PATCH', `/api/admin/libraries/${NESTED}`, { paths: ['x'.repeat(301)] })).statusCode, 400);
+      assert.deepEqual((await listed(NESTED)).paths, ['Manga'], 'a refused folder list was half-saved');
+      // The same folder twice, or with a trailing slash, is held once.
+      const twice = await send('PATCH', `/api/admin/libraries/${NESTED}`, { paths: ['Manga', 'Manga/', 'Lm Twice'] });
+      assert.equal(twice.statusCode, 200, twice.body);
+      assert.deepEqual((await listed(NESTED)).paths, ['Manga', 'Lm Twice']);
+      // `path` alone replaces the list with that one folder, as a v0.55.0 client means it.
+      const one = await send('PATCH', `/api/admin/libraries/${PICKS}`, { path: 'Manga/Seinen' });
+      assert.equal(one.statusCode, 200, one.body);
+      assert.deepEqual((await listed(PICKS)).paths, ['Manga/Seinen']);
+      assert.equal(await libOf(q, 's_lm_b'), PICKS);
+      // An unknown library is a 404, not a folder list for nobody.
+      assert.equal((await send('PATCH', '/api/admin/libraries/lib_nope', { paths: ['Lm Nope'] })).statusCode, 404);
+    });
+
+    await t.test('the folders on offer leave out every folder a library holds', async () => {
+      // Reintroduce `taken` from libraries.path alone: Manga/Shounen, the nested library's second folder, is offered as
+      // a folder to split out.
+      const r = await send('PATCH', `/api/admin/libraries/${NESTED}`, { paths: ['Manga', 'Manga/Shounen'] });
+      assert.equal(r.statusCode, 200, r.body);
+      const { candidates } = (await app.inject({ method: 'GET', url: '/api/admin/libraries', headers: auth })).json();
+      const offered = candidates.map((c: any) => c.path);
+      assert.ok(!offered.includes('Manga/Shounen'), `a second folder of a library is offered: ${offered.join(', ')}`);
+      assert.ok(!offered.includes('Manga'), 'a first folder is offered');
+    });
+
+    await t.test('removing a library releases its series to the libraries that hold them', async () => {
+      const r = await send('DELETE', `/api/admin/libraries/${NESTED}`);
+      assert.equal(r.statusCode, 200, r.body);
+      assert.deepEqual(await placesOf(q), { s_lm_a: 'lib', s_lm_b: PICKS, s_lm_c: 'lib' });
+      assert.equal((await q('SELECT 1 FROM library_paths WHERE library_id = $1', [NESTED])).length, 0, 'its folders outlived it');
     });
   } finally {
     await app.close();
