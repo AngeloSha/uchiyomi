@@ -3189,7 +3189,7 @@
   "Notice chapters hidden": "Hinweis-Kapitel ausgeblendet",
   "Notice chapters shown": "Hinweis-Kapitel eingeblendet",
   "Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.": "Hinweis-Kapitel (nummeriert wie 100.1 oder 100.5) hier, in Mihon und überall sonst ausblenden und nicht herunterladen. Ausschalten zeigt sie wieder an.",
-  "{n} hidden now.": "Derzeit {n} ausgeblendet.",
+  "Hidden now: {n}.": "Jetzt ausgeblendet: {n}.",
   "Following the switch for {type} in Settings.": "Folgt dem Schalter für {type} in den Einstellungen.",
   "Notice chapters": "Hinweis-Kapitel",
   "Sources often post notices for readers as a chapter numbered after the latest one, like 100.1 or 100.5. For each type switched on, every chapter numbered with a fraction is hidden from the library, the reader, OPDS and Mihon, and is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "Quellen veröffentlichen Hinweise für Leser oft als Kapitel, das nach dem neuesten nummeriert ist, etwa 100.1 oder 100.5. Für jeden eingeschalteten Typ wird jedes Kapitel mit einer Nachkommazahl in der Bibliothek, im Reader, in OPDS und in Mihon ausgeblendet und nicht heruntergeladen. Nichts wird gelöscht: Wird ein Typ ausgeschaltet, erscheinen sie wieder. Eine Serie kann das in ihrem Blatt „Quellen & Übersetzungen“ überschreiben."

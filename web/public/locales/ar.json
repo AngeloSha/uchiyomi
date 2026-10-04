@@ -3189,7 +3189,7 @@
   "Notice chapters hidden": "أُخفيت فصول الإعلانات",
   "Notice chapters shown": "أُظهرت فصول الإعلانات",
   "Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.": "إخفاء فصول الإعلانات (المرقّمة مثل 100.1 أو 100.5) هنا وفي Mihon وفي كل مكان آخر، وعدم تنزيلها. إيقاف هذا يُظهرها من جديد.",
-  "{n} hidden now.": "المخفي الآن: {n}.",
+  "Hidden now: {n}.": "المخفي الآن: {n}.",
   "Following the switch for {type} in Settings.": "يتبع مفتاح {type} في الإعدادات.",
   "Notice chapters": "فصول الإعلانات",
   "Sources often post notices for readers as a chapter numbered after the latest one, like 100.1 or 100.5. For each type switched on, every chapter numbered with a fraction is hidden from the library, the reader, OPDS and Mihon, and is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "كثيرًا ما تنشر المصادر إعلانات للقرّاء كفصل مرقّم بعد أحدث فصل، مثل 100.1 أو 100.5. لكل نوع مفعّل، يُخفى كل فصل رقمه كسري من المكتبة والقارئ وOPDS وMihon، ولا يُنزَّل. لا يُحذف شيء: إيقاف النوع يُظهرها من جديد. يمكن لسلسلة أن تتجاوز هذا من لوحة المصادر والترجمات الخاصة بها."

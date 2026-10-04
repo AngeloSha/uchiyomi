@@ -3189,7 +3189,7 @@
   "Notice chapters hidden": "Capítulos de aviso ocultos",
   "Notice chapters shown": "Capítulos de aviso visíveis",
   "Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.": "Ocultar capítulos de aviso (numerados como 100.1 ou 100.5) aqui, no Mihon e em todo lugar, e não baixá-los. Desligar mostra-os de novo.",
-  "{n} hidden now.": "{n} ocultos agora.",
+  "Hidden now: {n}.": "Ocultos agora: {n}.",
   "Following the switch for {type} in Settings.": "Segue o interruptor de {type} em Configurações.",
   "Notice chapters": "Capítulos de aviso",
   "Sources often post notices for readers as a chapter numbered after the latest one, like 100.1 or 100.5. For each type switched on, every chapter numbered with a fraction is hidden from the library, the reader, OPDS and Mihon, and is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "As fontes costumam publicar avisos aos leitores como um capítulo numerado depois do mais recente, como 100.1 ou 100.5. Para cada tipo ligado, todo capítulo numerado com fração é ocultado da biblioteca, do leitor, do OPDS e do Mihon, e não é baixado. Nada é apagado: desligar um tipo mostra-os de novo. Uma série pode substituir isso na sua folha Fontes e traduções."

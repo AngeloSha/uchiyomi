@@ -817,7 +817,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               <span>
                 {tr('Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.')}
                 {series.hideNoticesEffective && (
-                  <span className="text-fog-400"> {tr('{n} hidden now.', { n: series.hiddenNotices ?? 0 })}</span>
+                  <span className="text-fog-400"> {tr('Hidden now: {n}.', { n: series.hiddenNotices ?? 0 })}</span>
                 )}
               </span>
             </label>

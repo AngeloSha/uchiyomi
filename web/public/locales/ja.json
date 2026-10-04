@@ -3189,7 +3189,7 @@
   "Notice chapters hidden": "お知らせ章を非表示にしました",
   "Notice chapters shown": "お知らせ章を表示しました",
   "Hide notice chapters (numbered like 100.1 or 100.5) here, in Mihon and everywhere else, and do not download them. Switching this off shows them again.": "お知らせ章（100.1 や 100.5 のような番号）をここ、Mihon、その他すべての場所で非表示にし、ダウンロードしません。オフにすると再び表示されます。",
-  "{n} hidden now.": "現在 {n} 件を非表示。",
+  "Hidden now: {n}.": "現在の非表示：{n} 件。",
   "Following the switch for {type} in Settings.": "設定の {type} のスイッチに従います。",
   "Notice chapters": "お知らせ章",
   "Sources often post notices for readers as a chapter numbered after the latest one, like 100.1 or 100.5. For each type switched on, every chapter numbered with a fraction is hidden from the library, the reader, OPDS and Mihon, and is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "ソースは読者へのお知らせを、最新章の後に 100.1 や 100.5 のような番号の章として投稿することがよくあります。オンにした種類では、小数のある番号の章はすべてライブラリ、リーダー、OPDS、Mihon から非表示になり、ダウンロードもされません。何も削除されません。種類をオフにすると再び表示されます。シリーズごとに「ソースと翻訳」シートで上書きできます。"

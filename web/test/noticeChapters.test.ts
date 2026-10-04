@@ -34,6 +34,18 @@ test('the Sources & translations sheet: what applies, its own choice, and the wa
   assert.match(src, /'series-books'/, 'the chapter list is not refetched after a flip');
 });
 
+test('the sheet says how many it hides as a label, which reads right at 1 in every language', () => {
+  // "{n} hidden now." was a counted sentence with no "1 ..." twin: "1 masqués", "1 ocultos" in fr, es and pt-BR.
+  // A label takes any number. Reintroduce the sentence: the sheet's key is not this one, and the old one is back.
+  const src = read('components/SourcesSheet.tsx');
+  assert.match(src, /tr\('Hidden now: \{n\}\.', \{ n: series\.hiddenNotices \?\? 0 \}\)/, 'the hidden count is not the label');
+  for (const lang of ['ar', 'de', 'es', 'fr', 'ja', 'pt-BR', 'ru', 'zh']) {
+    const loc = JSON.parse(read(`public/locales/${lang}.json`));
+    assert.equal(loc['{n} hidden now.'], undefined, `${lang} still carries the counted sentence`);
+    assert.ok(loc['Hidden now: {n}.']?.includes('{n}'), `${lang} has no label for the hidden count`);
+  }
+});
+
 test('Edit details: the type is sent on every save, null for automatic, seeded from the override only', () => {
   const series = { name: 'x', metadata: {}, overrides: null } as any;
   assert.equal(seedMeta(series).seriesType, '', 'a detected type must not be seeded as an override');
