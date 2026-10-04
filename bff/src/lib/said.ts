@@ -157,6 +157,13 @@ const EN = {
   // ---- Chapters that would not download
   'failures.live': ({ n, m }: { n: number; m: number }) => `${n} chapter${s(n, '', 's')} across ${m} source${s(m, '', 's')} keep failing`,
   'failures.none': () => 'Every attempted chapter landed',
+  // v0.55.1: a source whose every failing chapter was refused for room (HTTP 429) is waiting, not failing.
+  'failures.waiting': ({ n }: { n: number }) => (n === 1
+    ? '1 chapter waits for a site that asked for a pause, and is tried again by itself'
+    : `${n} chapters wait for a site that asked for a pause, and are tried again by themselves`),
+  'failures.alsoWaiting': ({ n }: { n: number }) => (n === 1
+    ? '1 more waits for a site that asked for a pause'
+    : `${n} more wait for a site that asked for a pause`),
   'failures.note': ({ cap }: { cap: number }) =>
     'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
     `They clear themselves the moment the chapter lands. After ${cap} failed tries the nightly sweep leaves a chapter alone ` +

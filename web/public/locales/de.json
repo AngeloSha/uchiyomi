@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3167
+    "strings": 3171
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1671,6 +1671,10 @@
   "{n} chapters across 1 source keep failing": "{n} Kapitel aus 1 Quelle schlagen immer wieder fehl",
   "{n} chapters across {m} sources keep failing": "{n} Kapitel aus {m} Quellen schlagen immer wieder fehl",
   "Every attempted chapter landed": "Jedes versuchte Kapitel ist angekommen",
+  "1 chapter waits for a site that asked for a pause, and is tried again by itself": "1 Kapitel wartet auf eine Seite, die um eine Pause gebeten hat, und wird von selbst erneut versucht",
+  "{n} chapters wait for a site that asked for a pause, and are tried again by themselves": "{n} Kapitel warten auf eine Seite, die um eine Pause gebeten hat, und werden von selbst erneut versucht",
+  "1 more waits for a site that asked for a pause": "1 weiteres wartet auf eine Seite, die um eine Pause gebeten hat",
+  "{n} more wait for a site that asked for a pause": "{n} weitere warten auf eine Seite, die um eine Pause gebeten hat",
   "One entry per source, counting chapters still missing after an attempt and how often each has been tried. They clear themselves the moment the chapter lands. After {cap} failed tries the nightly sweep leaves a chapter alone until the nightly repair gives it another chance a week later; \"Retry now\" does that for this source at once, and \"Find missing chapters\" on the series still fetches it on purpose. A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.": "Ein Eintrag pro Quelle: Er zählt die Kapitel, die nach einem Versuch noch fehlen, und wie oft jedes versucht wurde. Die Einträge verschwinden von selbst, sobald das Kapitel ankommt. Nach {cap} Fehlversuchen lässt der nächtliche Kapiteldurchlauf ein Kapitel in Ruhe, bis die nächtliche Reparatur ihm eine Woche später eine neue Chance gibt; „Jetzt erneut versuchen“ erledigt das für diese Quelle sofort, und „Fehlende Kapitel finden“ bei der Serie holt es weiterhin gezielt. Ein Kapitel, das mit fehlenden Seiten gespeichert wurde, steht auf seiner Serienseite und wird vom Kapiteldurchlauf erneut versucht, bis zu 10 pro Nacht.",
   "1 chapter in 1 series since {date}": "1 Kapitel in 1 Serie seit {date}",
   "1 chapter in {m} series since {date}": "1 Kapitel in {m} Serien seit {date}",

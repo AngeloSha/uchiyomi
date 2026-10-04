@@ -782,7 +782,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
   let readFailed = false;
   const rows = await q<{
     source_id: string; chapters: number; series: number; since: string; last_at: string; attempts: number; capped: number;
-    latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[];
+    latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[]; limited: number;
     blocked_until: string | null; disabled: boolean;
   }>(
     // `since` is the FIRST failure (first_at, v0.49.0; `at` is the latest attempt and a Retry now moves it
@@ -797,6 +797,9 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
             max(f.at) AS last_at,
             max(f.attempts)::int AS attempts,
             count(*) FILTER (WHERE f.attempts >= ${CHAPTER_RETRY_CAP})::int AS capped,
+            -- v0.55.1: refused for room (HTTP 429, lib/downloader.ts records it as rate_limited). A source whose every
+            -- failing chapter is one of these is waiting, not failing: Fix everything says it clears by itself.
+            count(*) FILTER (WHERE f.status = 'rate_limited')::int AS limited,
             (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
             (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
             (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
@@ -812,6 +815,10 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     sourceId: r.source_id,
     key: `source:${r.source_id}`,
     members: r.failing ?? [],
+    // Every chapter here was refused for room: a statement, not a finding, as Fix everything's "clears by itself" says
+    // it. One chapter failing any other way keeps the row a finding. Reintroduce by dropping it: "chapters refused only
+    // for room are waiting, not failing" in health.int.test.ts finds the card amber.
+    ...(r.limited > 0 && r.limited === r.chapters ? { info: true } : {}),
     // One chip, and it is the repair's failures step for THIS source: it clears the attempt counts whatever
     // their age and re-checks up to ten of the source's series. The nightly does the same thing on its own
     // for rows that have sat at the cap for a week -- this is "the site is back up, try now".
@@ -841,12 +848,16 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
   const live = rows.filter((_, i) => !all[i].info);
   const items = [...all].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
   const total = live.reduce((n, r) => n + r.chapters, 0);
+  // Waiting, and not ignored: an ignored row is said as ignored.
+  const waiting = rows.filter((r, i) => all[i].info && !all[i].ignored).reduce((n, r) => n + r.chapters, 0);
   return {
     id: 'chapter-failures',
     title: 'Chapters that would not download',
     status: verdict(all),
     ...summaryOf([
-      live.length ? say('failures.live', { n: total, m: live.length }) : say('failures.none'),
+      live.length ? say('failures.live', { n: total, m: live.length })
+        : waiting ? say('failures.waiting', { n: waiting }) : say('failures.none'),
+      live.length > 0 && waiting > 0 && say('failures.alsoWaiting', { n: waiting }),
       ignoredPart(ignored),
     ]),
     // The note's last sentence is not about a failure row: a chapter saved short is on disk and readable, so it is

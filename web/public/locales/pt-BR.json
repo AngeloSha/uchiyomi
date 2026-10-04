@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3167
+    "strings": 3171
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1671,6 +1671,10 @@
   "{n} chapters across 1 source keep failing": "{n} capítulos em 1 fonte continuam falhando",
   "{n} chapters across {m} sources keep failing": "{n} capítulos em {m} fontes continuam falhando",
   "Every attempted chapter landed": "Todos os capítulos tentados chegaram",
+  "1 chapter waits for a site that asked for a pause, and is tried again by itself": "1 capítulo espera por um site que pediu uma pausa e será tentado de novo sozinho",
+  "{n} chapters wait for a site that asked for a pause, and are tried again by themselves": "{n} capítulos esperam por um site que pediu uma pausa e serão tentados de novo sozinhos",
+  "1 more waits for a site that asked for a pause": "mais 1 espera por um site que pediu uma pausa",
+  "{n} more wait for a site that asked for a pause": "mais {n} esperam por um site que pediu uma pausa",
   "One entry per source, counting chapters still missing after an attempt and how often each has been tried. They clear themselves the moment the chapter lands. After {cap} failed tries the nightly sweep leaves a chapter alone until the nightly repair gives it another chance a week later; \"Retry now\" does that for this source at once, and \"Find missing chapters\" on the series still fetches it on purpose. A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.": "Uma entrada por fonte, contando os capítulos que ainda faltam depois de uma tentativa e quantas vezes cada um foi tentado. As entradas somem sozinhas assim que o capítulo chega. Depois de {cap} tentativas com falha, a varredura noturna deixa o capítulo de lado até o reparo noturno lhe dar outra chance uma semana depois; “Tentar de novo agora” faz isso na hora para esta fonte, e “Encontrar capítulos que faltam” na série ainda o busca de propósito. Um capítulo salvo com páginas faltando aparece na página da série e é tentado de novo pela varredura, até 10 por noite.",
   "1 chapter in 1 series since {date}": "1 capítulo em 1 série desde {date}",
   "1 chapter in {m} series since {date}": "1 capítulo em {m} séries desde {date}",

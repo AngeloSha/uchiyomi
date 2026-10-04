@@ -1562,6 +1562,10 @@ another tab.
   the source is cooling down and when it can be asked again — and **what the last attempt found**, from what the
   repair stored: *No source has a longer copy*, *Followed {source}*, *No other source lists them*, *Failing since
   {date}* (which a Retry now no longer resets to today).
+- **Chapters a site refused only for room are waiting, not failing** (v0.55.1). When every failing chapter of a source
+  was refused with HTTP 429 (*too many requests*), *Chapters that would not download* lists that source greyed and
+  says *2 chapters wait for a site that asked for a pause, and are tried again by themselves*; the card stays green
+  for it. One chapter failing any other way keeps the source a finding.
 - **While any repair runs** — yours, another admin's, the nightly — a strip at the top of the page says what it is
   (*Repairing: Gap fill*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
   what it is on, how long it has been going and usually takes, and the searches it has left, with **Stop**, which

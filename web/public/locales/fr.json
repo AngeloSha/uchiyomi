@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3167
+    "strings": 3171
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1671,6 +1671,10 @@
   "{n} chapters across 1 source keep failing": "{n} chapitres échouent sans cesse sur 1 source",
   "{n} chapters across {m} sources keep failing": "{n} chapitres échouent sans cesse sur {m} sources",
   "Every attempted chapter landed": "Tous les chapitres tentés sont arrivés",
+  "1 chapter waits for a site that asked for a pause, and is tried again by itself": "1 chapitre attend un site qui a demandé une pause, et sera réessayé tout seul",
+  "{n} chapters wait for a site that asked for a pause, and are tried again by themselves": "{n} chapitres attendent un site qui a demandé une pause, et seront réessayés tout seuls",
+  "1 more waits for a site that asked for a pause": "1 autre attend un site qui a demandé une pause",
+  "{n} more wait for a site that asked for a pause": "{n} autres attendent un site qui a demandé une pause",
   "One entry per source, counting chapters still missing after an attempt and how often each has been tried. They clear themselves the moment the chapter lands. After {cap} failed tries the nightly sweep leaves a chapter alone until the nightly repair gives it another chance a week later; \"Retry now\" does that for this source at once, and \"Find missing chapters\" on the series still fetches it on purpose. A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.": "Une ligne par source, qui compte les chapitres encore manquants après une tentative et le nombre d’essais de chacun. Un chapitre disparaît de la liste dès qu’il arrive. Après {cap} essais ratés, la passe nocturne laisse un chapitre de côté jusqu’à ce que la réparation nocturne lui redonne une chance une semaine plus tard ; « Réessayer maintenant » le fait tout de suite pour cette source, et « Trouver les chapitres manquants » sur la page de la série le récupère quand même, à la demande. Un chapitre enregistré avec des pages manquantes est listé sur la page de sa série et réessayé par la passe, jusqu’à 10 par nuit.",
   "1 chapter in 1 series since {date}": "1 chapitre dans 1 série depuis le {date}",
   "1 chapter in {m} series since {date}": "1 chapitre dans {m} séries depuis le {date}",

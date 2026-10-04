@@ -224,6 +224,8 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   // v0.49.1, Health's own sentences (lib/said.ts): two or three words agree with the count.
   '1 lost its primary but still follows another': '{n} lost their primary but still follow another',
   'left out 1 folder or file it could not read': 'left out {n} folders or files it could not read',
+  // v0.55.1, Health's chapters waiting for a site's pause (lib/said.ts failures.waiting): three words agree.
+  '1 chapter waits for a site that asked for a pause, and is tried again by itself': '{n} chapters wait for a site that asked for a pause, and are tried again by themselves',
   '1 folder belongs to series someone removed, and was left alone; Admin → Library puts a series back.':
     '{n} folders belong to series someone removed, and were left alone; Admin → Library puts a series back.',
   '1 folder is more than {max} levels deep and was not looked into (LIBRARY_MAX_DEPTH)':

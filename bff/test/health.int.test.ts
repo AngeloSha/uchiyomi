@@ -1152,6 +1152,52 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
 const S_FAIL = 's_health_fail';
 
 /**
+ * v0.55.1: a source whose every failing chapter was refused for room (HTTP 429, status `rate_limited`) is waiting, not
+ * failing. The owner's Health read "70 chapters across 4 sources keep failing" in amber while Fix everything said the
+ * rate-limited ones clear by themselves. One chapter failing any other way keeps the source a finding.
+ *
+ * Reintroduce by dropping the `info` line in health.ts chapterFailures: the card is amber with only waiting chapters.
+ */
+test('chapters refused only for room are waiting, not failing', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const S = 's_health_wait';
+  const SRC = 'health-wait-src';
+  await q('DELETE FROM lib_series WHERE id = $1', [S]);
+  await q('DELETE FROM chapter_failures WHERE series_id = $1', [S]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Wait Fixture',$1)`, [S]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+           VALUES ($1, 1, $2, 'rate_limited', 'no images downloaded (blocked?) (page 1: 429)', 1, now(), now()),
+                  ($1, 2, $2, 'rate_limited', 'no images downloaded (blocked?) (page 1: 429)', 1, now(), now())`, [S, SRC]);
+  const card = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-failures');
+    await assertSaid([c]);
+    return c;
+  };
+  try {
+    const c = await card();
+    const row = c.items.find((i: any) => i.sourceId === SRC);
+    assert.equal(row?.info, true, 'a source refusing only for room is a statement, not a finding');
+    assert.ok(!c.items.some((i: any) => !i.info), 'nothing else fails in this fixture');
+    assert.equal(c.status, 'ok', 'chapters waiting for a pause to end do not turn the card amber');
+    assert.match(c.summary, /2 chapters wait for a site that asked for a pause, and are tried again by themselves/);
+
+    // One chapter failing another way: the source is a finding again, and the waiting count is not said beside it.
+    await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+             VALUES ($1, 3, $2, 'error', 'HTTP 500', 1, now(), now())`, [S, SRC]);
+    const mixed = await card();
+    assert.notEqual(mixed.items.find((i: any) => i.sourceId === SRC)?.info, true, 'one real failure keeps it a finding');
+    assert.equal(mixed.status, 'warn');
+    assert.match(mixed.summary, /3 chapters across 1 source keep failing/);
+  } finally {
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S]);
+    await q('DELETE FROM lib_series WHERE id = $1', [S]);
+  }
+});
+
+/**
  * v0.49.0: "failing since" is the FIRST failure (first_at), not the latest attempt, and a source that cannot
  * be asked right now says so on its Retry now before anyone presses it.
  *
