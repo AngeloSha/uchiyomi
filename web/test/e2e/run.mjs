@@ -17,6 +17,7 @@
 // it at an existing one instead.
 import puppeteer from 'puppeteer';
 import { mkdirSync, writeFileSync } from 'fs';
+import { networkCuts } from './networkCut.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
@@ -35,9 +36,9 @@ const serverErrors = [];
 // badge on 2026-09-04 over one AniList cover. Noted, not counted; every other 5xx and console error still is.
 const thirdPartyCover = (url) => /\/img\/sources\/cover\?[^ ]*\bu=https?%3A/i.test(url || '');
 const thirdPartyNotes = [];
-// True only while the browser is being held offline on purpose. Inside that window a request FAILING is the
-// condition under test, not a defect -- see the note where it is set.
-let networkCut = false;
+// The browser held offline on purpose (holdOffline, below). Inside that window a request FAILING is the condition under
+// test, not a defect -- see the note where the console reads it, and networkCut.mjs for the window's edges.
+const cuts = networkCuts();
 const offlineNotes = [];
 // Every request the browser could not complete, with its RESOURCE TYPE. Printed only when the run is
 // already failing on console errors, so it costs nothing on a green run -- and on a red one it answers the
@@ -69,8 +70,9 @@ try {
       // actually assert -- that the chapter opens, that its pages decode out of IndexedDB, that neither the
       // sign-in page nor a raw RSC payload appears -- is checked directly a few lines below and is not
       // weakened by this. Narrow on purpose: only `Failed to load resource`, only inside the window, and
-      // every one of them is still printed at the end.
-      else if (networkCut && /Failed to load resource/.test(m.text())) offlineNotes.push(`${res || m.text()}`);
+      // every one of them is still printed at the end. At the window's edges only the cut's own
+      // net::ERR_INTERNET_DISCONNECTED, reported a moment late (v0.55.1, networkCut.mjs).
+      else if (cuts.noted(m.text())) offlineNotes.push(`${res || m.text()}`);
       else consoleErrors.push(`${page.url()} :: ${m.text()}${res ? ` :: ${res}` : ''}`);
     }
   });
@@ -82,6 +84,11 @@ try {
   });
 
   const shot = async (name) => page.screenshot({ path: `${OUT}/${String(++step).padStart(2, '0')}-${name}.png` });
+  // Every deliberate cut goes through here, so the console knows the window it raised its failures in.
+  const holdOffline = async (on) => {
+    if (on) { cuts.asking(); await page.setOfflineMode(true); cuts.cut(); }
+    else { await page.setOfflineMode(false); cuts.back(); }
+  };
 
   // ---------------------------------------------------------------- sign in
   console.log('\n  sign in');
@@ -510,8 +517,7 @@ try {
       [...document.querySelectorAll('a[href*="/reader"]')].map((a) => a.getAttribute('href')));
     if (saved.length < 2) console.log('    [ .. ] nothing downloaded, skipping');
     else {
-      await page.setOfflineMode(true);
-      networkCut = true;
+      await holdOffline(true);
       try {
         const tapped = await page.evaluate((h) => {
           const a = [...document.querySelectorAll('a')].find((x) => x.getAttribute('href') === h);
@@ -537,8 +543,7 @@ try {
           else ok(`with the whole network cut, a downloaded chapter opens and decodes ${seen.blobs} page(s)`);
         }
       } finally {
-        await page.setOfflineMode(false);
-        networkCut = false;
+        await holdOffline(false);
       }
     }
   }
@@ -570,8 +575,7 @@ try {
   // blob: URL, a reader link in the list) AND the absence of the failure (input[type=password]).
   if (seriesHref) {
     console.log('\n  cold boot, no network');
-    await page.setOfflineMode(true);
-    networkCut = true;
+    await holdOffline(true);
     // Offline there is no server to ask what it is fetching, and the one poller must not try (v0.49.0).
     let jobsAsked = 0;
     const countJobs = (r) => { if (new URL(r.url()).pathname.startsWith('/api/sources/jobs')) jobsAsked++; };
@@ -622,16 +626,14 @@ try {
       }
 
       // 3. Reconnecting revalidates: the offline chrome goes away without a reload.
-      await page.setOfflineMode(false);
-      networkCut = false;
+      await holdOffline(false);
       await page.evaluate(() => window.dispatchEvent(new Event('online')));
       await sleep(5000);
       const back = await page.evaluate(() => document.body.innerText.includes('Offline —'));
       if (back) bad('the offline banner was still showing after the network came back');
       else ok('reconnecting clears the offline state');
     } finally {
-      await page.setOfflineMode(false);
-      networkCut = false;
+      await holdOffline(false);
     }
   }
 
@@ -1512,8 +1514,7 @@ try {
   });
   if (!signedOutViaUi) bad('could not find the Sign out control on /profile');
   await sleep(3000);
-  await page.setOfflineMode(true);
-  networkCut = true;
+  await holdOffline(true);
   try {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await sleep(6000);
@@ -1527,8 +1528,7 @@ try {
     else if (after.readerLinks) bad(`after signing out, an offline launch still listed ${after.readerLinks} downloaded chapter(s)`);
     else ok('after signing out, an offline launch asks to sign in and lists nothing');
   } finally {
-    await page.setOfflineMode(false);
-    networkCut = false;
+    await holdOffline(false);
   }
 } finally {
   await browser.close();
