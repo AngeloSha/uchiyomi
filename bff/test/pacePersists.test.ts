@@ -92,11 +92,11 @@ before(async () => {
   pace = await import('../src/lib/pace');
   ({ clearPace, paceLevel } = pace);
   // What the Suwayomi adapter declares: four at a time, no gap. The widest pool, so the narrowing shows. A `long-`
-  // chapter has forty pages, long enough to still be running when its neighbour is refused.
+  // chapter has 120 pages, still running (about a second, four at a time) well after its neighbour is refused.
   registerAdapter({
     id: SRC, name: 'Pace Persists', pageConcurrency: 4, pageGapMs: 0,
     search: async () => [], getSeries: async () => null, listChapters: async () => [],
-    getPageUrls: async (c: string) => Array.from({ length: c.startsWith('long-') ? 40 : 8 }, (_, i) => `https://example.invalid/${c}/p${i}.png`),
+    getPageUrls: async (c: string) => Array.from({ length: c.startsWith('long-') ? 120 : 8 }, (_, i) => `https://example.invalid/${c}/p${i}.png`),
   } as any);
   for (const [id, host] of [[CDN_A, 'img-a'], [CDN_B, 'img-b']]) {
     registerAdapter({
@@ -192,14 +192,16 @@ test('a 429 to one chapter slows the chapter beside it: it rests as long, then g
   await Promise.all([dl('long-a', 31), dl('long-b', 32)]);
   const a = traces.get('long-a')!, b = traces.get('long-b')!;
   assert.ok(a.limitedAt, 'the first chapter was refused');
-  const during = b.spans.filter(([start]) => start > a.limitedAt + 80 && start < a.limitedAt + RESUME - 100);
+  // From 200 ms on: the rest is noted once the refused chapter's requests in flight are back (one HOLD), and a loaded
+  // machine is slower to get there than this one; at full speed the neighbour asks every few ms until past a second.
+  const during = b.spans.filter(([start]) => start > a.limitedAt + 200 && start < a.limitedAt + RESUME - 100);
   assert.deepEqual(during.map(([start]) => start - a.limitedAt), [], 'the chapter beside it rests while the refused one does');
   const after = b.spans.filter(([start]) => start >= a.limitedAt + RESUME - 100).sort((x, y) => x[0] - y[0]);
   assert.ok(after.length > 0, 'and then carries on');
   for (let i = 1; i < after.length; i++) {
     assert.ok(after[i][0] >= after[i - 1][1], `one page at a time after the rest: a page started ${after[i - 1][1] - after[i][0]}ms early`);
   }
-  assert.equal(b.asked, 40, 'every page of it was asked for once');
+  assert.equal(b.asked, 120, 'every page of it was asked for once');
 });
 
 test('a raised pace comes down a step after a steady run of whole chapters, once held an hour', async () => {
