@@ -19,6 +19,7 @@ import { roleOf, userIdOf } from './auth';
 import { autoHeroFor } from './autoHero';
 import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
+import { noticeBook, noticeHidden, noticesActive } from './noticeChapters';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -27,6 +28,59 @@ export async function seriesColors(ids: string[]): Promise<Map<string, string>> 
     [ids],
   );
   return new Map(rows.map((r) => [r.series_id, r.color]));
+}
+
+/**
+ * The chapter count "new since you last looked" is kept in (series_seen.seen_books_count): every chapter row,
+ * lib_series.books_count, the notice chapters an admin hides included (lib/noticeChapters.ts) -- where `booksCount`
+ * leaves those out. booksCount moves when a switch flips or a notice's pages get counted, and nobody read anything
+ * new: kept in it, a hide switched on swallowed the next real chapters of every favourite (the seen count stood
+ * above the count left), and one switched off announced every old notice as new. The same as booksCount while
+ * nothing hides, so nothing is asked then. Either way the count is what each series' row says when there is none.
+ * Reintroduce by keeping booksCount: "Updates count real chapters across a switch" in noticeSurfaces.int.test.ts
+ * finds the favourite gone from Updates after a new chapter.
+ */
+export async function seenCounts(list: Array<{ id: string; booksCount?: number }>): Promise<Map<string, number>> {
+  const out = new Map(list.map((s) => [s.id, s.booksCount ?? 0]));
+  if (!noticesActive() || !list.length) return out;
+  const rows = await q<{ id: string; n: number }>('SELECT id, books_count AS n FROM lib_series WHERE id = ANY($1)', [list.map((s) => s.id)]);
+  for (const r of rows) out.set(r.id, Number(r.n));
+  return out;
+}
+
+/**
+ * How many chapters came since this reader last looked, for each series they have looked at (`seen`, from
+ * seriesSeen): the rows above the count they saw, `counts` (seenCounts). While nothing hides, simply the difference,
+ * as it always was. Otherwise the newest that many rows by number, less every hidden notice among them -- so a
+ * notice that arrived uncounted and turned out to be two pages stops being new, and an old notice a switch shows
+ * again never was.
+ */
+export async function newSinceSeen(seen: Map<string, number>, counts: Map<string, number>): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const due: Array<[string, number]> = [];
+  for (const [id, was] of seen) {
+    const now = counts.get(id);
+    if (now === undefined) continue;
+    const fresh = Math.max(0, now - was);
+    out.set(id, fresh);
+    if (fresh > 0) due.push([id, fresh]);
+  }
+  if (!noticesActive() || !due.length) return out;
+  const rows = await q<{ id: string; n: number }>(
+    `SELECT k.id, count(*) FILTER (WHERE NOT t.hidden)::int AS n
+       FROM unnest($1::text[], $2::int[]) AS k(id, fresh)
+       CROSS JOIN LATERAL (
+         SELECT ${noticeHidden('s', 'b', 'COALESCE(ov.number, b.number)')} AS hidden
+           FROM lib_books b JOIN lib_series s ON s.id = b.series_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
+          WHERE b.series_id = k.id
+          ORDER BY COALESCE(ov.number, b.number) DESC, b.file DESC
+          LIMIT k.fresh
+       ) t
+      GROUP BY k.id`,
+    [due.map(([id]) => id), due.map(([, n]) => n)],
+  ).catch(() => null);
+  for (const r of rows ?? []) out.set(r.id, Number(r.n));
+  return out;
 }
 
 export async function seriesSeen(userId: string, ids: string[]): Promise<Map<string, number>> {
@@ -52,6 +106,9 @@ async function seriesProgress(userId: string, seriesIds: string[]): Promise<Map<
             count(*) FILTER (WHERE NOT completed)::int  AS started
        FROM read_progress
       WHERE user_id = $1 AND series_id = ANY($2)
+        -- A hidden notice chapter (lib/noticeChapters.ts) is out of the total these are laid against, so out of
+        -- these too, or one read notice would cover for an unread chapter.
+        AND NOT ${noticeBook('read_progress.book_id')}
       GROUP BY series_id`,
     [userId, seriesIds],
   );
@@ -102,6 +159,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const progress = admin ? null : await seriesProgress(userId, list.map((s) => s.id));
   const colors = await seriesColors(list.map((s) => s.id));
   const seen = await seriesSeen(userId, list.map((s) => s.id));
+  const fresh = await newSinceSeen(seen, await seenCounts(list));
   const heroes = await autoHeroFor(list.map((s) => s.id));
   const editions = await editionLangs(list, (req as any).viewCtx as ViewCtx | undefined);
   return list.map((s) => {
@@ -126,7 +184,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
         // Kept alongside booksUnreadCount even though they now agree: it is a shipped field, and removing it
         // would break any client reading it for nothing.
         unread,
-        newCount: seen.has(s.id) ? Math.max(0, total - (seen.get(s.id) ?? 0)) : 0,
+        newCount: fresh.get(s.id) ?? 0,
       },
     };
   });

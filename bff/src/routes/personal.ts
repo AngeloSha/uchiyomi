@@ -11,12 +11,13 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
-import { enrichSeries } from '../lib/enrich';
+import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
+import { noticeBook } from '../lib/noticeChapters';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -146,12 +147,13 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const { seriesId } = z.object({ seriesId: z.string().min(1) }).parse(req.body);
     await q('INSERT INTO favorites (user_id, series_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [uid, seriesId]);
-    // baseline the updates feed at the current chapter count so old chapters don't show as "new"
+    // baseline the updates feed at the current chapter count so old chapters don't show as "new" -- every chapter
+    // row, hidden notices included (lib/enrich.ts seenCounts)
     const s = await komga.series(vc(req), seriesId).catch(() => null);
     if (s) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`,
-        [uid, seriesId, (s as any).booksCount ?? 0],
+        [uid, seriesId, (await seenCounts([s as any])).get(seriesId) ?? 0],
       );
     }
     return reply.send({ ok: true, favorite: true });
@@ -292,7 +294,7 @@ export default async function personalRoutes(app: FastifyInstance) {
            JOIN lib_books b   ON b.id = bm.book_id
            JOIN lib_series s  ON s.id = b.series_id AND ${browsable('s', ctx, p)}
            LEFT JOIN series_overrides so ON so.series_id = s.id
-          WHERE bm.user_id = ${uid}${extra}
+          WHERE bm.user_id = ${uid}${extra} AND NOT ${noticeBook('b.id')}
           ORDER BY bm.created_at DESC LIMIT 500`,
         p.values as any[],
       ),
@@ -443,6 +445,8 @@ export default async function personalRoutes(app: FastifyInstance) {
          -- through browsable() make history obey the same rule as every other listing, 18+ included.
          JOIN lib_books b ON b.id = e.book_id
          JOIN lib_series s ON s.id = e.series_id AND ${browsable('s', hctx, hp)}
+         -- not a notice chapter the admin hides (lib/noticeChapters.ts)
+         WHERE NOT ${noticeBook('b.id')}
          ORDER BY e.created_at DESC
          LIMIT ${hp.add(limit)}`,
         hp.values as any[],
@@ -628,6 +632,8 @@ export default async function personalRoutes(app: FastifyInstance) {
         `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
          SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
            FROM lib_books b WHERE b.series_id = ANY($2)
+            -- What the reader sees: a notice chapter the admin hides (lib/noticeChapters.ts) is left as it was.
+            AND NOT ${noticeBook('b.id')}
          ON CONFLICT (user_id, book_id) DO UPDATE
            SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()`,
         [uid, live],

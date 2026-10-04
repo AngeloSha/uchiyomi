@@ -19,6 +19,7 @@
 //      leaderboard and Wrapped must not inflate from it.
 //   5. Reconciliation never makes a just-landed file due for the read-chapter cleanup.
 import { q, tx } from './db';
+import { noticeShown } from './noticeChapters';
 
 /** A statement runner: the module-level `q`, or the scoped one a `tx` callback is handed. */
 type Run = <R = any>(text: string, params?: any[]) => Promise<R[]>;
@@ -139,9 +140,13 @@ export async function realRows(userId: string, seriesId: string): Promise<Array<
   return q<{ number: number; completed: boolean | null }>(
     `SELECT COALESCE(ov.number, b.number) AS number, rp.completed
        FROM lib_books b
+       JOIN lib_series s ON s.id = b.series_id
        LEFT JOIN book_overrides ov ON ov.book_id = b.id
        LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $2
       WHERE b.series_id = $1
+        -- Not a notice chapter the admin hides (lib/noticeChapters.ts): Mihon never sees one, so an unread 100.5
+        -- must not stop the run at 100, nor count toward the total or the tracker's "finished".
+        AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
       ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`,
     [seriesId, userId],
   );

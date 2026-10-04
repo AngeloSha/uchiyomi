@@ -17,7 +17,7 @@ import { sourceLabel } from '../lib/health';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
-import { enrichSeries, seriesSeen } from '../lib/enrich';
+import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
@@ -34,6 +34,8 @@ import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
 import { effectiveLang } from '../lib/seriesLang';
 import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
+import { noticeBook, noticeListed } from '../lib/noticeChapters';
+import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { join } from 'node:path';
 
 
@@ -312,6 +314,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
                       -- the chapter you are part-way through wins
                       (SELECT p.book_id FROM read_progress p
                          WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
+                           -- not a notice chapter the admin hides (lib/noticeChapters.ts): it is no chapter to resume
+                           AND NOT ${noticeBook('p.book_id')}
                          ORDER BY p.updated_at DESC LIMIT 1),
                       -- otherwise the lowest-numbered chapter you have not finished
                       (SELECT b.id FROM lib_books b
@@ -319,6 +323,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
                          WHERE b.series_id = r.series_id
                            -- never offer a chapter whose pages were deleted (a tombstone, lib/chapterCleanup.ts)
                            AND b.pruned_at IS NULL
+                           AND NOT ${noticeBook('b.id')}
                            AND NOT EXISTS (
                              SELECT 1 FROM read_progress p2
                               WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
@@ -378,14 +383,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = favAll.filter((id) => favShown.has(id)).slice(0, 20);
     const favorites = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
 
-    // updates badge: favorites with new chapters since last seen (self-heal missing baselines)
+    // updates badge: favorites with new chapters since last seen (self-heal missing baselines). Counted in every
+    // chapter row, hidden notices included (lib/enrich.ts seenCounts), on both sides.
     const seenMap = await seriesSeen(uid, favorites.map((s) => s.id));
+    const counts = await seenCounts(favorites);
+    const since = await newSinceSeen(seenMap, counts);
     let updatesCount = 0;
     for (const s of favorites) {
       if (seenMap.has(s.id)) {
-        if ((s.booksCount ?? 0) > (seenMap.get(s.id) ?? 0)) updatesCount++;
+        if ((since.get(s.id) ?? 0) > 0) updatesCount++;
       } else {
-        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, s.booksCount ?? 0]);
+        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, counts.get(s.id) ?? 0]);
       }
     }
 
@@ -420,18 +428,20 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id', async (req) => {
     const { id } = req.params as { id: string };
     const series = await komga.series(vc(req), id);
-    // opening a series marks its new chapters as seen
+    // opening a series marks its new chapters as seen -- in every chapter row, hidden notices included (lib/enrich.ts
+    // seenCounts)
     await q(
       `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
        ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = EXCLUDED.seen_books_count, seen_at = now()`,
-      [userIdOf(req), id, series.booksCount ?? 0],
+      [userIdOf(req), id, (await seenCounts([series])).get(id) ?? 0],
     );
     const out: any = (await enrichSeries(req, [series]))[0];
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; adult_exempt: boolean | null; reading_direction: string | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt, reading_direction,
+                          age_rating: number | null; adult_exempt: boolean | null; reading_direction: string | null;
+                          series_type: string | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt, reading_direction, series_type,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -448,7 +458,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
                         author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
-                        adultExempt: ov.adult_exempt === true, readingDirection: ov.reading_direction };
+                        adultExempt: ov.adult_exempt === true, readingDirection: ov.reading_direction,
+                        seriesType: ov.series_type };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
@@ -467,9 +478,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
       const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
-                            reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null }>(
+                            reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null;
+                            series_type: string | null; series_type_from: string | null; type_override: string | null; hide_notices: boolean | null }>(
         `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow,
-                reading_direction, reading_direction_from, lang, source_id,
+                reading_direction, reading_direction_from, lang, source_id, series_type, series_type_from, hide_notices,
+                (SELECT o.series_type FROM series_overrides o WHERE o.series_id = lib_series.id) AS type_override,
                 ARRAY(SELECT DISTINCT b.root FROM lib_books b WHERE b.series_id = lib_series.id AND b.root IS NOT NULL ORDER BY b.root) AS roots
            FROM lib_series WHERE id = $1`, [id]);
       if (f) out.folder = f.folder;
@@ -490,6 +503,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // What the evidence says about the reading direction, and which evidence (lib/readingDirection.ts), so
       // the edit modal's "Automatic" can name what it would fall back to. null when nothing has said.
       out.detectedDirection = f?.reading_direction ? { direction: f.reading_direction, from: f.reading_direction_from } : null;
+      // Notice chapters (lib/noticeChapters.ts): the type the switches go by (the admin's, else the evidence's,
+      // else unknown) and what the evidence said, for Edit details; the series' own switch -- null when its type's
+      // applies -- and what applies, with how many chapters that hides right now, for the Sources sheet.
+      const type = f?.type_override ?? f?.series_type ?? 'unknown';
+      out.seriesType = type;
+      out.detectedType = f?.series_type ? { type: f.series_type, from: f.series_type_from } : null;
+      out.hideNotices = f?.hide_notices ?? null;
+      out.hideNoticesEffective = f?.hide_notices ?? (await noticeTypes()).includes(type as any);
+      out.hiddenNotices = out.hideNoticesEffective ? await hiddenCount(id) : 0;
     }
     return out;
   });
@@ -503,20 +525,24 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = favRows.filter((id) => shown.has(id));
     const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
     const seenMap = await seriesSeen(uid, favSeries.map((s) => s.id));
+    // Counted in every chapter row, hidden notices included, on both sides (lib/enrich.ts seenCounts): a notice
+    // switch must neither swallow a favourite's next chapters nor announce its old notices as new.
+    const counts = await seenCounts(favSeries);
+    const fresh = await newSinceSeen(seenMap, counts);
     const out: { series: any; newCount: number }[] = [];
     for (const s of favSeries) {
       if (!seenMap.has(s.id)) {
-        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, s.booksCount ?? 0]);
+        await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`, [uid, s.id, counts.get(s.id) ?? 0]);
         continue;
       }
-      const newCount = Math.max(0, (s.booksCount ?? 0) - (seenMap.get(s.id) ?? 0));
+      const newCount = fresh.get(s.id) ?? 0;
       if (newCount > 0) out.push({ series: (await enrichSeries(req, [s]))[0], newCount });
     }
     // newest chapter date per series: source release date when stamped, else the file's mtime
     if (out.length) {
       const latest = await q<{ series_id: string; latest: string }>(
         `SELECT series_id, max(COALESCE(published_at, to_timestamp(mtime / 1000.0))) AS latest
-         FROM lib_books WHERE series_id = ANY($1) GROUP BY series_id`,
+         FROM lib_books WHERE series_id = ANY($1) AND NOT ${noticeBook('lib_books.id')} GROUP BY series_id`,
         [out.map((o) => o.series.id)],
       );
       const byId = new Map(latest.map((r) => [r.series_id, r.latest]));
@@ -530,11 +556,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
     const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
+    const counts = await seenCounts(favSeries);
     for (const s of favSeries) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
          ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = EXCLUDED.seen_books_count, seen_at = now()`,
-        [uid, s.id, s.booksCount ?? 0],
+        [uid, s.id, counts.get(s.id) ?? 0],
       );
     }
     return { ok: true };
@@ -682,13 +709,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/groups', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const rows = await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]);
+    // A notice chapter the admin hides (lib/noticeChapters.ts) is nobody's release here either: a listed number by
+    // what the listing says of it, a file by its own pages.
+    const rows = await q<{ number: number; copies: ListingCopy[] }>(
+      `SELECT l.number, l.copies FROM series_listing l WHERE l.series_id = $1 AND NOT ${noticeListed('l')}`, [id]);
     const copies: StatCopy[] = [];
     for (const r of rows) for (const c of r.copies ?? []) copies.push({ ...c, number: Number(r.number) });
     // Live rows only: a tombstone's group is a file that is no longer here, and "3 on this server" has to
     // count what a reader can open.
     const onDisk = await q<{ number: number; scanlator: string | null }>(
-      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]);
+      `SELECT b.number, b.scanlator FROM lib_books b
+        WHERE b.series_id = $1 AND b.pruned_at IS NULL AND b.scanlator IS NOT NULL AND NOT ${noticeBook('b.id')}`, [id]);
     return { checkedAt: await checkedAtOf(id), content: groupStats(copies, onDisk.map((b) => ({ number: Number(b.number), scanlator: b.scanlator }))) };
   });
 
@@ -713,8 +744,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
+    // Not the versions of a notice the admin hides, by what the listing says of it (lib/noticeChapters.ts).
     const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
-      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+      `SELECT l.number, l.title, l.source_id, l.status, l.chosen, l.copies FROM series_listing l
+        WHERE l.series_id = $1 AND NOT ${noticeListed('l')} ORDER BY l.number`, [id]);
     const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
       'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
     const booksOf = new Map<number, typeof books>();

@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool, one } from './db';
 import { env } from '../env';
 import { MANGADEX_LANGS } from './lang';
+import { typeFromGenres } from './seriesTypeSignals';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -1415,6 +1416,23 @@ INSERT INTO library_paths (library_id, path)
 SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
     ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id
  WHERE library_paths.library_id <> EXCLUDED.library_id;
+
+-- v0.55.2 (#147): notice chapters (lib/noticeChapters.ts, lib/seriesType.ts). Sources post notices for readers as
+-- a short chapter N.x after their latest chapter N; the admin may hide every chapter numbered with a fraction that
+-- has 3 pages or fewer, per series type, and override that per series. series_type: manga, manhwa, manhua, webtoon or comic as learned (NULL =
+-- unknown), with series_type_from naming the evidence (lib/seriesTypeSignals.ts SERIES_TYPE_FROM);
+-- series_overrides.series_type is the admin's word. lib_series.hide_notices: the series' own switch, NULL = its
+-- type's. server_settings.hide_notice_types: the types whose notice chapters are hidden, empty = off (the default).
+-- All nullable or defaulted, so the previous release boots on this schema and simply shows every chapter.
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS series_type      text;
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS series_type_from text;
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS hide_notices     boolean;
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS series_type      text;
+ALTER TABLE server_settings  ADD COLUMN IF NOT EXISTS hide_notice_types jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- The chapters whose file number has a fraction, by series: the few rows a notice can be among (lib/noticeChapters.ts
+-- mayBeNotice, hiddenBookCount), so the hidden counts and the read-progress roll-ups do not visit every chapter of
+-- the library while a switch is on (about 1,800 of 48,000 on the owner's). Partial and small; nothing else reads it.
+CREATE INDEX IF NOT EXISTS lib_books_fraction_idx ON lib_books (series_id) WHERE number <> floor(number);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
@@ -1572,6 +1590,28 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
            FROM top t JOIN unnest($1::text[], $2::text[]) AS m(md, code) ON m.md = t.md
           WHERE s.id = t.series_id AND s.lang IS NULL`,
         [MANGADEX_LANGS.map((l) => l.md), MANGADEX_LANGS.map((l) => l.code)],
+      );
+    },
+  },
+
+  // v0.55.2 (#147), notice chapters: the type of every series whose genres name one (lib/seriesTypeSignals.ts
+  // typeFromGenres), so the per-type switches mean something on the first boot rather than after every series is
+  // rescanned. typeFromGenres itself, in JS rather than a copy of its rule in SQL, so the two cannot disagree: a
+  // genre menu naming several origins, or a lone "Manga", types nothing here either. The admin's genre override
+  // counts, as everywhere. Only series nothing has typed yet: one read and one UPDATE.
+  {
+    id: 'v0.55.2-series-type-from-genres',
+    run: async (c) => {
+      const rows = (await c.query<{ id: string; genres: string[] | null }>(
+        `SELECT s.id, COALESCE(o.genres, s.genres) AS genres
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id WHERE s.series_type IS NULL`)).rows;
+      const typed = rows.flatMap((r) => { const t = typeFromGenres(r.genres); return t ? [{ id: r.id, ...t }] : []; });
+      if (!typed.length) return;
+      await c.query(
+        `UPDATE lib_series s SET series_type = v.type, series_type_from = v.src
+           FROM unnest($1::text[], $2::text[], $3::text[]) AS v(id, type, src)
+          WHERE s.id = v.id AND s.series_type IS NULL`,
+        [typed.map((t) => t.id), typed.map((t) => t.type), typed.map((t) => t.from)],
       );
     },
   },

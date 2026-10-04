@@ -26,6 +26,8 @@ import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
+import { isListedNotice } from './noticeChapters';
+import { seriesHidesNotices } from './noticeSettings';
 
 /**
  * Why a series produced nothing this run.
@@ -410,7 +412,21 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // fetches below the boundary.
   const archiveBoundary = s.archive_boundary == null || opts.ignoreArchiveBoundary ? -Infinity : Number(s.archive_boundary);
   const floor = Math.max(s.chapter_floor == null ? -Infinity : Number(s.chapter_floor), archiveBoundary);
-  const wanted = releases.filter((c) => c.number >= floor);
+  // Notice chapters the admin hides (lib/noticeChapters.ts), for a series whose type or own switch says so: a number
+  // with a fraction that its copies say is NOTICE_MAX_PAGES pages or fewer (the most any copy says, as the listing
+  // reads it). Not fetched, not "behind", not in the count of what the sources list -- the sweep leaves them in the
+  // listing, so the series page and Mihon show them again the moment the switch goes off, and the next sweep fetches
+  // them then. A fractional number its copies say nothing about, or say is longer, is fetched like any chapter: it
+  // may be a real one in parts, and once it is here its own counted pages decide. Reintroduce by dropping `notice`:
+  // "the sweep skips only a notice its source says is short" in noticeChapters.int.test.ts finds 2.5 asked for; by
+  // going back to any fraction, it finds 3.5 and 4.5 never asked.
+  const hidesNotice = await seriesHidesNotices(seriesId);
+  const pagesOf = new Map<number, unknown[]>();
+  if (hidesNotice) {
+    for (const c of tagged) { const l = pagesOf.get(c.number); if (l) l.push(c.pages); else pagesOf.set(c.number, [c.pages]); }
+  }
+  const notice = (n: number) => hidesNotice && isListedNotice(n, pagesOf.get(n) ?? []);
+  const wanted = releases.filter((c) => c.number >= floor && !notice(c.number));
   // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
   // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)
   // "On disk" includes the tombstones the library keeps on purpose -- a chapter the read-chapter cleanup
@@ -432,7 +448,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
   // A covered number is another site's split of a chapter (R2, R3): not this sweep's to fetch, and not "behind" either.
   const missing = wanted.filter((c) => !have.has(c.number) && !covered.has(c.number)).sort((a, b) => a.number - b.number);
-  await stampChecked(seriesId, releases.length, missing.length);
+  await stampChecked(seriesId, releases.filter((c) => !notice(c.number)).length, missing.length);
   // The ledger for this series, read once: which chapters have already failed CHAPTER_RETRY_CAP times and
   // are not attempted again by the sweep, and which have been REFUSED twice by the very source that still
   // lists them. The second set is `persistent` for the fallback helper (lib/chapterFallback.ts): a refusal
@@ -488,7 +504,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // the source that ranks first (R3, whose own parts are the ones to fetch). Reintroduce by taking the top of every
     // release: "Fetch newest takes the newest chapter, not another site's part of one" in updater.int.test.ts finds
     // 78.9 queued for download.
-    const top = releases.filter((c) => !covered.has(c.number))
+    const top = releases.filter((c) => !covered.has(c.number) && !notice(c.number))
       .reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
     const via = top ? (top.source ?? (s.source_id as string)) : '';
     if (!top) newest = { number: null, state: 'unlisted' };

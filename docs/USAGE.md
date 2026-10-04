@@ -2187,6 +2187,52 @@ this browser — see the next section. Switches save the moment they flip; text 
 leave them or press Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save
 button (**Save scanlator defaults**), because a half-typed list is not something to save on every keystroke.
 
+### Notice chapters
+
+Many sources post announcements for readers (a hiatus, a season break, a schedule change) as a short chapter
+numbered after the latest one with a fraction: **100.5**, often a page or two. **Admin → Settings → Notice
+chapters** has one switch per series type: **Manga**, **Manhwa**, **Manhua**, **Webtoon**, **Comic** and
+**Unknown / other**. All are off by default. For a type that is switched on, every chapter numbered like 12.5
+that has **3 pages or fewer** is hidden:
+
+- **Everywhere you read.** It is hidden from the chapter list, the reader's next and previous, Continue Reading,
+  Updates, history, bookmarks, OPDS, offline downloads and the Komga-compatible API that the Mihon extension
+  reads. It applies to everyone, admins included.
+- **From the counts.** It is not counted in chapter totals or unread badges, in Mihon's *read up to* and
+  *Completed*, or in what AniList, MyAnimeList and Kitsu are told. An unread 100.5 therefore no longer keeps a
+  series you have read to the end from being finished.
+- **From downloads.** Neither the updater nor the slow archive downloads one its sources list as 3 pages or
+  fewer, and those are not counted as missing.
+
+**Only short ones.** A chapter numbered with a fraction is a notice only when its page count is known and is 3 or
+fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
+one; most sites do not). A longer one is a chapter posted in parts (78.1 … 78.9) and stays, and so does one whose
+length nobody knows yet. A chapter's pages are counted the first time anyone opens it, and the nightly repair
+counts the rest, so a notice from a site that lists no page counts is downloaded, shown until it is counted, and
+hidden from then on.
+
+Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
+rescan. Any that were never downloaded are fetched at the next check. **Updates** keeps counting only what came
+since you last looked: switching a type on does not swallow a favourite's next chapter, switching it off does
+not announce its old notices as new, and a notice stops being new once its pages are counted.
+
+**Which type a series is** is worked out from, most trusted first:
+
+1. A genre naming its origin (Manhwa, Manhua, Comic, Japanese).
+2. The followed source: MangaDex's original language.
+3. AniList's country of origin.
+4. A Webtoon genre with none of the above.
+
+A series tagged both Manhwa and Webtoon is a manhwa. Genres that name several origins at once (some sites copy
+their whole genre menu, Manga, Manhwa and Manhua, onto every title) say nothing, and neither does Manga on its
+own, which many sites file everything under: the source and AniList decide those. A series nothing speaks for is **Unknown / other**. You
+can set the type by hand under **Series type** in *Edit details* → **Reading**.
+
+**One series** can override its type's switch with **Hide notice chapters** in its **Sources & translations**
+sheet. The sheet also says how many chapters that hides right now, and **Use the server default** puts the
+series back under its type's switch. Use this for a series whose short x.5 chapters are real content (a
+webtoon whose parts are a few long strips each), or to hide one series' notices while its type's switch is off.
+
 ### Notifications
 
 **Admin → Settings → Notifications** sends new chapters and server problems somewhere other than a browser:

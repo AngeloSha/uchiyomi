@@ -137,6 +137,8 @@ function toSeries(m: any, source: string): SourceSeries {
     updatedAt: a.updatedAt || a.createdAt || undefined,
     // Japanese reads right to left, Korean and Chinese as a long strip (lib/readingDirection.ts, #102).
     readingDirection: directionFromLanguage(a.originalLanguage) ?? undefined,
+    // And what kind of comic it is (lib/seriesType.ts), from the same field.
+    originalLanguage: typeof a.originalLanguage === 'string' && a.originalLanguage ? a.originalLanguage : undefined,
   };
 }
 

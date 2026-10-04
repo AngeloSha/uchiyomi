@@ -30,6 +30,7 @@ import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
 import { loadUnstatedLang } from './lib/seriesLang';
+import { refreshNoticesActive } from './lib/noticeSettings';
 import { loadMangadexLangs } from './lib/sources/mangadexLangs';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
@@ -63,6 +64,9 @@ async function main() {
   // The language of sources and series that do not say (lib/lang.ts), before anything compares languages. A
   // database that cannot be read here leaves English, the default, and never stops the boot.
   await loadUnstatedLang().catch((e) => console.warn(`[lang] could not read the unstated language: ${(e as Error)?.message || e}`));
+  // Whether any notice-chapter switch is on (lib/noticeChapters.ts), before the first query is built: while none is,
+  // every query is the one the previous release ran. Unreadable leaves them off, as they were before the feature.
+  await refreshNoticesActive().catch((e) => console.warn(`[notices] could not read the switches: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // v0.55.0: a Fix everything run the last process was in the middle of (lib/autofix.ts) reads `interrupted`, not running.

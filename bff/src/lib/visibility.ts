@@ -10,6 +10,7 @@
 // That duplication is the measure of the risk. Per-library access does not get to become a 24th copy: it is
 // one more clause on `visible()`, and every caller inherits it because they all go through here.
 import { q, one } from './db';
+import { noticeBook } from './noticeChapters';
 
 export interface ViewCtx {
   /** null only for background work that legitimately sees everything: the scanner, the hero pre-warmer. */
@@ -453,7 +454,9 @@ export async function visibleBookFile(bookId: string, ctx: ViewCtx): Promise<{ f
   return (await one<{ file: string; root: string }>(
     `SELECT b.file, b.root FROM lib_books b
        JOIN lib_series s ON s.id = b.series_id
-      WHERE b.id = ${id} AND ${visible('s', ctx, p)}`,
+      WHERE b.id = ${id} AND ${visible('s', ctx, p)}
+        -- A notice chapter the admin hides (lib/noticeChapters.ts) has no pages to give, as booksSrc has no row.
+        AND NOT ${noticeBook('b.id')}`,
     p.values as any[],
   )) ?? null;
 }

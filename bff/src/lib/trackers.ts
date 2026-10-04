@@ -16,6 +16,7 @@ import { withGate } from './gate';
 import { ADAPTERS, PROVIDERS, type Provider } from './trackerProviders';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
+import { noticeShown } from './noticeChapters';
 export type { Provider } from './trackerProviders';
 
 
@@ -192,9 +193,13 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
             count(*)::int AS total,
             count(*) FILTER (WHERE rp.completed)::int AS done
        FROM lib_books b
+       JOIN lib_series s ON s.id = b.series_id
        LEFT JOIN book_overrides ov ON ov.book_id = b.id
        LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $2
-      WHERE b.series_id = $1`,
+      WHERE b.series_id = $1
+        -- Not a notice chapter the admin hides (lib/noticeChapters.ts): an unread notice must not keep a series
+        -- that is read to the end from being finished.
+        AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}`,
     [seriesId, userId],
   );
   const out = {

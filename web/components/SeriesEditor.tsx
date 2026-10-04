@@ -26,6 +26,7 @@ import { useLayer } from '@/lib/layers';
 import { useReduceEffects } from '@/lib/effects';
 import { keys, t as tr } from '@/lib/i18n';
 import { metaSaver, seedMeta, type SeriesMeta } from '@/lib/seriesMeta';
+import { SERIES_TYPES, seriesTypeKey } from '@/lib/seriesTypes';
 import { useToast } from './Toast';
 import { msgOf } from './ConfirmDialog';
 import { Backdrop, useRtl } from './ui';
@@ -73,6 +74,18 @@ function autoDirectionLabel(d: Series['detectedDirection']): string {
   if (d.from === 'comicinfo') return tr('Automatic — {direction}, from the chapter files', { direction });
   if (d.from === 'anilist') return tr('Automatic — {direction}, from AniList', { direction });
   return tr('Automatic — {direction}, from the source', { direction });
+}
+
+/**
+ * What "Automatic" means for the type now, and what said so (bff lib/seriesType.ts): a genre, the source, AniList,
+ * or a Webtoon genre with nothing better.
+ */
+function autoTypeLabel(d: Series['detectedType']): string {
+  if (!d) return tr('Automatic — not known');
+  const type = tr(seriesTypeKey(d.type));
+  if (d.from === 'genre' || d.from === 'webtoon') return tr('Automatic — {type}, from the genres', { type });
+  if (d.from === 'anilist') return tr('Automatic — {type}, from AniList', { type });
+  return tr('Automatic — {type}, from the source', { type });
 }
 
 /** The Automatic choice itself, short enough for a segment: what it reads as now, a webtoon when nothing has said. */
@@ -458,6 +471,14 @@ function ReadingPane({ id, series, meta, save, onSaved }: {
         </>}
         options={[{ value: '', label: autoDirectionChoice(series.detectedDirection) }, ...DIRECTIONS.map(([v, label]) => ({ value: v as string, label: tr(label) }))]}
         onPick={(readingDirection) => save({ readingDirection })} />
+      {/* What kind of comic it is: the notice-chapter switches in Admin → Settings go by it (bff lib/noticeChapters.ts). */}
+      <ChoiceRow narrow label={tr('Series type')} value={meta.seriesType}
+        help={<>
+          {tr('What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.')}
+          <span data-auto-type className="mt-0.5 block text-fog-400">{autoTypeLabel(series.detectedType)}</span>
+        </>}
+        options={[{ value: '', label: tr('Automatic') }, ...SERIES_TYPES.filter((v) => v !== 'unknown').map((v) => ({ value: v as string, label: tr(seriesTypeKey(v)) }))]}
+        onPick={(seriesType) => save({ seriesType })} />
       <LanguageRow id={id} series={series} onSaved={onSaved} />
       <ChoiceRow narrow label={tr('Age rating')} value={meta.ageRating}
         help={tr('Members with an age limit below this will not see the series anywhere: not in the library, search, the reader, or an external OPDS app.')}

@@ -449,6 +449,57 @@ test("migrate: v0.52.0's data migration states a MangaDex series' language from 
   }
 });
 
+test("migrate: v0.55.2's data migration types a series from its genres, and only one nothing has typed", { skip }, async () => {
+  // Notice chapters are switched per series type (lib/noticeChapters.ts), so every series whose genres say what it is
+  // has a type at the first boot. Each: its genres, the admin's genres (null for none), the type it already had and
+  // from where, and the admin's own type (series_overrides.series_type).
+  const SEED: Record<string, [string[], string[] | null, [string, string] | null, string | null]> = {
+    't-st-genre': [['Action', 'Manhwa'], null, null, null],
+    't-st-webtoon': [['Webtoon', 'Romance'], null, null, null],
+    't-st-none': [['Action'], null, null, null],
+    't-st-menu': [['Manga', 'Manhwa', 'Manhua', 'Action'], null, null, null],
+    't-st-lone-manga': [['Manga', 'Action'], null, null, null],
+    't-st-admin-genres': [['Action'], ['Manhua'], null, null],
+    't-st-typed': [['Manhwa'], null, ['manga', 'source'], null],
+    't-st-admin-type': [['Manhwa'], null, null, 'comic'],
+  };
+  const ids = Object.keys(SEED);
+  try {
+    for (const [id, [genres, ovGenres, typed, ovType]] of Object.entries(SEED)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, genres, series_type, series_type_from) VALUES ($1, 'test', 'T', $1, $2, $3, $4)`,
+        [id, genres, typed?.[0] ?? null, typed?.[1] ?? null]);
+      if (ovGenres || ovType) await q(`INSERT INTO series_overrides (series_id, genres, series_type) VALUES ($1, $2, $3)`, [id, ovGenres, ovType]);
+    }
+    // Reintroduce the PR's id ('notice-chapters-series-type-from-genres'): this stamp is not the one migrate() checks,
+    // the migration does not run again, and t-st-genre stays untyped. An id is permanent once it has shipped.
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.55.2-series-type-from-genres'`);
+    await migrate();
+    const rows = await q<{ id: string; t: string | null; ov: string | null }>(
+      `SELECT s.id, s.series_type || '/' || s.series_type_from AS t, o.series_type AS ov
+         FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id WHERE s.id = ANY($1)`, [ids]);
+    assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, [r.t, r.ov]])), {
+      't-st-genre': ['manhwa/genre', null],
+      't-st-webtoon': ['webtoon/webtoon', null],
+      't-st-none': [null, null],
+      // typeFromGenres' own rule, not a copy of it in SQL: a genre menu, or "Manga" alone, is no evidence.
+      // Reintroduce the SQL table (the first origin named wins): manhwa/genre and manga/genre.
+      't-st-menu': [null, null],
+      't-st-lone-manga': [null, null],
+      // The admin's genres are the series' genres, as everywhere.
+      't-st-admin-genres': ['manhua/genre', null],
+      // Only a series nothing has typed: MangaDex said manga, and a genre does not get to say otherwise here.
+      // Reintroduce by dropping "s.series_type IS NULL": manhwa/genre.
+      't-st-typed': ['manga/source', null],
+      // The evidence is filled in beside the admin's word, never over it: their comic is still what applies.
+      't-st-admin-type': ['manhwa/genre', 'comic'],
+    }, 'the data migration typed the wrong series, or the wrong way');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.55.2-series-type-from-genres'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
+});
+
 test('migrate: an edition v0.51.0 merged away after a rollback gives its language back at the next boot', { skip }, async () => {
   // The rollback drill's find: v0.51.0's merge sets merged_into and leaves work_id and lang alone, so the absorbed
   // French row kept its slot in lib_series_work_lang_idx, and v0.52.0 then refused a new French edition of the

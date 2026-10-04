@@ -97,6 +97,8 @@ import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
+import { learnTypeFromSource, learnTypeFromAniList } from '../lib/seriesType';
+import { noticeListed } from '../lib/noticeChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
@@ -1361,11 +1363,13 @@ export async function addSeriesFromSource(opts: {
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
     }
     await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
+    await learnTypeFromSource({ id }, series);
     fetchAniListArt(title)
       .then(async (a) => {
         await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
           ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, a.banner, a.cover]).catch(() => {});
         await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
+        await learnTypeFromAniList({ id }, title, a);
       })
       .catch(() => {});
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}), ...(linked ? { edition: linked } : {}) };
@@ -1450,6 +1454,7 @@ export async function addSeriesFromSource(opts: {
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6) WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor, stateLang]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
+    await learnTypeFromSource({ folder }, series);
     // The same call the run makes on its full selection, and for the same reason: these dates are the
     // source's own, and the chapters they belong to are here -- they were simply fetched by somebody else.
     await setBookDates(folder, selected).catch(() => {});
@@ -1476,6 +1481,7 @@ export async function addSeriesFromSource(opts: {
         // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
         // this title (lib/directionSignals.ts directionFromAniListMatch).
         await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
+        await learnTypeFromAniList({ folder }, title, a);
       })
       .catch(() => {});
     return {
@@ -1579,6 +1585,7 @@ export async function addSeriesFromSource(opts: {
     // Which way it reads, when the source can say (MangaDex: the original language). After persistScan, so
     // the row exists; below a ComicInfo that already said otherwise (lib/readingDirection.ts).
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
+    await learnTypeFromSource({ folder }, series);
     // The listing the series page and "Who scanlates this" read is written here from the chapters this add
     // already fetched -- no second call to the source -- so a title opened straight from Discover shows
     // its groups and versions at once instead of only what is on disk until the sweep reaches it. Held is
@@ -1616,6 +1623,7 @@ export async function addSeriesFromSource(opts: {
         // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
         // this title (lib/directionSignals.ts directionFromAniListMatch).
         await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
+        await learnTypeFromAniList({ folder }, title, a);
       })
       .catch(() => {});
     void (async () => {
@@ -2552,8 +2560,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const wholes = plain.map((n) => Math.floor(n));
       const expanded = (await q<{ number: number }>(
         // `number` as stored (real), not cast to float8: 12.1 read back through float8 is 12.100000381..., which
-        // then matches no listing row keyed by the real's own spelling.
-        'SELECT DISTINCT number FROM series_listing WHERE series_id = $1 AND floor(number) = ANY($2::float8[])',
+        // then matches no listing row keyed by the real's own spelling. Never a notice chapter the admin hides
+        // (lib/noticeChapters.ts): 12 is the chapters a person can see under 12, and the sweep does not fetch that
+        // one either. Reintroduce by dropping the clause: "a whole number leaves a hidden notice behind" in
+        // fetchWhole.int.test.ts downloads 30.5.
+        `SELECT DISTINCT l.number FROM series_listing l
+          WHERE l.series_id = $1 AND floor(l.number) = ANY($2::float8[]) AND NOT ${noticeListed('l')}`,
         [seriesId, wholes],
       )).map((r) => Number(r.number));
       const covered = new Set(expanded.map((n) => Math.floor(n)));

@@ -29,6 +29,7 @@
 // that belongs on a phone credential. This module reads the same table and takes five columns.
 import { q, one } from './db';
 import { seriesVisible, type ViewCtx } from './visibility';
+import { listedShown } from './noticeChapters';
 
 /**
  * A `covered` listing row (v0.50.0, lib/partAlias.ts R2) is another site's split of a chapter this server holds:
@@ -38,6 +39,13 @@ import { seriesVisible, type ViewCtx } from './visibility';
  * marks them (lib/komgaProgress.ts): reading past chapter 78 is reading 78's parts, whoever split it.
  */
 export const NOT_COVERED = "l.status <> 'covered'";
+
+/**
+ * A notice chapter the admin hides (lib/noticeChapters.ts) is no chapter of the series, so no ghost either: Mihon
+ * would list it, and the highest notice would be the total the trackers read. Reads the series as `s`. Built per
+ * query, not once at load: it is a constant while nothing hides.
+ */
+const notNotice = () => listedShown('s', 'l');
 
 /**
  * Is the opt-in on?
@@ -142,7 +150,7 @@ export async function ghostBooksFor(seriesId: string): Promise<GhostBook[]> {
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND ${NOT_COVERED}
+      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -180,7 +188,7 @@ export async function ghostBookById(id: string, ctx: ViewCtx): Promise<GhostBook
     `SELECT l.number, l.title, l.published_at, l.scanlator, s.title AS series_title
        FROM series_listing l
        JOIN lib_series s ON s.id = l.series_id
-      WHERE l.series_id = $1 AND l.number = $2::real AND ${NOT_COVERED}
+      WHERE l.series_id = $1 AND l.number = $2::real AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -211,7 +219,8 @@ export async function ghostNumbers(seriesId: string): Promise<number[]> {
   const rows = await q<{ number: string | number }>(
     `SELECT l.number
        FROM series_listing l
-      WHERE l.series_id = $1 AND ${NOT_COVERED}
+       JOIN lib_series s ON s.id = l.series_id
+      WHERE l.series_id = $1 AND ${NOT_COVERED} AND ${notNotice()}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

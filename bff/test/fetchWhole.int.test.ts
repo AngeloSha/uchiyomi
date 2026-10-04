@@ -33,7 +33,9 @@ const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.allo
 const realFetch = globalThis.fetch;
 let q: any, app: any, token = '';
 
-const ch = (n: number) => ({ sourceId: `fw/${n}`, number: n, title: `Chapter ${n}`, scanlator: 'Group' });
+/** 30.5 is a two-page notice by its source's own count; 30.6 is twenty pages, a part of chapter 30. */
+const PAGES: Record<number, number> = { 30: 20, 30.5: 2, 30.6: 20 };
+const ch = (n: number) => ({ sourceId: `fw/${n}`, number: n, title: `Chapter ${n}`, scanlator: 'Group', pages: PAGES[n] });
 
 before(async () => {
   if (!DSN) return;
@@ -47,9 +49,13 @@ before(async () => {
     id: SRC, name: 'Whole Source',
     async search() { return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: SRC, title: 'Whole Series' }; },
-    // 1 and 2 are held; 12, 12.5 and 13 are not; nothing is numbered 20.
-    async listChapters() { return [1, 2, 12, 12.5, 13].map(ch); },
-    async getPageUrls(id: string) { return [`https://example.invalid/${encodeURIComponent(id)}/p1.png`]; },
+    // 1 and 2 are held; 12, 12.5 and 13 are not; nothing is numbered 20; 30, 30.5 and 30.6 for the notice case.
+    async listChapters() { return [1, 2, 12, 12.5, 13, 30, 30.5, 30.6].map(ch); },
+    // As many pages as the listing says, or one: a chapter that delivers fewer than it listed is saved partial.
+    async getPageUrls(id: string) {
+      const n = PAGES[Number(id.slice(3))] ?? 1;
+      return Array.from({ length: n }, (_, i) => `https://example.invalid/${encodeURIComponent(id)}/p${i + 1}.png`);
+    },
     async latest() { return []; },
   } as any);
   await q(`DELETE FROM lib_series WHERE id = $1`, [S]);
@@ -113,6 +119,28 @@ test('without `floored` a number means exactly that number, as it always has', {
   const r = await fetchNums({ numbers: [12] });
   assert.equal(r.statusCode, 409, 'an exact 12 that is already here was fetched again');
   assert.deepEqual(r.json().skipped, [{ number: 12, reason: 'already_here' }]);
+});
+
+test('a whole number leaves a hidden notice behind, and takes every other chapter it covers', { skip }, async () => {
+  // Notice chapters (lib/noticeChapters.ts): with the series' type switched on, the two-page 30.5 is hidden from
+  // everyone and the sweep never fetches it, so "30" from the Find missing dialog must not either.
+  const { refreshNoticesActive } = await import('../src/lib/noticeSettings');
+  await q(`UPDATE lib_series SET series_type = 'manhwa', series_type_from = 'genre' WHERE id = $1`, [S]);
+  await q(`UPDATE server_settings SET hide_notice_types = '["manhwa"]'::jsonb WHERE id = 1`);
+  await refreshNoticesActive();
+  try {
+    // Reintroduce by dropping the notice clause from the expansion: 30.5 is fetched too (total 3).
+    const r = await fetchNums({ numbers: [30], floored: true });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().total, 2, `30 and the twenty-page 30.6, never the hidden 30.5 -- got ${r.body}`);
+    const job = await idle();
+    assert.equal(job?.status, 'done', JSON.stringify(job));
+    const held = (await q(`SELECT number::float8 AS n FROM lib_books WHERE series_id = $1 AND number >= 30 ORDER BY number`, [S])).map((x: any) => Number(x.n));
+    assert.deepEqual(held.map((n: number) => Math.round(n * 10) / 10), [30, 30.6]);
+  } finally {
+    await q(`UPDATE server_settings SET hide_notice_types = '[]'::jsonb WHERE id = 1`);
+    await refreshNoticesActive();
+  }
 });
 
 test('following a source refreshes the listing at once, so its chapters show without waiting for the sweep', () => {

@@ -22,6 +22,7 @@ import { CHAPTER_RETRY_CAP } from './updater';
 import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
+import { listedShown } from './noticeChapters';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -382,7 +383,11 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
        FROM series_listing l
        LEFT JOIN chapter_failures f ON f.series_id = l.series_id AND f.number = l.number
        LEFT JOIN listing_progress lp ON lp.user_id = $2 AND lp.series_id = l.series_id AND lp.number = l.number
+       JOIN lib_series s_l ON s_l.id = l.series_id
       WHERE l.series_id = $1
+        -- A notice chapter the admin hides (lib/noticeChapters.ts) is not missing: it is not a chapter here at all.
+        -- Kept in the listing, so switching the hide off shows it again at once.
+        AND ${listedShown('s_l', 'l')}
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

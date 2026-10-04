@@ -182,6 +182,8 @@ export interface Series {
     adultExempt?: boolean;
     /** The admin's reading direction for this series; null follows `detectedDirection`. Absent before v0.48.0. */
     readingDirection?: SeriesMetadata['readingDirection'] | null;
+    /** The admin's series type (notice chapters); null follows `detectedType`. Absent on older servers. */
+    seriesType?: Exclude<SeriesType, 'unknown'> | null;
   };
   /**
    * Admins only (v0.48.0): what the evidence alone says about the reading direction, and which evidence --
@@ -198,7 +200,20 @@ export interface Series {
   borrowNames?: boolean | null;
   /** Admins only: whether names are borrowed for this series once the server setting is applied. */
   borrowNamesEffective?: boolean;
+  /** Admins only: the type the notice-chapter switches go by -- the override, else the evidence's, else unknown. */
+  seriesType?: SeriesType;
+  /** Admins only: what the evidence alone says the series is, and which evidence. null when nothing has said. */
+  detectedType?: { type: Exclude<SeriesType, 'unknown'>; from: 'genre' | 'source' | 'anilist' | 'webtoon' | null } | null;
+  /** Admins only: this series' own notice-chapter switch; null follows its type's. */
+  hideNotices?: boolean | null;
+  /** Admins only: whether its notice chapters (numbered N.x) are hidden once its type's switch is applied. */
+  hideNoticesEffective?: boolean;
+  /** Admins only: how many of its chapters that hides right now. */
+  hiddenNotices?: number;
 }
+
+/** What kind of comic a series is (bff lib/seriesTypeSignals.ts), as the notice-chapter switches go by it. */
+export type SeriesType = 'manga' | 'manhwa' | 'manhua' | 'webtoon' | 'comic' | 'unknown';
 
 export interface ReadProgress {
   page: number;
