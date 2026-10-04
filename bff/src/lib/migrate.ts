@@ -1452,6 +1452,15 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS name_rule smallint NOT NULL DEFAU
 -- number in the name and never meets this column, and a CHECK would make that UPDATE, and its folder, fail. A stored
 -- end not above the number is read as no range instead, until v0.55.2's next scan writes both again.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS number_end real;
+
+-- v0.55.2 (#147 beside #150): when a chapter row was first scanned. Updates counts what came since a reader last
+-- looked in chapter rows and, while a notice switch is on, leaves out the hidden notices among the rows that came
+-- (lib/enrich.ts newSinceSeen) -- which it can only tell apart by when they came. Taken by number, a file collected
+-- late below the series' top (a 01-07 omnibus beside a hidden 44.5) was the notice, and swallowed. The scan's
+-- INSERT takes the default and its ON CONFLICT never names the column, so a row keeps the time it first came. Rows
+-- from before this release all carry the time of the upgrade and tie, ordered by number as before. v0.55.1 boots on
+-- this schema: it never names the column, and its INSERTs take the default.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

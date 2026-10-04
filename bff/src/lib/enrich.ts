@@ -51,9 +51,12 @@ export async function seenCounts(list: Array<{ id: string; booksCount?: number }
 /**
  * How many chapters came since this reader last looked, for each series they have looked at (`seen`, from
  * seriesSeen): the rows above the count they saw, `counts` (seenCounts). While nothing hides, simply the difference,
- * as it always was. Otherwise the newest that many rows by number, less every hidden notice among them -- so a
- * notice that arrived uncounted and turned out to be two pages stops being new, and an old notice a switch shows
- * again never was.
+ * as it always was. Otherwise the newest that many rows, less every hidden notice among them -- so a notice that
+ * arrived uncounted and turned out to be two pages stops being new, and an old notice a switch shows again never was.
+ * Newest by when each row was first scanned (lib_books.created_at), then by number: by number alone, a file that came
+ * below the series' top -- a range collected late, a gap filled -- was taken for the hidden notice at the top and
+ * swallowed. Reintroduce the number alone: "a file added below a hidden notice" in noticeRanges.int.test.ts finds
+ * nothing new.
  */
 export async function newSinceSeen(seen: Map<string, number>, counts: Map<string, number>): Promise<Map<string, number>> {
   const out = new Map<string, number>();
@@ -73,7 +76,7 @@ export async function newSinceSeen(seen: Map<string, number>, counts: Map<string
          SELECT ${noticeHidden('s', 'b', 'ov')} AS hidden
            FROM lib_books b JOIN lib_series s ON s.id = b.series_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
           WHERE b.series_id = k.id
-          ORDER BY COALESCE(ov.number, b.number) DESC, b.file DESC
+          ORDER BY b.created_at DESC, COALESCE(ov.number, b.number) DESC, b.file DESC
           LIMIT k.fresh
        ) t
       GROUP BY k.id`,

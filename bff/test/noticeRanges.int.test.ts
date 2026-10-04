@@ -239,3 +239,25 @@ test('Updates: a new range file is one new file, a new notice none, across the s
     await q('DELETE FROM series_seen WHERE user_id = $1', [memberId]);
   }
 });
+
+test('Updates: a file added below a hidden notice is new too -- a range collected late', { skip }, async () => {
+  await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1, $2)`, [memberId, S]);
+  const updates = async () => (await get('/api/updates', asMember)).json().content.map((u: any) => [u.series.id, u.newCount]);
+  try {
+    await setTypes(['manhwa']);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/updates/seen', headers: asMember })).statusCode, 200);
+    assert.deepEqual(await updates(), []);
+    // The series' highest number is now the hidden two-page 14.5. A hand-collected omnibus of 1 to 7 arrives after it:
+    // a new file, far below the top. Reintroduce "the newest rows by number" in newSinceSeen (lib/enrich.ts): the
+    // hidden 14.5 stands in for it, and nothing is new.
+    await shelve({ 'Solo 01-07 (Omnibus).cbz': 20 });
+    assert.deepEqual(await updates(), [[S, 1]], 'a file added below a hidden notice was swallowed');
+    assert.equal((await get('/api/home', asMember)).json().updatesCount, 1, "Home's badge disagrees with Updates");
+    await setTypes([]);
+    assert.deepEqual(await updates(), [[S, 1]], 'switched off, the same one file is new');
+  } finally {
+    await setTypes([]);
+    await q('DELETE FROM favorites WHERE user_id = $1', [memberId]);
+    await q('DELETE FROM series_seen WHERE user_id = $1', [memberId]);
+  }
+});
