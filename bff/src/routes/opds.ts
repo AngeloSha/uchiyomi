@@ -273,12 +273,12 @@ export default async function opdsRoutes(app: FastifyInstance) {
       // This had no visibility predicate whatsoever: the chapter list of a hidden series was served in
       // full. The join is what carries the rule down from the series. The progress join is per reader, so
       // `pse:lastRead` is where THIS person stopped, not where anyone did.
-      // The number is the effective one -- the admin's renumber when there is one -- as booksSrc hands it to the
-      // app and the Komga-compatible API, so the three surfaces list a chapter under one number and in one order.
-      `SELECT b.id, b.title, COALESCE(ov.number, b.number) AS number, b.pages, b.updated_at, b.root, b.file,
-              rp.page AS last_page, rp.updated_at AS last_at
+      `SELECT b.id, b.title, b.number, b.pages, b.updated_at, b.root, b.file, rp.page AS last_page, rp.updated_at AS last_at
          FROM lib_books b
          JOIN lib_series s ON s.id = b.series_id AND ${visible('s', vc(req), bp)}
+         -- Read only by the notice rule below, which goes by the effective number (the admin's renumber). The feed
+         -- itself still lists and orders by the file's number, as it always has: following the renumber here is a
+         -- change of its own (the titles would have to follow too), not part of hiding notices.
          LEFT JOIN book_overrides ov ON ov.book_id = b.id
          LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ${uid}
         WHERE b.series_id = ${bp.add(id)}
@@ -288,7 +288,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
           AND b.pruned_at IS NULL
           -- Nor a notice chapter the admin hides (lib/noticeChapters.ts).
           AND ${noticeShown('s', 'COALESCE(ov.number, b.number)')}
-        ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`, bp.values as any[]);
+        ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
     // A page count of 0 means "never counted", not "no pages". The scanner counts most archives, but a
     // streaming link with count 0 is a link a reader cannot use, so the unknowns get counted here, once,
     // and written back the way the image server does it.
