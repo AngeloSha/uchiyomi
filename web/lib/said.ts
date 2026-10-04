@@ -414,6 +414,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     none: () => tr('the last test ran out of time while searching — not proof it is broken'),
   }),
   'sources.stale': (p) => tr('{stage} failed {when} and nothing has checked it since — test it again', { stage: stageName(p.stage), when: relativeTime(str(p, 'at')) }),
+  'sources.paced': () => tr('Downloading slowly: the site asked for fewer requests'),
 
   // ---- Duplicate series
   'dupes.live': (p) => (num(p, 'n') === 1 ? tr('1 title appears to be in the library twice') : tr('{n} titles appear to be in the library twice', { n: num(p, 'n') })),

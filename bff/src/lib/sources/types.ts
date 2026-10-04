@@ -166,6 +166,13 @@ export interface SourceAdapter {
    */
   rateGroup?: string;
   /**
+   * Page URLs are a proxy's, shared by many sources, not the site's own image server (v0.55.3): the extension engine
+   * serves every extension's pages. The downloader joins sources whose pages come from one image server under one rate
+   * key (lib/pace.ts notePageHosts), and a proxy's address would join every source behind it. Absent: the pages come
+   * from the site's own servers, or a CDN of its own.
+   */
+  pagesProxied?: boolean;
+  /**
    * BCP-47-ish language this source publishes in, when it only publishes in one. Suwayomi reports it per
    * source; a built-in declares it only when its own requests pin a language (each MangaDex adapter asks for
    * its one language and nothing else). Absent means "no single language", which the language grouping reads

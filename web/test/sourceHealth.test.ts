@@ -20,7 +20,7 @@ import { RepairRunProvider } from '../lib/useRepairRun';
 import { FindRunProvider } from '../lib/useFindRun';
 import { SourceHealthBody } from '../components/SourceHealthBody';
 import {
-  bulkTargets, groupOf, primaryOf, seriesText, stateReason, stateWord, tileLetters, tileTone, turnOffAllLabel, turnOffEach,
+  bulkTargets, groupOf, paceText, primaryOf, seriesText, stateReason, stateWord, tileLetters, tileTone, turnOffAllLabel, turnOffEach,
   turnOffOutcome, turnOffQuestion,
 } from '../lib/sourceHealth';
 import type { HealthCheck, HealthItem } from '../lib/types';
@@ -245,6 +245,27 @@ test('one key per row, the rest behind ⋯; a row reads one line, and its eviden
   // Behind Details, closed: the stage lines are not drawn until it opens.
   for (const r of rows) assert.match(r, /data-health-details[\s\S]*?aria-expanded="false"/, 'Details is closed');
   assert.ok(!html.includes('data-source-evidence'), 'the stage lines are drawn while Details is closed');
+});
+
+test('a source at a raised pace says it downloads slowly: a quiet row of its own, a phrase on any other (v0.55.3)', () => {
+  // The owner's Natomanga, its chapters coming one at a time for hours after its image server's 429s, and the card
+  // said nothing of why. Reintroduce by dropping the `slowed` case in stateWord: the row falls back to its detail. Drop
+  // the `pace` segment in SourceRow: the rate-limited row's line says nothing of its pace.
+  const slowed = item({ sourceId: 'natomanga', title: 'Natomanga', group: 'quiet', state: 'slowed', slowed: true, info: true, series: 116 });
+  assert.equal(stateWord(slowed), 'Downloading slowly');
+  assert.equal(stateReason(slowed), 'the site asked for fewer requests');
+  assert.equal(paceText(slowed), '', 'said once, by its word');
+  assert.equal(tileTone(slowed), 'info', 'grey: nothing to fix');
+  assert.equal(primaryOf(slowed), null, 'and nothing to press in its fold');
+  const limited = { ...ROWS[0], slowed: true };
+  assert.equal(paceText(limited), 'Downloading slowly', 'beside a cooldown, after its reason');
+  assert.equal(paceText(ROWS[0]), '', 'nothing for a row at its own pace');
+  const html = render({ ...CHECK, items: [limited] });
+  assert.match(rowsOf(html)[0], /Rate-limited<\/span> — trying again in (19|20) minutes · Downloading slowly · 37 series/);
+  // In the quiet fold, closed: drawn only once it opens.
+  const folded = render({ ...CHECK, items: [slowed] });
+  assert.match(slice(folded, 'data-source-fold="quiet"', '</section>'), /aria-expanded="false"/);
+  assert.ok(!folded.includes('Natomanga'), 'the quiet row waits behind its fold');
 });
 
 test('Turn off all is a key in its group\'s head, and it asks before it does anything', () => {

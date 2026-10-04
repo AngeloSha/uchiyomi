@@ -1366,3 +1366,26 @@ test('a listing ladder a failed refresh left ends once the listing reads fresh a
   assert.equal(note.listingFails, undefined, 'the ladder is over');
   assert.equal(note.listingRetryAt, undefined);
 });
+
+test('a raised pace is held for hours, and the archive waits out only the hour after the 429 (v0.55.3)', { skip }, async () => {
+  // A level comes off only as chapters land now (lib/pace.ts), and a waiting archive lands none: waiting for level 0, it
+  // would have waited days. It waits the hour after a 429 and then goes on, never faster than the raised level.
+  // Reintroduce `paced: paceLevel(src) > 0` in archive.ts stateOf: an hour on, the archive still waits on `pace`.
+  const pace = await import('../src/lib/pace');
+  const s = await series('paced', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  noteRateLimited(A);
+  const t1 = await tick();
+  assert.deepEqual(t1.started, [], 'nothing starts in the hour after a 429');
+  assert.equal(t1.waits[s.id]?.why, 'pace');
+  pace.setPaceClock(() => Date.now() + pace.PACE_HOLD_MS);
+  try {
+    assert.equal(pace.paceLevel(A), 1, 'an hour on, the level is still raised');
+    const t2 = await tick();
+    assert.notEqual(t2.waits[s.id]?.why, 'pace', 'and the archive no longer waits on it');
+    assert.deepEqual(t2.started.filter((x) => x.seriesId === s.id).map((x) => x.number), [1], 'it takes its next chapter');
+    await arch.archiveIdle();
+  } finally {
+    pace.setPaceClock(null);
+  }
+});

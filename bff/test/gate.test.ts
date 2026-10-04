@@ -54,3 +54,52 @@ test('queued work still runs after a failure ahead of it', async () => {
   await Promise.all([failing, following]);
   assert.ok(ran.includes('ran'), 'work queued behind a failure must still execute');
 });
+
+test('a width asked again narrows a busy lane as its operations finish', async () => {
+  // v0.55.3: the downloader's width falls to one while a source's pace is raised, and two chapters may already be
+  // running at two. Reintroduce the old release in admit() (`lane.queue.shift()` and go, whatever the width): the first
+  // of the two to finish lets a waiter in beside the one still running, and `nothing new beside` reads 2.
+  let width = 2;
+  let inFlight = 0;
+  let peakLate = 0;
+  const release: Array<() => void> = [];
+  const first = [0, 1].map(() => withGate('narrow', async () => {
+    inFlight++;
+    await new Promise<void>((r) => release.push(r));
+    inFlight--;
+  }, { concurrency: () => width }));
+  await sleep(5);
+  assert.equal(inFlight, 2, 'both ran at two');
+  width = 1;
+  const late = [0, 1, 2].map(() => withGate('narrow', async () => {
+    peakLate = Math.max(peakLate, ++inFlight);
+    await sleep(10);
+    inFlight--;
+  }, { concurrency: () => width }));
+  release[0]();
+  await sleep(30);
+  assert.equal(peakLate, 0, 'nothing new beside the one still running, at a width of one');
+  release[1]();
+  await Promise.all([...first, ...late]);
+  assert.equal(peakLate, 1, 'then one at a time');
+  assert.deepEqual(gateDepth('narrow'), { active: 0, queued: 0 });
+});
+
+test('first come, first served: a widened lane lets its waiters in, in order, before a newcomer', async () => {
+  // Reintroduce the arrival's old test (`if (lane.active >= width())` alone): the newcomer walks past the waiter into
+  // the slot the widening opened, and the order reads A, C, B.
+  let width = 1;
+  const order: string[] = [];
+  let releaseA!: () => void;
+  const a = withGate('fifo', async () => { order.push('A'); await new Promise<void>((r) => { releaseA = r; }); }, { concurrency: () => width });
+  await sleep(5);
+  const b = withGate('fifo', async () => { order.push('B'); await sleep(5); }, { concurrency: () => width });
+  await sleep(5);
+  width = 2;
+  const c = withGate('fifo', async () => { order.push('C'); }, { concurrency: () => width });
+  await sleep(5);
+  assert.deepEqual(order, ['A', 'B'], 'the waiter got the widened slot, the newcomer waits behind it');
+  releaseA();
+  await Promise.all([a, b, c]);
+  assert.deepEqual(order, ['A', 'B', 'C']);
+});

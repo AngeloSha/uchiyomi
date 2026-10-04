@@ -547,12 +547,17 @@ export interface HealthItem {
   offBy?: 'admin' | 'extension' | 'language';
   /** The source has an extension's logo, which /img/sources/icon/:id serves. */
   icon?: boolean;
+  /**
+   * v0.55.3: the source downloads at a raised pace -- one chapter at a time, longer gaps -- because its site, or an image
+   * server it shares with another source, answered 429. On a row of any state; the whole of a `slowed` row.
+   */
+  slowed?: boolean;
 }
 
 /** v0.53.0: the Source health card's groups, in the server's order. */
 export type SourceGroup = 'affected' | 'unused' | 'quiet' | 'off';
 /** v0.53.0: a source row's one state (bff lib/health.ts SourceState). */
-export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off';
+export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off' | 'slowed';
 
 /** The last attempt at a finding, per check (bff lib/health.ts `HealthOutcome`). */
 export type HealthOutcome =

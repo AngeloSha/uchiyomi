@@ -112,8 +112,13 @@ export interface SourceState {
   blockedUntil: number | null;
   /** Chapters on the source's download gate, running or waiting (lib/gate.ts gateDepth). */
   gate: { active: number; queued: number };
-  /** lib/pace.ts paceLevel. */
-  paceLevel: number;
+  /**
+   * The site answered 429 within the hour (lib/pace.ts refusedLately). Was the pace level itself, which came down ten
+   * minutes a step; since v0.55.3 a level is held for hours and comes off only as chapters land, which a waiting
+   * archive never adds to -- it would have waited for a day. Past the hour it runs, never faster than the raised level
+   * (lib/pace.ts pagePace keeps the level's gap a floor under the archive's own).
+   */
+  paced: boolean;
   /** archive_pace, ms. */
   nextAt: number | null;
   backoffUntil: number | null;
@@ -134,7 +139,7 @@ export function sourceWait(s: SourceState, now: number): Omit<SeriesWait, 'sourc
   if (s.disabled) return { why: 'disabled' };
   if (s.blockedUntil != null && s.blockedUntil > now) return { why: 'cooldown', until: s.blockedUntil };
   if (s.gate.active + s.gate.queued > 0) return { why: 'source_busy' };
-  if (s.paceLevel > 0) return { why: 'pace' };
+  if (s.paced) return { why: 'pace' };
   return null;
 }
 

@@ -681,6 +681,19 @@ offers `replace_source`, the source's `standing` is `cooling` (so it still carri
 `frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
 refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
 
+**A site that keeps refusing is downloaded slowly, for hours** (since v0.55.3). A 429 raises the download pace level
+of the source's rate key (one more per 429, up to four): one chapter at a time, and gaps doubled per level between
+chapters and between pages. A level is held at least an hour after it changed, and comes off one step at a time only
+after ten chapters in a row came down whole with no 429 at it; one nothing downloads from loses a step every three
+days. A 429 is a rest every chapter on the key waits out, and a chapter running beside a refused one slows down with
+it. Sources whose pages come from one image server share one rate key (Natomanga and Mangakakalot: two sites, one
+image CDN), learned from the page addresses as chapters are fetched, except a proxy's (the extension engine's).
+Health's `sources` row for such a source carries `slowed: true` and the detail `sources.paced` (*Downloading slowly:
+the site asked for fewer requests*); one with nothing else to say is listed for it alone, `info`, in the `quiet` group,
+with the state `slowed` (also a state of `GET /api/admin/sources/overview`). The slow archive waits on the hour after
+a 429 (`waiting.why: 'pace'`), no longer on the level: past it, it goes on at its own pace, never faster than the
+raised one. Cooldowns are as before, per source.
+
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
 source, `sw:<id>` for an extension). Findings: a numbering change waiting for review — the detector's proposal

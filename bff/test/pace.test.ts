@@ -1,13 +1,15 @@
-// The per-source pace level: raised by every 429, lowered by nothing but time.
+// The per-key pace level: raised by every 429, lowered slowly -- by a steady run of chapters held an hour, or by days.
 //
-// Pure arithmetic over an injected clock, so ten quiet minutes cost nothing here. What it pins is the
-// shape the downloader relies on: a level that persists past the chapter that earned it, a ceiling, a
-// declared gap of zero that still slows down, and a decay that is lazy and stepwise.
+// Pure arithmetic over an injected clock, so an hour's hold and three idle days cost nothing here. What it pins is
+// the shape the downloader relies on: a level that persists past the chapter that earned it, a ceiling, a declared gap
+// of zero that still slows down, a level that comes off a step at a time and never for one good chapter, a rest every
+// chapter on the key sits out, and one key for every source whose pages come from one image server (v0.55.3).
 import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  noteRateLimited, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_DECAY_MS, MAX_PAGE_GAP_MS,
-  pagePace, slowPace, withSlowPace, resumePace, rateKeyOf,
+  noteRateLimited, noteDownloaded, notePageHosts, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_HOLD_MS,
+  PACE_IDLE_MS, PACE_STEADY_RUN, MAX_PAGE_GAP_MS, pagePace, slowPace, withSlowPace, resumePace, rateKeyOf, refusedLately,
+  restLeft, serverOf,
 } from '../src/lib/pace';
 import { drawGap } from '../src/lib/archivePace';
 import { registerAdapter, unregisterAdapter } from '../src/lib/sources/loader';
@@ -73,43 +75,135 @@ test('a declared gap of 0 falls back to the server default when slowed, because 
   assert.deepEqual(paceFor(ext, DEFAULTS), { gap: 500, workers: 1, level: 1 });
 });
 
-test('ten quiet minutes take one level off, lazily, and a hit after a partial decay builds on what is left', () => {
-  // Reintroduce by returning the stored entry without the `steps` computation in current(): the level
-  // never comes down and a source that was rate-limited once on Monday is still crawling on Friday.
+test('a raised level is held: quiet minutes, hours and a day take nothing off', () => {
+  // v0.55.3. Ten quiet minutes used to take a level off, and Natomanga's image server -- refusing for hours once it
+  // had refused -- was asked at full speed again within the hour, every night. Reintroduce the ten-minute decay
+  // (PACE_IDLE_MS = 10 * 60_000): the level reads 3 after ten minutes and the `held` assertions fail.
   for (let i = 0; i < 4; i++) noteRateLimited(plain.id);
-  now += PACE_DECAY_MS - 1;
+  now += 10 * 60_000;
+  assert.equal(paceLevel(plain.id), 4, 'held after ten quiet minutes');
+  now += 2 * 3600_000;
+  assert.equal(paceLevel(plain.id), 4, 'held after two quiet hours: nothing has come down at this pace to say it works');
+  now += 24 * 3600_000;
+  assert.equal(paceLevel(plain.id), 4, 'held after a quiet day');
+  assert.ok(PACE_IDLE_MS >= 2 * 24 * 3600_000, `a nightly run must not find the level forgotten (${PACE_IDLE_MS} ms)`);
+});
+
+test('one good chapter never brings a level down; a steady run, held an hour, takes ONE step off', () => {
+  // The site let a chapter through at the slower pace, which says the slower pace works, not that the faster one would.
+  // Reintroduce the step without the run (`p.run < PACE_STEADY_RUN ||` dropped): the `one chapter is not a run`
+  // assertion reads 1. Reintroduce it without the hour (`now - p.since < PACE_HOLD_MS ||` dropped): the run inside the
+  // hour after the first step takes a second, and `no second step inside the hour` reads 0.
+  noteRateLimited(plain.id);
+  noteRateLimited(plain.id);
+  assert.equal(paceLevel(plain.id), 2);
+  now += PACE_HOLD_MS;
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 2, 'one chapter is not a run');
+  for (let i = 1; i < PACE_STEADY_RUN - 1; i++) noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 2, `${PACE_STEADY_RUN - 1} in a row are not a run either`);
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 1, `the ${PACE_STEADY_RUN}th steps it down, one level`);
+  // The next step needs its own hour: chapters landing at the new level count towards it, and step nothing before it.
+  for (let i = 0; i < 2 * PACE_STEADY_RUN; i++) noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 1, 'no second step inside the hour after the first, however many land');
+  now += PACE_HOLD_MS;
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 0, 'a run at this level and its own hour take the last step');
+  assert.deepEqual(paceFor(plain, DEFAULTS), { gap: 250, workers: 1, level: 0 }, 'back to the declaration');
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 0, 'nothing at level 0');
+});
+
+test('a step spends its run: the next one needs a run of its own', () => {
+  // Reintroduce by leaving `run` as it was on a step: the chapters before the first step count again for the second,
+  // and the `starts again` assertion reads 0.
+  for (let i = 0; i < 2; i++) noteRateLimited(plain.id);
+  now += PACE_HOLD_MS;
+  for (let i = 0; i < PACE_STEADY_RUN; i++) noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 1);
+  now += PACE_HOLD_MS;
+  for (let i = 0; i < PACE_STEADY_RUN - 1; i++) noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 1, 'the run starts again from nothing after a step');
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 0);
+});
+
+test('a run that is held long enough but too short, or a run with a 429 in it, takes nothing off', () => {
+  // Reintroduce by carrying the run over a 429 (`run: p?.run ?? 0` in noteRateLimited): the nine chapters before the
+  // refusal count after it, the tenth steps the level down, and the `a 429 starts the run again` assertion reads 1.
+  noteRateLimited(plain.id);
+  now += PACE_HOLD_MS;
+  for (let i = 0; i < PACE_STEADY_RUN - 1; i++) noteDownloaded(plain.id);
+  noteRateLimited(plain.id); // the site said no again: level 2, held from now
+  assert.equal(paceLevel(plain.id), 2);
+  now += PACE_HOLD_MS;
+  noteDownloaded(plain.id);
+  assert.equal(paceLevel(plain.id), 2, 'a 429 starts the run again');
+});
+
+test('a level nothing changes for PACE_IDLE_MS loses a step, and the stamp advances rather than resets', () => {
+  // A source refused once and never asked again is not slow for good. Reintroduce `return p` in current() without the
+  // idle steps: the level never comes off without downloads, and the `one step` assertion reads 4. Reintroduce
+  // `p.since = clock()` on decay: a day short of the second step reads as three days from scratch.
+  for (let i = 0; i < 4; i++) noteRateLimited(plain.id);
+  now += PACE_IDLE_MS - 1;
   assert.equal(paceLevel(plain.id), 4, 'not a full step yet');
   now += 1;
-  assert.equal(paceLevel(plain.id), 3, 'one step after ten minutes');
-  now += 2 * PACE_DECAY_MS + 5 * 60_000; // 25 more minutes: two whole steps, five minutes into the third
-  assert.equal(paceLevel(plain.id), 1);
+  assert.equal(paceLevel(plain.id), 3, 'one step');
+  now += PACE_IDLE_MS + 5 * 3600_000; // two steps, five hours into the third
+  assert.equal(paceLevel(plain.id), 2);
+  now += PACE_IDLE_MS - 5 * 3600_000;
+  assert.equal(paceLevel(plain.id), 1, 'the third step lands three idle periods in, not three and five hours');
   noteRateLimited(plain.id);
   assert.equal(paceLevel(plain.id), 2, 'a new hit raises the DECAYED level, not the original one');
-  now += 2 * PACE_DECAY_MS;
+  now += 2 * PACE_IDLE_MS;
   assert.equal(paceLevel(plain.id), 0, 'and it reaches zero');
   assert.deepEqual(paceFor(plain, DEFAULTS), { gap: 250, workers: 1, level: 0 }, 'back to the declaration');
 });
 
-test('decay advances the stamp rather than resetting it, so partial minutes are not lost', () => {
-  // Reintroduce by storing `lastHitAt: clock()` on decay: 25 quiet minutes read as level 2 with 0 served,
-  // and the next step comes at 35 minutes instead of 30.
-  for (let i = 0; i < 4; i++) noteRateLimited(plain.id);
-  now += 2 * PACE_DECAY_MS + 5 * 60_000; // 25 minutes: level 2, five minutes towards level 1
-  assert.equal(paceLevel(plain.id), 2);
-  now += 5 * 60_000; // 30 minutes in total
-  assert.equal(paceLevel(plain.id), 1, 'the third step lands at 30 minutes, not 35');
+test('a 429 is a rest every chapter on the key waits out, the longest asked for', () => {
+  // Reintroduce by dropping `restUntil` from noteRateLimited (or restLeft's answer): a neighbour on the key reads no
+  // rest and asks the refusing server again at once, and `the rest the refused chapter waits` reads 0.
+  assert.equal(restLeft(plain.id), 0, 'no rest before a 429');
+  noteRateLimited(plain.id, 5000);
+  assert.equal(restLeft(plain.id), 5000, 'the rest the refused chapter waits');
+  now += 2000;
+  assert.equal(restLeft(plain.id), 3000);
+  noteRateLimited(plain.id, 1000);
+  assert.equal(restLeft(plain.id), 3000, 'a shorter rest never cuts a longer one');
+  noteRateLimited(plain.id, 10_000);
+  assert.equal(restLeft(plain.id), 10_000, 'a longer one extends it');
+  now += 10_000;
+  assert.equal(restLeft(plain.id), 0);
+  assert.equal(restLeft(ext.id), 0, 'per key: the other source never rests');
 });
 
-test('a successful download does not reset the level: only time does', () => {
-  // There is deliberately no "reportOk" hook here. A chapter that got through at the slower pace is
-  // evidence the slower pace works, not that the fast one does. The absence is pinned by the API surface:
-  // nothing exported lowers a level except the clock and the tests-only clearPace(). (withSlowPace only
-  // ever slows a download further, and only inside its own scope; rateKeyOf only says whose level it is.)
+test('refused lately: an hour after the 429, whatever the level says', () => {
+  // The slow archive waits on this (lib/archivePlan.ts sourceWait), no longer on the level, which is held for hours and
+  // comes off only as chapters land -- chapters a waiting archive would never add.
+  assert.equal(refusedLately(plain.id), false);
   noteRateLimited(plain.id);
-  const before = paceLevel(plain.id);
-  assert.equal(before, 1);
+  assert.equal(refusedLately(plain.id), true);
+  now += PACE_HOLD_MS - 1;
+  assert.equal(refusedLately(plain.id), true);
+  now += 1;
+  assert.equal(refusedLately(plain.id), false, 'an hour on, no longer');
+  assert.equal(paceLevel(plain.id), 1, 'while the level stays raised');
+});
+
+test('nothing but a run, the idle days and the tests lowers a level', () => {
+  // The API surface: noteDownloaded is the one way down besides the clock, and it counts runs, never one success.
+  // (withSlowPace only ever slows a download further, and only inside its own scope; rateKeyOf only says whose level it
+  // is; notePageHosts only says which sources share one.)
+  noteRateLimited(plain.id);
+  assert.equal(paceLevel(plain.id), 1);
   const exported = Object.keys(require('../src/lib/pace')).sort();
-  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'rateKeyOf', 'resumePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
+  assert.deepEqual(exported, [
+    'MAX_PAGE_GAP_MS', 'PACE_HOLD_MS', 'PACE_IDLE_MS', 'PACE_MAX_LEVEL', 'PACE_STEADY_RUN', 'clearPace', 'noteDownloaded',
+    'notePageHosts', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'rateKeyOf', 'refusedLately', 'restLeft',
+    'resumePace', 'serverOf', 'setPaceClock', 'slowPace', 'withSlowPace',
+  ]);
   clearPace();
   assert.equal(paceLevel(plain.id), 0, 'clearPace is for tests');
 });
@@ -247,4 +341,75 @@ test('a 429 in one MangaDex language slows every MangaDex language: the level be
   // Anything else keeps a level of its own, registered or not.
   assert.equal(paceLevel(plain.id), 0);
   assert.equal(rateKeyOf('not-registered'), 'not-registered');
+});
+
+// ── one image server, one key (v0.55.3) ───────────────────────────────────────────────────────────────────────────
+
+test('an image server is its registrable domain; addresses, private names and shared hosts are none', () => {
+  // The owner's two sites: Mangakakalot's pages on imgs-2.2xstorage.com, Natomanga's on img-r1.2xstorage.com and
+  // storage.waitst.com (measured 2026-09-02). Reintroduce the host name itself (`return host`): the two read apart.
+  assert.equal(serverOf('https://imgs-2.2xstorage.com/a/1.jpg'), '2xstorage.com');
+  assert.equal(serverOf('https://img-r1.2xstorage.com/b/2.webp'), '2xstorage.com');
+  assert.equal(serverOf('https://storage.waitst.com/c/3.jpg'), 'waitst.com');
+  assert.equal(serverOf('https://IMG.Site.co.uk./p.png'), 'site.co.uk', 'a country second level is a suffix; case and a trailing dot fold');
+  assert.equal(serverOf('https://img.site.de:8443/p.png'), 'site.de');
+  // Nothing that says whose limit it is: an image proxy or a host many sites share, an address or a container's name (the
+  // walks' fake sites), a test or home domain, anything that is not a web address.
+  for (const u of ['https://i0.wp.com/site.com/p.png', 'https://blogger.googleusercontent.com/img/p.png', 'https://i.imgur.com/p.png',
+    'https://d1abc.cloudfront.net/p.png', 'http://127.0.0.1:18150/img/c/1', 'http://e2e-fake-a:18150/img/c/1', 'http://[::1]:80/p.png',
+    'https://example.invalid/p.png', 'https://img.nas.local/p.png', 'data:image/png;base64,AAAA', 'not a url']) {
+    assert.equal(serverOf(u), null, u);
+  }
+});
+
+test('two sources whose pages come from one image server share one key, one level and one rest', () => {
+  // Natomanga and Mangakakalot: two sites, one CDN, and each was asked at full speed while the other was being refused.
+  // Reintroduce by returning `g` from rateKeyOf (no joins): Mangakakalot reads level 0 after Natomanga's 429.
+  notePageHosts({ id: 'nato' }, ['https://img-r1.2xstorage.com/x/1.jpg', 'https://storage.waitst.com/x/2.jpg']);
+  noteRateLimited('nato', 5000);
+  assert.equal(paceLevel('kakalot'), 0, 'not joined before its pages were seen');
+  notePageHosts({ id: 'kakalot' }, ['https://imgs-2.2xstorage.com/y/1.jpg', 'https://imgs-2.2xstorage.com/y/2.jpg']);
+  assert.equal(rateKeyOf('nato'), rateKeyOf('kakalot'), 'one key');
+  assert.equal(rateKeyOf('nato'), 'kakalot', 'the smaller of the two');
+  assert.equal(paceLevel('kakalot'), 1, "Natomanga's 429 slows Mangakakalot from now on");
+  assert.equal(restLeft('kakalot'), 5000, 'and rests it with Natomanga');
+  noteRateLimited('kakalot');
+  assert.equal(paceLevel('nato'), 2, 'and the other way round');
+  // A source on another server keeps its own key and its own pace.
+  notePageHosts({ id: 'other' }, ['https://cdn.othersite.com/1.jpg']);
+  assert.equal(rateKeyOf('other'), 'other');
+  assert.equal(paceLevel('other'), 0);
+  // So does one on a host many sites share, beside one of its own.
+  notePageHosts({ id: 'wp-site' }, ['https://i0.wp.com/a.com/1.jpg', 'https://cdn.othersite.com/2.jpg']);
+  assert.equal(rateKeyOf('wp-site'), 'other', 'its own server joins it to the other');
+  notePageHosts({ id: 'wp-two' }, ['https://i1.wp.com/b.com/1.jpg']);
+  assert.equal(rateKeyOf('wp-two'), 'wp-two', 'the shared host joins nothing');
+});
+
+test('a key that joins another brings its level: the slower of the two, held from the later change', () => {
+  // Reintroduce by dropping the move in joined() (`paces.delete(g)` and the merge): a-src's level 3 stays under its old
+  // key, which nothing reads any more, and the joint key reads b-src's level 1.
+  for (let i = 0; i < 3; i++) noteRateLimited('a-src');
+  now += 30 * 60_000;
+  noteRateLimited('b-src');
+  notePageHosts({ id: 'a-src' }, ['https://p.sharedcdn.net/1.jpg']);
+  notePageHosts({ id: 'b-src' }, ['https://q.sharedcdn.net/1.jpg']);
+  assert.equal(paceLevel('b-src'), 3, 'the slower of the two');
+  assert.equal(paceLevel('a-src'), 3);
+  now += PACE_HOLD_MS - 1;
+  for (let i = 0; i < PACE_STEADY_RUN; i++) noteDownloaded('a-src');
+  assert.equal(paceLevel('a-src'), 3, "held from b-src's 429, the later of the two");
+  now += 1;
+  noteDownloaded('a-src');
+  assert.equal(paceLevel('a-src'), 2);
+});
+
+test("a proxy's pages join nothing: every extension's pages are on the engine", () => {
+  // Reintroduce by dropping the `pagesProxied` return in notePageHosts: two extensions on one engine address join, and a
+  // 429 to one slows every extension.
+  notePageHosts({ id: 'sw:1', pagesProxied: true }, ['https://engine.myhost.com/api/v1/manga/1/chapter/1/page/0']);
+  notePageHosts({ id: 'sw:2', pagesProxied: true }, ['https://engine.myhost.com/api/v1/manga/2/chapter/1/page/0']);
+  noteRateLimited('sw:1');
+  assert.equal(rateKeyOf('sw:2'), 'sw:2');
+  assert.equal(paceLevel('sw:2'), 0);
 });

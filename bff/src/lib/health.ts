@@ -17,7 +17,7 @@ import { latestSolverVersion } from './solverVersion';
 import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPingShared, solverUrl } from './sources/flaresolverr';
-import { getSource } from './sources';
+import { getSource, listSources } from './sources';
 import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
@@ -35,6 +35,7 @@ import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
 import { applyIgnores, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
+import { paceLevel } from './pace';
 import { forDesktop, isDesktop } from './desktop';
 import { archiveHoles, archiveTakes, type ArchiveHoles } from './archiveBoundaries';
 import { renumberRunning, type NumberingNote } from './numbering';
@@ -179,6 +180,12 @@ export interface HealthItem {
   /** A `blocked` row's status (rate_limited, blocked, down) and when its cooldown ends; `until` null when none is set. */
   cooldown?: { status: string; until: string | null };
   /**
+   * v0.55.3: the source downloads at a raised pace -- one chapter at a time, longer gaps -- because its site, or an image
+   * server it shares with another source, answered 429 (lib/pace.ts). On a row of any state; the one thing a `slowed`
+   * row says.
+   */
+  slowed?: boolean;
+  /**
    * Where an `off` row was switched off: under Providers (`admin`), in Admin -> Extensions (`extension`), or by hiding
    * its language in every extension (`language`) -- which says where it comes back on.
    */
@@ -193,9 +200,9 @@ export type SourceGroup = 'affected' | 'unused' | 'quiet' | 'off';
  * v0.53.0: a source row's one state. `blocked`: a cooldown, or a status other than ok (`cooldown` says which);
  * `failing`: a confirmed failure at `stage`; `slow` and `empty`: answers too slow, or empty, three times in a row;
  * `inconclusive`: its last test ran out of time at `stage`; `untested`: a failure at `stage` nothing has checked for a
- * week; `off`: switched off.
+ * week; `off`: switched off; `slowed` (v0.55.3): nothing but a raised download pace (`slowed`), listed for reference.
  */
-export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off';
+export type SourceState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off' | 'slowed';
 
 /**
  * The last attempt at a finding, per check. Every field comes from a stored row the repair wrote (gaps_result,
@@ -1056,10 +1063,13 @@ const iso = (t: string | number | Date) => new Date(t).toISOString();
 
 /** v0.53.0: the Source health card's groups in its order, and how bad a state is among rows with as many series. */
 const GROUP_ORDER: Record<SourceGroup, number> = { affected: 0, unused: 1, quiet: 2, off: 3 };
-const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1, empty: 1, inconclusive: 2, untested: 2, off: 3 };
+const SEVERITY: Record<SourceState, number> = { blocked: 0, failing: 0, slow: 1, empty: 1, inconclusive: 2, untested: 2, slowed: 2, off: 3 };
 
 /** Source health (#115, v0.53.0's groups). Exported for the sources overview (v0.54.0), which reads its rows. */
 export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+  // v0.55.3: the sources downloading at a raised pace (lib/pace.ts), listed whether or not anything else is wrong: the
+  // row is where an admin learns why their chapters come one at a time.
+  const slowed = listSources().map((a) => a.id).filter((id) => paceLevel(id) > 0);
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean; off_in: 'language' | 'extension' | null;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
@@ -1103,9 +1113,11 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
       WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3 OR sh.slow_streak >= 3
          OR sh.live_state IN ('fail', 'inconclusive') OR sh.stages::text LIKE '%failAt%'
          OR EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)
+         OR sh.source_id = ANY($1::text[])
       -- Any order: the card's is set below, once each row's group is known. This was ORDER BY disabled DESC, which
       -- put thirty switched-off sources at the top of the card and the ones the library depends on at its very end.
       ORDER BY sh.source_id`,
+    [slowed],
   );
   const now = Date.now();
   // v0.49.1: how many series each source is the MAIN source of -- what Find other sources on its row would search for.
@@ -1144,7 +1156,11 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
     const failing = open.filter((f) => !f.stale && !isRateLimit(f));
     const inconclusive = loaded && r.live_state === 'inconclusive' && !!r.live_at && now - new Date(r.live_at).getTime() < WEEK;
     const stale = open.length > 0 && !failing.length && !limited;
-    if (!r.disabled && !failing.length && !traffic(r) && !inconclusive && !stale) continue; // nothing to say
+    // v0.55.3: downloading at a raised pace, whatever else is true: said on every row, and the row's one state when
+    // nothing else is. Reintroduce by dropping it: "a source downloading at a raised pace says so" in
+    // health.int.test.ts finds no row.
+    const paced = !r.disabled && slowed.includes(r.source_id);
+    if (!r.disabled && !failing.length && !traffic(r) && !inconclusive && !stale && !paced) continue; // nothing to say
 
     const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
     // A block whose deadline has passed is not actually holding anything back; say so rather than
@@ -1175,6 +1191,8 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
     );
     const uses = say('sources.uses', { n: r.series });
     const tested = r.live_at ? say('sources.tested', { at: iso(r.live_at), by: r.live_by }) : null;
+    // v0.55.3: the pace, as a sentence of its own after the rest -- before a diagnosis's fix, which ends the line.
+    const paceLine = paced ? [joined('period', say('sources.paced'))] : [];
     let detail: Part[];
     let info = false;
     let members: string[] = [];
@@ -1191,22 +1209,27 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
         ...(d.reason ? [joined('dash', say('sources.reason', { diagnosis: d.code }))] : []),
         joined(d.reason ? 'sentence' : 'dashCap', rest[0]),
         ...rest.slice(1),
+        ...paceLine,
       ];
       // What an Ignore covers: the failing stages. A NEW stage failing is a new finding (healthIgnore covered()).
       members = failing.map((f) => f.stage);
     } else if (traffic(r)) {
       info = unused(r);
       detail = [
-        state, uses,
+        state, uses, ...paceLine,
         ...(d.code === 'ok' ? [] : [joined('dash', d.fix ? own(d.fixSaid, d.fix) : say('sources.reason', { diagnosis: d.code }))]),
       ];
     } else if (inconclusive) {
       info = true;
-      detail = [say('sources.inconclusive', { stage: r.live_stage ?? 'search' }), tested, uses].filter((p): p is Part => !!p);
-    } else {
+      detail = [say('sources.inconclusive', { stage: r.live_stage ?? 'search' }), tested, uses, ...paceLine].filter((p): p is Part => !!p);
+    } else if (stale) {
       info = true;
       const days = Math.floor((now - new Date(open[0].at).getTime()) / DAY_MS);
-      detail = [say('sources.stale', { stage: open[0].stage, at: iso(open[0].at), days }), uses];
+      detail = [say('sources.stale', { stage: open[0].stage, at: iso(open[0].at), days }), uses, ...paceLine];
+    } else {
+      // Only the pace: nothing to fix, and nothing to press -- it comes back up by itself as chapters land.
+      info = true;
+      detail = [say('sources.paced'), uses];
     }
     // v0.53.0: the row's one state and what its words need, as data (HealthItem.state). The same branches as the
     // detail above, in the same order, so the two can never tell one row two ways.
@@ -1214,7 +1237,8 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
       : failing.length ? 'failing'
       : traffic(r) ? (r.status !== 'ok' ? 'blocked' : r.empty_streak >= 3 ? 'empty' : 'slow')
       : inconclusive ? 'inconclusive'
-      : 'untested';
+      : stale ? 'untested'
+      : 'slowed';
     const stage = sourceState === 'failing' ? lead.stage
       : sourceState === 'inconclusive' ? (r.live_stage ?? 'search')
       : sourceState === 'untested' ? open[0].stage
@@ -1253,6 +1277,7 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
       state: sourceState,
       ...(stage ? { stage } : {}),
       ...(sourceState === 'blocked' ? { cooldown: { status: r.status, until: r.blocked_until ? iso(r.blocked_until) : null } } : {}),
+      ...(paced ? { slowed: true } : {}),
       // Switched off in Extensions as well as under Providers: Extensions is where it comes back on.
       ...(r.disabled ? { offBy: r.off_in ?? 'admin' as const } : {}),
       // An extension's own logo, which /img/sources/icon/:id serves while the source is loaded. Not a site's favicon:

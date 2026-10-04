@@ -184,7 +184,9 @@ ever hit.
 - `CHAPTER_RETRY_CAP` (default `3`): ordinary failures before a chapter is left as failed until a person
   explicitly retries it.
 
-- `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source.
+- `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source -- per rate key: the MangaDex languages
+  share one, and since v0.55.3 so do sources whose pages come from one image server (Natomanga and Mangakakalot). One
+  at a time while a 429 has raised that key's pace (see `DOWNLOAD_RESUME_WAIT_MS`).
 - `DOWNLOAD_MIN_GAP_MS` (default `1200`): minimum gap between the starts of two chapter downloads from the same
   source, doubled for each pace level a 429 has earned it (1200 → 2400 → 4800 ms).
 - `DOWNLOAD_PAGE_GAP_MS` (default `250`): pause between page requests inside one chapter, for an engine or
@@ -242,9 +244,12 @@ ever hit.
   so they are set in every shipped compose file; raise both together for a very long extension list, keeping
   the ceiling well above the `-Xmx` heap for the memory Java uses outside it.
 - `DOWNLOAD_RESUME_WAIT_MS` (default `5000,10000,20000`): waits before the three attempts to resume a
-  chapter after a 429. A source's longer `Retry-After` is always the floor. A 429 also raises that source's
-  in-memory pace level (0–4): slowed levels use one page worker and double gaps up to four seconds; ten
-  quiet minutes lower the level by one. A successful slow chapter does not immediately reset it.
+  chapter after a 429. A source's longer `Retry-After` is always the floor. Every chapter on the source waits the same
+  wait, not only the refused one. A 429 also raises that source's in-memory pace level (0–4): slowed levels download
+  one chapter at a time, use one page worker and double gaps up to four seconds. Since v0.55.3 a level is held at least
+  an hour, and comes off one step at a time only after ten chapters in a row came down whole without a 429 at it (a
+  level nothing downloads through loses a step every three days); it was ten quiet minutes a step, and a site that
+  kept refusing was asked at full speed again within the hour. Nothing persists: a restart starts at full speed.
 - `PARTIAL_CHAPTER_FLOOR` (default `0.8`): if an ordinary, non-refusal failure leaves at least this share of
   pages, save the chapter with indexed placeholders and repair evidence instead of discarding it. `0`
   disables partial chapters. A 403/429 is a refusal and is never saved partial.

@@ -63,6 +63,7 @@ export function stateWord(it: HealthItem): string | null {
     case 'inconclusive': return tr('Test didn’t finish');
     case 'untested': return tr('Not checked since it failed');
     case 'off': return it.offBy === 'language' ? tr('Hidden language') : sourceMark('disabled').label;
+    case 'slowed': return tr('Downloading slowly');
     default: return null;
   }
 }
@@ -84,8 +85,18 @@ export function stateReason(it: HealthItem, now = Date.now()): string {
       return it.stage ? stageLabel(it.stage) : '';
     case 'slow': return tr('answers take longer than the limit');
     case 'empty': return tr('the site may have changed');
+    case 'slowed': return tr('the site asked for fewer requests');
     default: return '';
   }
+}
+
+/**
+ * v0.55.3: what a row that has more to say than its pace adds after its reason -- "Rate-limited — trying again in 20
+ * minutes · Downloading slowly": the source downloads one chapter at a time, at longer gaps, once it is asked again.
+ * Empty for a `slowed` row, whose word says it already, and for any row not slowed.
+ */
+export function paceText(it: HealthItem): string {
+  return it.slowed && it.state !== 'slowed' ? tr('Downloading slowly') : '';
 }
 
 /**

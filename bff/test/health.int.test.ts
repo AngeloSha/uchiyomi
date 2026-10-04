@@ -1652,6 +1652,57 @@ test('images failing with 429 are a cooldown: no Replace, and its series still u
   }
 });
 
+test('a source downloading at a raised pace says so: a quiet row of its own, and a sentence on any other (v0.55.3)', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // The owner's Natomanga: after its image server's 429s its chapters come one at a time, at longer gaps, for hours
+  // (lib/pace.ts), and nothing on Health said why. Reintroduce by dropping `paced` from sourceTrouble (lib/health.ts):
+  // hp-slow has no row, and the rate-limited row says nothing of its pace.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { registerAdapter } = await import('../src/lib/sources');
+  const pace = await import('../src/lib/pace');
+  await migrate();
+  const IDS = ['hp-slow', 'hp-limit', 'hp-fast'];
+  for (const id of IDS) registerAdapter(stubSource(id) as any);
+  const clean = async () => {
+    await q(`DELETE FROM lib_series WHERE id = 's_hp_slow'`);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [IDS]);
+  };
+  await clean();
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id, auto_update)
+           VALUES ('s_hp_slow', 'test', 'Paced Tale', 's_hp_slow', 4, 'hp-slow', 'x', true)`);
+  // hp-slow's last chapter landed (status ok) at the raised pace; hp-limit is in its cooldown; hp-fast is fine.
+  await q(`INSERT INTO source_health (source_id, status, blocked_until, last_error) VALUES
+             ('hp-slow', 'ok', NULL, NULL),
+             ('hp-limit', 'rate_limited', now() + interval '20 minutes', '0/113 pages downloaded (HTTP 429)'),
+             ('hp-fast', 'ok', NULL, NULL)`);
+  pace.clearPace();
+  pace.noteRateLimited('hp-slow');
+  pace.noteRateLimited('hp-limit');
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    await assertSaid([c]);
+    const row = (id: string) => c.items.find((i: any) => i.sourceId === id);
+    const slow = row('hp-slow');
+    assert.ok(slow, 'a source at a raised pace is listed with nothing else wrong');
+    assert.equal(slow.state, 'slowed');
+    assert.equal(slow.slowed, true);
+    assert.equal(slow.info, true, 'for reference: nothing to fix, it comes back up by itself');
+    assert.equal(slow.group, 'quiet');
+    assert.equal(slow.detailSaid[0].code, 'sources.paced');
+    assert.match(slow.detail, /^Downloading slowly: the site asked for fewer requests; 1 series use it$/);
+    assert.ok(!slow.actions.includes('replace_source') && !slow.actions.includes('find_sources'), 'and nothing to replace');
+    const limit = row('hp-limit');
+    assert.equal(limit.state, 'blocked', 'a cooldown is still the row\'s state');
+    assert.equal(limit.slowed, true, 'and its pace is said beside it');
+    assert.ok(limit.detailSaid.some((d: any) => d.code === 'sources.paced'), limit.detail);
+    assert.equal(row('hp-fast'), undefined, 'a source at its own pace has nothing to say');
+  } finally {
+    pace.clearPace();
+    await clean();
+  }
+});
+
 test('a series whose loaded main is off or failing, with no working follower, can no longer update; one with a working follower is reference; a cooling main is not listed', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   // Reintroduce by dropping the `OR ls.source_id = ANY($1)` clause from frozenSeries: the series on the switched-off main
   // is absent. Reintroduce "any loaded follower counts" (drop the standing test on followers): the series whose follower

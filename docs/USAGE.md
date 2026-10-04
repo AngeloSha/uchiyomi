@@ -585,8 +585,13 @@ they were. Chapters already here stay, and older ones can still be fetched from 
 
 ### When a source or page fails
 
-The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and
-the current chapter waits and resumes from its remaining pages. If a normal failure still wins, Uchiyomi
+The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, one
+chapter at a time, and the current chapter waits and resumes from its remaining pages; a chapter running beside it
+waits as long. Since v0.55.3 the slower pace is kept: at least an hour, and it comes back up a step at a time only
+after ten chapters in a row came down whole at it — a site that kept refusing used to be asked at full speed again
+ten minutes later. Two sources whose pages come from the same image server share one pace (Natomanga and
+Mangakakalot do), and **Admin → Health → Source health** says *Downloading slowly: the site asked for fewer
+requests* on a source's row while it lasts. If a normal failure still wins, Uchiyomi
 tries the same chapter on at most two sources the series already follows; the download card says which
 source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
@@ -2690,7 +2695,7 @@ source's numbers**; either way the series updates again.
 **The slow archive is not fetching anything.** Library → Downloads says why — under the covers when the whole
 archive is waiting, and on a series' own sheet (tap its cover) otherwise: it is between chapters (at the default
 pace about a quarter of an hour, now and then much longer), another download is using the same site, the site is
-cooling down, asked for a slower pace or refused a chapter, a check or a repair is running, it is outside the hours
+cooling down, asked for a slower pace within the hour or refused a chapter, a check or a repair is running, it is outside the hours
 it may run (the server's local time), or the download disk is below its floor (**Admin → Settings → Downloads**).
 After a restart its first look waits ten minutes.
 
