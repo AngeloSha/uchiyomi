@@ -344,7 +344,9 @@ file.** An install set up before v0.46.0 gets the cap by downloading the current
   is a greyed line otherwise. The row, and the *Cloudflare helper* cell of the strip at the top of **Admin →
   Sources**, offer **Connect**, which sets the engine to the solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it
   on. Nothing restarts, and the engine keeps it unless its own container names another solver. It is never changed
-  without someone pressing it; with no `FLARESOLVERR_URL` on Uchiyomi both say to set that first. When the engine
+  without someone pressing it; with no `FLARESOLVERR_URL` on Uchiyomi both say to set that first. The engine has one
+  solver: a backup set on Uchiyomi (`FLARESOLVERR_FALLBACK_URL`, since v0.55.4) solves for Uchiyomi's own sources only,
+  so the row reads Uchiyomi's main solver and says its helper is not answering while only the backup is. When the engine
   cannot say what its helper is set to while a source fails with its *Cloudflare bypass currently disabled*, the
   row reads *It cannot use its Cloudflare helper*, with the same **Connect** wherever there is a setting to change
   (an engine too old to report the setting has to be set on its own container).

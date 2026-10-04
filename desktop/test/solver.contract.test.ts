@@ -61,7 +61,8 @@ let bff: typeof import('../../bff/src/lib/sources/flaresolverr');
 before(async () => {
   fake = new FakeBackend();
   srv = await startSolverServer({ backend: fake, token: TOKEN, appVersion: '0.43.0-test' });
-  // The bff reads FLARESOLVERR_URL once, at import. A trailing slash on purpose: the bff strips it (flaresolverr.ts:3).
+  // Set before the bff is imported (since v0.55.4 it reads FLARESOLVERR_URL when it asks). A trailing slash on purpose: the
+  // bff strips it (flaresolverr.ts mainUrl).
   process.env.FLARESOLVERR_URL = `${srv.url}/`;
   bff = await import('../../bff/src/lib/sources/flaresolverr');
 });

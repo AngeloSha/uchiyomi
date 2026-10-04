@@ -52,6 +52,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   start: () => 176,
   // v0.55.0, Fix everything (bff lib/autofix.ts): a Test's verdict, the series a copy merged into, why a part was skipped.
   ok: (c) => c === 1, into: () => 'Walk Tale', why: () => 'time',
+  // v0.55.4, solver.ready: which solver answered (bff lib/sources/flaresolverr.ts SolverKind), named before its version.
+  kind: () => 'trawl',
 };
 
 /**
@@ -219,6 +221,9 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     ['crash', facts('flaresolverr: Error solving the challenge. Message: Service /app/chromedriver unexpectedly exited.')],
     ['down', facts("flaresolverr: HTTPConnectionPool(host='localhost', port=1): Max retries exceeded with url: /session")],
     ['solver timeout', facts('flaresolverr: Error solving the challenge. Timeout after 60.0 seconds.')],
+    // v0.55.4: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
+    ['solver busy', facts('flaresolverr: solver busy (every one of its browsers stayed in use)')],
+    ['ip blocked', facts('flaresolverr: Tier 3 failed (datacenter-ip-blocked (cf_clearance obtained but redirect never completed — needs residential proxy)). Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.')],
     ['bypass', facts('suwayomi: java.io.IOException: Cloudflare bypass currently disabled')],
     ['engine login', facts('suwayomi 401')],
     ['engine down', facts('suwayomi unreachable: ECONNREFUSED')],
@@ -563,6 +568,8 @@ test('on the desktop app, every platform wording says Uchiyomi, never a containe
   const DESKTOP = [
     'solver.down', 'solver.downNote', 'solver.failingNote', 'cap.note', 'cap.title', 'cap.detail', 'frozen.overLimit',
     'fix.solverCrash', 'fix.solverDown', 'fix.bypassOff', 'fix.engineLogin', 'fix.engineDown', 'fix.solverBroken',
+    // v0.55.4: the desktop helper is never busy and has no backup, but its words would still be a restart.
+    'fix.solverBusy', 'autofix.needs.mainSolverDown', 'autofix.needs.backupSolverDown',
     // v0.52.0 (#134): the desktop app chooses its folders; nothing is mounted there.
     'nested.note',
   ];

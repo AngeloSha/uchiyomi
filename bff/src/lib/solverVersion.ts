@@ -12,11 +12,15 @@ import { latestRelease, resetReleaseCache } from './githubRelease';
 
 export { parseVersion, isBehind } from './githubRelease';
 
-const SOLVER_REPO = 'FlareSolverr/FlareSolverr';
+/**
+ * Where each solver Health can name publishes its releases (v0.55.4, flaresolverr.ts SolverKind). trawl's are its own:
+ * held against FlareSolverr's 3.x, its 1.7.0 read as years behind. A solver of another kind is compared with nothing.
+ */
+const SOLVER_REPOS = { flaresolverr: 'FlareSolverr/FlareSolverr', trawl: 'germondai/trawl' } as const;
 
-/** The newest published FlareSolverr release, or null if we could not find out. Never throws. */
-export function latestSolverVersion(now = Date.now()): Promise<string | null> {
-  return latestRelease(SOLVER_REPO, now);
+/** The newest published release of that solver (FlareSolverr's by default), or null if we could not find out. Never throws. */
+export function latestSolverVersion(now = Date.now(), kind: keyof typeof SOLVER_REPOS = 'flaresolverr'): Promise<string | null> {
+  return latestRelease(SOLVER_REPOS[kind], now);
 }
 
 /** Test seam: drop the memoised answer. */

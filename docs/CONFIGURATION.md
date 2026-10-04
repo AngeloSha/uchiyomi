@@ -173,6 +173,84 @@ rather than as a failure: raise it for extension sources behind a slow Cloudflar
 Test key counts against it, plus a few seconds of margin (*Testing… 0:12 of up to 0:53* at the default).
 `SOURCE_LATEST_TIMEOUT_MS` (default `8000`) is how long a source's newest page may take before it counts as slow.
 
+## The Cloudflare solver
+
+Most manga sites sit behind Cloudflare, so the built-in engines fetch them through a **solver**: a real browser in a
+container of its own that gets past the check and hands back the page, its cookies and its user agent; images are
+then fetched directly with that cookie and user agent. Uchiyomi speaks FlareSolverr's `/v1` API, so any solver that
+speaks it works. (Extension sources are fetched by the extension engine, which has its own solver setting: below.)
+
+- `FLARESOLVERR_URL`: the **main** solver. Every shipped compose file runs [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)
+  as `uchiyomi-flaresolverr` and points this at it, so there is nothing to do.
+- `FLARESOLVERR_FALLBACK_URL` (since v0.55.4; empty by default, which means none): a **backup** solver. A request the
+  main does not answer with a page — it cannot be reached, it runs out of time, it answers with an error, an empty
+  page or something that is not its JSON, or it stays busy — is sent once, unchanged, to the backup. The solver that
+  answered a site last is asked first for that site for the next six hours, so a site the main cannot get past does
+  not wait for the main to fail every time (a solver that was only busy keeps its sites); after that the main is asked
+  first again and gets its sites back. Cookies
+  and the user agent are kept per solver and site, and a site's images go with the pair of the solver that solved it
+  (a `cf_clearance` cookie only works with the user agent that earned it).
+- A solver that answers **HTTP 429 itself is busy**, not the site refusing: trawl does that when every browser it has
+  is in use. Uchiyomi asks it again twice, 3 and 6 seconds apart, then the backup. It never puts the site in a
+  cooldown or reads as the site asking for a pause; if every solver stays busy, the source's diagnosis says so and
+  names the fix (more browsers, or a lower `SOLVER_CONCURRENCY`).
+- `SOLVER_CONCURRENCY` (default `4`, above) is how many solves Uchiyomi asks for at once, whichever solver answers.
+
+The solvers to choose from, all speaking the same API:
+
+| Solver | What to know |
+|---|---|
+| [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) | The default. Chrome, a fresh browser for every request; about 850 MB idle. Needs `shm_size: 1gb` (the shipped files set it). |
+| [trawl](https://github.com/germondai/trawl) | Camoufox (a patched Firefox), and it keeps solved sessions, so a repeat visit to a site is quick: on one install's own sites, a median of 2 s against FlareSolverr's 12, and 316 MB idle against 865. Young (created June 2026): pin a version. Its pool holds one browser unless `BROWSER_POOL_SIZE` says more, and Uchiyomi asks for four solves at once: set 2 or more, or lower `SOLVER_CONCURRENCY`. `SESSION_CACHE_DRIVER=memory` runs it without Redis. AGPL-3.0, as its own container. |
+| [Byparr](https://github.com/ThePhaseless/Byparr) | Says it is up at `/health` instead of its root; Uchiyomi reads both. |
+
+**Admin → Health** names the solver by how it greets — FlareSolverr, trawl, or another — and compares FlareSolverr's
+and trawl's version with their own latest release (any other solver's with nothing). With a backup the *Cloudflare
+solver* card lists both, *Main solver* and *Backup solver*, each with its address: amber with *The main solver is not
+answering; the backup is solving* while only the backup answers, amber while the backup does not answer, and the
+usual *Not answering* when neither does. The nightly repair and **Fix everything** count the solver as up while either
+answers, and **Reset the solver** clears what Uchiyomi remembers about both.
+
+The extension engine uses the **main** solver only: **Connect** points its own helper at `FLARESOLVERR_URL` (see
+`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` under [Downloading](#downloading), and [extensions.md](extensions.md)).
+
+**trawl as the main solver, FlareSolverr kept as the backup** — in [`deploy/docker-compose.yml`](../deploy/docker-compose.yml),
+point `FLARESOLVERR_URL` on the `uchiyomi` service at trawl, add `FLARESOLVERR_FALLBACK_URL` beside it, and add the
+service below next to `uchiyomi-flaresolverr` (which stays as it is). The shipped files keep FlareSolverr alone; this is
+a choice, not a default.
+
+```yaml
+services:
+  uchiyomi:
+    environment:
+      # ...everything else as it is
+      FLARESOLVERR_URL: http://uchiyomi-trawl:8191
+      FLARESOLVERR_FALLBACK_URL: http://uchiyomi-flaresolverr:8191
+
+  uchiyomi-trawl:
+    image: ghcr.io/germondai/trawl:1.7.0   # pinned: it is young, and has changed a setting once already
+    container_name: uchiyomi-trawl
+    restart: unless-stopped
+    shm_size: 1gb
+    mem_limit: 2g
+    environment:
+      SESSION_CACHE_DRIVER: memory   # keep solved sessions in memory, no Redis
+      BROWSER_POOL_SIZE: "2"
+    healthcheck:
+      # /health answers 503 until a browser is up (15 to 30 s after a start).
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8191/health >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [uchiyomi_app]
+```
+
+Then `docker compose up -d`. To go back, put `FLARESOLVERR_URL` back to `http://uchiyomi-flaresolverr:8191` and drop
+the other line (and the service, if you like). The extension engine keeps the solver its own container names
+(FlareSolverr, in the shipped files); for extension sources to go through trawl too, set `FLARESOLVERR_URL` on the
+`uchiyomi-suwayomi` service to `http://uchiyomi-trawl:8191` as well. It has no backup of its own.
+
 ## Downloading
 
 All optional; the defaults are what the live install runs. Adding a series and importing hundreds of

@@ -1709,7 +1709,9 @@ that is cooling down or switched off is reset but not asked, and the row says so
 *Turn off* act on a source, with what *Test* found shown under the row. The solver card's **Reset the solver**
 clears the Cloudflare cookies and "could not be solved" marks this server is holding and ends the cooldowns of the
 sources that blame the solver — it says how many — but cannot restart the solver: while the solver is not
-answering, the card says to restart its container (on the desktop app, to quit and reopen Uchiyomi) instead. A
+answering, the card says to restart its container (on the desktop app, to quit and reopen Uchiyomi) instead. With a
+backup solver (`FLARESOLVERR_FALLBACK_URL`, since v0.55.4) the card lists both, *Main solver* and *Backup solver*, and
+says which one is not answering; the reset clears both ([the Cloudflare solver](CONFIGURATION.md#the-cloudflare-solver)). A
 check whose step the nightly can run also gets **Fix all** at the top of its card; on *Chapters that would not
 download* it gives every failed chapter another try now (before v0.49.0 it reset only week-old ones). Everything
 a key starts is the same repair narrowed to one step, so it waits while a chapter sweep is running and says so.

@@ -349,6 +349,38 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.equal(engineRow!.status, 'warn');
       assert.match(engineRow!.items[0].detail, /Cloudflare solver row/);
     });
+
+    /**
+     * v0.55.4: a backup solver (FLARESOLVERR_FALLBACK_URL) solves for Uchiyomi, never for the engine, whose helper Connect
+     * points at the main alone. With the main down and the backup answering, the solver row says the backup is solving
+     * and the engine row still says its helper is not answering. Reintroduce `.ok` for `.main.ok` in extensionEngineCheck:
+     * the engine row reads that it can get past Cloudflare.
+     */
+    await t.test('the engine row reads the main solver: a backup solving for Uchiyomi does nothing for the engine', async () => {
+      const { extensionEngineCheck } = await import('../src/lib/engineHealth');
+      const { solverHealth } = await import('../src/lib/health');
+      const { forgetEngineProbe } = await import('../src/lib/extensionEngine');
+      const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+      assert.equal(fake.settings.flareSolverrUrl, OURS, 'PREMISE: the engine is connected to our main solver');
+      const backup = await startFakeSolver();
+      process.env.FLARESOLVERR_FALLBACK_URL = backup.url;
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = ((u: any, init?: any) => (String(u).startsWith('https://api.github.com/')
+        ? Promise.resolve(new Response('', { status: 404 })) : realFetch(u, init))) as typeof fetch;
+      try {
+        forgetEngineProbe();
+        forgetSolverPing();
+        const [engineRow, solverRow] = await Promise.all([extensionEngineCheck(), solverHealth()]);
+        assert.equal(solverRow.summary, 'The main solver is not answering; the backup is solving', 'PREMISE: the main is down, the backup up');
+        assert.doesNotMatch(engineRow!.summary, /can get past Cloudflare/, 'the engine row reads the backup as its own helper');
+        assert.match(engineRow!.summary, /its Cloudflare helper is not answering/i);
+      } finally {
+        globalThis.fetch = realFetch;
+        delete process.env.FLARESOLVERR_FALLBACK_URL;
+        forgetSolverPing();
+        await backup.stop();
+      }
+    });
   } finally {
     console.warn = quiet[0];
     console.log = quiet[1];

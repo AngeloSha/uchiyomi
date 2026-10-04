@@ -207,7 +207,7 @@ function resetCatalog(): void {
 before(async () => {
   if (!DSN) return;
   // The stub solver comes up FIRST, on a port the system picks, and FLARESOLVERR_URL names it before any module
-  // that reads it at load (lib/sources/flaresolverr.ts) is imported. A fixed port hung every other run that
+  // that reads it (lib/sources/flaresolverr.ts) is imported. A fixed port hung every other run that
   // shared the network namespace (the lanes' int suites all run beside one Postgres container).
   solver = createServer((_req, res) => {
     if (!solverReady) { res.writeHead(503); res.end('down'); return; }
@@ -1072,6 +1072,30 @@ test('nothing is cleared while the solver itself is not answering', { skip }, as
   assert.equal(r.solver.unblocked, 0);
   assert.ok((await q('SELECT blocked_until FROM source_health WHERE source_id = $1', [BLAMER]))[0].blocked_until,
     'the cooldown stands: the solve that would re-earn the cookies cannot happen');
+});
+
+test('with the main down and the backup answering, the reset still runs', { skip }, async () => {
+  // v0.55.4: "the solver answers" is at least one of the two (FLARESOLVERR_FALLBACK_URL). The backup solves what the
+  // main cannot, so the cooldowns are worth clearing. Reintroduce the main's ping as the whole of it (solverPing's top
+  // level in flaresolverr.ts): nothing is reset while the backup answers.
+  solverReady = false;
+  const backup = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ msg: 'FlareSolverr is ready', version: '3.3.21' }));
+  });
+  await new Promise<void>((go) => backup.listen(0, '127.0.0.1', go));
+  process.env.FLARESOLVERR_FALLBACK_URL = `http://127.0.0.1:${(backup.address() as AddressInfo).port}`;
+  try {
+    await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, last_error, updated_at)
+             VALUES ($1,'blocked',3, now() + interval '1 hour', 'flaresolverr: Error: Error solving the challenge. Timeout after 60.0 seconds.', now())`, [BLAMER]);
+    const r = await runRepair(undefined, { only: ['solver'], userId: null });
+    assert.equal(r.solver.reset, true, 'the backup answers, so the solver is up');
+    assert.equal(r.solver.unblocked, 1);
+    assert.equal((await q('SELECT blocked_until FROM source_health WHERE source_id = $1', [BLAMER]))[0].blocked_until, null);
+  } finally {
+    delete process.env.FLARESOLVERR_FALLBACK_URL;
+    await new Promise<void>((go) => backup.close(() => go()));
+  }
 });
 
 test('a cooldown that lapsed more than a day ago loses its escalation memory; one that lapsed an hour ago keeps it', { skip }, async () => {

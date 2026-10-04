@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3197
+    "strings": 3209
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3200,5 +3200,17 @@
   "Only hide short ones (3 pages or fewer)": "短いものだけ非表示にする（3 ページ以下）",
   "Off hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split into parts.": "オフにすると、オンにした種類で 12.5 のような番号の話をすべて非表示にします。サイトが分割した本物の話も含まれます。",
   "Hide notice chapters (numbered like 12.5) here, in Mihon and everywhere else. Switching this off shows them again.": "お知らせだけの話（12.5 のような番号）をここ、Mihon、その他すべての場所で非表示にします。オフにすると再び表示されます。",
-  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, every chapter numbered like 12.5 is hidden from the library, the reader, OPDS and Mihon, and one a source lists is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "ソースは読者へのお知らせを、最新話の後に 100.5 のような番号の短い話として投稿することがよくあります。オンにした種類では、12.5 のような番号の話がすべてライブラリ、リーダー、OPDS、Mihon から非表示になり、ソースに載っていてもダウンロードされません。何も削除されません。種類をオフにすると再び表示されます。シリーズごとに「ソースと翻訳」シートで上書きできます。"
+  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, every chapter numbered like 12.5 is hidden from the library, the reader, OPDS and Mihon, and one a source lists is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "ソースは読者へのお知らせを、最新話の後に 100.5 のような番号の短い話として投稿することがよくあります。オンにした種類では、12.5 のような番号の話がすべてライブラリ、リーダー、OPDS、Mihon から非表示になり、ソースに載っていてもダウンロードされません。何も削除されません。種類をオフにすると再び表示されます。シリーズごとに「ソースと翻訳」シートで上書きできます。",
+  "Uchiyomi's built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.": "Uchiyomi 内蔵の Cloudflare ヘルパーがほかのページの処理でふさがったままでした。自然に追いつきます。続く場合は、Uchiyomi を終了して開き直してください。",
+  "The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).": "Cloudflare ソルバーがふさがったままでした：Uchiyomi がどれだけ待っても、すべてのブラウザーが使用中でした。自然に追いつきます。続く場合は、ブラウザーを増やす（trawl：BROWSER_POOL_SIZE）か、Uchiyomi が一度に頼むページを減らしてください（SOLVER_CONCURRENCY）。",
+  "The solver got past the site's check, but the site still refuses this server's address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.": "ソルバーはサイトのチェックを通過しましたが、サイトは依然としてこのサーバーのアドレスを拒否しています。たいていはデータセンターの IP のブロックで、どのチャレンジソルバーでも通過できません。通過できるのは別のネットワークだけです（trawl：RESIDENTIAL_PROXY_URL）。送信元 IP を変えるか、このソースの利用をやめてください。",
+  "Main solver": "メインのソルバー",
+  "Backup solver": "予備のソルバー",
+  "The main solver is not answering; the backup is solving": "メインのソルバーが応答しません。予備のソルバーが代わりに解いています",
+  "the backup is not answering": "予備のソルバーが応答しません",
+  "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "メインのソルバーが応えられないリクエストはすべて予備に回るため、ソースは動き続けます。ただし、どのリクエストもまずメインの失敗を待ちます。",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "メインの Cloudflare ソルバーが応答しません（その間は予備のソルバーが解いています）：コンテナーが動いているか確認してください",
+  "The backup Cloudflare solver is not answering: check that its container is running": "予備の Cloudflare ソルバーが応答しません：コンテナーが動いているか確認してください",
+  "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "メインのソルバーが応答していません。その間は予備のソルバーが解いています。メインのソルバーのコンテナーを再起動してください。ここからリセットしても何も変わりません。",
+  "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "予備のソルバーが応答していません。コンテナーを再起動してください。ここからリセットしても何も変わりません。"
 }

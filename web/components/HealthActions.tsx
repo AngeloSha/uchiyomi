@@ -45,7 +45,7 @@ import {
 } from '@/lib/healthCopy';
 import {
   CARD_STEP, cardBody, cardRecord, cardStepState, isRepairAction, itemBody, kindOfBody,
-  recordFor, runTouches, solverDown, stepFindings, type RepairEstimate, type RepairStatus,
+  recordFor, runTouches, solverDown, solverQuiet, stepFindings, type RepairEstimate, type RepairStatus,
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
@@ -710,7 +710,7 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
     });
   }
   if (solverDown(check)) {
-    rows.push({ id: 'solver_down', label: tr('Reset the solver'), what: solverDownLine(isDesktop()) });
+    rows.push({ id: 'solver_down', label: tr('Reset the solver'), what: solverDownLine(isDesktop(), solverQuiet(check)) });
   }
   if (pairs.length) {
     const copy = ACTION_COPY.merge_all;
