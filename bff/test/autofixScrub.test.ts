@@ -56,12 +56,19 @@ test('with the reveal on, or for a kept record, the rule is the same one', () =>
   const r = run({ title: 'Adult', seriesIds: ['s-adult'] });
   assert.equal(scrubAutofixRun(r, false, new Set()), r, 'an admin with the 18+ reveal on reads the run as it is');
   assert.equal(scrubAutofixRun(null, true, NAMED), null);
-  // The repair history's record: `{phaseIndex, summary, log}`, no current.
-  const rec = { phaseIndex: 9, log: [shown, adult, legacy], summary: run().summary };
+  // The repair history's record: `{phaseIndex, summary, log, tried?}`, no current. `tried` -- the packages the run
+  // searched in vain, with the series each was searched for -- is in no answer, the reveal on or not (v0.55.1
+  // integration); the rest is as stored for an admin with the reveal on. Reintroduce by keeping it (scrubAutofixRecord
+  // spreading the record whole): "nobody reads `tried`, the reveal on or not" fails.
+  const tried = [{ pkg: 'eu.kanade.tachiyomi.extension.en.scrubbed', lang: 'en', series: ['s-adult'] }];
+  const rec = { phaseIndex: 9, log: [shown, adult, legacy], summary: run().summary, tried };
   const kept = scrubAutofixRecord(rec, true, NAMED);
   assert.deepEqual(kept.log, [shown]);
   assert.deepEqual(kept.summary.done[0].items, [shown]);
-  assert.equal(scrubAutofixRecord(rec, false, new Set()), rec);
+  const { tried: _tried, ...asStored } = rec;
+  const shownAll = scrubAutofixRecord(rec, false, new Set());
+  assert.ok(!('tried' in kept) && !('tried' in shownAll), 'nobody reads `tried`, the reveal on or not');
+  assert.deepEqual(shownAll, asStored, 'with the reveal on, the rest of the record is as stored');
   assert.equal(scrubAutofixRecord(null, true, NAMED), null);
 });
 
