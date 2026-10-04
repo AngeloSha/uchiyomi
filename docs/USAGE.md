@@ -2238,7 +2238,8 @@ that has **3 pages or fewer** is hidden:
 **Only short ones.** A chapter numbered with a fraction is a notice only when its page count is known and is 3 or
 fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
 one; most sites do not). A longer one is a chapter posted in parts (78.1 … 78.9) and stays, and so does one whose
-length nobody knows yet. A chapter's pages are counted the first time anyone opens it, and the nightly repair
+length nobody knows yet. A file holding a range of chapters (`Chapter 12.5-13.cbz`, see *How a chapter's number is
+read*) is never a notice, however short. A chapter's pages are counted the first time anyone opens it, and the nightly repair
 counts the rest, so a notice from a site that lists no page counts is downloaded, shown until it is counted, and
 hidden from then on.
 

@@ -6285,7 +6285,8 @@ paths:
                     a chapter numbered with a fraction (100.5 -- the notices many sources post after their latest
                     chapter) whose page count is known and is 3 or fewer: a saved chapter's own counted pages, else
                     what its sources list. A longer one is a chapter in parts and stays, and so does one nobody has
-                    counted yet. Empty, the default, is off. A hidden chapter is left out of every chapter list,
+                    counted yet, and a file holding a range of chapters (`numberEnd`) is never one. Empty, the
+                    default, is off. A hidden chapter is left out of every chapter list,
                     count, badge and feed, the reader's next and previous, OPDS, the Komga-compatible API and what
                     the trackers are told, and the sweep and the slow archive do not download one its sources list
                     as that short. Nothing is deleted: taking a type off the list shows its chapters again on the

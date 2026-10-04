@@ -203,7 +203,7 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
       WHERE b.series_id = $1
         -- Not a notice chapter the admin hides (lib/noticeChapters.ts): an unread notice must not keep a series
         -- that is read to the end from being finished.
-        AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}`,
+        AND ${noticeShown('s', 'b', 'ov')}`,
     [seriesId, userId],
   );
   const out = {

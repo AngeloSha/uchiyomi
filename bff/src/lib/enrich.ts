@@ -70,7 +70,7 @@ export async function newSinceSeen(seen: Map<string, number>, counts: Map<string
     `SELECT k.id, count(*) FILTER (WHERE NOT t.hidden)::int AS n
        FROM unnest($1::text[], $2::int[]) AS k(id, fresh)
        CROSS JOIN LATERAL (
-         SELECT ${noticeHidden('s', 'b', 'COALESCE(ov.number, b.number)')} AS hidden
+         SELECT ${noticeHidden('s', 'b', 'ov')} AS hidden
            FROM lib_books b JOIN lib_series s ON s.id = b.series_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
           WHERE b.series_id = k.id
           ORDER BY COALESCE(ov.number, b.number) DESC, b.file DESC

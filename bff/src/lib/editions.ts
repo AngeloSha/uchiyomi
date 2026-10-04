@@ -153,7 +153,7 @@ export async function editionInfo(id: string, ctx: ViewCtx, userId: string | nul
             (SELECT max(${lastNumber('b', 'ov')}) FROM read_progress rp
                JOIN lib_books b ON b.id = rp.book_id LEFT JOIN book_overrides ov ON ov.book_id = b.id
               WHERE rp.user_id = ${uid} AND rp.series_id = s.id AND rp.completed
-                AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}) AS last_read
+                AND ${noticeShown('s', 'b', 'ov')}) AS last_read
        FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
       WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND ${visible('s', ctx, p)}
       ORDER BY s.created_at, s.id`,

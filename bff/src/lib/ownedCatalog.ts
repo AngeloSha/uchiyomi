@@ -88,7 +88,7 @@ const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
     LEFT JOIN book_overrides ov ON ov.book_id = b.id
     -- A notice chapter the admin hides (lib/noticeChapters.ts) is not a chapter to anyone: not listed, not opened
     -- by id, not next or previous, not in the offline plan or the Komga-compatible API. By the effective number.
-   WHERE ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
+   WHERE ${noticeShown('s', 'b', 'ov')}
 ) ${alias}`;
 
 /** The overridden title for one series, for the book DTOs that carry seriesTitle. */

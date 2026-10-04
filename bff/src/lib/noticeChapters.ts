@@ -23,11 +23,13 @@
 // are notices" and "which series hide them" cannot drift apart between the chapter list and the counts. No
 // fragment binds a parameter: they are interpolated into queries whose parameter lists are written by hand, as
 // browsable() in lib/visibility.ts is. Everything they read comes from the database itself. Two kinds of row are
-// judged: a saved chapter (lib_books, `bookIsNotice`) by its own counted pages, else the listing's for its number;
-// and a number only the sources list (series_listing, `listedIsNotice`) by what the listing says.
+// judged: a saved chapter (lib_books, `bookIsNotice`) by its own counted pages, else the listing's for its number --
+// and never a file holding a range of chapters (lib/chapterRanges.ts); and a number only the sources list
+// (series_listing, `listedIsNotice`) by what the listing says.
 //
 // Pure: no database (seriesTypeSignals.test.ts imports it). The reads that need one are lib/noticeSettings.ts.
 import { SERIES_TYPES, isSeriesType, type SeriesType } from './seriesTypeSignals';
+import { rangeEnd } from './chapterRanges';
 
 /** The most pages a notice has. One more and it is a chapter -- a part of one, a short extra -- and stays. */
 export const NOTICE_MAX_PAGES = 3;
@@ -59,14 +61,22 @@ export const listedPages = (copies: string): string =>
              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(${copies}) = 'array' THEN ${copies} ELSE '[]'::jsonb END) c_nt), 0)`;
 
 /**
- * Is the lib_books row `b`, numbered `num` (its EFFECTIVE number: the admin's renumber when there is one, as booksSrc
- * reads it), a notice -- whether or not its series hides them? Its own counted pages, else what the listing says of
- * its number (a chapter is counted when somebody opens it, or by the nightly repair). The cheap tests first: a whole
- * number never reaches the listing.
+ * Is the lib_books row `b` a notice -- whether or not its series hides them? `ov` is its LEFT JOINed book_overrides
+ * row: the book goes by its EFFECTIVE number, the admin's renumber when there is one, as booksSrc reads it. Its own
+ * counted pages, else what the listing says of its number (a chapter is counted when somebody opens it, or by the
+ * nightly repair). The cheap tests first: a whole number never reaches the listing.
+ *
+ * Never a file holding a range of chapters (v0.55.2, #150, lib/chapterRanges.ts): `Chapter 12.5-13.cbz` is a part and
+ * a chapter in one file, however few its pages, and hiding it would hide chapter 13 with it. An admin's number makes
+ * such a file one chapter (rangeEnd reads the override), and that chapter is judged like any other. Reintroduce by
+ * dropping the range test: "a range is never a notice" in noticeRanges.int.test.ts finds the two-page 12.5-13 gone.
  */
-export const bookIsNotice = (b: string, num: string): string => `(${isFractional(num)} AND ${isShort(
-  `COALESCE(NULLIF(${b}.pages, 0), (SELECT ${listedPages('lp_nt.copies')} FROM series_listing lp_nt
-    WHERE lp_nt.series_id = ${b}.series_id AND lp_nt.number = ${num}))`)})`;
+export const bookIsNotice = (b: string, ov: string): string => {
+  const num = `COALESCE(${ov}.number, ${b}.number)`;
+  return `(${isFractional(num)} AND ${rangeEnd(b, ov)} IS NULL AND ${isShort(
+    `COALESCE(NULLIF(${b}.pages, 0), (SELECT ${listedPages('lp_nt.copies')} FROM series_listing lp_nt
+      WHERE lp_nt.series_id = ${b}.series_id AND lp_nt.number = ${num}))`)})`;
+};
 
 /**
  * A NECESSARY condition for bookIsNotice on the lib_books row `b`, in a form indexes serve: its file's number has a
@@ -94,12 +104,12 @@ export const hidesNotices = (s: string): string =>
      COALESCE((SELECT st_nt.hide_notice_types FROM server_settings st_nt WHERE st_nt.id = 1), '[]'::jsonb) ? ${seriesTypeSql(s)},
      false)`;
 
-/** Is the lib_books row `b` of series `s`, numbered `num` (the effective number), a notice that series hides? */
-export const noticeHidden = (s: string, b: string, num: string): string =>
-  (active ? `(${bookIsNotice(b, num)} AND ${hidesNotices(s)})` : 'false');
+/** Is the lib_books row `b` of series `s` (`ov` its LEFT JOINed book_overrides row) a notice that series hides? */
+export const noticeHidden = (s: string, b: string, ov: string): string =>
+  (active ? `(${bookIsNotice(b, ov)} AND ${hidesNotices(s)})` : 'false');
 
 /** The negation, for a WHERE that keeps what is shown. */
-export const noticeShown = (s: string, b: string, num: string): string => (active ? `NOT ${noticeHidden(s, b, num)}` : 'true');
+export const noticeShown = (s: string, b: string, ov: string): string => (active ? `NOT ${noticeHidden(s, b, ov)}` : 'true');
 
 /** Is the series_listing row `l` of series `s` a notice that series hides? */
 export const listedHidden = (s: string, l: string): string => (active ? `(${listedIsNotice(l)} AND ${hidesNotices(s)})` : 'false');
@@ -116,7 +126,7 @@ export const noticeBook = (bookId: string): string => (!active ? 'false' : `EXIS
     JOIN lib_series ns_nt ON ns_nt.id = nb_nt.series_id
     LEFT JOIN book_overrides nov_nt ON nov_nt.book_id = nb_nt.id
    WHERE nb_nt.id = ${bookId} AND ${mayBeNotice('nb_nt')}
-     AND ${noticeHidden('ns_nt', 'nb_nt', 'COALESCE(nov_nt.number, nb_nt.number)')})`);
+     AND ${noticeHidden('ns_nt', 'nb_nt', 'nov_nt')})`);
 
 /**
  * Is the series_listing row `l` a hidden notice? Self-contained, for queries over the listing that hold no lib_series
@@ -140,11 +150,11 @@ export const noticeListed = (l: string): string => (!active ? 'false' : `EXISTS 
 export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(*) FROM lib_books hb_nt LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
    WHERE hb_nt.series_id = ${s}.id AND hb_nt.number <> floor(hb_nt.number)
-     AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
+     AND ${bookIsNotice('hb_nt', 'hov_nt')}
 ) + (
   SELECT count(*) FROM lib_books hb_nt JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
    WHERE hb_nt.id = ANY(ARRAY(SELECT bo_nt.book_id FROM book_overrides bo_nt WHERE bo_nt.number <> floor(bo_nt.number)))
-     AND hb_nt.series_id = ${s}.id AND hb_nt.number = floor(hb_nt.number) AND ${bookIsNotice('hb_nt', 'hov_nt.number')}
+     AND hb_nt.series_id = ${s}.id AND hb_nt.number = floor(hb_nt.number) AND ${bookIsNotice('hb_nt', 'hov_nt')}
 ) ELSE 0 END)::int`;
 
 /**
@@ -159,7 +169,7 @@ export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotic
   SELECT count(DISTINCT hn_nt.n) FROM (
     SELECT COALESCE(hov_nt.number, hb_nt.number) AS n FROM lib_books hb_nt
       LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
-     WHERE hb_nt.series_id = ${s}.id AND ${bookIsNotice('hb_nt', 'COALESCE(hov_nt.number, hb_nt.number)')}
+     WHERE hb_nt.series_id = ${s}.id AND ${bookIsNotice('hb_nt', 'hov_nt')}
     UNION ALL
     SELECT hl_nt.number FROM series_listing hl_nt
      WHERE hl_nt.series_id = ${s}.id AND ${listedIsNotice('hl_nt')}

@@ -813,7 +813,9 @@ A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` wh
 number, and whose page count is known and is 3 or fewer. A saved chapter's own counted pages decide; a chapter not
 counted yet (a page count is stamped when somebody opens it, or by the nightly repair) goes by the most pages any
 copy its sources list says it has. A longer one is a chapter in parts (78.1 … 78.9) and stays, and so does one
-nobody knows the length of. A number only the sources list is judged by what they say.
+nobody knows the length of. A number only the sources list is judged by what they say. A file holding a range of
+chapters (`numberEnd`, `Chapter 12.5-13.cbz`) is never a notice, however few its pages, unless an admin's number
+(Edit number & title) makes it one chapter.
 
 For a series that hides them, every notice is left out of everything:
 

@@ -289,7 +289,7 @@ const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
   const s = await one<{ cover_book_id: string }>(
     `SELECT CASE WHEN ${noticeBook('s.cover_book_id')} THEN (
               SELECT b.id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-               WHERE b.series_id = s.id AND ${noticeShown('s', 'b', 'COALESCE(ov.number, b.number)')}
+               WHERE b.series_id = s.id AND ${noticeShown('s', 'b', 'ov')}
                ORDER BY (b.pruned_at IS NOT NULL), b.number ASC, b.file ASC LIMIT 1)
             ELSE s.cover_book_id END AS cover_book_id
        FROM lib_series s WHERE s.id = $1`, [id]);

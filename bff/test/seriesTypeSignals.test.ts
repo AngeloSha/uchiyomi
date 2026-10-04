@@ -86,7 +86,7 @@ test('while nothing hides, every fragment is a constant: each query is the one t
   // 10 -> 118 ms, every reader page 0.47 -> 1.17 ms, because the planner prices a per-series count and a per-row EXISTS
   // whether or not they can match. Reintroduce by dropping the `active` gate: every one of these is SQL again.
   const off = {
-    hidden: noticeHidden('s', 'b', 'b.number'), shown: noticeShown('s', 'b', 'b.number'), book: noticeBook('b.id'),
+    hidden: noticeHidden('s', 'b', 'ov'), shown: noticeShown('s', 'b', 'ov'), book: noticeBook('b.id'),
     listedHidden: listedHidden('s', 'l'), listedShown: listedShown('s', 'l'), listed: noticeListed('l'), count: visibleBookCount('s'),
   };
   assert.deepEqual(off, {
@@ -95,7 +95,7 @@ test('while nothing hides, every fragment is a constant: each query is the one t
   setNoticesActive(true);
   try {
     // And the real thing the moment anything hides.
-    assert.match(noticeShown('s', 'b', 'b.number'), /^NOT \(/);
+    assert.match(noticeShown('s', 'b', 'ov'), /^NOT \(/);
     assert.match(listedShown('s', 'l'), /^NOT \(/);
     assert.match(noticeBook('b.id'), /^EXISTS \(/);
     assert.match(noticeListed('l'), /^EXISTS \(/);
@@ -117,8 +117,12 @@ test('the server reads whether anything hides before it serves a request', () =>
 test('the SQL fragment tests the fraction before it reads any setting, and binds nothing', () => {
   setNoticesActive(true);
   try {
-    const sql = noticeHidden('s', 'b', 'b.number');
-    assert.ok(sql.indexOf('floor(b.number)') < sql.indexOf('server_settings'), 'the cheap test must come first');
+    const sql = noticeHidden('s', 'b', 'ov');
+    // The effective number: the admin's renumber, else the file's.
+    const fraction = sql.indexOf('floor(COALESCE(ov.number, b.number))');
+    assert.ok(fraction >= 0, 'the fraction test reads the effective number');
+    assert.ok(fraction < sql.indexOf('series_listing'), 'the cheap test must come first');
+    assert.ok(fraction < sql.indexOf('server_settings'), 'the cheap test must come first');
     assert.doesNotMatch(sql, /\$\d/, 'a fragment interpolated into hand-numbered queries must not bind');
   } finally {
     setNoticesActive(false);
