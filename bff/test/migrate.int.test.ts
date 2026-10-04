@@ -581,3 +581,28 @@ test('migrate: v0.55.1 adds library_paths, seeded from libraries.path, and a v0.
     await q(`DELETE FROM libraries WHERE id = ANY($1)`, [IDS]);
   }
 });
+
+test('migrate: v0.55.2 reads every chapter already in a library by rule 1, and v0.55.1 keeps writing its rows', { skip }, async () => {
+  // #150: lib_books.name_rule says which rule reads a row's number out of its file name (lib/naming.ts numberByRule).
+  // Every row that exists when the column arrives is rule 1, the first number, as it always was; v0.55.1 boots on
+  // this schema and INSERTs without naming the column, so whatever it adds is rule 1 too. Reintroduce DEFAULT 2:
+  // "a v0.55.1 row" reads 2, and the next scan renumbers every chapter v0.55.1 added.
+  const cols = await q<{ column_name: string; data_type: string; column_default: string | null; is_nullable: string }>(
+    `SELECT column_name, data_type, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'lib_books' AND column_name = 'name_rule'`);
+  assert.deepEqual(cols.map((c) => [c.column_name, c.data_type, c.column_default, c.is_nullable]),
+    [['name_rule', 'smallint', '1', 'NO']]);
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-rule', 'test', 'T', 'T!rule-m/T')`);
+      // Exactly the INSERT v0.55.1's scan makes.
+      await c.query(`INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root)
+                     VALUES ('t-rule-b', 't-rule', 'test', 'T!rule-m/T/Vol 2 Ch 5.cbz', 2, 'Vol 2 Ch 5', 0, '/library')`);
+      const { rows } = await c.query(`SELECT name_rule FROM lib_books WHERE id = 't-rule-b'`);
+      assert.equal(rows[0].name_rule, 1, 'a v0.55.1 row is not rule 1');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});

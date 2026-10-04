@@ -650,13 +650,16 @@ CREATE TABLE IF NOT EXISTS book_overrides (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 -- Chapter number and title are DERIVED, not stored. Title is the filename minus its extension, and number
--- is numFromName(), which takes the FIRST number it finds. So "Vol 2 Ch 5.cbz" is chapter 2: it sorts
--- between 1 and 3 in the reader, and 2 is what gets reported to AniList. There is no filename parser that
--- is right for every collection, so the escape hatch is a manual, per-chapter override.
+-- is read from the filename by the row's name_rule (lib/naming.ts numberByRule). Rule 1 is numFromName(),
+-- which takes the FIRST number it finds. So "Vol 2 Ch 5.cbz" is chapter 2: it sorts between 1 and 3 in the
+-- reader, and 2 is what gets reported to AniList. There is no filename parser that is right for every
+-- collection, so the escape hatch is a manual, per-chapter override.
 --
 -- Deliberately manual. Re-parsing every filename with a smarter rule would silently renumber hundreds of
 -- chapters at once, and a renumbered COMPLETED chapter changes what a tracker is told (see
--- tracker_progress above for why that direction is dangerous).
+-- tracker_progress above for why that direction is dangerous). Which is why the smarter rule that did come
+-- (v0.55.2, rule 2, "Vol 2 Ch 5.cbz" is 5) reads only the files the scanner meets from then on: every row
+-- keeps the rule it was first scanned with (lib_books.name_rule, in the v0.55.2 block below).
 --
 -- Keyed on book id, which is minted per (root, file), so deleting a file and re-adding it elsewhere loses
 -- the override -- exactly as series_overrides loses a series' art. The FK is inline and VALID from birth
@@ -1415,6 +1418,16 @@ INSERT INTO library_paths (library_id, path)
 SELECT id, path FROM libraries WHERE path <> '' AND id <> 'lib'
     ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id
  WHERE library_paths.library_id <> EXCLUDED.library_id;
+
+-- v0.55.2 (#150): chapter numbers from file names, for libraries collected by hand. name_rule is the rule that reads a
+-- chapter's number out of its file name (lib/naming.ts numberByRule): 1, the first number in the name, as every chapter
+-- was read until now; 2, chapterFromName (a chapter word, then an issue's #, never a year in brackets nor a volume's
+-- number), for every file the scanner meets from this release on. A row keeps the rule it was born with, and every scan
+-- reads its file by that rule (lib/library.ts persistScan): nothing already in a library is renumbered. The default
+-- makes every existing row rule 1. v0.55.1 boots on this schema: it never names the column, so a file it adds is rule
+-- 1, and its scan reads every file by the first number again -- rule-2 rows included -- until v0.55.2's next scan reads
+-- those by rule 2 once more.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS name_rule smallint NOT NULL DEFAULT 1;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

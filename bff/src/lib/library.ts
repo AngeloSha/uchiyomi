@@ -8,7 +8,7 @@ import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
-import { numFromName, naturalCmp, chapterName } from './naming';
+import { naturalCmp, chapterName, numberByRule, NAME_RULE } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { directionFromComicInfo } from './directionSignals';
 import { reconcileListingProgress } from './listingProgress';
@@ -75,7 +75,7 @@ function cleanSummary(s: string | null): string | null {
 function cleanStatus(s: string | null): string | null {
   return s && !looksLikeCss(s) && s.length < 60 ? s : null; // a real status is one short word
 }
-// numFromName / naturalCmp live in ./naming (dependency-free so they're unit-testable)
+// numberByRule / naturalCmp live in ./naming (dependency-free so they're unit-testable)
 
 // A "chapter" can be a CBZ (zip), a CBR (rar), or a loose folder of images. These helpers read all three so
 // the scanner + page server are format-agnostic. (The downloader still WRITES CBZ; this is read-side only.)
@@ -928,14 +928,30 @@ async function scanOnce(): Promise<ScanResult> {
             seenFolders.set(folderRel, id);
           }
 
+          // NEW FILES ONLY (v0.55.2, #150). Every file is read by the rule its row was first scanned with
+          // (lib_books.name_rule, lib/naming.ts numberByRule): a file already in the library by the first number in
+          // its name, exactly as every scan before read it, and only a file this scan meets for the first time --
+          // a new chapter, or a renamed one, which is a new row -- by the newer rule. A smarter parser over every
+          // name would renumber chapters behind their readers' backs on the next scan, and a completed chapter's
+          // number is what the trackers were told (the book_overrides note in lib/migrate.ts). Re-read rather than
+          // kept: a row's file can change under it (a rematch repoints it, a renumber renames it), and its rule's
+          // reading of the name it has now is what any earlier scan would have stored.
+          // Reintroduce by reading every file with NAME_RULE: "a rescan never renumbers a chapter already in the
+          // library" in nameRule.int.test.ts finds `Vol 2 Ch 5.cbz` moved from 2 to 5.
+          const rules = new Map((await qq<{ file: string; name_rule: number }>(
+            'SELECT file, name_rule FROM lib_books WHERE root = $1 AND file = ANY($2)',
+            [root, files.map((f) => `${folderRel}/${f}`)],
+          )).map((r) => [r.file, Number(r.name_rule)]));
           const params: any[] = [];
           const tuples: string[] = [];
           for (const f of files) {
             const rel = `${folderRel}/${f}`;
             const st = await stat(join(folderAbs, f)).catch(() => null);
+            const rule = rules.get(rel) ?? NAME_RULE;
             const b = params.length;
-            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
-            params.push(newBookId(), id, srcName, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar|pdf|epub)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
+            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`);
+            params.push(newBookId(), id, srcName, rel, numberByRule(f, rule).number, f.replace(/\.(cbz|cbr|zip|rar|pdf|epub)$/i, ''),
+              st ? Math.floor(st.mtimeMs) : 0, root, rule);
             nBooks++;
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
@@ -956,8 +972,10 @@ async function scanOnce(): Promise<ScanResult> {
           // proof was about the bytes that are no longer there.
           // Reintroduce by dropping the CASE (always NULL): "a scan that finds the same file leaves a
           // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
+          //
+          // name_rule is written by the INSERT alone: a row keeps the rule it was born with (see NEW FILES ONLY above).
           await qq(
-            `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
+            `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule) VALUES ${tuples.join(',')}
              ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
                title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
                short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
