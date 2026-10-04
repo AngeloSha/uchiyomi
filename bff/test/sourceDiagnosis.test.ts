@@ -53,7 +53,7 @@ test('THE MIS-DIAGNOSIS: "challenge" in a solver error must not read as the site
   }
 });
 
-// --- trawl's own failures (v0.55.4) ----------------------------------------------------------------------------
+// --- trawl's own failures (v0.55.3) ----------------------------------------------------------------------------
 // ⚠️ Not from a production last_error: the side-by-side benchmark on the owner's pages (2026-10-04) had trawl answer all
 // fourteen, so these are trawl 1.7.0's own messages, read from its source (apps/api/src/routes/v1.ts, packages/tiers
 // orchestrator.ts and tiers/3.ts), in the shape the client stores them: `flaresolverr: <message>`. Without a residential
@@ -82,7 +82,7 @@ test("trawl's own failures are named for what broke", () => {
 });
 
 test("a solver still busy is the solver's capacity, never the site's rate limit", async () => {
-  // v0.55.4: trawl answers its own HTTP 429 when no browser of its pool frees up; the client asks again, then the
+  // v0.55.3: trawl answers its own HTTP 429 when no browser of its pool frees up; the client asks again, then the
   // backup, and then fails with SOLVER_BUSY. Reintroduce by dropping its rule: the words match nothing and read as
   // `unknown`; by putting "429" back in them, the rate-limit rule names a site that never said a word.
   const { SOLVER_BUSY } = await import('../src/lib/sources/flaresolverr');

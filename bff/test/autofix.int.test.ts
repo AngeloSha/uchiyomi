@@ -826,7 +826,7 @@ test('a solver that is down: the sources behind it are left alone, and it is Nee
 });
 
 /**
- * v0.55.4: with a backup solver (FLARESOLVERR_FALLBACK_URL), "the solver is up" is at least one answering. The main down
+ * v0.55.3: with a backup solver (FLARESOLVERR_FALLBACK_URL), "the solver is up" is at least one answering. The main down
  * and the backup solving is not a solver that is down: the sources behind it are Tested like any other (a failure there
  * is the site's again), and Needs you names the main. Reintroduce the main's ping as the whole of it (solverPing's top
  * level in flaresolverr.ts): af-cf is left alone with "solver_down" in the log. Reintroduce the two-way split in

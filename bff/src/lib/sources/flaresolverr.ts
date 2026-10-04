@@ -2,7 +2,7 @@
 // Returns solved page HTML, and keeps the latest cf_clearance cookies + user-agent per solver and origin so the
 // downloader can fetch images directly afterwards.
 //
-// v0.55.4: an optional BACKUP solver (FLARESOLVERR_FALLBACK_URL). A request the main solver does not answer with a
+// v0.55.3: an optional BACKUP solver (FLARESOLVERR_FALLBACK_URL). A request the main solver does not answer with a
 // page -- it cannot be reached, it ran out of time, it answered with an error, an empty page or something that is not
 // its JSON, or it stayed busy -- is sent once, unchanged, to the backup, and each site is asked first of the solver that
 // answered it last (lastWon). Every error keeps the `flaresolverr:` prefix whichever solver said it: to Health
@@ -24,7 +24,7 @@ const solvers = (): string[] => [mainUrl(), backupSolverUrl()].filter(Boolean);
 interface Solution { url: string; status: number; response: string; cookies: Array<{ name: string; value: string }>; userAgent: string }
 
 /**
- * Each solver's cookie jar and user agent, per origin it solved (v0.55.4: keyed by solver AND origin, `jarKey`), and
+ * Each solver's cookie jar and user agent, per origin it solved (v0.55.3: keyed by solver AND origin, `jarKey`), and
  * whose pair an origin's plain fetches send: the solver that solved it last (`solvedBy`).
  *
  * A cf_clearance belongs to the browser that earned it -- its user agent, its address -- so an image fetch must send one
@@ -41,7 +41,7 @@ const sessionOf = (origin: string) => {
 };
 
 /**
- * Per site (the origin a request names), the solver that answered it last with a page, and when (v0.55.4).
+ * Per site (the origin a request names), the solver that answered it last with a page, and when (v0.55.3).
  *
  * That solver is asked first for rememberMs: without it every request for a site the main cannot solve would wait for
  * the main to fail -- up to its whole attempt -- before the backup answered as it did a moment ago. After that the main
@@ -96,7 +96,7 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
 }
 
 /**
- * The request, asked of each solver in turn until one answers it with a page (v0.55.4: the main, then the backup, or
+ * The request, asked of each solver in turn until one answers it with a page (v0.55.3: the main, then the backup, or
  * first the one that answered this site last -- askingOrder).
  *
  * When every one failed, the caller is told what a solver SAID: an error in its own words, or a page that came back
@@ -129,7 +129,7 @@ async function solveNow(cmd: 'request.get' | 'request.post', url: string, postDa
 type Asked = { solution: Solution } | { error: Error; said: boolean; busy?: boolean };
 
 /**
- * A solver's own HTTP 429 is the solver being BUSY, never the site refusing (v0.55.4).
+ * A solver's own HTTP 429 is the solver being BUSY, never the site refusing (v0.55.3).
  *
  * trawl answers it when none of its browsers (BROWSER_POOL_SIZE, one by default) frees up within its
  * BROWSER_ACQUIRE_TIMEOUT_MS (15 s): "Browser pool exhausted: all browsers are busy". A site's own 429 comes inside an
@@ -201,7 +201,7 @@ async function ask(solver: string, cmd: 'request.get' | 'request.post', url: str
  * Throwing routes it through the caller's existing catch, where `classify` finally has an HTTP status to
  * read. That status was always here: `Solution.status` carries what the ORIGIN answered, and discarding it
  * is why every caller had to call `classify(e)` with no second argument. The 403 that manhuaus.com and
- * manhuafast.net return on every request was arriving on this line and being thrown away. Since v0.55.4 it is
+ * manhuafast.net return on every request was arriving on this line and being thrown away. Since v0.55.3 it is
  * one solver's failure like any other, and the backup is asked; its cookies are kept all the same (cfSession).
  */
 function emptyBody(s: Solution, url: string): Error {
@@ -259,7 +259,7 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
  * never get any: that is a security boundary, not a missing feature. A solver that is genuinely wedged is
  * for the operator's `docker restart`; this resets only what THIS process remembers about it.
  *
- * v0.55.4: both solvers' -- every (solver, origin) pair is counted and cleared -- and which solver answered each site
+ * v0.55.3: both solvers' -- every (solver, origin) pair is counted and cleared -- and which solver answered each site
  * last, so the next request starts from the main again (an operator who restarted the main has it back at once).
  */
 export function resetSolverSessions(): { sessions: number; unsolvable: number } {
@@ -281,7 +281,7 @@ export const solverUrl = (): string => mainUrl();
  * failure against ITSELF. The operator sees four broken sites and no hint that one container explains all
  * four. This turns that into a single line on the health page.
  *
- * v0.55.4: the main and the backup, side by side, each in `main` / `backup`. The top level is the solver that would
+ * v0.55.3: the main and the backup, side by side, each in `main` / `backup`. The top level is the solver that would
  * solve now -- the main when it answers, else the backup when it does, else the main's failure -- so `ok` means at least
  * one answers, which is what the repair's solver step and Fix everything take "the solver is up" to mean. The extension
  * engine's helper is pointed at the main alone, and reads `main` (engineHealth.ts). Reintroduce the main's answer as
@@ -318,7 +318,7 @@ async function pingOne(base: string, timeoutMs: number): Promise<SolverPing> {
 }
 
 /**
- * Which solver answered, by the sentence it greets with (v0.55.4). trawl (#144, germondai/trawl) greets "TRAWL is
+ * Which solver answered, by the sentence it greets with (v0.55.3). trawl (#144, germondai/trawl) greets "TRAWL is
  * ready!", which the old `/ready/i` test took for FlareSolverr: Health then held trawl's 1.7.0 against FlareSolverr's
  * 3.x releases and said an update was out. Only these two are named; any other solver that answers (Byparr at
  * /health, another one's greeting) is `other`, and is held against nobody's releases. Reintroduce `flaresolverr` for

@@ -1462,7 +1462,7 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const solverCheck = by.get('solver');
   if (solverCheck && solverCheck.status !== 'ok') {
     // Down is the operator's whatever the run did; answering but failing is the solver step's to reset first. With a
-    // backup (v0.55.4) one of the two may be down while the other solves: that one is the operator's too, by name.
+    // backup (v0.55.3) one of the two may be down while the other solves: that one is the operator's too, by name.
     // Reintroduce the two-way split: "with the main down and the backup solving" in autofix.int.test.ts reads that the
     // solver keeps failing.
     const said = (solverCheck.summarySaid ?? []).map((p) => p.code);

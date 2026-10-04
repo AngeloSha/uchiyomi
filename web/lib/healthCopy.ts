@@ -668,7 +668,7 @@ export function runStatusWord(status: RepairRunRecord['status']): string {
 
 /**
  * The solver card while the solver does not answer: why no reset is offered, and what to do instead. The desktop
- * app's helper is part of the app, so there the answer is to reopen it, never a container. With a backup (v0.55.4,
+ * app's helper is part of the app, so there the answer is to reopen it, never a container. With a backup (v0.55.3,
  * repairRun.ts solverQuiet) it names the one that is not answering: "the solver is not answering" beside a backup that
  * is solving every request would send the admin to look for an outage there is not.
  */

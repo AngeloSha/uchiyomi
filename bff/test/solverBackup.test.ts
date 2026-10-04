@@ -1,4 +1,4 @@
-// A backup Cloudflare solver (v0.55.4, FLARESOLVERR_FALLBACK_URL), against fake solvers that speak FlareSolverr's /v1
+// A backup Cloudflare solver (v0.55.3, FLARESOLVERR_FALLBACK_URL), against fake solvers that speak FlareSolverr's /v1
 // over real HTTP: one that fails in each way a solver fails, one at an address where nothing listens, and a backup.
 //
 // The owner runs trawl (#144) as the main solver and keeps FlareSolverr "just in case". A request the main does not

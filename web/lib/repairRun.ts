@@ -175,7 +175,7 @@ export function solverDown(check: HealthCheck): boolean {
 
 /**
  * Which solver the card says is not answering, while it offers no reset (solverDown): `all` of them -- the one there is,
- * or both -- or, with a backup (v0.55.4, FLARESOLVERR_FALLBACK_URL), only the `main` (the backup is solving: the card
+ * or both -- or, with a backup (v0.55.3, FLARESOLVERR_FALLBACK_URL), only the `main` (the backup is solving: the card
  * opens on "solver.backupSolving") or only the `backup` (the card's summary says "solver.backupQuiet" after a ready
  * main). Null while the card is fine or offers its reset. Reintroduce one answer for every case: "the main down, the
  * backup solving" in repairRun.test.ts reads that the solver is not answering.

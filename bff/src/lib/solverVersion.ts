@@ -13,7 +13,7 @@ import { latestRelease, resetReleaseCache } from './githubRelease';
 export { parseVersion, isBehind } from './githubRelease';
 
 /**
- * Where each solver Health can name publishes its releases (v0.55.4, flaresolverr.ts SolverKind). trawl's are its own:
+ * Where each solver Health can name publishes its releases (v0.55.3, flaresolverr.ts SolverKind). trawl's are its own:
  * held against FlareSolverr's 3.x, its 1.7.0 read as years behind. A solver of another kind is compared with nothing.
  */
 const SOLVER_REPOS = { flaresolverr: 'FlareSolverr/FlareSolverr', trawl: 'germondai/trawl' } as const;

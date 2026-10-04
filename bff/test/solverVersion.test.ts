@@ -89,7 +89,7 @@ test('a good answer is returned and then reused', async (t) => {
 });
 
 test("trawl's releases are asked of trawl's own repository, and cached apart from FlareSolverr's", async (t) => {
-  // v0.55.4: trawl (#144) is held against its own releases, never FlareSolverr's 3.x. Reintroduce one repository for
+  // v0.55.3: trawl (#144) is held against its own releases, never FlareSolverr's 3.x. Reintroduce one repository for
   // every kind (SOLVER_REPOS): trawl's question goes to FlareSolverr/FlareSolverr and answers v3.6.0.
   mod.resetSolverVersionCache();
   const asked: string[] = [];

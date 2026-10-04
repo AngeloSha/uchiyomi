@@ -208,7 +208,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
       )),
       'admin')],
 
-  // trawl (v0.55.4) still starting its browsers answers "Browser pool initializing, retry in a few seconds", and an address
+  // trawl (v0.55.3) still starting its browsers answers "Browser pool initializing, retry in a few seconds", and an address
   // that answers with something that is not a solver's JSON is ours (sources/flaresolverr.ts): no solver is there.
   [/httpconnectionpool|max retries exceeded|newconnectionerror|failed to establish a new connection|browser pool initializing|did not answer with its json/i, () =>
     D('solver_down', NEEDS_ADMIN,
@@ -218,13 +218,13 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
       )),
       'admin')],
 
-  // trawl's own (v0.55.4): "Tier 3 failed (cloudflare-challenge-timeout)", its browser's wait on the wall running out.
+  // trawl's own (v0.55.3): "Tier 3 failed (cloudflare-challenge-timeout)", its browser's wait on the wall running out.
   [/timeout after [\d.]+ seconds|error solving the challenge|-challenge-timeout\b/i, () =>
     D('solver_timeout', NEEDS_ADMIN,
       fixed('fix.solverTimeout', 'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
       'admin')],
 
-  // A solver that stayed BUSY through its tries and the backup (v0.55.4, sources/flaresolverr.ts SOLVER_BUSY: trawl's
+  // A solver that stayed BUSY through its tries and the backup (v0.55.3, sources/flaresolverr.ts SOLVER_BUSY: trawl's
   // own 429 when no browser of its pool frees up). The solver ran out of room, not the site of patience: a solver code,
   // with the solver's own capacity as the fix. The words are ours, so no rule below can read them as the site's.
   [/\bsolver busy\b/i, () =>
@@ -280,7 +280,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
       'admin', { needsProbe: true })],
 
   // trawl's "datacenter-ip-blocked (cf_clearance obtained but redirect never completed — needs residential proxy)"
-  // (v0.55.4): it got past the challenge and the site still refused this server's address. ABOVE the Cloudflare rule,
+  // (v0.55.3): it got past the challenge and the site still refused this server's address. ABOVE the Cloudflare rule,
   // which would read its "cf_clearance" as a challenge left unsolved and send the admin to check a solver that worked.
   [/datacenter-ip-blocked/i, () =>
     D('edge_403', 'This source is blocking this server right now.',
@@ -307,7 +307,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
       fixed('fix.rateLimited', 'The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.'),
       'wait')],
 
-  // trawl's Firefox (v0.55.4) says it in its own words: NS_ERROR_UNKNOWN_HOST, NS_ERROR_CONNECTION_REFUSED, about:neterror.
+  // trawl's Firefox (v0.55.3) says it in its own words: NS_ERROR_UNKNOWN_HOST, NS_ERROR_CONNECTION_REFUSED, about:neterror.
   [/enotfound|eai_again|econnrefused|unknownhostexception|connectexception|ns_error_unknown_host|ns_error_connection_refused|about:neterror/i, () =>
     D('unreachable', 'This source is not answering right now.',
       fixed('fix.unreachable', 'The address could not be reached at all. Check the URL. The site may be gone.'), 'admin')],

@@ -182,7 +182,7 @@ speaks it works. (Extension sources are fetched by the extension engine, which h
 
 - `FLARESOLVERR_URL`: the **main** solver. Every shipped compose file runs [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)
   as `uchiyomi-flaresolverr` and points this at it, so there is nothing to do.
-- `FLARESOLVERR_FALLBACK_URL` (since v0.55.4; empty by default, which means none): a **backup** solver. A request the
+- `FLARESOLVERR_FALLBACK_URL` (since v0.55.3; empty by default, which means none): a **backup** solver. A request the
   main does not answer with a page — it cannot be reached, it runs out of time, it answers with an error, an empty
   page or something that is not its JSON, or it stays busy — is sent once, unchanged, to the backup. The solver that
   answered a site last is asked first for that site for the next six hours, so a site the main cannot get past does

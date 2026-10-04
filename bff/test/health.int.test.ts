@@ -1474,7 +1474,7 @@ test("the solver's newer release is named with one v", { skip: DSN ? false : 'se
   forgetSolverPing();
   try {
     const row = await solverHealth();
-    // v0.55.4: FlareSolverr is named by its kind ("trawl answering at its root is trawl", below).
+    // v0.55.3: FlareSolverr is named by its kind ("trawl answering at its root is trawl", below).
     assert.equal(row.summary, 'Ready (FlareSolverr v3.4.6) — v3.5.2 is available', 'the solver\'s newer release is named with one v');
     assert.deepEqual(row.items.map((i) => i.title), ['v3.4.6 → v3.5.2']);
     assert.equal(englishOf(row.summarySaid), row.summary, 'the codes say the same');
@@ -1531,7 +1531,7 @@ test("Byparr answering at /health is a working solver, and never behind FlareSol
 });
 
 /**
- * v0.55.4: trawl (#144) greets "TRAWL is ready!" at its root, and `solverPing` read every greeting with "ready" in it as
+ * v0.55.3: trawl (#144) greets "TRAWL is ready!" at its root, and `solverPing` read every greeting with "ready" in it as
  * FlareSolverr's: Health held trawl's 1.7.0 against FlareSolverr's 3.x releases and said an update was out. It is named
  * by its greeting now, and held against its own releases. Reintroduce `flaresolverr` for every greeting (kindOf in
  * flaresolverr.ts): "a TRAWL greeting is trawl" fails; compare it with FlareSolverr's releases (latestSolverVersion
@@ -1574,7 +1574,7 @@ test('trawl answering at its root is trawl, named and held against its own relea
 });
 
 /**
- * v0.55.4, a backup solver (FLARESOLVERR_FALLBACK_URL): the card lists both solvers, the main first, each with its state,
+ * v0.55.3, a backup solver (FLARESOLVERR_FALLBACK_URL): the card lists both solvers, the main first, each with its state,
  * and is amber whenever one does not answer -- the main ("the backup is solving"), the backup (it would not answer when
  * needed), or both (the solver-down card it always was, which Fix everything's Needs you reads by its first code).
  * Reintroduce the card without rows (`rows = []` in solverHealth): "the card lists both solvers" fails; its status from

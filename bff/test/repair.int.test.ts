@@ -1075,7 +1075,7 @@ test('nothing is cleared while the solver itself is not answering', { skip }, as
 });
 
 test('with the main down and the backup answering, the reset still runs', { skip }, async () => {
-  // v0.55.4: "the solver answers" is at least one of the two (FLARESOLVERR_FALLBACK_URL). The backup solves what the
+  // v0.55.3: "the solver answers" is at least one of the two (FLARESOLVERR_FALLBACK_URL). The backup solves what the
   // main cannot, so the cooldowns are worth clearing. Reintroduce the main's ping as the whole of it (solverPing's top
   // level in flaresolverr.ts): nothing is reset while the backup answers.
   solverReady = false;

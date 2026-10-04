@@ -130,14 +130,14 @@ const SERVER_ARMS = [
   // v0.55.0: Fix everything's Needs you (autofix.needs.*).
   "lib/said.ts: 'The Cloudflare solver is not answering: check that its container is running'",
   "lib/said.ts: 'The Cloudflare solver answers but keeps failing: restart its container'",
-  // v0.55.4: one of two solvers is not answering.
+  // v0.55.3: one of two solvers is not answering.
   "lib/said.ts: 'The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running'",
   "lib/said.ts: 'The backup Cloudflare solver is not answering: check that its container is running'",
   "lib/said.ts: 'The library and the downloads folder are inside each other: mount them side by side'",
   "lib/said.ts: `${n} extension source${s(n, '', 's')} ${s(n, 'is', 'are')} over the source limit: raise SUWAYOMI_MAX_SOURCES or hide languages you do not read`",
   "lib/sourceDiagnosis.ts: \"The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.\"",
   "lib/sourceDiagnosis.ts: 'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.'",
-  // v0.55.4: a solver still busy after its tries and the backup (trawl's own 429).
+  // v0.55.3: a solver still busy after its tries and the backup (trawl's own 429).
   "lib/sourceDiagnosis.ts: 'The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).'",
   "lib/sourceDiagnosis.ts: \"The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.\"",
   "lib/sourceDiagnosis.ts: \"The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.\"",
@@ -210,7 +210,7 @@ test('source diagnoses: every solver and engine fix says to restart Uchiyomi', a
     // #115: the engine refusing Uchiyomi's login gets its own arm, which on a PC must not name the env vars.
     ['suwayomi 401'],
     ['flaresolverr: something odd', { httpStatus: 200, adapterOk: false }],
-    // v0.55.4: a solver still busy (sources/flaresolverr.ts SOLVER_BUSY).
+    // v0.55.3: a solver still busy (sources/flaresolverr.ts SOLVER_BUSY).
     ['flaresolverr: solver busy (every one of its browsers stayed in use)'],
   ];
   for (const [err, probe] of cases) {

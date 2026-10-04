@@ -1659,7 +1659,7 @@ export { solverVersionLabel } from './said';
 
 /**
  * A solver's newest release, bare ('3.5.2'), when its kind publishes the ones it is compared with -- FlareSolverr's own,
- * trawl's own (v0.55.4) -- else null.
+ * trawl's own (v0.55.3) -- else null.
  *
  * ⚠️ Advisory only, and it must stay that way: `latestSolverVersion` answers null when GitHub is
  * unreachable, rate-limited or unrecognisable, and `isBehind` answers false whenever either side cannot be
@@ -1670,7 +1670,7 @@ export { solverVersionLabel } from './said';
  * one v" in health.int.test.ts fails.
  * Compared only with the solver's own releases: another solver's version (Byparr, #144) is not FlareSolverr's, and would
  * read as years behind. Reintroduce the comparison for every kind: "…never behind FlareSolverr's releases" fails. trawl
- * (v0.55.4) is held against its own: against FlareSolverr's, "trawl answering at its root is trawl" fails.
+ * (v0.55.3) is held against its own: against FlareSolverr's, "trawl answering at its root is trawl" fails.
  */
 async function latestOf(p: SolverPing): Promise<string | null> {
   return p.kind === 'flaresolverr' || p.kind === 'trawl'
@@ -1679,7 +1679,7 @@ async function latestOf(p: SolverPing): Promise<string | null> {
 }
 
 /**
- * One solver's row when there are two (v0.55.4, FLARESOLVERR_FALLBACK_URL): titled by what it is, the main or the
+ * One solver's row when there are two (v0.55.3, FLARESOLVERR_FALLBACK_URL): titled by what it is, the main or the
  * backup, with its state and its address. Answering, it is listed for reference (`info`), with its kind, its version
  * and a newer release when there is one; not answering, it is a finding. The desktop app never has a backup, and its
  * helper's address carries its token: no address is printed there.
@@ -1701,7 +1701,7 @@ export async function solverHealth(): Promise<HealthCheck> {
   // The ping the extension engine row reads too (engineHealth.ts): the two rows cannot disagree about the solver.
   const ping = await solverPingShared();
   const blaming = await solverBlaming();
-  // v0.55.4: with a backup the card lists both solvers, the main first, and says which one is not answering: the main
+  // v0.55.3: with a backup the card lists both solvers, the main first, and says which one is not answering: the main
   // (amber, "the backup is solving"), the backup (amber, a backup that would not answer when needed), or both (the
   // solver-down card it always was). Without one it is the card it always was. Reintroduce the card without the rows:
   // "with a backup, the card lists both solvers" in health.int.test.ts finds none.
@@ -1750,7 +1750,7 @@ export async function solverHealth(): Promise<HealthCheck> {
       ? [say('solver.backupSolving')]
       : [blaming.length
         ? say('solver.blaming', { n: blaming.length })
-        // Named by its kind (v0.55.4), except on the desktop app: its helper greets as FlareSolverr and is Uchiyomi's own.
+        // Named by its kind (v0.55.3), except on the desktop app: its helper greets as FlareSolverr and is Uchiyomi's own.
         : say('solver.ready', { version: ping.version ?? null, latest: behind ? latest : null, kind: isDesktop() ? undefined : ping.kind }),
       backupQuiet]),
     ...noteOf(mainQuiet

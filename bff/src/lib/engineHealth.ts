@@ -200,7 +200,7 @@ export async function extensionEngineCheck(): Promise<HealthCheck | null> {
   const [probe, cloudflare] = await Promise.all([engineProbe(), cloudflareEvidence()]);
   const ours = ourSolverUrl();
   // The solver row's own ping (shared for a few seconds), and only when the engine's helper is Uchiyomi's solver: an
-  // engine that is down, or points elsewhere, has nothing to learn from it. The MAIN solver's answer (v0.55.4): Connect
+  // engine that is down, or points elsewhere, has nothing to learn from it. The MAIN solver's answer (v0.55.3): Connect
   // points the engine at FLARESOLVERR_URL alone, so a backup solving for Uchiyomi does nothing for the engine.
   // Reintroduce `.ok` (at least one answers): "the engine row reads the main solver" in extensionsEngine.int.test.ts
   // finds it saying the engine can get past Cloudflare while its helper does not answer.

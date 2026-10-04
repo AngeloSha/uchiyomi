@@ -56,13 +56,13 @@ const minute = (iso: string) => new Date(iso).toISOString().slice(0, 16).replace
 type StageName = 'search' | 'chapters' | 'pages' | 'images';
 const STAGE_LABEL: Record<StageName, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
 
-/** The solvers Health names by their kind (v0.55.4, sources/flaresolverr.ts SolverKind): names, never translated. */
+/** The solvers Health names by their kind (v0.55.3, sources/flaresolverr.ts SolverKind): names, never translated. */
 const solverName = (kind?: string | null): string => (kind === 'flaresolverr' ? 'FlareSolverr' : kind === 'trawl' ? 'trawl' : '');
 
 /**
  * " (v3.4.6)" for FlareSolverr, whose versions are numbers; the desktop helper's is `uchiyomi-desktop-0.44.0`,
  * deliberately not semver-shaped (desktop/src/solver/server.ts), and read "vuchiyomi-desktop-…" with the v.
- * v0.55.4: with its kind, the solver's name comes first -- " (FlareSolverr v3.4.6)", " (trawl v1.7.0)": a version alone
+ * v0.55.3: with its kind, the solver's name comes first -- " (FlareSolverr v3.4.6)", " (trawl v1.7.0)": a version alone
  * no longer says which solver it is. A kind with no name (`other`) and none at all (the desktop helper) read as before.
  */
 export function solverVersionLabel(version?: string | null, kind?: string | null): string {
@@ -310,7 +310,7 @@ const EN = {
   'solver.notAnswering': ({ error }: { error: string | null }) => (error ? `not answering (${error})` : 'not answering'),
   'solver.names': () => 'failing, and its recorded error names the solver',
   'solver.blaming': ({ n }: { n: number }) => `Answering, but ${n} source${s(n, '', 's')} recently failed inside it`,
-  // `kind` (v0.55.4): which solver answered, named before its version; absent on the desktop app, whose helper is its own.
+  // `kind` (v0.55.3): which solver answered, named before its version; absent on the desktop app, whose helper is its own.
   'solver.ready': ({ version, latest, kind }: { version: string | null; latest: string | null; kind?: string | null }) =>
     `Ready${solverVersionLabel(version, kind)}${latest ? ` — v${latest} is available` : ''}`,
   'solver.failingNote': () => forDesktop(
@@ -320,7 +320,7 @@ const EN = {
   ),
   'solver.behind': () => 'a newer solver is out; Cloudflare changes often break older ones',
   'solver.inside': () => 'its last failure happened inside the solver',
-  // v0.55.4, a backup solver (FLARESOLVERR_FALLBACK_URL): the card lists both, each titled by what it is, and says which
+  // v0.55.3, a backup solver (FLARESOLVERR_FALLBACK_URL): the card lists both, each titled by what it is, and says which
   // is not answering. No address in these: the rows carry theirs, and the desktop app never has a backup.
   'solver.main': () => 'Main solver',
   'solver.backup': () => 'Backup solver',
@@ -642,7 +642,7 @@ const EN = {
     'The Cloudflare solver answers but keeps failing: restart its container',
     'Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi',
   ),
-  // v0.55.4: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
+  // v0.55.3: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
   'autofix.needs.mainSolverDown': () => forDesktop(
     'The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running',
     'Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi',

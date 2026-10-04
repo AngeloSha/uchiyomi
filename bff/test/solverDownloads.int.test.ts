@@ -1,4 +1,4 @@
-// The Cloudflare solvers (v0.55.4's backup, lane H) and the download pace (v0.55.3, lane G), where they meet: the
+// The Cloudflare solvers (lane H: the backup) and the download pace (lane G), both v0.55.3, where they meet: the
 // downloader's own image fetches.
 //
 // A chapter of a Cloudflare site is listed through a solver, and its images are fetched plainly with the cookie and the

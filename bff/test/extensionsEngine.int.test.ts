@@ -351,7 +351,7 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
     });
 
     /**
-     * v0.55.4: a backup solver (FLARESOLVERR_FALLBACK_URL) solves for Uchiyomi, never for the engine, whose helper Connect
+     * v0.55.3: a backup solver (FLARESOLVERR_FALLBACK_URL) solves for Uchiyomi, never for the engine, whose helper Connect
      * points at the main alone. With the main down and the backup answering, the solver row says the backup is solving
      * and the engine row still says its helper is not answering. Reintroduce `.ok` for `.main.ok` in extensionEngineCheck:
      * the engine row reads that it can get past Cloudflare.

@@ -17,7 +17,7 @@
 //
 // The fake FlareSolverr below records every URL it is asked to open, and the assertions are on that record:
 // a refused URL that still reached the solver is exactly the bug, even though the call rejects either way. Since
-// v0.55.4 a backup solver (FLARESOLVERR_FALLBACK_URL) is asked whatever the main could not answer, so a fake backup
+// v0.55.3 a backup solver (FLARESOLVERR_FALLBACK_URL) is asked whatever the main could not answer, so a fake backup
 // writes into the same record ("backup: <url>"): every guard stands in front of both.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,7 +80,7 @@ async function fakeSolver(tag: string): Promise<Server> {
 before(async () => {
   solver = await fakeSolver('');
   backup = await fakeSolver('backup: ');
-  // Set before anything imports flaresolverr.ts (which since v0.55.4 reads both when it asks).
+  // Set before anything imports flaresolverr.ts (which since v0.55.3 reads both when it asks).
   process.env.FLARESOLVERR_URL = `http://127.0.0.1:${(solver.address() as AddressInfo).port}`;
   process.env.FLARESOLVERR_FALLBACK_URL = `http://127.0.0.1:${(backup.address() as AddressInfo).port}`;
 
@@ -104,7 +104,7 @@ test('the fake solver is really the one the app calls (so an empty record below 
   // Without this, every "the solver was never asked" assertion would pass against a solver nobody talks to.
   await cfSession('http://93.184.215.14/probe.jpg');
   assert.ok(asked.length > 0, 'cfSession reached the fake FlareSolverr');
-  // ...and the backup, once the main refused (v0.55.4): an empty record below covers both solvers.
+  // ...and the backup, once the main refused (v0.55.3): an empty record below covers both solvers.
   assert.ok(asked.some((u) => u.startsWith('backup: ')), 'cfSession reached the fake backup after the main refused');
 });
 

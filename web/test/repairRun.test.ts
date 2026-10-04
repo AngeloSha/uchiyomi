@@ -141,7 +141,7 @@ test('the solver card is "down" only while no finding offers the reset: then it 
 });
 
 test('with a backup solver the card says which one is not answering: the main, the backup, or all of them', () => {
-  // v0.55.4 (bff lib/health.ts solverHealth): the summary's codes say which. Reintroduce one answer for every case
+  // v0.55.3 (bff lib/health.ts solverHealth): the summary's codes say which. Reintroduce one answer for every case
   // (`return 'all'` alone in solverQuiet): "the main down, the backup solving" reads that the solver is not answering.
   const check = (codes: string[], over: Partial<HealthCheck> = {}): HealthCheck => ({
     id: 'solver', title: 'Cloudflare solver', status: 'warn', summary: '', items: [], summarySaid: codes.map((code) => ({ code })), ...over,

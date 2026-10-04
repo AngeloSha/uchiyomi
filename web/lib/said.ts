@@ -169,11 +169,11 @@ const loopedTo = (p: P): string =>
 
 const engineVersion = (p: P): string => str(p, 'version').replace(/^v/i, '');
 
-/** The solvers Health names by their kind (v0.55.4, bff lib/said.ts solverName): names, never translated. */
+/** The solvers Health names by their kind (v0.55.3, bff lib/said.ts solverName): names, never translated. */
 const solverName = (kind: string): string => (kind === 'flaresolverr' ? 'FlareSolverr' : kind === 'trawl' ? 'trawl' : '');
 /**
  * "v3.4.6" for FlareSolverr, "uchiyomi-desktop-0.44.0" for the desktop helper (bff solverVersionLabel); with its kind
- * (v0.55.4) the solver's name first, "FlareSolverr v3.4.6", "trawl v1.7.0". '' when there is neither.
+ * (v0.55.3) the solver's name first, "FlareSolverr v3.4.6", "trawl v1.7.0". '' when there is neither.
  */
 const solverVersion = (v: string, kind = ''): string =>
   [solverName(kind), v ? `${/^\d/.test(v) ? 'v' : ''}${v}` : ''].filter(Boolean).join(' ');
@@ -478,7 +478,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     : tr('It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default 64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.')),
   'solver.behind': () => tr('a newer solver is out; Cloudflare changes often break older ones'),
   'solver.inside': () => tr('its last failure happened inside the solver'),
-  // v0.55.4, a backup solver: the card lists both, each titled by what it is.
+  // v0.55.3, a backup solver: the card lists both, each titled by what it is.
   'solver.main': () => tr('Main solver'),
   'solver.backup': () => tr('Backup solver'),
   'solver.backupSolving': () => tr('The main solver is not answering; the backup is solving'),
@@ -868,7 +868,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.needs.solverFailing': () => (isDesktop()
     ? tr('Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi')
     : tr('The Cloudflare solver answers but keeps failing: restart its container')),
-  // v0.55.4: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
+  // v0.55.3: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
   'autofix.needs.mainSolverDown': () => (isDesktop()
     ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
     : tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running')),
@@ -940,7 +940,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('Uchiyomi\'s built-in Cloudflare helper is not answering. Quit and reopen Uchiyomi to restart it.')
     : tr('The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.')),
   'fix.solverTimeout': () => tr('The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
-  // v0.55.4: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
+  // v0.55.3: a solver still busy after its tries and the backup (bff sources/flaresolverr.ts SOLVER_BUSY).
   'fix.solverBusy': () => (isDesktop()
     ? tr('Uchiyomi\'s built-in Cloudflare helper stayed busy with other pages. It catches up by itself. Quit and reopen Uchiyomi if it keeps happening.')
     : tr('The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).')),
@@ -962,7 +962,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   }), tr('It may be busy with a slow site or a long chapter list; re-test, and if it keeps happening, check the engine\'s own log.'), 'sentence'),
   'fix.challenge': () => tr('A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.'),
   'fix.cdnRefuses': () => tr('The site\'s CDN is refusing this server outright with a 403. A challenge solver cannot fix that; it is usually a datacentre-IP block. Change egress or drop the source.'),
-  // v0.55.4: trawl got past the challenge, and the site still refused this server's address.
+  // v0.55.3: trawl got past the challenge, and the site still refused this server's address.
   'fix.ipBlocked': () => tr('The solver got past the site\'s check, but the site still refuses this server\'s address: usually a block on datacentre IPs, which no challenge solver gets past. Only another network does (trawl: RESIDENTIAL_PROXY_URL). Change egress or drop the source.'),
   'fix.rateLimited': () => tr('The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.'),
   'fix.unreachable': () => tr('The address could not be reached at all. Check the URL. The site may be gone.'),

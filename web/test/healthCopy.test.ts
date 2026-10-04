@@ -337,7 +337,7 @@ test('the solver card says what to do while the solver is down, the desktop way 
 });
 
 test('with a backup solver, the card names the one that is not answering', () => {
-  // v0.55.4 (FLARESOLVERR_FALLBACK_URL). Reintroduce one line for every case (drop `which` in solverDownLine): "the main
+  // v0.55.3 (FLARESOLVERR_FALLBACK_URL). Reintroduce one line for every case (drop `which` in solverDownLine): "the main
   // is named" reads "The solver is not answering" beside a backup that is solving.
   assert.match(solverDownLine(false, 'main'), /^The main solver is not answering; the backup is solving meanwhile\./, 'the main is named');
   assert.match(solverDownLine(false, 'backup'), /^The backup solver is not answering\./, 'the backup is named');
