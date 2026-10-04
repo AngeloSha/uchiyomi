@@ -531,9 +531,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     // v0.55.0: what the nightly runs, `repair` (the safe repair) or `autofix` (Fix everything). Read apart from the
     // columns above and said as the contract names it; an unknown value reads as the default.
     const mode = await one<{ m: string | null }>('SELECT nightly_mode AS m FROM server_settings WHERE id = 1').catch(() => null);
+    // v0.55.3 (#147): "Only hide short ones" -- the notice switches' rule (lib/noticeChapters.ts). Read apart and said
+    // as the contract names it, as nightlyMode is; on unless the column says off.
+    const shortOnly = await one<{ s: boolean | null }>('SELECT hide_notice_short_only AS s FROM server_settings WHERE id = 1').catch(() => null);
     return {
       ...row,
       nightlyMode: mode?.m === 'autofix' ? 'autofix' : 'repair',
+      hideNoticeShortOnly: shortOnly?.s !== false,
       extensions_configured: suwayomiConfigured(),
       // How many chapters the read-chapter cleanup would delete if it ran now, at the CURRENT day setting.
       // Computed here rather than only in the tasks list because the tasks list does not show the job until
@@ -670,6 +674,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        * /api/admin/series/:id) outranks its type's.
        */
       hideNoticeTypes: z.array(z.enum(SERIES_TYPES)).max(SERIES_TYPES.length).optional(),
+      /**
+       * v0.55.3 (#147, TIGamingTV): "Only hide short ones (3 pages or fewer)", on by default -- the rule above. Off, every
+       * chapter numbered with a fraction of the types (and series) switched on is a notice, real chapters a site split
+       * into parts included; a file holding a range of chapters never is, either way.
+       */
+      hideNoticeShortOnly: z.boolean().optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
       ...ARCHIVE_SETTINGS_SHAPE,
     }).superRefine(archiveWindowPair).parse(req.body);
@@ -753,6 +763,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       // in-process flag that says whether anything hides at all has been read again, here.
       await q('UPDATE server_settings SET hide_notice_types = $1::jsonb, updated_at = now() WHERE id = 1',
         [JSON.stringify(sanitiseNoticeTypes(b.hideNoticeTypes))]);
+      await refreshNoticesActive();
+    }
+    if (b.hideNoticeShortOnly !== undefined) {
+      // The rule is written into each query as it is built (lib/noticeChapters.ts), so it is read again here, as the
+      // types' flag is: the next request lists, counts and sweeps by it.
+      await q('UPDATE server_settings SET hide_notice_short_only = $1, updated_at = now() WHERE id = 1', [b.hideNoticeShortOnly]);
       await refreshNoticesActive();
     }
     await applyArchiveSettings(b);

@@ -1733,6 +1733,11 @@ paths:
                   hiddenNotices:
                     description: Admins only. How many notice chapters that hides right now, downloaded or only listed by its sources.
                     type: integer
+                  hideNoticeShortOnly:
+                    description: >-
+                      Admins only, since v0.55.3: the rule the notice switches hide by (`hideNoticeShortOnly` on PATCH
+                      /api/admin/settings) -- true, a fraction with 3 pages or fewer; false, every fraction.
+                    type: boolean
         "401":
           description: Not authenticated
         "404":
@@ -5990,6 +5995,9 @@ paths:
                     type: string
                     enum: [repair, autofix]
                     description: Since v0.55.0, what the nightly runs (PATCH nightlyMode); `repair` unless set.
+                  hideNoticeShortOnly:
+                    type: boolean
+                    description: Since v0.55.3 (#147), the notice switches' rule (PATCH hideNoticeShortOnly); true unless set off.
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -6294,6 +6302,15 @@ paths:
                     next request, and the next check fetches those never downloaded. A series' own switch
                     (`hideNotices` on PATCH /api/admin/series/{id}) outranks its type's; its type is `seriesType`
                     on GET /api/series/{id}. Read back as `hide_notice_types`.
+                hideNoticeShortOnly:
+                  type: boolean
+                  description: >-
+                    Since v0.55.3 (#147, "Only hide short ones (3 pages or fewer)"): the rule the notice switches
+                    hide by. true, the default, is the page rule `hideNoticeTypes` describes. false makes every
+                    chapter numbered with a fraction a notice, of the types and the series switched on -- real chapters
+                    a site split into parts (12.1, 12.2) included, whatever their pages, and the sweep then downloads no
+                    fractional chapter of a series that hides them. A file holding a range of chapters is never a
+                    notice either way. Applies on the next request. Read back as `hideNoticeShortOnly`.
       security:
         - bearer: []
       responses:

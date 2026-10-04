@@ -210,6 +210,11 @@ export interface Series {
   hideNoticesEffective?: boolean;
   /** Admins only: how many of its chapters that hides right now. */
   hiddenNotices?: number;
+  /**
+   * Admins only (v0.55.3, #147): the rule the notice switches hide by -- true, chapters numbered like 12.5 with 3 pages
+   * or fewer; false, every chapter numbered like 12.5. Settings' "Only hide short ones".
+   */
+  hideNoticeShortOnly?: boolean;
 }
 
 /** What kind of comic a series is (bff lib/seriesTypeSignals.ts), as the notice-chapter switches go by it. */

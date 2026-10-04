@@ -2240,13 +2240,19 @@ that has **3 pages or fewer** is hidden:
 - **From downloads.** Neither the updater nor the slow archive downloads one its sources list as 3 pages or
   fewer, and those are not counted as missing.
 
-**Only short ones.** A chapter numbered with a fraction is a notice only when its page count is known and is 3 or
-fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
+**Only short ones.** With **Only hide short ones (3 pages or fewer)** on, the default, a chapter numbered with a
+fraction is a notice only when its page count is known and is 3 or fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
 one; most sites do not). A longer one is a chapter posted in parts (78.1 … 78.9) and stays, and so does one whose
 length nobody knows yet. A file holding a range of chapters (`Chapter 12.5-13.cbz`, see *How a chapter's number is
 read*) is never a notice, however short. A chapter's pages are counted the first time anyone opens it, and the nightly repair
 counts the rest, so a notice from a site that lists no page counts is downloaded, shown until it is counted, and
 hidden from then on.
+
+**Or every x.5** (since v0.55.3, #147). Switch **Only hide short ones** off and every chapter numbered like 12.5 of
+the types switched on is hidden, whatever its length — including real chapters a site split into parts (78.1 …
+78.9), and the updater downloads none of them while they are hidden. A file holding a range of chapters is still
+never hidden. Switching it back on shows the longer ones again on the next page load, and the next check fetches
+any never downloaded. The series' own switch in **Sources & translations** says which of the two it hides.
 
 Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
 rescan. Any that were never downloaded are fetched at the next check. **Updates** keeps counting only what came

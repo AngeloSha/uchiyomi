@@ -811,6 +811,14 @@ An admin can hide them per series type. `PATCH /api/admin/settings {hideNoticeTy
 carries `hideNotices`, `hideNoticesEffective` and `hiddenNotices`: how many notice chapters that hides now, downloaded
 or only listed.
 
+Since v0.55.3 (#147) `PATCH /api/admin/settings {hideNoticeShortOnly: false}` changes the rule they hide by (*Only hide
+short ones (3 pages or fewer)*, on by default, read back as `hideNoticeShortOnly`, and carried for admins on `GET
+/api/series/:id` so a client can say which rule a series' switch hides by). Off, every chapter numbered with a fraction
+is a notice, of the types and the series switched on -- real chapters a site split into parts included, whatever
+their pages -- and neither the updater nor the slow archive downloads a fractional chapter of a series that hides
+them. A file holding a range of chapters is never a notice either way. *What is a notice* below is the rule while it
+is on.
+
 A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` when nothing is known), with
 `detectedType {type, from}` naming the evidence. Most trusted first, the evidence is:
 
@@ -2402,7 +2410,8 @@ Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
 
 **Notice chapters** (opt-in, *Settings → Notice chapters*, `hideNoticeTypes`, off by default). Many sources post
 announcements as a short chapter numbered after the latest with a fraction (100.5). For a series that hides them,
-every such chapter of 3 pages or fewer is absent from this API: not in `/api/v1/series/:id/books`, a 404 by id,
+every such chapter of 3 pages or fewer (with *Only hide short ones* off, since v0.55.3, every chapter numbered with a
+fraction) is absent from this API: not in `/api/v1/series/:id/books`, a 404 by id,
 not counted in `booksCount` or the read counts, and not a ghost. `readProgressV2`'s run skips them, so an unread
 100.5 does not stop `lastReadContinuousNumberSort` at 100. Switching it off lists them again on the next request.
 See *Notice chapters* above.

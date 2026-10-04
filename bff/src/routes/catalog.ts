@@ -34,7 +34,7 @@ import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
 import { effectiveLang } from '../lib/seriesLang';
 import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
-import { noticeBook, noticeListed } from '../lib/noticeChapters';
+import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapters';
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { join } from 'node:path';
 
@@ -512,6 +512,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       out.hideNotices = f?.hide_notices ?? null;
       out.hideNoticesEffective = f?.hide_notices ?? (await noticeTypes()).includes(type as any);
       out.hiddenNotices = out.hideNoticesEffective ? await hiddenCount(id) : 0;
+      // v0.55.3 (#147): the rule the switches hide by -- short ones only, or every fraction -- so the sheet says which.
+      out.hideNoticeShortOnly = noticesShortOnly();
     }
     return out;
   });

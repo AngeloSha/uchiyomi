@@ -16,6 +16,11 @@
 // a chapter nobody has counted yet is a chapter until it is counted (the repair counts them nightly, the reader and
 // OPDS when they open one).
 //
+// v0.55.3 (#147, TIGamingTV's switch): unless the admin says otherwise. "Only hide short ones" (server_settings.
+// hide_notice_short_only) is on by default and is the rule above; off, every chapter numbered with a fraction is a
+// notice, of the types and the series switched on -- the rule #147 was first written with, real chapters a site split
+// into parts included, which is why it is a choice and says so where it is made.
+//
 // Off by default (an empty list and NULL everywhere), and while nothing hides, nothing costs anything: every fragment
 // below is then a constant (`active`), so every query is the one the previous release ran.
 //
@@ -45,6 +50,15 @@ export const setNoticesActive = (on: boolean): void => { active = on; };
 /** The flag itself, for code that works on lists in memory and would otherwise ask the database for nothing. */
 export const noticesActive = (): boolean => active;
 
+/**
+ * v0.55.3: whether a notice must also be short (server_settings.hide_notice_short_only, "Only hide short ones"). Kept
+ * by refreshNoticesActive beside `active`, at boot and after the switch, so each query is written for ONE rule and the
+ * planner prices only that one: off, no fragment reads a page count at all. True until read: the default, and v0.55.2.
+ */
+let shortOnly = true;
+export const setNoticesShortOnly = (on: boolean): void => { shortOnly = on; };
+export const noticesShortOnly = (): boolean => shortOnly;
+
 /** Is this number a fraction? NULL is not. `real` holds 100 exactly, so floor() compares cleanly. */
 export const isFractional = (num: string): string => `(${num} IS NOT NULL AND ${num} <> floor(${num}))`;
 
@@ -73,6 +87,8 @@ export const listedPages = (copies: string): string =>
  */
 export const bookIsNotice = (b: string, ov: string): string => {
   const num = `COALESCE(${ov}.number, ${b}.number)`;
+  // v0.55.3: with "Only hide short ones" off, the fraction alone -- and still never a range.
+  if (!shortOnly) return `(${isFractional(num)} AND ${rangeEnd(b, ov)} IS NULL)`;
   return `(${isFractional(num)} AND ${rangeEnd(b, ov)} IS NULL AND ${isShort(
     `COALESCE(NULLIF(${b}.pages, 0), (SELECT ${listedPages('lp_nt.copies')} FROM series_listing lp_nt
       WHERE lp_nt.series_id = ${b}.series_id AND lp_nt.number = ${num}))`)})`;
@@ -88,8 +104,12 @@ export const bookIsNotice = (b: string, ov: string): string => {
 const mayBeNotice = (b: string): string => `(${b}.number <> floor(${b}.number)
      OR ${b}.id = ANY(ARRAY(SELECT bo_nt.book_id FROM book_overrides bo_nt WHERE bo_nt.number <> floor(bo_nt.number))))`;
 
-/** Is the series_listing row `l` a notice, whether or not its series hides them? What the listing says of it. */
-export const listedIsNotice = (l: string): string => `(${isFractional(`${l}.number`)} AND ${isShort(listedPages(`${l}.copies`))})`;
+/**
+ * Is the series_listing row `l` a notice, whether or not its series hides them? What the listing says of it -- or, with
+ * "Only hide short ones" off (v0.55.3), its number alone.
+ */
+export const listedIsNotice = (l: string): string =>
+  (shortOnly ? `(${isFractional(`${l}.number`)} AND ${isShort(listedPages(`${l}.copies`))})` : isFractional(`${l}.number`));
 
 /** The type a series is, for alias `s` of lib_series: the admin's override, else what was learned, else unknown. */
 export const seriesTypeSql = (s: string): string =>
@@ -197,10 +217,11 @@ export function listedPagesOf(pages: Iterable<unknown>): number | null {
 /**
  * The JS twin of `listedIsNotice`, for the sweep, which decides on the copies in hand: is a listed number, whose
  * copies say `pages`, a notice? Only when they say it is short; a number they say nothing about is fetched like any
- * chapter, and judged by its own pages once it is here.
+ * chapter, and judged by its own pages once it is here. With "Only hide short ones" off (v0.55.3), any fraction is.
  */
 export const isListedNotice = (n: number, pages: Iterable<unknown>): boolean => {
   if (!isFractionalNumber(n)) return false;
+  if (!shortOnly) return true;
   const most = listedPagesOf(pages);
   return most != null && most <= NOTICE_MAX_PAGES;
 };

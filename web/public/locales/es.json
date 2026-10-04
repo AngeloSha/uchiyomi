@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3192
+    "strings": 3196
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3195,5 +3195,9 @@
   "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "Las fuentes suelen publicar avisos para los lectores como un capítulo corto numerado después del último, como 100.5. Para cada tipo activado, los capítulos numerados como 12.5 con 3 páginas o menos se ocultan de la biblioteca, el lector, OPDS y Mihon; los más largos, y aquellos cuyas páginas aún no se han contado, siguen visibles. No se descarga ninguno que la fuente ya liste con tan pocas páginas. No se elimina nada: al desactivar un tipo vuelven a mostrarse. Una serie puede anular esto en su hoja Fuentes y traducciones.",
   "Downloading slowly: the site asked for fewer requests": "Descargando despacio: el sitio pidió menos solicitudes",
   "Downloading slowly": "Descargando despacio",
-  "the site asked for fewer requests": "el sitio pidió menos solicitudes"
+  "the site asked for fewer requests": "el sitio pidió menos solicitudes",
+  "Only hide short ones (3 pages or fewer)": "Ocultar solo los cortos (3 páginas o menos)",
+  "Off hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split into parts.": "Desactivado, oculta todos los capítulos numerados como 12.5 de los tipos activados, incluidos los capítulos reales que un sitio dividió en partes.",
+  "Hide notice chapters (numbered like 12.5) here, in Mihon and everywhere else. Switching this off shows them again.": "Ocultar los capítulos de aviso (numerados como 12.5) aquí, en Mihon y en todas partes. Al desactivarlo vuelven a mostrarse.",
+  "Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, every chapter numbered like 12.5 is hidden from the library, the reader, OPDS and Mihon, and one a source lists is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.": "Las fuentes suelen publicar avisos para los lectores como un capítulo corto numerado después del último, como 100.5. Para cada tipo activado, todos los capítulos numerados como 12.5 se ocultan de la biblioteca, el lector, OPDS y Mihon, y no se descarga ninguno que liste una fuente. No se elimina nada: al desactivar un tipo vuelven a mostrarse. Una serie puede anular esto en su hoja Fuentes y traducciones."
 }

@@ -1461,6 +1461,12 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS number_end real;
 -- from before this release all carry the time of the upgrade and tie, ordered by number as before. v0.55.1 boots on
 -- this schema: it never names the column, and its INSERTs take the default.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+-- v0.55.3 (#147, TIGamingTV): which chapters the notice switches hide (lib/noticeChapters.ts). true, the default, is
+-- v0.55.2's rule: a chapter numbered with a fraction that has 3 pages or fewer, counted. false is the rule #147 was first
+-- written with: every chapter numbered with a fraction, of the types and the series switched on. v0.55.2 boots on this
+-- schema and never reads it: it hides by the page rule, which is what the default says.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only boolean NOT NULL DEFAULT true;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

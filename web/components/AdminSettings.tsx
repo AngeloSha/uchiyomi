@@ -12,7 +12,8 @@
 // (components/AdminNotifications.tsx), follows them; its dialog saves a whole target at once. After it, the
 // 18+ filter: which genres and sources the "Show 18+" switch hides besides 18+ libraries. Last, the source order:
 // which followed source a new chapter is taken from. After that, notice chapters: per series type, whether short
-// chapters numbered with a fraction (12.5, with 3 pages or fewer) are hidden.
+// chapters numbered with a fraction (12.5, with 3 pages or fewer) are hidden -- or, with "Only hide short ones" off
+// (v0.55.3, #147), every chapter numbered with one.
 //
 // Toasts survive on exactly two rows, and only for the sentence the inline tick cannot say: the install count
 // ("Thank you — counted" / "No longer counted", because opting out destroys the identifier) and the
@@ -86,6 +87,10 @@ export function AdminSettings() {
  * nothing is deleted: switching a type off shows them again at once. A series' own switch, in its Sources &
  * translations sheet, outranks its type's; its type is set in Edit series.
  *
+ * v0.55.3 (#147, TIGamingTV's switch): "Only hide short ones", on by default, is that page rule; off, every chapter
+ * numbered like 12.5 of the types switched on is hidden, real chapters a site split into parts included -- which its
+ * help says before it is flipped, and the section's own sentence says which rule is in force.
+ *
  * Held locally and saved whole on every flip, re-seeded from the refetch, for the reason AdultFilterSection says:
  * two quick flips must not both start from the list as it was before either landed.
  */
@@ -98,13 +103,21 @@ function NoticeChaptersSection({ data, save }: { data: any; save: Save }) {
     setTypes(next);
     try { await save({ hideNoticeTypes: next }); } catch (e) { setTypes(prev); throw e; }
   };
+  const shortOnly = data.hideNoticeShortOnly !== false;
   return (
     <Section title={tr('Notice chapters')} icon={<IcFilter width={18} height={18} />}
-      description={tr('Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.')}>
+      description={shortOnly
+        ? tr('Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, chapters numbered like 12.5 with 3 pages or fewer are hidden from the library, the reader, OPDS and Mihon; longer ones, and any whose pages are not counted yet, stay. A chapter a source already lists with 3 pages or fewer is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.')
+        : tr('Sources often post notices for readers as a short chapter numbered after the latest one, like 100.5. For each type switched on, every chapter numbered like 12.5 is hidden from the library, the reader, OPDS and Mihon, and one a source lists is not downloaded. Nothing is deleted: switching a type off shows them again. A series can override this in its Sources & translations sheet.')}>
       <div data-notice-types>
         {SERIES_TYPES.map((t) => (
           <SwitchRow key={t} label={tr(seriesTypeKey(t))} on={types.includes(t)} onChange={(next) => flip(t, next)} />
         ))}
+      </div>
+      <div data-notice-short-only>
+        <SwitchRow label={tr('Only hide short ones (3 pages or fewer)')}
+          help={tr('Off hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split into parts.')}
+          on={shortOnly} onChange={(next) => save({ hideNoticeShortOnly: next })} />
       </div>
     </Section>
   );
