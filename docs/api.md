@@ -695,6 +695,19 @@ them there, Fix everything's failures step skipped a source failing at its pages
 no source can download. A `moved` row on a source that is rate-limited or in a cooldown waits as a 429's does: a
 source whose every row waits is `info`, and Fix everything says it clears by itself, never `needsYou`.
 
+**A site that keeps refusing is downloaded slowly, for hours** (since v0.55.3). A 429 raises the download pace level
+of the source's rate key (one more per 429, up to four): one chapter at a time, and gaps doubled per level between
+chapters and between pages. A level is held at least an hour after it changed, and comes off one step at a time only
+after ten chapters in a row came down whole with no 429 at it; one nothing downloads from loses a step every three
+days. A 429 is a rest every chapter on the key waits out, and a chapter running beside a refused one slows down with
+it. Sources whose pages come from one image server share one rate key (Natomanga and Mangakakalot: two sites, one
+image CDN), learned from the page addresses as chapters are fetched, except a proxy's (the extension engine's).
+Health's `sources` row for such a source carries `slowed: true` and the detail `sources.paced` (*Downloading slowly:
+the site asked for fewer requests*); one with nothing else to say is listed for it alone, `info`, in the `quiet` group,
+with the state `slowed` (also a state of `GET /api/admin/sources/overview`). The slow archive waits on the hour after
+a 429 (`waiting.why: 'pace'`), no longer on the level: past it, it goes on at its own pace, never faster than the
+raised one. Cooldowns are as before, per source.
+
 **Chapter numbering and the slow archive** (since v0.49.0). A new check, `numbering` (#116, *Chapter numbering*),
 lists the series whose numbering has something to say, each item with `seriesId` and `sourceId` (the numbering
 source, `sw:<id>` for an extension). Findings: a numbering change waiting for review — the detector's proposal
@@ -811,6 +824,14 @@ An admin can hide them per series type. `PATCH /api/admin/settings {hideNoticeTy
 `PATCH /api/admin/series/:id {hideNotices: true | false | null}`, where `null` follows the type. The answer
 carries `hideNotices`, `hideNoticesEffective` and `hiddenNotices`: how many notice chapters that hides now, downloaded
 or only listed.
+
+Since v0.55.3 (#147) `PATCH /api/admin/settings {hideNoticeShortOnly: false}` changes the rule they hide by (*Only hide
+short ones (3 pages or fewer)*, on by default, read back as `hideNoticeShortOnly`, and carried for admins on `GET
+/api/series/:id` so a client can say which rule a series' switch hides by). Off, every chapter numbered with a fraction
+is a notice, of the types and the series switched on -- real chapters a site split into parts included, whatever
+their pages -- and neither the updater nor the slow archive downloads a fractional chapter of a series that hides
+them. A file holding a range of chapters is never a notice either way. *What is a notice* below is the rule while it
+is on.
 
 A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` when nothing is known), with
 `detectedType {type, from}` naming the evidence. Most trusted first, the evidence is:
@@ -2404,7 +2425,8 @@ Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
 
 **Notice chapters** (opt-in, *Settings → Notice chapters*, `hideNoticeTypes`, off by default). Many sources post
 announcements as a short chapter numbered after the latest with a fraction (100.5). For a series that hides them,
-every such chapter of 3 pages or fewer is absent from this API: not in `/api/v1/series/:id/books`, a 404 by id,
+every such chapter of 3 pages or fewer (with *Only hide short ones* off, since v0.55.3, every chapter numbered with a
+fraction) is absent from this API: not in `/api/v1/series/:id/books`, a 404 by id,
 not counted in `booksCount` or the read counts, and not a ghost. `readProgressV2`'s run skips them, so an unread
 100.5 does not stop `lastReadContinuousNumberSort` at 100. Switching it off lists them again on the next request.
 See *Notice chapters* above.

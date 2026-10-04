@@ -69,7 +69,7 @@ test('the server-wide gates, each on its own, and none when all are clear', () =
 });
 
 const idle: SourceState = {
-  loaded: true, disabled: false, blockedUntil: null, gate: { active: 0, queued: 0 }, paceLevel: 0,
+  loaded: true, disabled: false, blockedUntil: null, gate: { active: 0, queued: 0 }, paced: false,
   nextAt: null, backoffUntil: null, inFlight: false,
 };
 
@@ -84,7 +84,7 @@ test('the per-source gates: each on its own, and the more telling reason first',
   assert.deepEqual(sourceWait({ ...idle, blockedUntil: NOW + 900_000 }, NOW), { why: 'cooldown', until: NOW + 900_000 });
   assert.equal(sourceWait({ ...idle, gate: { active: 1, queued: 0 } }, NOW)?.why, 'source_busy', "a person's Fetch on the site");
   assert.equal(sourceWait({ ...idle, gate: { active: 0, queued: 2 } }, NOW)?.why, 'source_busy', 'queued counts too');
-  assert.equal(sourceWait({ ...idle, paceLevel: 1 }, NOW)?.why, 'pace');
+  assert.equal(sourceWait({ ...idle, paced: true }, NOW)?.why, 'pace');
   // A backoff and a break together: the backoff is the longer and says more.
   assert.equal(sourceWait({ ...idle, nextAt: NOW + 60_000, backoffUntil: NOW + 3600_000 }, NOW)?.why, 'backoff');
 });

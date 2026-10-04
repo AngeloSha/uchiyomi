@@ -253,6 +253,9 @@ const EN = {
   // `at` the failure itself, for the web to say how long ago in the reader's words; `days` the English's count.
   'sources.stale': ({ stage, at: _at, days }: { stage: StageName; at: string; days: number }) =>
     `${STAGE_LABEL[stage]} failed ${days} days ago and nothing has checked it since — test it again`,
+  // v0.55.3: the source downloads at a raised pace (lib/pace.ts): one chapter at a time, longer gaps, until it has gone
+  // a while without a 429. The whole of a `slowed` row, and a sentence after the rest on any other row.
+  'sources.paced': () => 'Downloading slowly: the site asked for fewer requests',
 
   // ---- Duplicate series
   'dupes.live': ({ n }: { n: number }) => `${n} title${s(n, ' appears', 's appear')} to be in the library twice`,

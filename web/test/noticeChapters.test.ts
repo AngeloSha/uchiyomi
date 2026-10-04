@@ -35,6 +35,24 @@ test('both switches say what they hide: the short x.y chapters, not every fracti
   assert.match(read('components/SourcesSheet.tsx'), /numbered like 12\.5, with 3 pages or fewer/, 'the series switch does not say what it hides');
 });
 
+test('"Only hide short ones": a switch of its own, on unless the server says off, and every sentence follows it (v0.55.3)', () => {
+  // TIGamingTV's switch (#147). Off hides every chapter numbered like 12.5 of the types switched on, real chapters a site
+  // split into parts included, so its help says so before it is flipped, and the section's sentence and the series'
+  // switch say which rule is in force. Reintroduce the sheet's one sentence: "the series switch says the off rule" fails.
+  const settings = read('components/AdminSettings.tsx');
+  const section = settings.slice(settings.indexOf('function NoticeChaptersSection('));
+  assert.match(section, /const shortOnly = data\.hideNoticeShortOnly !== false;/, 'on unless the server says off');
+  assert.match(section, /<SwitchRow label=\{tr\('Only hide short ones \(3 pages or fewer\)'\)\}/);
+  assert.match(section, /help=\{tr\('Off hides every chapter numbered like 12\.5 of the types switched on, including real chapters a site split into parts\.'\)\}/,
+    'the switch does not say what off hides');
+  assert.match(section, /on=\{shortOnly\} onChange=\{\(next\) => save\(\{ hideNoticeShortOnly: next \}\)\}/, 'the switch does not PATCH hideNoticeShortOnly');
+  assert.match(section, /description=\{shortOnly\s*\? tr\('[^']*with 3 pages or fewer are hidden[^']*'\)\s*: tr\('[^']*every chapter numbered like 12\.5 is hidden[^']*'\)\}/,
+    'the section says one rule whichever is in force');
+  const sheet = read('components/SourcesSheet.tsx');
+  assert.match(sheet, /series\.hideNoticeShortOnly === false\s*\? tr\('Hide notice chapters \(numbered like 12\.5\) here, in Mihon and everywhere else\. Switching this off shows them again\.'\)/,
+    'the series switch says the off rule');
+});
+
 test('the Sources & translations sheet: what applies, its own choice, and the way back to the type', () => {
   const src = read('components/SourcesSheet.tsx');
   assert.match(src, /method: 'PATCH', json: \{ hideNotices: on \}/);

@@ -61,7 +61,8 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
     await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
     await q('DELETE FROM users WHERE username = ANY($1)', [[ADMIN, MEMBER]]).catch(() => {});
     // Shared database: a list left behind would hide chapters in every later suite.
-    await q(`UPDATE server_settings SET hide_notice_types = '[]'::jsonb WHERE id = 1`).catch(() => {});
+    await q(`UPDATE server_settings SET hide_notice_types = '[]'::jsonb, hide_notice_short_only = true WHERE id = 1`).catch(() => {});
+    await (await import('../src/lib/noticeSettings')).refreshNoticesActive().catch(() => {});
   };
   await cleanup();
 
@@ -377,6 +378,81 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       await app.inject({ method: 'PATCH', url: `/api/admin/series/${MG}`, headers: asAdmin, payload: { hideNotices: null } });
       assert.deepEqual(await numbers(MG), [1, 1.5]);
       assert.equal(noticesActive(), false, 'nothing hides any more, so the fragments must be constants again');
+    });
+
+    // ---- v0.55.3 (#147, TIGamingTV's switch): "Only hide short ones (3 pages or fewer)", on by default ------------------
+
+    const setShortOnly = async (on: unknown) =>
+      app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: asAdmin, payload: { hideNoticeShortOnly: on } });
+
+    await t.test('only short ones ships on, and the settings route turns it off, refreshing the rule the queries are built by', async () => {
+      const { noticesShortOnly } = await import('../src/lib/noticeChapters');
+      const row = (await get('/api/admin/settings', asAdmin)).json();
+      assert.equal(row.hideNoticeShortOnly, true, 'the switch must ship on: v0.55.2\'s page rule');
+      assert.equal(noticesShortOnly(), true);
+      assert.equal((await setShortOnly('no')).statusCode, 400, 'a switch takes a boolean');
+      const off = await setShortOnly(false);
+      assert.equal(off.statusCode, 200, off.body);
+      assert.equal(off.json().hideNoticeShortOnly, false, 'read back off');
+      // Reintroduce by dropping refreshNoticesActive after the PATCH (routes/admin.ts): the rule in force is still the
+      // page rule, and the next subtest's twenty-page 12.5 is still listed.
+      assert.equal(noticesShortOnly(), false, 'the queries are built by the old rule');
+    });
+
+    await t.test('short only off: every chapter numbered like 12.5 of a type switched on is hidden, a range never', async () => {
+      // TIGamingTV's original rule. Reintroduce by dropping the `!shortOnly` branch from bookIsNotice (lib/noticeChapters.ts):
+      // the twenty-page 12.5 and the uncounted 7.5 are still listed.
+      await setTypes(['manhwa']);
+      try {
+        assert.deepEqual(await numbers(PG), [7, 12, 44], 'every fraction goes, whatever its pages');
+        assert.equal((await get(`/api/series/${PG}`, asMember)).json().booksCount, 3);
+        assert.equal((await get('/api/books/b_nt_p125', asMember)).statusCode, 404, 'the twenty-page 12.5 is gone by id');
+        const list = (await get(`/api/v1/series/${PG}/books?unpaged=true`, komgaKey)).json();
+        assert.deepEqual(list.content.map((b: any) => b.number), [7, 12, 44], 'Mihon reads the same chapters');
+        // The listed fractions go with them, the long and the uncounted alike: only 102 is missing from HW.
+        // Reintroduce by dropping the branch from listedIsNotice: 102.5 and 103.5 are still missing chapters.
+        const ghosts = (await get(`/api/series/${HW}/listing`, asMember)).json().content.map((g: any) => g.number);
+        assert.deepEqual(ghosts, [102], 'a listed fraction is still a missing chapter while every fraction is hidden');
+        const a = (await get(`/api/series/${PG}`, asAdmin)).json();
+        assert.equal(a.hideNoticeShortOnly, false, 'the sheet is told which rule its switch hides by');
+        assert.equal(a.hiddenNotices, 5, '7.5, 8.5, 9.5, 12.5 and 44.5');
+        assert.deepEqual(await numbers(MG), [1, 1.5], 'manga is still not switched on');
+        // A file holding a range of chapters is never a notice, by either rule.
+        await book('b_nt_prange', PG, 10.5, 2);
+        await q(`UPDATE lib_books SET number_end = 11 WHERE id = 'b_nt_prange'`);
+        try {
+          assert.deepEqual(await numbers(PG), [7, 10.5, 12, 44], 'a short range was hidden with the fractions');
+        } finally {
+          await q(`DELETE FROM lib_books WHERE id = 'b_nt_prange'`);
+        }
+        // The sweep fetches none of SWEEP's fractions: by its listing every one is a notice now. Reintroduce by dropping
+        // the branch from isListedNotice: the twenty-page 3.5 and the uncounted 4.5 are asked for.
+        asked.length = 0;
+        await q('DELETE FROM chapter_failures WHERE series_id = $1', [SWEEP]);
+        await updateSeries(SWEEP, 10);
+        assert.deepEqual([...asked].sort(), ['nt-c1', 'nt-c2', 'nt-c3'], 'a fraction was fetched while every fraction is hidden');
+      } finally {
+        await setTypes([]);
+        await q('DELETE FROM chapter_failures WHERE series_id = $1', [SWEEP]);
+      }
+    });
+
+    await t.test('short only off with no type on: nothing is hidden, and the fragments are constants', async () => {
+      const { noticesActive, noticesShortOnly, noticeHidden, listedHidden, noticeBook } = await import('../src/lib/noticeChapters');
+      assert.equal(noticesShortOnly(), false);
+      assert.equal(noticesActive(), false, 'nothing hides');
+      // The previous release's queries, whatever the rule: every fragment a constant until something hides.
+      assert.deepEqual([noticeHidden('s', 'b', 'ov'), listedHidden('s', 'l'), noticeBook('b.id')], ['false', 'false', 'false']);
+      assert.deepEqual(await numbers(PG), [7, 7.5, 8.5, 9.5, 12, 12.5, 44, 44.5]);
+      assert.deepEqual(await numbers(HW), [99, 100, 100.1, 100.5, 101]);
+      // And back on: the page rule, as before.
+      assert.equal((await setShortOnly(true)).statusCode, 200);
+      await setTypes(['manhwa']);
+      try {
+        assert.deepEqual(await numbers(PG), [7, 7.5, 9.5, 12, 12.5, 44], 'back on, the short ones only');
+      } finally {
+        await setTypes([]);
+      }
     });
 
     await t.test('the type can be set by hand and cleared back to automatic', async () => {

@@ -505,7 +505,8 @@ components:
         fetching right now: `turn` (another series on its source has the slot, or the archive has as many
         sources in flight as it may), `break` (its source is between chapters; `until`), `backoff` (its source
         refused a chapter and is left alone: 1 h, 3 h, 12 h, then a day), `source_busy` (somebody else's
-        download is on its source), `pace` (its source answered 429 recently), `cooldown` (the source's own
+        download is on its source), `pace` (its source answered 429 within the hour; since v0.55.3 the archive then goes on
+        at its own slow pace while the source's raised download pace lasts, no longer waiting for that to end), `cooldown` (the source's own
         back-off), `disabled`, `source_missing`, `series_busy` (a download for the series itself is running),
         `listing` (its listing must be read before its next chapter, and the last read gave none: read again at
         `until`, 1 h, 3 h, 12 h, then a day apart), `renumbering` (a renumber is pending for it). `attention` puts
@@ -1732,6 +1733,11 @@ paths:
                   hiddenNotices:
                     description: Admins only. How many notice chapters that hides right now, downloaded or only listed by its sources.
                     type: integer
+                  hideNoticeShortOnly:
+                    description: >-
+                      Admins only, since v0.55.3: the rule the notice switches hide by (`hideNoticeShortOnly` on PATCH
+                      /api/admin/settings) -- true, a fraction with 3 pages or fewer; false, every fraction.
+                    type: boolean
         "401":
           description: Not authenticated
         "404":
@@ -5989,6 +5995,9 @@ paths:
                     type: string
                     enum: [repair, autofix]
                     description: Since v0.55.0, what the nightly runs (PATCH nightlyMode); `repair` unless set.
+                  hideNoticeShortOnly:
+                    type: boolean
+                    description: Since v0.55.3 (#147), the notice switches' rule (PATCH hideNoticeShortOnly); true unless set off.
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -6293,6 +6302,15 @@ paths:
                     next request, and the next check fetches those never downloaded. A series' own switch
                     (`hideNotices` on PATCH /api/admin/series/{id}) outranks its type's; its type is `seriesType`
                     on GET /api/series/{id}. Read back as `hide_notice_types`.
+                hideNoticeShortOnly:
+                  type: boolean
+                  description: >-
+                    Since v0.55.3 (#147, "Only hide short ones (3 pages or fewer)"): the rule the notice switches
+                    hide by. true, the default, is the page rule `hideNoticeTypes` describes. false makes every
+                    chapter numbered with a fraction a notice, of the types and the series switched on -- real chapters
+                    a site split into parts (12.1, 12.2) included, whatever their pages, and the sweep then downloads no
+                    fractional chapter of a series that hides them. A file holding a range of chapters is never a
+                    notice either way. Applies on the next request. Read back as `hideNoticeShortOnly`.
       security:
         - bearer: []
       responses:
@@ -9219,13 +9237,17 @@ paths:
         (switched off, with `offBy`: `admin` under Providers, `extension` in Admin -> Extensions, or `language`
         for a language hidden in every extension -- where it comes back on). The check lists them in that order: `affected` by series, most first, then blocked or failing
         before slow or empty; the other three by name. `state` is the row's one state -- blocked, failing, slow,
-        empty, inconclusive, untested or off -- with `stage` for failing, inconclusive and untested, and
+        empty, inconclusive, untested, off, or since v0.55.3 slowed -- with `stage` for failing, inconclusive and untested, and
         `cooldown` {status, until} for blocked (`until` null when no cooldown is set); `icon` is true when the
         source has an extension's logo, which GET /img/sources/icon/{id} serves. The summary counts the first two
         groups -- "3 sources your series use need a look · 5 sources nothing uses are failing", the codes
         `sources.affected` and `sources.failingUnused` with the new join `dot` (" · ") -- and with neither says
         "All sources are working" (`sources.working`), or "Nothing is failing that your library uses" while quiet
         rows are listed. The status is decided as before.
+        Since v0.55.3 a source downloading at a raised pace -- one chapter at a time, at longer gaps, because its site or
+        an image server it shares with another source answered 429 -- carries `slowed: true` on its row, whatever its
+        state, and the detail `sources.paced` ("Downloading slowly: the site asked for fewer requests") after the rest;
+        one with nothing else to say is listed for it alone, `info`, in the `quiet` group, with the state `slowed`.
         Since v0.54.0 a `sources` item whose source is switched off or failing -- a confirmed failure at the chapter
         list, the page list or the images, or the site's own offline notice at any step; not a cooldown, and not a
         failure at search alone -- and is the MAIN source of at least one series carries the action `replace_source`
@@ -10399,7 +10421,7 @@ paths:
                         standing:
                           $ref: "#/components/schemas/SourceStanding"
                         offBy: { type: [string, "null"], enum: [admin, extension, language, null], description: "Where it was switched off: under Sources, in its extension, or by hiding its language." }
-                        state: { type: string, enum: [blocked, failing, slow, empty, inconclusive, untested, off, ok] }
+                        state: { type: string, enum: [blocked, failing, slow, empty, inconclusive, untested, off, slowed, ok] }
                         stage: { type: [string, "null"], enum: [search, chapters, pages, images, null] }
                         cooldown:
                           oneOf:

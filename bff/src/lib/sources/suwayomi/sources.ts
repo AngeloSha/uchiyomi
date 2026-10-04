@@ -220,6 +220,9 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     // see the doc comment above and SUWAYOMI_PAGE_CONCURRENCY in env.ts.
     pageConcurrency: env.SUWAYOMI_PAGE_CONCURRENCY,
     pageGapMs: 0,
+    // Every extension's pages are on the engine: its address says nothing about which site's limit a page counts
+    // against, so it never joins two extensions under one rate key (lib/pace.ts notePageHosts).
+    pagesProxied: true,
     // After the built-ins but ahead of user-added engine sites: an extension is usually a better-maintained
     // parser than a generic engine pointed at the same site.
     preferredOrder: 30,

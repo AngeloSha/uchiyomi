@@ -7,9 +7,11 @@
 //
 // One gate per source id keeps a slow site from starving a fast one.
 
+/** One operation waiting for a slot, with the width it asks for, asked again each time a slot frees. */
+interface Waiter { width: () => number; go: () => void }
 interface Lane {
   active: number;
-  queue: Array<() => void>;
+  queue: Waiter[];
   nextFreeAt: number;
 }
 
@@ -23,21 +25,45 @@ const laneOf = (key: string): Lane => {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface GateOptions {
-  /** how many operations may run at once for this key */
-  concurrency?: number;
-  /** minimum gap between the start of one operation and the next, per key */
-  minGapMs?: number;
+  /**
+   * how many operations may run at once for this key. A function is asked again whenever a slot frees (v0.55.3): the
+   * downloader's width falls to one while a source's pace is raised, and a lane busy at the old width narrows as its
+   * operations finish rather than whenever it happens to drain.
+   */
+  concurrency?: number | (() => number);
+  /** minimum gap between the start of one operation and the next, per key; a function is asked when a slot is had */
+  minGapMs?: number | (() => number);
+}
+
+const valueOf = (v: number | (() => number) | undefined, fallback: number): number => (typeof v === 'function' ? v() : v ?? fallback);
+
+/**
+ * Let waiters in, in order, while the lane is under the width the first of them asks for -- one, as a rule; more only
+ * when the lane has widened. The slot is counted HERE, before the waiter wakes: counted by the waiter itself, an
+ * arrival in between saw the lane one short, walked in, and three ran in a lane of two.
+ */
+function admit(key: string, lane: Lane): void {
+  while (lane.queue.length && lane.active < lane.queue[0].width()) {
+    lane.active++;
+    lane.queue.shift()!.go();
+  }
+  if (lane.active === 0 && lane.queue.length === 0) lanes.delete(key); // don't leak a lane per source forever
 }
 
 /** Run `fn` under the gate for `key`, waiting for a slot and for the politeness gap. */
 export async function withGate<T>(key: string, fn: () => Promise<T>, opts: GateOptions = {}): Promise<T> {
-  const concurrency = Math.max(1, opts.concurrency ?? 2);
-  const minGapMs = Math.max(0, opts.minGapMs ?? 0);
+  const width = () => Math.max(1, valueOf(opts.concurrency, 2));
   const lane = laneOf(key);
 
-  if (lane.active >= concurrency) await new Promise<void>((resolve) => lane.queue.push(resolve));
-  lane.active++;
+  // First come, first served: an arrival waits behind anyone already waiting, never past them into a slot the
+  // first in line is about to be given -- and a lane that has widened since they queued lets them in now, in order.
+  if (lane.queue.length || lane.active >= width()) {
+    const turn = new Promise<void>((go) => lane.queue.push({ width, go }));
+    admit(key, lane);
+    await turn;
+  } else lane.active++;
   try {
+    const minGapMs = Math.max(0, valueOf(opts.minGapMs, 0));
     if (minGapMs) {
       const wait = lane.nextFreeAt - Date.now();
       if (wait > 0) await sleep(wait);
@@ -46,9 +72,7 @@ export async function withGate<T>(key: string, fn: () => Promise<T>, opts: GateO
     return await fn();
   } finally {
     lane.active--;
-    const next = lane.queue.shift();
-    if (next) next();
-    else if (lane.active === 0 && lane.queue.length === 0) lanes.delete(key); // don't leak a lane per source forever
+    admit(key, lane);
   }
 }
 

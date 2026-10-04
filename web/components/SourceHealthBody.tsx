@@ -27,7 +27,7 @@ import { keysFor } from '@/lib/healthKeys';
 import { checkNote, itemDetail, itemTitle } from '@/lib/said';
 import { healthRowEvidence } from '@/lib/sourceEvidence';
 import {
-  FINDING_GROUPS, bulkTargets, groupOf, primaryOf, seriesText, stateReason, stateWord, tileTone,
+  FINDING_GROUPS, bulkTargets, groupOf, paceText, primaryOf, seriesText, stateReason, stateWord, tileTone,
   turnOffAllLabel, turnOffEach, turnOffOutcome, turnOffQuestion,
 } from '@/lib/sourceHealth';
 import type { HealthCheck, HealthItem, SourceGroup } from '@/lib/types';
@@ -125,6 +125,7 @@ function SourceRow({ check, it, rowKey }: { check: HealthCheck; it: HealthItem; 
   const name = itemTitle(it);
   const word = stateWord(it);
   const reason = stateReason(it);
+  const pace = paceText(it);
   const series = seriesText(it.series);
   const finding = FINDING_GROUPS.includes(groupOf(it));
   return (
@@ -143,6 +144,7 @@ function SourceRow({ check, it, rowKey }: { check: HealthCheck; it: HealthItem; 
               <>
                 <span className={finding ? 'font-medium text-amber-300' : 'text-fog-400'}>{word}</span>
                 {reason && <> — {reason}</>}
+                {pace && <> · {pace}</>}
                 {series && <> · {series}</>}
                 {it.ignored && <> · {tr('Ignored')}</>}
               </>

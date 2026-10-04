@@ -585,8 +585,13 @@ they were. Chapters already here stay, and older ones can still be fetched from 
 
 ### When a source or page fails
 
-The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and
-the current chapter waits and resumes from its remaining pages. If a normal failure still wins, Uchiyomi
+The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, one
+chapter at a time, and the current chapter waits and resumes from its remaining pages; a chapter running beside it
+waits as long. Since v0.55.3 the slower pace is kept: at least an hour, and it comes back up a step at a time only
+after ten chapters in a row came down whole at it — a site that kept refusing used to be asked at full speed again
+ten minutes later. Two sources whose pages come from the same image server share one pace (Natomanga and
+Mangakakalot do), and **Admin → Health** says *Downloading slowly: the site asked for fewer requests* on the
+source's row under *Source health* while it lasts. If a normal failure still wins, Uchiyomi
 tries the same chapter on at most two sources the series already follows; the download card says which
 source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
@@ -2243,13 +2248,19 @@ that has **3 pages or fewer** is hidden:
 - **From downloads.** Neither the updater nor the slow archive downloads one its sources list as 3 pages or
   fewer, and those are not counted as missing.
 
-**Only short ones.** A chapter numbered with a fraction is a notice only when its page count is known and is 3 or
-fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
+**Only short ones.** With **Only hide short ones (3 pages or fewer)** on, the default, a chapter numbered with a
+fraction is a notice only when its page count is known and is 3 or fewer: its own pages once it is on this server and counted, else the page count its sources list (MangaDex lists
 one; most sites do not). A longer one is a chapter posted in parts (78.1 … 78.9) and stays, and so does one whose
 length nobody knows yet. A file holding a range of chapters (`Chapter 12.5-13.cbz`, see *How a chapter's number is
 read*) is never a notice, however short. A chapter's pages are counted the first time anyone opens it, and the nightly repair
 counts the rest, so a notice from a site that lists no page counts is downloaded, shown until it is counted, and
 hidden from then on.
+
+**Or every x.5** (since v0.55.3, #147). Switch **Only hide short ones** off and every chapter numbered like 12.5 of
+the types switched on is hidden, whatever its length — including real chapters a site split into parts (78.1 …
+78.9), and the updater downloads none of them while they are hidden. A file holding a range of chapters is still
+never hidden. Switching it back on shows the longer ones again on the next page load, and the next check fetches
+any never downloaded. The series' own switch in **Sources & translations** says which of the two it hides.
 
 Nothing is deleted. Switching a type off shows its notice chapters again on the next page load, with no
 rescan. Any that were never downloaded are fetched at the next check. **Updates** keeps counting only what came
@@ -2698,7 +2709,7 @@ source's numbers**; either way the series updates again.
 **The slow archive is not fetching anything.** Library → Downloads says why — under the covers when the whole
 archive is waiting, and on a series' own sheet (tap its cover) otherwise: it is between chapters (at the default
 pace about a quarter of an hour, now and then much longer), another download is using the same site, the site is
-cooling down, asked for a slower pace or refused a chapter, a check or a repair is running, it is outside the hours
+cooling down, asked for a slower pace within the hour or refused a chapter, a check or a repair is running, it is outside the hours
 it may run (the server's local time), or the download disk is below its floor (**Admin → Settings → Downloads**).
 After a restart its first look waits ten minutes.
 

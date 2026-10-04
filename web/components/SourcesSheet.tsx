@@ -815,7 +815,10 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
                 checked={series.hideNoticesEffective} disabled={hidingNotices}
                 onChange={(e) => setHideNotices(e.target.checked)} />
               <span>
-                {tr('Hide notice chapters (numbered like 12.5, with 3 pages or fewer) here, in Mihon and everywhere else. Switching this off shows them again.')}
+                {/* What the switch hides is Settings' rule (v0.55.3, #147): short ones only, or every fraction. */}
+                {series.hideNoticeShortOnly === false
+                  ? tr('Hide notice chapters (numbered like 12.5) here, in Mihon and everywhere else. Switching this off shows them again.')
+                  : tr('Hide notice chapters (numbered like 12.5, with 3 pages or fewer) here, in Mihon and everywhere else. Switching this off shows them again.')}
                 {series.hideNoticesEffective && (
                   <span className="text-fog-400"> {tr('Hidden now: {n}.', { n: series.hiddenNotices ?? 0 })}</span>
                 )}

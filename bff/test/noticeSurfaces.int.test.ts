@@ -57,6 +57,7 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
     await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
     await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
     // Shared database: a list left behind would hide chapters in every later suite.
+    await q(`UPDATE server_settings SET hide_notice_short_only = true WHERE id = 1`).catch(() => {});
     await hide([]).catch(() => {});
   };
   await cleanup();
@@ -263,6 +264,43 @@ test('notice chapters, surface by surface: unchanged with every switch off, the 
       } finally {
         await hide([]);
         await unland(['b_nts_4', 'b_nts_45']);
+        await q(`DELETE FROM favorites WHERE user_id = $1`, [uid]);
+        await q(`DELETE FROM series_seen WHERE user_id = $1`, [uid]);
+      }
+    });
+
+    await t.test('only short ones off: every fraction is a notice, and Updates and the counts agree with it (v0.55.3)', async () => {
+      // TIGamingTV's switch (#147). A twenty-page 4.5 lands: by the page rule a chapter, and new; with the switch off a
+      // notice like any fraction, and nothing new -- and the series' count and Home's badge say the same each way.
+      // Reintroduce by dropping the `!shortOnly` branch from bookIsNotice (lib/noticeChapters.ts): the twenty-page 4.5 is
+      // counted and announced while every fraction is meant to be hidden.
+      const shortOnly = async (on: boolean) => {
+        await q(`UPDATE server_settings SET hide_notice_short_only = $1 WHERE id = 1`, [on]);
+        await refreshNoticesActive();
+      };
+      await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1, $2)`, [uid, S]);
+      const updates = async () => (await get('/api/updates', asUser)).json().content.map((u: any) => [u.series.id, u.newCount]);
+      // Through the Komga-compatible API: opening the series page marks its chapters seen, which is not this test's.
+      const count = async () => (await get(`/api/v1/series/${S}`, komgaKey)).json().booksCount;
+      const badge = async () => (await get('/api/home', asUser)).json().updatesCount;
+      try {
+        await shortOnly(false);
+        await hide(['manhwa']);
+        assert.equal((await app.inject({ method: 'POST', url: '/api/updates/seen', headers: asUser })).statusCode, 200);
+        assert.deepEqual(await updates(), []);
+        assert.equal(await count(), 4, 'the two-page 2.5 is hidden either way');
+        await land('b_nts_45l', 4.5, 20);
+        assert.equal(await count(), 4, 'every fraction is a notice: the twenty-page 4.5 too');
+        assert.deepEqual(await updates(), [], 'a hidden fraction is announced as new');
+        assert.equal(await badge(), 0, "Home's badge disagrees with Updates");
+        await shortOnly(true);
+        assert.equal(await count(), 5, 'by the page rule the twenty-page 4.5 is a chapter');
+        assert.deepEqual(await updates(), [[S, 1]], 'and it came since the last look: new');
+        assert.equal(await badge(), 1, "Home's badge disagrees with Updates");
+      } finally {
+        await shortOnly(true);
+        await hide([]);
+        await unland(['b_nts_45l']);
         await q(`DELETE FROM favorites WHERE user_id = $1`, [uid]);
         await q(`DELETE FROM series_seen WHERE user_id = $1`, [uid]);
       }

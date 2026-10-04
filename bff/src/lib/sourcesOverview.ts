@@ -31,7 +31,7 @@ import { currentFailures, type Stage, type Stages } from './sourceEvidence';
 import { replaceCountsByMain } from './replaceSource';
 
 export type SourceKind = 'builtin' | 'mangadex' | 'site' | 'extension' | 'pack';
-export type OverviewState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off' | 'ok';
+export type OverviewState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off' | 'slowed' | 'ok';
 
 export interface OverviewSource {
   id: string;

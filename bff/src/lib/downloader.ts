@@ -14,7 +14,7 @@ import { classify, noteStage, reportOk, reportFail, SourceStatus } from './sourc
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
-import { pagePace, paceLevel, noteRateLimited, rateKeyOf, resumePace } from './pace';
+import { pagePace, paceLevel, noteDownloaded, notePageHosts, noteRateLimited, rateKeyOf, restLeft, resumePace } from './pace';
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
@@ -270,11 +270,19 @@ export const chapterFileRel = (seriesFolder: string, number: number): string => 
  * a gap between their starts that doubles per pace level (1200 → 2400 → 4800 ms), so a source that has
  * answered 429 sees fewer chapters as well as slower pages until it has been quiet for a while.
  *
- * One gate per RATE GROUP (lib/pace.ts rateKeyOf, v0.52.0): MangaDex in three languages is one site downloading
- * three chapters, so it gets one gate, not three.
+ * One gate per RATE KEY (lib/pace.ts rateKeyOf): MangaDex in three languages is one site downloading three chapters
+ * (v0.52.0), and Natomanga and Mangakakalot are one image server (v0.55.3), so each gets one gate, not several.
+ *
+ * One chapter at a time while the key's pace is raised (v0.55.3): two at once were two page streams to a server that
+ * had asked for fewer requests, at a doubled gap each. Both values are asked again whenever a slot frees (lib/gate.ts),
+ * so a lane already running two when the 429 came narrows as they finish. Reintroduce `concurrency: DL_CONCURRENCY`:
+ * "a raised pace downloads one chapter at a time" in pacePersists.test.ts sees two at once.
  */
 export const underGate = <T>(sourceId: string, fn: () => Promise<T>): Promise<T> =>
-  withGate(rateKeyOf(sourceId), fn, { concurrency: DL_CONCURRENCY, minGapMs: DL_MIN_GAP_MS * 2 ** paceLevel(sourceId) });
+  withGate(rateKeyOf(sourceId), fn, {
+    concurrency: () => (paceLevel(sourceId) ? 1 : DL_CONCURRENCY),
+    minGapMs: () => DL_MIN_GAP_MS * 2 ** paceLevel(sourceId),
+  });
 
 /**
  * Download one chapter into <DL_ROOT>/<seriesFolder>/Chapter <n>.cbz.
@@ -365,6 +373,9 @@ export interface PagesResult {
  * resume raises that level for the chapters that follow (lib/pace.ts).
  */
 export async function fetchPages(src: SourceAdapter, urls: string[], indices: number[], ctx: PageCtx): Promise<PagesResult> {
+  // Which image servers these pages are on, before the first is asked for (v0.55.3): a source whose pages share a
+  // server with another's shares its rate key from now on, and this chapter's pace already reads the shared one.
+  notePageHosts(src, urls);
   // Cloudflare-hosted images need FlareSolverr session cookies — the source declares this via requiresCloudflare.
   const cf = src.requiresCloudflare ? await cfSession(urls[0]).catch(() => null) : null;
   // Referer: the source's declared imageReferer (static or per-chapter), else the chapter url's own origin.
@@ -447,6 +458,29 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
   const rand = ctx.rand ?? pace.rand ?? Math.random;
   let lastStart = -Infinity;
   let lastDone = -Infinity;
+  /**
+   * The key's own state, read again before every page (v0.55.3). Another chapter on the key may have been refused since
+   * this one began -- two run at once at level 0, and a source joined to it by its image server is the same server --
+   * and this one then rests as long as that one does and goes on one page at a time at the slower gap, instead of
+   * asking the same server at the old pace until it is refused itself. Reintroduce by dropping the two calls in run():
+   * "a 429 to one chapter slows the chapter beside it" in pacePersists.test.ts sees the neighbour keep its pace.
+   *
+   * `level` starts at 0, not at `pace.level`: a caller's own gap and width (fetchChapter's) were read before this
+   * chapter's pages joined its source to another's server, so the first page squares them with the key's level -- never
+   * making them faster.
+   */
+  let level = 0;
+  const follow = () => {
+    const now = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
+    if (now.level <= level) return;
+    level = now.level;
+    gap = Math.max(gap, now.gap);
+    workers = Math.min(workers, now.workers);
+  };
+  const restOut = async () => {
+    const ms = restLeft(src.id);
+    if (ms > 0) await sleep(ms);
+  };
 
   /**
    * Fetch `indices` through up to `workers` loops that each pull the next index off a shared cursor.
@@ -471,8 +505,13 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
    */
   const run = async (idx: number[]): Promise<void> => {
     let next = 0;
-    const worker = async () => {
+    const worker = async (w: number) => {
       while (!retryAfterMs && next < idx.length) {
+        // Resting: wait, then ask the loop again -- the cursor may have run out, or a 429 come, while this one slept.
+        // No await at all when there is no rest, so a slot is still reserved in the same tick the clocks are read.
+        if (restLeft(src.id) > 0) { await restOut(); continue; }
+        follow();
+        if (w >= workers) return; // narrowed by a refusal on the key: one page at a time from here
         const i = idx[next++];
         const g = jitter ? drawGap(jitter, gap, rand) : gap;
         const at = Math.max(Date.now(), lastStart + g, lastDone + g);
@@ -481,12 +520,17 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
         if (wait > 0) {
           await sleep(wait);
           if (retryAfterMs) return;
+          // A rest that began while this page waited its turn is a neighbour's 429 to the same server.
+          if (restLeft(src.id) > 0) {
+            await restOut();
+            if (retryAfterMs) return;
+          }
         }
         await fetchPage(urls[i], i);
         lastDone = Date.now();
       }
     };
-    await Promise.all(Array.from({ length: Math.min(workers, idx.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(workers, idx.length) }, (_, w) => worker(w)));
   };
 
   await run(indices);
@@ -511,14 +555,16 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
     if (!gaps.length) break;
     if (gaps.length === indices.length && !retryAfterMs) break; // a silent refusal: do not ask twice
     if (retryAfterMs) {
+      // Retry-After is a floor, not the whole wait: a site that has just refused a burst is not ready one
+      // second later, whatever the header said, and each further round waits longer.
+      const wait = Math.max(retryAfterMs, RESUME_WAIT_MS[round] ?? 0);
       // The slow-down has to outlive this chapter: the next one on this source starts from a higher pace
       // level (one worker, a doubled gap, a longer chapter gate) instead of at full speed against a site
       // that just said no. Noted BEFORE the wait, so a chapter queued behind this one on the gate already
-      // sees it. ⚠️ Delete this and pacePersists.test.ts fails: chapter 2 runs four wide again.
-      noteRateLimited(src.id);
-      // Retry-After is a floor, not the whole wait: a site that has just refused a burst is not ready one
-      // second later, whatever the header said, and each further round waits longer.
-      await sleep(Math.max(retryAfterMs, RESUME_WAIT_MS[round] ?? 0));
+      // sees it -- and with the wait, which every chapter on the key sits out with this one (v0.55.3).
+      // ⚠️ Delete this and pacePersists.test.ts fails: chapter 2 runs four wide again.
+      noteRateLimited(src.id, wait);
+      await sleep(wait);
       retryAfterMs = 0;
       // Resume slower than the burst that caused this, or the wait only buys one more page. The burst is
       // what was refused, so a widened pool narrows to one here too: an engine that said 429 to four
@@ -531,8 +577,8 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
     }
     await run(gaps);
   }
-  // A 429 in the final round was never noted by the loop above; it counts the same.
-  if (retryAfterMs) noteRateLimited(src.id);
+  // A 429 in the final round was never noted by the loop above; it counts the same, and the key rests what it asked.
+  if (retryAfterMs) noteRateLimited(src.id, retryAfterMs);
 
   return { page, ext, worst, failed, retryAfterMs, refusal };
 }
@@ -640,6 +686,10 @@ async function fetchChapter(
       partial ? { partial } : {},
     );
   }
+  // A whole chapter that met no 429, nor a 403, at this pace (v0.55.3): one more in the run that takes a raised pace back
+  // down a step (lib/pace.ts noteDownloaded). Reintroduce by dropping it: "a raised pace comes down a step after a steady
+  // run" in pacePersists.test.ts stays slowed.
+  if (!refusal) noteDownloaded(src.id);
   await reportOk(input.sourceId); // a successful download clears any prior block
   // Evidence for the two stages a whole chapter proves, and ONLY those: a download says nothing about search
   // or the chapter list, and must not close their failures (lib/sourceEvidence.ts). reportOk above resets the
