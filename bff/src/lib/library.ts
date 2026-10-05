@@ -14,6 +14,7 @@ import { directionFromComicInfo } from './directionSignals';
 import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { reconcileListingProgress } from './listingProgress';
 import { holdsRaw, isRange } from './chapterRanges';
+import { cleanGenres } from './genres';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -920,7 +921,8 @@ async function scanOnce(): Promise<ScanResult> {
               [
                 newSeriesId(), srcName, field(firstXml, 'Series') || folderRel.split('/').pop()!, cleanSummary(field(firstXml, 'Summary')),
                 field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
-                (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
+                // Without a site's genre menu (lib/genres.ts): files a page-wide read wrote before v0.55.5 still carry one.
+                cleanGenres((field(firstXml, 'Genre') || '').split(',')),
                 field(firstXml, 'Web'), folderRel, files.length,
                 known?.library_id ?? libraryIdFor(folderRel, libs),
                 parseComicInfoAgeRating(field(firstXml, 'AgeRating')),
@@ -932,7 +934,7 @@ async function scanOnce(): Promise<ScanResult> {
             seenFolders.set(folderRel, id);
             // What kind of comic the file's genres say it is (lib/seriesType.ts), below nothing weaker and above
             // nothing stronger -- the rule learnSeriesType applies, in this transaction.
-            const t = typeFromGenres((field(firstXml, 'Genre') || '').split(','));
+            const t = typeFromGenres(cleanGenres((field(firstXml, 'Genre') || '').split(',')));
             if (t) {
               await qq(
                 `UPDATE lib_series SET series_type = $2, series_type_from = $3

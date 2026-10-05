@@ -766,6 +766,7 @@ function findOrder(): string[] {
 // type keeps its old address for anyone who imported it from here.
 import { pickBest, pickBestScored, type MatchConfidence } from '../lib/titleMatch';
 import { withOrigin, listActivity, dismissFailed, type Origin, type ActivityEntry } from '../lib/downloadActivity';
+import { cleanGenres } from '../lib/genres';
 export type { MatchConfidence };
 
 /**
@@ -1399,7 +1400,9 @@ export async function addSeriesFromSource(opts: {
   const stateLang = edition?.lang ?? majorityLang(chosen) ?? canonLang(src.lang);
   // The description as the page will show it: MangaDex writes Markdown, and this is what goes into every
   // ComicInfo the downloader writes and, through the scanner, into lib_series.summary.
-  const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
+  // Its genres without a site's genre menu (lib/genres.ts, v0.55.5), whichever source read them: they go into the row and
+  // every chapter file's ComicInfo, which a scan reads back.
+  const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: cleanGenres(series?.genres), url: series?.url, status: series?.status };
 
   /**
    * "Nothing yet": the series is created and followed, and no chapter is fetched.

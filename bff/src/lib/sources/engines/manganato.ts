@@ -7,6 +7,7 @@ import { parseWhen } from '../dates';
 import { plainText } from '../../htmlText';
 import { seriesSlug, isOwnChapterUrl, rebase } from '../slug';
 import { offlineNotice, siteOffline, throwIfOffline } from '../offline';
+import { cleanGenres } from '../../genres';
 
 /**
  * Anything of the family's own markup (v0.49.1, lib/sources/offline.ts; the Madara engine's MADARA_MARKUP is the
@@ -17,6 +18,23 @@ export const MANGANATO_MARKUP = /list-comic-item-wrap|story_item|story_name|item
 
 const strip = plainText;
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
+
+/** The element whose class list holds `name` exactly: `genres` is not `genres-item`. */
+const classed = (tag: string, name: string) => new RegExp(`<${tag}[^>]*\\sclass="(?:[^"]*\\s)?${name}(?:\\s[^"]*)?"[^>]*>([\\s\\S]*?)</${tag}>`, 'i');
+
+/**
+ * A series page's own genres (v0.55.5): its info panel's "Genres" row, else the genre box beside it, else an older
+ * Manganato page's "Genres" table cell -- never every genre link on the page. Natomanga's pages carry the site's whole
+ * genre menu at their foot (All, Completed, Ongoing, Action, Adaptation, Adult, ... 59 links), and reading the page
+ * whole gave twelve series on the owner's library all 69 genres, Hentai and Smut among them. cleanGenres drops a menu's
+ * run all the same, for a layout none of these blocks matches. Reintroduce the page-wide read: "a series page's own
+ * genres, not the site's menu" in manganatoSeries.test.ts reads them twice, then the menu.
+ */
+export function seriesGenres(h: string): string[] {
+  const block = (h.match(classed('li', 'genres')) || h.match(classed('div', 'genre-list'))
+    || h.match(/info-genres[\s\S]*?<td[^>]*class="[^"]*table-value[^"]*"[^>]*>([\s\S]*?)<\/td>/i) || [])[1] || '';
+  return cleanGenres([...block.matchAll(/<a[^>]*>([^<]+)<\/a>/gi)].map((x) => strip(x[1])));
+}
 /** The solver returns JSON inside an HTML <pre>, so the payload arrives entity-escaped. */
 const unescapeHtml = (s: string) => s
   .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'")
@@ -243,8 +261,7 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
           [])[1] || '',
       ).replace(/^Description\s*:?\s*/i, '');
       const cover = (h.match(/class="[^"]*info-image[^"]*"[\s\S]{0,120}?<img[^>]+src="([^"]+)"/i) || h.match(/property="og:image" content="([^"]+)"/i) || [])[1];
-      const genres = [...h.matchAll(/href="[^"]*\/genre[^"\/]*\/[^"]*"[^>]*>([^<]+)<\/a>/gi)].map((x) => strip(x[1])).filter(Boolean);
-      return { sourceId: url, source: cfg.id, title, summary, genres, coverUrl: cover ? norm(cover) : undefined, url };
+      return { sourceId: url, source: cfg.id, title, summary, genres: seriesGenres(h), coverUrl: cover ? norm(cover) : undefined, url };
     },
 
     async listChapters(seriesId) {

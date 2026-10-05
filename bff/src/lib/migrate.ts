@@ -2,7 +2,8 @@ import type { PoolClient } from 'pg';
 import { pool, one } from './db';
 import { env } from '../env';
 import { MANGADEX_LANGS } from './lang';
-import { typeFromGenres } from './seriesTypeSignals';
+import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
+import { cleanGenres } from './genres';
 import { REFILE_FAILURES_SQL } from './chapterFailures';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
@@ -1666,6 +1667,43 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
   {
     id: 'v0.55.3-failures-follow-the-series',
     run: async (c) => { await c.query(REFILE_FAILURES_SQL, [null]); },
+  },
+
+  // v0.55.5: a site's whole genre menu out of the genres a series carries (lib/genres.ts cleanGenres, the same function
+  // the engine, the add and the scan now pass every genre list through, so the four cannot disagree). The Manganato
+  // engine read every genre link on a Natomanga page, the site's 59-link menu among them: twelve live series held all
+  // 69 genres, Hentai and Smut too. The scanned genres, and an admin's override as well: Edit details sends every field
+  // on any save since v0.53.0, so a series anyone retitled holds the menu there -- and a menu's run is nobody's choice.
+  // Then each series cleaned is typed from what is left, by learnSeriesType's rule (never over a stronger provenance):
+  // a menu names three origins, so typeFromGenres typed none of them. No column: a v0.55.4 rollback reads clean genres.
+  {
+    id: 'v0.55.5-genres-without-site-menu',
+    run: async (c) => {
+      const cleaned: string[] = [];
+      for (const [table, key] of [['lib_series', 'id'], ['series_overrides', 'series_id']] as const) {
+        const rows = (await c.query<{ id: string; genres: string[] }>(
+          `SELECT ${key} AS id, genres FROM ${table} WHERE EXISTS (SELECT 1 FROM unnest(genres) g WHERE lower(btrim(g)) = 'ongoing')`)).rows;
+        for (const r of rows) {
+          const genres = cleanGenres(r.genres);
+          if (genres.length === r.genres.length) continue;
+          await c.query(`UPDATE ${table} SET genres = $2 WHERE ${key} = $1`, [r.id, genres]);
+          cleaned.push(r.id);
+        }
+      }
+      if (!cleaned.length) return;
+      const rows = (await c.query<{ id: string; genres: string[] | null }>(
+        `SELECT s.id, COALESCE(o.genres, s.genres) AS genres
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id WHERE s.id = ANY($1)`, [[...new Set(cleaned)]])).rows;
+      for (const r of rows) {
+        const t = typeFromGenres(r.genres);
+        if (!t) continue;
+        await c.query(
+          `UPDATE lib_series SET series_type = $2, series_type_from = $3
+            WHERE id = $1 AND COALESCE(array_position($4::text[], series_type_from), 0) <= array_position($4::text[], $3::text)`,
+          [r.id, t.type, t.from, SERIES_TYPE_FROM],
+        );
+      }
+    },
   },
 
 ];

@@ -545,6 +545,56 @@ test("migrate: v0.55.3's data migration files a failed chapter under its series'
   }
 });
 
+test("migrate: v0.55.5's data migration takes a site's genre menu out of a series' genres and its override, and types what is left", { skip }, async () => {
+  // The owner's library (2026-10-06): twelve series held Natomanga's whole 59-genre menu after their own genres, read
+  // twice -- "Fantasy, Action, ..., Fantasy, Action, ..., All, Completed, Ongoing, Action, Adaptation, Adult, ...".
+  const MENU = ['All', 'Completed', 'Ongoing', 'Action', 'Adult', 'Hentai', 'Manga', 'Manhua', 'Manhwa', 'Smut', 'Webtoons'];
+  // Each row: the scanned genres, the override's (undefined: no override row), and the stored type and its provenance.
+  const SEED: Record<string, [string[], string[] | undefined, string | null, string | null]> = {
+    // Cleaned, then typed by its own genres: the menu names three origins, so nothing typed it before.
+    't-gm-typed': [['Action', 'Manhwa', 'Action', 'Manhwa', ...MENU], undefined, null, null],
+    // Cleaned; its own genres name no origin, so it stays untyped.
+    't-gm-untyped': [['Fantasy', 'Demons', 'Fantasy', 'Demons', ...MENU], undefined, null, null],
+    // Cleaned; its own Webtoon genre ranks below the source that typed it, which stands (learnSeriesType's rule).
+    't-gm-ranked': [['Drama', 'Webtoon', ...MENU], undefined, 'manhua', 'source'],
+    // The override holds the menu too (Edit details froze it there on a save): cleaned, the scanned genres as well.
+    't-gm-override': [['Drama', ...MENU], ['Drama', 'Romance', ...MENU], null, null],
+    // No menu: an "Ongoing" alone is a genre like any other, and nothing changes.
+    't-gm-clean': [['Action', 'Ongoing'], undefined, null, null],
+  };
+  const ids = Object.keys(SEED);
+  try {
+    for (const [id, [genres, override, type, from]] of Object.entries(SEED)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, genres, series_type, series_type_from) VALUES ($1, 'test', 'T', $1, $2, $3, $4)`,
+        [id, genres, type, from]);
+      if (override) await q(`INSERT INTO series_overrides (series_id, genres) VALUES ($1, $2)`, [id, override]);
+    }
+    // Reintroduce by leaving the step out of DATA_MIGRATIONS: every menu stays.
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.55.5-genres-without-site-menu'`);
+    await migrate();
+    const read = async () => Object.fromEntries((await q<{ id: string; genres: string[]; o: string[] | null; series_type: string | null; series_type_from: string | null }>(
+      `SELECT s.id, s.genres, o.genres AS o, s.series_type, s.series_type_from FROM lib_series s
+         LEFT JOIN series_overrides o ON o.series_id = s.id WHERE s.id = ANY($1)`, [ids])).map((r) => [r.id, [r.genres, r.o, r.series_type, r.series_type_from]]));
+    const want = {
+      't-gm-typed': [['Action', 'Manhwa'], null, 'manhwa', 'genre'],
+      't-gm-untyped': [['Fantasy', 'Demons'], null, null, null],
+      't-gm-ranked': [['Drama', 'Webtoon'], null, 'manhua', 'source'],
+      't-gm-override': [['Drama'], ['Drama', 'Romance'], null, null],
+      't-gm-clean': [['Action', 'Ongoing'], null, null, null],
+    };
+    assert.deepEqual(await read(), want, 'the data migration cleaned the wrong rows, or the wrong way');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.55.5-genres-without-site-menu'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+    // Run again, nothing changes.
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.55.5-genres-without-site-menu'`);
+    await migrate();
+    assert.deepEqual(await read(), want, 'a second run changed something');
+  } finally {
+    await q(`DELETE FROM series_overrides WHERE series_id = ANY($1)`, [ids]);
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+  }
+});
+
 test('migrate: an edition v0.51.0 merged away after a rollback gives its language back at the next boot', { skip }, async () => {
   // The rollback drill's find: v0.51.0's merge sets merged_into and leaves work_id and lang alone, so the absorbed
   // French row kept its slot in lib_series_work_lang_idx, and v0.52.0 then refused a new French edition of the

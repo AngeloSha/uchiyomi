@@ -38,7 +38,7 @@ let q: Q;
 let persistScan: () => Promise<{ series: number; books: number; ms: number }>;
 
 /** A minimal but genuinely valid CBZ: one page plus a ComicInfo.xml the scanner can parse. */
-async function writeCbz(abs: string, opts: { series?: string; number?: number; pages?: number; pixel?: string } = {}) {
+async function writeCbz(abs: string, opts: { series?: string; number?: number; pages?: number; pixel?: string; genre?: string } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const AdmZip = require('adm-zip');
   const zip = new AdmZip();
@@ -52,7 +52,7 @@ async function writeCbz(abs: string, opts: { series?: string; number?: number; p
       Buffer.from(
         `<?xml version="1.0"?><ComicInfo><Series>${opts.series}</Series>` +
           `<Number>${opts.number ?? 1}</Number><Writer>A. Writer</Writer>` +
-          `<Genre>Action, Drama</Genre><Web>https://example.invalid/x</Web>` +
+          `<Genre>${opts.genre ?? 'Action, Drama'}</Genre><Web>https://example.invalid/x</Web>` +
           `<Summary>A summary.</Summary></ComicInfo>`,
       ),
     );
@@ -112,6 +112,19 @@ test('persistScan: a fresh scan creates the series and its chapters', { skip }, 
   assert.deepEqual(books.map((b) => b.number), [1, 2]);
   assert.deepEqual(books.map((b) => b.title), ['Chapter 1', 'Chapter 2']);
   assert.ok(books.every((b) => b.root === ROOT_A));
+});
+
+test("persistScan: a chapter file whose <Genre> holds a site's genre menu gives the series its own genres (v0.55.5)", { skip }, async () => {
+  // Files the Manganato engine wrote before v0.55.5 carry Natomanga's whole genre menu, and every scan reads the first
+  // file back. Reintroduce the plain split in library.ts: Adult and Hentai are the series' genres again.
+  const src = 'T!menu';
+  const genre = 'Action, Manhwa, Fantasy, Action, Manhwa, Fantasy, All, Completed, Ongoing, Action, Adult, Hentai, Manga, Manhua, Manhwa, Smut';
+  await writeCbz(chapter(ROOT_A, src, 'War God', 'Chapter 1.cbz'), { series: 'War God', number: 1, genre });
+  await persistScan();
+  const s = await oneSeries(`${src}/War God`);
+  assert.deepEqual(s.genres, ['Action', 'Manhwa', 'Fantasy']);
+  // Typed from them as well: the menu names three origins and types nothing, the series' own say manhwa.
+  assert.deepEqual([s.series_type, s.series_type_from], ['manhwa', 'genre']);
 });
 
 test('persistScan: cover_book_id points at a book row that actually exists', { skip }, async () => {
