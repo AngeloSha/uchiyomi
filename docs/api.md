@@ -1019,6 +1019,10 @@ below will touch) — and `pruned` — the file was deleted by the read-chapter 
 row is a tombstone: reading progress is still attached, but there are no pages behind it. A pruned chapter
 is listed by `GET /api/series/:id/books` (with the flag) and skipped everywhere a chapter is *served*:
 `next`, Continue reading, the OPDS feed, the offline plan; its download manifest answers **410** `pruned`.
+Since v0.55.4 it also carries `prunedReason: 'deleted' | 'missing' | null` — why the file is gone, null while it
+has one: `'deleted'` by *Delete files*, or by *Rescan everything* for a file gone from a library built by hand
+(`owned` false: the web says *File no longer on disk*, not *Deleted from the server*); `'missing'` by *Verify
+chapter files*; null for the read-chapter cleanup, a chapter's own delete, or a mark from before v0.37.0.
 
 Since v0.40.0 every chapter object also carries `missingPages: number[] | null`: 1-based indices whose
 images are repair placeholders in a partial chapter. `GET /api/books/:id/pages` keeps those entries in

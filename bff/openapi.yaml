@@ -2134,6 +2134,15 @@ paths:
                       survives; no pages behind it. The chapter is still listed and still counts as read, but
                       the page list is empty, next/previous step over it, and the download manifest answers
                       410.
+                  prunedReason:
+                    type: [string, "null"]
+                    enum: [deleted, missing, null]
+                    description: >-
+                      Since v0.55.4: why a pruned chapter's file is gone, null while it has one. `deleted`: Delete
+                      files removed it, or Rescan everything found it gone from a library built by hand (with
+                      `owned` false; the web says "File no longer on disk"); `missing`: Verify chapter files found
+                      no file behind a downloaded chapter, which the next sweep fetches again; null: the read-chapter
+                      cleanup, a chapter's own delete, or a mark from before v0.37.0.
                   owned:
                     type: boolean
                     description: >-

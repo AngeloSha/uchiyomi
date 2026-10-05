@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3267
+    "strings": 3268
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3270,5 +3270,6 @@
   "Which ones were probably moved or renamed": "Quais provavelmente foram movidos ou renomeados",
   "Number chapters again by the new file-name rules (optional)": "Numerar os capítulos de novo pelas regras novas de nome de arquivo (opcional)",
   "Chapters added before v0.55.2 keep the first number in their file name, so “Vol 2 Ch 5” is chapter 2. Tick a series to number its files by the new rules instead. Trackers are told nothing now; the next chapter a reader finishes there sends its new number.": "Capítulos adicionados antes da v0.55.2 mantêm o primeiro número do nome do arquivo, então “Vol 2 Ch 5” é o capítulo 2. Marque uma série para numerar os arquivos dela pelas regras novas. Nada é enviado aos trackers agora; o próximo capítulo que um leitor terminar ali envia o número novo.",
-  "Series numbered by posting order, or in the middle of a renumber, are not listed.": "Séries numeradas pela ordem de publicação, ou no meio de uma renumeração, não aparecem."
+  "Series numbered by posting order, or in the middle of a renumber, are not listed.": "Séries numeradas pela ordem de publicação, ou no meio de uma renumeração, não aparecem.",
+  "File no longer on disk": "Arquivo fora do disco"
 }

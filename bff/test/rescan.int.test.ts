@@ -493,6 +493,21 @@ test('everyone\'s history stays, nothing a reader owns changes, and a file that 
   assert.equal((await q(`SELECT book_id FROM read_progress WHERE user_id = $1`, [uid]))[0].book_id, three.id);
 });
 
+test('a chapter Rescan everything marked says why on the book, so the series page can say "File no longer on disk"', { skip }, async () => {
+  // The DTO had only `pruned`, and the web said "Deleted from the server" for every tombstone -- here about a file the
+  // admin removed by hand. Reintroduce by dropping `prunedReason` from bookDto (or `b.pruned_reason` from booksSrc's
+  // columns): the marked book reads undefined.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await apply(await preview());
+  const { owned } = (await import('../src/lib/ownedCatalog')) as any;
+  const ctx = { userId: null, libraryIds: null, maxAgeRating: null };
+  const books = (await owned.seriesBooks(ctx, await seriesOf(`${SRC}/Kept`), 0, 50)).content;
+  const by = (n: number) => books.find((b: any) => b.name === `Chapter ${n}`);
+  assert.deepEqual([by(3)?.pruned, by(3)?.prunedReason, by(3)?.owned], [true, 'deleted', false], JSON.stringify(by(3)));
+  assert.deepEqual([by(1)?.pruned, by(1)?.prunedReason], [false, null], 'a chapter with its file has no reason');
+});
+
 test('a series with nothing left is listed, never hidden or forgotten, and the covers and counts are recomputed', { skip }, async () => {
   // Reintroduce by dropping refreshSeries from applyPlan: Kept's cover stays on the chapter just marked.
   await seed();
