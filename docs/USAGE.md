@@ -1974,10 +1974,10 @@ nothing left*.
   *Delete read chapters* or a library scan is running — the message says which. The Tasks line keeps what it did
   across restarts: *36 chapters marked as no longer on disk · 1 back on disk before Apply, left alone · 2 series
   renumbered by the new rules*.
-- A series that is downloading when Apply reaches it — a *Fetch*, the slow archive's next chapter, *Fetch newest* — is
-  left alone, neither marked nor renumbered (*1 series had a download running and was left alone*): run it again when
-  the download is done. Every other series it changes waits for it: a *Fetch* there says a download is already running,
-  and the slow archive takes its next chapter once Apply has finished.
+- A series that is downloading or being checked when Apply reaches it — a *Fetch*, the slow archive's next chapter,
+  *Fetch newest*, a check for new chapters — is left alone, neither marked nor renumbered (*1 series had a download or a
+  check running and was left alone*): run it again when that is done. Every other series it changes waits for it: a
+  *Fetch* there says a download is already running, and the slow archive takes its next chapter once Apply has finished.
 - It never runs by itself — not at start-up, not on a schedule — for Verify's reason: a share that is not mounted yet
   looks exactly like a library with every file gone.
 

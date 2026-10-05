@@ -180,6 +180,8 @@ const AGREE: Record<string, string> = {
   goes: 'go', lands: 'land', stays: 'stay', matches: 'match', qualifies: 'qualify', it: 'they', its: 'their', this: 'these',
   // v0.49.1, Health's own sentences (lib/said.ts).
   waits: 'wait', contains: 'contain', uses: 'use', appears: 'appear', shares: 'share', holds: 'hold', belongs: 'belong',
+  // v0.55.4, Rescan everything's renumbering preview (lib/rescan.ts numbersLine).
+  gets: 'get',
 };
 /** A word and the punctuation after it, apart. */
 const split = (w: string) => { const m = /^(.*?)([.,;:!?…)]*)$/u.exec(w)!; return { core: m[1], tail: m[2] }; };

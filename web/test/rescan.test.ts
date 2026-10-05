@@ -52,7 +52,7 @@ test('a series of the opt-in says what renumbering it costs, and the tracker mov
   // Reintroduce by saying the tracker clauses without `tracked`: the second line below grows two clauses about a
   // tracker the series is not linked to.
   assert.equal(numbersLine({ chapters: 3, readers: 1, overrides: 1, tracked: true, up: 2, down: 1 }),
-    '3 chapters are renumbered · 1 reader finished one of them · 1 with a number set by hand keeps it · 2 finished chapters go up on a tracker · 1 finished chapter goes down on a tracker, which keeps its number');
+    '3 chapters are renumbered · 1 reader finished one of them · 1 with a number set by hand keeps it · 2 finished chapters get a higher number on a tracker · 1 finished chapter gets a lower number; the tracker keeps the higher one');
   assert.equal(numbersLine({ chapters: 1, readers: 0, overrides: 0, tracked: false, up: 1, down: 1 }), '1 chapter is renumbered');
   assert.equal(numbersLine({ chapters: 4, readers: 2, overrides: 3, tracked: true, up: 0, down: 0 }),
     '4 chapters are renumbered · 2 readers finished one of them · 3 with a number set by hand keep it');
@@ -74,9 +74,9 @@ test('what an Apply did leads with a folder it left alone, and is the Tasks line
   // v0.55.4 integration (lanes J × K): a series a download was running in is left alone, and said. Reintroduce by
   // dropping the clause: a series Apply never touched reads as one with nothing gone.
   assert.equal(appliedLine({ ...r, busy: 2 }),
-    '12 chapters marked as no longer on disk · 1 back on disk before Apply, left alone · 2 changed since the preview, left alone · 3 were probably moved or renamed (kept) · 2 series had a download running and were left alone · 2 series renumbered by the new rules');
+    '12 chapters marked as no longer on disk · 1 back on disk before Apply, left alone · 2 changed since the preview, left alone · 3 were probably moved or renamed (kept) · 2 series had a download or a check running and were left alone · 2 series renumbered by the new rules');
   assert.equal(appliedLine({ ...r, marked: 0, back: 0, changed: 0, moved: 0, renumbered: undefined, busy: 1 }),
-    '0 chapters marked as no longer on disk · 1 series had a download running and was left alone');
+    '0 chapters marked as no longer on disk · 1 series had a download or a check running and was left alone');
   assert.match(appliedLine({ ...r, stopped: 'shutdown' }), /^stopped for a restart · 12 chapters/);
   // The Tasks line: the rescan's result is told apart by `marked`, and never read as the verify's or the cleanup's.
   // Reintroduce by dropping the `marked` branch in taskResult: the line is empty.

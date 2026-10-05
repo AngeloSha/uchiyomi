@@ -155,10 +155,10 @@ export function numbersLine(n: Pick<RescanNumbers, 'chapters' | 'readers' | 'ove
   if (n.readers) bits.push(n.readers === 1 ? tr('1 reader finished one of them') : tr('{n} readers finished one of them', { n: n.readers }));
   if (n.overrides) bits.push(n.overrides === 1 ? tr('1 with a number set by hand keeps it') : tr('{n} with a number set by hand keep it', { n: n.overrides }));
   // Only for a series linked to a tracker, where a finished chapter's number is what the tracker is told next.
-  if (n.tracked && n.up) bits.push(n.up === 1 ? tr('1 finished chapter goes up on a tracker') : tr('{n} finished chapters go up on a tracker', { n: n.up }));
+  if (n.tracked && n.up) bits.push(n.up === 1 ? tr('1 finished chapter gets a higher number on a tracker') : tr('{n} finished chapters get a higher number on a tracker', { n: n.up }));
   if (n.tracked && n.down) {
-    bits.push(n.down === 1 ? tr('1 finished chapter goes down on a tracker, which keeps its number')
-      : tr('{n} finished chapters go down on a tracker, which keeps its number', { n: n.down }));
+    bits.push(n.down === 1 ? tr('1 finished chapter gets a lower number; the tracker keeps the higher one')
+      : tr('{n} finished chapters get a lower number; the tracker keeps the higher one', { n: n.down }));
   }
   return bits.join(' · ');
 }
@@ -186,8 +186,8 @@ export function appliedLine(r: RescanApplied): string {
   if (r.moved) bits.push(movedText(r.moved));
   // Said, or a series Apply did not touch reads as one it found nothing in: the next Rescan has it.
   if (r.busy) {
-    bits.push(r.busy === 1 ? tr('1 series had a download running and was left alone')
-      : tr('{n} series had a download running and were left alone', { n: r.busy }));
+    bits.push(r.busy === 1 ? tr('1 series had a download or a check running and was left alone')
+      : tr('{n} series had a download or a check running and were left alone', { n: r.busy }));
   }
   const s = r.renumbered?.series ?? 0;
   if (s) bits.push(s === 1 ? tr('1 series renumbered by the new rules') : tr('{n} series renumbered by the new rules', { n: s }));
