@@ -195,14 +195,14 @@ test('refused lately: an hour after the 429, whatever the level says', () => {
 test('nothing but a run, the idle days and the tests lowers a level', () => {
   // The API surface: noteDownloaded is the one way down besides the clock, and it counts runs, never one success.
   // (withSlowPace only ever slows a download further, and only inside its own scope; rateKeyOf only says whose level it
-  // is; notePageHosts only says which sources share one.)
+  // is; notePageHosts only says which sources share one; slowedSources only names the sources at a raised level.)
   noteRateLimited(plain.id);
   assert.equal(paceLevel(plain.id), 1);
   const exported = Object.keys(require('../src/lib/pace')).sort();
   assert.deepEqual(exported, [
     'MAX_PAGE_GAP_MS', 'PACE_HOLD_MS', 'PACE_IDLE_MS', 'PACE_MAX_LEVEL', 'PACE_STEADY_RUN', 'clearPace', 'noteDownloaded',
     'notePageHosts', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'rateKeyOf', 'refusedLately', 'restLeft',
-    'resumePace', 'serverOf', 'setPaceClock', 'slowPace', 'withSlowPace',
+    'resumePace', 'serverOf', 'setPaceClock', 'slowPace', 'slowedSources', 'withSlowPace',
   ]);
   clearPace();
   assert.equal(paceLevel(plain.id), 0, 'clearPace is for tests');
