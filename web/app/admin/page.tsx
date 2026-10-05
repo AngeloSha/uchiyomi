@@ -778,7 +778,9 @@ function Tasks() {
       <DesktopBackups />
       <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
         {(data?.content || []).map((t: any) => (
-          <div key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
+          // `id`: the search palette's Rescan everything lands on its row (`?section=task-rescan`, lib/destinations.ts), clear
+          // of the desktop's top bar.
+          <div key={t.id} id={`task-${t.id}`} className="grid scroll-mt-4 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:scroll-mt-20 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
             <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{tr(t.name)}</p>
             {/* Phone stacks the schedule under the name; from lg it takes a track of its own. */}
             {/* ⚠️ `remaining` is shown because the backlog is the one number that tells you whether a task is

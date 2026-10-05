@@ -23,7 +23,7 @@ const LABELS = keys(
   'Source order', 'Notice chapters',
   // Settings people ask for by name.
   'Check for updates', 'Open registration', 'Backup time', 'Delete read chapters', 'Show missing chapters in Mihon',
-  'Slow archive', 'Cloudflare solver', 'Version', 'Import a list',
+  'Slow archive', 'Cloudflare solver', 'Version', 'Import a list', 'Rescan everything',
   // The profile: its tabs, its cards and its settings by name.
   'You', 'Connections', 'Account', 'Badges', 'Reading studio', 'Appearance', 'Language', 'Reduce effects', 'Reading',
   'Weekly goal', 'Reading direction', 'Offline downloads', 'This device', 'New-chapter alerts', 'Progress tracking',
@@ -53,6 +53,7 @@ export interface Destination {
 const ADMIN = ['Admin'] as const;
 const ADMIN_SETTINGS = ['Admin', 'Settings'] as const;
 const ADMIN_HEALTH = ['Admin', 'Health'] as const;
+const ADMIN_TASKS = ['Admin', 'Tasks'] as const;
 const PROFILE = ['Profile'] as const;
 const PROFILE_SETTINGS = ['Profile', 'Settings'] as const;
 const PROFILE_CONNECTIONS = ['Profile', 'Connections'] as const;
@@ -115,6 +116,10 @@ export const DESTINATIONS: readonly Destination[] = [
     keywords: ['flaresolverr', 'byparr', 'trawl', 'captcha', 'cloudflare'] },
   { key: 'version', label: 'Version', where: ADMIN_HEALTH, href: '/admin/?tab=Health&section=check-update', admin: true,
     keywords: ['update', 'upgrade', 'release', 'changelog', 'about'] },
+  // Tasks' rows, by the task they run (`task-<id>`, app/admin/page.tsx Tasks). Rescan everything (v0.55.4, #150) is what
+  // Kedryn asked for by name, "rescan everything from scratch, removing from library what is no more on disk".
+  { key: 'rescan', label: 'Rescan everything', where: ADMIN_TASKS, href: '/admin/?tab=Tasks&section=task-rescan', admin: true,
+    keywords: ['rescan', 'scan from scratch', 'files gone', 'deleted files', 'missing files', 'remove from library', 'no longer on disk'] },
 
   // ---- The import (app/admin/import/page.tsx) ----
   { key: 'import', label: 'Import a list', where: ADMIN, href: '/admin/import/', admin: true,

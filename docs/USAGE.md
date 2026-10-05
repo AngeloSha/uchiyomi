@@ -127,7 +127,7 @@ Appearance → Type anywhere to search** switches the typing, and the **/** shor
 settings** lists what the words name: every admin tab, each section of **Admin → Settings**, the profile's tabs and
 cards, the import, and settings by name — *Notice chapters*, *18+ filter*, *Source order*, *Slow archive*, *Backup
 time*, *Delete read chapters*, *Scanlators*, *Check for updates*, the *Cloudflare solver* and the *Version* on Health,
-*Language*, *API tokens*, *Two-factor authentication* and more. A name works in your language and in English, and so do
+*Rescan everything* on Tasks, *Language*, *API tokens*, *Two-factor authentication* and more. A name works in your language and in English, and so do
 a few words people type instead (*flaresolverr*, *mihon*, *2fa*). Each row says where it is (*Admin → Settings*), and
 choosing it opens that page on that tab, scrolled to that card once it has loaded. Admin pages are listed for admins
 only, and what the desktop app does not have is not listed there. On a phone, the **Search** tab lists the same ones

@@ -39,6 +39,11 @@ const TAB_FILES: Record<string, string[]> = {
 const sectionIds = (files: string[]): Set<string> =>
   new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 const viewer = { admin: true, desktop: false, label: (k: string) => k };
+/** The ids of the tasks the server lists on Admin → Tasks (bff routes/admin.ts GET /api/admin/tasks). */
+const TASK_IDS = (() => {
+  const route = readFileSync(join(ROOT, '../bff/src/routes/admin.ts'), 'utf8');
+  return [...slice(route, "app.get('/api/admin/tasks',", "app.post('/api/admin/tasks/:id/run'").matchAll(/\bid: '([a-z]+)'/g)].map((m) => m[1]);
+})();
 
 test('every destination lands where it says: a real page, one of its tabs, and a card that tab draws', () => {
   // Reintroduce a section without its id (drop `id="notice-chapters"` from AdminSettings.tsx), or a tab that is gone
@@ -60,10 +65,19 @@ test('every destination lands where it says: a real page, one of its tabs, and a
       assert.ok(section.slice(6) in CHECK_TITLES, `${d.key}: there is no ${section.slice(6)} check`);
       continue;
     }
+    if (at === '/admin/ Tasks') {
+      // Tasks' rows are `task-<the task's id>`, a task the server lists (v0.55.4: Rescan everything, the palette's).
+      assert.match(section, /^task-/, `${d.key}: a Tasks row is not addressed by its task`);
+      assert.ok(TASK_IDS.includes(section.slice(5)), `${d.key}: the server lists no ${section.slice(5)} task (it has ${TASK_IDS.join(', ')})`);
+      continue;
+    }
     assert.ok(TAB_FILES[at], `${d.key}: nothing says where ${at} draws its cards`);
     assert.ok(sectionIds(TAB_FILES[at]).has(section), `${d.key}: no card with id="${section}" on ${at}`);
   }
   assert.match(code(read('app/admin/page.tsx')), /<div key=\{c\.id\} id=\{`check-\$\{c\.id\}`\} data-health-check=\{c\.id\}/, 'Health\'s cards have no id to land on');
+  // Reintroduce a Tasks row without its id: "Tasks' rows have no id to land on".
+  assert.ok(TASK_IDS.length >= 9 && TASK_IDS.includes('rescan'), `the server's task list was not read: ${TASK_IDS.join(', ')}`);
+  assert.match(code(read('app/admin/page.tsx')), /<div key=\{t\.id\} id=\{`task-\$\{t\.id\}`\} className="grid scroll-mt-4 /, 'Tasks\' rows have no id to land on');
   assert.equal(new Set(DESTINATIONS.map((d) => d.key)).size, DESTINATIONS.length, 'two destinations share a key');
 });
 
@@ -86,7 +100,7 @@ test('it covers every admin tab, every section of Admin → Settings, the profil
   }
   assert.ok(DESTINATIONS.some((d) => d.href === '/admin/import/' && d.label === 'Import a list'), 'the import page is not a destination');
   for (const name of ['Check for updates', 'Notice chapters', '18+ filter', 'Source order', 'Slow archive', 'Backup time', 'Delete read chapters',
-    'Scanlators', 'Cloudflare solver', 'Version']) {
+    'Scanlators', 'Cloudflare solver', 'Version', 'Rescan everything']) {
     assert.ok(DESTINATIONS.some((d) => d.label === name), `"${name}" is not found by name`);
   }
 });
@@ -122,6 +136,9 @@ test('a query finds by the label in the reader\'s language or in English, then b
   assert.equal(keysFor('notice')[0], 'settings-notice');
   assert.equal(keysFor('import')[0], 'import');
   assert.equal(keysFor('Version')[0], 'version');
+  // v0.55.4 (#150): Kedryn's words for it find Rescan everything.
+  assert.equal(keysFor('rescan')[0], 'rescan');
+  assert.ok(keysFor('deleted files').includes('rescan'), 'a word someone types for Rescan everything does not find it');
   assert.ok(keysFor('flaresolverr').includes('solver'), 'a word someone types for it does not find it');
   assert.ok(keysFor('mihon').includes('import'));
   assert.ok(keysFor('2fa').includes('two-factor'));
