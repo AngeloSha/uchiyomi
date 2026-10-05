@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.55.5 — 2026-10-06
+
+**Normal titles are no longer counted as 18+: a site that flags itself 18+ no longer marks every title it shares with
+other sites, and Natomanga's series keep their own genres instead of the site's whole genre menu.**
+
+### Fewer false 18+ in Discover search
+
+- **The cause:** each extension says whether its site has adult content, and the extension index flags a whole site when
+  it hosts any adult title. General sites such as **AllManga**, 11toon and Manga Bab carry the flag too.
+- **What went wrong:** since v0.55.4, one flagged site among a title's sources made the whole card 18+. With **Show 18+**
+  on, most manhwa AllManga also carries wore the **18+** mark under *All*, vanished under *Hide 18+* and showed under
+  *18+ only*.
+- **Now:** a site's own flag makes a title 18+ only when no other site carries it. A MangaDex erotica or pornographic
+  rating, a genre on your 18+ list, or a source you named on it still make a title 18+ wherever it is found.
+- **Unchanged:** with Show 18+ off, flagged sites aren't searched at all, and a flagged site's own row of results stays
+  behind 18+.
+
+### Natomanga series keep their own genres
+
+- **The cause:** Natomanga's series pages now carry the site's whole genre menu, and Uchiyomi read every genre link on
+  the page. Some series got all 69 genres, Adult, Hentai and Smut among them; on the owner's library that was 12 series,
+  such as *Return of the War God* and *The Glutton*.
+- **Now:** genres come from the series' own genre row only (Natomanga and Mangakakalot).
+- **Repaired on upgrade:**
+  - series that already hold the menu get their own genres back;
+  - they get a series type where those genres name one, so the notice-chapter switches apply to them;
+  - neither a chapter file still carrying the menu nor a new add from any source brings it back.
+- It hid nothing on its own, since the library hides by genre only for genres on your 18+ list. But those series showed
+  dozens of genre chips and turned up under Hentai.
+
+### Upgrading
+
+- **Database:** no new column. A one-time step cleans genres holding a site's genre menu, in series and in their Edit
+  details overrides, and types those series from what is left. v0.55.4 runs on the same database, so going back is one
+  line of your compose file.
+- **For scripts** ([api.md](docs/api.md)): in `GET /api/sources/search-all`, a provider 18+ only by its extension's
+  flag makes a card 18+ only when every provider is one. Providers still carry `rating: adult` for it.
+
 ## v0.55.4 — 2026-10-05
 
 **Easier to find: the version at the foot of the admin menu, "Import your library" where a new library starts, and a
