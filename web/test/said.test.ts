@@ -568,8 +568,9 @@ test('on the desktop app, every platform wording says Uchiyomi, never a containe
   const DESKTOP = [
     'solver.down', 'solver.downNote', 'solver.failingNote', 'cap.note', 'cap.title', 'cap.detail', 'frozen.overLimit',
     'fix.solverCrash', 'fix.solverDown', 'fix.bypassOff', 'fix.engineLogin', 'fix.engineDown', 'fix.solverBroken',
-    // v0.55.3: the desktop helper is never busy and has no backup, but its words would still be a restart.
-    'fix.solverBusy', 'autofix.needs.mainSolverDown', 'autofix.needs.backupSolverDown',
+    // v0.55.3: the desktop helper is never busy and has no backup, but its words would still be a restart, and the
+    // backup's two lines name no container.
+    'fix.solverBusy', 'autofix.clears.mainSolverDown', 'autofix.clears.backupSolverDown',
     // v0.52.0 (#134): the desktop app chooses its folders; nothing is mounted there.
     'nested.note',
   ];

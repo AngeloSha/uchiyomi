@@ -642,15 +642,6 @@ const EN = {
     'The Cloudflare solver answers but keeps failing: restart its container',
     'Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi',
   ),
-  // v0.55.3: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
-  'autofix.needs.mainSolverDown': () => forDesktop(
-    'The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running',
-    'Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi',
-  ),
-  'autofix.needs.backupSolverDown': () => forDesktop(
-    'The backup Cloudflare solver is not answering: check that its container is running',
-    'Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi',
-  ),
   'autofix.needs.engine': () => 'The extension engine needs a look',
   'autofix.needs.foldersTwice': () => forDesktop(
     'The library and the downloads folder are inside each other: mount them side by side',
@@ -683,6 +674,11 @@ const EN = {
   'autofix.clears.nextRun': ({ n }: { n: number }) => `${n} more to do: the next Fix everything continues`,
   'autofix.clears.partial': ({ n }: { n: number }) => `${n} chapter${s(n, '', 's')} with missing pages ${s(n, 'is', 'are')} completed by the sweep`,
   'autofix.clears.slow': ({ n }: { n: number }) => `${n} source${s(n, '', 's')} answered slowly or empty lately`,
+  // v0.55.3: one of two solvers is not answering while the other solves: Health's solver card is amber, and nothing waits
+  // on a person -- Needs you holds the solver only when neither answers (the owner's plan). The desktop app has one
+  // helper and never a backup, so neither is ever said there.
+  'autofix.clears.mainSolverDown': () => 'The main Cloudflare solver is not answering, and the backup is solving meanwhile',
+  'autofix.clears.backupSolverDown': () => 'The backup Cloudflare solver is not answering, and the main one is solving',
 };
 
 /** Why Fix everything passed a part of its run over (`autofix.item.skipped`). */

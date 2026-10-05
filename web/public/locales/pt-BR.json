@@ -3209,8 +3209,8 @@
   "The main solver is not answering; the backup is solving": "O solucionador principal não está respondendo; o de reserva está resolvendo",
   "the backup is not answering": "o solucionador de reserva não está respondendo",
   "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "Toda requisição que o solucionador principal não consegue responder vai para o de reserva, então as fontes continuam funcionando; cada uma espera antes o principal falhar.",
-  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "O solucionador do Cloudflare principal não responde, e enquanto isso o de reserva está resolvendo: verifique se o contêiner dele está rodando",
-  "The backup Cloudflare solver is not answering: check that its container is running": "O solucionador do Cloudflare de reserva não responde: verifique se o contêiner dele está rodando",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile": "O solucionador do Cloudflare principal não responde, e enquanto isso o de reserva está resolvendo",
+  "The backup Cloudflare solver is not answering, and the main one is solving": "O solucionador do Cloudflare de reserva não responde, e o principal continua resolvendo",
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "O solucionador principal não está respondendo; enquanto isso, o de reserva está resolvendo. Reinicie o contêiner do solucionador principal; redefinir daqui não mudaria nada.",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "O solucionador de reserva não está respondendo. Reinicie o contêiner dele; redefinir daqui não mudaria nada."
 }

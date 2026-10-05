@@ -1555,6 +1555,8 @@ without you pressing anything. Since v0.48.3:
     moves a series onto a source that cannot update it, and leaves the chapters a rate limit holds back to clear by
     themselves. A source the extension source limit left out keeps its series too (it needs a slot, which the end lists
     under what needs you), while one the engine no longer offers is replaced like any broken source (since v0.55.1).
+    With a backup Cloudflare solver (since v0.55.3) the solver needs you only when neither answers: with one of the two
+    down, every request is still solved, and the end says which one under what clears by itself.
     Merges and deletes cannot be undone. While it
     runs you see its step (ten of them), a bar and what it is on, with **Stop** — it stops at the next safe point,
     never in the middle of a merge, a delete or a renumbering — and **Run in background**; the key then says

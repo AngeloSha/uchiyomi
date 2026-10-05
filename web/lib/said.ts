@@ -868,13 +868,6 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.needs.solverFailing': () => (isDesktop()
     ? tr('Uchiyomi’s Cloudflare helper keeps failing: quit and reopen Uchiyomi')
     : tr('The Cloudflare solver answers but keeps failing: restart its container')),
-  // v0.55.3: one of two solvers is not answering (the desktop app has one, and says so as solverDown does).
-  'autofix.needs.mainSolverDown': () => (isDesktop()
-    ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
-    : tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running')),
-  'autofix.needs.backupSolverDown': () => (isDesktop()
-    ? tr('Uchiyomi’s Cloudflare helper is not answering: quit and reopen Uchiyomi')
-    : tr('The backup Cloudflare solver is not answering: check that its container is running')),
   'autofix.needs.engine': () => tr('The extension engine needs a look'),
   'autofix.needs.foldersTwice': () => (isDesktop()
     ? tr('Uchiyomi’s library folder and the manga folder you added are inside each other: keep them side by side')
@@ -931,6 +924,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.clears.slow': (p) => (num(p, 'n') === 1
     ? tr('1 source answered slowly or empty lately')
     : tr('{n} sources answered slowly or empty lately', { n: num(p, 'n') })),
+  // v0.55.3: one of two solvers is not answering while the other solves (never on the desktop app: one helper, no backup).
+  'autofix.clears.mainSolverDown': () => tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile'),
+  'autofix.clears.backupSolverDown': () => tr('The backup Cloudflare solver is not answering, and the main one is solving'),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

@@ -1462,14 +1462,16 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const solverCheck = by.get('solver');
   if (solverCheck && solverCheck.status !== 'ok') {
     // Down is the operator's whatever the run did; answering but failing is the solver step's to reset first. With a
-    // backup (v0.55.3) one of the two may be down while the other solves: that one is the operator's too, by name.
-    // Reintroduce the two-way split: "with the main down and the backup solving" in autofix.int.test.ts reads that the
-    // solver keeps failing.
+    // backup (v0.55.3) one of the two may be down while the other solves: every request is still solved, and the owner's
+    // plan has Needs you hold the solver only when NEITHER answers. Health's card stays amber, so the end says it among
+    // what goes on without anyone -- never "All green" over an amber card, never a person's. Reintroduce Needs you for
+    // either: "with the main down and the backup solving" and "with the backup down" in autofix.int.test.ts find the
+    // solver under Needs you.
     const said = (solverCheck.summarySaid ?? []).map((p) => p.code);
     if (said[0] === 'solver.down') need('solver', say('autofix.needs.solverDown'));
-    else if (said[0] === 'solver.backupSolving') need('solver', say('autofix.needs.mainSolverDown'));
+    else if (said[0] === 'solver.backupSolving') clear(say('autofix.clears.mainSolverDown'));
     else {
-      if (said.includes('solver.backupQuiet')) need('solver', say('autofix.needs.backupSolverDown'));
+      if (said.includes('solver.backupQuiet')) clear(say('autofix.clears.backupSolverDown'));
       if (said[0] === 'solver.blaming') needAfter(['solver'], 'solver', 1, say('autofix.needs.solverFailing'));
     }
   }

@@ -3209,8 +3209,8 @@
   "The main solver is not answering; the backup is solving": "أداة الحل الرئيسية لا تستجيب؛ والاحتياطية هي التي تحلّ",
   "the backup is not answering": "أداة الحل الاحتياطية لا تستجيب",
   "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "كل طلب لا تستطيع أداة الحل الرئيسية الإجابة عنه يذهب إلى الاحتياطية، فتستمر المصادر في العمل؛ لكن كلًّا منها ينتظر أولًا إخفاق الرئيسية.",
-  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "أداة حل Cloudflare الرئيسية لا تستجيب، والاحتياطية تحلّ مكانها في الأثناء: تحقّق من أن حاويتها تعمل",
-  "The backup Cloudflare solver is not answering: check that its container is running": "أداة حل Cloudflare الاحتياطية لا تستجيب: تحقّق من أن حاويتها تعمل",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile": "أداة حل Cloudflare الرئيسية لا تستجيب، والاحتياطية تحلّ مكانها في الأثناء",
+  "The backup Cloudflare solver is not answering, and the main one is solving": "أداة حل Cloudflare الاحتياطية لا تستجيب، والرئيسية هي التي تحلّ",
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "أداة الحل الرئيسية لا تستجيب؛ والاحتياطية تحلّ مكانها في الأثناء. أعد تشغيل حاوية أداة الحل الرئيسية؛ إعادة الضبط من هنا لن تغيّر شيئًا.",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "أداة الحل الاحتياطية لا تستجيب. أعد تشغيل حاويتها؛ إعادة الضبط من هنا لن تغيّر شيئًا."
 }

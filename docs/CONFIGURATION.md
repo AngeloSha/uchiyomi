@@ -209,7 +209,9 @@ and trawl's version with their own latest release (any other solver's with nothi
 solver* card lists both, *Main solver* and *Backup solver*, each with its address: amber with *The main solver is not
 answering; the backup is solving* while only the backup answers, amber while the backup does not answer, and the
 usual *Not answering* when neither does. The nightly repair and **Fix everything** count the solver as up while either
-answers, and **Reset the solver** clears what Uchiyomi remembers about both.
+answers, and **Reset the solver** clears what Uchiyomi remembers about both. Fix everything puts the solver under *Needs
+you* only when neither answers: with one of the two down its end says so under what goes on by itself, since every
+request is still solved.
 
 The extension engine uses the **main** solver only: **Connect** points its own helper at `FLARESOLVERR_URL` (see
 `FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` under [Downloading](#downloading), and [extensions.md](extensions.md)).

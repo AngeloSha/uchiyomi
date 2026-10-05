@@ -828,11 +828,13 @@ test('a solver that is down: the sources behind it are left alone, and it is Nee
 /**
  * v0.55.3: with a backup solver (FLARESOLVERR_FALLBACK_URL), "the solver is up" is at least one answering. The main down
  * and the backup solving is not a solver that is down: the sources behind it are Tested like any other (a failure there
- * is the site's again), and Needs you names the main. Reintroduce the main's ping as the whole of it (solverPing's top
- * level in flaresolverr.ts): af-cf is left alone with "solver_down" in the log. Reintroduce the two-way split in
- * summarise: Needs you reads that the solver keeps failing.
+ * is the site's again). Every request is still solved, so nothing waits on a person: the owner's plan has Needs you hold
+ * the solver only when neither answers, and the end says the main is not answering among what goes on by itself -- never
+ * "All green" over Health's amber card. Reintroduce the main's ping as the whole of it (solverPing's top level in
+ * flaresolverr.ts): af-cf is left alone with "solver_down" in the log. Reintroduce Needs you for it (lane H's
+ * autofix.needs.mainSolverDown in summarise): "the solver is never Needs you while the backup solves" fails.
  */
-test('with the main solver down and the backup solving: the sources behind them are tested, and Needs you names the main', { skip }, async () => {
+test('with the main solver down and the backup solving: the sources behind them are tested, and the end says so without Needs you', { skip }, async () => {
   const backup = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ msg: 'FlareSolverr is ready!', version: '3.4.6' }));
@@ -852,13 +854,39 @@ test('with the main solver down and the backup solving: the sources behind them 
     assert.ok(!r?.log?.some((l: any) => l.code === 'autofix.item.skipped' && l.params?.why === 'solver_down'), 'the run took the solver for down');
     const tested = await q(`SELECT 1 FROM audit_log WHERE event = 'source.test' AND detail->>'runId' = $1 AND detail->>'source' = $2`, [started.runId, CF]);
     assert.equal(tested.length, 1, 'af-cf was Tested: the backup is solving, so its failure is the site\'s');
-    const solverNeed = r?.summary?.needsYou.find((n: any) => n.check === 'solver');
-    assert.equal(solverNeed?.said.code, 'autofix.needs.mainSolverDown', 'Needs you names the main solver');
+    assert.ok(!r?.summary?.needsYou.some((n: any) => n.check === 'solver'), `the solver is never Needs you while the backup solves: ${JSON.stringify(r?.summary?.needsYou)}`);
+    assert.ok(r?.summary?.clears.some((c: any) => c.said.code === 'autofix.clears.mainSolverDown'), `the end says the main is not answering: ${JSON.stringify(r?.summary?.clears)}`);
+    assert.equal(r?.summary?.green, false, 'and never "All green" while Health\'s solver card is amber');
   } finally {
     solverReady = true;
     delete process.env.FLARESOLVERR_FALLBACK_URL;
     forgetSolverPing();
     await new Promise<void>((go) => backup.close(() => go()));
+  }
+});
+
+test('with the backup down and the main solving: the end says so, and the solver is never Needs you (v0.55.3)', { skip }, async () => {
+  // A backup that would not answer when needed: Health's card is amber, and the main still solves every request. The
+  // owner's plan: Needs you only when neither answers. Reintroduce lane H's autofix.needs.backupSolverDown in summarise:
+  // "never Needs you with the main solving" fails.
+  const gone = createServer();
+  await new Promise<void>((go) => gone.listen(0, '127.0.0.1', go));
+  const port = (gone.address() as AddressInfo).port;
+  await new Promise<void>((go) => gone.close(() => go()));
+  const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+  process.env.FLARESOLVERR_FALLBACK_URL = `http://127.0.0.1:${port}`;
+  try {
+    forgetSolverPing();
+    const started = autofix.startAutofix(adminId);
+    assert.ok('runId' in started);
+    await autofix.autofixSettled();
+    const r = await autofix.autofixRun(started.runId);
+    assert.equal(r?.status, 'done');
+    assert.ok(!r?.summary?.needsYou.some((n: any) => n.check === 'solver'), `never Needs you with the main solving: ${JSON.stringify(r?.summary?.needsYou)}`);
+    assert.ok(r?.summary?.clears.some((c: any) => c.said.code === 'autofix.clears.backupSolverDown'), `the end says the backup is not answering: ${JSON.stringify(r?.summary?.clears)}`);
+  } finally {
+    delete process.env.FLARESOLVERR_FALLBACK_URL;
+    forgetSolverPing();
   }
 });
 

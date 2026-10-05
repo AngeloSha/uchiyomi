@@ -3209,8 +3209,8 @@
   "The main solver is not answering; the backup is solving": "主求解器没有响应；由备用求解器求解",
   "the backup is not answering": "备用求解器没有响应",
   "Every request the main solver cannot answer goes to the backup, so sources keep working; each one first waits for the main to fail.": "主求解器无法应答的每个请求都会转给备用求解器，因此来源仍能正常工作；不过每个请求都要先等主求解器失败。",
-  "The main Cloudflare solver is not answering, and the backup is solving meanwhile: check that its container is running": "主 Cloudflare 求解器没有响应，目前由备用求解器求解：请检查它的容器是否在运行",
-  "The backup Cloudflare solver is not answering: check that its container is running": "备用 Cloudflare 求解器没有响应：请检查它的容器是否在运行",
+  "The main Cloudflare solver is not answering, and the backup is solving meanwhile": "主 Cloudflare 求解器没有响应，目前由备用求解器求解",
+  "The backup Cloudflare solver is not answering, and the main one is solving": "备用 Cloudflare 求解器没有响应，目前由主求解器求解",
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "主求解器没有响应；目前由备用求解器求解。请重启主求解器的容器；在这里重置不会有任何改变。",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "备用求解器没有响应。请重启它的容器；在这里重置不会有任何改变。"
 }
