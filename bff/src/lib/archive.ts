@@ -164,9 +164,9 @@ const lastWaits = new Map<string, { wait: SeriesWait; since: number }>();
 /** The source each queued series' next chapter is on, as the last tick found it: what its ETA shares. */
 const sourceOf = new Map<string, string>();
 /**
- * The sources a queued series' next chapter may come from, as the last tick found them, one per rate key with the
- * chosen copy's first (v0.55.4, #158): only for a series whose copies are the same release on several. Its ETA is
- * divided among them, and it is backing off only while every one of them is.
+ * The sources a queued series' next chapter may come from, as the last tick found them, the chosen copy's first (v0.55.4,
+ * #158): only for a series whose copies are the same release on several. Its ETA is divided among their rate keys, and
+ * it is backing off only while every one of them is.
  */
 const rotating = new Map<string, string[]>();
 let timer: NodeJS.Timeout | null = null;
@@ -748,8 +748,8 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
       }
       // Where the chapter may come from (v0.55.4, #158): the copy the release rules chose, and on a series that may
       // rotate, the same release on every other followed source (lib/seriesListing.ts sameRelease) that the enqueuer's
-      // cap and the sweep's adult rule allow -- one per rate key, the chosen copy's key its own: a second site on the
-      // same image server is the same server, and taking turns between the two would only ask it twice as often.
+      // cap and the sweep's adult rule allow. A second site on the chosen one's image server is the same server: it waits
+      // with it (stateOf is by key) and loses their tie, so taking turns between the two never asks it more often.
       // Reintroduce by keeping the chosen copy alone: "a series rotates to a site that is not resting" in
       // archive.int.test.ts waits out the chosen site's break.
       const options = [pick.copy];
@@ -760,13 +760,7 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
           // adult source on a clean series. Reintroduce by dropping either: "never onto an adult source" in
           // archive.int.test.ts takes a second chapter from the adult site.
           const sweepRule = await sweepAllowedFor(await seriesIsAdult(r.series_id));
-          const keys = new Set([rateKeyOf(pick.copy.source)]);
-          for (const cp of same) {
-            const key = rateKeyOf(cp.source);
-            if (keys.has(key) || !sweepRule(cp.source)) continue;
-            keys.add(key);
-            options.push(cp);
-          }
+          for (const cp of same) if (sweepRule(cp.source)) options.push(cp);
         }
       }
       if (options.length > 1) rotating.set(r.series_id, options.map((cp) => cp.source));
