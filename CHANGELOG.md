@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.55.3 — 2026-10-05
+
+**A backup Cloudflare solver, gentler downloads from sites that ask for fewer requests, and failed chapters that follow
+their series to a new source.**
+
+### A backup Cloudflare solver
+
+- **`FLARESOLVERR_FALLBACK_URL`** sets a second solver. When the main one doesn't answer a request with a page (it's
+  down, it timed out, it answered with an error or an empty page, or it stays busy), the same request goes to the
+  backup.
+- **Each site goes first to the solver that last solved it,** for 6 hours. Its Cloudflare pass (the cookie and browser
+  identity) is kept per solver, so downloads use the pass of the solver that earned it.
+- **A solver that is only busy is waited for, not blamed.** When a solver answers *too many requests* itself (trawl does
+  when all its browsers are in use), Uchiyomi waits, retries, then asks the backup. It never counts as the site refusing.
+- **trawl is recognised as itself.** Health says *Ready (trawl v1.7.0)* and checks trawl's own releases; before, it was
+  compared with FlareSolverr's and read as a false "update available". [CONFIGURATION.md](docs/CONFIGURATION.md)
+  describes FlareSolverr, trawl and Byparr, with a compose example of trawl as the main solver and FlareSolverr as the
+  backup. On a real library, once trawl had solved a site, its next pages took about 2 s instead of about 12 s.
+- **Health's solver card lists both solvers.** It is amber when one is down and the other keeps solving, and needs
+  attention only when both are down. Fix everything says a down solver clears by itself while the other one works.
+- trawl's own error messages are read for what they mean.
+
+### Gentler with a site that asks for fewer requests
+
+- **Downloads stay slow longer.** After a site's image server answers *too many requests* (HTTP 429), downloads from it
+  stay slower for at least an hour. They speed up one step at a time, after a run of good chapters. Before, they sped up
+  after the first success and were refused again.
+- **One chapter at a time while slowed,** and a refusal pauses every chapter from that site, not just the one refused.
+- **Sources whose pages come from the same image server share one pace,** like Natomanga and Mangakakalot.
+- Health says *Downloading slowly: the site asked for fewer requests* on such a source.
+- **Measured on a test server allowing 60 requests a minute:** 6 of 18 chapters failed before; now 2 of 18 do, and only on
+  the first night. Downloads take about twice as long.
+
+### Failed chapters follow their series
+
+- **When a series moves to another main source,** the chapters that had failed on the old source move with it and are
+  tried again from the new one. A move is a Replace, Make main, Fix everything, or a source being unfollowed or removed.
+  Before, they stayed filed under the old source, where Health counted them as failing and Fix everything listed them as
+  needing you.
+- Chapters already left behind are moved on first start.
+- While the new source is rate-limited or slowed, they show as waiting.
+
+### Fix everything tries the extensions most people read first
+
+- The download counts that order the extension search no longer favour recently updated extensions. The big sites now
+  come first: MangaDex, MangaFire, Asura Scans, Comick, Weeb Central, Mangakakalot and the like. Everything is still tried
+  eventually.
+
+### Notice chapters: "Only hide short ones"
+
+- A new switch under **Admin → Settings → Notice chapters**, **on by default**, keeps today's rule: only chapters numbered
+  like 12.5 with 3 pages or fewer are hidden.
+- Turned off, it hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split
+  into parts.
+- Asked for by **@TIGamingTV** ([#147](https://github.com/AngeloSha/uchiyomi/pull/147)).
+
+### Upgrading
+
+- **Database:** one new column (`server_settings.hide_notice_short_only`, on by default), and a one-time move of failed
+  chapters left under a source their series no longer uses. Both happen by themselves. v0.55.2 runs on the same
+  database, so going back is one line of your compose file.
+- **New optional setting:** `FLARESOLVERR_FALLBACK_URL` (CONFIGURATION.md → *The Cloudflare solver*). Nothing changes
+  until you set it.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET` and `PATCH /api/admin/settings` carry `hideNoticeShortOnly`.
+  - Source states gain `slowed`.
+  - Health's solver card gains its main and backup rows.
+  - A failed chapter can be `moved`.
+
 ## v0.55.2 — 2026-10-04
 
 **Hand-collected comics get the right chapter numbers from their file names, and the notice "chapters" some sites post
