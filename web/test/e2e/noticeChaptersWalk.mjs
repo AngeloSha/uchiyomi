@@ -13,6 +13,8 @@
 //   2. the series page leaves the two-page 2.5 out and keeps the twenty-page 3.5, and every count agrees on five --
 //      the series, its Library card, Mihon, the header's "5 chapters" -- with "Hidden now" at one;
 //   3. the reader: its chapter list leaves 2.5 out, the next chapter after 2 is 3, and 2.5 is not there by id;
+//   3b. v0.55.3 (#147, TIGamingTV's switch): "Only hide short ones (3 pages or fewer)" switched off -- its help says what
+//      that hides -- and the twenty-page 3.5 leaves too, four counted and two hidden; switched on again, it is back;
 //   4. switched off: every one of them is back, six.
 // And the off state costs nothing: the Library grid's own request, timed before the switch was ever on and after it is
 // off again, takes about as long (lib/noticeChapters.ts `active`: off, every query is the previous release's).
@@ -31,6 +33,8 @@ const FILES = {
 };
 const ALL = ['Ch. 1', 'Ch. 2', 'Ch. 2.5', 'Ch. 3', 'Ch. 3.5', 'Ch. 4'];
 const SHOWN = ALL.filter((l) => l !== 'Ch. 2.5');
+/** "Only hide short ones" off (v0.55.3): every chapter numbered like 12.5 hides, the twenty-page 3.5 too. */
+const WHOLE_ONLY = ALL.filter((l) => !/\.5$/.test(l));
 /** Manhwa's switch: the second of Settings' notice switches, in the server's type order (web lib/seriesTypes.ts). */
 const MANHWA = 1;
 
@@ -98,6 +102,25 @@ export async function noticeChaptersWalk(ctx) {
       await waitFor(() => page.evaluate((i, want) => document.querySelectorAll('[data-notice-types] [role="switch"]')[i]?.getAttribute('aria-checked') === want, MANHWA, String(to)), 5000, 200);
       check(`noticechapters @${t}: no sideways scroll`, await noSideScroll());
     };
+    /** v0.55.3 (#147): Settings -> Notice chapters -> "Only hide short ones", flipped through the page. */
+    const flipShort = async (to, t) => {
+      await visit('/admin/?tab=Settings', 3500);
+      const sw = await waitFor(() => page.evaluate(() => {
+        const b = document.querySelector('[data-notice-short-only] [role="switch"]');
+        if (!b) return null;
+        b.scrollIntoView({ block: 'center' });
+        return b.getAttribute('aria-checked');
+      }), 15_000, 300);
+      check(`noticechapters @${t}: Settings has "${say('Only hide short ones (3 pages or fewer)')}", ${to ? 'off' : 'on'}`, sw === String(!to), String(sw));
+      const help = await page.evaluate(() => document.querySelector('[data-notice-short-only]')?.closest('section')?.textContent ?? '');
+      check(`noticechapters @${t}: ...its help says what switching it off hides`,
+        help.includes(say('Off hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split into parts.')), help.slice(0, 300));
+      await page.evaluate(() => document.querySelector('[data-notice-short-only] [role="switch"]')?.click());
+      const held = await waitFor(async () => ((await call('/api/admin/settings')).hideNoticeShortOnly === to ? true : null), 10_000, 300);
+      check(`noticechapters @${t}: switched ${to ? 'on' : 'off'}, the server holds it`, !!held, String((await call('/api/admin/settings')).hideNoticeShortOnly));
+      await waitFor(() => page.evaluate((want) => document.querySelector('[data-notice-short-only] [role="switch"]')?.getAttribute('aria-checked') === want, String(to)), 5000, 200);
+      check(`noticechapters @${t}: no sideways scroll`, await noSideScroll());
+    };
     const { token: apiKey } = await call('/api/tokens', { json: { name: 'notice chapters walk', scopes: ['read'] } });
     /** What each surface counts: the series, its Library card, Mihon, and Hidden now. */
     const counts = async () => {
@@ -156,6 +179,27 @@ export async function noticeChaptersWalk(ctx) {
         return ms.sort((a, b) => a - b)[Math.floor(ms.length / 2)];
       })();
 
+      // 3b. v0.55.3 (#147, TIGamingTV's switch): only short ones off -- the twenty-page 3.5 hides too -- and on again.
+      await flipShort(false, t);
+      await page.evaluate(() => document.querySelector('[data-notice-short-only]')?.scrollIntoView({ block: 'center' }));
+      await shot(`noticechapters-${t}-3b-short-only-off`);
+      const whole = await seriesPage(4);
+      check(`noticechapters @${t}: "Only hide short ones" off, the twenty-page 3.5 leaves the series page too`,
+        JSON.stringify(whole.rows) === JSON.stringify(WHOLE_ONLY), JSON.stringify(whole.rows));
+      check(`noticechapters @${t}: ...and its header says "${say('{n} chapters', { n: 4 })}"`, whole.says);
+      const c3 = await counts();
+      check(`noticechapters @${t}: every count is 4, and Hidden now is 2`,
+        JSON.stringify(c3) === JSON.stringify({ series: 4, card: 4, unread: 4, mihon: 4, hidden: 2 }), JSON.stringify(c3));
+      check(`noticechapters @${t}: ...and the series says which rule hides them`, (await call(`/api/series/${s.id}`)).hideNoticeShortOnly === false);
+      await shot(`noticechapters-${t}-3c-series-short-only-off`);
+      await flipShort(true, t);
+      const shortAgain = await seriesPage(5);
+      check(`noticechapters @${t}: on again, the twenty-page 3.5 is back and only the two-page 2.5 stays hidden`,
+        JSON.stringify(shortAgain.rows) === JSON.stringify(SHOWN), JSON.stringify(shortAgain.rows));
+      const c4 = await counts();
+      check(`noticechapters @${t}: ...every count is 5 again, Hidden now 1`,
+        JSON.stringify(c4) === JSON.stringify({ series: 5, card: 5, unread: 5, mihon: 5, hidden: 1 }), JSON.stringify(c4));
+
       // 4. Off: every one of them back.
       await flip(false, t);
       await shot(`noticechapters-${t}-4-settings-off`);
@@ -178,7 +222,7 @@ export async function noticeChaptersWalk(ctx) {
     check(`noticechapters: off again, the Library grid's request takes what it took before any switch (${before.toFixed(1)} -> ${after.toFixed(1)} ms)`,
       after <= Math.max(before * 1.5, before + 15));
   } finally {
-    await call('/api/admin/settings', { method: 'PATCH', json: { hideNoticeTypes: [] } }).catch(() => {});
+    await call('/api/admin/settings', { method: 'PATCH', json: { hideNoticeTypes: [], hideNoticeShortOnly: true } }).catch(() => {});
     if (lang() !== 'en') await setLang('en').catch(() => {});
   }
 }

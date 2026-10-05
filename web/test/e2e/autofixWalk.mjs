@@ -35,7 +35,9 @@
 //  10. fake-d, the owner's AllManga: searches and chapter lists answer, its page lists fail (its Test says so). Moved
 //      Walk is what that run moved onto it, fake-c dropped; the run moves it back to fake-c, which only asked for room
 //      (the damage undone), and turns fake-d off. fake-d also lists Fix Search and registers before fake-b: Replace
-//      must never make it a destination;
+//      must never make it a destination. Since v0.55.3 Moved Walk's chapters 11 and 12 failed on fake-d's page lists
+//      while it sat there (the owner's 32 AllManga chapters): the move files them under fake-c, not tried there yet, and
+//      Health shows them waiting on it while it is rate-limited -- never Needs you;
 //  11. Pop Walk, with no source at all and no translation group: only an extension carries it, the fifth by popularity
 //      (the GitHub releases' download counts, from the engine's stand-in) -- the run goes past three, in that order,
 //      keeps the one that found it and removes each miss at once; the most downloaded, 18+, is never tried for it.
@@ -81,7 +83,8 @@ const ADDS = [
   ['fake-b', 'gap-only', 'Gap Only', {}],
   ['fake-b', 'fail-walk', 'Fail Walk', { chapterCount: 3 }],
   // v0.55.1: Moved Walk from fake-c, before its images refuse anything; Pop Walk from fake-b, whose source then goes.
-  ['fake-c', 'moved-walk', 'Moved Walk', {}],
+  // v0.55.3: ten of Moved Walk's twelve -- 11 and 12 are the chapters that failed on fake-d (the header's 10).
+  ['fake-c', 'moved-walk', 'Moved Walk', { chapterCount: 10 }],
   ['fake-b', 'pop-walk', 'Pop Walk', {}],
 ];
 /** The source limit up.sh starts this stack with (E2E_MAX_SOURCES): what Free a slot's sheet says is full. */
@@ -292,6 +295,13 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     // Moved Walk, as that run left three series: moved onto fake-d, whose page lists fail, and fake-c dropped from it.
     sql(`UPDATE lib_series SET source_id = 'fake-d', source_series_id = 'moved-walk' WHERE id = ${lit(ID['Moved Walk'])}`);
     sql(`DELETE FROM series_sources WHERE series_id = ${lit(ID['Moved Walk'])}`);
+    // v0.55.3: and its chapters 11 and 12 failed there, at fake-d's page lists, three times each -- rows of the ledger
+    // under fake-d, as the owner's 32 sat under AllManga. fake-c refuses their images with 429, should anything ask.
+    sql(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+           VALUES (${lit(ID['Moved Walk'])}, 11, 'fake-d', 'error', 'no page urls', 3, now() - interval '1 hour', now() - interval '2 days'),
+                  (${lit(ID['Moved Walk'])}, 12, 'fake-d', 'error', 'no page urls', 3, now() - interval '1 hour', now() - interval '2 days')
+           ON CONFLICT DO NOTHING`);
+    for (const n of [11, 12]) await script(FAKE_C, `moved-walk-${n}`, '429');
     await script(FAKE_D, 'site', 'pages-error');
     const dTest = await call('/api/admin/sources/fake-d/test', { method: 'POST', json: {} });
     check('autofix: fake-d\'s Test finds its page lists failing', dTest.body?.state === 'fail' && dTest.body?.stage === 'pages',
@@ -515,6 +525,15 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     check('autofix: ...and fake-c\'s refused chapter waits on Chapters that would not download: a statement, the card green',
       failures?.status === 'ok' && JSON.stringify(failures.items.map((i) => [i.title, !!i.info])) === JSON.stringify([['fake-c', true]]),
       JSON.stringify(failures && { status: failures.status, items: failures.items.map((i) => [i.title, i.info]) }));
+    // v0.55.3, failures follow the series: Moved Walk's two failed chapters moved with it, onto fake-c, and wait there.
+    const followed = sql(`SELECT string_agg(number || ':' || source_id || ':' || status || ':' || attempts, ' ' ORDER BY number) FROM chapter_failures WHERE series_id = ${lit(ID['Moved Walk'])}`);
+    check('autofix: Moved Walk\'s two failed chapters followed it onto fake-c, its new main, their tries back to 0',
+      /^11:fake-c:(moved|rate_limited):[01] 12:fake-c:(moved|rate_limited):[01]$/.test(followed), followed);
+    console.log(`         Moved Walk's ledger after the run: ${followed}`);
+    const cRowAfter = failures?.items.find((i) => i.sourceId === 'fake-c');
+    check('autofix: ...and Health counts them on fake-c\'s row, waiting with Limit Walk\'s: three chapters in two series',
+      cRowAfter?.info === true && cRowAfter.detailSaid?.[0]?.params?.n === 3 && cRowAfter.detailSaid[0].params.series === 2, JSON.stringify(cRowAfter?.detailSaid));
+    check('autofix: ...nothing is filed under fake-d any more', sql(`SELECT count(*) FROM chapter_failures WHERE source_id = 'fake-d'`) === '0');
     check('autofix: ...and Twice Short and Odd Mark are what is left on theirs', JSON.stringify(after['saved-twice']) === JSON.stringify(['Twice Short'])
       && JSON.stringify(after.outliers) === JSON.stringify(['Odd Mark']) && JSON.stringify(after.numbering) === JSON.stringify(['Number Held']), JSON.stringify(after));
     const ignored = sql('SELECT count(*) FROM health_ignored');
@@ -532,6 +551,27 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     check(`autofix @1280: Recent repairs lists the run with its headline ("${say('{n} need you', { n: 4 })}")`, history?.kind === 'needs' && history.text === say('{n} need you', { n: 4 }), JSON.stringify(history));
     check('autofix @1280: Health after has no sideways scroll', await noSideScroll());
     await shot('autofix-1280-4-health-after');
+    // v0.55.3: Chapters that would not download, opened: fake-c's row, greyed, with Moved Walk's chapters waiting on it.
+    await page.evaluate(() => {
+      const c = document.querySelector('[data-health-check="chapter-failures"]');
+      const b = c?.querySelector('button');
+      if (b && b.getAttribute('aria-expanded') !== 'true') b.click();
+      c?.scrollIntoView({ block: 'start' });
+    });
+    await sleep(800);
+    const failText = await page.evaluate(() => document.querySelector('[data-health-check="chapter-failures"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+    check(`autofix @1280: Chapters that would not download says the chapters wait for the site's pause, Moved Walk's among them`,
+      failText.includes(say('{n} chapters wait for a site that asked for a pause, and are tried again by themselves', { n: 3 })), failText.slice(0, 400));
+    // fake-c's own row, in view: its latest chapter is one of Moved Walk's, worded as moved from a source it left.
+    const cRowText = await page.evaluate(() => {
+      const c = document.querySelector('[data-health-check="chapter-failures"]');
+      const title = [...(c?.querySelectorAll('p') ?? [])].find((p) => p.textContent.trim() === 'fake-c');
+      title?.scrollIntoView({ block: 'center' });
+      return title?.parentElement?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    });
+    check(`autofix @1280: ...fake-c's row names Moved Walk's chapter "${say('from a source the series no longer uses')}"`,
+      cRowText.includes('Moved Walk') && cRowText.includes(say('from a source the series no longer uses')), cRowText);
+    await shot('autofix-1280-4c-failures-follow-the-series');
 
     // ---- 2. at 390: Health after, then a second run, stopped at a safe point -------------------------------------------
     console.log('\n  autofix @390');
