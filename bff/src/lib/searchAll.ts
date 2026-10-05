@@ -313,13 +313,69 @@ export async function searchAll(
 // (by declared preference), which is what "the first provider is the default pick" rests on -- NOT the
 // ask order above, which puts language-less sources first and would change every card's default source.
 
-/** `lang` (v0.52.0): the language the source declares, as an app code; null when it says nothing or serves every one. */
-export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string; lang: string | null }
-export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[] }
-export interface SourceRail { source: string; name: string; lang: string | null; results: Array<SourceSeries & { name: string }> }
+// ---- the 18+ filter (v0.55.4, #158) -------------------------------------------------------------------------------------
+// DannyDynamite39's second ask: "certain extensions don't expose content rating ... when searching a series in the
+// Discover tab, such filtering options should be visible". A search result says what it can: its source may be adult (an
+// extension that declares it, or one the admin named), MangaDex rates every title, and the admin's adult genres
+// (Admin -> Settings -> 18+ filter) can be matched against the genres a result carries. Worked out here, on READ, for one
+// viewer's answer: the entry above is every viewer's, and must never hold anyone's filter.
 
-/** One card per normalised title carrying every provider that has it; most providers first, at most `max`. */
-export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], max = 30): TitleGroup[] {
+/** What a search result is known to be: 18+, or not. Absent when nothing says either. */
+export type Rating = 'adult' | 'safe';
+/** What a search shows: everything, everything not known to be 18+ (`safe`), or only what is (`adult`). */
+export type RatingFilter = 'all' | 'safe' | 'adult';
+/** The admin's 18+ filter lists (lib/visibility.ts adultFilter): genres as typed, source ids lowercased. */
+export interface AdultLists { genres: readonly string[]; sources: readonly string[] }
+
+/**
+ * Whether a search result is 18+, by every signal it carries.
+ *
+ * 18+ when its source is (the extension declares itself adult, or the admin named it on the 18+ list), when MangaDex
+ * rates the title erotica or pornographic, or when one of its genres is on the admin's adult list -- folded as
+ * browsable() folds them (lib/visibility.ts: trimmed and case-blind on both sides). Not 18+ when MangaDex rates it safe
+ * or suggestive, or when it names genres, the admin's list has some, and none of them match. Anything else is unknown:
+ * most extensions name no genres in a search, and an unknown result is shown under All and Hide 18+, never under 18+
+ * only. Reintroduce by matching genres without the fold: "a genre is matched as the library matches it" in
+ * adultFilter.int.test.ts keeps the 18+ result under Hide 18+.
+ */
+export function ratingOf(
+  item: Pick<SourceSeries, 'genres' | 'contentRating'>, src: { id?: string; isNsfw?: boolean } | null | undefined, lists: AdultLists,
+): Rating | undefined {
+  if (src?.isNsfw) return 'adult';
+  if (src?.id && lists.sources.includes(String(src.id).toLowerCase())) return 'adult';
+  if (item.contentRating === 'erotica' || item.contentRating === 'pornographic') return 'adult';
+  const fold = (g: string) => g.trim().toLowerCase();
+  const adult = new Set(lists.genres.map(fold).filter(Boolean));
+  const genres = (Array.isArray(item.genres) ? item.genres : []).filter((g): g is string => typeof g === 'string').map(fold).filter(Boolean);
+  if (genres.some((g) => adult.has(g))) return 'adult';
+  if (item.contentRating === 'safe' || item.contentRating === 'suggestive') return 'safe';
+  if (genres.length && adult.size) return 'safe';
+  return undefined;
+}
+
+/** How a shaping rates and filters: the rating of one result from one source, and what the viewer is shown. */
+export interface Rated { of: (item: SourceSeries, src: SourceAdapter) => Rating | undefined; want: RatingFilter }
+/** Whether a result (or a card) of this rating is shown under `want`. Unknown is shown under all and safe, not adult. */
+const shows = (want: RatingFilter, r: Rating | undefined): boolean => (want === 'all' ? true : want === 'safe' ? r !== 'adult' : r === 'adult');
+
+/**
+ * `lang` (v0.52.0): the language the source declares, as an app code; null when it says nothing or serves every one.
+ * `rating` (v0.55.4): what the result is known to be, absent when nothing says (ratingOf).
+ */
+export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string; lang: string | null; rating?: Rating }
+/** `rating` (v0.55.4): 18+ when any provider's result is, else safe when any is; absent when none says. */
+export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[]; rating?: Rating }
+export interface SourceRail { source: string; name: string; lang: string | null; results: Array<SourceSeries & { name: string; rating?: Rating }> }
+
+/**
+ * One card per normalised title carrying every provider that has it; most providers first, at most `max`.
+ *
+ * With `rated`, each provider and card says what it is known to be, and the cards the viewer does not want are left out
+ * BEFORE the cap: filtered after it, "18+ only" was what happened to be among the thirty, often nothing. A card is 18+
+ * when any of its providers is -- a title folded with an adult one stays out of Hide 18+, which errs the safe way.
+ * Reintroduce the filter after the slice: "filtered before the cap" in searchAll.int.test.ts finds fewer cards.
+ */
+export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], max = 30, rated?: Rated): TitleGroup[] {
   const groups = new Map<string, TitleGroup>();
   for (const src of order) {
     for (const r of per.get(src.id)?.items ?? []) {
@@ -331,23 +387,38 @@ export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], m
       if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
       if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
       if (!g.providers.some((p) => p.source === r.source)) {
-        g.providers.push({ source: r.source, name: src.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title, lang: canonLang(src.lang) });
+        const rating = rated?.of(r, src);
+        g.providers.push({
+          source: r.source, name: src.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title, lang: canonLang(src.lang),
+          ...(rating ? { rating } : {}),
+        });
       }
     }
   }
-  return [...groups.values()].sort((a, b) => b.providers.length - a.providers.length).slice(0, max);
+  const all = [...groups.values()];
+  for (const g of all) {
+    const rating = g.providers.some((p) => p.rating === 'adult') ? 'adult' : g.providers.some((p) => p.rating === 'safe') ? 'safe' : undefined;
+    if (rating) g.rating = rating;
+  }
+  return (rated ? all.filter((g) => shows(rated.want, g.rating)) : all).sort((a, b) => b.providers.length - a.providers.length).slice(0, max);
 }
 
-/** One rail per source that had results (Mihon's global-search screen); each result carries its source's name. */
-export function bySource(per: SearchAnswer['per'], order: SourceAdapter[]): SourceRail[] {
+/**
+ * One rail per source that had results (Mihon's global-search screen); each result carries its source's name. With
+ * `rated`, each result says what it is known to be, the ones the viewer does not want are left out, and a rail left
+ * with nothing is not drawn.
+ */
+export function bySource(per: SearchAnswer['per'], order: SourceAdapter[], rated?: Rated): SourceRail[] {
   const out: SourceRail[] = [];
   for (const src of order) {
     const list = per.get(src.id)?.items ?? [];
     if (!list.length) continue;
-    out.push({
-      source: src.id, name: src.name, lang: src.lang ?? null,
-      results: list.filter((r) => !!r.sourceId).map((r) => ({ ...r, name: src.name })),
+    const results = list.filter((r) => !!r.sourceId).flatMap((r) => {
+      const rating = rated?.of(r, src);
+      return !rated || shows(rated.want, rating) ? [{ ...r, name: src.name, ...(rating ? { rating } : {}) }] : [];
     });
+    if (rated && !results.length) continue;
+    out.push({ source: src.id, name: src.name, lang: src.lang ?? null, results });
   }
   return out;
 }

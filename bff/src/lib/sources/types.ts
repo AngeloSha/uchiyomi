@@ -31,6 +31,12 @@ export interface SourceSeries {
    * as its type (lib/seriesType.ts: ja manga, ko manhwa, zh manhua), which the notice-chapter switches go by.
    */
   originalLanguage?: string;
+  /**
+   * How the source itself rates the title, when it does (v0.55.4, #158): MangaDex's `contentRating`. Discover's search
+   * reads it for its 18+ filter (lib/searchAll.ts ratingOf): erotica and pornographic are 18+, safe and suggestive are
+   * not. Absent for every scraped site and extension, which say nothing per title.
+   */
+  contentRating?: 'safe' | 'suggestive' | 'erotica' | 'pornographic';
 }
 
 export interface SourceChapter {

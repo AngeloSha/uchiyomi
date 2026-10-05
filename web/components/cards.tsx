@@ -275,6 +275,8 @@ export interface SourceItem {
   lang?: string | null;
   /** >1 when the same title was found on several sources. */
   providerCount?: number;
+  /** A search result known to be 18+ (v0.55.4, #158): the small "18+" mark on its cover. */
+  rating?: 'adult' | 'safe';
 }
 
 /**
@@ -313,6 +315,15 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
         {sourceName && (
           <span title={sourceName} className="absolute end-1.5 top-1.5 z-10 grid place-items-center rounded-md bg-ink-950/80 p-1 backdrop-blur">
             <SourceIcon id={item.source} name={sourceName} size={16} />
+          </span>
+        )}
+        {/* Known to be 18+ (v0.55.4, #158): a search for one title answers with whatever the sources hold, and an 18+ one
+            says so before it is opened. Below the source's icon when the wall shows one. dir="ltr": the "+" of "18+" stays
+            where the translation puts it in an Arabic line. */}
+        {item.rating === 'adult' && (
+          <span dir="ltr" data-rating-mark
+            className={`absolute end-1.5 ${sourceName ? 'top-9' : 'top-1.5'} z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-red-300 backdrop-blur`}>
+            {tr('18+')}
           </span>
         )}
         {/* A bare "3" in a corner said nothing; the word makes it the fact it is: the same title on three

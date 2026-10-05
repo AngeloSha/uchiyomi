@@ -26,19 +26,25 @@ import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 /**
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
- * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`.
+ * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
+ * (#158) `rating` says what the card is known to be -- 18+ when any provider's result is -- and is absent when nothing
+ * says (most extensions name no genres in a search).
  */
 interface SearchGroup {
   title: string; coverUrl?: string; inLibrary?: boolean; librarySeriesId?: string; libraryLangs?: string[]; updatedAt?: string;
-  providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string; lang?: string | null; inLibrary?: boolean }[];
+  rating?: 'adult' | 'safe';
+  providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string; lang?: string | null; inLibrary?: boolean; rating?: 'adult' | 'safe' }[];
 }
+/** What a search shows (v0.55.4): everything, everything not known to be 18+, or only what is. */
+type RatingFilter = 'all' | 'safe' | 'adult';
 /** One source's line in a search answer (v0.40.0): what it did with the term, or that it is still being asked. */
 interface SearchSourceLine { id: string; name: string; state: 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending'; ms?: number; why?: 'disabled' | 'cooldown' }
 /**
  * `/api/sources/search-all`. `content` is the grouped hits, shaped exactly as before v0.40.0; the rest is the
- * progress the server has reported since, and is optional so an older server's answer still renders.
+ * progress the server has reported since, and is optional so an older server's answer still renders. `rating` (v0.55.4)
+ * is the 18+ filter the server applied: the one asked for, or `safe` for an account whose age limit shows no 18+.
  */
-interface SearchAnswer { content: SearchGroup[]; sources?: SearchSourceLine[]; pending?: number; asked?: number }
+interface SearchAnswer { content: SearchGroup[]; sources?: SearchSourceLine[]; pending?: number; asked?: number; rating?: RatingFilter }
 
 /**
  * How long the server may hold the FIRST answer to a search while the sources are still being asked. The
@@ -206,6 +212,17 @@ export default function DiscoverPage() {
 
   // ---------------------------------------------------------------- search
   /**
+   * The 18+ filter on the results (v0.55.4, #158): All, Hide 18+, 18+ only. Offered only while Show 18+ is on -- with it
+   * off the server hides every 18+ result anyway, and three chips that answer the same would be a control that does
+   * nothing -- and not to an account whose age limit shows no 18+: the server holds that one to Hide 18+ whatever it
+   * asks, and its answer says so (`rating: 'safe'` for a filter asked as anything else), which is how the page learns
+   * it. Kept for the visit, so every search after the first is filtered the same way.
+   */
+  const [rating, setRating] = useState<RatingFilter>('all');
+  const [capped, setCapped] = useState(false);
+  const offerRating = adultOn && !capped;
+  const ratingAsked: RatingFilter = offerRating ? rating : 'all';
+  /**
    * The search, as a query rather than an imperative fetch.
    *
    * It was one `await api(...)` that showed eighteen skeletons until EVERY source had answered, and a
@@ -217,14 +234,16 @@ export default function DiscoverPage() {
    */
   const searchQ = useQuery({
     // `selected` is part of the key: narrowing to a source is a different question, and must not be
-    // answered from the unfiltered search's cache.
-    queryKey: ['search-all', term, selected],
+    // answered from the unfiltered search's cache. So is the 18+ filter, and whether Show 18+ is on: an answer from
+    // before the switch was flipped says nothing about the account's age limit after it.
+    queryKey: ['search-all', term, selected, ratingAsked, adultOn],
     queryFn: ({ signal, queryKey, client }) => {
       // ⚠️ Only the first request may wait the long wait. A poll that also waited six seconds would hold
       // its answer until the server's grace expired, so the wall would fill in six seconds late every time.
       const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
       const only = selected ? `&source=${encodeURIComponent(selected)}` : '';
-      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}`, { signal });
+      const rated = ratingAsked === 'all' ? '' : `&rating=${ratingAsked}`;
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}`, { signal });
     },
     enabled: mode === 'search' && !!term,
     // A failed search is shown as one; retrying it would be another fan-out to every source.
@@ -233,6 +252,11 @@ export default function DiscoverPage() {
     refetchOnWindowFocus: false,
     refetchInterval: (qy) => (qy.state.data?.pending ? SEARCH_POLL_MS : false),
   });
+  // An answer to a search made with Show 18+ on, filtered to Hide 18+ although it asked for something else: the
+  // account's age limit shows no 18+, and the chips go for the rest of the visit.
+  useEffect(() => {
+    if (adultOn && ratingAsked !== 'safe' && searchQ.data?.rating === 'safe') setCapped(true);
+  }, [adultOn, ratingAsked, searchQ.data]);
   // The grouped hits as wall rows, under today's mapping: the first provider's ids are the card's, the badge
   // counts every provider. Derived, so a poll's answer replaces the rows without anything being cleared.
   const searchHits = useMemo<SourceItem[]>(() => (searchQ.data?.content ?? []).flatMap((g) => {
@@ -246,6 +270,7 @@ export default function DiscoverPage() {
       title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
       inLibrary: g.inLibrary, librarySeriesId: g.librarySeriesId, providerCount: g.providers.length,
       ...(g.libraryLangs ? { libraryLangs: g.libraryLangs } : {}), ...(pick.lang !== undefined ? { lang: pick.lang } : {}),
+      ...(g.rating === 'adult' ? { rating: 'adult' as const } : {}),
     }];
   }), [searchQ.data, selected]);
   const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
@@ -558,6 +583,16 @@ export default function DiscoverPage() {
             {tr('{done} of {total} sources', { done: settled, total: budget.length })}
           </span>
         ) : null}
+        {/* The 18+ filter (v0.55.4, #158), on its own row under the heading: three chips do not fit beside it at 390 px.
+            Search mode only, and only while it can change something (`offerRating`). */}
+        {mode === 'search' && offerRating && (
+          <div role="group" aria-label={tr('18+ filter')} className="flex basis-full flex-wrap items-center gap-1.5" data-rating-chips>
+            {([['all', tr('All')], ['safe', tr('Hide 18+')], ['adult', tr('18+ only')]] as const).map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setRating(key)} aria-pressed={rating === key}
+                className={`chip text-xs ${rating === key ? 'chip-active' : ''}`}>{label}</button>
+            ))}
+          </div>
+        )}
         {/* Search's own progress, on its own row: with three source names it does not fit beside the
             heading at 390 px, and it is gone the moment the last source answers. Announced, since the wall
             it describes changes under a screen reader without a focus change. */}

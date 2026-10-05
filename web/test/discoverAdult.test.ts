@@ -87,3 +87,16 @@ test('the admin console lists every source, including the ones Discover hides', 
   assert.doesNotMatch(admin, /queryKey: \['sources'\], queryFn: \(\) => api<\{ content: any\[\] \}>\('\/api\/sources'\)/,
     'an admin source query is back on the shared browsing key');
 });
+
+test('"18+ only" is offered only while Show 18+ is on, and never to an account capped below 18 (v0.55.4)', () => {
+  // With Show 18+ off the server hides every 18+ search result anyway, so the three chips would all answer the same: a
+  // control that does nothing. An account whose age limit shows no 18+ is held to Hide 18+ by the server whatever it
+  // asks, and its answer says so (`rating: 'safe'` for a filter asked as anything else): the page learns it there and
+  // offers nothing. Reintroduce by offering the chips whatever Show 18+ says (`const offerRating = !capped;`): the first
+  // assertion fails; by never learning the cap: "the cap is not learned from the answer" fails.
+  const page = code(read('app/discover/page.tsx'));
+  assert.match(page, /const offerRating = adultOn && !capped;/, 'the chips are offered while Show 18+ is off');
+  assert.match(page, /const ratingAsked: RatingFilter = offerRating \? rating : 'all';/, 'a rating is asked for while the chips are not offered');
+  assert.match(page, /if \(adultOn && ratingAsked !== 'safe' && searchQ\.data\?\.rating === 'safe'\) setCapped\(true\);/,
+    'the cap is not learned from the answer');
+});

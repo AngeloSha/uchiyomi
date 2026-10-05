@@ -13,7 +13,7 @@ import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
 import { followGuard, seriesLanguage } from '../lib/seriesLang';
-import { searchAll, groupByTitle, bySource, SEARCH_FIRST_ANSWER_MS } from '../lib/searchAll';
+import { searchAll, groupByTitle, bySource, ratingOf, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 
@@ -130,7 +130,10 @@ import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import {
+  visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult, adultFilter,
+  ADULT_RATING,
+} from '../lib/visibility';
 // v0.52.0 (#72): language editions of one work, and the language model they stand on.
 import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editions';
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
@@ -2810,9 +2813,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * polls the same URL with a short `wait` until it is 0.
    */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait, source } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string };
+    const { q: rawQ, groupBy, wait, source, rating: rawRating } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; rating?: string };
+    // The 18+ filter (v0.55.4, #158): `rating=all|safe|adult`, anything else read as all. Applied to this viewer's
+    // answer only, after the shared entry (lib/searchAll.ts ratingOf, groupByTitle). An account capped below 18 is never
+    // shown an 18+ result whatever it asks: the add checks only the source, so the cap is held here. And with "Show 18+"
+    // off nobody is: that switch already keeps adult SOURCES out of the fan-out, and an 18+ title from a source that is
+    // not -- MangaDex's erotica, a genre on the admin's list -- went on showing in search until v0.55.4.
+    // Reintroduce by honouring `rating` whatever the cap: "a capped account is held to Hide 18+" in searchAll.int.test.ts
+    // finds the 18+ card.
+    const ctx = vc(req);
+    const ratingAsked: RatingFilter = rawRating === 'safe' || rawRating === 'adult' ? rawRating : 'all';
+    const rating: RatingFilter = (ctx.maxAgeRating !== null && ctx.maxAgeRating < ADULT_RATING) || ctx.hideAdultLibraries ? 'safe' : ratingAsked;
     const term = (rawQ || '').trim();
-    if (!term) return { content: [], sources: [], pending: 0, asked: 0 };
+    if (!term) return { content: [], sources: [], pending: 0, asked: 0, rating };
     // Absent means the full first-answer wait, so a caller written before `wait` existed gets the most
     // complete answer one request can give; anything above the cap is clamped rather than refused.
     const asked = wait === undefined || wait === '' ? SEARCH_FIRST_ANSWER_MS : Number(wait);
@@ -2842,14 +2855,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const byId = new Map(ask.map((s) => [s.id, s] as const));
     // Shaped in provider-preference order, as before: the first provider of a card is the default pick.
     const order = findOrder().map((id) => byId.get(id)).filter((s): s is SourceAdapter => !!s);
-    const rest = { sources: ans.sources, pending: ans.pending, asked: ans.asked };
+    // `rating`: the filter this answer applied -- the one asked for, or `safe` when the viewer may not be shown 18+.
+    const rest = { sources: ans.sources, pending: ans.pending, asked: ans.asked, rating };
+    // Every result's rating, by the admin's lists as they are now (cached briefly: lib/visibility.ts adultFilter).
+    const lists = await adultFilter();
+    const rated: Rated = { of: (r, src) => ratingOf(r, src, lists), want: rating };
 
     // Same fan-out either way; only the shaping differs. groupBy=source mirrors Mihon's global-search
     // screen (one rail per provider) for the import-review "search manually" sheet — the title-grouped
     // shape below groups all providers of the SAME title into one card instead, which is what Discover
     // wants but hides which specific source a manual pick would come from.
     if (groupBy === 'source') {
-      const rails = bySource(ans.per, order);
+      const rails = bySource(ans.per, order, rated);
       const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
       return {
         content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), g.source) })) })),
@@ -2858,7 +2875,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     }
 
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
-    const groups = groupByTitle(ans.per, order);
+    const groups = groupByTitle(ans.per, order, 30, rated);
     const have = await inLibrary(groups.map((g) => g.title));
     return { content: groups.map((g) => ownedGroup(g, have.get(norm(g.title)))), ...rest };
   });

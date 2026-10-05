@@ -1183,6 +1183,15 @@ again.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
   source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+- **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
+  **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
+  results by what is known of each. A result is 18+ when its provider is (its extension says so, or it is ticked in
+  **Admin → Settings → 18+ filter**), when MangaDex rates the title erotica, or when it carries one of the 18+ filter's
+  genres, and such a card wears a small **18+** mark; a MangaDex title rated safe or suggestive is not, nor one whose
+  genres the filter's list does not name. Most extensions say nothing about a title in a search: their results stay
+  under *All* and *Hide 18+* and are left out of *18+ only*. The choice holds for every search until you leave the
+  page. With **Show 18+** off the search shows no 18+ results at all and the chips are not offered, and an account
+  whose age limit is below 18 gets the same, whatever it asks for.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle
@@ -2034,7 +2043,9 @@ and popular walls answer nothing, and the search across all your sources does no
 request goes to that site at all. The **Show 18+** button is on Discover too — beside *Newest from your
 sources*, where it stays while you search — and brings the lot back for the rest of the browser session.
 It appears there whenever something is being hidden, so an install with adult providers and no 18+ shelf
-still has the switch. Three things are deliberately left alone, because you named them yourself: opening a
+still has the switch. Since v0.55.4 the search also leaves out 18+ titles from providers that are not 18+ themselves
+while the reveal is off — a MangaDex title rated erotica, a result carrying one of the genres below — and with it on,
+its *Hide 18+* and *18+ only* chips (section 6) sort them out. Three things are deliberately left alone, because you named them yourself: opening a
 provider's own page for a title, adding it, and *Find missing chapters* on a series whose own source is
 adult. Hiding those would stop a series you already own from being filled, which is breaking the library
 rather than tidying a screen.

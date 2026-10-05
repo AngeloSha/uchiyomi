@@ -510,6 +510,20 @@ narrows the set described above and never widens it: an adult source without `ad
 limit, or an id that does not exist asks nobody and answers the empty shape. The entry is still keyed by the
 term alone, so a narrowed search reads whatever a full one already heard, and the other way round.
 
+Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)) `&rating=all|safe|adult` filters the
+answer for 18+: `safe` (Discover's *Hide 18+*) leaves out every result known to be 18+, `adult` (*18+ only*) keeps only
+those, and `all` (the default; anything else reads as it) keeps everything. A result is 18+ when its source is (an
+extension that declares itself adult, or one on the source list of Admin → Settings → 18+ filter), when MangaDex rates
+the title erotica or pornographic, or when one of its genres is on the 18+ filter's genre list (trimmed and case-blind,
+as the library compares them). It is not 18+ when MangaDex rates it safe or suggestive, or when it names genres, the
+genre list has some, and none of them match; otherwise it is unknown — kept under `all` and `safe`, left out of
+`adult`. A card is 18+ when any of its providers is, else safe when any is. Each card, each provider and (with
+`groupBy=source`) each result carries `rating: adult | safe` when known, and nothing when not. The filter runs on the
+caller's own answer before the 30-card cap, never on the shared entry. An account whose age limit is below 18 is held
+to `safe` whatever it asks, and so is every request without `adult=1`: with Show 18+ off the search hides 18+ titles
+from sources that are not adult themselves too (MangaDex's erotica, a genre on the list), which it did not before
+v0.55.4. The answer's top-level `rating` says which filter it applied.
+
 `GET /api/sources/detail` is cached for ten minutes per source and series (it was ninety seconds), and
 concurrent requests for the same pair — the add dialog's pre-warm and the pick that follows it — collapse
 into one outbound fetch. A failed lookup is never cached, so an immediate retry asks the source again.

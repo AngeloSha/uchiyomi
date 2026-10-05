@@ -39,6 +39,8 @@ const MEMBER = 'af-member';
 const CAPPED = 'af-capped';
 const NAMED_SRC = 'af-src-named';
 const CLEAN_SRC = 'af-src-clean';
+/** A site whose search results name genres (v0.55.4): one carries a genre on the list, spelt as another site spells it. */
+const GENRE_SRC = 'af-src-genre';
 
 const asked: Record<string, number> = { [NAMED_SRC]: 0, [CLEAN_SRC]: 0 };
 function fakeSource(id: string, name: string) {
@@ -63,6 +65,15 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
   await migrate();
   registerAdapter(fakeSource(NAMED_SRC, 'Zzz Named Source') as any);
   registerAdapter(fakeSource(CLEAN_SRC, 'Zzz Clean Source') as any);
+  registerAdapter({
+    ...fakeSource(GENRE_SRC, 'Zzz Genre Source'),
+    async search(term: string) {
+      return [
+        { sourceId: `${GENRE_SRC}-1`, source: GENRE_SRC, title: `${term} tagged`, genres: ['Action', 'zzzaf ECCHI  '] },
+        { sourceId: `${GENRE_SRC}-2`, source: GENRE_SRC, title: `${term} clean`, genres: ['Action'] },
+      ];
+    },
+  } as any);
 
   const cleanup = async () => {
     await q('DELETE FROM series_overrides WHERE series_id = ANY($1)', [SERIES]).catch(() => {});
@@ -252,6 +263,25 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       assert.equal(r.statusCode, 200);
       assert.equal(asked[NAMED_SRC] - before[NAMED_SRC], 0, 'the fan-out still asked the named source');
       assert.equal(asked[CLEAN_SRC] - before[CLEAN_SRC], 1, 'PREMISE: the fan-out asked nobody');
+    });
+
+    await t.test('a genre is matched as the library matches it, in Discover search too (v0.55.4)', async () => {
+      // Discover's 18+ filter reads the same list (lib/searchAll.ts ratingOf), folded the way browsable() folds it:
+      // trimmed and case-blind on both sides. Reintroduce by matching genres as written: the tagged title stays under
+      // Hide 18+ and is missing from 18+ only.
+      await patch({ adultGenres: ['  ZZZAF Ecchi'], adultSources: [] });
+      const search = async (qs: string) => {
+        const r = await app.inject({ method: 'GET', url: `/api/sources/search-all?q=Zzzafgenre&wait=3000${qs}`, headers });
+        assert.equal(r.statusCode, 200, r.body);
+        return (r.json().content as Array<{ title: string; rating?: string }>)
+          .filter((g) => g.title === 'Zzzafgenre tagged' || g.title === 'Zzzafgenre clean').map((g) => `${g.title}:${g.rating ?? '?'}`).sort();
+      };
+      assert.deepEqual(await search('&adult=1'), ['Zzzafgenre clean:safe', 'Zzzafgenre tagged:adult'], 'a genre is matched as the library matches it');
+      assert.deepEqual(await search('&adult=1&rating=safe'), ['Zzzafgenre clean:safe']);
+      assert.deepEqual(await search('&adult=1&rating=adult'), ['Zzzafgenre tagged:adult']);
+      // With the list empty again, genres prove nothing either way.
+      await patch({ adultGenres: [] });
+      assert.deepEqual(await search('&adult=1'), ['Zzzafgenre clean:?', 'Zzzafgenre tagged:?']);
     });
   } finally {
     await app.close();

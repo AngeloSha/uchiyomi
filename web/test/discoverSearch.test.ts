@@ -47,11 +47,11 @@ test('the search is a query keyed on the submitted term, not on the field', () =
   // other way round, would show one under the other. Reintroduce by writing `queryKey: ['search-all', q]`:
   // "keyed on the field" fails; by dropping `selected` from the key: the same assertion fails; by dropping
   // `&source=` from the request: "the chosen source is not sent" fails; by bringing back `setSearchHits`:
-  // "the imperative search is back" fails.
+  // "the imperative search is back" fails. (Since v0.55.4 the 18+ filter is in the key too: see its own test.)
   const src = code(read(PAGE));
-  assert.match(src, /queryKey: \['search-all', term, selected\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
+  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
   assert.match(src, /const only = selected \? `&source=\$\{encodeURIComponent\(selected\)\}` : '';/, 'the chosen source is not sent');
-  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}`, \{ signal \}\)/, 'the chosen source is not sent');
+  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}\$\{rated\}`, \{ signal \}\)/, 'the chosen source is not sent');
   assert.match(src, /const \[term, setTerm\] = useState\(''\)/, 'there is no separate submitted term');
   assert.match(src, /enabled: mode === 'search' && !!term/, 'the search runs outside search mode or with an empty term');
   assert.doesNotMatch(src, /setSearchHits|setSearching|useState<SourceItem\[\]>\(\[\]\)/, 'the imperative search is back');
@@ -147,12 +147,32 @@ test('the wall pins still hold, and the hits are derived from the answer', () =>
   assert.match(code(src), /useEffect\(\(\) => \{\s*groupsRef\.current = \{\};\s*\(searchQ\.data\?\.content \?\? \[\]\)\.forEach\(\(g\) => \{ groupsRef\.current\[normTitle\(g\.title\)\] = g\.providers; \}\);\s*\}, \[searchQ\.data\]\);/, 'groups are not replaced from the latest answer');
 });
 
+test('the 18+ filter: three chips in search mode, sent and keyed, and an 18+ mark on what is 18+ (v0.55.4)', () => {
+  // DannyDynamite39 (#158): "when searching a series in the Discover tab, such filtering options should be visible".
+  // The rating is asked of the server (it filters before its thirty-card cap, which a client-side filter could not), so
+  // it is part of the key -- a Hide 18+ answer must never be shown under All -- and so is Show 18+: an answer from before
+  // the switch flipped says nothing about the account's age limit after it. Reintroduce by dropping `ratingAsked` from
+  // the key: "the rating is not in the key" fails; by dropping `&rating=`: "the rating is not sent" fails; by
+  // rendering the chips outside search mode: "the chips are not gated" fails; by dropping the mark: "no 18+ mark" fails.
+  const src = code(read(PAGE));
+  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the rating is not in the key');
+  assert.match(src, /const rated = ratingAsked === 'all' \? '' : `&rating=\$\{ratingAsked\}`;/, 'the rating is not sent');
+  assert.match(src, /\{mode === 'search' && offerRating && \(/, 'the chips are not gated on search mode and offerRating');
+  assert.match(src, /\(\[\['all', tr\('All'\)\], \['safe', tr\('Hide 18\+'\)\], \['adult', tr\('18\+ only'\)\]\] as const\)\.map/, 'the three chips are gone');
+  assert.match(src, /aria-pressed=\{rating === key\}/, 'the chips do not say which is on');
+  assert.match(src, /\.\.\.\(g\.rating === 'adult' \? \{ rating: 'adult' as const \} : \{\}\)/, 'a card does not carry its rating to the wall');
+  const card = code(read('components/cards.tsx'));
+  assert.match(card, /\{item\.rating === 'adult' && \(/, 'no 18+ mark on an 18+ result');
+  assert.match(card, /<span dir="ltr" data-rating-mark/, 'the mark lost its direction: "+18" reads backwards in an Arabic line');
+});
+
 test('every string the search renders is in all eight locale files', () => {
   // The parity test (library.test.ts) only compares the eight files with each other, so a string that
   // reaches none of them falls back to English in every language without anything failing. This reads the
   // page instead. Reintroduce by deleting any one of the four v0.40.0 keys from public/locales/ar.json.
   const keys = trKeys([PAGE]);
-  for (const k of ['{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}', 'and {n} more', 'and 1 more']) {
+  for (const k of ['{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}', 'and {n} more', 'and 1 more',
+    'Hide 18+', '18+ only', '18+ filter']) {
     assert.ok(keys.has(k), `"${k}" is no longer rendered by the page -- the scan or the page changed`);
   }
   const locales = readdirSync(join(ROOT, 'public/locales')).filter((f) => f.endsWith('.json'));
