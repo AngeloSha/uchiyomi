@@ -1393,6 +1393,13 @@ POST   /api/admin/import/batches/:id/run
 PATCH  /api/admin/import/candidates/:cid
 ```
 
+**Overview.** `GET /api/admin/stats` is what the admin header and Overview show: `libraries`, `seriesTotal`,
+`members`, `cacheBytes`, `lastScan`, `backlog` {chapters, series}, `database` (`embedded` or `external`) and each
+member's recent reading (`activity`). Since v0.55.4 ([#150](https://github.com/AngeloSha/uchiyomi/issues/150)) it also
+answers `version`, the running version as the server's own package.json says it, or null when that cannot be read; the
+foot of the admin menu prints it. Whether a newer one exists is Health's `update` check (`GET /api/admin/health`), which
+the page reads from its own copy of that answer: this route asks GitHub nothing.
+
 **Libraries.** A library is declared on one or more folders under the library root (since v0.55.1, #148): `POST
 /api/admin/libraries {name, paths, ageRating?}`, where `paths` is every folder it holds and `path` alone still means
 one; `PATCH /api/admin/libraries/:id` takes the same fields, `paths` replacing the list whole, and `members`. Each

@@ -43,6 +43,7 @@ import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
+import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -115,7 +116,9 @@ function AdminInner() {
     <div className="min-h-screen-d px-4 lg:px-0">
       <AdminHero onBack={() => router.back()} />
 
-      <ConsoleNav groups={isDesktop() ? visibleGroups(GROUPS, DESKTOP_HIDDEN.adminTabs) : GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}>
+      {/* The foot of the rail says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
+      <ConsoleNav groups={isDesktop() ? visibleGroups(GROUPS, DESKTOP_HIDDEN.adminTabs) : GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}
+        footer={<VersionLine />}>
         {hiddenTab ? null : panel}
       </ConsoleNav>
     </div>
@@ -138,7 +141,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery({
     queryKey: ['admin-health'],
-    queryFn: () => api<{ generatedAt: string; checks: Array<{ status: string }> }>('/api/admin/health'),
+    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
   });
   // One random series for the wash. `keepPreviousData` is deliberately off: a different backdrop on each
   // visit is the point, and it is the cheapest way to make the panel feel like part of the library.
@@ -184,6 +187,9 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
         : tr('{n} chapters behind across {m} series', { n: stats.backlog.chapters, m: stats.backlog.series })
       : null,
   ].filter(Boolean) as string[];
+  // v0.55.4 (#150): which Uchiyomi this is. A desktop says it at the foot of the rail (VersionLine); a phone has no
+  // rail -- its group sheet holds the same line, a tap away -- so it is the last of these facts there.
+  const running: string | null = bridge()?.version || stats?.version || null;
 
   return (
     <div className="bleed relative isolate mb-6 overflow-hidden lg:mt-2 lg:rounded-b-3xl">
@@ -212,8 +218,15 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
             } ${!health ? 'animate-pulse' : ''}`} />
             <h1 className="font-display text-2xl font-bold leading-tight text-fog-50 lg:text-4xl">{verdict}</h1>
           </div>
-          {facts.length > 0 && (
-            <p className="mt-2 text-sm text-fog-400">{facts.join(' · ')}</p>
+          {(facts.length > 0 || running) && (
+            <p className="mt-2 text-sm text-fog-400">
+              {facts.join(' · ')}
+              {running && (
+                <span data-hero-version className="lg:hidden">
+                  {facts.length > 0 && ' · '}<VersionFacts running={running} update={updateState(health?.checks)} />
+                </span>
+              )}
+            </p>
           )}
         </motion.div>
 
@@ -226,6 +239,48 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Which Uchiyomi this is, at the foot of the admin menu (v0.55.4, #150).
+ *
+ * Kedryn: "I can't find anymore what version I'm running. I'm pretty sure it was in a menu on the left somewhere." It
+ * was only Health's Version card. The number is the server's (`/api/admin/stats`), or Uchiyomi Desktop's own
+ * (`bridge().version`, the app the person installed); whether a newer one is out is Health's `update` check, read from
+ * the answer the header has already asked for -- the same query key, so no request of its own and nothing asked of
+ * GitHub, and with update checks off it says nothing either way (lib/versionLine.ts). Short: run.mjs reads the
+ * Settings tab's first 4000 characters of text, and on a desktop the rail comes before the panel.
+ */
+function VersionLine() {
+  const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
+  const { data: health } = useQuery({
+    queryKey: ['admin-health'],
+    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
+  });
+  const running: string | null = bridge()?.version || stats?.version || null;
+  if (!running) return null;
+  return (
+    <p data-admin-version className="px-3 text-[11px] leading-relaxed text-fog-500">
+      <VersionFacts running={running} update={updateState(health?.checks)} />
+    </p>
+  );
+}
+
+/**
+ * "Uchiyomi v0.55.4 · up to date", or "· update available (v0.55.5)" linking to that release. Each part in its own
+ * <bdi>, and the tag isolated inside its sentence: a Latin version beside Arabic words otherwise takes their order.
+ */
+function VersionFacts({ running, update }: { running: string; update: UpdateState }) {
+  return (
+    <>
+      <bdi>Uchiyomi {shownVersion(running)}</bdi>
+      {update?.kind === 'behind' && (
+        <>{' · '}<a data-version-update href={releaseHref(update.latest)} target="_blank" rel="noopener noreferrer"
+          className="text-accent hover:underline"><bdi>{tr('update available ({version})', { version: `\u2068${update.latest}\u2069` })}</bdi></a></>
+      )}
+      {update?.kind === 'current' && <>{' · '}<bdi>{tr('up to date')}</bdi></>}
+    </>
   );
 }
 

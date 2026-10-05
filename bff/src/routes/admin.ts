@@ -4119,6 +4119,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       // (DATABASE_URL was unset); an install talking to its own database never sees the variable.
       database: process.env.EMBEDDED_DB === '1' ? 'embedded' : 'external',
       activity,
+      // v0.55.4 (#150): what is running, for the foot of the admin menu. "I can't find anymore what version I'm
+      // running" -- it was only Health's Version card, a tab and a scroll away. Null when bff/package.json cannot be
+      // read (lib/appVersion.ts). Whether a newer one exists stays Health's: the page reads its cached `update` check,
+      // so this asks GitHub nothing and an admin who turned update checks off is asked nothing either.
+      version: appVersion(),
     };
   });
 
