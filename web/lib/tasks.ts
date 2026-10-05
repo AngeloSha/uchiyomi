@@ -1,5 +1,6 @@
 import { bytes, durationText } from './format';
 import { keys, t as tr } from './i18n';
+import { appliedLine } from './rescan';
 
 /**
  * The tasks' names, by id, in the words GET /api/admin/tasks sends in English (v0.49.0). Declared through
@@ -184,6 +185,9 @@ export function taskResult(r: any): string {
     if (r.stopped === 'shutdown') bits.push(tr('stopped for a restart'));
     return ` \u00b7 ${bits.join(', ')}`;
   }
+  // "Rescan everything" (v0.55.4): what its last Apply did -- a preview changes nothing and has no line of its own.
+  // `marked` is the key: no other job reports one. A folder it left alone as unmounted leads, for the verify's reason.
+  if (typeof r.marked === 'number') return ` \u00b7 ${appliedLine(r)}`;
   // ⚠️ BEFORE the backup branch. The read-chapter cleanup also reports `bytes`, so keying on that first
   // would render "freed 4 GB" as a backup archive size and lose the chapter count entirely.
   if (typeof r.deleted === 'number') {
