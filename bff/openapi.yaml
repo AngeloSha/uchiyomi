@@ -6457,11 +6457,44 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/rescan/status:
+    get:
+      tags:
+        - admin
+      summary: Rescan everything, live -- the preview's phase and progress, and the plan it ended with.
+      operationId: getApiAdminTasksRescanStatus
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.55.4 (discussion #150). The preview is started by POST /api/admin/tasks/rescan/run, detached: it scans
+        the library, then looks for every live chapter row's own file under the library folder and the download
+        folder -- never a hidden or merged series', nor one in the middle of a renumber -- and keeps a plan in
+        memory. Answers {running: 'preview' | null, phase: 'scan' | 'look' | 'pair' | null, done, of (rows or
+        files of the phase, null while scanning), startedAt, error: 'failed' | 'stopped' | null (how the last
+        preview ended when it left no plan), plan}. `plan` is null or {id (uuid), at, scannedAt (epoch ms), ms,
+        stale (older than 30 minutes), applied, looked (rows whose file was looked for, under folders that were
+        not refused), unchecked (rows whose file could not be checked at all -- a permission or an I/O error,
+        never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
+        behind any of its rows, or more than 90 % of them gone: looks unmounted, and nothing under it is
+        planned), gone (rows in your own library folder whose file is gone), moved (gone rows whose file is
+        another live row's now, by fingerprint: renamed or moved, kept), downloads (rows in the download
+        folder whose file is gone: Verify chapter files' to mark, counted only), emptied (series with every
+        live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title}], movedList [{seriesId,
+        title, file, to: {seriesId, title, file}}]}. The lists hold at most 200 entries each and name only
+        series this viewer may list (the 18+ hide, as on the repair status); the counts are always whole.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/tasks/{id}/run:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair).
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan).
         {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off,
         {ok:false,error:sweep_running} for `repair` while a chapter sweep is going, and
         {ok:false,error:repair_running} for `update` while a library repair is going.
@@ -6517,10 +6550,12 @@ paths:
             The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
             is off; its run is subject to the same consent and the same vetoes as the hourly one. `verify` is
             the repair for a database restored without its chapter files. `repair` is the nightly library
-            repair and is the only one that takes a body.
+            repair and is the only one that takes a body. `rescan` (since v0.55.4, "Rescan everything") starts
+            a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
+            progress and plan are on GET /api/admin/tasks/rescan/status.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan]
       requestBody:
         required: false
         description: Only `repair` reads a body; every other task ignores it.

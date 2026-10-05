@@ -66,7 +66,8 @@ async function pool_<T>(items: T[], n: number, worker: (t: T) => Promise<void>):
 
 interface Row { id: string; root: string | null; file: string }
 
-async function fingerprintOne(b: Row): Promise<boolean> {
+/** One book, stamped as the backfill stamps it. Also Rescan everything's, for the files it pairs (lib/rescan.ts). */
+export async function fingerprintOne(b: Row): Promise<boolean> {
   const abs = join(b.root || LIBRARY_ROOT, b.file);
   const r = await fingerprintChapter(abs);
   // fp_at is stamped even when the read failed, so an unreadable file is attempted once rather than

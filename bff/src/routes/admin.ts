@@ -7,6 +7,7 @@ import numberingRoutes from './numbering';
 import { lastNumber } from '../lib/chapterRanges';
 import findSourcesRoutes from './findSources';
 import autoHeroRoutes from './autoHero';
+import rescanRoutes from './rescan';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -23,6 +24,7 @@ import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
+import { startRescan } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
@@ -477,6 +479,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   await app.register(findSourcesRoutes);
   // v0.51.0: a new automatic banner for a series, the same way (routes/autoHero.ts).
   await app.register(autoHeroRoutes);
+  // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
+  await app.register(rescanRoutes);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
@@ -1073,6 +1077,16 @@ export default async function adminRoutes(app: FastifyInstance) {
         (r) => logAudit('library.verify', { userId, detail: { checked: r.checked, missing: r.missing, readLibraryMissing: r.readLibraryMissing, unmounted: r.unmounted, ms: r.ms }, req }),
         () => {}, // runVerify logs it and clears the result; this only stops an unhandled rejection
       );
+      return { ok: true, started: true };
+    }
+    if (id === 'rescan') {
+      // Never awaited, for Verify's reason (lib/rescan.ts): a scan and one stat per chapter over a share is minutes, and
+      // a request that long dies at the proxy while the walk goes on. The Tasks panel polls
+      // GET /api/admin/tasks/rescan/status for the phase and the plan; startRescan refuses a second preview on top of a
+      // first. Reintroduce by awaiting `run` here: "the preview answers started" in rescan.int.test.ts finds no `started`.
+      const run = startRescan(app.log);
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch(() => {}); // startRescan logs it and records the failure; this only stops an unhandled rejection
       return { ok: true, started: true };
     }
     if (id === 'update') {

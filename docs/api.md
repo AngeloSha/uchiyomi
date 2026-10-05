@@ -1333,6 +1333,7 @@ GET    /api/admin/sessions        DELETE /api/admin/sessions/:id
 GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 GET    /api/admin/tasks/repair/status  GET    /api/admin/tasks/repair/runs
+GET    /api/admin/tasks/rescan/status
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
 DELETE /api/sources/jobs/:folder  POST   /api/sources/jobs/:folder/cancel
