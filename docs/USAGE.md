@@ -40,6 +40,14 @@ point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/pat
 contains chapters, at any depth. Each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may
 carry a `ComicInfo.xml` for metadata).
 
+**Bringing a library over** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/issues/158)): a new
+server opens on an empty library, and the empty **Library** and Home's **Welcome to Uchiyomi** both lead with **Import
+your library** — from a Mihon or Tachiyomi backup, a MangaDex list, your AniList, MyAnimeList or Kitsu list, or pasted
+titles; it opens the import page described under *Sources* in section 8 — and **Find series in Discover** beside it.
+An admin sees both; someone who may add series sees Discover; anyone else is told to ask whoever runs the server.
+Later, an admin finds the import as **Import a list** in the Library's header, beside where you add series, or by
+typing *import* in search.
+
 Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` from a clone instead — it generates the secrets, creates
 the admin from a password you type, fixes volume ownership, and starts the development stack (`yomi-app`,
 `yomi-db`, `yomi-suwayomi`, `yomi-flaresolverr`). `yomi-app` is the same single container the install ships,
@@ -114,6 +122,16 @@ Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under 
 interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
 Appearance → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
 **Ctrl+K** keeps working.
+
+**Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
+settings** lists what the words name: every admin tab, each section of **Admin → Settings**, the profile's tabs and
+cards, the import, and settings by name — *Notice chapters*, *18+ filter*, *Source order*, *Slow archive*, *Backup
+time*, *Delete read chapters*, *Scanlators*, *Check for updates*, the *Cloudflare solver* and the *Version* on Health,
+*Language*, *API tokens*, *Two-factor authentication* and more. A name works in your language and in English, and so do
+a few words people type instead (*flaresolverr*, *mihon*, *2fa*). Each row says where it is (*Admin → Settings*), and
+choosing it opens that page on that tab, scrolled to that card once it has loaded. Admin pages are listed for admins
+only, and what the desktop app does not have is not listed there. On a phone, the **Search** tab lists the same ones
+under the series it finds.
 
 ### What counts as a chapter
 
@@ -1521,7 +1539,14 @@ Providers and Extensions were two; `?tab=Providers` and `?tab=Extensions` lead t
 Every tab has an address — `/admin/?tab=Settings`, `/admin/?tab=Health` and so on — so a refresh, the Back
 button, a bookmark or a language change keeps you on the tab you were on. The first tab, Overview, is plain
 `/admin/`. The same is true of the profile: `/profile/?tab=Settings`, `/profile/?tab=Connections`,
-`/profile/?tab=Account`.
+`/profile/?tab=Account`. A card can be named too, `/admin/?tab=Settings&section=notice-chapters`: the page scrolls to
+it once it has loaded (that is how search's settings land on theirs).
+
+**Which version is running** (since v0.55.4, [#150](https://github.com/AngeloSha/uchiyomi/issues/150)) is the foot of
+the admin menu: *Uchiyomi v0.55.4 · up to date*, or *· update available (v0.55.5)*, which links to that release. On a
+phone it ends the line of facts under the header, and the menu's sheet says it too. Whether a newer one is out is
+Health's **Version** check, the same answer: with **Check for updates** off, or GitHub not answering, the line says the
+version alone. In the desktop app it is the app's own version.
 
 **Server → Overview:** library stats + recent member activity.
 
@@ -2090,7 +2115,9 @@ everywhere ends it on the next occasion that device reaches the server.
 
 **Sources:** every source and the ways to add one, from section 7. Its **Add sources** also holds **Import a
 list**, for moving a library over from another app. It is one path: import a list → review the matches → add.
-Pressing it opens the import page (`/admin/import/`), which takes the list four ways:
+Pressing it opens the import page (`/admin/import/`) — as do **Import your library** on an empty Library or Home,
+**Import a list** in the Library's header, and *import* typed in search (since v0.55.4) — which takes the list four
+ways:
 
 ![Import and review matches](shots/admin-import.webp)
 
