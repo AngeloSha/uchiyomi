@@ -1,12 +1,16 @@
 'use client';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
 import { IcSearch, IcX } from '@/components/icons';
+import { PlaceRow } from '@/components/CommandPalette';
 import { t as tr } from '@/lib/i18n';
+import { useAuth } from '@/lib/auth';
+import { isDesktop } from '@/lib/desktop';
+import { findDestinations } from '@/lib/destinations';
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -36,6 +40,10 @@ function SearchInner() {
     enabled: debounced.length >= 2,
     queryFn: () => api<Page<Series>>('/api/series/search', { json: { query: debounced, size: 60 } }),
   });
+  // v0.55.4: the pages and settings the query names, as the palette lists them (a phone has no palette): under the
+  // series, admins' only for admins, none of Desktop's missing ones there (lib/destinations.ts).
+  const { isAdmin } = useAuth();
+  const places = useMemo(() => findDestinations(debounced, { admin: isAdmin, desktop: isDesktop(), limit: 8 }), [debounced, isAdmin]);
 
   const remember = (term: string) => {
     if (!term) return;
@@ -85,7 +93,9 @@ function SearchInner() {
               {Array.from({ length: 12 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
             </div>
           ) : (data?.content.length ?? 0) === 0 ? (
-            <p className="py-20 text-center text-sm text-fog-500">No matches for “{debounced}”.</p>
+            <p className={`${places.length ? 'py-6' : 'py-20'} text-center text-sm text-fog-500`}>
+              {tr('No series match “{query}”.', { query: `\u2068${debounced}\u2069` })}
+            </p>
           ) : (
             <>
               <p className="mb-3 text-xs text-fog-500">{data?.totalElements} results</p>
@@ -93,6 +103,14 @@ function SearchInner() {
                 {data?.content.map((s, i) => <SeriesTile key={s.id} series={s} eager={i < 12} />)}
               </div>
             </>
+          )}
+          {places.length > 0 && (
+            <section data-search-places aria-label={tr('Pages and settings')} className="mt-6 pb-6">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-fog-500">{tr('Pages and settings')}</p>
+              <div className="card divide-y divide-ink-800/70 overflow-hidden rounded-2xl">
+                {places.map((p) => <PlaceRow key={p.key} place={p} href={p.href} />)}
+              </div>
+            </section>
           )}
         </div>
       )}

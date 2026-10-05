@@ -44,6 +44,7 @@ import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
 import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
+import { useSectionArrival } from '@/lib/useSectionArrival';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -94,6 +95,8 @@ function AdminInner() {
   // `GROUPS` and the line above stay as they are: only what ConsoleNav receives is filtered.
   const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.adminTabs, tab);
   useEffect(() => { if (hiddenTab) setTab('Overview'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // v0.55.4: `?section=` -- a setting found by the search palette lands on its card, once it has loaded.
+  useSectionArrival();
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
@@ -1725,7 +1728,8 @@ function Health() {
           const rowKeys = keysFor(c.id, c.items);
           return (
             // `scroll-mt-*`: Fix everything's "Show the card" scrolls a card to the top, clear of the desktop's top bar.
-            <div key={c.id} data-health-check={c.id} className={`card grad-border relative scroll-mt-4 overflow-hidden lg:scroll-mt-20 ${c.status !== 'ok' ? 'full' : ''}`}>
+            // `id`: the search palette's Cloudflare solver and Version land on their cards (`?section=check-solver`).
+            <div key={c.id} id={`check-${c.id}`} data-health-check={c.id} className={`card grad-border relative scroll-mt-4 overflow-hidden lg:scroll-mt-20 ${c.status !== 'ok' ? 'full' : ''}`}>
               <StatusEdge tone={mark.tone} />
               {/* ⚠️ The disclosure is the FIRST button in the card: the end-to-end walks open a card by
                   clicking the first button inside `[data-health-check="…"]`. Every action lives in the body. */}

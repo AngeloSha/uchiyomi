@@ -114,7 +114,7 @@ export function NotificationsSection() {
 
   return (
     <>
-      <Section title={tr('Notifications')} icon={<IcBell width={18} height={18} />}
+      <Section id="notifications" title={tr('Notifications')} icon={<IcBell width={18} height={18} />}
         description={tr('Send new chapters and server problems somewhere besides this browser: a webhook, Home Assistant, ntfy or Discord. One message per library update, not one per chapter.')}
         action={(
           <button type="button" onClick={() => setEditing('new')} className="chip inline-flex items-center gap-1 text-xs">

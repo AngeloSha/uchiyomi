@@ -265,6 +265,7 @@ function OpdsSection() {
 
   return (
     <Section
+      id="opds"
       title={tr('External readers (OPDS)')}
       icon={<IcCloudDownload width={18} height={18} />}
       description={tr('Add Uchiyomi as an OPDS catalog in readers like Panels, Chunky, KOReader or Moon+. Generate a personal link, then enter the URL and credentials below in your reader.')}
@@ -399,6 +400,7 @@ function TokensSection() {
 
   return (
     <Section
+      id="api-tokens"
       title={tr('API tokens')}
       icon={<IcKey />}
       description={`${tr('For scripts and integrations. A normal login expires every 15 minutes; these do not, so treat one like a password.')} ${tr('Mihon’s Komga extension and the Uchiyomi extension use these too.')}`}

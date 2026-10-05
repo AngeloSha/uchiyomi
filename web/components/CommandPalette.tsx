@@ -1,17 +1,21 @@
 'use client';
-// Global command palette (Ctrl/Cmd+K, "/", or just start typing): instant series search + quick actions.
+// Global command palette (Ctrl/Cmd+K, "/", or just start typing): instant series search + quick actions, and since v0.55.4
+// the pages and settings a query names (lib/destinations.ts).
 // No dependency — a fixed overlay + debounced POST /api/series/search, keyboard-navigable.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api, img } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from './Toast';
 import { Img } from './ui';
-import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcCloudDownload, IcGrid, IcMoments } from './icons';
+import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcCloudDownload, IcGrid, IcMoments, IcSettings, IcUser, IcImport } from './icons';
 import { t as tr } from '@/lib/i18n';
-import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { hiddenOnDesktop, isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { effectsReduced } from '@/lib/effects';
+import { arrival, findDestinations, whereText, type Destination } from '@/lib/destinations';
 import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
 import { useLayer } from '@/lib/layers';
 import { canDownload, useAuth } from '@/lib/auth';
@@ -22,7 +26,7 @@ interface Action { key: string; label: string; hint?: string; icon: React.ReactN
 export function CommandPalette({ open, seed = '', onClose }: { open: boolean; seed?: string; onClose: () => void }) {
   const router = useRouter();
   const toast = useToast();
-  const { user, status } = useAuth();
+  const { user, status, isAdmin } = useAuth();
   // What the server is fetching is Library -> Downloads, a view the route behind it opens only to a viewer
   // who may download: nobody else is offered the way in.
   const mayDownload = status === 'authed' && canDownload(user);
@@ -84,6 +88,20 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
   }, [q, open]);
 
   const go = useCallback((href: string) => { onClose(); router.push(href); }, [onClose, router]);
+  // A page or a setting (v0.55.4). Another page is a client-side push, and it reads its tab and its `?section=` as it
+  // mounts; a card already on this page is scrolled to; this console on another tab is a whole page load, because the
+  // console reads `?tab=` once (lib/destinations.ts `arrival`, lib/useTabParam.ts).
+  const goTo = useCallback((href: string) => {
+    onClose();
+    const how = arrival(href, window.location, (id) => !!document.getElementById(id));
+    if (how === 'push') router.push(href);
+    else if (how === 'load') window.location.assign(href);
+    else if (how === 'scroll') {
+      const id = new URL(href, window.location.href).searchParams.get('section');
+      const still = effectsReduced() || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+    }
+  }, [onClose, router]);
 
   // Labels and hints through tr(): they are what the list shows and what a typed query is matched against, so
   // an English-only list could neither be read nor found in the reader's language.
@@ -111,13 +129,17 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
 
   const query = q.trim().toLowerCase();
   const shownActions = query.length < 2 ? actions : actions.filter((a) => a.label.toLowerCase().includes(query) || a.key.includes(query));
-  // one flat keyboard list: series first, then actions
+  // v0.55.4: the pages and settings the query names, for two characters or more, admins' only for admins and none of
+  // Desktop's missing ones there (lib/destinations.ts).
+  const places = useMemo(() => findDestinations(q, { admin: isAdmin, desktop: isDesktop() }), [q, isAdmin]);
+  // one flat keyboard list: series first, then pages and settings, then actions
   const rows = useMemo(
     () => [
       ...results.map((s) => ({ kind: 'series' as const, series: s })),
+      ...places.map((p) => ({ kind: 'place' as const, place: p })),
       ...shownActions.map((a) => ({ kind: 'action' as const, action: a })),
     ],
-    [results, shownActions],
+    [results, places, shownActions],
   );
   useEffect(() => { setSel((s) => Math.min(s, Math.max(0, rows.length - 1))); }, [rows.length]);
 
@@ -125,6 +147,7 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
     const r = rows[i];
     if (!r) return;
     if (r.kind === 'series') go(`/series/?id=${r.series.id}`);
+    else if (r.kind === 'place') goTo(r.place.href);
     else r.action.run();
   };
 
@@ -163,7 +186,7 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
             <div className="max-h-[52vh] overflow-y-auto py-1.5" data-lenis-prevent>
               {searching && <p className="px-4 py-3 text-xs text-fog-500">{tr('Searching…')}</p>}
               {!searching && query.length >= 2 && results.length === 0 && (
-                <p className="px-4 py-3 text-xs text-fog-500">No series match “{q.trim()}”.</p>
+                <p className="px-4 py-3 text-xs text-fog-500">{tr('No series match “{query}”.', { query: `\u2068${q.trim()}\u2069` })}</p>
               )}
               {results.length > 0 && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Series')}</p>}
               {rows.map((r, i) =>
@@ -175,12 +198,17 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-sm text-fog-100">{r.series.metadata?.title || r.series.name}</p>
-                      <p className="text-[11px] text-fog-500">{r.series.booksCount} chapters</p>
+                      <p className="text-[11px] text-fog-500">{r.series.booksCount === 1 ? tr('1 chapter') : tr('{n} chapters', { n: r.series.booksCount })}</p>
                     </div>
                   </button>
+                ) : r.kind === 'place' ? (
+                  <div key={`p:${r.place.key}`}>
+                    {rows[i - 1]?.kind !== 'place' && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Pages and settings')}</p>}
+                    <PlaceRow place={r.place} selected={sel === i} onClick={() => activate(i)} onHover={() => setSel(i)} />
+                  </div>
                 ) : (
                   <div key={`a:${r.action.key}`}>
-                    {i === results.length && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Actions')}</p>}
+                    {rows[i - 1]?.kind !== 'action' && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Actions')}</p>}
                     <button onClick={() => activate(i)} onMouseEnter={() => setSel(i)}
                       className={`flex w-full items-center gap-3 px-4 py-2.5 text-left ${sel === i ? 'bg-accent-soft' : ''}`}>
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 text-fog-400">{r.action.icon}</span>
@@ -196,6 +224,28 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
       )}
     </AnimatePresence>
   );
+}
+
+/**
+ * A page or a setting (v0.55.4): its name, and where it is ("Admin → Settings") in the reader's language. Exported for
+ * the phone search page, which lists the same ones under its series.
+ */
+export function PlaceRow({ place, selected, onClick, onHover, href }: {
+  place: Destination; selected?: boolean; onClick?: () => void; onHover?: () => void; href?: string;
+}) {
+  const Icon = place.href.startsWith('/admin/import/') ? IcImport : place.href.startsWith('/admin/') ? IcSettings : IcUser;
+  const rtl = typeof document !== 'undefined' && document.documentElement.dir === 'rtl';
+  const inner = (
+    <>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 text-fog-400"><Icon width={16} height={16} /></span>
+      <span className="min-w-0 truncate text-sm text-fog-100">{tr(place.label)}</span>
+      <span className="ms-auto shrink-0 text-[11px] text-fog-500">{whereText(place, rtl)}</span>
+    </>
+  );
+  const cls = `flex w-full items-center gap-3 px-4 py-2.5 text-start ${selected ? 'bg-accent-soft' : ''}`;
+  return href
+    ? <Link href={href} data-palette-place={place.key} className={cls}>{inner}</Link>
+    : <button type="button" data-palette-place={place.key} onClick={onClick} onMouseEnter={onHover} className={cls}>{inner}</button>;
 }
 
 /**
