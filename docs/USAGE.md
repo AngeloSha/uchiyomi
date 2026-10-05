@@ -156,7 +156,8 @@ The files Uchiyomi downloads itself are named `Chapter 12.cbz` and read exactly 
 **Chapters already in your library keep their numbers.** A chapter scanned before v0.55.2 goes on being read the
 old way, by the first number in its name, so nothing is renumbered behind your back and what your trackers were told
 stays true. A renamed file is a new file to the scanner and is read by the rules above. **Edit a chapter** (section
-4) fixes any number by hand, old or new.
+4) fixes any number by hand, old or new, and since v0.55.4 **Admin → Tasks → Rescan everything** reads a whole series
+again by these rules when you tick it (*Numbering hand-named files again*, section 8).
 
 A file holding a range is one chapter row, and one file in the series' chapter count. Everything about *which*
 chapters you have counts every number in it: no gap is reported between 1 and 7, the updater does not fetch 2 to 7,
@@ -1881,6 +1882,55 @@ server applied the same strict rule, so the button was dead rather than the requ
 title** button now sits beside the box as well, whenever the browser offers a clipboard (over plain `http`
 on a LAN it does not, and the button is then hidden rather than broken).
 
+### Library maintenance: Scan, Verify chapter files and Rescan everything
+
+Three tasks on **Admin → Tasks** look at your chapter files, and each does one thing:
+
+| | What it does | What it never does |
+|---|---|---|
+| **Library scan** | Adds every chapter file it finds and updates the ones it knows. A file that comes back after it was marked gone is picked up again, on the same row. | Remove anything: a chapter whose file is gone stays listed as it was. |
+| **Verify chapter files** | After a database restored without its files (section 12): marks the chapters Uchiyomi *downloaded* whose file is gone, so the next sweep downloads them again onto the same rows. | Mark a chapter in a library you built by hand; it only counts those. |
+| **Rescan everything** (since v0.55.4) | For a library you built by hand: finds the chapters whose file is gone from your own folders, shows you first, and marks them *File no longer on disk* when you press **Apply**. | Erase a chapter, touch a file, hide a series, or change what anyone has read. |
+
+**Rescan everything** ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)) is for files you deleted, moved
+out or renamed by hand. **Start** scans the library, then looks for every chapter's own file; nothing changes yet. The
+panel under the row says how far it has got, then what **Apply** would do: *37 chapter files are gone from your folders
+· 3 were probably moved or renamed (kept) · 4 in the download folder, left to Verify chapter files · 2 series with
+nothing left*.
+
+- **Gone from your folders** is what Apply marks. The chapter stays in its series, greyed, reading *File no longer on
+  disk* (never *Deleted from the server*: nothing deleted it), and everyone's progress, bookmarks and notes stay on it;
+  the sweep does not fetch it back. Put the file back and the next scan picks it up again on the same row.
+- **Moved or renamed (kept)**: a file renamed in place, or moved into another folder, is a new chapter to the scanner,
+  and its old row looks gone. When the old file's fingerprint matches a file that is there, the old row is kept as it
+  is — the reading history is on it — and listed under *Which ones were probably moved or renamed*.
+- **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
+  fetches them again; here they are only counted.
+- **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
+  open one to *Remove* it, or to merge it with the series its files went to (a renamed folder becomes a new series
+  unless `LIBRARY_REMATCH` is on, see CONFIGURATION.md).
+- A folder (`/library`, `/library-dl`) with no file behind any of its chapters, or with more than nine in ten gone,
+  *looks unmounted*, and nothing under it is touched — the rule *Verify chapter files* follows. A file that could not
+  be checked at all (a permission, a disk error) is never called gone.
+- **Apply** looks at every file again before it marks it, with library scans held off: a file that came back since the
+  preview, or a chapter renamed or renumbered since, is left alone. It is refused when the preview is more than 30
+  minutes old (run it again), and while a chapter sweep, the library repair, *Fix everything*, *Verify chapter files*,
+  *Delete read chapters* or a library scan is running — the message says which. The Tasks line keeps what it did
+  across restarts: *36 chapters marked as no longer on disk · 1 back on disk before Apply, left alone · 2 series
+  renumbered by the new rules*.
+- It never runs by itself — not at start-up, not on a schedule — for Verify's reason: a share that is not mounted yet
+  looks exactly like a library with every file gone.
+
+**Numbering hand-named files again (optional).** A chapter scanned before v0.55.2 keeps the first number in its file
+name (section 3), so `Vol 2 Ch 5.cbz` is still chapter 2 and `Batman (1987) #12.cbz` is 1987. The preview lists every
+series the newer rules would renumber, with what that costs: how many chapters change, how many readers finished one of
+them, how many carry a number you set by hand (those keep it), and, for a series linked to a tracker, how many finished
+chapters would go up or down there — with a few examples, `Batman (1987) #12.cbz: 1987 → 12`. Tick the series you want;
+**Apply** renumbers only those, all at once, and the scanner reads them by the new rules from then on. Nothing is sent
+to AniList or the other trackers at that moment: the next chapter a reader finishes in the series sends its number as
+usual — a higher one is taken, and a lower one the tracker refuses, keeping the number it has. A series numbered by
+posting order, or in the middle of a renumber, is not listed.
+
 ### Deleting chapters after they are read
 
 **Admin → Settings → Library housekeeping → Delete read chapters**. Off by default, and turning it on asks
@@ -2186,7 +2236,8 @@ off under **Admin → Settings → Updates & schedules**; see [extensions.md](ex
 hour is shown here and changed there. **Verify chapter files** is the one task that never
 runs by itself: it is the repair for a database restored without its chapter files, and section 12 says
 when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
-it found when it is done.
+it found when it is done. **Rescan everything** (since v0.55.4) is its counterpart for a library you built by hand:
+*Library maintenance* above says what it shows before it changes anything, and what it never does.
 
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
 what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
