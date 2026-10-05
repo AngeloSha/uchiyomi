@@ -69,7 +69,9 @@ test('the admin rail ends with the version, and a phone says it among the header
   const facts = slice(admin, 'function VersionFacts(', 'function Overview(');
   assert.match(facts, /<bdi>Uchiyomi \{shownVersion\(running\)\}<\/bdi>/, 'the version is not isolated from an Arabic neighbour');
   assert.match(facts, /\{update\?\.kind === 'behind' && \([\s\S]*?href=\{releaseHref\(update\.latest\)\} target="_blank" rel="noopener noreferrer"[\s\S]*?tr\('update available \(\{version\}\)'/, 'an update does not link to its release');
-  assert.match(facts, /\{update\?\.kind === 'current' && <>\{' · '\}<bdi>\{tr\('up to date'\)\}<\/bdi><\/>\}/);
+  assert.match(facts, /\{update\?\.kind === 'current' && <>\{' · '\}<bdi className="inline-block">\{tr\('up to date'\)\}<\/bdi><\/>\}/);
+  // The update is one block when the line wraps: the rail broke "update available" from its "(v0.55.5)".
+  assert.match(facts, /className="inline-block text-accent hover:underline"><bdi>\{tr\('update available/, 'the update breaks inside itself');
   // A phone: the same facts at the end of the header's line, hidden where the rail shows them.
   const hero = slice(admin, 'function AdminHero(', 'function VersionLine(');
   assert.match(hero, /<span data-hero-version className="lg:hidden">\s*\{facts\.length > 0 && ' · '\}<VersionFacts running=\{running\} update=\{updateState\(health\?\.checks\)\} \/>/,

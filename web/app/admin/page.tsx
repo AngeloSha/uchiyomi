@@ -261,7 +261,7 @@ function VersionLine() {
   const running: string | null = bridge()?.version || stats?.version || null;
   if (!running) return null;
   return (
-    <p data-admin-version className="px-3 text-[11px] leading-relaxed text-fog-500">
+    <p data-admin-version className="text-[11px] leading-relaxed text-fog-500 lg:px-3">
       <VersionFacts running={running} update={updateState(health?.checks)} />
     </p>
   );
@@ -269,7 +269,8 @@ function VersionLine() {
 
 /**
  * "Uchiyomi v0.55.4 · up to date", or "· update available (v0.55.5)" linking to that release. Each part in its own
- * <bdi>, and the tag isolated inside its sentence: a Latin version beside Arabic words otherwise takes their order.
+ * <bdi>, and the tag isolated inside its sentence: a Latin version beside Arabic words otherwise takes their order. The
+ * second part is one block on a line: the rail is too narrow for both, and broke "update available" from its tag.
  */
 function VersionFacts({ running, update }: { running: string; update: UpdateState }) {
   return (
@@ -277,9 +278,9 @@ function VersionFacts({ running, update }: { running: string; update: UpdateStat
       <bdi>Uchiyomi {shownVersion(running)}</bdi>
       {update?.kind === 'behind' && (
         <>{' · '}<a data-version-update href={releaseHref(update.latest)} target="_blank" rel="noopener noreferrer"
-          className="text-accent hover:underline"><bdi>{tr('update available ({version})', { version: `\u2068${update.latest}\u2069` })}</bdi></a></>
+          className="inline-block text-accent hover:underline"><bdi>{tr('update available ({version})', { version: `\u2068${update.latest}\u2069` })}</bdi></a></>
       )}
-      {update?.kind === 'current' && <>{' · '}<bdi>{tr('up to date')}</bdi></>}
+      {update?.kind === 'current' && <>{' · '}<bdi className="inline-block">{tr('up to date')}</bdi></>}
     </>
   );
 }
