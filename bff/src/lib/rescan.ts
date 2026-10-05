@@ -15,6 +15,25 @@
  *   file is the new row it will be; then one stat per live row's OWN file, root by root -- never the series folder,
  *   because a merge survivor's rows sit in the folder it absorbed; then a plan, kept in memory with its id and its
  *   time, saying what Apply would do. Nothing in the plan is changed by the preview.
+ *   Apply (startApply, detached too): refused for a stale plan and beside any job that changes the library, then,
+ *   with every scan held off (withScansHeld), each planned row is asked again -- the same id at the same file, still
+ *   live, its series still looked at, its file still not there, its fingerprint still no live row's -- and marked
+ *   pruned with reason 'deleted' (tombstoneBooks), the mark Delete files leaves on a file it removed: HELD, so the
+ *   sweep never fetches it back, and "File no longer on disk" on the series page. Then the cover and the counts of
+ *   every series it touched, an audit entry, and the result, kept in server_settings for the Tasks line.
+ *
+ * ⚠️ A ROW IS NEVER ERASED. read_progress.book_id is ON DELETE RESTRICT and the row IS everyone's reading history of
+ *   the chapter; erasing it would also turn its number into a ghost the sweep downloads again (lib/komgaGhosts.ts),
+ *   and flip a tracker's "finished" (trackers.ts counts every row). The tombstone keeps all of it, and a file that
+ *   comes back is picked up again: the scan clears the mark on the same row (lib/library.ts persistScan).
+ *   Reintroduce by erasing the rows: "Apply marks your own folder's gone chapters and nothing else" finds rows gone.
+ *
+ * ⚠️ ONLY YOUR OWN LIBRARY FOLDER IS MARKED (LIBRARY_ROOT). The download folder's gone rows are Verify chapter
+ *   files' to mark 'missing', the one reason the sweep fetches again onto the same rows; here they are counted, and
+ *   the panel points at Verify. Rows under any other root are not a scan's, so not a rescan's. Nothing else is
+ *   touched: no file on disk, no row already pruned (Verify's 'missing' above all keeps its mark), no series hidden
+ *   or forgotten -- a series with nothing left is listed with a link, for the admin -- and no tracker floor, read
+ *   mark, favourite or rating.
  *
  * ⚠️ THE WHOLE-ROOT RULES, PER ROOT, ARE VERIFY'S (lib/verifyFiles.ts says why at length). An unmounted share is an
  *   empty, readable mount point, and from in here it looks exactly like a library whose every file is gone: a root
@@ -41,6 +60,13 @@
  *   first, at most PAIR_MAX per preview. Reintroduce by planning every gone row: "a moved or renamed file is paired
  *   before anything is planned" finds the renamed chapter's old row in the plan.
  *
+ * ⚠️ APPLY LOOKS AGAIN, UNDER THE SCAN HOLD. Minutes can pass between the preview and the press: a file comes back,
+ *   a renumber or a rename moves a row to another file, Verify or a cleanup marks one, a share is unmounted. So a
+ *   planned row is marked only if it is still the row that was looked at and its file is still not there, the folder
+ *   still holds the files the preview saw (`samples`), and no live row has its fingerprint by now. With scans held,
+ *   no scan can bring a row back between the look and the mark. Reintroduce by marking the plan as it stands: "Apply
+ *   asks every row again, with scans held" finds the file that came back marked.
+ *
  * ⚠️ NEVER AT BOOT, NEVER ON A SCHEDULE, for Verify's reason: a boot with the share not yet mounted is the empty
  *   mount point on every start. The one caller is the admin's Tasks panel (routes/admin.ts, routes/rescan.ts).
  *   "rescan never runs at boot or on a schedule" in rescan.int.test.ts pins the callers.
@@ -51,12 +77,18 @@
  */
 import { randomUUID } from 'node:crypto';
 import { stat } from 'fs/promises';
-import { q } from './db';
-import { DL_ROOT, LIBRARY_ROOT, persistScan } from './library';
+import type { FastifyRequest } from 'fastify';
+import { q, one } from './db';
+import { DL_ROOT, LIBRARY_ROOT, persistScan, scanRunning, withScansHeld } from './library';
 import { containedPath } from './fsGuard';
 import { runtime } from './runtime';
 import { visibleToAll } from './visibility';
 import { fingerprintOne } from './fingerprintJob';
+import { tombstoneBooks } from './chapterCleanup';
+import { verifyState } from './verifyFiles';
+import { renumberRunning } from './numbering';
+import { logAudit } from './audit';
+import { scheduleHealthSummaryRefresh } from './healthSummary';
 
 /** How many stats are in flight at once: a NAS answers a handful in parallel well and thousands badly (Verify's). */
 const CONCURRENCY = 16;
@@ -73,7 +105,7 @@ const SAMPLES = 20;
 /** How long a preview may be applied for. Older, Apply asks for a new one: the library has had time to change. */
 export const PLAN_TTL_MS = 30 * 60_000;
 
-export type RescanPhase = 'scan' | 'look' | 'pair';
+export type RescanPhase = 'scan' | 'look' | 'pair' | 'mark';
 
 /** A root the whole-root rules refused: no present file at all, or `missing` of the `of` rows looked at (the 90 % rule). */
 export interface Unmounted { root: string; missing?: number; of?: number }
@@ -105,19 +137,50 @@ export interface RescanPlan {
   applied: boolean;
 }
 
+/** What one Apply did: the Tasks line, the panel's result and the audit entry. Persisted in server_settings. */
+export interface RescanApplied {
+  ok: true;
+  /** The preview it applied. */
+  plan: string;
+  /** Rows in your own folder marked pruned with reason 'deleted': their file is no longer on disk. */
+  marked: number;
+  /** Planned rows whose file was back on disk at Apply: left as they are. */
+  back: number;
+  /**
+   * Planned rows that were no longer the row looked at -- pruned since, moved to another file by a rename or a
+   * renumber, their series hidden, merged or being renumbered -- or whose file could not be checked at Apply.
+   */
+  changed: number;
+  /** Gone rows kept because their file is another live row's: the preview's pairs, and any found at Apply. */
+  moved: number;
+  /** The preview's counts, carried for the line: gone from the download folder (Verify's), series with nothing left. */
+  downloads: number;
+  emptied: number;
+  /** The library folder, when it no longer held the files the preview saw: nothing under it was marked. */
+  unmounted: Unmounted[];
+  ms: number;
+  /** A shutdown stopped it between batches: what it had marked stays marked, because it was true. */
+  stopped?: 'shutdown';
+}
+
 export interface RescanState {
-  running: 'preview' | null;
+  running: 'preview' | 'apply' | null;
   phase: RescanPhase | null;
   done: number;
   of: number | null;
   startedAt: number | null;
   /** The newest preview, while there is one: a new preview replaces it. */
   plan: RescanPlan | null;
-  /** How the last preview ended when it did not end with a plan. */
+  /** How the last preview or Apply ended when it did not end well. */
   error: 'failed' | 'stopped' | null;
+  /** When this process last finished an Apply, and what it did (null after one that threw). */
+  appliedAt: number | null;
+  lastApplied: RescanApplied | null;
 }
 
-export const rescanState: RescanState = { running: null, phase: null, done: 0, of: null, startedAt: null, plan: null, error: null };
+export const rescanState: RescanState = {
+  running: null, phase: null, done: 0, of: null, startedAt: null, plan: null, error: null, appliedAt: null, lastApplied: null,
+};
 
 const setPhase = (phase: RescanPhase, of: number | null = null): void => {
   rescanState.phase = phase;
@@ -349,6 +412,191 @@ export function startRescan(log?: Log): Promise<RescanPlan | null> | false {
       rescanState.phase = null;
     }
   })();
+}
+
+// ---- Apply ------------------------------------------------------------------------------------------------------
+
+/** Why an Apply was not started. Every job named here changes the library, or looks at it to change it. */
+export type ApplyRefusal =
+  | 'busy' | 'no_plan' | 'stale' | 'applied'
+  | 'sweep_running' | 'autofix_running' | 'repair_running' | 'verify_running' | 'cleanup_running' | 'scan_running';
+
+/** Who pressed Apply, for the audit entry. */
+export interface ApplyWho { userId: string | null; req?: FastifyRequest; log?: Log }
+/** Tests only: `held` runs inside the scan hold, before anything is looked at again -- the moment a scan is asked for. */
+export interface ApplyOpts { held?: () => Promise<void> }
+
+/**
+ * The job that is changing the library right now, if one is. A plan is a picture of the library at its preview, and
+ * every one of these redraws it: a sweep or a repair lands and scans files, Fix everything merges and deletes,
+ * Verify and the cleanup mark rows, a scan writes them. Answered by name, as the repair and the sweep answer each
+ * other, so the panel can say which. Reintroduce by dropping a line: "Apply is refused for a stale preview, an
+ * applied one, and beside another job" in rescan.int.test.ts names the job that was let through.
+ */
+function clashing(): ApplyRefusal | null {
+  if (runtime.updating) return 'sweep_running';
+  if (runtime.autofixing) return 'autofix_running';
+  if (runtime.repairing) return 'repair_running';
+  if (verifyState.running) return 'verify_running';
+  if (runtime.cleaning) return 'cleanup_running';
+  if (scanRunning()) return 'scan_running';
+  return null;
+}
+
+/**
+ * Start an Apply of the plan the admin saw, or say why not. Same contract as the preview: detached, the route
+ * answers `started`, the panel polls the status route, and the result is kept in memory and in server_settings.
+ * `plan` must be the newest preview's id, not yet applied, and younger than PLAN_TTL_MS.
+ */
+export function startApply(
+  input: { plan: string },
+  who: ApplyWho,
+  opts: ApplyOpts = {},
+): { ok: true; run: Promise<RescanApplied> } | { ok: false; error: ApplyRefusal } {
+  if (rescanState.running) return { ok: false, error: 'busy' };
+  const plan = rescanState.plan;
+  if (!plan) return { ok: false, error: 'no_plan' };
+  // A newer preview replaced it, or it is older than its time: the library has had time to change under it.
+  if (plan.id !== input.plan || Date.now() - plan.at > PLAN_TTL_MS) return { ok: false, error: 'stale' };
+  if (plan.applied) return { ok: false, error: 'applied' };
+  const clash = clashing();
+  if (clash) return { ok: false, error: clash };
+  // Taken now, in the same turn as the checks: a second press is `busy`, and a plan is applied once whatever happens.
+  plan.applied = true;
+  rescanState.running = 'apply';
+  rescanState.startedAt = Date.now();
+  rescanState.error = null;
+  setPhase('mark', plan.mark.length);
+  const run = (async () => {
+    try {
+      const r = await applyPlan(plan, opts);
+      rescanState.appliedAt = Date.now();
+      rescanState.lastApplied = r;
+      if (r.stopped) rescanState.error = 'stopped';
+      // Persisted as Verify's is: the Tasks line keeps the last Apply across a restart.
+      // Reintroduce by dropping this UPDATE: "the Apply answers started ... a restart keeps the result" in
+      // rescan.int.test.ts finds the Tasks row empty after the simulated restart.
+      await q('UPDATE server_settings SET rescan_last_run = now(), rescan_last_result = $1::jsonb WHERE id = 1', [JSON.stringify(r)]).catch(() => {});
+      // A library-wide change, so the Activity feed says who made it and what it did.
+      await logAudit('library.rescan', {
+        userId: who.userId,
+        detail: { plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}) },
+        req: who.req,
+      });
+      scheduleHealthSummaryRefresh();
+      who.log?.info(`rescan: ${r.marked} chapter(s) marked as no longer on disk; ${r.back} back on disk and ${r.changed} changed since the preview, left alone`
+        + (r.stopped ? ' (stopped for shutdown)' : ''));
+      for (const u of r.unmounted) who.log?.warn(`rescan: ${u.root} no longer holds the files the preview saw -- is the volume mounted? Nothing under it was marked`);
+      return r;
+    } catch (e) {
+      // Never leave an older healthy result standing after an Apply that threw (Verify's rule), in memory or the row.
+      rescanState.appliedAt = Date.now();
+      rescanState.lastApplied = null;
+      rescanState.error = 'failed';
+      await q('UPDATE server_settings SET rescan_last_run = now(), rescan_last_result = NULL WHERE id = 1').catch(() => {});
+      who.log?.error?.(e);
+      throw e;
+    } finally {
+      rescanState.running = null;
+      rescanState.phase = null;
+    }
+  })();
+  return { ok: true, run };
+}
+
+/** Is the library folder still the one the preview looked at: readable, and holding a file it saw there? */
+async function stillMounted(root: string, samples: string[]): Promise<boolean> {
+  if (!(await stat(root).catch(() => null))) return false;
+  for (const f of samples) if ((await look(root, f)) === 'present') return true;
+  return false;
+}
+
+/** Marked per statement: a shutdown is honoured between batches, and no statement names thousands of ids. */
+const MARK_BATCH = 500;
+
+async function applyPlan(plan: RescanPlan, opts: ApplyOpts): Promise<RescanApplied> {
+  const t0 = Date.now();
+  const out: RescanApplied = {
+    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length,
+    downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], ms: 0,
+  };
+  // ⚠️ With every scan held off (the header): a scan between the look below and the mark could bring a row back, or
+  // move it, and the mark would land on a chapter whose file is there.
+  // Reintroduce by running this outside withScansHeld: "Apply asks every row again, with scans held" sees a scan
+  // start inside the Apply.
+  await withScansHeld(async () => {
+    await opts.held?.();
+    if (!plan.mark.length) return;
+    // The folder first: one that no longer holds the files the preview saw is unmounted now, whatever it held then.
+    if (!(await stillMounted(LIBRARY_ROOT, plan.samples))) {
+      out.unmounted.push({ root: LIBRARY_ROOT });
+      return;
+    }
+    const now = new Map((await q<{ id: string; file: string; root: string; pruned_at: string | null; fingerprint: string | null; series_id: string; looked: boolean }>(
+      `SELECT b.id, b.file, b.root, b.pruned_at, b.fingerprint, b.series_id, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked
+         FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = ANY($1)`,
+      [plan.mark.map((m) => m.id)])).map((r) => [r.id, r]));
+    const gone: Array<{ id: string; seriesId: string; fingerprint: string | null }> = [];
+    await mapLimit(plan.mark, CONCURRENCY, async (m) => {
+      const c = now.get(m.id);
+      // ⚠️ Still the row that was looked at: never one pruned since (Verify's 'missing' keeps its mark), moved to
+      // another file or root, or of a series hidden, merged away or being renumbered meanwhile.
+      if (!c || c.pruned_at || c.file !== m.file || c.root !== LIBRARY_ROOT || !c.looked || renumberRunning(c.series_id)) out.changed++;
+      else {
+        const l = await look(LIBRARY_ROOT, m.file);
+        if (l === 'present') out.back++;
+        else if (l === 'gone') gone.push({ id: m.id, seriesId: c.series_id, fingerprint: c.fingerprint });
+        else out.changed++;
+      }
+      rescanState.done++;
+    });
+    // ⚠️ Paired again, before the mark wipes the fingerprint: the backfill may have fingerprinted a moved file's new
+    // row since the preview. Reintroduce by dropping this: "a file paired since the preview is kept" finds it marked.
+    const fps = [...new Set(gone.map((g) => g.fingerprint).filter((f): f is string => !!f))];
+    const twinned = fps.length ? new Set((await q<{ fingerprint: string }>(
+      `SELECT DISTINCT fingerprint FROM lib_books WHERE pruned_at IS NULL AND fingerprint = ANY($1::text[]) AND NOT (id = ANY($2::text[]))`,
+      [fps, gone.map((g) => g.id)])).map((r) => r.fingerprint)) : new Set<string>();
+    const todo = gone.filter((g) => !(g.fingerprint && twinned.has(g.fingerprint)));
+    out.moved += gone.length - todo.length;
+    const touched = new Set<string>();
+    for (let i = 0; i < todo.length; i += MARK_BATCH) {
+      if (runtime.stopping) { out.stopped = 'shutdown'; break; }
+      const batch = todo.slice(i, i + MARK_BATCH);
+      // 'deleted': held, as Delete files' mark -- the sweep never fetches these back (chapterCleanup.ts heldBooks).
+      await tombstoneBooks(batch.map((g) => g.id), 'deleted');
+      out.marked += batch.length;
+      for (const g of batch) touched.add(g.seriesId);
+    }
+    if (touched.size) await refreshSeries([...touched]);
+  });
+  out.ms = Date.now() - t0;
+  return out;
+}
+
+/**
+ * The cover and the counts of the series an Apply touched, the way the scan writes them: the cover is the lowest
+ * LIVE chapter (every thumbnail falls back to the cover chapter's first page, and a tombstone has none), and
+ * books_count and latest_mtime are over every row, tombstones included -- "read" is every row read, as the trackers
+ * count it. A series with nothing left keeps a tombstone as its cover: the dashed placeholder is the honest one.
+ */
+async function refreshSeries(ids: string[]): Promise<void> {
+  await q(
+    `UPDATE lib_series s SET cover_book_id = c.id FROM (
+       SELECT DISTINCT ON (series_id) series_id, id FROM lib_books WHERE series_id = ANY($1)
+        ORDER BY series_id, (pruned_at IS NOT NULL), number ASC, file ASC) c
+      WHERE s.id = c.series_id AND s.cover_book_id IS DISTINCT FROM c.id`, [ids]).catch(() => {});
+  await q(
+    `UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
+       FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books WHERE series_id = ANY($1) GROUP BY series_id) c
+      WHERE c.series_id = s.id`, [ids]).catch(() => {});
+}
+
+/** The last Apply: this process's, else the one a restart kept in server_settings. */
+export async function lastApplied(): Promise<{ at: number | null; result: RescanApplied | null }> {
+  if (rescanState.appliedAt) return { at: rescanState.appliedAt, result: rescanState.lastApplied };
+  const r = await one<{ at: string | null; result: RescanApplied | null }>(
+    'SELECT rescan_last_run AS at, rescan_last_result AS result FROM server_settings WHERE id = 1').catch(() => null);
+  return { at: r?.at ? new Date(r.at).getTime() : null, result: r?.result ?? null };
 }
 
 /** A plan as the Tasks panel reads it: the counts, and the lists by series id (the route names them). */

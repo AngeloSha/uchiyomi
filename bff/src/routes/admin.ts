@@ -24,7 +24,7 @@ import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
-import { startRescan } from '../lib/rescan';
+import { startRescan, rescanState } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
@@ -793,12 +793,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     scheduleVars: vars,
   });
   app.get('/api/admin/tasks', async (req) => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
               verify_last_run, verify_last_result,
-              repair_enabled, repair_last_run, repair_last_result
+              repair_enabled, repair_last_run, repair_last_result,
+              rescan_last_run, rescan_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -857,6 +858,17 @@ export default async function adminRoutes(app: FastifyInstance) {
         lastRun: verifyState.finishedAt || (s?.verify_last_run ? new Date(s.verify_last_run).getTime() : null),
         lastResult: verifyState.finishedAt ? verifyState.lastResult : (s?.verify_last_result ?? null),
         running: verifyState.running,
+      },
+      // v0.55.4 (#150): the look for chapters whose files are gone from your own folders, previewed, then applied
+      // (lib/rescan.ts). On demand only, like Verify. Its line is the last APPLY's, persisted the same way -- a preview
+      // changes nothing, so there is nothing of it to report here; the panel under the row shows it.
+      {
+        id: 'rescan',
+        name: 'Rescan everything',
+        ...sched('on demand'),
+        lastRun: rescanState.appliedAt || (s?.rescan_last_run ? new Date(s.rescan_last_run).getTime() : null),
+        lastResult: rescanState.appliedAt ? rescanState.lastApplied : (s?.rescan_last_result ?? null),
+        running: !!rescanState.running,
       },
       // The nightly repair (lib/repair.ts). Listed whether it is on or off, and the schedule text says
       // which: unlike the read-chapter cleanup there is no "are you sure" to attach to its Run now, because

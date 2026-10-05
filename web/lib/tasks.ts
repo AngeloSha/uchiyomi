@@ -9,6 +9,7 @@ import { keys, t as tr } from './i18n';
 export const TASK_NAMES = keys(
   'Library scan', 'Check for new chapters', 'Backup database & config', 'Fingerprint library files',
   'Find repeated pages', 'Verify chapter files', 'Repair library', 'Delete read chapters', 'Extension updates',
+  'Rescan everything',
 );
 
 /**

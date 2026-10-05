@@ -39,11 +39,16 @@ let persistScan: () => Promise<any>;
 let scanCount: () => number;
 let previewRescan: () => Promise<any>;
 let startRescan: (log?: any) => Promise<any> | false;
+let startApply: (input: any, who: any, opts?: any) => any;
 let rescanState: any;
+let PLAN_TTL_MS: number;
+let runtime: any;
+let verifyState: any;
 let runFingerprintBackfill: () => Promise<any>;
-let app: any, adminTok: string;
+let app: any, adminTok: string, adminId: string;
 
 const ADMIN = 'rs-admin';
+const READER = 'rs-reader';
 const SRC = 'T!rs';
 
 /** A real one-page archive. Its page names its own path, so no two files share a fingerprint unless one IS the other. */
@@ -84,19 +89,40 @@ async function wipe() {
   await rm(TMP, { recursive: true, force: true }).catch(() => {});
   await mkdir(ROOT, { recursive: true });
   await mkdir(DL, { recursive: true });
-  Object.assign(rescanState, { running: null, phase: null, done: 0, of: null, startedAt: null, plan: null, error: null });
+  Object.assign(rescanState, { running: null, phase: null, done: 0, of: null, startedAt: null, plan: null, error: null, appliedAt: null, lastApplied: null });
+  await q('DELETE FROM users WHERE username = $1', [READER]).catch(() => {});
 }
+
+/** A preview, the way the panel starts one. */
+async function preview(): Promise<any> {
+  const run = startRescan();
+  assert.ok(run, 'the preview did not start');
+  return run;
+}
+/** An Apply of `plan`, the way the panel presses it; the result once it is done. */
+async function apply(plan: any, opts: any = {}): Promise<any> {
+  const r = startApply({ plan: plan.id }, { userId: adminId }, opts);
+  assert.ok(r.ok, `Apply was refused: ${JSON.stringify(r)}`);
+  return r.run;
+}
+const prunedOf = async (root: string, rel: string) => {
+  const r = await rowOf(root, rel);
+  return { at: r.pruned_at, reason: r.pruned_reason };
+};
+const exists = (p: string) => readFile(p).then(() => true).catch(() => false);
 
 before(async () => {
   if (!DSN) return;
   const { migrate } = await import('../src/lib/migrate');
   ({ q } = (await import('../src/lib/db')) as any);
   ({ persistScan, scanCount } = (await import('../src/lib/library')) as any);
-  ({ previewRescan, startRescan, rescanState } = (await import('../src/lib/rescan')) as any);
+  ({ previewRescan, startRescan, startApply, rescanState, PLAN_TTL_MS } = (await import('../src/lib/rescan')) as any);
+  ({ runtime } = (await import('../src/lib/runtime')) as any);
+  ({ verifyState } = (await import('../src/lib/verifyFiles')) as any);
   ({ runFingerprintBackfill } = (await import('../src/lib/fingerprintJob')) as any);
   await migrate();
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
-  const adminId = (await q<{ id: string }>(
+  adminId = (await q<{ id: string }>(
     `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'admin','x','password') RETURNING id`, [ADMIN]))[0].id;
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
@@ -114,6 +140,7 @@ after(async () => {
   if (!DSN) return;
   await wipe().catch(() => {});
   await q(`DELETE FROM audit_log WHERE event LIKE 'library.rescan%' OR (event = 'task.run' AND detail->>'task' = 'rescan')`).catch(() => {});
+  await q('UPDATE server_settings SET rescan_last_run = NULL, rescan_last_result = NULL WHERE id = 1').catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   await app?.close().catch(() => {});
   await rm(TMP, { recursive: true, force: true }).catch(() => {});
@@ -297,4 +324,222 @@ test('rescan never runs at boot or on a schedule', { skip: false }, async () => 
   };
   await walk(SRC_DIR);
   assert.deepEqual(callers.sort(), ['lib/rescan.ts', 'routes/admin.ts'], 'the rescan is called from somewhere new');
+});
+
+// ---- Apply ----------------------------------------------------------------------------------------------------------
+
+test('Apply marks your own folder\'s gone chapters and nothing else: no row erased, no file touched, the download folder left to Verify', { skip }, async () => {
+  // The row IS everyone's reading history of the chapter, and the download folder's are Verify's to mark 'missing'
+  // for the sweep. Reintroduce by erasing the planned rows instead of tombstoning them: the row count drops.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await rm(join(DL, SRC, 'Fetched', 'Chapter 2.cbz'));
+  const before = (await allRows()).length;
+  const plan = await preview();
+  const r = await apply(plan);
+  assert.equal(r.marked, 1, JSON.stringify(r));
+  assert.equal(r.downloads, 1);
+  assert.equal((await allRows()).length, before, 'a row was erased');
+  assert.deepEqual(await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`).then((p) => [!!p.at, p.reason]), [true, 'deleted'],
+    'the gone chapter is not marked held, as Delete files marks a file it removed');
+  assert.equal((await prunedOf(DL, `${SRC}/Fetched/Chapter 2.cbz`)).at, null, 'the download folder\'s row was marked: that is Verify\'s');
+  for (const n of [1, 2]) {
+    assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter ${n}.cbz`)).at, null);
+    assert.ok(await exists(join(ROOT, SRC, 'Kept', `Chapter ${n}.cbz`)), 'Apply touched a file');
+  }
+});
+
+test('Apply asks every row again, with scans held: a file that came back, and a row that moved, are left alone', { skip }, async () => {
+  // Minutes pass between the preview and the press. Reintroduce by marking the plan as it stands (drop the look in
+  // applyPlan): Kept's chapter 3, back on disk, is marked. Reintroduce by running outside withScansHeld: the scan
+  // asked for inside the Apply starts at once.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await rm(join(ROOT, SRC, 'Gone', 'Chapter 1.cbz'));
+  const plan = await preview();
+  assert.equal(plan.mark.length, 2, 'precondition');
+  let pending: Promise<any> | null = null;
+  const r = await apply(plan, {
+    held: async () => {
+      // The file comes back, and a rename (or a renumber's commit) moves the other row to a new file.
+      await cbz(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+      await q(`UPDATE lib_books SET file = $2 WHERE root = $3 AND file = $1`, [`${SRC}/Gone/Chapter 1.cbz`, `${SRC}/Gone/Chapter 01.cbz`, ROOT]);
+      const n = scanCount();
+      pending = persistScan();
+      await new Promise((res) => setTimeout(res, 100));
+      assert.equal(scanCount(), n, 'a scan started inside the Apply');
+    },
+  });
+  await pending;
+  assert.deepEqual([r.marked, r.back, r.changed], [0, 1, 1], JSON.stringify(r));
+  assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`)).at, null, 'a file back on disk was marked');
+  assert.equal((await prunedOf(ROOT, `${SRC}/Gone/Chapter 01.cbz`)).at, null, 'a row that moved was marked');
+});
+
+test('a file paired since the preview is kept, not marked', { skip }, async () => {
+  // The preview pairs what it can see; a moved file the scan and the backfill met after it is paired at Apply, before
+  // the mark wipes the fingerprint. Reintroduce by dropping the twin check in applyPlan: chapter 3 is marked.
+  await seed();
+  await runFingerprintBackfill();
+  const bytes = await readFile(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  const plan = await preview();
+  assert.equal(plan.mark.length, 1, 'precondition: the preview had nothing to pair it with');
+  await mkdir(join(ROOT, SRC, 'Moved'), { recursive: true });
+  await writeFile(join(ROOT, SRC, 'Moved', 'Chapter 3.cbz'), bytes);
+  await persistScan();
+  await runFingerprintBackfill();
+  const r = await apply(plan);
+  assert.deepEqual([r.marked, r.moved], [0, 1], JSON.stringify(r));
+  assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`)).at, null, 'a moved file was marked as gone');
+});
+
+test('Apply is refused for a stale preview, an applied one, and beside another job', { skip }, async () => {
+  // Reintroduce by dropping a line of clashing() (lib/rescan.ts): its job is let through below.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  const plan = await preview();
+  const who = { userId: adminId };
+  assert.deepEqual(startApply({ plan: '00000000-0000-4000-8000-000000000000' }, who), { ok: false, error: 'stale' }, 'a plan a newer preview replaced');
+  plan.at -= PLAN_TTL_MS + 1;
+  assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error: 'stale' }, 'a plan older than its time');
+  plan.at += PLAN_TTL_MS + 1;
+  const flags: Array<[any, string, string]> = [
+    [runtime, 'updating', 'sweep_running'], [runtime, 'autofixing', 'autofix_running'], [runtime, 'repairing', 'repair_running'],
+    [verifyState, 'running', 'verify_running'], [runtime, 'cleaning', 'cleanup_running'],
+  ];
+  for (const [o, k, error] of flags) {
+    o[k] = true;
+    try { assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error }, `Apply ran beside ${k}`); } finally { o[k] = false; }
+  }
+  const scan = persistScan();
+  assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error: 'scan_running' }, 'Apply ran beside a scan');
+  await scan;
+  rescanState.running = 'preview';
+  try { assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error: 'busy' }); } finally { rescanState.running = null; }
+  assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`)).at, null, 'a refused Apply marked something');
+  await apply(plan);
+  assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error: 'applied' }, 'a plan was applied twice');
+  rescanState.plan = null;
+  assert.deepEqual(startApply({ plan: plan.id }, who), { ok: false, error: 'no_plan' });
+});
+
+test('a library folder that no longer holds what the preview saw is left alone at Apply', { skip }, async () => {
+  // The share went between the preview and the press: every planned file still reads gone, and so does every other.
+  // Reintroduce by dropping the stillMounted look in applyPlan: chapter 3 is marked on a bare mount point.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  const plan = await preview();
+  await rm(join(ROOT, SRC), { recursive: true });
+  await mkdir(join(ROOT, SRC, 'Kept'), { recursive: true });
+  const r = await apply(plan);
+  assert.deepEqual(r.unmounted, [{ root: ROOT }], JSON.stringify(r));
+  assert.equal(r.marked, 0);
+  assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`)).at, null, 'a row under a bare mount point was marked');
+});
+
+test('a row already marked keeps its mark: Verify\'s missing is never relabelled', { skip }, async () => {
+  // Reintroduce by dropping `b.pruned_at IS NULL` from LOOKED_AT: the missing row is planned; by dropping the pruned
+  // test in applyPlan: the row marked meanwhile is counted as marked, not as changed.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 2.cbz'));
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE root = $1 AND file = $2`, [ROOT, `${SRC}/Kept/Chapter 2.cbz`]);
+  const plan = await preview();
+  const three = await rowOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  assert.deepEqual(plan.mark.map((m: any) => m.id), [three.id], 'a row already marked was planned');
+  // Marked by something else between the preview and the press.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE id = $1`, [three.id]);
+  const r = await apply(plan);
+  assert.deepEqual([r.marked, r.changed], [0, 1], JSON.stringify(r));
+  for (const n of [2, 3]) assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter ${n}.cbz`)).reason, 'missing', `chapter ${n}'s mark was relabelled`);
+});
+
+test('everyone\'s history stays, nothing a reader owns changes, and a file that comes back is picked up again', { skip }, async () => {
+  // Reintroduce by clearing the marked rows' progress in applyPlan: the snapshot differs. Reintroduce by dropping
+  // `pruned_at=NULL` from persistScan's upsert: the chapter put back stays marked.
+  await seed();
+  const kept = await seriesOf(`${SRC}/Kept`);
+  const three = await rowOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  const uid = (await q<{ id: string }>(
+    `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'user','x','password') RETURNING id`, [READER]))[0].id;
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, three.id, kept]);
+  await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page) VALUES ($1,$2,$3,1)`, [uid, three.id, kept]);
+  await q(`INSERT INTO notes (user_id, series_id, book_id, body) VALUES ($1,$2,$3,'a note')`, [uid, kept, three.id]);
+  await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1,$2)`, [uid, kept]);
+  await q(`INSERT INTO ratings (user_id, series_id, stars) VALUES ($1,$2,4)`, [uid, kept]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,7)`, [uid, kept]);
+  await q(`INSERT INTO tracker_progress (user_id, series_id, provider, chapters) VALUES ($1,$2,'anilist',3)`, [uid, kept]);
+  const owned = async () => {
+    const out: Record<string, unknown> = {};
+    for (const t of ['read_progress', 'bookmarks', 'notes', 'favorites', 'ratings', 'listing_progress', 'tracker_progress']) {
+      out[t] = await q(`SELECT * FROM ${t} WHERE user_id = $1 ORDER BY 1, 2`, [uid]);
+    }
+    return JSON.stringify(out);
+  };
+  const before = await owned();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  const r = await apply(await preview());
+  assert.equal(r.marked, 1);
+  assert.equal(await owned(), before, 'a reader\'s progress, bookmark, note, favourite, rating, read mark or tracker floor changed');
+  // The file comes back: the next scan picks it up on the same row, and the history is there.
+  await cbz(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  await persistScan();
+  const back = await rowOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  assert.deepEqual([back.id, back.pruned_at], [three.id, null], 'the chapter put back is not the live row it was');
+  assert.equal((await q(`SELECT book_id FROM read_progress WHERE user_id = $1`, [uid]))[0].book_id, three.id);
+});
+
+test('a series with nothing left is listed, never hidden or forgotten, and the covers and counts are recomputed', { skip }, async () => {
+  // Reintroduce by dropping refreshSeries from applyPlan: Kept's cover stays on the chapter just marked.
+  await seed();
+  await rm(join(ROOT, SRC, 'Gone'), { recursive: true });
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 1.cbz'));
+  const kept = await seriesOf(`${SRC}/Kept`);
+  const gone = await seriesOf(`${SRC}/Gone`);
+  assert.equal((await q(`SELECT cover_book_id FROM lib_series WHERE id = $1`, [kept]))[0].cover_book_id,
+    (await rowOf(ROOT, `${SRC}/Kept/Chapter 1.cbz`)).id, 'precondition: the cover is chapter 1');
+  const plan = await preview();
+  assert.deepEqual(plan.emptied, [{ seriesId: gone, chapters: 2 }]);
+  const r = await apply(plan);
+  assert.equal(r.marked, 3);
+  assert.equal(r.emptied, 1);
+  const s = await q<{ id: string; deleted_at: string | null; books_count: number; cover_book_id: string }>(
+    `SELECT id, deleted_at, books_count, cover_book_id FROM lib_series WHERE id = ANY($1) ORDER BY title`, [[kept, gone]]);
+  assert.deepEqual(s.map((x) => [x.id, x.deleted_at, x.books_count]), [[gone, null, 2], [kept, null, 3]],
+    'a series was hidden, or its count is not every row');
+  assert.equal(s.find((x) => x.id === kept)!.cover_book_id, (await rowOf(ROOT, `${SRC}/Kept/Chapter 2.cbz`)).id, 'the cover is still a chapter with no file');
+});
+
+test('the Apply answers started, the panel and the Tasks row say what it did, the audit says who, and a restart keeps it', { skip }, async () => {
+  // Reintroduce by awaiting the Apply in its route: the answer carries no `started`. Reintroduce by dropping the
+  // UPDATE server_settings in startApply: the Tasks row is empty after the simulated restart.
+  await seed();
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  const call = (method: string, url: string, payload?: unknown) =>
+    app.inject({ method, url, headers: { authorization: adminTok }, ...(payload ? { payload } : {}) });
+  await call('POST', '/api/admin/tasks/rescan/run');
+  for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+  const id = (await call('GET', '/api/admin/tasks/rescan/status')).json().plan.id;
+
+  assert.equal((await call('POST', '/api/admin/tasks/rescan/apply', { plan: 'not-a-plan' })).statusCode, 400);
+  const started = await call('POST', '/api/admin/tasks/rescan/apply', { plan: id });
+  assert.equal(started.statusCode, 200, started.body);
+  assert.deepEqual(started.json(), { ok: true, started: true });
+  for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+  const status = (await call('GET', '/api/admin/tasks/rescan/status')).json();
+  assert.equal(status.last?.marked, 1, JSON.stringify(status));
+  assert.ok(status.lastRun);
+  assert.equal(status.plan.applied, true);
+  assert.deepEqual((await call('POST', '/api/admin/tasks/rescan/apply', { plan: id })).json(), { ok: false, error: 'applied' });
+  const row = async () => (await call('GET', '/api/admin/tasks')).json().content.find((t: any) => t.id === 'rescan');
+  const t = await row();
+  assert.deepEqual([t.name, t.running, t.lastResult?.marked], ['Rescan everything', false, 1], JSON.stringify(t));
+  const audit = await q<{ user_id: string; detail: any }>(`SELECT user_id, detail FROM audit_log WHERE event = 'library.rescan' ORDER BY at DESC LIMIT 1`);
+  assert.deepEqual([audit[0]?.user_id, audit[0]?.detail?.marked], [adminId, 1], 'the audit entry does not say who or what');
+  // A restart is a fresh process: the in-memory state is what it was at boot.
+  Object.assign(rescanState, { appliedAt: null, lastApplied: null, plan: null });
+  const after1 = await row();
+  assert.ok(after1.lastRun, 'the last Apply is gone after a restart');
+  assert.equal(after1.lastResult?.marked, 1, 'the last result is gone after a restart');
 });

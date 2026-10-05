@@ -6356,6 +6356,9 @@ paths:
         result} (the newest scoped run, from GET /api/admin/tasks/repair/runs). Every entry also carries
         `scheduleKey` (the schedule sentence with {placeholders}, a locale key on the web) and `scheduleVars`
         (their values); `schedule` stays the English sentence.
+        Since v0.55.4 the list always carries `rescan` ("Rescan everything", schedule "on demand"): `running`
+        while its preview or Apply runs, and `lastRun`/`lastResult` the last APPLY's (see POST
+        /api/admin/tasks/rescan/apply), persisted in server_settings.rescan_last_run / rescan_last_result.
       security:
         - bearer: []
       responses:
@@ -6468,9 +6471,11 @@ paths:
         v0.55.4 (discussion #150). The preview is started by POST /api/admin/tasks/rescan/run, detached: it scans
         the library, then looks for every live chapter row's own file under the library folder and the download
         folder -- never a hidden or merged series', nor one in the middle of a renumber -- and keeps a plan in
-        memory. Answers {running: 'preview' | null, phase: 'scan' | 'look' | 'pair' | null, done, of (rows or
-        files of the phase, null while scanning), startedAt, error: 'failed' | 'stopped' | null (how the last
-        preview ended when it left no plan), plan}. `plan` is null or {id (uuid), at, scannedAt (epoch ms), ms,
+        memory. Answers {running: 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' (a preview) | 'mark'
+        (an Apply) | null, done, of (rows or files of the phase, null while scanning), startedAt, error: 'failed' |
+        'stopped' | null (how the last preview or Apply ended when it did not end well), plan, last (the last
+        Apply's result, below, this process's or the one server_settings kept), lastRun (epoch ms or null)}.
+        `plan` is null or {id (uuid), at, scannedAt (epoch ms), ms,
         stale (older than 30 minutes), applied, looked (rows whose file was looked for, under folders that were
         not refused), unchecked (rows whose file could not be checked at all -- a permission or an I/O error,
         never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
@@ -6481,11 +6486,59 @@ paths:
         live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title}], movedList [{seriesId,
         title, file, to: {seriesId, title, file}}]}. The lists hold at most 200 entries each and name only
         series this viewer may list (the 18+ hide, as on the repair status); the counts are always whole.
+        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, downloads, emptied,
+        unmounted [{root}], ms, stopped?: 'shutdown'}.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/rescan/apply:
+    post:
+      tags:
+        - admin
+      summary: Apply a Rescan everything preview -- mark the chapters whose files are gone from your own folder.
+      operationId: postApiAdminTasksRescanApply
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.55.4 (discussion #150). Detached like the preview, because it stats every planned file again: answers
+        {ok: true, started: true}, or {ok: false, error} when it may not start -- `busy` (a preview or an Apply is
+        running), `no_plan`, `stale` (a newer preview replaced it, or it is older than 30 minutes), `applied`
+        (each plan is applied once), or the job it would run beside: `sweep_running`, `autofix_running`,
+        `repair_running`, `verify_running`, `cleanup_running`, `scan_running`. With every library scan held off,
+        each planned row is asked again -- the same id at the same file, still live, its series neither hidden,
+        merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
+        library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
+        'deleted'` (held: the sweep never fetches it back), and the cover and books_count of every series it
+        touched are recomputed. It never erases a row, touches a file on disk, marks a row in the download folder
+        (Verify chapter files' to mark), relabels a row already pruned, hides or forgets a series, or changes a
+        tracker floor, read mark, favourite or rating. A file that comes back is picked up on the same row by the
+        next scan. The result lands on the status route's `last` and on GET /api/admin/tasks as the `rescan`
+        entry's lastResult, persisted in server_settings.rescan_last_run / rescan_last_result. Audit:
+        `library.rescan` {plan, marked, back, changed, moved, downloads, emptied, unmounted, ms}.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  format: uuid
+                  description: The id of the preview the admin saw (the status route's plan.id).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: The body is not {plan} with a uuid.
         "401":
           description: Not authenticated
         "403":
