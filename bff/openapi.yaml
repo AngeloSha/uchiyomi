@@ -2602,6 +2602,11 @@ paths:
         `duplicate`. At least one of `numbers` / `picks`, at most 300 combined. `floored: true` (since
         v0.48.3) reads `numbers` as WHOLE chapters -- 12 takes every listed chapter from 12 up to 13, so 12 and
         12.5 -- which is what the fill scan's numbers are; a whole number nothing lists is `not_listed`.
+        Since v0.55.4 (#158) the chapters named by number are spread over the followed sources that carry the same
+        release (the same group; or none named, the same language and agreeing page counts): the source this job has
+        asked least, at full speed before slowed, up to three chapters at once, one per image server. Never a source
+        that is switched off, cooling down, refusing or outside the age cap; never a pick, a number once picked, or a
+        series numbered by posting order or with its own source order.
       requestBody:
         required: true
         content:

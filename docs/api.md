@@ -1183,6 +1183,15 @@ cannot see. Same permission gate as the fill:
 `canDownload: false` is refused by the whole `/api/sources` surface, and a source outside the account's
 age cap answers **403**. Progress is on `GET /api/sources/jobs` under the series' `folder`.
 
+Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)) a fetch by `numbers` is spread over the
+sources the series follows when they carry the same release of a chapter (the same scanlation group; or no group named,
+the same language and page counts that agree): each chapter is taken from the one this job has asked least, a source
+downloading at full speed before one a 429 has slowed, and up to three chapters come in at once, one per image server
+(two sites whose pages come from one server count as one). A source that is switched off, in a cooldown, refusing this
+job or outside the account's age cap is never taken this way. A `pick` never moves, nor a number once picked by name
+(`lib_books.picked_at`), nor anything for a series numbered by posting order or with its own source order. A chapter
+that fails is filed under the source it was asked from.
+
 **Download progress.** Since v0.40.0 a job may carry `switched: [{number, from, to, why?}]`, one entry for
 each chapter completed from a different followed source after its first copy failed. `why` is
 `"rate_limited"` when that was the reason for the switch; it may be absent for an ordinary failure. It may

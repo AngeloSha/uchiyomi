@@ -597,6 +597,16 @@ source it switched from and to. It does not switch a version you explicitly pick
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
 follows another source with the chapter, that copy may keep the queue moving.
 
+**Several sites, one release.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a Fetch
+— *Fetch all {n}*, a chapter's *Fetch*, a *Try again* — of a series that follows more than one source carrying the
+same release (the same scanlation group; or, on sites that name none, the same language and page count) takes its
+chapters from those sources in turn rather than all from one: the one the Fetch has asked least, a site downloading at
+full speed before one that is slowed, and up to three chapters at once, one per image server, so two sites fill the
+series side by side. Two sites whose pages come from one image server count as one. A site that is switched off,
+cooling down, refusing or above your age limit is skipped, and nothing moves for a version you picked by name, for a
+series with its own source order (*Preferring one source*) or for one numbered by posting order. The download card
+counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below).
+
 If at least four pages in five arrived after an ordinary page failure, the chapter is kept with a numbered
 placeholder at every missing position rather than thrown away. Its row says how many pages are missing. The
 reader never hides a missing placeholder — even when that position was also marked as a repeated page — and
