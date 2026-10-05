@@ -347,10 +347,12 @@ export async function previewRescan(): Promise<RescanPlan | null> {
       [gone.map((g) => g.id), gone.map((g) => g.file)])).map((r) => r.id)) : new Set<string>();
     const goneHere = gone.filter((g) => still.has(g.id));
     seen -= gone.length - goneHere.length;
-    if (!seen) continue;
     // ⚠️ The whole-root rules (the header): no file present is a volume that is not there, or a disk with nothing on
-    // it, and neither is evidence about any one chapter; nine in ten gone is the admin's call, not the task's.
-    if (!present) { unmounted.push({ root }); continue; }
+    // it, and neither is evidence about any one chapter -- nor is a root where no file could be checked at all (a NAS
+    // answering every stat with an I/O error or a stale handle), which would otherwise read as nothing gone. Nine in
+    // ten gone is the admin's call, not the task's. Reintroduce by skipping a root that saw nothing (`if (!seen)
+    // continue;` first): "a file that cannot be checked is not a gone file" finds no folder reported.
+    if (!present) { if (seen || uncheckedHere) unmounted.push({ root }); continue; }
     if (goneHere.length > seen * REFUSE_ABOVE) { unmounted.push({ root, missing: goneHere.length, of: seen }); continue; }
     looked += seen;
     unchecked += uncheckedHere;
@@ -365,6 +367,8 @@ export async function previewRescan(): Promise<RescanPlan | null> {
   }
 
   const moved = await pairMoved(own, goneIds, roots);
+  // A pairing cut short by a shutdown would plan a moved file as gone.
+  if (runtime.stopping) return null;
   const movedIds = new Set(moved.map((m) => m.id));
   const mark = own.filter((g) => !movedIds.has(g.id)).map(({ id, seriesId, file }) => ({ id, seriesId, file }));
 

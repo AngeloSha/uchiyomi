@@ -87,6 +87,7 @@ async function wipe() {
   await q(`DELETE FROM lib_books`).catch(() => {});
   await q(`DELETE FROM lib_series`).catch(() => {});
   await q(`DELETE FROM series_trackers WHERE external_id LIKE 'rs-%'`).catch(() => {});
+  await chmod(join(ROOT, SRC), 0o755).catch(() => {});
   await chmod(join(ROOT, SRC, 'Locked'), 0o755).catch(() => {});
   await rm(TMP, { recursive: true, force: true }).catch(() => {});
   await mkdir(ROOT, { recursive: true });
@@ -227,6 +228,16 @@ test('a file that cannot be checked is not a gone file', { skip }, async () => {
     assert.equal(plan.looked, 7);
   } finally {
     await chmod(join(ROOT, SRC, 'Locked'), 0o755);
+  }
+  // A folder where no file could be checked at all -- a NAS answering every stat with an I/O error -- is not a folder
+  // with nothing gone: it looks unmounted. Reintroduce by skipping a root that saw nothing: no folder is reported.
+  await chmod(join(ROOT, SRC), 0o000);
+  try {
+    const plan = await previewRescan();
+    assert.deepEqual(plan.unmounted, [{ root: ROOT }], `a folder where nothing could be checked read as fine: ${JSON.stringify(plan)}`);
+    assert.deepEqual(plan.mark, []);
+  } finally {
+    await chmod(join(ROOT, SRC), 0o755);
   }
 });
 
