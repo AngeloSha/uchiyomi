@@ -227,6 +227,24 @@ test("a deleted chapter's thumbnail is a 404, not a server error", { skip }, asy
   assert.equal(live.statusCode, 200, 'a live chapter still has a thumbnail');
 });
 
+test("a series whose cover chapter's file is gone answers its cover and backdrop 404, not a server error", { skip }, async () => {
+  // v0.55.4 integration: Rescan everything is about files gone from disk, and until its Apply moves a series' cover to a
+  // live chapter -- or while the library folder is not mounted -- the series' cover and the admin header's backdrop are
+  // drawn from a cover chapter whose file is not there. Reintroduce by calling cbzPageAt directly in firstPageInput
+  // (routes/images.ts): 500.
+  // Art known to be none, so neither route asks AniList for it.
+  await q('INSERT INTO series_art (series_id, banner, cover) VALUES ($1, NULL, NULL) ON CONFLICT (series_id) DO NOTHING', [S]);
+  try {
+    await rm(join(DL, FOLDER, 'ch1.cbz'));   // the cover chapter's file, gone; its row still live
+    for (const url of [`/img/series/${S}/thumb`, `/img/series/${S}/backdrop`]) {
+      const r = await app.inject({ method: 'GET', url, headers: { cookie: imgCookie } });
+      assert.equal(r.statusCode, 404, `${url}: ${r.statusCode}`);
+    }
+  } finally {
+    await q('DELETE FROM series_art WHERE series_id = $1', [S]).catch(() => {});
+  }
+});
+
 test('the book DTO says whether Uchiyomi downloaded it', { skip }, async () => {
   // Only a chapter under DL_ROOT may be deleted from the server or fetched again; the web greys the buttons
   // per row from this flag. Reintroduce by removing `owned` from bookDto in lib/ownedCatalog.ts.

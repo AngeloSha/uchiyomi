@@ -295,7 +295,11 @@ const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
        FROM lib_series s WHERE s.id = $1`, [id]);
   const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id, ctx) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
-  const first = await cbzPageAt(abs, 0);
+  // A cover chapter whose file is gone -- deleted or moved by hand, which is what Rescan everything finds (v0.55.4), or a
+  // library folder not mounted right now -- is a 404, as a chapter's own thumbnail is (pageOrGone, below): the admin
+  // header's backdrop asked for one, and the ENOENT surfaced as a server error. Reintroduce by calling cbzPageAt here:
+  // "a series whose cover chapter's file is gone" in prunedBooks.int.test.ts sees 500.
+  const first = await pageOrGone(abs, 0);
   if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
   return first.bytes;
 };
