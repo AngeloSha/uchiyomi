@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Dependency-free HTTP source used only by the browser walks (v0.40 onwards).
 //
-//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49,v54]
+//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49,v54] [--cloudflare yes]
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
 // (shorthand for walk-tale-N), a SERIES id (for `omit:`), "search" with page 0, or "site" with page 0 (for
@@ -25,6 +25,12 @@
 //                                                                 answer -- the owner's AllManga (v0.55.1), whose page
 //                                                                 lists timed out in the engine's WebView for days.
 //
+// --cloudflare yes (v0.55.3, up.sh's E2E_SOLVERS=1, for the backup solver's walk): the site behind a fake Cloudflare.
+// Every request without a solver's `cf_clearance` cookie gets the challenge page (403, logged as route `challenge`);
+// with one, the site answers as it always does, its root (`/`, a small home page) included, and each log row carries
+// the clearance it came with (`clearance`, the solver's name, and `ua`): the app's own image fetches must send the pair
+// of the solver that solved this server (bff lib/sources/flaresolverr.ts cfSession).
+//
 // ⚠️ `offline` answers 200 on purpose, and in HTML: that is what made aqua hard to see. The adapter (bff
 // lib/sources/fake.ts) hands such a page to the product's own offlineNotice, which accepts it only while it is
 // small (under 8 KB), says so in its <title> or first <h1>, and carries none of the stub's JSON. The control
@@ -44,6 +50,7 @@ const argv = new Map();
 for (let i = 2; i < process.argv.length; i += 2) argv.set(process.argv[i], process.argv[i + 1]);
 const NAME = argv.get('--name') || 'fake-a';
 const PORT = Number(argv.get('--port') || 18150);
+const CLOUDFLARE = argv.get('--cloudflare') === 'yes';
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`bad --port ${PORT}`);
 
 // ⚠️ "Walk Gap" runs to 14, not 12, and both fakes carry all fourteen: the walk punches its hole with
@@ -209,6 +216,10 @@ const OFFLINE_PAGE = Buffer.from(`<!doctype html>
 </html>
 `);
 
+// The fake Cloudflare's challenge, as Cloudflare words it (--cloudflare yes): what a request with no clearance gets.
+const CHALLENGE_PAGE = Buffer.from('<!doctype html><html><head><title>Just a moment...</title></head><body>'
+  + '<h1>Checking your browser before accessing the site.</h1><div id="cf-chl-widget"></div></body></html>');
+
 const scripts = new Map();
 const requestCounts = new Map();
 const log = [];
@@ -244,7 +255,10 @@ async function bodyOf(req) {
   return JSON.parse(Buffer.concat(parts).toString('utf8'));
 }
 function begin(req, url, extra = {}) {
-  const row = { seq: ++sequence, at: Date.now(), method: req.method, path: url.pathname, ...extra };
+  const row = {
+    seq: ++sequence, at: Date.now(), method: req.method, path: url.pathname,
+    ...(req.clearance ? { clearance: req.clearance, ua: String(req.headers['user-agent'] || '') } : {}), ...extra,
+  };
   log.push(row);
   return row;
 }
@@ -278,6 +292,22 @@ const server = http.createServer(async (req, res) => {
       requestCounts.delete(chapter);
       scripts.delete(`${keyOf(chapter, page)}:fired`);
       return sendJson(res, 200, { ok: true, chapter, page, behaviour });
+    }
+
+    // Behind the fake Cloudflare (--cloudflare yes, see the header): nothing without a solver's clearance.
+    if (CLOUDFLARE) {
+      const clearance = /(?:^|;\s*)cf_clearance=([^;]+)/.exec(String(req.headers.cookie || ''))?.[1] ?? null;
+      if (!clearance) {
+        const row = begin(req, url, { route: 'challenge' });
+        finish(row, 403);
+        return sendBytes(res, 403, 'text/html; charset=utf-8', CHALLENGE_PAGE);
+      }
+      req.clearance = clearance;
+      if (req.method === 'GET' && url.pathname === '/') {
+        const row = begin(req, url, { route: 'home' });
+        finish(row, 200);
+        return sendBytes(res, 200, 'text/html; charset=utf-8', Buffer.from(`<!doctype html><title>${SITE_NAME}</title><h1>${SITE_NAME}</h1>`));
+      }
     }
 
     // The whole site down behind its own notice (see the header): every source route, before any of them reads a

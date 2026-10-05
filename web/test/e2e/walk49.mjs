@@ -137,8 +137,15 @@
 //   the series page, the reader and every count while its twenty-page 3.5 stays; switched off, all of it is back; and
 //   the Library grid's request takes as long off as it did before the switch was ever on.
 //
+//   solver -- v0.55.3, the backup Cloudflare solver (FLARESOLVERR_FALLBACK_URL), on up.sh's E2E_SOLVERS=1 stack
+//   (solverWalk.mjs): at 1280, 390 and 390 in Arabic, the main solver (greeting as trawl) and the backup (FlareSolverr)
+//   both on Health's card, trawl never held against FlareSolverr's releases; the main stopped -- the card amber, "the
+//   backup is solving", and a site behind a fake Cloudflare still lists and downloads with the backup's clearance and user
+//   agent, Fix everything's end saying it without Needs you; a source downloading slowly after a 429 (Source health's
+//   `slowed` row); and the main back, the card green.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   libraries, nosource, filenames, noticechapters, replace, autofix, engine. The engine phase resets the fake engine
+//   libraries, nosource, filenames, noticechapters, replace, autofix, solver, engine. The engine phase resets the fake engine
 //   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
 //   failing, which only the engine phase then meets, and it never searches.
 //
@@ -183,7 +190,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'engine'];
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1449,6 +1456,11 @@ try {
   if (PHASES.includes('autofix')) {
     const { autofixWalk } = await import('./autofixWalk.mjs');
     await autofixWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
+  }
+  // v0.55.3: the backup Cloudflare solver, and a source downloading slowly (solverWalk.mjs; up.sh with E2E_SOLVERS=1).
+  if (PHASES.includes('solver')) {
+    const { solverWalk } = await import('./solverWalk.mjs');
+    await solverWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.

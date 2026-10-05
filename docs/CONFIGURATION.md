@@ -158,7 +158,9 @@ by the release test harness. It is empty in every shipped deployment and is not 
 configuration. `FAKE_SOURCE_NSFW=name` (since v0.42.0) makes the named ones — a comma-separated list of
 ids from that same list — declare themselves adult, which is the only way to drive the 18+ rules without a
 real adult extension; it does nothing at all while `FAKE_SOURCE_URLS` is unset, which is every shipped
-deployment.
+deployment. `FAKE_SOURCE_CLOUDFLARE=name` (since v0.55.3) puts the named ones behind a fake Cloudflare: they ask the
+Cloudflare solvers for every page and send a solver's cookie with their images, which is how the harness drives the
+backup solver end to end; the same, it does nothing while `FAKE_SOURCE_URLS` is unset.
 
 The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER_BUDGET_MS` (default
 `90000`) for Cloudflare-backed work; `SCAN_CONCURRENCY` defaults to that solver slot count, while

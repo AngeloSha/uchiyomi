@@ -19,6 +19,7 @@ afterEach(async () => {
   globalThis.fetch = realFetch;
   delete process.env.FAKE_SOURCE_URLS;
   delete process.env.FAKE_SOURCE_NSFW;
+  delete process.env.FAKE_SOURCE_CLOUDFLARE;
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
@@ -200,5 +201,77 @@ test('the stub\'s own `offline` page is one the adapter reads as the site saying
     assert.equal((await a.listChapters('walk-tale')).length, 12, '`ok` on "site" brings the site back');
   } finally {
     child.kill('SIGTERM');
+  }
+});
+
+/** A free port on 127.0.0.1, and one of the rig's scripts started on it, once it says it is listening. */
+async function startRig(script: string, args: string[]): Promise<{ base: string; stop: () => void }> {
+  const port = await new Promise<number>((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port: p } = srv.address() as AddressInfo; srv.close(() => resolve(p)); });
+  });
+  const child = spawn(process.execPath, [join(__dirname, '..', '..', 'web', 'test', 'e2e', script), ...args, '--port', String(port)],
+    { stdio: ['ignore', 'pipe', 'inherit'] });
+  await new Promise<void>((resolve, reject) => {
+    let out = '';
+    const timer = setTimeout(() => reject(new Error(`${script} did not start: ${out}`)), 10_000);
+    child.stdout!.on('data', (c) => { out += c; if (/listening on/.test(out)) { clearTimeout(timer); resolve(); } });
+    child.on('exit', (code) => { clearTimeout(timer); reject(new Error(`${script} exited (${code}): ${out}`)); });
+  });
+  return { base: `http://127.0.0.1:${port}`, stop: () => { child.kill('SIGTERM'); } };
+}
+
+test('a stub behind the fake Cloudflare answers only through a solver, and its images take the solver\'s pair (v0.55.3)', async () => {
+  // The backup solver's walk (web/test/e2e/solverWalk.mjs) drives the product's own solver client through these two:
+  // fakeSource.mjs --cloudflare yes refuses every request without a solver's cf_clearance, and fakeSolver.mjs fetches
+  // the page with its own and hands it back. FAKE_SOURCE_CLOUDFLARE names the adapter that asks the solver for every
+  // page (lib/sources/fake.ts). Reintroduce by building every adapter plain (`makeFakeSource(id, base)` in fakeSources):
+  // "the stub named in FAKE_SOURCE_CLOUDFLARE is behind Cloudflare" fails, and its search would reach the stub with no
+  // clearance and meet the challenge.
+  const site = await startRig('fakeSource.mjs', ['--name', 'fake-b', '--cloudflare', 'yes']);
+  const solver = await startRig('fakeSolver.mjs', ['--name', 'main', '--greeting', 'trawl']);
+  const was = { main: process.env.FLARESOLVERR_URL, backup: process.env.FLARESOLVERR_FALLBACK_URL };
+  try {
+    process.env.FLARESOLVERR_URL = solver.base;
+    delete process.env.FLARESOLVERR_FALLBACK_URL;
+    process.env.FAKE_SOURCE_URLS = `fake-a=http://127.0.0.1:1,fake-b=${site.base}`;
+    process.env.FAKE_SOURCE_CLOUDFLARE = 'fake-b';
+    await cleanRegistry();
+    const { loadBuiltins } = await import('../src/lib/sources/builtins');
+    const { getSource } = await import('../src/lib/sources/loader');
+    const { cfSession, resetSolverSessions } = await import('../src/lib/sources/flaresolverr');
+    resetSolverSessions();
+    loadBuiltins();
+    assert.equal(getSource('fake-a')?.requiresCloudflare, false, 'a stub nobody named is plain');
+    const b = getSource('fake-b')!;
+    assert.equal(b.requiresCloudflare, true, 'the stub named in FAKE_SOURCE_CLOUDFLARE is behind Cloudflare');
+
+    const plain = await realFetch(`${site.base}/search?q=Walk`);
+    assert.equal(plain.status, 403, 'PREMISE: without a clearance the stub answers its challenge');
+    assert.match(await plain.text(), /Just a moment/);
+    assert.equal((await b.search('Walk Tale'))[0]?.title, 'Walk Tale', 'the search comes through the solver');
+    assert.equal((await b.getSeries('walk-tale'))?.title, 'Walk Tale');
+    assert.equal(await b.getSeries('no-such-series'), null, 'the stub\'s own "not found" is no series, through the solver too');
+    assert.equal((await b.listChapters('walk-tale')).length, 12);
+    const urls = await b.getPageUrls('walk-tale-1');
+    assert.equal(urls.length, 12);
+
+    // The images, as the downloader fetches them: plainly, with the pair of the solver that solved their server.
+    const pair = await cfSession(urls[0]);
+    assert.deepEqual(pair, { cookie: 'cf_clearance=main', userAgent: 'main-browser/1.0' }, 'the solver\'s own cookie and user agent');
+    const img = await realFetch(urls[0], { headers: { cookie: pair.cookie, 'user-agent': pair.userAgent } });
+    assert.equal(img.status, 200, 'with them, the image comes');
+    const log = (await (await realFetch(`${site.base}/__log`)).json()).content as Array<{ route: string; clearance?: string; ua?: string }>;
+    const seen = log.filter((r) => r.route !== 'challenge');
+    assert.ok(seen.length >= 6 && seen.every((r) => r.clearance === 'main' && r.ua === 'main-browser/1.0'),
+      `every request the stub answered carried the solver's pair: ${JSON.stringify(seen)}`);
+    const asked = (await (await realFetch(`${solver.base}/__log`)).json()).content as Array<{ cmd: string; url: string }>;
+    assert.ok(asked.some((r) => r.cmd === 'request.get' && r.url === `${site.base}/search?q=Walk%20Tale`), JSON.stringify(asked));
+  } finally {
+    if (was.main === undefined) delete process.env.FLARESOLVERR_URL; else process.env.FLARESOLVERR_URL = was.main;
+    if (was.backup !== undefined) process.env.FLARESOLVERR_FALLBACK_URL = was.backup;
+    site.stop();
+    solver.stop();
   }
 });
