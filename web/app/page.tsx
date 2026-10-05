@@ -17,6 +17,7 @@ import { IcPlay, IcSparkle, IcRefresh, IcBell } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { Avatar } from '@/components/Avatar';
 import { Lockup } from '@/components/Brand';
+import { LibraryStart } from '@/components/LibraryStart';
 import { t as tr } from '@/lib/i18n';
 
 interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
@@ -70,7 +71,7 @@ export default function HomePage() {
   const { data, isLoading } = useQuery({ queryKey: ['home'], queryFn: () => api<HomePayload>('/api/home') });
   const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000 });
   const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000 });
-  const { data: featured } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
+  const { data: featured, isPending: featuredPending } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
 
   // "Because you read X" — seed a named recommendation rail from what you're currently reading (else a top favorite)
   const seed = data?.onDeck?.[0]
@@ -117,9 +118,12 @@ export default function HomePage() {
       </header>
 
       {/* HERO — daily recommendation carousel */}
+      {/* The welcome is for a library with nothing in it for this viewer -- `/api/featured` is the latest series they
+          can see, so it is empty only then -- and never a flash while that answer is on its way: it now offers the
+          import (v0.55.4), which a full library must not show for the second before its carousel arrives. */}
       {(featured?.content?.length ?? 0) > 0 ? (
         <HeroCarousel slides={featured!.content} />
-      ) : isLoading ? (
+      ) : isLoading || featuredPending ? (
         <div className="skeleton h-[62vh] min-h-[440px] w-full lg:-mx-6 lg:w-[calc(100%+3rem)]" />
       ) : (
         <div className="relative h-[58vh] min-h-[420px] overflow-hidden lg:-mx-6 lg:h-[70vh] lg:w-[calc(100%+3rem)]">
@@ -130,7 +134,9 @@ export default function HomePage() {
             <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-accent backdrop-blur"><IcSparkle width={13} height={13} />{tr('Welcome')}</span>
             <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">{tr('Welcome to Uchiyomi')}</h1>
             <p className="mb-4 mt-1 text-sm text-fog-300">{tr('Your cinematic library awaits.')}</p>
-            <Link href="/library" className="btn-accent">{tr('Browse library')}</Link>
+            {/* v0.55.4 (#158): the empty Library's keys, in its order -- import one (admins), find series in Discover
+                (whoever may add them). "Browse library" led to that same empty page. */}
+            <LibraryStart align="start" />
           </div>
         </div>
       )}

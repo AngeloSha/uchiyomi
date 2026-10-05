@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3211
+    "strings": 3215
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3214,5 +3214,9 @@
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "أداة الحل الرئيسية لا تستجيب؛ والاحتياطية تحلّ مكانها في الأثناء. أعد تشغيل حاوية أداة الحل الرئيسية؛ إعادة الضبط من هنا لن تغيّر شيئًا.",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "أداة الحل الاحتياطية لا تستجيب. أعد تشغيل حاويتها؛ إعادة الضبط من هنا لن تغيّر شيئًا.",
   "update available ({version})": "يتوفر تحديث ({version})",
-  "up to date": "محدَّث"
+  "up to date": "محدَّث",
+  "Import your library": "استورد مكتبتك",
+  "Find series in Discover": "اعثر على سلاسل في «اكتشف»",
+  "From a Mihon or Tachiyomi backup, a MangaDex list, your AniList, MyAnimeList or Kitsu list, or pasted titles": "من نسخة Mihon أو Tachiyomi احتياطية، أو قائمة MangaDex، أو قائمتك على AniList أو MyAnimeList أو Kitsu، أو عناوين ملصوقة",
+  "Ask whoever runs this server to add some series.": "اطلب ممّن يدير هذا الخادم إضافة بعض السلاسل."
 }

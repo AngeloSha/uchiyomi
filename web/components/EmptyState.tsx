@@ -1,8 +1,15 @@
 'use client';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 
-export function EmptyState({ art, title, sub, cta }: { art: string; title: string; sub: string; cta?: { href: string; label: string } }) {
+/**
+ * A page with nothing on it yet: its art, what is missing, and what to do about it -- one link (`cta`), or keys of the
+ * caller's own under the words (`children`: the empty Library's Import your library and Find series in Discover).
+ */
+export function EmptyState({ art, title, sub, cta, children }: {
+  art: string; title: string; sub?: string; cta?: { href: string; label: string }; children?: ReactNode;
+}) {
   return (
     <div className="flex flex-col items-center px-6 py-16 text-center">
       <motion.div
@@ -16,8 +23,9 @@ export function EmptyState({ art, title, sub, cta }: { art: string; title: strin
         <div className="absolute inset-0" style={{ boxShadow: 'inset 0 0 50px 16px rgb(0 0 0 / 0.55)' }} />
       </motion.div>
       <p className="font-display text-xl font-semibold text-fog-50">{title}</p>
-      <p className="mt-1 max-w-xs text-sm text-fog-400">{sub}</p>
+      {sub && <p className="mt-1 max-w-xs text-sm text-fog-400">{sub}</p>}
       {cta && <Link href={cta.href} className="btn-accent mt-4 text-sm">{cta.label}</Link>}
+      {children && <div className="mt-4">{children}</div>}
     </div>
   );
 }

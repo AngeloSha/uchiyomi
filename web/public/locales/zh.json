@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3211
+    "strings": 3215
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3214,5 +3214,9 @@
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "主求解器没有响应；目前由备用求解器求解。请重启主求解器的容器；在这里重置不会有任何改变。",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "备用求解器没有响应。请重启它的容器；在这里重置不会有任何改变。",
   "update available ({version})": "有可用更新（{version}）",
-  "up to date": "已是最新"
+  "up to date": "已是最新",
+  "Import your library": "导入你的书库",
+  "Find series in Discover": "在“发现”中查找系列",
+  "From a Mihon or Tachiyomi backup, a MangaDex list, your AniList, MyAnimeList or Kitsu list, or pasted titles": "来自 Mihon 或 Tachiyomi 备份、MangaDex 列表、你在 AniList、MyAnimeList 或 Kitsu 上的列表，或粘贴的标题",
+  "Ask whoever runs this server to add some series.": "请联系管理这台服务器的人添加一些系列。"
 }

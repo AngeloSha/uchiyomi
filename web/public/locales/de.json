@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3211
+    "strings": 3215
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3214,5 +3214,9 @@
   "The main solver is not answering; the backup is solving meanwhile. Restart the main solver's container; a reset from here would change nothing.": "Der Haupt-Solver antwortet nicht; der Reserve-Solver übernimmt so lange. Starte den Container des Haupt-Solvers neu; ein Zurücksetzen von hier aus würde nichts ändern.",
   "The backup solver is not answering. Restart its container; a reset from here would change nothing.": "Der Reserve-Solver antwortet nicht. Starte seinen Container neu; ein Zurücksetzen von hier aus würde nichts ändern.",
   "update available ({version})": "Update verfügbar ({version})",
-  "up to date": "auf dem neuesten Stand"
+  "up to date": "auf dem neuesten Stand",
+  "Import your library": "Deine Bibliothek importieren",
+  "Find series in Discover": "Serien in „Entdecken“ finden",
+  "From a Mihon or Tachiyomi backup, a MangaDex list, your AniList, MyAnimeList or Kitsu list, or pasted titles": "Aus einem Mihon- oder Tachiyomi-Backup, einer MangaDex-Liste, deiner AniList-, MyAnimeList- oder Kitsu-Liste oder eingefügten Titeln",
+  "Ask whoever runs this server to add some series.": "Bitte die Person, die diesen Server betreibt, ein paar Serien hinzuzufügen."
 }
