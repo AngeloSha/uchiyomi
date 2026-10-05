@@ -1823,14 +1823,17 @@ posting-order and mid-renumber series left out. Lists name only series the viewe
 /api/admin/tasks/rescan/apply {plan, renumber?: seriesId[]}` applies it, detached, refused as `{ok: false, error}`
 with `busy`, `no_plan`, `stale` (replaced, or older than 30 minutes), `applied`, `not_in_plan`, or the job it would
 run beside (`sweep_running`, `autofix_running`, `repair_running`, `verify_running`, `cleanup_running`,
-`scan_running`). Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
+`scan_running`). A series a download is writing into or a check is reading as it reaches it (a Fetch and its lanes,
+the slow archive's chapter, Fetch newest, a repair) is left alone — neither marked nor renumbered, counted in `busy` —
+and every other series it changes is held busy until it is done, so no Fetch (409 `busy`), archive chapter or Fetch
+newest starts in it meanwhile. Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
 gone, no live fingerprint twin, the library folder still holding a file the preview saw) and marked pruned with
 `pruned_reason = 'deleted'` — held, so the sweep never fetches it back — and the covers and counts of the series it
 touched are recomputed; then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
 number set by hand and a `'missing'` row are kept), with nothing pushed to any tracker. It never erases a row, touches
 a file, marks the download folder, relabels a row already pruned, hides a series or changes a tracker floor, read
-mark, favourite or rating. The result (`{marked, back, changed, moved, downloads, emptied, unmounted, renumbered:
-{series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
+mark, favourite or rating. The result (`{marked, back, changed, moved, busy, downloads, emptied, unmounted,
+renumbered: {series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
 `server_settings.rescan_last_run` / `rescan_last_result`; audit `library.rescan`, and `library.rescan_numbers` when
 the opt-in renumbered something. Never at boot or on a schedule.
 

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3279
+    "strings": 3281
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3282,5 +3282,7 @@
   "Number chapters again by the new file-name rules (optional)": "按新的文件名规则重新为章节编号（可选）",
   "Chapters added before v0.55.2 keep the first number in their file name, so “Vol 2 Ch 5” is chapter 2. Tick a series to number its files by the new rules instead. Trackers are told nothing now; the next chapter a reader finishes there sends its new number.": "v0.55.2 之前加入的章节沿用文件名中的第一个数字，所以“Vol 2 Ch 5”是第 2 话。勾选一个系列，改用新规则为它的文件编号。现在不会通知追踪器；之后读者在该系列读完的下一话会发送新的编号。",
   "Series numbered by posting order, or in the middle of a renumber, are not listed.": "按发布顺序编号的系列，或正在重新编号的系列，不在此列。",
-  "File no longer on disk": "文件已不在磁盘上"
+  "File no longer on disk": "文件已不在磁盘上",
+  "1 series had a download running and was left alone": "有 1 个系列正在下载，未做处理",
+  "{n} series had a download running and were left alone": "有 {n} 个系列正在下载，未做处理"
 }

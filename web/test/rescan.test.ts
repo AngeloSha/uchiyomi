@@ -71,6 +71,12 @@ test('what an Apply did leads with a folder it left alone, and is the Tasks line
   assert.equal(left, '\u2068/library\u2069 no longer held the files the preview saw: nothing under it was marked · 0 chapters marked as no longer on disk');
   assert.ok(left.indexOf('no longer held') < left.indexOf('0 chapters marked'), 'the folder left alone must lead the line');
   assert.equal(appliedLine({ ...r, marked: 1, back: 0, changed: 0, moved: 0, renumbered: undefined }), '1 chapter marked as no longer on disk');
+  // v0.55.4 integration (lanes J × K): a series a download was running in is left alone, and said. Reintroduce by
+  // dropping the clause: a series Apply never touched reads as one with nothing gone.
+  assert.equal(appliedLine({ ...r, busy: 2 }),
+    '12 chapters marked as no longer on disk · 1 back on disk before Apply, left alone · 2 changed since the preview, left alone · 3 were probably moved or renamed (kept) · 2 series had a download running and were left alone · 2 series renumbered by the new rules');
+  assert.equal(appliedLine({ ...r, marked: 0, back: 0, changed: 0, moved: 0, renumbered: undefined, busy: 1 }),
+    '0 chapters marked as no longer on disk · 1 series had a download running and was left alone');
   assert.match(appliedLine({ ...r, stopped: 'shutdown' }), /^stopped for a restart · 12 chapters/);
   // The Tasks line: the rescan's result is told apart by `marked`, and never read as the verify's or the cleanup's.
   // Reintroduce by dropping the `marked` branch in taskResult: the line is empty.

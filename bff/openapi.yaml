@@ -6534,8 +6534,8 @@ paths:
         how many a tracker would be told higher, or lower -- which the tracker floor refuses), examples [{file,
         from, to}] (at most 3, numbers as text: "2" -> "5", "1" -> "1–7")}]. A series numbered by posting order,
         or in the middle of a renumber, is never listed; a row Verify marked 'missing' is never read again.
-        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, downloads, emptied,
-        unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'}.
+        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, busy, downloads,
+        emptied, unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'}.
       security:
         - bearer: []
       responses:
@@ -6558,7 +6558,11 @@ paths:
         running), `no_plan`, `stale` (a newer preview replaced it, or it is older than 30 minutes), `applied`
         (each plan is applied once), `not_in_plan` (a series in `renumber` the preview did not list), or the job
         it would run beside: `sweep_running`, `autofix_running`,
-        `repair_running`, `verify_running`, `cleanup_running`, `scan_running`. With every library scan held off,
+        `repair_running`, `verify_running`, `cleanup_running`, `scan_running`. One writer per series, as a renumber
+        has it: a series a download is writing into or a check is reading as Apply reaches it (a Fetch and its lanes,
+        the slow archive's chapter, Fetch newest, a repair) is left alone -- neither marked nor renumbered, counted in
+        the result's `busy` for the next Rescan -- and every other series it changes is held busy until it is done, so
+        no Fetch (409 `busy`), archive chapter or Fetch newest starts in it meanwhile. With every library scan held off,
         each planned row is asked again -- the same id at the same file, still live, its series neither hidden,
         merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
         library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
@@ -6573,7 +6577,7 @@ paths:
         preview is left alone. Nothing is pushed to any tracker: the next chapter a reader finishes sends its
         number as usual. The result lands on the status route's `last` and on GET /api/admin/tasks as the
         `rescan` entry's lastResult, persisted in server_settings.rescan_last_run / rescan_last_result. Audit:
-        `library.rescan` {plan, marked, back, changed, moved, downloads, emptied, unmounted, ms}, and
+        `library.rescan` {plan, marked, back, changed, moved, busy, downloads, emptied, unmounted, ms}, and
         `library.rescan_numbers` {plan, series, chapters, ids} when the opt-in renumbered something.
       requestBody:
         required: true

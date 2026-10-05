@@ -63,6 +63,11 @@ export interface RescanApplied {
   back: number;
   changed: number;
   moved: number;
+  /**
+   * Series left alone because a download or a check was running in them as Apply reached them (v0.55.4: a Fetch's
+   * lanes, the slow archive's chapter): none of their chapters marked or renumbered, for the next Rescan.
+   */
+  busy?: number;
   downloads: number;
   emptied: number;
   unmounted: RescanUnmounted[];
@@ -179,6 +184,11 @@ export function appliedLine(r: RescanApplied): string {
   if (r.back) bits.push(r.back === 1 ? tr('1 back on disk before Apply, left alone') : tr('{n} back on disk before Apply, left alone', { n: r.back }));
   if (r.changed) bits.push(r.changed === 1 ? tr('1 changed since the preview, left alone') : tr('{n} changed since the preview, left alone', { n: r.changed }));
   if (r.moved) bits.push(movedText(r.moved));
+  // Said, or a series Apply did not touch reads as one it found nothing in: the next Rescan has it.
+  if (r.busy) {
+    bits.push(r.busy === 1 ? tr('1 series had a download running and was left alone')
+      : tr('{n} series had a download running and were left alone', { n: r.busy }));
+  }
   const s = r.renumbered?.series ?? 0;
   if (s) bits.push(s === 1 ? tr('1 series renumbered by the new rules') : tr('{n} series renumbered by the new rules', { n: s }));
   return bits.join(' \u00b7 ');

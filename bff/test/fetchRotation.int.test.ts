@@ -291,3 +291,27 @@ test('a series with its own source order, and a job that is not a Fetch, take ev
   assert.equal((await jobFromListing(f.id, f.folder, [1, 2, 3, 4], 'fill'))?.status, 'done');
   assert.deepEqual(servedBy('fill', [1, 2, 3, 4]), [ALPHA, ALPHA, ALPHA, ALPHA], 'a fill was rotated');
 });
+
+test('a Fetch that starts while a Rescan holds its series waits for it, then takes its chapters in turn', { skip }, async () => {
+  // v0.55.4 integration (lanes J × K): the route looks at the folder (jobBusy), then awaits a listing refresh, the
+  // chapters' states and an audit entry before the job starts -- and a Rescan everything Apply (lib/rescan.ts
+  // holdSeries) can take the series in between, to change its numbers. Its lanes must not write beside it. Reintroduce
+  // by dropping the wait in startDownloadJob: a chapter is asked for while the series is held.
+  const { busyFolders } = await import('../src/lib/bulkNewest');
+  const s = await series('held', ALPHA, [BETA], [1, 2, 3, 4]);
+  const rows = await q('SELECT chosen, source_id FROM series_listing WHERE series_id = $1 ORDER BY number', [s.id]);
+  busyFolders.add(s.folder);
+  try {
+    startDownloadJob({ origin: 'fetch', folder: s.folder, title: s.folder, seriesId: s.id, meta: { series: s.folder },
+      chapters: rows.map((x: any) => ({ ...x.chosen, source: x.source_id })) });
+    await sleep(1500);
+    assert.deepEqual(servedBy('held', [1, 2, 3, 4]), ['', '', '', ''], 'a chapter was asked for while a Rescan held the series');
+  } finally {
+    busyFolders.delete(s.folder);
+  }
+  const job = await jobDone(s.folder);
+  assert.equal(job?.status, 'done', JSON.stringify(job));
+  assert.deepEqual([job.done, job.total], [4, 4]);
+  const by = servedBy('held', [1, 2, 3, 4]);
+  assert.ok(by.includes(ALPHA) && by.includes(BETA), `the Fetch that waited lost its turns: ${by}`);
+});

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3279
+    "strings": 3281
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3282,5 +3282,7 @@
   "Number chapters again by the new file-name rules (optional)": "Volver a numerar los capítulos con las reglas nuevas de nombres de archivo (opcional)",
   "Chapters added before v0.55.2 keep the first number in their file name, so “Vol 2 Ch 5” is chapter 2. Tick a series to number its files by the new rules instead. Trackers are told nothing now; the next chapter a reader finishes there sends its new number.": "Los capítulos añadidos antes de v0.55.2 conservan el primer número de su nombre de archivo, así que «Vol 2 Ch 5» es el capítulo 2. Marca una serie para numerar sus archivos con las reglas nuevas. A los trackers no se les dice nada ahora; el próximo capítulo que un lector termine ahí envía su número nuevo.",
   "Series numbered by posting order, or in the middle of a renumber, are not listed.": "Las series numeradas por orden de publicación, o en plena renumeración, no aparecen.",
-  "File no longer on disk": "El archivo ya no está en el disco"
+  "File no longer on disk": "El archivo ya no está en el disco",
+  "1 series had a download running and was left alone": "1 serie tenía una descarga en curso, se dejó tal cual",
+  "{n} series had a download running and were left alone": "{n} series tenían una descarga en curso, se dejaron tal cual"
 }

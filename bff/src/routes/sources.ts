@@ -469,6 +469,8 @@ function cardFor(seen: DownloadsAudience, me: string | null, folder: string, { b
  * whose chapters are the same release on several followed sources has more than one lane; every other job is one.
  */
 const JOB_LANES = 3;
+/** How often a job that found its folder taken by another writer looks again (startDownloadJob). */
+const FOLDER_WAIT_MS = 500;
 
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
@@ -676,6 +678,14 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // Start what may start, wait for a lane, again. Stopping (a shutdown, Cancel #82, a full disk, every source refusing)
     // is between chapters, never mid-write: what is in flight finishes, nothing new starts.
     const halted = () => stop || runtime.stopping || !!jobs.get(folder)?.cancelRequested;
+    // ⚠️ Another writer may have taken the folder between the route's jobBusy check and this start -- every route that
+    // starts a job awaits a listing refresh, the chapters' states or an audit entry in between: a Rescan everything
+    // Apply (lib/rescan.ts holdSeries), the slow archive's chapter, Fetch newest or a repair holds it in busyFolders.
+    // None of them looks again once it has it, and the lanes below would write beside it, into a series being judged or
+    // renumbered. So the job waits for it to let go; from here on the job's own card holds the folder (jobBusy), and
+    // nothing else takes it. Reintroduce by dropping the wait: "a Fetch that starts while a Rescan holds its series
+    // waits for it" in fetchRotation.int.test.ts lands a chapter while the folder is held.
+    while (busyFolders.has(folder) && !halted()) await new Promise((r) => setTimeout(r, FOLDER_WAIT_MS));
     while (pending.length && !halted()) {
       // Whether a source may be asked, read once per round rather than once per chapter: a Fetch all is 300 of them.
       const asked = new Map<string, Promise<boolean>>();

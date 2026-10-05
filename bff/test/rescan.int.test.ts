@@ -706,3 +706,48 @@ test('an opt-in that fails part way changes no number', { skip }, async () => {
   assert.deepEqual(await numbersOf(comics.id), before, 'part of a failed renumber stayed');
   assert.equal(rescanState.lastApplied, null, 'a failed Apply left a result standing');
 });
+
+// ---- one writer per series ------------------------------------------------------------------------------------------
+
+test('a series being downloaded into is left alone at Apply, and every other one it changes is held until it is done', { skip }, async () => {
+  // v0.55.4 integration (lanes J × K): a Fetch -- several chapters at once since v0.55.4, a lane per image server -- or
+  // the slow archive's chapter chose its numbers by the series as it is, and the opt-in is about to change them.
+  // Reintroduce by dropping the test in holdSeries (lib/rescan.ts): Comics is renumbered and Kept's chapter marked under
+  // the download. By dropping the mark: a Fetch on Gone is let in during the Apply. By letting go of every folder it
+  // looked at: the archive's own mark on Kept is gone after the Apply.
+  const { jobBusy } = (await import('../src/routes/sources')) as any;
+  const { busyFolders } = (await import('../src/lib/bulkNewest')) as any;
+  await seed();
+  const comics = await handNamed('Comics');
+  await rm(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'));
+  await rm(join(ROOT, SRC, 'Gone', 'Chapter 1.cbz'));
+  const plan = await preview();
+  assert.equal(plan.mark.length, 2, 'precondition: a gone chapter in Kept and in Gone');
+  assert.deepEqual(plan.numbers.map((n: any) => n.seriesId), [comics.id], 'precondition: Comics is in the opt-in');
+  const before = await numbersOf(comics.id);
+  const kept = `${SRC}/Kept`, gone = `${SRC}/Gone`, comicsFolder = `${SRC}/Comics`;
+  // The slow archive is fetching a chapter of Kept, and of Comics, right now: lib/archive.ts begin() marks the folder.
+  busyFolders.add(kept);
+  busyFolders.add(comicsFolder);
+  let during: boolean | null = null;
+  try {
+    const r = startApply({ plan: plan.id, renumber: [comics.id] }, { userId: adminId }, { held: async () => { during = jobBusy(gone); } });
+    assert.ok(r.ok, JSON.stringify(r));
+    const out = await r.run;
+    assert.deepEqual([out.busy, out.marked, out.back, out.changed], [2, 1, 0, 0], JSON.stringify(out));
+    assert.deepEqual(out.renumbered, { series: 0, chapters: 0 }, 'a series being downloaded into was renumbered');
+    assert.equal((await prunedOf(ROOT, `${kept}/Chapter 3.cbz`)).at, null, 'a chapter of a series being downloaded into was marked');
+    assert.equal((await prunedOf(ROOT, `${gone}/Chapter 1.cbz`)).reason, 'deleted', 'a free series was not marked');
+    assert.deepEqual(await numbersOf(comics.id), before, 'a series being downloaded into was renumbered');
+    assert.equal(during, true, 'a Fetch could start in a series the Apply was changing');
+    assert.equal(busyFolders.has(gone), false, 'the Apply kept its hold on Gone after it was done');
+    assert.ok(busyFolders.has(kept) && busyFolders.has(comicsFolder), 'the Apply let go of the archive\'s own marks');
+  } finally {
+    busyFolders.delete(kept);
+    busyFolders.delete(comicsFolder);
+  }
+  // The next Rescan has them, once the download is done.
+  const again = await preview();
+  const out2 = await (startApply({ plan: again.id, renumber: [comics.id] }, { userId: adminId }) as any).run;
+  assert.deepEqual([out2.busy, out2.marked, out2.renumbered.series], [0, 1, 1], JSON.stringify(out2));
+});

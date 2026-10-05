@@ -67,6 +67,17 @@
  *   no scan can bring a row back between the look and the mark. Reintroduce by marking the plan as it stands: "Apply
  *   asks every row again, with scans held" finds the file that came back marked.
  *
+ * ⚠️ ONE WRITER PER SERIES, AS A RENUMBER HAS IT. A series something is writing into or checking as Apply reaches it --
+ *   a Fetch (several chapters at once since v0.55.4, a lane per image server), the slow archive's chapter, Fetch newest,
+ *   a repair, a check reading its listing -- is left alone and counted (`busy`), for the next Rescan: those writers chose
+ *   their chapters by the numbers the series has now, and the opt-in is about to change them. Every other series the
+ *   Apply changes is held busy until it is done (bulkNewest's busyFolders, the one mark all of them honour), so none of
+ *   them starts in it meanwhile: a Fetch is refused as busy (and one that took the folder just before waits, routes/
+ *   sources.ts startDownloadJob), the archive waits its turn (`series_busy`). The test and the mark are one turn, with
+ *   no await between them, as the archive's own (lib/archive.ts begin). Reintroduce by dropping the test: "a series
+ *   being downloaded into is left alone at Apply" in rescan.int.test.ts finds its chapter marked and renumbered; by
+ *   dropping the mark: the same test finds a Fetch let in.
+ *
  * ⚠️ NEVER AT BOOT, NEVER ON A SCHEDULE, for Verify's reason: a boot with the share not yet mounted is the empty
  *   mount point on every start. The one caller is the admin's Tasks panel (routes/admin.ts, routes/rescan.ts).
  *   "rescan never runs at boot or on a schedule" in rescan.int.test.ts pins the callers.
@@ -99,7 +110,9 @@ import { visibleToAll } from './visibility';
 import { fingerprintOne } from './fingerprintJob';
 import { tombstoneBooks } from './chapterCleanup';
 import { verifyState } from './verifyFiles';
-import { renumberRunning } from './numbering';
+import { folderBusy, renumberRunning } from './numbering';
+import { busyFolders } from './bulkNewest';
+import { runsInside } from './updater';
 import { logAudit } from './audit';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { numberByRule } from './naming';
@@ -189,6 +202,11 @@ export interface RescanApplied {
   changed: number;
   /** Gone rows kept because their file is another live row's: the preview's pairs, and any found at Apply. */
   moved: number;
+  /**
+   * Series left alone because something was writing into them, or checking them, when Apply reached them (the header):
+   * neither their planned rows nor the opt-in's numbers were touched -- the next Rescan has them.
+   */
+  busy: number;
   /** The preview's counts, carried for the line: gone from the download folder (Verify's), series with nothing left. */
   downloads: number;
   emptied: number;
@@ -564,7 +582,8 @@ export type ApplyRefusal =
 /** Who pressed Apply, for the audit entry. */
 export interface ApplyWho { userId: string | null; req?: FastifyRequest; log?: Log }
 /**
- * Tests only: `held` runs inside the scan hold, before anything is looked at again -- the moment a scan is asked for;
+ * Tests only: `held` runs inside the scan hold, with the series held, before anything is looked at again -- the moment
+ * a scan, or a Fetch, is asked for;
  * `renumbered` inside the opt-in's transaction, after its writes -- the moment a failure must take them all back.
  */
 export interface ApplyOpts { held?: () => Promise<void>; renumbered?: () => Promise<void> }
@@ -629,7 +648,7 @@ export function startApply(
       // A library-wide change, so the Activity feed says who made it and what it did.
       await logAudit('library.rescan', {
         userId: who.userId,
-        detail: { plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}) },
+        detail: { plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, busy: r.busy, downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}) },
         req: who.req,
       });
       // The opt-in, an entry of its own: chapter numbers are what a tracker is told, and the feed must say who changed
@@ -641,6 +660,7 @@ export function startApply(
       }
       scheduleHealthSummaryRefresh();
       who.log?.info(`rescan: ${r.marked} chapter(s) marked as no longer on disk; ${r.back} back on disk and ${r.changed} changed since the preview, left alone`
+        + (r.busy ? `; ${r.busy} series with a download or a check running, left for the next rescan` : '')
         + (r.renumbered.series ? `; ${r.renumbered.chapters} chapter(s) of ${r.renumbered.series} series renumbered by the new file-name rules` : '')
         + (r.stopped ? ' (stopped for shutdown)' : ''));
       for (const u of r.unmounted) who.log?.warn(`rescan: ${u.root} no longer holds the files the preview saw -- is the volume mounted? Nothing under it was marked`);
@@ -674,7 +694,7 @@ const MARK_BATCH = 500;
 async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts): Promise<RescanApplied> {
   const t0 = Date.now();
   const out: RescanApplied = {
-    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length,
+    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, busy: 0,
     downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
   };
   // ⚠️ With every scan held off (the header): a scan between the look below and the mark could bring a row back, or
@@ -683,20 +703,52 @@ async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts):
   // Reintroduce by running this outside withScansHeld: "Apply asks every row again, with scans held" sees a scan
   // start inside the Apply.
   await withScansHeld(async () => {
-    await opts.held?.();
-    await markGone(plan, out);
-    if (renumber.length && !out.stopped) {
-      setPhase('renumber', renumber.length);
-      out.renumbered = await renumberSeries(renumber, opts);
+    // ⚠️ One writer per series (the header): every series this Apply may change, held -- or left alone, if it is taken.
+    const hold = await holdSeries([...plan.mark.map((m) => m.seriesId), ...renumber]);
+    try {
+      out.busy = hold.busy.size;
+      await opts.held?.();
+      await markGone(plan, out, hold.busy);
+      const free = renumber.filter((id) => !hold.busy.has(id));
+      if (free.length && !out.stopped) {
+        setPhase('renumber', free.length);
+        out.renumbered = await renumberSeries(free, opts);
+      }
+    } finally {
+      hold.release();
     }
   });
   out.ms = Date.now() - t0;
   return out;
 }
 
-/** Apply's marking: every planned row asked again, then marked (the header). Inside applyPlan's scan hold. */
-async function markGone(plan: RescanPlan, out: RescanApplied): Promise<void> {
-  if (!plan.mark.length) return;
+/**
+ * The series an Apply may change, held for it (the header): each one's folder marked busy until `release`, unless
+ * something is writing into it or checking it already -- that series is `busy`, and left alone. The test and the mark
+ * are taken in one turn per series, with no await between them.
+ */
+async function holdSeries(ids: string[]): Promise<{ busy: Set<string>; release: () => void }> {
+  const want = [...new Set(ids)];
+  const rows = want.length ? await q<{ id: string; folder: string }>('SELECT id, folder FROM lib_series WHERE id = ANY($1)', [want]) : [];
+  const busy = new Set<string>();
+  const mine = new Set<string>();
+  for (const r of rows) {
+    if (mine.has(r.folder)) continue;
+    if (folderBusy(r.folder) || runsInside(r.id) > 0) { busy.add(r.id); continue; }
+    busyFolders.add(r.folder);
+    mine.add(r.folder);
+  }
+  return { busy, release: () => { for (const f of mine) busyFolders.delete(f); } };
+}
+
+/**
+ * Apply's marking: every planned row asked again, then marked (the header). Inside applyPlan's scan hold. A row of a
+ * `busy` series is not looked at: the series waits for the next Rescan.
+ */
+async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<string>): Promise<void> {
+  const rows = plan.mark.filter((m) => !busy.has(m.seriesId));
+  rescanState.done += plan.mark.length - rows.length;
+  if (!rows.length) return;
   // The folder first: one that no longer holds the files the preview saw is unmounted now, whatever it held then.
   if (!(await stillMounted(LIBRARY_ROOT, plan.samples))) {
     out.unmounted.push({ root: LIBRARY_ROOT });
@@ -705,9 +757,9 @@ async function markGone(plan: RescanPlan, out: RescanApplied): Promise<void> {
   const now = new Map((await q<{ id: string; file: string; root: string; pruned_at: string | null; fingerprint: string | null; series_id: string; looked: boolean }>(
     `SELECT b.id, b.file, b.root, b.pruned_at, b.fingerprint, b.series_id, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = ANY($1)`,
-    [plan.mark.map((m) => m.id)])).map((r) => [r.id, r]));
+    [rows.map((m) => m.id)])).map((r) => [r.id, r]));
   const gone: Array<{ id: string; seriesId: string; fingerprint: string | null }> = [];
-  await mapLimit(plan.mark, CONCURRENCY, async (m) => {
+  await mapLimit(rows, CONCURRENCY, async (m) => {
     const c = now.get(m.id);
     // ⚠️ Still the row that was looked at: never one pruned since (Verify's 'missing' keeps its mark), moved to
     // another file or root, or of a series hidden, merged away or being renumbered meanwhile.
