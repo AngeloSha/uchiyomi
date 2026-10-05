@@ -1,5 +1,76 @@
 # Changelog
 
+## v0.55.4 — 2026-10-05
+
+**Easier to find: the version at the foot of the admin menu, "Import your library" where a new library starts, and a
+search that finds settings. Plus *Rescan everything*, downloads that use every source carrying a release, and an 18+
+filter in Discover search.**
+
+### Easier to find
+
+- **The running version is at the foot of the admin menu**, with *up to date* or *update available*, which links to the
+  release. On a phone it ends the admin header.
+- **"Import your library"** appears on an empty Library and on Home's welcome. It takes a Mihon or Tachiyomi backup, a
+  MangaDex list, your AniList, MyAnimeList or Kitsu list, or pasted titles. The Library header also has *Import a list*
+  for admins. Until now it was only under Admin → Sources → Add sources.
+- **The search box (Ctrl+K, or the phone's Search page) also finds pages and settings by name**, in your language and in
+  English: *notice*, *import*, *version*, *solver*, *backup time*, *2FA* and the like. A result opens the page and
+  scrolls to the setting.
+- Asked for by **@Kedryn** ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)) and **@DannyDynamite39**
+  ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)).
+
+### Rescan everything
+
+**Admin → Tasks → Rescan everything** re-reads every folder and shows a preview before it changes anything:
+- **Gone:** chapters whose files are gone from your own folders.
+- **Kept:** files that were only moved or renamed (matched by their contents).
+- **Download folder:** chapters missing there, left to *Verify chapter files*.
+- **Empty series:** series with nothing left, each with a link.
+
+On **Apply**, the gone chapters read *File no longer on disk*. Nothing is erased and no file is touched: everyone's
+reading history stays, and a file that comes back is picked up again by the next scan. It refuses a folder that looks
+unmounted, leaves alone files it couldn't read, and checks everything again right before applying.
+
+**Optionally, number chapters again by the v0.55.2 file-name rules,** for the series you tick: chapter words, `#12`,
+years in brackets, ranges like `01-07`. The preview shows each series' changes first, with how many readers and trackers
+they touch, and nothing is sent to a tracker. Asked for by **@Kedryn** ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)).
+
+### Downloads that use every source carrying a release
+
+- **The slow archive and *Fetch all*** take a series' chapters from every source you follow that carries the same
+  release (the same scanlation group), in turn. Sources on different image servers download side by side.
+- **Sites on one image server count as one**, like Natomanga and Mangakakalot, so turns never double the requests to it.
+- **What never changes source:** a chapter you picked yourself, a series with its own source order, posting-order
+  series, and the regular update check.
+- **In a test with two image servers,** a 12-chapter *Fetch all* took 1.4 minutes instead of 2.8, and each server got
+  half the requests.
+- Asked for by **@DannyDynamite39** ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)).
+
+### An 18+ filter in Discover search
+
+- **Search results can be filtered:** *All · Hide 18+ · 18+ only*. A result is 18+ when the source says so, when MangaDex
+  rates it erotica or pornographic, or when it carries one of your 18+ genres. Results with no rating stay under *All*
+  and *Hide 18+*. Adult results carry a small *18+* mark.
+- **With Show 18+ off, search now hides adult results** too. Before, MangaDex's erotica still showed.
+- Asked for by **@DannyDynamite39** ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)).
+
+### Smaller
+
+- **A series whose cover chapter's file is gone** now shows no cover; it used to answer with an error.
+- **A Rescan that changes a series waits for it:** a series with a download or a check running is left alone for the
+  next Rescan, and a Fetch or the archive waits for the Rescan to finish.
+
+### Upgrading
+
+- **Database:** two nullable columns on server settings, `rescan_last_run` and `rescan_last_result`. v0.55.3 runs on the
+  same database, so going back is one line of your compose file.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET /api/admin/stats` carries `version`.
+  - `POST /api/admin/tasks/rescan/run`, `GET …/rescan/status` and `POST …/rescan/apply` drive the rescan.
+  - `GET /api/sources/search-all` takes `rating=all|safe|adult` and marks results with `rating`.
+  - MangaDex results carry `contentRating`.
+  - A chapter carries `prunedReason`.
+
 ## v0.55.3 — 2026-10-05
 
 **A backup Cloudflare solver, gentler downloads from sites that ask for fewer requests, and failed chapters that follow
