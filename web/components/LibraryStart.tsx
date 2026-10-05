@@ -19,17 +19,17 @@ export function LibraryStart({ align = 'center' }: { align?: 'center' | 'start' 
   if (!keys.length) {
     return <p data-library-start="none" className={`text-sm text-fog-400 ${align === 'center' ? 'text-center' : 'text-start'}`}>{tr('Ask whoever runs this server to add some series.')}</p>;
   }
-  // The import's line sits under the import key, at that key's width (`w-min` over a key that does not wrap): beside
-  // Discover on a wide screen, and on a phone, where the keys stack, still under the key it describes rather than under
-  // the last one.
+  // The import's line sits under the import key, at that key's width (`w-min` over a key that does not wrap; never
+  // narrower than 14rem, or "استورد مكتبتك" squeezed it into five lines): beside Discover on a wide screen, and on a
+  // phone, where the keys stack, still under the key it describes rather than under the last one.
   return (
     <div data-library-start className={`flex flex-wrap items-start gap-x-2 gap-y-3 ${align === 'center' ? 'justify-center' : 'justify-start'}`}>
       {keys.map((k, i) => {
-        // A key's words may wrap (h-auto) -- a long language on a narrow phone -- except the import's, whose width sets
-        // its line's.
-        const cls = `btn-key h-auto min-h-10 px-4 py-2 text-sm ${i === 0 ? 'btn-key-primary' : ''}`;
+        // A key's words may wrap (h-auto, never wider than the row) -- a long language on a narrow phone -- except the
+        // import's, whose width sets its line's.
+        const cls = `btn-key h-auto min-h-10 max-w-full px-4 py-2 text-center text-sm ${i === 0 ? 'btn-key-primary' : ''}`;
         return k === 'import' ? (
-          <div key={k} className={`flex w-min flex-col gap-1.5 ${at}`}>
+          <div key={k} className={`flex w-min min-w-56 flex-col gap-1.5 ${at}`}>
             <Link href={IMPORT_HREF} className={`${cls} whitespace-nowrap`} data-start-key="import">
               <IcImport width={17} height={17} aria-hidden />{tr('Import your library')}
             </Link>

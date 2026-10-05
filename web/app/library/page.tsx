@@ -347,9 +347,11 @@ function LibraryInner() {
 
         <div className="min-w-0 flex-1">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
-        <div className="flex items-center justify-between">
-          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
-          <div className="flex items-center gap-2">
+        {/* The title gives way before the keys do: with the admin's import a fourth round key, "Bibliothèque" and
+            "Библиотека" pushed the row 25-29 px past a 320 px screen. */}
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="min-w-0 truncate font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
+          <div className="flex shrink-0 items-center gap-2">
             {/* v0.55.4 (#158): the import, for an admin, where "+" and the top bar's Discover add series -- it was four
                 taps deep in Admin → Sources. A labelled key on a wide screen; on a phone a round key among the others. */}
             {isAdmin && (

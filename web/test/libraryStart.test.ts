@@ -51,6 +51,8 @@ test('the empty Library says how to fill it, and only when it is empty for this 
     'the import does not say what it takes');
   assert.match(start, /<Link key=\{k\} href=\{DISCOVER_HREF\}[^>]*>\s*<IcPlus [^>]*\/>\{tr\('Find series in Discover'\)\}/);
   assert.match(start, /if \(!keys\.length\) \{\s*return <p [^>]*>\{tr\('Ask whoever runs this server to add some series\.'\)\}<\/p>;/, 'someone who may add nothing is not told who can');
+  // A key never wider than its row: the Russian Discover key ran off a 320 px Home, clipped by the hero.
+  assert.match(start, /const cls = `btn-key h-auto min-h-10 max-w-full [^`]*`;/, 'a long key can run off a narrow screen');
   // Keys, not capsules ("no more pills").
   assert.doesNotMatch(start, /btn-accent|btn-ghost|\bchip\b|rounded-full/, 'a pill-shaped key is back');
 });
@@ -65,6 +67,9 @@ test('the Library header has the import for admins, beside where Add lives', () 
   assert.match(doors[0], /className="btn-key hidden lg:inline-flex"/, 'the wide screen does not get the labelled key');
   assert.match(doors[1], /aria-label=\{tr\('Import a list'\)\}[\s\S]*lg:hidden/, 'the phone does not get the round key, or it has no name');
   assert.ok(header.indexOf('data-library-import title=') < header.indexOf('href="/discover"'), 'the phone\'s import is not beside Add');
+  // With a fourth round key the row was 25-29 px wider than a 320 px screen in French and Russian: the title gives way.
+  assert.match(header, /<h1 className="min-w-0 truncate [^"]*">\{tr\('Library'\)\}<\/h1>\s*<div className="flex shrink-0 items-center gap-2">/,
+    'the header row can be pushed past a narrow screen');
 });
 
 test('Home\'s welcome offers the same keys, and is never shown for the second before the carousel arrives', () => {
