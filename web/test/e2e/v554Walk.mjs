@@ -22,9 +22,9 @@
 //     rest from both (the fakes' own logs say which served what), each chapter once, and the job finishes.
 //
 //   adultsearch -- up.sh with E2E_ADULT=1 (fake-b declares itself 18+). At 1280, 390 and 390 in Arabic, Discover's
-//     search for "Walk" with Show 18+ on: the chips All · Hide 18+ · 18+ only, the 18+ mark on each adult result (a title
-//     any 18+ source carries), Hide 18+ and 18+ only each showing their half; then with Show 18+ off: no chips, and no
-//     adult result.
+//     search for "Walk" with Show 18+ on: the chips All · Hide 18+ · 18+ only, the 18+ mark on each adult result (since
+//     v0.55.5 a title only 18+ sources carry: one fake-a carries too is not), Hide 18+ and 18+ only each showing their
+//     half; then with Show 18+ off: no chips, and no adult result.
 //
 // Every view: no sideways scroll. walk49 counts the console errors and 5xx of the whole walk. Screenshots:
 // <phase>-<pass>-<n>-<what>.png in walk49's OUT. LOOK at them.
@@ -404,12 +404,14 @@ export async function multisourceWalk(ctx) {
 // ── adultsearch ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * "Walk" on the E2E_ADULT=1 stack: fake-b is 18+, so every title it carries is too (a card is 18+ when any of its sources'
- * results is); Ren's Walk is fake-a's alone. The real MangaDex answers the same search with titles of its own, rated by
- * what MangaDex says -- so the fakes' four are checked by name, and every other card only by the rule of its chip.
+ * "Walk" on the E2E_ADULT=1 stack: fake-b declares itself 18+. A title only fake-b carries is 18+ by that alone (Walk
+ * Tale: Next); one fake-a carries too is not (v0.55.5: a site's own flag never outweighs another site carrying the title
+ * unflagged, AllManga's case), so Walk Gap and Walk Tale wear no mark and stay under Hide 18+; Ren's Walk is fake-a's
+ * alone. The real MangaDex answers the same search with titles of its own, rated by what MangaDex says -- so the fakes'
+ * four are checked by name, and every other card only by the rule of its chip.
  */
-const ADULT = ['Walk Gap', 'Walk Tale', 'Walk Tale: Next'];
-const CLEAN = ['Ren’s Walk – Notes'];
+const ADULT = ['Walk Tale: Next'];
+const CLEAN = ['Ren’s Walk – Notes', 'Walk Gap', 'Walk Tale'];
 
 export async function adultSearchWalk(ctx) {
   const { page, check, waitFor, sleep } = ctx;
@@ -470,7 +472,7 @@ export async function adultSearchWalk(ctx) {
 
       await page.evaluate((x) => [...document.querySelectorAll('[data-rating-chips] button')].find((b) => b.textContent.trim() === x)?.click(), say('Hide 18+'));
       const safe = await wall(CLEAN, ADULT, (c) => !c.adult);
-      check(`adultsearch @${t}: Hide 18+ leaves the one result no 18+ source carries, and nothing marked`, !!safe, fakes(safe ?? await cards()));
+      check(`adultsearch @${t}: Hide 18+ keeps every title a site with no 18+ flag carries too, and nothing marked`, !!safe, fakes(safe ?? await cards()));
       await shot(`adultsearch-${t}-2-hide`);
 
       await page.evaluate((x) => [...document.querySelectorAll('[data-rating-chips] button')].find((b) => b.textContent.trim() === x)?.click(), say('18+ only'));

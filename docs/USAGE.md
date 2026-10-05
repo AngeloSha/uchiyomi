@@ -1204,11 +1204,13 @@ again.
   source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
 - **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
   **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
-  results by what is known of each. A result is 18+ when its provider is (its extension says so, or it is ticked in
-  **Admin → Settings → 18+ filter**), when MangaDex rates the title erotica, or when it carries one of the 18+ filter's
-  genres, and such a card wears a small **18+** mark; a MangaDex title rated safe or suggestive is not, nor one whose
-  genres the filter's list does not name. Most extensions say nothing about a title in a search: their results stay
-  under *All* and *Hide 18+* and are left out of *18+ only*. The choice holds for every search until you leave the
+  results by what is known of each. A result is 18+ when its provider is ticked in **Admin → Settings → 18+ filter**,
+  when MangaDex rates the title erotica, or when it carries one of the 18+ filter's genres, and such a card wears a small
+  **18+** mark; a MangaDex title rated safe or suggestive is not, nor one whose genres the filter's list does not name.
+  A site whose extension calls itself 18+ makes a title 18+ only when no other site carries it (since v0.55.5): the
+  flag covers a whole site, and general sites such as AllManga carry it for the few adult titles they host. Most
+  extensions say nothing about a title in a search: their results stay under *All* and *Hide 18+* and are left out of
+  *18+ only*. The choice holds for every search until you leave the
   page. With **Show 18+** off the search shows no 18+ results at all and the chips are not offered, and an account
   whose age limit is below 18 gets the same, whatever it asks for.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most

@@ -2706,7 +2706,8 @@ paths:
         18+ when its source is adult (declared, or on the admin's 18+ source list), MangaDex rates it erotica or
         pornographic, or a genre is on the admin's 18+ genre list (trimmed, case-blind); safe when MangaDex rates it
         safe or suggestive, or it names genres, the list has some and none match; else unknown, kept by `all` and
-        `safe` and left out of `adult`. A card is 18+ when any provider is, else safe when any is; cards, providers and
+        `safe` and left out of `adult`. A card is 18+ when any provider is, else safe when any is -- except that since
+        v0.55.5 a provider 18+ only by its extension's own flag counts only when every provider is one; cards, providers and
         rail results carry `rating` when known. Filtered per caller before the 30-card cap, never in the shared entry.
         An account capped below 18, and any request without `adult=1`, is held to `safe` -- so with Show 18+ off an
         18+ title from a source that is not adult itself (MangaDex's erotica) no longer shows.

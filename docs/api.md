@@ -517,7 +517,9 @@ extension that declares itself adult, or one on the source list of Admin → Set
 the title erotica or pornographic, or when one of its genres is on the 18+ filter's genre list (trimmed and case-blind,
 as the library compares them). It is not 18+ when MangaDex rates it safe or suggestive, or when it names genres, the
 genre list has some, and none of them match; otherwise it is unknown — kept under `all` and `safe`, left out of
-`adult`. A card is 18+ when any of its providers is, else safe when any is. Each card, each provider and (with
+`adult`. A card is 18+ when any of its providers is — except that, since v0.55.5, a provider that is 18+ only because
+its extension declares itself adult counts only when every provider of the card is such a one (the flag covers a whole
+site, and general sites carry it too) — else safe when any is. Each card, each provider and (with
 `groupBy=source`) each result carries `rating: adult | safe` when known, and nothing when not. The filter runs on the
 caller's own answer before the 30-card cap, never on the shared entry. An account whose age limit is below 18 is held
 to `safe` whatever it asks, and so is every request without `adult=1`: with Show 18+ off the search hides 18+ titles

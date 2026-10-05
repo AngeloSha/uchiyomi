@@ -322,6 +322,13 @@ export async function searchAll(
 
 /** What a search result is known to be: 18+, or not. Absent when nothing says either. */
 export type Rating = 'adult' | 'safe';
+/**
+ * What one result is known to be, before a card weighs it (v0.55.5): `flagged` when the ONLY thing that says 18+ is its
+ * source's own declaration. An extension's flag covers its whole site, and the extension index flags a site that hosts
+ * any adult title at all, so general aggregators carry it beside hentai sites: AllManga (EN), 11toon, Manga Bab. A
+ * flagged result still reads `adult` in what is answered; groupByTitle is where it weighs less.
+ */
+export type Judged = Rating | 'flagged';
 /** What a search shows: everything, everything not known to be 18+ (`safe`), or only what is (`adult`). */
 export type RatingFilter = 'all' | 'safe' | 'adult';
 /** The admin's 18+ filter lists (lib/visibility.ts adultFilter): genres as typed, source ids lowercased. */
@@ -330,40 +337,60 @@ export interface AdultLists { genres: readonly string[]; sources: readonly strin
 /**
  * Whether a search result is 18+, by every signal it carries.
  *
- * 18+ when its source is (the extension declares itself adult, or the admin named it on the 18+ list), when MangaDex
- * rates the title erotica or pornographic, or when one of its genres is on the admin's adult list -- folded as
- * browsable() folds them (lib/visibility.ts: trimmed and case-blind on both sides). Not 18+ when MangaDex rates it safe
- * or suggestive, or when it names genres, the admin's list has some, and none of them match. Anything else is unknown:
- * most extensions name no genres in a search, and an unknown result is shown under All and Hide 18+, never under 18+
- * only. Reintroduce by matching genres without the fold: "a genre is matched as the library matches it" in
- * adultFilter.int.test.ts keeps the 18+ result under Hide 18+.
+ * 18+ when the admin named its source on the 18+ list, when MangaDex rates the title erotica or pornographic, or when
+ * one of its genres is on the admin's adult list -- folded as browsable() folds them (lib/visibility.ts: trimmed and
+ * case-blind on both sides). `flagged` when nothing but its extension's own declaration says so (Judged), and that comes
+ * before any `safe`: a site that declares itself adult is not made safe by a title whose genres the admin's list misses.
+ * Not 18+ when MangaDex rates it safe or suggestive, or when it names genres, the admin's list has some, and none of them
+ * match. Anything else is unknown: most extensions name no genres in a search, and an unknown result is shown under All
+ * and Hide 18+, never under 18+ only. Reintroduce by matching genres without the fold: "a genre is matched as the
+ * library matches it" in adultFilter.int.test.ts keeps the 18+ result under Hide 18+.
  */
 export function ratingOf(
   item: Pick<SourceSeries, 'genres' | 'contentRating'>, src: { id?: string; isNsfw?: boolean } | null | undefined, lists: AdultLists,
-): Rating | undefined {
-  if (src?.isNsfw) return 'adult';
+): Judged | undefined {
   if (src?.id && lists.sources.includes(String(src.id).toLowerCase())) return 'adult';
   if (item.contentRating === 'erotica' || item.contentRating === 'pornographic') return 'adult';
   const fold = (g: string) => g.trim().toLowerCase();
   const adult = new Set(lists.genres.map(fold).filter(Boolean));
   const genres = (Array.isArray(item.genres) ? item.genres : []).filter((g): g is string => typeof g === 'string').map(fold).filter(Boolean);
   if (genres.some((g) => adult.has(g))) return 'adult';
+  if (src?.isNsfw) return 'flagged';
   if (item.contentRating === 'safe' || item.contentRating === 'suggestive') return 'safe';
   if (genres.length && adult.size) return 'safe';
   return undefined;
 }
 
+/**
+ * A card's rating, from its providers' (v0.55.5). 18+ when any provider is known to be by the title itself (or by a
+ * source the admin named), or when EVERY provider is `flagged`: a title that only sites declaring themselves adult carry.
+ * A site's own flag never outweighs another site carrying the same title unflagged. v0.55.4 let it: a card was 18+ when
+ * any provider was, and AllManga's flag put every manhwa it shares with Asura or Natomanga under 18+ only, marked 18+
+ * under All and gone from Hide 18+. Then safe when any provider says so; else unknown. Reintroduce "any provider": the
+ * flagged-and-plain card in searchAll.int.test.ts reads 18+.
+ */
+export function cardRating(judged: ReadonlyArray<Judged | undefined>): Rating | undefined {
+  if (judged.some((j) => j === 'adult')) return 'adult';
+  if (judged.length && judged.every((j) => j === 'flagged')) return 'adult';
+  if (judged.some((j) => j === 'safe')) return 'safe';
+  return undefined;
+}
+
+/** What one result answers: a `flagged` one reads 18+, its source's own word for what it is. */
+const answered = (j: Judged | undefined): Rating | undefined => (j === 'flagged' ? 'adult' : j);
+
 /** How a shaping rates and filters: the rating of one result from one source, and what the viewer is shown. */
-export interface Rated { of: (item: SourceSeries, src: SourceAdapter) => Rating | undefined; want: RatingFilter }
+export interface Rated { of: (item: SourceSeries, src: SourceAdapter) => Judged | undefined; want: RatingFilter }
 /** Whether a result (or a card) of this rating is shown under `want`. Unknown is shown under all and safe, not adult. */
 const shows = (want: RatingFilter, r: Rating | undefined): boolean => (want === 'all' ? true : want === 'safe' ? r !== 'adult' : r === 'adult');
 
 /**
  * `lang` (v0.52.0): the language the source declares, as an app code; null when it says nothing or serves every one.
- * `rating` (v0.55.4): what the result is known to be, absent when nothing says (ratingOf).
+ * `rating` (v0.55.4): what the result is known to be, absent when nothing says (ratingOf); 18+ also when only its site's
+ * own flag says so (v0.55.5, Judged), which the card weighs less.
  */
 export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string; lang: string | null; rating?: Rating }
-/** `rating` (v0.55.4): 18+ when any provider's result is, else safe when any is; absent when none says. */
+/** `rating` (v0.55.4; weighed by cardRating since v0.55.5): 18+, safe, or absent when nothing says. */
 export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[]; rating?: Rating }
 export interface SourceRail { source: string; name: string; lang: string | null; results: Array<SourceSeries & { name: string; rating?: Rating }> }
 
@@ -371,23 +398,27 @@ export interface SourceRail { source: string; name: string; lang: string | null;
  * One card per normalised title carrying every provider that has it; most providers first, at most `max`.
  *
  * With `rated`, each provider and card says what it is known to be, and the cards the viewer does not want are left out
- * BEFORE the cap: filtered after it, "18+ only" was what happened to be among the thirty, often nothing. A card is 18+
- * when any of its providers is -- a title folded with an adult one stays out of Hide 18+, which errs the safe way.
+ * BEFORE the cap: filtered after it, "18+ only" was what happened to be among the thirty, often nothing. A card's rating
+ * is cardRating's: 18+ when any provider is known to be by the title, or when only self-declared adult sites carry it.
  * Reintroduce the filter after the slice: "filtered before the cap" in searchAll.int.test.ts finds fewer cards.
  */
 export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], max = 30, rated?: Rated): TitleGroup[] {
   const groups = new Map<string, TitleGroup>();
+  // Each card's providers as ratingOf judged them, `flagged` kept apart: what is answered folds it into `adult`.
+  const judged = new Map<TitleGroup, Array<Judged | undefined>>();
   for (const src of order) {
     for (const r of per.get(src.id)?.items ?? []) {
       if (!r.sourceId || !r.title) continue;
       const key = normTerm(r.title);
       if (!key) continue;
       let g = groups.get(key);
-      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [] }; groups.set(key, g); }
+      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [] }; groups.set(key, g); judged.set(g, []); }
       if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
       if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
       if (!g.providers.some((p) => p.source === r.source)) {
-        const rating = rated?.of(r, src);
+        const j = rated?.of(r, src);
+        const rating = answered(j);
+        judged.get(g)!.push(j);
         g.providers.push({
           source: r.source, name: src.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title, lang: canonLang(src.lang),
           ...(rating ? { rating } : {}),
@@ -397,7 +428,7 @@ export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], m
   }
   const all = [...groups.values()];
   for (const g of all) {
-    const rating = g.providers.some((p) => p.rating === 'adult') ? 'adult' : g.providers.some((p) => p.rating === 'safe') ? 'safe' : undefined;
+    const rating = cardRating(judged.get(g) ?? []);
     if (rating) g.rating = rating;
   }
   return (rated ? all.filter((g) => shows(rated.want, g.rating)) : all).sort((a, b) => b.providers.length - a.providers.length).slice(0, max);
@@ -406,7 +437,7 @@ export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], m
 /**
  * One rail per source that had results (Mihon's global-search screen); each result carries its source's name. With
  * `rated`, each result says what it is known to be, the ones the viewer does not want are left out, and a rail left
- * with nothing is not drawn.
+ * with nothing is not drawn. A rail is one site, so nothing else vouches for its titles: a `flagged` result is 18+ here.
  */
 export function bySource(per: SearchAnswer['per'], order: SourceAdapter[], rated?: Rated): SourceRail[] {
   const out: SourceRail[] = [];
@@ -414,7 +445,7 @@ export function bySource(per: SearchAnswer['per'], order: SourceAdapter[], rated
     const list = per.get(src.id)?.items ?? [];
     if (!list.length) continue;
     const results = list.filter((r) => !!r.sourceId).flatMap((r) => {
-      const rating = rated?.of(r, src);
+      const rating = answered(rated?.of(r, src));
       return !rated || shows(rated.want, rating) ? [{ ...r, name: src.name, ...(rating ? { rating } : {}) }] : [];
     });
     if (rated && !results.length) continue;

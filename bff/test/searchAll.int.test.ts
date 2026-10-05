@@ -391,10 +391,11 @@ test('the detail lookup is one fetch for a pre-warm and the pick that joins it, 
 // ---- the 18+ filter (v0.55.4, #158) --------------------------------------------------------------------------------------
 
 /** A fake answering only `term`, with these results: anything else is an empty answer, so no other test meets it. */
-function probe(id: string, name: string, term: string, items: Array<{ title: string; genres?: string[]; contentRating?: string }>) {
+function probe(id: string, name: string, term: string, items: Array<{ title: string; genres?: string[]; contentRating?: string }>,
+  opts: { isNsfw?: boolean } = {}) {
   calls[id] = 0;
   return {
-    id, name,
+    id, name, isNsfw: opts.isNsfw,
     async search(q: string) {
       calls[id]++;
       return q === term ? items.map((it, i) => ({ sourceId: `${id}-${i}`, source: id, ...it })) : [];
@@ -496,4 +497,52 @@ test('filtered before the cap: 18+ only finds every 18+ title, not what the firs
   const j = (await app.inject({ method: 'GET', url: `/api/sources/search-all?q=${encodeURIComponent(TERM)}&wait=0&adult=1&rating=adult`, headers: tok(ids.plain) })).json();
   assert.equal(three(j), 12, 'filtered before the cap');
   assert.ok(j.content.every((g: any) => g.rating === 'adult'));
+});
+
+test("a site's own 18+ flag makes a card 18+ only when no unflagged site carries the title (v0.55.5)", { skip }, async () => {
+  // The extension index flags a site that hosts any adult title, so AllManga (EN) carries the flag among thousands of
+  // general titles. v0.55.4 rated a card 18+ when any provider was: every manhwa it shares with Asura or Natomanga was
+  // marked 18+ under All, gone from Hide 18+ and listed under 18+ only.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { invalidateAdultFilter } = await import('../src/lib/visibility');
+  const TERM = 'Weigh Probe';
+  registerAdapter(probe('sb-aggregator', 'Flagged Aggregator', TERM, [
+    { title: 'Flag Shared' }, { title: 'Flag Only Here' }, { title: 'Flag Two Adult Sites' },
+    { title: 'Flag Erotica Elsewhere' }, { title: 'Flag Safe Elsewhere' }, { title: 'Flag Named Elsewhere' },
+  ], { isNsfw: true }) as any);
+  registerAdapter(probe('sb-plainsite', 'Plain Site', TERM, [
+    { title: 'Flag Shared' }, { title: 'Flag Erotica Elsewhere', contentRating: 'erotica' }, { title: 'Flag Safe Elsewhere', contentRating: 'safe' },
+  ]) as any);
+  registerAdapter(probe('sb-adultsite', 'Adult Site', TERM, [{ title: 'Flag Two Adult Sites' }], { isNsfw: true }) as any);
+  registerAdapter(probe('sb-named', 'Named Site', TERM, [{ title: 'Flag Named Elsewhere' }]) as any);
+  await q(`UPDATE server_settings SET adult_sources = '["sb-named"]'::jsonb WHERE id = 1`);
+  invalidateAdultFilter();
+  const ask = async (qs: string) => {
+    const r = await app.inject({ method: 'GET', url: `/api/sources/search-all?q=${encodeURIComponent(TERM)}&wait=3000&adult=1${qs}`, headers: tok(ids.plain) });
+    assert.equal(r.statusCode, 200, r.body);
+    return r.json();
+  };
+  const cards = (j: any) => Object.fromEntries(j.content.filter((g: any) => g.title.startsWith('Flag')).map((g: any) => [g.title, g.rating ?? '?']));
+  try {
+    const all = await ask('&rating=all');
+    // Reintroduce v0.55.4's "18+ when any provider is" in cardRating: Flag Shared and Flag Safe Elsewhere read adult.
+    assert.deepEqual(cards(all), {
+      'Flag Shared': '?', 'Flag Only Here': 'adult', 'Flag Two Adult Sites': 'adult', 'Flag Erotica Elsewhere': 'adult',
+      'Flag Safe Elsewhere': 'safe', 'Flag Named Elsewhere': 'adult',
+    }, 'a flagged site weighs only where nothing else carries the title');
+    const shared = all.content.find((g: any) => g.title === 'Flag Shared');
+    assert.deepEqual(shared.providers.map((p: any) => [p.source, p.rating ?? '?']).sort(), [['sb-aggregator', 'adult'], ['sb-plainsite', '?']],
+      'each provider still says what its own site declares');
+    assert.deepEqual(Object.keys(cards(await ask('&rating=safe'))).sort(), ['Flag Safe Elsewhere', 'Flag Shared'], 'Hide 18+');
+    assert.deepEqual(Object.keys(cards(await ask('&rating=adult'))).sort(),
+      ['Flag Erotica Elsewhere', 'Flag Named Elsewhere', 'Flag Only Here', 'Flag Two Adult Sites'], '18+ only');
+    // A rail is one site, and nothing vouches for a flagged site's titles there: under Hide 18+ it draws nothing.
+    const rails = await ask('&rating=safe&groupBy=source');
+    assert.ok(!rails.content.some((x: any) => x.source === 'sb-aggregator'), "a flagged site's rail is still 18+");
+    assert.deepEqual(rails.content.find((x: any) => x.source === 'sb-plainsite').results.map((r: any) => r.title).sort(),
+      ['Flag Safe Elsewhere', 'Flag Shared']);
+  } finally {
+    await q(`UPDATE server_settings SET adult_sources = '[]'::jsonb WHERE id = 1`);
+    invalidateAdultFilter();
+  }
 });
