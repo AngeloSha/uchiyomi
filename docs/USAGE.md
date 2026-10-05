@@ -693,6 +693,18 @@ seconds — and now and then a long one of 20 to 45 minutes. That comes to about
 1,000 take about ten days. Several sites are archived side by side, one chapter in flight on each and at most three
 sites at once; the series queued on one site take turns, so ten of them share its four chapters an hour.
 
+**One release on several sites.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a
+series that follows more than one source takes its chapters from them in turn when they carry the same release: the
+same scanlation group, or — on sites that name no group, as most aggregators don't — no group, the same language and
+the same page count wherever both say. While one site is in its break the next chapter comes from another, the one that
+was asked longest ago, so a series on two such sites is archived about twice as fast while each site still sees only
+its own pace. Two sites whose pages come from one image server (Natomanga and Mangakakalot share one) count as one site:
+one chapter at a time between them, and a break or a refusal on either holds both. It never takes another group's copy
+this way, never one from a site above the age limit of whoever queued the series or an 18+ site for a series that is
+not 18+, and never at all for a series with its own source order (*Preferring one source*) or numbered by posting
+order. Its estimate is shared among the sites it takes turns on, and it goes under *Needs attention* for refusals only
+when every one of them keeps refusing.
+
 **What it waits for.** Everything else goes first. It stands aside while the scheduled check, the library repair or
 the daily source check (or *Test all*) runs; while anyone else downloads from the same site or into the same
 series; while the site is cooling down, switched off or not installed; outside the hours it may run; and while the

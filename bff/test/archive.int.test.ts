@@ -54,6 +54,8 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const LIB = 'lib_arch';
 const S = (k: string) => `s_arch_${k}`;
 const A = 'arch-a', B = 'arch-b', R = 'arch-refuse', R2 = 'arch-refuse2', CHK = 'arch-check', GONE = 'arch-gone';
+/** v0.55.4 (#158): a third site carrying the same releases, and an adult one. */
+const C = 'arch-c', NSFW = 'arch-nsfw';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -79,6 +81,8 @@ const refusing = new Set<string>([R, R2]);
 const listAsks = new Map<string, number>();
 /** Series whose listing read throws, as a site that is down does. */
 const listThrows = new Set<string>();
+/** The group a series' chapters name, by its source_series_id: absent names none, as aggregators mostly do. */
+const scanlated = new Map<string, string>();
 
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
 const realFetch = globalThis.fetch;
@@ -98,7 +102,7 @@ function adapter(id: string, extra: Record<string, unknown> = {}) {
     async listChapters(sid: string) {
       listAsks.set(sid, (listAsks.get(sid) ?? 0) + 1);
       if (listThrows.has(sid)) throw new Error('503 Service Unavailable');
-      return (listed.get(sid) ?? []).map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${sid}/c${n}` }));
+      return (listed.get(sid) ?? []).map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${sid}/c${n}`, scanlator: scanlated.get(sid) }));
     },
     async getPageUrls(chId: string) {
       asked.push(chId);
@@ -178,9 +182,10 @@ before(async () => {
   await migrate();
   // The check's source first: the daily source check walks the registry in order.
   registerAdapter(adapter(CHK) as any);
-  for (const id of [A, B, R, R2]) registerAdapter(adapter(id) as any);
+  for (const id of [A, B, R, R2, C]) registerAdapter(adapter(id) as any);
+  registerAdapter(adapter(NSFW, { isNsfw: true }) as any);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Arch',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
-  await q(`DELETE FROM users WHERE username = 'arch-admin'`);
+  await q(`DELETE FROM users WHERE username IN ('arch-admin', 'arch-capped')`);
   adminId = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ('arch-admin','arch-admin','x','admin','password') RETURNING id`))[0].id;
   adminCtx = await viewCtxFor(adminId, 'admin');
   // The default floor is 20 GB and a test's tmpfs is smaller; the disk test sets its own.
@@ -209,7 +214,7 @@ after(async () => {
   await q(`DELETE FROM archive_pace WHERE source_id LIKE 'arch-%'`);
   await q(`DELETE FROM source_health WHERE source_id LIKE 'arch-%'`);
   await q(`DELETE FROM lib_series WHERE id LIKE 's_arch_%' OR folder LIKE 'arch/%'`);
-  await q(`DELETE FROM users WHERE username = 'arch-admin'`);
+  await q(`DELETE FROM users WHERE username IN ('arch-admin', 'arch-capped')`);
   await q('UPDATE server_settings SET archive_min_free_gb = 20 WHERE id = 1');
   const { pool } = await import('../src/lib/db');
   await pool.end();
@@ -1388,4 +1393,207 @@ test('a raised pace is held for hours, and the archive waits out only the hour a
   } finally {
     pace.setPaceClock(null);
   }
+});
+
+// ---- v0.55.4 (#158): one release on several sites, taken in turn --------------------------------------------------------
+
+/** A series on `src` that also follows `also`, each listing the same numbers: the same release on each (no group named). */
+async function rotating(key: string, src: string, also: string[], numbers: number[]) {
+  const s = await series(key, src, numbers);
+  for (const [i, other] of also.entries()) {
+    listed.set(`${key}-ref-${other}`, numbers);
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, created_at) VALUES ($1, $2, $3, now() + $4 * interval '1 second')
+             ON CONFLICT DO NOTHING`, [s.id, other, `${key}-ref-${other}`, i]);
+  }
+  assert.equal((await updateSeries(s.id, 0)).outcome, 'ok');
+  return s;
+}
+const startedOn = (t: Awaited<ReturnType<typeof tick>>, id: string) => t.started.filter((x) => x.seriesId === id).map((x) => `${x.source}:${x.number}`);
+
+test('a series rotates to a site that is not resting, and never to another group\'s copy (v0.55.4)', { skip }, async () => {
+  // DannyDynamite39 (#158): aggregators carry the same scanlation, and taking them in turn is faster and gentler. The
+  // chosen site wins the first turn (a tie: neither has had one); while it is in its break the next chapter comes from
+  // the other. Reintroduce by keeping the chosen copy alone (tickOnce `options`): the second look waits out A's break.
+  const rand = () => 0.99;
+  const s = await rotating('rot', A, [C], [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand }), s.id), [`${A}:1`], 'the chosen site goes first');
+  await arch.archiveIdle();
+  now += MIN;
+  const t2 = await tick({ rand });
+  assert.deepEqual(startedOn(t2, s.id), [`${C}:2`], 'a series rotates to a site that is not resting');
+  await arch.archiveIdle();
+  assert.ok(asked.includes(`rot-ref-${C}/c2`), 'chapter two came from the other site');
+  assert.deepEqual(onDiskNums(s.folder), [1, 2]);
+  now += MIN;
+  const t3 = await tick({ rand });
+  assert.deepEqual(t3.started, [], 'both sites are between chapters now');
+  assert.equal(t3.waits[s.id]?.why, 'break');
+
+  // Another group's copy of the same number is another release: never taken in turn, whatever the sites' rests say.
+  // Reintroduce by passing every followed copy as an option (no sameRelease): this takes C's chapter.
+  const g = await series('rotgroup', B, [1, 2, 3]);
+  scanlated.set('rotgroup-ref', 'Group One');
+  scanlated.set(`rotgroup-ref-${C}`, 'Group Two');
+  listed.set(`rotgroup-ref-${C}`, [1, 2, 3]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [g.id, C, `rotgroup-ref-${C}`]);
+  assert.equal((await updateSeries(g.id, 0)).outcome, 'ok');
+  await q(`DELETE FROM archive_pace WHERE source_id LIKE 'arch-%'`);
+  assert.equal(await arch.enqueueArchive(g.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand }), g.id), [`${B}:1`]);
+  await arch.archiveIdle();
+  now += MIN;
+  const t5 = await tick({ rand });
+  assert.deepEqual(startedOn(t5, g.id), [], "another group's copy is never taken in turn");
+  assert.equal(t5.waits[g.id]?.why, 'break');
+});
+
+test('two sources on one image server are one site to the archive: one chapter at a time, one rest (v0.55.4)', { skip }, async () => {
+  // Natomanga and Mangakakalot share a CDN. Joined under one rate key (lib/pace.ts notePageHosts, which needs PUBLIC
+  // hosts: `.invalid` joins nothing), a look used to start a series on each in the same breath -- the gate that would
+  // hold the second is entered only once the first is under way -- and each kept its own rest, so the CDN was asked
+  // twice as often as the pace allows.
+  const pace = await import('../src/lib/pace');
+  pace.notePageHosts({ id: A }, ['https://img-a.sharedcdn-arch.com/1.png']);
+  pace.notePageHosts({ id: B }, ['https://img-b.sharedcdn-arch.com/1.png']);
+  assert.equal(pace.rateKeyOf(B), pace.rateKeyOf(A), 'PREMISE: one image server, one key');
+  const rand = () => 0.99;
+  const x = await series('cdnx', A, [1, 2, 3]);
+  const y = await series('cdny', B, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(x.id, adminId, adminCtx), 'queued');
+  assert.equal(await arch.enqueueArchive(y.id, adminId, adminCtx), 'queued');
+  // Reintroduce by claiming the SOURCE in tickOnce (`claimed.has(src)`, `flights.has(src)` for the slot and for inFlight):
+  // both series start in this one look.
+  const t1 = await tick({ rand });
+  assert.equal(t1.started.length, 1, 'two sources on one image server both started in one look');
+  assert.equal(t1.waits[y.id]?.why, 'turn');
+  await arch.archiveIdle();
+  now += MIN;
+  // Reintroduce by reading the break per source (stateOf `paceRows.get(src)`): Y starts on B inside A's break.
+  const t2 = await tick({ rand });
+  assert.deepEqual(t2.started, [], "a site on the same image server rests with the one that was just asked");
+  assert.equal(t2.waits[y.id]?.why, 'break');
+  // And a series that follows both rotates between nothing: they are one site.
+  const z = await rotating('cdnz', A, [B], [1, 2]);
+  await q(`DELETE FROM archive_pace WHERE source_id LIKE 'arch-%'`);
+  await arch.archiveAct('pause', x.id, { userId: adminId, admin: true, ctx: adminCtx });
+  await arch.archiveAct('pause', y.id, { userId: adminId, admin: true, ctx: adminCtx });
+  assert.equal(await arch.enqueueArchive(z.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand }), z.id), [`${A}:1`]);
+  await arch.archiveIdle();
+  now += MIN;
+  const t4 = await tick({ rand });
+  assert.deepEqual(t4.started, [], 'taking turns between two sources on one server');
+  assert.equal(t4.waits[z.id]?.why, 'break');
+});
+
+test('a series that rotates backs off only when every site does, and its estimate is shared among them (v0.55.4)', { skip }, async () => {
+  // One site refusing while the other carries on is not worth a look, and the series is not "left alone after
+  // refusals": it goes on the other site after its break.
+  const { expectedCycleMs } = await import('../src/lib/archivePace');
+  const s = await rotating('rotoff', A, [C], [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  // A refused twice in a row; its backoff is over and it is between chapters for ten minutes. C is between chapters
+  // for five, and has never refused.
+  await q(`INSERT INTO archive_pace (source_id, next_at, backoff_level, backoff_until, last_at) VALUES ($1, $2, 2, $3, $4), ($5, $6, 0, NULL, $4)`,
+    [A, new Date(now + 10 * MIN), new Date(now - MIN), new Date(now - 2 * MIN), C, new Date(now + 5 * MIN)]);
+  arch.invalidateArchiveView();
+  const t = await tick();
+  assert.deepEqual(t.started, []);
+  assert.equal(t.waits[s.id]?.why, 'break');
+  let v = (await arch.archiveView(() => true, adminId)).series.find((r) => r.seriesId === s.id);
+  // Reintroduce by reading the one source's row in compose (`pace?.backoff_level`): Needs attention reads backoff.
+  assert.equal(v?.attention, undefined, 'backing off only when every site is');
+  // Reintroduce by reading the one source's row for nextAt: ten minutes.
+  assert.ok(v?.nextAt && Math.abs(Date.parse(v.nextAt) - (now + 5 * MIN)) < 2000, `it goes when the first site is free (${v?.nextAt})`);
+  // Its estimate: the three chapters left at a typical chapter's cost, shared by the two sites.
+  // Reintroduce by dropping the division by the keys in compose: twice this.
+  const cycle = expectedCycleMs({ perHour: 4, chapterMs: 60_000, minBreakMs: 45_000 });
+  assert.equal(v?.etaMs, Math.round((3 * cycle) / 2), 'the estimate is shared among the sites it rotates over');
+
+  // A refuses again and is left alone for hours: the series still goes on C in five minutes.
+  // Reintroduce by reporting the chosen copy's reason whatever it is (tickOnce `at = 0`): this reads backoff.
+  await q(`UPDATE archive_pace SET backoff_until = $2 WHERE source_id = $1`, [A, new Date(now + 3 * HOUR)]);
+  arch.invalidateArchiveView();
+  const t2 = await tick();
+  assert.equal(t2.waits[s.id]?.why, 'break', 'a series another site takes in minutes is between chapters, not backing off');
+  assert.equal(t2.waits[s.id]?.source, `Arch ${C}`);
+
+  // Now C refuses twice too: every site is backing off.
+  await q(`UPDATE archive_pace SET backoff_level = 2, backoff_until = $2 WHERE source_id = $1`, [C, new Date(now + 3 * HOUR)]);
+  arch.invalidateArchiveView();
+  assert.equal((await tick()).waits[s.id]?.why, 'backoff');
+  v = (await arch.archiveView(() => true, adminId)).series.find((r) => r.seriesId === s.id);
+  assert.equal(v?.attention?.why, 'backoff', 'every site backing off is worth a look');
+});
+
+test('never onto an adult source: not on a clean series, and not past the enqueuer\'s cap (v0.55.4)', { skip }, async () => {
+  // A rotated copy is held to what the chapter's alternates are (runChapter `allowed`): the sweep's adult rule and the
+  // enqueuer's cap. Reintroduce by dropping the sweep's rule (tickOnce sweepRule): the clean series' second chapter
+  // comes from the adult site.
+  const rand = () => 0.99;
+  const s = await rotating('rotclean', A, [NSFW], [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand }), s.id), [`${A}:1`]);
+  await arch.archiveIdle();
+  now += MIN;
+  const t2 = await tick({ rand });
+  assert.deepEqual(startedOn(t2, s.id), [], 'a clean series rotated onto an adult source');
+  assert.equal(t2.waits[s.id]?.why, 'break');
+
+  // A capped member queued a series that followed only clean sites. Since then it follows an adult one and an admin has
+  // rated it 18+, so the sweep's rule allows the adult site: the enqueuer's cap is what keeps it out.
+  // Reintroduce by dropping capOk from the rotation's filter: the second chapter comes from the adult site.
+  await q(`DELETE FROM archive_pace WHERE source_id LIKE 'arch-%'`);
+  const memberId = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind, max_age_rating)
+                              VALUES ('arch-capped','arch-capped','x','user','password',16) RETURNING id`))[0].id;
+  const c = await series('rotcap', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(c.id, memberId, await viewCtxFor(memberId, 'user')), 'queued');
+  listed.set(`rotcap-ref-${NSFW}`, [1, 2, 3]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [c.id, NSFW, `rotcap-ref-${NSFW}`]);
+  assert.equal((await updateSeries(c.id, 0)).outcome, 'ok');
+  await q(`INSERT INTO series_overrides (series_id, age_rating) VALUES ($1, 18) ON CONFLICT (series_id) DO UPDATE SET age_rating = 18`, [c.id]);
+  try {
+    await arch.archiveAct('stop', s.id, { userId: adminId, admin: true, ctx: adminCtx });
+    assert.deepEqual(startedOn(await tick({ rand }), c.id), [`${A}:1`]);
+    await arch.archiveIdle();
+    now += MIN;
+    const t4 = await tick({ rand });
+    assert.deepEqual(startedOn(t4, c.id), [], "a capped enqueuer's archive rotated onto an adult source");
+    assert.equal(t4.waits[c.id]?.why, 'break');
+  } finally {
+    await q('DELETE FROM series_overrides WHERE series_id = $1', [c.id]);
+  }
+});
+
+test('a series with its own source order never rotates (v0.55.4)', { skip }, async () => {
+  // "Take this series from that site" is an explicit preference: the archive keeps to it. Reintroduce by dropping the
+  // `rotates` check in tickOnce: the second chapter comes from C.
+  const rand = () => 0.99;
+  const s = await rotating('rotown', A, [C], [1, 2, 3]);
+  await q(`UPDATE lib_series SET source_prefs = '{"priority":["arch-a"]}'::jsonb WHERE id = $1`, [s.id]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand }), s.id), [`${A}:1`]);
+  await arch.archiveIdle();
+  now += MIN;
+  const t2 = await tick({ rand });
+  assert.deepEqual(startedOn(t2, s.id), [], 'a series with its own source order rotated');
+  assert.equal(t2.waits[s.id]?.why, 'break');
+});
+
+test('an alternate on an image server the archive is resting is not asked (v0.55.4)', { skip }, async () => {
+  // A chapter that fails turns to the same number on another followed site -- but a site whose pages come from the
+  // server another site of the archive is resting on is that server asked on the side. Reintroduce by reading the
+  // rests per source in alternatesOf: B is asked for chapter one.
+  const pace = await import('../src/lib/pace');
+  pace.notePageHosts({ id: A }, ['https://img-a.sharedcdn-arch.com/1.png']);
+  pace.notePageHosts({ id: B }, ['https://img-b.sharedcdn-arch.com/1.png']);
+  const s = await rotating('altkey', R, [B], [1, 2]);
+  await q(`INSERT INTO archive_pace (source_id, next_at) VALUES ($1, $2)`, [A, new Date(now + 30 * MIN)]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand: () => 0.99 }), s.id), [`${R}:1`]);
+  await arch.archiveIdle();
+  assert.ok(asked.includes('altkey-ref/c1'), 'PREMISE: the chosen site was asked, and refused');
+  assert.ok(!asked.includes(`altkey-ref-${B}/c1`), 'an alternate on a resting image server was asked');
+  assert.equal((await row(s.id)).failed_count, 1);
 });
