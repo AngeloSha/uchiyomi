@@ -3,8 +3,8 @@
 // DannyDynamite39: "I have found the import, god damn it's way too buried, it should be the first thing that gets
 // recommended when the server is set up." It was Admin → Sources → Add sources → Import a list, while a new server
 // opened on a Library that said "Your library is empty." and nothing else, and a Home whose one key, "Browse library",
-// led to that page. No browser walk ever sees an empty library (test/e2e/up.sh seeds one), so the wiring is read from
-// source here, and who is offered what is called.
+// led to that page. CI's browser walk never sees an empty library (test/e2e/up.sh seeds one; only walk49's find phase,
+// on E2E_EMPTY_LIBRARY=1, does), so the wiring is read from source here, and who is offered what is called.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'fs';

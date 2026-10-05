@@ -20,6 +20,7 @@
 #   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=2 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's autofix
 #   KEEP=1 E2E_SOLVERS=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's solver: a main and a backup solver, fake-b
 #     behind a fake Cloudflare
+#   KEEP=1 E2E_EMPTY_LIBRARY=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's find: a new server, nothing in its library
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -192,8 +193,14 @@ if [ "$ENGINE" = "fake" ]; then
   if [ "$OWNER" = "1" ]; then ENGINE_ENV+=(-e "GITHUB_API_URL=http://$ENGINE_C:$ENGINE_PORT/__github"); fi
 fi
 
-echo "· seeding a library"
-python3 "$REPO/web/test/e2e/seed.py" "$LIB"
+# E2E_EMPTY_LIBRARY=1 (v0.55.4): nothing seeded, so the library a new owner meets is the one the walk sees -- where
+# "Import your library" is offered (walk49's find). run.mjs needs the seeded series: never both.
+if [ "${E2E_EMPTY_LIBRARY:-0}" = "1" ]; then
+  echo "· an empty library: nothing seeded"
+else
+  echo "· seeding a library"
+  python3 "$REPO/web/test/e2e/seed.py" "$LIB"
+fi
 
 echo "· building the all-in-one image"
 docker build -q -f "$REPO/Dockerfile.aio" -t "$IMAGE" "$REPO" >/dev/null

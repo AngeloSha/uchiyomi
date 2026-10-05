@@ -144,8 +144,21 @@
 //   agent, Fix everything's end saying it without Needs you; a source downloading slowly after a 429 (Source health's
 //   `slowed` row); and the main back, the card green.
 //
+//   find, rescan, multisource, adultsearch -- v0.55.4 (v554Walk.mjs), each on a stack of its own: find on an EMPTY one
+//   (up.sh with E2E_EMPTY_LIBRARY=1) -- the version at the foot of the admin menu (the header's facts on a phone), the
+//   empty Library's and Home's "Import your library" opening the import page, and search finding Notice chapters (Ctrl+K,
+//   and the phone's Search page) and Rescan everything, each landing on its card; rescan on a plain one with LIB and
+//   E2E_NET -- two files of a folder collected by hand deleted and one renamed, Admin → Tasks → Rescan everything's
+//   preview naming them (the renamed one as moved), Apply marking the two "File no longer on disk" with their read marks
+//   kept and renumbering only the series ticked for the new file-name rules, and a folder with no file behind it refused
+//   as unmounted; multisource on a plain one with E2E_NET -- a release on fake-a and fake-b, chapters picked from fake-b
+//   coming from fake-b alone, and the series page's Fetch all taking the rest from both (the fakes' logs), each once;
+//   adultsearch with E2E_ADULT=1 -- Discover's search with Show 18+ on offers All · Hide 18+ · 18+ only and marks each
+//   18+ result, and with it off shows no chip and no 18+ result. At 1280, 390 and 390 in Arabic (multisource at 1280).
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   libraries, nosource, filenames, noticechapters, replace, autofix, solver, engine. The engine phase resets the fake engine
+//   libraries, nosource, filenames, noticechapters, replace, autofix, solver, find, rescan, multisource, adultsearch,
+//   engine. The engine phase resets the fake engine
 //   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
 //   failing, which only the engine phase then meets, and it never searches.
 //
@@ -190,7 +203,8 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver', 'engine'];
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver',
+  'find', 'rescan', 'multisource', 'adultsearch', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1461,6 +1475,25 @@ try {
   if (PHASES.includes('solver')) {
     const { solverWalk } = await import('./solverWalk.mjs');
     await solverWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN });
+  }
+  // v0.55.4: the version, the import and search's settings (#150, #158), Rescan everything (#150), downloads from several
+  // sources in turn and the 18+ filter in Discover search (#158) -- v554Walk.mjs, each on its own stack (its header).
+  const v554 = { page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN, lib: process.env.LIB };
+  if (PHASES.includes('find')) {
+    const { findWalk } = await import('./v554Walk.mjs');
+    await findWalk(v554);
+  }
+  if (PHASES.includes('rescan')) {
+    const { rescanWalk } = await import('./v554Walk.mjs');
+    await rescanWalk(v554);
+  }
+  if (PHASES.includes('multisource')) {
+    const { multisourceWalk } = await import('./v554Walk.mjs');
+    await multisourceWalk(v554);
+  }
+  if (PHASES.includes('adultsearch')) {
+    const { adultSearchWalk } = await import('./v554Walk.mjs');
+    await adultSearchWalk(v554);
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.
