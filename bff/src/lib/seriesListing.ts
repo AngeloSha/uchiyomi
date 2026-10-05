@@ -24,6 +24,8 @@ import { HEALED_NAME } from './naming';
 import { holds, isRange } from './chapterRanges';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { listedShown } from './noticeChapters';
+import { sameLanguage } from './lang';
+import { sourceLanguage } from './seriesLang';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -271,6 +273,61 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
     source: copy.source,
   };
 }
+
+/**
+ * The copies of one number that are the SAME RELEASE as `chosen` (v0.55.4, #158): what a download may take from
+ * another followed source instead, so that a long series is spread over the sites that carry it rather than asked of
+ * one. DannyDynamite39's case is the common one: several aggregators re-host one group's scanlation, and asking them in
+ * turn is both faster and less likely to earn a refusal than asking one of them for everything.
+ *
+ * The chosen copy first, then at most one copy per other source, in the order given (the listing stores them best
+ * first), each on a source in `followed`. A copy is the same release when it names the same groups, compared as sets of
+ * normalised names (normGroup) -- and the same groups is the same priority rank, so the scanlator preference and its
+ * patience are untouched: nothing here can take a copy the release rules would rank below the chosen one for its group.
+ * Aggregators rarely name a group, so a copy that names none matches a chosen copy that names none, and only then; and
+ * since nothing about the group can tell two such copies apart, their page counts must agree wherever both are known.
+ * Either way the language must be the same, exactly (an es-419 scanlation is not an es one): the copy's own, else
+ * what `langOf` says its source publishes in, else the server's unstated language (lib/lang.ts sameLanguage). An
+ * external link (`pages === 0`) is never a release here, and a chosen external copy has no other.
+ *
+ * Pure, over the stored copies: which sources may actually be asked -- loaded, allowed, resting or not -- is the
+ * caller's (the slow archive, lib/archive.ts; the job card, routes/sources.ts startDownloadJob).
+ * Reintroduce by comparing the first group only: "a copy by another group is never the same release" in
+ * seriesListing.test.ts takes the joint release.
+ */
+export function sameRelease(
+  chosen: ListingCopy,
+  copies: readonly ListingCopy[],
+  o: { followed: Iterable<string>; langOf?: (source: string) => string | null | undefined },
+): ListingCopy[] {
+  const out = [chosen];
+  if (chosen.pages === 0) return out;
+  const followed = new Set(o.followed);
+  const keysOf = (c: ListingCopy) => new Set(groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined }).map(normGroup).filter(Boolean));
+  const langOf = (c: ListingCopy) => c.lang ?? o.langOf?.(c.source) ?? null;
+  const mine = keysOf(chosen);
+  const lang = langOf(chosen);
+  const seen = new Set([chosen.source]);
+  for (const c of copies) {
+    if (seen.has(c.source) || !followed.has(c.source) || c.pages === 0) continue;
+    const theirs = keysOf(c);
+    if (theirs.size !== mine.size || [...theirs].some((k) => !mine.has(k))) continue;
+    if (!sameLanguage(lang, langOf(c), { exact: true })) continue;
+    if (!mine.size && chosen.pages != null && c.pages != null && chosen.pages !== c.pages) continue;
+    seen.add(c.source);
+    out.push(c);
+  }
+  return out;
+}
+
+/**
+ * sameRelease's `langOf` for a copy whose chapter names no language: the one its source declares, or none for a source
+ * that publishes in many (lib/seriesLang.ts sourceLanguage's 'any').
+ */
+export const declaredLang = (source: string): string | null => {
+  const l = sourceLanguage(source);
+  return l === 'any' ? null : l;
+};
 
 export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered';
 
