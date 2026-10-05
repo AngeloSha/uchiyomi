@@ -10630,12 +10630,37 @@ paths:
         - admin
       summary: Server-wide counts for the overview.
       operationId: getApiAdminStats
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. What the admin
+        header and Overview show: the libraries, how many series and members, the cache's size, the last scan, how far
+        behind the sources say the library is, where the database lives and each member's recent reading. Since v0.55.4
+        (#150) `version` is the running version, read from the server's own package.json, or null when it cannot be
+        read; whether a newer one exists is Health's `update` check, which this does not ask.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  libraries: { type: array, items: { type: object, properties: { name: { type: string } } } }
+                  seriesTotal: { type: integer }
+                  cacheBytes: { type: integer }
+                  lastScan: { type: [integer, "null"], description: When the last scan started, in ms since the epoch. }
+                  members: { type: integer }
+                  backlog:
+                    type: object
+                    properties:
+                      chapters: { type: integer }
+                      series: { type: integer }
+                  database: { type: string, enum: [embedded, external] }
+                  activity: { type: array, items: { type: object } }
+                  version:
+                    type: [string, "null"]
+                    description: The running version, e.g. 0.55.4 (since v0.55.4); null when it cannot be read.
         "401":
           description: Not authenticated
         "403":

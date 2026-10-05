@@ -115,6 +115,11 @@ export const IcGlobe = (p: P) => (
 export const IcMore = (p: P) => (
   <svg {...base(p)} fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
 );
+// Import your library (v0.55.4, #158): an arrow into a tray, what a list from another app does. Deliberately not
+// IcDownload (an arrow onto a line), which every chapter row spends on "save to this device".
+export const IcImport = (p: P) => (
+  <svg {...base(p)}><path d="M12 3v10" /><path d="m8 9.5 4 4 4-4" /><path d="M3.5 14H8l1.5 2.5h5L16 14h4.5" /><path d="M3.5 14v4.5A2.5 2.5 0 0 0 6 21h12a2.5 2.5 0 0 0 2.5-2.5V14" /></svg>
+);
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );

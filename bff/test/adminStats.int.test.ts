@@ -109,6 +109,18 @@ test('admin member activity', { skip }, async (t) => {
       assert.equal(r.total, 0);
     });
 
+    await t.test('it says which version is running, for the foot of the admin menu (#150)', async () => {
+      // v0.55.4: the admin rail and the phone hero print it; before, only Health's Version card knew it. Reintroduce by
+      // dropping `version: appVersion()` from the route: this finds no version.
+      const { appVersion } = await import('../src/lib/appVersion');
+      const { readFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as { version: string };
+      const r = (await app.inject({ method: 'GET', url: '/api/admin/stats', headers: auth })).json();
+      assert.equal(r.version, pkg.version, 'the stats do not carry the running version');
+      assert.equal(r.version, appVersion(), 'the stats read the version somewhere other than lib/appVersion.ts');
+    });
+
     await t.test('THE LINE: the household leaderboard still says nothing about what anyone is reading', async () => {
       // Every member can read this one. It carries how much, on purpose, and must not start carrying what.
       const catalogRoutes = (await import('../src/routes/catalog')).default;

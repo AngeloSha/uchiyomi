@@ -180,7 +180,9 @@ export function useAutosave(): { status: SaveStatus; run: (fn: () => Promise<unk
  * A titled card of rows. Keeps `.card` because `scripts/shots/capture.mjs` crops by that class.
  *
  * `ref` is a plain prop (React 19) so a section can be scrolled into view by whoever renders it -- the
- * tracking section still answers `?card=tracking` from the import page that way.
+ * tracking section still answers `?card=tracking` from the import page that way. `id` names it for the search
+ * palette's `?section=` (v0.55.4, lib/useSectionArrival.ts), and the scroll margin keeps it clear of the desktop's
+ * sticky top bar when it is scrolled to.
  *
  * ⚠️ `min-w-0` on the `<section>` is load-bearing. A grid item's minimum width is its content's minimum
  * width, so one row that came out wider than the card (a Japanese pill group) widened the grid column and
@@ -198,7 +200,7 @@ export function Section({ title, description, icon, action, id, className, ref, 
 }) {
   const hid = useId();
   return (
-    <section ref={ref} id={id} aria-labelledby={hid} className={`card grad-border min-w-0 p-4 ${className ?? ''}`}>
+    <section ref={ref} id={id} aria-labelledby={hid} className={`card grad-border min-w-0 p-4 scroll-mt-4 lg:scroll-mt-20 ${className ?? ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           {icon && <span aria-hidden className="shrink-0 text-accent">{icon}</span>}

@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { relativeTime } from '@/lib/format';
 import { useTabParam } from '@/lib/useTabParam';
+import { useSectionArrival } from '@/lib/useSectionArrival';
 import { Avatar } from '@/components/Avatar';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { HouseBoard } from '@/components/HouseBoard';
@@ -99,6 +100,8 @@ function ProfileInner() {
   // (lib/desktop.ts). The rail never lists it; `?tab=Account` lands on You. PROFILE_GROUPS stays as it is.
   const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.profileTabs, tab);
   useEffect(() => { if (hiddenTab) setTab('You'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // v0.55.4: `?section=` -- a card found by the search palette (Appearance, API tokens…) is scrolled to once it is drawn.
+  useSectionArrival();
   // Read once: the card is scrolled to on arrival, never again on a re-render or a tab change.
   const [focusTracking] = useState<boolean>(() => params.get('card') === 'tracking');
   const [goalOpen, setGoalOpen] = useState(false);

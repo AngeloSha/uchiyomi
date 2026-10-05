@@ -60,7 +60,7 @@ export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string 
   const earned = BADGES.filter((b) => b.test(stats));
   const next = BADGES.find((b) => !b.test(stats));
   return (
-    <div className={`${CARD} ${span}`}>
+    <div id="badges" className={`${CARD} scroll-mt-4 lg:scroll-mt-20 ${span}`}>
       <h2 className="mb-3 font-display text-base font-semibold">{tr('Badges')}</h2>
       <div className="flex flex-wrap gap-2">
         {earned.map((b) => (
@@ -133,7 +133,7 @@ export function StudioCard({ span = '' }: { span?: string }) {
   if (isLoading && !data) return <div className={`card skeleton h-64 ${span}`} />;
 
   return (
-    <div className={`${CARD} ${span}`}>
+    <div id="reading-studio" className={`${CARD} scroll-mt-4 lg:scroll-mt-20 ${span}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-base font-semibold">{tr('Reading studio')}</h2>
         <div className="flex gap-1.5">

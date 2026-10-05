@@ -8,7 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { api } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
-import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
+import { IcSearch, IcSparkle, IcPlus, IcImport } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
@@ -31,6 +31,9 @@ import { findRefusal } from '@/lib/useFindRun';
 import { FindStartDialog } from '@/components/FindSources';
 import { ProgressRing } from '@/components/ProgressRing';
 import { ServerDownloadsView } from '@/components/ServerDownloadsView';
+import { EmptyState } from '@/components/EmptyState';
+import { LibraryStart } from '@/components/LibraryStart';
+import { ART } from '@/lib/art';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
 function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
@@ -344,9 +347,18 @@ function LibraryInner() {
 
         <div className="min-w-0 flex-1">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
-        <div className="flex items-center justify-between">
-          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
-          <div className="flex items-center gap-2">
+        {/* The title gives way before the keys do: with the admin's import a fourth round key, "Bibliothèque" and
+            "Библиотека" pushed the row 25-29 px past a 320 px screen. */}
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="min-w-0 truncate font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* v0.55.4 (#158): the import, for an admin, where "+" and the top bar's Discover add series -- it was four
+                taps deep in Admin → Sources. A labelled key on a wide screen; on a phone a round key among the others. */}
+            {isAdmin && (
+              <Link href="/admin/import/" data-library-import className="btn-key hidden lg:inline-flex">
+                <IcImport width={15} height={15} aria-hidden />{tr('Import a list')}
+              </Link>
+            )}
             {/* The one thing the browse page had that has nowhere else to live. */}
             <button onClick={surprise} title={tr('Surprise me')} aria-label={tr('Surprise me')}
               className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 hover:text-fog-100">
@@ -356,6 +368,12 @@ function LibraryInner() {
             <Link href="/search" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
               <IcSearch width={20} height={20} />
             </Link>
+            {isAdmin && (
+              <Link href="/admin/import/" data-library-import title={tr('Import a list')} aria-label={tr('Import a list')}
+                className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
+                <IcImport width={19} height={19} />
+              </Link>
+            )}
             {canDownload(user) && (
               <Link href="/discover" className="grid h-10 w-10 place-items-center rounded-full border border-accent/40 bg-accent-soft text-accent lg:hidden" title={tr('Add new series')}>
                 <IcPlus width={20} height={20} />
@@ -448,13 +466,21 @@ function LibraryInner() {
             ))}
       </div>
 
+      {!isLoading && !items.length && activeCount > 0 && (
+        <p className="px-5 pb-10 pt-6 text-center text-sm text-fog-500">{tr('Nothing matches those filters.')}</p>
+      )}
+      {/* v0.55.4 (#158): an empty library says how to fill it -- import one (admins) or find series in Discover (whoever
+          may add them) -- where it said "Your library is empty." and nothing else. Empty for THIS viewer, with nothing
+          filtered: their 18+ reveal, their library access and a folder not scanned yet all count, and an answer that
+          has not come (or failed) is not "empty". */}
+      {!isLoading && total === 0 && !activeCount && (
+        <EmptyState art={ART.emptyLibrary} title={tr('Your library is empty.')}>
+          <LibraryStart />
+        </EmptyState>
+      )}
+
       <div ref={sentinel} className="h-16" />
       {isFetchingNextPage && <p className="pb-6 text-center text-xs text-fog-500">{tr('Loading more…')}</p>}
-      {!isLoading && !items.length && (
-        <p className="px-5 pb-10 text-center text-sm text-fog-500">
-          {activeCount ? tr('Nothing matches those filters.') : tr('Your library is empty.')}
-        </p>
-      )}
       </>}
         </div>
       </div>
