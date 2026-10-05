@@ -45,6 +45,7 @@ let PLAN_TTL_MS: number;
 let runtime: any;
 let verifyState: any;
 let runFingerprintBackfill: () => Promise<any>;
+let numFromName: (name: string) => number;
 let app: any, adminTok: string, adminId: string;
 
 const ADMIN = 'rs-admin';
@@ -85,6 +86,7 @@ async function wipe() {
   await q(`DELETE FROM read_progress`).catch(() => {});
   await q(`DELETE FROM lib_books`).catch(() => {});
   await q(`DELETE FROM lib_series`).catch(() => {});
+  await q(`DELETE FROM series_trackers WHERE external_id LIKE 'rs-%'`).catch(() => {});
   await chmod(join(ROOT, SRC, 'Locked'), 0o755).catch(() => {});
   await rm(TMP, { recursive: true, force: true }).catch(() => {});
   await mkdir(ROOT, { recursive: true });
@@ -120,6 +122,7 @@ before(async () => {
   ({ runtime } = (await import('../src/lib/runtime')) as any);
   ({ verifyState } = (await import('../src/lib/verifyFiles')) as any);
   ({ runFingerprintBackfill } = (await import('../src/lib/fingerprintJob')) as any);
+  ({ numFromName } = (await import('../src/lib/naming')) as any);
   await migrate();
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   adminId = (await q<{ id: string }>(
@@ -542,4 +545,138 @@ test('the Apply answers started, the panel and the Tasks row say what it did, th
   const after1 = await row();
   assert.ok(after1.lastRun, 'the last Apply is gone after a restart');
   assert.equal(after1.lastResult?.marked, 1, 'the last result is gone after a restart');
+});
+
+// ---- the opt-in: chapter numbers by the newer file-name rules --------------------------------------------------------
+
+/** Hand-named comics, each read differently by the two rules, and one read the same (the #150 cases). */
+const COMICS = ['Vol 2 Ch 5.cbz', 'Batman (1987) #12.cbz', 'Batman 01-07 (1987).cbz', 'Chapter 9.cbz', 'Vol 3 Ch 8.cbz'];
+
+/**
+ * A folder of COMICS as a library scanned before v0.55.2 holds it: every row rule 1, numbered by the first number in
+ * its name, with no range (nameRule.int.test.ts asBefore). Returns its series id and its rows by file name.
+ */
+async function handNamed(folder: string): Promise<{ id: string; rows: Map<string, string> }> {
+  for (const f of COMICS) await cbz(ROOT, `${SRC}/${folder}/${f}`);
+  await persistScan();
+  await q(`UPDATE lib_books b SET name_rule = DEFAULT, number = v.n, number_end = NULL
+             FROM unnest($1::text[], $2::real[]) AS v(f, n) WHERE b.root = $3 AND b.file = $4 || '/' || v.f`,
+    [COMICS, COMICS.map((f) => numFromName(f)), ROOT, `${SRC}/${folder}`]);
+  const id = await seriesOf(`${SRC}/${folder}`);
+  const rows = new Map((await q<{ id: string; file: string }>(`SELECT id, file FROM lib_books WHERE series_id = $1`, [id]))
+    .map((r) => [r.file.slice(`${SRC}/${folder}/`.length), r.id]));
+  return { id, rows };
+}
+const numbersOf = async (series: string) => Object.fromEntries((await q<{ file: string; number: number; number_end: number | null; name_rule: number }>(
+  `SELECT file, number, number_end, name_rule FROM lib_books WHERE series_id = $1`, [series]))
+  .map((r) => [r.file.split('/').pop(), [Number(r.number), r.number_end == null ? null : Number(r.number_end), Number(r.name_rule)]]));
+
+/** A reader who finished three of Comics' chapters, with a tracker connected and the series linked to it. */
+async function reader(series: string, rows: Map<string, string>): Promise<string> {
+  const uid = (await q<{ id: string }>(
+    `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'user','x','password') RETURNING id`, [READER]))[0].id;
+  for (const f of ['Vol 2 Ch 5.cbz', 'Batman (1987) #12.cbz', 'Batman 01-07 (1987).cbz']) {
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, rows.get(f), series]);
+  }
+  await q(`INSERT INTO user_trackers (user_id, provider, access_token) VALUES ($1,'anilist','x')`, [uid]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','rs-1')`, [series]);
+  await q(`INSERT INTO tracker_progress (user_id, series_id, provider, chapters) VALUES ($1,$2,'anilist',7)`, [uid, series]);
+  return uid;
+}
+
+test('the preview lists each series the new rules would renumber, with its readers, its hand numbers and its tracker moves', { skip }, async () => {
+  // Reintroduce by counting a row with a number set by hand as changed (drop its `continue` in readAgain): Comics reads
+  // four chapters and no hand number. Reintroduce by listing every rule-1 row: Plain is listed.
+  const { id, rows } = await handNamed('Comics');
+  for (const n of [1, 2]) await cbz(ROOT, `${SRC}/Plain/Chapter ${n}.cbz`);
+  await persistScan();
+  await q(`UPDATE lib_books SET name_rule = DEFAULT WHERE file LIKE $1`, [`${SRC}/Plain/%`]);
+  await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 8)`, [rows.get('Vol 3 Ch 8.cbz')]);
+  await reader(id, rows);
+  const plan = await previewRescan();
+  assert.deepEqual(plan.numbers, [{
+    seriesId: id, chapters: 3, readers: 1, overrides: 1, tracked: true, up: 2, down: 1,
+    examples: [
+      { file: `${SRC}/Comics/Batman (1987) #12.cbz`, from: '1987', to: '12' },
+      { file: `${SRC}/Comics/Batman 01-07 (1987).cbz`, from: '1', to: '1–7' },
+      { file: `${SRC}/Comics/Vol 2 Ch 5.cbz`, from: '2', to: '5' },
+    ],
+  }], JSON.stringify(plan.numbers));
+});
+
+test('a series numbered by posting order, and one being renumbered, are left out of the opt-in', { skip }, async () => {
+  // Their numbers are their posts', or a renumber's, not their files'. Reintroduce by dropping the posting-order term
+  // from RENUMBERABLE: Posts is listed.
+  const posts = await handNamed('Posts');
+  const moving = await handNamed('Moving');
+  await q(`UPDATE lib_series SET numbering = 'posting_order' WHERE id = $1`, [posts.id]);
+  await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"temp"}'::jsonb WHERE id = $1`, [moving.id]);
+  const plan = await previewRescan();
+  assert.deepEqual(plan.numbers, [], JSON.stringify(plan.numbers));
+});
+
+test('Apply renumbers only the series ticked, keeps hand numbers and Verify\'s marks, and tells no tracker', { skip }, async () => {
+  // Reintroduce by renumbering every series the preview listed: Other is renumbered. By pushing to the trackers after:
+  // the reader's tracker records an error (or is called). By re-reading a row Verify marked 'missing': its rule moves.
+  const comics = await handNamed('Comics');
+  const other = await handNamed('Other');
+  await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 8)`, [comics.rows.get('Vol 3 Ch 8.cbz')]);
+  await cbz(ROOT, `${SRC}/Comics/Vol 4 Ch 9.cbz`);
+  await persistScan();
+  // A chapter Verify marked 'missing', read by the old rule.
+  await q(`UPDATE lib_books SET name_rule = DEFAULT, number = 4, pruned_at = now(), pruned_reason = 'missing' WHERE root = $1 AND file = $2`,
+    [ROOT, `${SRC}/Comics/Vol 4 Ch 9.cbz`]);
+  await rm(join(ROOT, SRC, 'Comics', 'Vol 4 Ch 9.cbz'));
+  const uid = await reader(comics.id, comics.rows);
+  const before = { comics: await numbersOf(comics.id), other: await numbersOf(other.id) };
+  const floors = await q(`SELECT * FROM tracker_progress WHERE user_id = $1`, [uid]);
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: any) => { calls.push(String(u)); return new Response('{}', { status: 200 }); }) as typeof fetch;
+  try {
+    const call = (method: string, url: string, payload?: unknown) =>
+      app.inject({ method, url: `${url}${url.includes('?') ? '&' : '?'}adult=1`, headers: { authorization: adminTok }, ...(payload ? { payload } : {}) });
+    await call('POST', '/api/admin/tasks/rescan/run');
+    for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+    const plan = (await call('GET', '/api/admin/tasks/rescan/status')).json().plan;
+    assert.deepEqual(plan.numbers.map((n: any) => [n.title, n.chapters]), [['Comics', 3], ['Other', 4]], JSON.stringify(plan.numbers));
+    assert.equal(plan.numbersTotal, 2);
+    // A series the preview did not list is refused: its cost was never in front of the admin.
+    assert.deepEqual((await call('POST', '/api/admin/tasks/rescan/apply', { plan: plan.id, renumber: ['s_not_listed'] })).json(), { ok: false, error: 'not_in_plan' });
+    const started = (await call('POST', '/api/admin/tasks/rescan/apply', { plan: plan.id, renumber: [comics.id] })).json();
+    assert.deepEqual(started, { ok: true, started: true });
+    for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+    await new Promise((r) => setTimeout(r, 200)); // a push would be on its way by now
+  } finally { globalThis.fetch = realFetch; }
+  assert.deepEqual(rescanState.lastApplied?.renumbered, { series: 1, chapters: 3 }, JSON.stringify(rescanState.lastApplied));
+  const after = await numbersOf(comics.id);
+  assert.deepEqual(after, {
+    'Vol 2 Ch 5.cbz': [5, null, 2], 'Batman (1987) #12.cbz': [12, null, 2], 'Batman 01-07 (1987).cbz': [1, 7, 2],
+    'Chapter 9.cbz': [9, null, 2],
+    // A number set by hand keeps its row as it was, and so does the chapter Verify marked.
+    'Vol 3 Ch 8.cbz': before.comics['Vol 3 Ch 8.cbz'], 'Vol 4 Ch 9.cbz': before.comics['Vol 4 Ch 9.cbz'],
+  });
+  assert.deepEqual(await numbersOf(other.id), before.other, 'a series nobody ticked was renumbered');
+  assert.deepEqual(await q(`SELECT * FROM tracker_progress WHERE user_id = $1`, [uid]), floors, 'a tracker floor moved');
+  assert.equal((await q(`SELECT last_error FROM user_trackers WHERE user_id = $1`, [uid]))[0].last_error, null, 'a tracker was pushed to');
+  // Only a tracker's address counts: the Health summary an Apply asks for checks the solver and the release feed.
+  assert.deepEqual(calls.filter((u) => /anilist|myanimelist|kitsu/i.test(u)), [], 'a tracker was called');
+  const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'library.rescan_numbers' ORDER BY at DESC LIMIT 1`);
+  assert.deepEqual([audit[0]?.detail?.series, audit[0]?.detail?.chapters], [1, 3], 'the renumber is not in the Activity feed');
+  // Rule 2 from here on: the next scan reads them the same way.
+  await persistScan();
+  assert.deepEqual(await numbersOf(comics.id), after, 'the next scan read the series by its old rule again');
+});
+
+test('an opt-in that fails part way changes no number', { skip }, async () => {
+  // One transaction. Reintroduce by writing the numbers outside it (q in place of qq in renumberSeries): Comics is
+  // renumbered although the Apply threw.
+  const comics = await handNamed('Comics');
+  const before = await numbersOf(comics.id);
+  const plan = await preview();
+  const r = startApply({ plan: plan.id, renumber: [comics.id] }, { userId: adminId }, { renumbered: async () => { throw new Error('the disk went away'); } });
+  assert.ok(r.ok);
+  await assert.rejects(r.run, /the disk went away/);
+  assert.deepEqual(await numbersOf(comics.id), before, 'part of a failed renumber stayed');
+  assert.equal(rescanState.lastApplied, null, 'a failed Apply left a result standing');
 });

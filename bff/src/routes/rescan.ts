@@ -15,6 +15,8 @@ import { lastApplied, planView, rescanState, startApply } from '../lib/rescan';
 
 /** Entries each of the plan's lists carries at most; its counts are always whole. */
 const LIST_MAX = 200;
+/** Series the opt-in lists at most: each is a box to tick, and a collection by hand can be hundreds of series. */
+const NUMBERS_MAX = 1000;
 
 /**
  * Which of these series this admin may see named: the plan's lists are a listing, so they follow the repair status'
@@ -47,7 +49,9 @@ export default async function rescanRoutes(app: FastifyInstance) {
     let plan = null;
     if (s.plan) {
       const v = planView(s.plan);
-      const ids = [...new Set([...v.emptiedList.map((e) => e.seriesId), ...v.movedList.flatMap((m) => [m.seriesId, m.to.seriesId])])];
+      const ids = [...new Set([
+        ...v.emptiedList.map((e) => e.seriesId), ...v.movedList.flatMap((m) => [m.seriesId, m.to.seriesId]), ...v.numbers.map((n) => n.seriesId),
+      ])];
       const [ok, named] = await Promise.all([listable(req, ids), titles(ids)]);
       plan = {
         ...v,
@@ -56,6 +60,9 @@ export default async function rescanRoutes(app: FastifyInstance) {
         // A pair is named when both of its series may be: the moved file's new series is a title too.
         movedList: v.movedList.filter((m) => ok.has(m.seriesId) && ok.has(m.to.seriesId)).slice(0, LIST_MAX)
           .map((m) => ({ ...m, title: named.get(m.seriesId) ?? '', to: { ...m.to, title: named.get(m.to.seriesId) ?? '' } })),
+        // The opt-in, by title: a series this viewer may not list is not offered (nor named); `numbersTotal` counts all.
+        numbers: v.numbers.filter((n) => ok.has(n.seriesId)).map((n) => ({ ...n, title: named.get(n.seriesId) ?? '' }))
+          .sort((a, b) => a.title.localeCompare(b.title)).slice(0, NUMBERS_MAX),
       };
     }
     const last = await lastApplied();
@@ -73,14 +80,19 @@ export default async function rescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Apply the plan the admin saw (`plan`, its id). Detached like the preview -- it stats every planned file again --
-   * so it answers {ok: true, started: true}, or {ok: false, error} when it may not start: `busy` (a preview or an
-   * Apply is running), `no_plan`, `stale` (a newer preview replaced it, or it is older than 30 minutes), `applied`,
-   * or the job it would run beside: `sweep_running`, `autofix_running`, `repair_running`, `verify_running`,
-   * `cleanup_running`, `scan_running`. Its result lands on the status route's `last` and the Tasks row.
+   * Apply the plan the admin saw (`plan`, its id), and renumber the series they ticked in its opt-in (`renumber`).
+   * Detached like the preview -- it stats every planned file again -- so it answers {ok: true, started: true}, or
+   * {ok: false, error} when it may not start: `busy` (a preview or an Apply is running), `no_plan`, `stale` (a newer
+   * preview replaced it, or it is older than 30 minutes), `applied`, `not_in_plan` (a ticked series the preview did
+   * not list), or the job it would run beside: `sweep_running`, `autofix_running`, `repair_running`,
+   * `verify_running`, `cleanup_running`, `scan_running`. Its result lands on the status route's `last` and the Tasks
+   * row.
    */
   app.post('/api/admin/tasks/rescan/apply', async (req, reply) => {
-    const b = z.object({ plan: z.string().uuid() }).safeParse(req.body ?? {});
+    const b = z.object({
+      plan: z.string().uuid(),
+      renumber: z.array(z.string().min(1).max(64)).max(10_000).optional(),
+    }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
     const r = startApply(b.data, { userId: userIdOf(req) ?? null, req, log: app.log });
     if (!r.ok) return { ok: false, error: r.error };
