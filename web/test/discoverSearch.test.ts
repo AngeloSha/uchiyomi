@@ -163,11 +163,12 @@ test('the 18+ filter: three chips in search mode, sent and keyed, and an 18+ mar
   assert.match(src, /\.\.\.\(g\.rating === 'adult' \? \{ rating: 'adult' as const \} : \{\}\)/, 'a card does not carry its rating to the wall');
   const card = code(read('components/cards.tsx'));
   assert.match(card, /\{item\.rating === 'adult' && \(/, 'no 18+ mark on an 18+ result');
-  assert.match(card, /<span data-rating-mark/, 'no 18+ mark on an 18+ result');
+  assert.match(card, /data-rating-mark/, 'no 18+ mark on an 18+ result');
   // The direction on the text, never on the positioned box: dir="ltr" there turned its `end-1.5` to the right in an Arabic
-  // page, under the "{n} sources" box (seen in the v0.55.4 shots). Reintroduce by moving dir="ltr" onto the span: both fail.
+  // page, under the "{n} sources" box (seen in the v0.55.4 shots). Reintroduce by moving dir="ltr" onto the span: "the
+  // positioned box takes its own direction" fails.
+  assert.doesNotMatch(card, /dir="ltr" data-rating-mark/, 'the positioned box takes its own direction: in Arabic it sits in the wrong corner');
   assert.match(card, /<bdi dir="ltr">\{tr\('18\+'\)\}<\/bdi>/, 'the mark lost its direction: "+18" reads backwards in an Arabic line');
-  assert.doesNotMatch(card, /<span dir="ltr" data-rating-mark/, 'the positioned box takes its own direction: in Arabic it sits in the wrong corner');
 });
 
 test('every string the search renders is in all eight locale files', () => {
