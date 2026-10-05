@@ -2602,6 +2602,11 @@ paths:
         `duplicate`. At least one of `numbers` / `picks`, at most 300 combined. `floored: true` (since
         v0.48.3) reads `numbers` as WHOLE chapters -- 12 takes every listed chapter from 12 up to 13, so 12 and
         12.5 -- which is what the fill scan's numbers are; a whole number nothing lists is `not_listed`.
+        Since v0.55.4 (#158) the chapters named by number are spread over the followed sources that carry the same
+        release (the same group; or none named, the same language and agreeing page counts): the source this job has
+        asked least, at full speed before slowed, up to three chapters at once, one per image server. Never a source
+        that is switched off, cooling down, refusing or outside the age cap; never a pick, a number once picked, or a
+        series numbered by posting order or with its own source order.
       requestBody:
         required: true
         content:
@@ -2688,6 +2693,14 @@ paths:
         Since v0.42.0 the same filtering covers the 18+ reveal: without `adult=1` an adult source is
         neither asked nor listed in `sources`, so no outbound query goes to it and nothing it answered for
         another account is read back here.
+        Since v0.55.4 (#158) `rating` filters the answer for 18+ (Discover's All / Hide 18+ / 18+ only). A result is
+        18+ when its source is adult (declared, or on the admin's 18+ source list), MangaDex rates it erotica or
+        pornographic, or a genre is on the admin's 18+ genre list (trimmed, case-blind); safe when MangaDex rates it
+        safe or suggestive, or it names genres, the list has some and none match; else unknown, kept by `all` and
+        `safe` and left out of `adult`. A card is 18+ when any provider is, else safe when any is; cards, providers and
+        rail results carry `rating` when known. Filtered per caller before the 30-card cap, never in the shared entry.
+        An account capped below 18, and any request without `adult=1`, is held to `safe` -- so with Show 18+ off an
+        18+ title from a source that is not adult itself (MangaDex's erotica) no longer shows.
       parameters:
         - name: q
           in: query
@@ -2726,13 +2739,24 @@ paths:
           description: >-
             The most milliseconds to hold the answer for, clamped to `SEARCH_FIRST_ANSWER_MS` (6000); absent
             means that maximum. `0` answers at once with whatever the entry already holds.
+        - name: rating
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, safe, adult]
+          description: >-
+            Since v0.55.4: `safe` leaves out what is known to be 18+, `adult` keeps only that, `all` (the default; any
+            other value reads as it) everything. Held to `safe` for an account capped below 18 and without `adult=1`.
       security:
         - bearer: []
       responses:
         "200":
           description: >-
             `content` is the title-grouped list (or the per-source rails with `groupBy=source`), exactly as
-            before v0.40.0; the three fields beside it are the search's progress. Since v0.52.0 a title-grouped
+            before v0.40.0; the three fields beside it are the search's progress. Since v0.55.4 a card, each of its
+            providers and each rail result carry `rating` (`adult` or `safe`) when known, absent when not, and the
+            top-level `rating` is the filter the answer applied. Since v0.52.0 a title-grouped
             card is `inLibrary` only when the library holds the title in EVERY provider's language, so a card
             with an English and a Spanish provider stays addable while only English is here; it carries
             `libraryLangs` and `librarySeriesId` when the title is held at all, and each of its `providers` its
@@ -2756,6 +2780,12 @@ paths:
                   asked:
                     type: integer
                     description: How many of the caller's sources were asked at all (everything but the skipped).
+                  rating:
+                    type: string
+                    enum: [all, safe, adult]
+                    description: >-
+                      Since v0.55.4: the 18+ filter this answer applied -- the one asked for, or `safe` for an account
+                      capped below 18 or a request without `adult=1`.
         "401":
           description: Not authenticated
         "403":

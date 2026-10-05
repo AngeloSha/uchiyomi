@@ -9,6 +9,11 @@
 // chapter is stored, so a restart has nothing to reconcile: a chapter that landed meanwhile, by the archive or
 // by anyone else, simply drops out of the next pick.
 //
+// Since v0.55.4 (#158) a series whose chapters are one release on several followed sources takes them from those
+// sources in turn: while one is in its break the next chapter comes from another (tickOnce, lib/seriesListing.ts
+// sameRelease). And "a source" is a RATE KEY for every slot, break and backoff here (lib/pace.ts rateKeyOf): two sites
+// whose pages come from one image server are one site to that server, and taking turns between them gains nothing.
+//
 // How it shares the work with the sweep. The sweep reads GREATEST(chapter_floor, boundary) as its floor while
 // a row is queued or paused (lib/updater.ts), so the archive owns everything below the boundary and new
 // releases above it stay the sweep's. chapter_floor itself is never rewritten while an archive runs: it is what
@@ -44,7 +49,8 @@ import { noteChapterFailure } from './chapterFailures';
 import { withOrigin } from './downloadActivity';
 import { busyFolders } from './bulkNewest';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
-import { copyToChapter, type ListingCopy } from './seriesListing';
+import { copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
+import { cleanSourceOrder } from './sourcePrefs';
 import { heldBooks } from './chapterCleanup';
 import { holds } from './chapterRanges';
 import { seriesIsAdult, sweepAllowedFor } from './sourceHunt';
@@ -157,6 +163,12 @@ let lastGlobal: { wait: GlobalWait; since: number } | null = null;
 const lastWaits = new Map<string, { wait: SeriesWait; since: number }>();
 /** The source each queued series' next chapter is on, as the last tick found it: what its ETA shares. */
 const sourceOf = new Map<string, string>();
+/**
+ * The sources a queued series' next chapter may come from, as the last tick found them, the chosen copy's first (v0.55.4,
+ * #158): only for a series whose copies are the same release on several. Its ETA is divided among their rate keys, and
+ * it is backing off only while every one of them is.
+ */
+const rotating = new Map<string, string[]>();
 let timer: NodeJS.Timeout | null = null;
 let started = false;
 /** Wall-clock time of the first look after boot: a kick (an enqueue, a settings change) never brings it forward. */
@@ -194,6 +206,7 @@ export function resetArchiveMemory(): void {
   lastGlobal = null;
   lastWaits.clear();
   sourceOf.clear();
+  rotating.clear();
   viewCache = null;
   if (timer) { clearTimeout(timer); timer = null; }
   started = false;
@@ -445,6 +458,7 @@ export function archiveForget(seriesId: string): void {
   stuck.delete(seriesId);
   lastWaits.delete(seriesId);
   sourceOf.delete(seriesId);
+  rotating.delete(seriesId);
   invalidateArchiveView();
 }
 
@@ -499,11 +513,42 @@ interface QueuedRow {
   title: string; folder: string; summary: string | null; author: string | null; genres: string[] | null;
   web: string | null; status: string | null; source_id: string | null; source_checked_at: Date | null;
   renumbering: boolean; by_role: string | null; by_cap: number | null; extra: string[];
+  /** Whether its chapters may come from another copy of the same release (rotates): not under posting order, not with an order of its own. */
+  numbering: string | null; source_prefs: unknown;
 }
 interface PaceRow { source_id: string; next_at: Date | null; backoff_level: number; backoff_until: Date | null; cycle_ms: number | null; last_at: Date | null }
 interface Candidate { number: number; title: string | null; copies: ListingCopy[] | null; publishedAt: string | null }
 
 const ms = (d: Date | string | null | undefined): number | null => (d == null ? null : new Date(d).getTime());
+
+/**
+ * archive_pace by RATE KEY (lib/pace.ts rateKeyOf) rather than by source (v0.55.4): the latest break and backoff any
+ * source on the key is under, its latest turn, its highest backoff level. Two sites whose pages come from one image
+ * server are one site to that server, so a break or a refusal earned on either holds both: kept per source, rotating
+ * a series between Natomanga and Mangakakalot would have asked their one CDN twice as often as the pace allows.
+ */
+interface KeyPace { nextAt: number | null; backoffUntil: number | null; lastAt: number | null; backoffLevel: number }
+function paceByKey(rows: Iterable<PaceRow>): Map<string, KeyPace> {
+  const later = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.max(a, b));
+  const out = new Map<string, KeyPace>();
+  for (const p of rows) {
+    const key = rateKeyOf(p.source_id);
+    const mine: KeyPace = { nextAt: ms(p.next_at), backoffUntil: ms(p.backoff_until), lastAt: ms(p.last_at), backoffLevel: Number(p.backoff_level) || 0 };
+    const had = out.get(key);
+    out.set(key, !had ? mine : {
+      nextAt: later(had.nextAt, mine.nextAt), backoffUntil: later(had.backoffUntil, mine.backoffUntil),
+      lastAt: later(had.lastAt, mine.lastAt), backoffLevel: Math.max(had.backoffLevel, mine.backoffLevel),
+    });
+  }
+  return out;
+}
+
+/** An archive chapter or listing read is in flight on some source of this rate key. */
+const keyInFlight = (key: string): boolean => [...flights.values()].some((f) => rateKeyOf(f.source) === key);
+
+/** May this series' chapters come from another copy of the same release: not under posting order, nor with its own source order. */
+const rotates = (r: Pick<QueuedRow, 'numbering' | 'source_prefs'>): boolean =>
+  r.numbering !== 'posting_order' && !cleanSourceOrder((r.source_prefs as { priority?: unknown } | null)?.priority).length;
 
 /**
  * Look once: start what may start, say why the rest waits, finish what has nothing left. Ticks never overlap --
@@ -549,7 +594,7 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   const rows = await q<QueuedRow>(
     `SELECT a.series_id, a.boundary, a.direction, a.added_by, a.note,
             s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id, s.source_checked_at,
-            (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS renumbering,
+            (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS renumbering, s.numbering, s.source_prefs,
             u.role AS by_role, u.max_age_rating AS by_cap,
             ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id ORDER BY ss.created_at, ss.source_id) AS extra
        FROM archive_queue a
@@ -591,24 +636,40 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   // Every source any of these may be on, read once.
   const followedOf = (r: QueuedRow) => [...new Set([r.source_id, ...(r.extra ?? [])].filter((x): x is string => !!x))];
   const allSources = [...new Set(rows.flatMap(followedOf))];
+  // Every row, not only the followed sources': a site on the same image server as one of them rests with it (paceByKey),
+  // whichever series last asked it. One row per source the archive has ever asked.
   const paceRows = new Map((await q<PaceRow>(
-    'SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace WHERE source_id = ANY($1::text[])',
-    [allSources])).map((r) => [r.source_id, r]));
+    'SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace')).map((r) => [r.source_id, r]));
+  const keyPace = paceByKey(paceRows.values());
   const health = new Map((await q<{ source_id: string; blocked_until: Date | null; disabled: boolean }>(
     'SELECT source_id, blocked_until, disabled FROM source_health WHERE source_id = ANY($1::text[])', [allSources])
     .catch(() => [])).map((r) => [r.source_id, r]));
   const stateOf = (src: string): SourceState => {
-    const pace = paceRows.get(src);
+    // The gate is the rate group's (pace.ts rateKeyOf): a Spanish MangaDex download keeps English waiting too. So since
+    // v0.55.4 are the break, the backoff and the chapter in flight: a source whose pages come from the same image server
+    // as one the archive is resting, backing off or fetching on is that server asked again.
+    const key = rateKeyOf(src);
+    const kp = keyPace.get(key);
     const h = health.get(src);
     return {
       loaded: !!getSource(src), disabled: h?.disabled === true, blockedUntil: ms(h?.blocked_until),
-      // The gate is the rate group's (pace.ts rateKeyOf): a Spanish MangaDex download keeps English waiting too.
-      gate: gateDepth(rateKeyOf(src)), paced: refusedLately(src),
-      nextAt: ms(pace?.next_at), backoffUntil: ms(pace?.backoff_until), inFlight: flights.has(src),
+      gate: gateDepth(key), paced: refusedLately(src),
+      nextAt: kp?.nextAt ?? null, backoffUntil: kp?.backoffUntil ?? null, inFlight: keyInFlight(key),
     };
   };
 
+  /**
+   * The rate keys this look has started something on. By key, not by source (v0.55.4): two sources on one image server
+   * both started in one look -- the gate that would have held the second is entered only once the first is under way.
+   * Reintroduce by claiming the source: "two sources on one image server" in archive.int.test.ts starts both series.
+   */
   const claimed = new Set<string>();
+  /** The archive's slots for a source: one chapter per rate key, and at most so many sources at once; then its own state. */
+  const slotWait = (src: string): Omit<SeriesWait, 'source'> | null => {
+    const key = rateKeyOf(src);
+    if (claimed.has(key) || (!keyInFlight(key) && flights.size >= maxSources())) return { why: 'turn' };
+    return sourceWait(stateOf(src), now);
+  };
   /** Notes a look writes on the rows (goneSince), awaited before it answers: a view read right after sees them. */
   const notes: Array<Promise<unknown>> = [];
   const wait = (r: QueuedRow, w: SeriesWait) => {
@@ -652,16 +713,24 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
       // archive.int.test.ts asks the site for it every few minutes.
       const retryAt = ms(r.note?.listingRetryAt);
       if (retryAt != null && retryAt > now) { wait(r, { why: 'listing', until: retryAt, source: getSource(S)?.name ?? S }); continue; }
+      rotating.delete(r.series_id);
+      sourceOf.set(r.series_id, S);
+      const sw = slotWait(S);
+      if (sw) { wait(r, { ...sw, source: getSource(S)?.name ?? S }); continue; }
     } else {
       const list = cands.get(r.series_id) ?? [];
+      // One chapter of a series at a time: its next one waits for the one in flight, wherever that is. Rotating, the next
+      // could otherwise start on another site beside it (production's busy(), jobBusy, says so too, as series_busy).
+      const own = [...flights.values()].find((f) => f.seriesId === r.series_id);
+      if (own) { wait(r, { why: 'turn', source: getSource(own.source)?.name ?? own.source }); continue; }
       if (!list.length) {
-        if ([...flights.values()].some((f) => f.seriesId === r.series_id)) { wait(r, { why: 'turn' }); continue; }
         // Its last chapters are on disk but not yet in the library: scan them in first, so what is left is
         // counted from the library and the Updates baseline is raised before the row says done.
         if (unscanned.has(r.series_id)) await flushArchiveScan();
         if (await finishSeries(r.series_id, now)) report.finished.push(r.series_id);
         continue;
       }
+      let copies: ListingCopy[] = [];
       for (const c of list) {
         // Already on disk -- landed before a restart, or by a download nobody scanned: not fetched again (the
         // downloader would skip it anyway, but only after the source's turn was spent). Scanned in shortly.
@@ -669,6 +738,7 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
         const copy = (c.copies ?? []).find((cp) => followed.includes(cp.source) && getSource(cp.source) && capOk(cp.source));
         if (!copy) continue;
         pick = { number: c.number, title: c.title, copy, publishedAt: c.publishedAt };
+        copies = c.copies ?? [];
         break;
       }
       if (!pick) {
@@ -676,20 +746,50 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
         wait(r, anyLoaded && unscanned.has(r.series_id) ? { why: 'turn' } : { why: 'source_missing' });
         continue;
       }
+      // Where the chapter may come from (v0.55.4, #158): the copy the release rules chose, and on a series that may
+      // rotate, the same release on every other followed source (lib/seriesListing.ts sameRelease) that the enqueuer's
+      // cap and the sweep's adult rule allow. A second site on the chosen one's image server is the same server: it waits
+      // with it (stateOf is by key) and loses their tie, so taking turns between the two never asks it more often.
+      // Reintroduce by keeping the chosen copy alone: "a series rotates to a site that is not resting" in
+      // archive.int.test.ts waits out the chosen site's break.
+      const options = [pick.copy];
+      if (rotates(r)) {
+        const same = sameRelease(pick.copy, copies, { followed, langOf: declaredLang }).slice(1).filter((cp) => getSource(cp.source) && capOk(cp.source));
+        if (same.length) {
+          // The rule the chapter's alternates are held to (runChapter `allowed`), beside the enqueuer's cap above: never an
+          // adult source on a clean series. Reintroduce by dropping either: "never onto an adult source" in
+          // archive.int.test.ts takes a second chapter from the adult site.
+          const sweepRule = await sweepAllowedFor(await seriesIsAdult(r.series_id));
+          for (const cp of same) if (sweepRule(cp.source)) options.push(cp);
+        }
+      }
+      if (options.length > 1) rotating.set(r.series_id, options.map((cp) => cp.source));
+      else rotating.delete(r.series_id);
+      // A free key, of those: the one whose last chapter was longest ago, the chosen copy's on a tie -- so each takes its
+      // turn, and a series with one site behaves exactly as before.
+      const waits = options.map((cp) => slotWait(cp.source));
+      const lastAt = (cp: ListingCopy) => keyPace.get(rateKeyOf(cp.source))?.lastAt ?? -Infinity;
+      let go: ListingCopy | null = null;
+      for (let i = 0; i < options.length; i++) if (!waits[i] && (!go || lastAt(options[i]) < lastAt(go))) go = options[i];
+      if (!go) {
+        // Nothing free: the chosen copy's reason -- unless it is backing off and another site is only between chapters. A
+        // series another site takes in a few minutes is not "left alone after refusals"; backing off is when every one is.
+        const at = waits[0]!.why === 'backoff' ? Math.max(0, waits.findIndex((w) => w!.why !== 'backoff')) : 0;
+        sourceOf.set(r.series_id, options[at].source);
+        wait(r, { ...waits[at]!, source: getSource(options[at].source)?.name ?? options[at].source });
+        continue;
+      }
+      pick.copy = go;
       S = pick.copy.source;
+      sourceOf.set(r.series_id, S);
     }
-    sourceOf.set(r.series_id, S);
     const name = getSource(S)?.name ?? S;
 
-    // The archive's slots: one chapter per source, and at most so many sources at once.
-    if (claimed.has(S) || (!flights.has(S) && flights.size >= maxSources())) { wait(r, { why: 'turn', source: name }); continue; }
-    const sw = sourceWait(stateOf(S), now);
-    if (sw) { wait(r, { ...sw, source: name }); continue; }
     // Reintroduce by dropping this: "it yields" in archive.int.test.ts starts the chapter of a series a Fetch is
     // already writing.
     if (busy(r.folder)) { wait(r, { why: 'series_busy', source: name }); continue; }
 
-    claimed.add(S);
+    claimed.add(rateKeyOf(S));
     lastWaits.delete(r.series_id);
     const pace = paceRows.get(S) ?? null;
     if (pick) {
@@ -1094,17 +1194,24 @@ async function backOffAlternates(asked: Map<string, unknown>, skip: readonly str
   }
 }
 
-/** The listing's other copies of `n` from followed sources the archive is not resting or busy on. */
+/**
+ * The listing's other copies of `n` from followed sources the archive is not resting or busy on -- by rate key since
+ * v0.55.4: a site on the image server the archive is resting, backing off or fetching on is that server asked on the
+ * side (paceByKey). The chosen copy's own key is in flight, this chapter, so a copy on it is never an alternate.
+ */
 async function alternatesOf(seriesId: string, n: number, chosen: ListingCopy, followed: string[]) {
   const row = await one<{ title: string | null; copies: ListingCopy[] }>(
     'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, n]).catch(() => null);
   const now = clock();
   const resting = new Set((await q<{ source_id: string }>(
-    `SELECT source_id FROM archive_pace WHERE (next_at > $1 OR backoff_until > $1) AND source_id = ANY($2::text[])`,
-    [new Date(now), followed]).catch(() => [])).map((r) => r.source_id));
+    `SELECT source_id FROM archive_pace WHERE next_at > $1 OR backoff_until > $1`, [new Date(now)]).catch(() => [])).map((r) => rateKeyOf(r.source_id)));
+  const free = (src: string) => {
+    const key = rateKeyOf(src);
+    const gate = gateDepth(key);
+    return !resting.has(key) && !keyInFlight(key) && gate.active + gate.queued === 0 && !refusedLately(src);
+  };
   return (row?.copies ?? [])
-    .filter((c) => c.source !== chosen.source && followed.includes(c.source) && !resting.has(c.source)
-      && !flights.has(c.source) && gateDepth(rateKeyOf(c.source)).active + gateDepth(rateKeyOf(c.source)).queued === 0 && !refusedLately(c.source))
+    .filter((c) => c.source !== chosen.source && followed.includes(c.source) && free(c.source))
     .map((c) => copyToChapter(c, { number: n, title: row!.title }));
 }
 
@@ -1140,6 +1247,7 @@ async function finishSeries(seriesId: string, now: number): Promise<boolean> {
   if (ended) {
     lastWaits.delete(seriesId);
     sourceOf.delete(seriesId);
+    rotating.delete(seriesId);
     invalidateArchiveView();
   }
   return ended;
@@ -1340,9 +1448,18 @@ export interface ArchiveView {
 const iso = (t: number | null | undefined): string | undefined => (t == null ? undefined : new Date(t).toISOString());
 
 /** One shared row with the scheduler's memory folded in: what is in flight, why it waits, when it next goes. */
-function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<string, number>, now: number): (ArchiveSeriesView & { addedBy: string | null }) | null {
+function compose(
+  r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<string, number>, now: number, keyPace: Map<string, KeyPace>,
+): (ArchiveSeriesView & { addedBy: string | null }) | null {
   const src = sourceOf.get(r.seriesId) ?? r.primary ?? null;
   const pace = src ? c.pace.get(src) : undefined;
+  // The rate keys its next chapter may come from (v0.55.4): every site of the same release it rotates over, else its
+  // one source's. It goes when the first of them is free, takes a share of each one's hour, and is backing off only
+  // while every one of them is -- one site refusing while another carries on is not worth a look.
+  // Reintroduce by reading the one source's row: "a series that rotates backs off only when every site does" in
+  // archive.int.test.ts puts it under Needs attention while the other site carries on.
+  const keys = [...new Set(((r.state === 'queued' ? rotating.get(r.seriesId) : undefined) ?? (src ? [src] : [])).map(rateKeyOf))];
+  const kps = keys.map((k) => keyPace.get(k));
   const flight = [...flights.values()].find((f) => f.seriesId === r.seriesId && f.number != null);
   const w = r.state === 'queued' ? lastWaits.get(r.seriesId) : undefined;
   const pausedAt = r.note?.pausedAt ? Date.parse(r.note.pausedAt) : null;
@@ -1350,14 +1467,17 @@ function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<s
   const progressAt = r.state === 'queued' ? Date.parse(r.note?.progressAt ?? '') : NaN;
   const attention = attentionOf({
     state: r.state, now, failed: r.failed, note, finishedAt: r.finishedAt, pausedAt: Number.isFinite(pausedAt) ? pausedAt : null,
-    backoffLevel: pace?.backoff_level ?? 0, backoffSince: ms(pace?.last_at), wait: w?.wait ?? null, waitSince: w?.since ?? null,
+    backoffLevel: kps.length ? Math.min(...kps.map((p) => p?.backoffLevel ?? 0)) : 0, backoffSince: ms(pace?.last_at),
+    wait: w?.wait ?? null, waitSince: w?.since ?? null,
     global: r.state === 'queued' ? lastGlobal?.wait ?? null : null,
     progressSince: Number.isFinite(progressAt) ? progressAt : r.createdAt, idleTurns: Number(r.note?.idleTurns) || 0,
   });
   if (!shownDone({ state: r.state, finishedAt: r.finishedAt, attention, now })) return null;
-  // When it next goes: its source's break or backoff, or its own listing ladder when that is what it waits on.
+  // When it next goes: the end of its source's break or backoff -- the first to end of its keys' -- or its own listing
+  // ladder when that is what it waits on.
+  const restEnd = (p: KeyPace | undefined) => Math.max(p?.nextAt ?? 0, p?.backoffUntil ?? 0);
   const nextAtMs = r.state === 'queued'
-    ? Math.max(pace ? Math.max(ms(pace.next_at) ?? 0, ms(pace.backoff_until) ?? 0) : 0, w?.wait.why === 'listing' ? w.wait.until ?? 0 : 0)
+    ? Math.max(kps.length ? Math.min(...kps.map(restEnd)) : 0, w?.wait.why === 'listing' ? w.wait.until ?? 0 : 0)
     : 0;
   // Before the source has a running average, what a typical chapter costs at this rate (lane 2's expectedCycleMs,
   // which the web's own estimate mirrors, web/lib/archive.ts), not the hour's bare share.
@@ -1379,7 +1499,8 @@ function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<s
     done: r.done, left, failed: r.failed, bytes: r.bytes, addedBy: r.addedBy,
     ...(flight ? { current: { number: flight.number!, startedAt: iso(flight.startedAt)! } } : {}),
     ...(nextAtMs > now && !flight ? { nextAt: iso(nextAtMs) } : {}),
-    ...(r.state !== 'done' && left != null ? { etaMs: Math.round(etaMs({ left, sharing: (src && queuedOn.get(src)) || 1, cycleMs: cyc }) / share) } : {}),
+    ...(r.state !== 'done' && left != null
+      ? { etaMs: Math.round(etaMs({ left, sharing: (src && queuedOn.get(src)) || 1, cycleMs: cyc }) / Math.max(1, keys.length) / share) } : {}),
     ...(w ? { waiting: { why: w.wait.why, ...(w.wait.until ? { until: iso(w.wait.until) } : {}), ...(w.wait.source ? { source: w.wait.source } : {}) } } : {}),
     ...(attention ? { attention: { why: attention.why, since: iso(attention.since)! } } : {}),
     queuedAt: iso(r.createdAt)!, startedAt: iso(r.startedAt) ?? null,
@@ -1407,7 +1528,8 @@ export async function archiveView(mayBrowse: (seriesId: string) => boolean, me: 
     const src = sourceOf.get(r.seriesId) ?? r.primary;
     if (src) queuedOn.set(src, (queuedOn.get(src) ?? 0) + 1);
   }
-  const rows = c.rows.map((r) => compose(r, c, queuedOn, now)).filter((x): x is NonNullable<typeof x> => !!x);
+  const keyPace = paceByKey(c.pace.values());
+  const rows = c.rows.map((r) => compose(r, c, queuedOn, now, keyPace)).filter((x): x is NonNullable<typeof x> => !!x);
   const s = c.settings;
   // What the last look concluded, unless the settings have moved on since: a 'paused' left from before a Resume all
   // (or a window since cleared) lingered on the view until the next look (#117 review).

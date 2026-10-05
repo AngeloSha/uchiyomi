@@ -15,11 +15,12 @@ process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 let listingRows: typeof import('../src/lib/seriesListing')['listingRows'];
 let whyOf: typeof import('../src/lib/seriesListing')['whyOf'];
 let copyToChapter: typeof import('../src/lib/seriesListing')['copyToChapter'];
+let sameRelease: typeof import('../src/lib/seriesListing')['sameRelease'];
 let chooseReleases: typeof import('../src/lib/releases')['chooseReleases'];
 let releaseOrder: typeof import('../src/lib/releases')['releaseOrder'];
 let CHAPTER_RETRY_CAP: number;
 before(async () => {
-  ({ listingRows, whyOf, copyToChapter } = await import('../src/lib/seriesListing'));
+  ({ listingRows, whyOf, copyToChapter, sameRelease } = await import('../src/lib/seriesListing'));
   ({ chooseReleases, releaseOrder } = await import('../src/lib/releases'));
   ({ CHAPTER_RETRY_CAP } = await import('../src/lib/updater'));
 });
@@ -171,4 +172,69 @@ test('another split of a chapter on disk says so, below the floor and failed or 
   assert.equal(whyOf('covered', 78.3, 100, 0), 'covered', 'another split below the floor');
   assert.equal(whyOf('covered', 78.3, null, CHAPTER_RETRY_CAP), 'covered', 'a failure count from before outranks it');
   assert.equal(whyOf('covered', 78.3, null, 0, 90), 'covered', 'the slow archive never takes it');
+});
+
+// ---- sameRelease (v0.55.4, #158): which other copies of a number a download may take instead -------------------------
+
+/** One stored copy: a group (or none), a language and a page count, on `source`. */
+const copy = (source: string, o: { groups?: string[]; scanlator?: string | null; lang?: string | null; pages?: number | null } = {}) => ({
+  sourceId: `${source}/c1`, source, groups: o.groups ?? [], scanlator: o.scanlator ?? null, lang: o.lang ?? null,
+  pages: o.pages === undefined ? 20 : o.pages, publishedAt: null,
+});
+const FOLLOWED = ['pri', 'a', 'b', 'c', 'd', 'e'];
+
+test('the same release is the same groups, on a followed source, one copy per source and the chosen first', () => {
+  // Reintroduce by comparing the first group only (`theirs` against `mine` by their first key): "a joint release is not
+  // one group's" takes d's copy, which Group B released with Group A.
+  const chosen = copy('pri', { groups: ['Group A'] });
+  const copies = [
+    chosen,
+    copy('a', { groups: ['group-a '] }), // the same group, spelt as another site spells it
+    copy('a', { groups: ['Group A'] }), // a second copy on a: one per source
+    copy('b', { groups: ['Group B'] }),
+    copy('d', { groups: ['Group A', 'Group B'] }),
+    copy('x', { groups: ['Group A'] }), // not followed
+    copy('pri', { groups: ['Group A'], pages: 21 }), // a re-upload on the chosen copy's own source
+  ];
+  const out = sameRelease(chosen, copies, { followed: FOLLOWED });
+  assert.equal(out[0], chosen, 'the chosen copy comes first');
+  assert.ok(!out.some((c) => c.source === 'd'), 'a joint release is not one group\'s');
+  assert.ok(!out.some((c) => c.source === 'x'), 'a source the series does not follow is never asked');
+  assert.deepEqual(out.map((c) => c.source), ['pri', 'a'], 'a copy by another group is never the same release');
+});
+
+test('copies that name no group match only each other, in one language, with page counts that agree', () => {
+  // Aggregators rarely name a group. Reintroduce by dropping the page check: "a no-group copy with another page count is
+  // another release" takes c's 18 pages; by dropping the language check: "another language is another release" takes e.
+  const chosen = copy('pri', { pages: 20 });
+  const copies = [
+    chosen,
+    copy('a', { pages: 20 }),
+    copy('b', { pages: null }), // a count nobody knows contradicts nothing
+    copy('c', { pages: 18 }),
+    copy('d', { groups: ['Group A'] }),
+    copy('e', { pages: 20, lang: 'es' }),
+  ];
+  const out = sameRelease(chosen, copies, { followed: FOLLOWED }).map((c) => c.source);
+  assert.ok(!out.includes('c'), 'a no-group copy with another page count is another release');
+  assert.ok(!out.includes('e'), 'another language is another release');
+  assert.ok(!out.includes('d'), 'a copy naming a group is not the no-group release');
+  assert.deepEqual(out, ['pri', 'a', 'b']);
+  // And a chosen copy that names a group never matches one that names none, whatever its pages.
+  assert.deepEqual(sameRelease(copy('pri', { groups: ['Group A'] }), [copy('a', {})], { followed: FOLLOWED }).map((c) => c.source), ['pri'],
+    'a no-group copy was taken for a named group\'s release');
+});
+
+test('a copy that names no language takes its source\'s, and an external link is never a release', () => {
+  // MangaDex says which language each chapter is in; an aggregator says nothing, and its source declares one.
+  // Reintroduce by dropping `langOf`: "a Spanish site's copy of an English chapter" is taken.
+  const chosen = copy('pri', { lang: 'en', pages: null });
+  const copies = [chosen, copy('a', { pages: null }), copy('b', { pages: null })];
+  const langOf = (s: string) => (s === 'a' ? 'es' : 'en');
+  const out = sameRelease(chosen, copies, { followed: FOLLOWED, langOf }).map((c) => c.source);
+  assert.deepEqual(out, ['pri', 'b'], "a Spanish site's copy of an English chapter");
+  // External links (pages === 0) are not a release anyone could download, on either side.
+  assert.deepEqual(sameRelease(chosen, [chosen, copy('a', { pages: 0 })], { followed: FOLLOWED }).map((c) => c.source), ['pri']);
+  const ext = copy('pri', { pages: 0 });
+  assert.deepEqual(sameRelease(ext, [ext, copy('a', { pages: 0 }), copy('b')], { followed: FOLLOWED }), [ext], 'an external chosen copy has no other');
 });

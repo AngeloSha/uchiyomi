@@ -115,6 +115,9 @@ function firstLang(obj: any): string {
   return obj.en || obj['ja-ro'] || (Object.values(obj)[0] as string) || '';
 }
 
+/** The content ratings MangaDex gives a title. */
+const CONTENT_RATINGS = new Set(['safe', 'suggestive', 'erotica', 'pornographic']);
+
 function toSeries(m: any, source: string): SourceSeries {
   const a = m.attributes || {};
   const cover = (m.relationships || []).find((r: any) => r.type === 'cover_art');
@@ -139,8 +142,12 @@ function toSeries(m: any, source: string): SourceSeries {
     readingDirection: directionFromLanguage(a.originalLanguage) ?? undefined,
     // And what kind of comic it is (lib/seriesType.ts), from the same field.
     originalLanguage: typeof a.originalLanguage === 'string' && a.originalLanguage ? a.originalLanguage : undefined,
+    // MangaDex rates every title (v0.55.4, #158): the one source whose search results say whether they are 18+, which
+    // Discover's search filter reads (lib/searchAll.ts ratingOf). Search asks for erotica as well as safe and suggestive.
+    ...(CONTENT_RATINGS.has(a.contentRating) ? { contentRating: a.contentRating } : {}),
   };
 }
+
 
 /**
  * The original language of many titles at once, for the repair's reading-direction backfill

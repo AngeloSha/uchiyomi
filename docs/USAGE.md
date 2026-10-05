@@ -615,6 +615,16 @@ source it switched from and to. It does not switch a version you explicitly pick
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
 follows another source with the chapter, that copy may keep the queue moving.
 
+**Several sites, one release.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a Fetch
+— *Fetch all {n}*, a chapter's *Fetch*, a *Try again* — of a series that follows more than one source carrying the
+same release (the same scanlation group; or, on sites that name none, the same language and page count) takes its
+chapters from those sources in turn rather than all from one: the one the Fetch has asked least, a site downloading at
+full speed before one that is slowed, and up to three chapters at once, one per image server, so two sites fill the
+series side by side. Two sites whose pages come from one image server count as one. A site that is switched off,
+cooling down, refusing or above your age limit is skipped, and nothing moves for a version you picked by name, for a
+series with its own source order (*Preferring one source*) or for one numbered by posting order. The download card
+counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below).
+
 If at least four pages in five arrived after an ordinary page failure, the chapter is kept with a numbered
 placeholder at every missing position rather than thrown away. Its row says how many pages are missing. The
 reader never hides a missing placeholder — even when that position was also marked as a repeated page — and
@@ -710,6 +720,18 @@ random pause of 1.5 to 4 seconds between pages, a break drawn at random after ea
 seconds — and now and then a long one of 20 to 45 minutes. That comes to about 96 chapters a day from one site, so
 1,000 take about ten days. Several sites are archived side by side, one chapter in flight on each and at most three
 sites at once; the series queued on one site take turns, so ten of them share its four chapters an hour.
+
+**One release on several sites.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a
+series that follows more than one source takes its chapters from them in turn when they carry the same release: the
+same scanlation group, or — on sites that name no group, as most aggregators don't — no group, the same language and
+the same page count wherever both say. While one site is in its break the next chapter comes from another, the one that
+was asked longest ago, so a series on two such sites is archived about twice as fast while each site still sees only
+its own pace. Two sites whose pages come from one image server (Natomanga and Mangakakalot share one) count as one site:
+one chapter at a time between them, and a break or a refusal on either holds both. It never takes another group's copy
+this way, never one from a site above the age limit of whoever queued the series or an 18+ site for a series that is
+not 18+, and never at all for a series with its own source order (*Preferring one source*) or numbered by posting
+order. Its estimate is shared among the sites it takes turns on, and it goes under *Needs attention* for refusals only
+when every one of them keeps refusing.
 
 **What it waits for.** Everything else goes first. It stands aside while the scheduled check, the library repair or
 the daily source check (or *Test all*) runs; while anyone else downloads from the same site or into the same
@@ -1179,6 +1201,15 @@ again.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
   source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+- **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
+  **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
+  results by what is known of each. A result is 18+ when its provider is (its extension says so, or it is ticked in
+  **Admin → Settings → 18+ filter**), when MangaDex rates the title erotica, or when it carries one of the 18+ filter's
+  genres, and such a card wears a small **18+** mark; a MangaDex title rated safe or suggestive is not, nor one whose
+  genres the filter's list does not name. Most extensions say nothing about a title in a search: their results stay
+  under *All* and *Hide 18+* and are left out of *18+ only*. The choice holds for every search until you leave the
+  page. With **Show 18+** off the search shows no 18+ results at all and the chips are not offered, and an account
+  whose age limit is below 18 gets the same, whatever it asks for.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle
@@ -2037,7 +2068,9 @@ and popular walls answer nothing, and the search across all your sources does no
 request goes to that site at all. The **Show 18+** button is on Discover too — beside *Newest from your
 sources*, where it stays while you search — and brings the lot back for the rest of the browser session.
 It appears there whenever something is being hidden, so an install with adult providers and no 18+ shelf
-still has the switch. Three things are deliberately left alone, because you named them yourself: opening a
+still has the switch. Since v0.55.4 the search also leaves out 18+ titles from providers that are not 18+ themselves
+while the reveal is off — a MangaDex title rated erotica, a result carrying one of the genres below — and with it on,
+its *Hide 18+* and *18+ only* chips (section 6) sort them out. Three things are deliberately left alone, because you named them yourself: opening a
 provider's own page for a title, adding it, and *Find missing chapters* on a series whose own source is
 adult. Hiding those would stop a series you already own from being filled, which is breaking the library
 rather than tidying a screen.

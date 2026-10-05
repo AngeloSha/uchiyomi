@@ -13,7 +13,7 @@ import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
 import { followGuard, seriesLanguage } from '../lib/seriesLang';
-import { searchAll, groupByTitle, bySource, SEARCH_FIRST_ANSWER_MS } from '../lib/searchAll';
+import { searchAll, groupByTitle, bySource, ratingOf, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 
@@ -87,7 +87,9 @@ import { enqueueArchive, archiveBusy, archiveScanPending, archiveSeriesIds, arch
 import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
-import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
+import { copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, type ListingCopy } from '../lib/seriesListing';
+import { cleanSourceOrder } from '../lib/sourcePrefs';
+import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
 import { heldBy, isRange, rangeEnd, rawRangeEnd } from '../lib/chapterRanges';
 import {
@@ -128,7 +130,10 @@ import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import {
+  visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult, adultFilter,
+  ADULT_RATING,
+} from '../lib/visibility';
 // v0.52.0 (#72): language editions of one work, and the language model they stand on.
 import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editions';
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
@@ -459,9 +464,16 @@ function cardFor(seen: DownloadsAudience, me: string | null, folder: string, { b
   return { folder, ...j, ...(open ? { seriesId: seriesId ?? row?.id, ...(cover ? { cover } : {}) } : {}), mine: !!by && by === me };
 }
 
+/**
+ * How many chapters of one Fetch may come in at once, each from a different image server (v0.55.4, #158). Only a Fetch
+ * whose chapters are the same release on several followed sources has more than one lane; every other job is one.
+ */
+const JOB_LANES = 3;
+
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
-  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), origin: input.origin ?? 'fetch', ...(input.by ? { by: input.by } : {}) });
+  const origin = input.origin ?? 'fetch';
+  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), origin, ...(input.by ? { by: input.by } : {}) });
   const settle = async (ch: SourceChapter, landed: boolean) => {
     if (!input.onSettled) return;
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
@@ -469,7 +481,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   };
   const nameOf = (id: string) => getSource(id)?.name ?? id;
 
-  void withOrigin(input.origin ?? 'fetch', input.by ?? null, async () => {
+  void withOrigin(origin, input.by ?? null, async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
     const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
@@ -492,8 +504,10 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // other copies are only ever taken from followed sources -- the same rule as a manual fetch, where a
     // listing row's source is trusted only while the series follows it). Read once, before any download.
     const sources = new Set(chapters.map((c) => c.source ?? ''));
+    const series = await one<{ source_id: string | null; numbering: string | null; source_prefs: unknown }>(
+      'SELECT source_id, numbering, source_prefs FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
     const followed = new Set([
-      ...(await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]).then((r) => (r?.source_id ? [r.source_id] : []), () => [])),
+      ...(series?.source_id ? [series.source_id] : []),
       ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
     ]);
     const exhausted = () => [...sources, ...followed].every((sid) => refusing.has(sid));
@@ -509,10 +523,78 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, n]).catch(() => null);
       return (row?.copies ?? []).filter((c) => followed.has(c.source)).map((c) => copyToChapter(c, { number: n, title: row!.title }));
     };
-    for (const ch of chapters) {
-      if (runtime.stopping) break; // between chapters, never mid-write
-      if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): the same place, for the same reason
-      const via = ch.source ?? '';
+
+    // Which other copies each chapter may come from (v0.55.4, #158): the same release on the series' other followed
+    // sources (lib/seriesListing.ts sameRelease), so that a Fetch all is spread over the sites that carry it rather than
+    // asked of one -- faster, and less likely to be refused. Only a Fetch of chapters the release rules chose: never a
+    // copy a person picked (`pinned`), nor a number they once picked a version of (lib_books.picked_at), nor a fill's,
+    // a refetch's or an add's, nor on a series numbered by posting order or with a source order of its own.
+    // Reintroduce by leaving `copiesOf` empty: "a Fetch all is spread over two image servers" in
+    // fetchRotation.int.test.ts takes every chapter from the chosen site, one at a time.
+    const copiesOf = new Map<SourceChapter, SourceChapter[]>();
+    const loose = origin === 'fetch' && series?.numbering !== 'posting_order'
+      && !cleanSourceOrder((series?.source_prefs as { priority?: unknown } | null)?.priority).length
+      ? chapters.filter((c) => !c.pinned) : [];
+    if (loose.length) {
+      const nums = loose.map((c) => c.number);
+      const picked = new Set((await q<{ number: number }>(
+        'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND picked_at IS NOT NULL', [seriesId, nums],
+      ).catch(() => [])).map((r) => Number(r.number)));
+      const rows = new Map((await q<{ number: number; title: string | null; copies: ListingCopy[] }>(
+        'SELECT number, title, copies FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])', [seriesId, nums],
+      ).catch(() => [])).map((r) => [Number(r.number), r] as const));
+      for (const ch of loose) {
+        const row = rows.get(ch.number);
+        const own = row?.copies?.find((c) => c.source === ch.source && c.sourceId === ch.sourceId);
+        if (!row || !own || picked.has(ch.number)) continue;
+        const same = sameRelease(own, row.copies, { followed, langOf: declaredLang }).slice(1);
+        if (same.length) copiesOf.set(ch, same.map((c) => copyToChapter(c, { number: ch.number, title: row.title })));
+      }
+    }
+
+    // One lane per image server, at most JOB_LANES: the chapters of one Fetch come in side by side only from different
+    // rate keys (lib/pace.ts rateKeyOf) -- two sites on one image server are one site, and a second lane there would only
+    // ask it twice as often. A job nothing can rotate is one lane, chapter after chapter, exactly as before.
+    // Reintroduce `lanes = 1`: "a Fetch all is spread over two image servers" never has the two at once; by keying the
+    // lanes by source (laneOn): "two sources on one image server are one site" downloads two chapters at once on it.
+    const lanes = copiesOf.size ? JOB_LANES : 1;
+    const pending = [...chapters];
+    const running = new Set<{ source: string; done: Promise<void> }>();
+    /** Chapters this job has started per rate key: what a chapter's copies are taken in turn by. */
+    const used = new Map<string, number>();
+    let stop = false;
+    const laneOn = (src: string) => { const key = rateKeyOf(src); return [...running].some((l) => rateKeyOf(l.source) === key); };
+
+    /**
+     * Of a chapter's copies, the one to start now: on a rate key no lane of this job is on, from a source that may be
+     * asked (loaded, allowed, switched on, out of a cooldown, not refusing this job), at full speed and not resting
+     * before one that is slowed (lib/pace.ts), then the key this job has asked least, then the chapter's own copy. Both
+     * by key, so two sites on one image server are one: they are busy together and asked as often as one, and the
+     * chapter's own copy wins their tie. Null: wait for a lane to free. A chapter none of whose sources may be asked goes
+     * as its own copy, as before rotation: the helper skips a refusing source and turns to the alternates.
+     * Reintroduce by counting `used` per source: "two sources on one image server are one site" in
+     * fetchRotation.int.test.ts takes turns between them.
+     */
+    const pickCopy = async (ch: SourceChapter, may: (src: string) => Promise<boolean>): Promise<SourceChapter | null> => {
+      const others = copiesOf.get(ch);
+      if (!others) return laneOn(ch.source ?? '') ? null : ch;
+      let best: { c: SourceChapter; slow: number; n: number } | null = null;
+      let anyMay = false;
+      for (const c of [ch, ...others]) {
+        const src = c.source ?? '';
+        if (!(await may(src))) continue;
+        anyMay = true;
+        if (laneOn(src)) continue;
+        const slow = paceLevel(src) || restLeft(src) ? 1 : 0;
+        const n = used.get(rateKeyOf(src)) ?? 0;
+        if (!best || slow < best.slow || (slow === best.slow && n < best.n)) best = { c, slow, n };
+      }
+      if (best) return best.c;
+      return anyMay || laneOn(ch.source ?? '') ? null : ch;
+    };
+
+    /** One chapter, start to settle: the old loop's body, for whichever copy pickCopy chose. `ch` is what the job was given. */
+    const runOne = async (ch: SourceChapter & { pinned?: boolean }, use: SourceChapter): Promise<void> => {
       settled.add(ch);
       let out;
       try {
@@ -527,7 +609,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
          * RIGHT, because a right match is often under a different English title.
          */
         out = await downloadWithFallback({
-          seriesId, title, folder, meta, chapter: ch,
+          seriesId, title, folder, meta, chapter: use,
           alternates: () => alternatesOf(ch.number),
           refusing, allowed: input.allowed, hunt: undefined,
         });
@@ -536,7 +618,8 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         if (e?.diskFull) {
           if (j) { j.status = 'error'; tell(j, say('job.noSpace', { error: String(e.message) }), savedSoFar(j)); j.finishedAt = Date.now(); }
           await settle(ch, false);
-          break;
+          stop = true;
+          return;
         }
         throw e;
       }
@@ -586,9 +669,43 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       // Every source this job could draw on has refused: the rest of the queue has nowhere to land.
       if (refusing.size && exhausted()) {
         if (j && j.status !== 'error') { j.status = 'error'; if (j.reason === undefined) tell(j, say('job.saved', { done: j.done, total: j.total })); j.finishedAt = Date.now(); }
-        break;
+        stop = true;
       }
+    };
+
+    // Start what may start, wait for a lane, again. Stopping (a shutdown, Cancel #82, a full disk, every source refusing)
+    // is between chapters, never mid-write: what is in flight finishes, nothing new starts.
+    const halted = () => stop || runtime.stopping || !!jobs.get(folder)?.cancelRequested;
+    while (pending.length && !halted()) {
+      // Whether a source may be asked, read once per round rather than once per chapter: a Fetch all is 300 of them.
+      const asked = new Map<string, Promise<boolean>>();
+      const may = (src: string) => {
+        let v = asked.get(src);
+        if (!v) {
+          v = (async () => !!src && !!getSource(src) && !refusing.has(src) && (!input.allowed || input.allowed(src))
+            && !(await isDisabled(src).catch(() => false)) && !(await blockedNow(src).catch(() => null)))();
+          asked.set(src, v);
+        }
+        return v;
+      };
+      while (running.size < lanes && pending.length && !halted()) {
+        let next: { i: number; use: SourceChapter } | null = null;
+        for (let i = 0; i < pending.length && !next; i++) {
+          const use = await pickCopy(pending[i], may);
+          if (use) next = { i, use };
+        }
+        if (!next) break;
+        const ch = pending.splice(next.i, 1)[0];
+        const key = rateKeyOf(next.use.source ?? '');
+        used.set(key, (used.get(key) ?? 0) + 1);
+        const lane = { source: next.use.source ?? '', done: Promise.resolve() };
+        lane.done = runOne(ch, next.use).finally(() => { running.delete(lane); });
+        running.add(lane);
+      }
+      if (!running.size) break; // nothing could start and nothing is running: nothing ever will
+      await Promise.race([...running].map((l) => l.done));
     }
+    await Promise.all([...running].map((l) => l.done));
     noteLeft();
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
@@ -2696,9 +2813,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * polls the same URL with a short `wait` until it is 0.
    */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait, source } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string };
+    const { q: rawQ, groupBy, wait, source, rating: rawRating } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; rating?: string };
+    // The 18+ filter (v0.55.4, #158): `rating=all|safe|adult`, anything else read as all. Applied to this viewer's
+    // answer only, after the shared entry (lib/searchAll.ts ratingOf, groupByTitle). An account capped below 18 is never
+    // shown an 18+ result whatever it asks: the add checks only the source, so the cap is held here. And with "Show 18+"
+    // off nobody is: that switch already keeps adult SOURCES out of the fan-out, and an 18+ title from a source that is
+    // not -- MangaDex's erotica, a genre on the admin's list -- went on showing in search until v0.55.4.
+    // Reintroduce by honouring `rating` whatever the cap: "a capped account is held to Hide 18+" in searchAll.int.test.ts
+    // finds the 18+ card.
+    const ctx = vc(req);
+    const ratingAsked: RatingFilter = rawRating === 'safe' || rawRating === 'adult' ? rawRating : 'all';
+    const rating: RatingFilter = (ctx.maxAgeRating !== null && ctx.maxAgeRating < ADULT_RATING) || ctx.hideAdultLibraries ? 'safe' : ratingAsked;
     const term = (rawQ || '').trim();
-    if (!term) return { content: [], sources: [], pending: 0, asked: 0 };
+    if (!term) return { content: [], sources: [], pending: 0, asked: 0, rating };
     // Absent means the full first-answer wait, so a caller written before `wait` existed gets the most
     // complete answer one request can give; anything above the cap is clamped rather than refused.
     const asked = wait === undefined || wait === '' ? SEARCH_FIRST_ANSWER_MS : Number(wait);
@@ -2728,14 +2855,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const byId = new Map(ask.map((s) => [s.id, s] as const));
     // Shaped in provider-preference order, as before: the first provider of a card is the default pick.
     const order = findOrder().map((id) => byId.get(id)).filter((s): s is SourceAdapter => !!s);
-    const rest = { sources: ans.sources, pending: ans.pending, asked: ans.asked };
+    // `rating`: the filter this answer applied -- the one asked for, or `safe` when the viewer may not be shown 18+.
+    const rest = { sources: ans.sources, pending: ans.pending, asked: ans.asked, rating };
+    // Every result's rating, by the admin's lists as they are now (cached briefly: lib/visibility.ts adultFilter).
+    const lists = await adultFilter();
+    const rated: Rated = { of: (r, src) => ratingOf(r, src, lists), want: rating };
 
     // Same fan-out either way; only the shaping differs. groupBy=source mirrors Mihon's global-search
     // screen (one rail per provider) for the import-review "search manually" sheet — the title-grouped
     // shape below groups all providers of the SAME title into one card instead, which is what Discover
     // wants but hides which specific source a manual pick would come from.
     if (groupBy === 'source') {
-      const rails = bySource(ans.per, order);
+      const rails = bySource(ans.per, order, rated);
       const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
       return {
         content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), g.source) })) })),
@@ -2744,7 +2875,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     }
 
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
-    const groups = groupByTitle(ans.per, order);
+    const groups = groupByTitle(ans.per, order, 30, rated);
     const have = await inLibrary(groups.map((g) => g.title));
     return { content: groups.map((g) => ownedGroup(g, have.get(norm(g.title)))), ...rest };
   });
