@@ -1468,6 +1468,13 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL D
 -- written with: every chapter numbered with a fraction, of the types and the series switched on. v0.55.2 boots on this
 -- schema and never reads it: it hides by the page rule, which is what the default says.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only boolean NOT NULL DEFAULT true;
+
+-- v0.55.4 (discussion #150): Rescan everything (lib/rescan.ts), the Tasks panel's on-demand look for the chapters whose
+-- files are gone from your own folders. Its last Apply and what it did, persisted like Verify chapter files' run above,
+-- so the Tasks line still says it after a restart; the preview's plan lives in memory only. Both nullable: v0.55.3
+-- boots on this schema and never names them.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_result jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

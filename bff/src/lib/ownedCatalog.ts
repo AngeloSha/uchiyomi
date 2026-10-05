@@ -76,7 +76,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
-         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size, b.missing_pages, b.chapter_name,
+         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.pruned_reason, b.size, b.missing_pages, b.chapter_name,
          COALESCE(ov.number, b.number) AS number,
          ${rangeEnd('b', 'ov')} AS number_end,
          COALESCE(ov.title,  b.title)  AS title
@@ -202,6 +202,14 @@ function bookDto(r: any) {
     // it any more. A client that ignores this gets a 404 from the image server, which is the honest failure
     // but a poor thing to find out by tapping.
     pruned: !!r.pruned_at,
+    // WHY the file is gone, while it is (v0.55.4; the column note in lib/migrate.ts): 'deleted' by Delete files or by
+    // Rescan everything (lib/rescan.ts), 'missing' by Verify chapter files, null by the read-chapter cleanup, a
+    // chapter's own delete, or a mark from before v0.37.0. The series page words a tombstone by it: one in a library
+    // you built by hand that Rescan everything found gone reads "File no longer on disk", never "Deleted from the
+    // server" -- nothing deleted it. Read through booksSrc's column list, like every field here.
+    // Reintroduce by dropping it (or `b.pruned_reason` above): "a chapter Rescan everything marked says why" in
+    // rescan.int.test.ts reads undefined.
+    prunedReason: r.pruned_at ? (r.pruned_reason ?? null) : null,
     // The 1-based pages that are placeholders in the file: the chapter was saved with these missing
     // (lib/partial.ts) and the sweep is still trying to fetch them. null when the chapter is complete. The
     // series page draws the badge from this; the reader learns which pages from /api/books/:id/pages.

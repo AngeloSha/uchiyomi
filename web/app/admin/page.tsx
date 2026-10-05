@@ -20,6 +20,7 @@ import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState }
 import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
+import { RESCAN_KEY, RescanPanel } from '@/components/RescanTask';
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
 import { FindRunProvider } from '@/lib/useFindRun';
@@ -763,6 +764,9 @@ function Tasks() {
       // rather than a bare "Started": a nightly run counts two thousand files and can replace a chapter,
       // and none of that is in this answer.
       else if (id === 'repair' && r?.started) toast(tr('Started — the Tasks line shows what it did'), 'success');
+      // Rescan everything's preview says how far it has got, and then what Apply would do, in the panel under its row
+      // (components/RescanTask.tsx): a "Started" toast would only point at what is already on screen.
+      else if (id === 'rescan' && r?.started) qc.invalidateQueries({ queryKey: RESCAN_KEY });
       else toast(tr('Started'), 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
     } catch { toast(tr('Failed'), 'error'); }
@@ -797,8 +801,16 @@ function Tasks() {
                 <RepairTaskLines nextAt={t.nextAt} latestOther={t.latestOther} running={!!t.running} />
               </div>
             )}
+            {/* v0.55.4: Rescan everything previews before it changes anything, and the preview needs the row's width. */}
+            {t.id === 'rescan' && (
+              <div className="col-span-full row-start-3 min-w-0 lg:row-start-2">
+                <RescanPanel running={!!t.running} />
+              </div>
+            )}
             <button onClick={() => run(t.id)} disabled={t.running}
-              className="btn-key col-start-2 row-span-2 row-start-1 justify-self-end lg:col-start-3 lg:row-span-1">{t.running ? tr('Running…') : tr('Run now')}</button>
+              className="btn-key col-start-2 row-span-2 row-start-1 justify-self-end lg:col-start-3 lg:row-span-1">
+              {t.running ? tr('Running…') : t.id === 'rescan' ? tr('Start') : tr('Run now')}
+            </button>
           </div>
         ))}
       </div>

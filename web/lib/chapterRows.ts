@@ -6,7 +6,7 @@
 // can reach them without a browser.
 
 import type { Book, Ghost } from './types';
-import { keys } from './i18n';
+import { keys, t as tr } from './i18n';
 
 export type Row =
   | { kind: 'book'; book: Book }
@@ -268,4 +268,17 @@ export function chunkNumbers(numbers: number[], size = FETCH_CHUNK): number[][] 
  */
 export function chaptersLeft(jobs: { total: number; done: number }[]): number {
   return jobs.reduce((sum, j) => sum + Math.max(0, (j.total || 0) - (j.done || 0)), 0) || jobs.length;
+}
+
+/**
+ * The words on a tombstone's chip, by why its file is gone (Book.prunedReason, v0.55.4). A chapter in a library you
+ * built by hand that Rescan everything found gone -- `deleted`, and not one this server downloaded -- says "File no
+ * longer on disk": nothing deleted it, the file simply is not there, and a file put back is picked up by the next
+ * scan. Every other tombstone keeps "Deleted from the server", as before. Null for a chapter with its file.
+ * Reintroduce one wording for every tombstone: "a chapter whose file went from your own folder says so" in
+ * chapterRows.test.ts reads "Deleted from the server".
+ */
+export function prunedLabel(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): string | null {
+  if (!b.pruned) return null;
+  return b.prunedReason === 'deleted' && b.owned === false ? tr('File no longer on disk') : tr('Deleted from the server');
 }

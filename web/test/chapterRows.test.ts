@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, countsAsBehind, heldBy, mergeRows, openableChapters, runLabel, wholesHeld, whyLabel, type Row } from '../lib/chapterRows';
+import { FETCH_CHUNK, GHOST_CAP, chaptersLeft, chunkNumbers, countsAsBehind, heldBy, mergeRows, openableChapters, prunedLabel, runLabel, wholesHeld, whyLabel, type Row } from '../lib/chapterRows';
 import type { Book, Ghost } from '../lib/types';
 
 const book = (number: number, over: Partial<Book> = {}): Book =>
@@ -296,4 +296,17 @@ test('wholesHeld: every whole number a range file holds, and a huge chapter numb
   // missing.
   assert.deepEqual([...wholesHeld([book(1, { numberEnd: 7 }), book(8.5)])].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.deepEqual([...wholesHeld([book(1e20)])], [1e20]);
+});
+
+test('a chapter whose file went from your own folder says so; one the server deleted says that (v0.55.4)', () => {
+  // Rescan everything marks a gone file in a library built by hand 'deleted', as Delete files marks one it removed,
+  // and the book carries the reason (bff ownedCatalog.ts). "Deleted from the server" there blamed the server for a
+  // file the admin moved or deleted by hand. Reintroduce one wording for every tombstone in prunedLabel: the first
+  // assertion reads "Deleted from the server".
+  assert.equal(prunedLabel({ pruned: true, prunedReason: 'deleted', owned: false }), 'File no longer on disk');
+  assert.equal(prunedLabel({ pruned: true, prunedReason: 'deleted', owned: true }), 'Deleted from the server', 'Delete files on a download');
+  assert.equal(prunedLabel({ pruned: true, prunedReason: null, owned: true }), 'Deleted from the server', 'the read-chapter cleanup');
+  assert.equal(prunedLabel({ pruned: true, prunedReason: 'missing', owned: true }), 'Deleted from the server', "Verify's mark, unchanged");
+  assert.equal(prunedLabel({ pruned: true, owned: false }), 'Deleted from the server', 'a server before v0.55.4 sends no reason');
+  assert.equal(prunedLabel({ pruned: false, prunedReason: null, owned: false }), null, 'a chapter with its file has no chip');
 });

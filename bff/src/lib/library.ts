@@ -750,6 +750,8 @@ let again: Promise<ScanResult> | null = null;
 let scansStarted = 0;
 /** How many scans this process has started: for the tests, which count them. */
 export const scanCount = (): number => scansStarted;
+/** A library scan is running right now: Rescan everything's Apply refuses to start beside one (lib/rescan.ts). */
+export const scanRunning = (): boolean => scanning !== null;
 /**
  * Scan every root into lib_series/lib_books. One scan at a time.
  *

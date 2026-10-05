@@ -2134,6 +2134,15 @@ paths:
                       survives; no pages behind it. The chapter is still listed and still counts as read, but
                       the page list is empty, next/previous step over it, and the download manifest answers
                       410.
+                  prunedReason:
+                    type: [string, "null"]
+                    enum: [deleted, missing, null]
+                    description: >-
+                      Since v0.55.4: why a pruned chapter's file is gone, null while it has one. `deleted`: Delete
+                      files removed it, or Rescan everything found it gone from a library built by hand (with
+                      `owned` false; the web says "File no longer on disk"); `missing`: Verify chapter files found
+                      no file behind a downloaded chapter, which the next sweep fetches again; null: the read-chapter
+                      cleanup, a chapter's own delete, or a mark from before v0.37.0.
                   owned:
                     type: boolean
                     description: >-
@@ -6386,6 +6395,9 @@ paths:
         result} (the newest scoped run, from GET /api/admin/tasks/repair/runs). Every entry also carries
         `scheduleKey` (the schedule sentence with {placeholders}, a locale key on the web) and `scheduleVars`
         (their values); `schedule` stays the English sentence.
+        Since v0.55.4 the list always carries `rescan` ("Rescan everything", schedule "on demand"): `running`
+        while its preview or Apply runs, and `lastRun`/`lastResult` the last APPLY's (see POST
+        /api/admin/tasks/rescan/apply), persisted in server_settings.rescan_last_run / rescan_last_result.
       security:
         - bearer: []
       responses:
@@ -6487,11 +6499,118 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/rescan/status:
+    get:
+      tags:
+        - admin
+      summary: Rescan everything, live -- the preview's phase and progress, and the plan it ended with.
+      operationId: getApiAdminTasksRescanStatus
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.55.4 (discussion #150). The preview is started by POST /api/admin/tasks/rescan/run, detached: it scans
+        the library, then looks for every live chapter row's own file under the library folder and the download
+        folder -- never a hidden or merged series', nor one in the middle of a renumber -- and keeps a plan in
+        memory. Answers {running: 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' (a
+        preview) | 'mark' | 'renumber' (an Apply) | null, done, of (rows or files of the phase, null while scanning
+        or reading names), startedAt, error: 'failed' |
+        'stopped' | null (how the last preview or Apply ended when it did not end well), plan, last (the last
+        Apply's result, below, this process's or the one server_settings kept), lastRun (epoch ms or null)}.
+        `plan` is null or {id (uuid), at, scannedAt (epoch ms), ms,
+        stale (older than 30 minutes), applied, looked (rows whose file was looked for, under folders that were
+        not refused), unchecked (rows whose file could not be checked at all -- a permission or an I/O error,
+        never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
+        behind any of its rows, or more than 90 % of them gone: looks unmounted, and nothing under it is
+        planned), gone (rows in your own library folder whose file is gone), moved (gone rows whose file is
+        another live row's now, by fingerprint: renamed or moved, kept), downloads (rows in the download
+        folder whose file is gone: Verify chapter files' to mark, counted only), emptied (series with every
+        live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title}], movedList [{seriesId,
+        title, file, to: {seriesId, title, file}}], numbers, numbersTotal}. The lists hold at most 200 entries
+        each and name only series this viewer may list (the 18+ hide, as on the repair status); the counts are
+        always whole. `numbers` is the opt-in, every series (by title, at most 1000) whose chapter numbers the
+        file-name rules of v0.55.2 would change -- each row still read by an older rule, read again with rule 2
+        against its stored number and range: [{seriesId, title, chapters (rows whose number or range changes),
+        readers (users who finished one of them), overrides (rows that would change but carry a number set by
+        hand: they keep it), tracked (linked to a tracker), up / down (of the changed chapters someone finished,
+        how many a tracker would be told higher, or lower -- which the tracker floor refuses), examples [{file,
+        from, to}] (at most 3, numbers as text: "2" -> "5", "1" -> "1–7")}]. A series numbered by posting order,
+        or in the middle of a renumber, is never listed; a row Verify marked 'missing' is never read again.
+        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, downloads, emptied,
+        unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'}.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/rescan/apply:
+    post:
+      tags:
+        - admin
+      summary: Apply a Rescan everything preview -- mark the chapters whose files are gone from your own folder.
+      operationId: postApiAdminTasksRescanApply
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.55.4 (discussion #150). Detached like the preview, because it stats every planned file again: answers
+        {ok: true, started: true}, or {ok: false, error} when it may not start -- `busy` (a preview or an Apply is
+        running), `no_plan`, `stale` (a newer preview replaced it, or it is older than 30 minutes), `applied`
+        (each plan is applied once), `not_in_plan` (a series in `renumber` the preview did not list), or the job
+        it would run beside: `sweep_running`, `autofix_running`,
+        `repair_running`, `verify_running`, `cleanup_running`, `scan_running`. With every library scan held off,
+        each planned row is asked again -- the same id at the same file, still live, its series neither hidden,
+        merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
+        library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
+        'deleted'` (held: the sweep never fetches it back), and the cover and books_count of every series it
+        touched are recomputed. It never erases a row, touches a file on disk, marks a row in the download folder
+        (Verify chapter files' to mark), relabels a row already pruned, hides or forgets a series, or changes a
+        tracker floor, read mark, favourite or rating. A file that comes back is picked up on the same row by the
+        next scan. Then, in the same hold and in ONE transaction, the series in `renumber` (the opt-in) are read
+        again by the v0.55.2 file-name rules: every row of theirs still read by an older rule gets name_rule 2 and
+        its number and number_end by that rule -- but a row with a number set by hand, which keeps it, and a row
+        Verify marked 'missing'; a series hidden, merged, put into posting order or being renumbered since the
+        preview is left alone. Nothing is pushed to any tracker: the next chapter a reader finishes sends its
+        number as usual. The result lands on the status route's `last` and on GET /api/admin/tasks as the
+        `rescan` entry's lastResult, persisted in server_settings.rescan_last_run / rescan_last_result. Audit:
+        `library.rescan` {plan, marked, back, changed, moved, downloads, emptied, unmounted, ms}, and
+        `library.rescan_numbers` {plan, series, chapters, ids} when the opt-in renumbered something.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  format: uuid
+                  description: The id of the preview the admin saw (the status route's plan.id).
+                renumber:
+                  type: array
+                  maxItems: 10000
+                  description: >-
+                    The opt-in: the series to read again by the newer file-name rules, each one the preview listed
+                    in plan.numbers. Omitted or empty renumbers nothing.
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: The body is not {plan} with a uuid, and `renumber` series ids if any.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/tasks/{id}/run:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair).
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan).
         {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off,
         {ok:false,error:sweep_running} for `repair` while a chapter sweep is going, and
         {ok:false,error:repair_running} for `update` while a library repair is going.
@@ -6547,10 +6666,12 @@ paths:
             The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
             is off; its run is subject to the same consent and the same vetoes as the hourly one. `verify` is
             the repair for a database restored without its chapter files. `repair` is the nightly library
-            repair and is the only one that takes a body.
+            repair and is the only one that takes a body. `rescan` (since v0.55.4, "Rescan everything") starts
+            a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
+            progress and plan are on GET /api/admin/tasks/rescan/status.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan]
       requestBody:
         required: false
         description: Only `repair` reads a body; every other task ignores it.

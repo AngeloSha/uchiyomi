@@ -7,6 +7,7 @@ import numberingRoutes from './numbering';
 import { lastNumber } from '../lib/chapterRanges';
 import findSourcesRoutes from './findSources';
 import autoHeroRoutes from './autoHero';
+import rescanRoutes from './rescan';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -23,6 +24,7 @@ import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
+import { startRescan, rescanState } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
@@ -477,6 +479,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   await app.register(findSourcesRoutes);
   // v0.51.0: a new automatic banner for a series, the same way (routes/autoHero.ts).
   await app.register(autoHeroRoutes);
+  // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
+  await app.register(rescanRoutes);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
@@ -789,12 +793,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     scheduleVars: vars,
   });
   app.get('/api/admin/tasks', async (req) => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
               verify_last_run, verify_last_result,
-              repair_enabled, repair_last_run, repair_last_result
+              repair_enabled, repair_last_run, repair_last_result,
+              rescan_last_run, rescan_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -853,6 +858,17 @@ export default async function adminRoutes(app: FastifyInstance) {
         lastRun: verifyState.finishedAt || (s?.verify_last_run ? new Date(s.verify_last_run).getTime() : null),
         lastResult: verifyState.finishedAt ? verifyState.lastResult : (s?.verify_last_result ?? null),
         running: verifyState.running,
+      },
+      // v0.55.4 (#150): the look for chapters whose files are gone from your own folders, previewed, then applied
+      // (lib/rescan.ts). On demand only, like Verify. Its line is the last APPLY's, persisted the same way -- a preview
+      // changes nothing, so there is nothing of it to report here; the panel under the row shows it.
+      {
+        id: 'rescan',
+        name: 'Rescan everything',
+        ...sched('on demand'),
+        lastRun: rescanState.appliedAt || (s?.rescan_last_run ? new Date(s.rescan_last_run).getTime() : null),
+        lastResult: rescanState.appliedAt ? rescanState.lastApplied : (s?.rescan_last_result ?? null),
+        running: !!rescanState.running,
       },
       // The nightly repair (lib/repair.ts). Listed whether it is on or off, and the schedule text says
       // which: unlike the read-chapter cleanup there is no "are you sure" to attach to its Run now, because
@@ -1073,6 +1089,16 @@ export default async function adminRoutes(app: FastifyInstance) {
         (r) => logAudit('library.verify', { userId, detail: { checked: r.checked, missing: r.missing, readLibraryMissing: r.readLibraryMissing, unmounted: r.unmounted, ms: r.ms }, req }),
         () => {}, // runVerify logs it and clears the result; this only stops an unhandled rejection
       );
+      return { ok: true, started: true };
+    }
+    if (id === 'rescan') {
+      // Never awaited, for Verify's reason (lib/rescan.ts): a scan and one stat per chapter over a share is minutes, and
+      // a request that long dies at the proxy while the walk goes on. The Tasks panel polls
+      // GET /api/admin/tasks/rescan/status for the phase and the plan; startRescan refuses a second preview on top of a
+      // first. Reintroduce by awaiting `run` here: "the preview answers started" in rescan.int.test.ts finds no `started`.
+      const run = startRescan(app.log);
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch(() => {}); // startRescan logs it and records the failure; this only stops an unhandled rejection
       return { ok: true, started: true };
     }
     if (id === 'update') {

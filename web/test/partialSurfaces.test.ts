@@ -93,7 +93,7 @@ test('a chapter row says how many pages are missing, as an amber chip before the
   assert.doesNotMatch(cap, /<button/, 'RowCaption renders a button inside the row opener');
   // And ChapterRow feeds it from the DTO.
   const row = between(page, 'function ChapterRow(', 'function GhostRow(', 'ChapterRow');
-  assert.match(row, /<RowCaption group=\{book\.scanlator\} via=\{altSource\} versions=\{versions\} pruned=\{book\.pruned\} missing=\{book\.missingPages\?\.length\} \/>/, 'ChapterRow does not pass the book\'s missingPages to the caption');
+  assert.match(row, /<RowCaption group=\{book\.scanlator\} via=\{altSource\} versions=\{versions\} pruned=\{prunedLabel\(book\)\} missing=\{book\.missingPages\?\.length\} \/>/, 'ChapterRow does not pass the book\'s missingPages to the caption');
 });
 
 // ---- offline ----

@@ -267,6 +267,12 @@ export interface Book {
    */
   pruned?: boolean;
   /**
+   * Why a pruned chapter's file is gone (v0.55.4): 'deleted' by Delete files or by Rescan everything, 'missing' by
+   * Verify chapter files, null for the read-chapter cleanup, a chapter's own delete or an older mark. Null or absent
+   * while the chapter has its file, and from a server before v0.55.4. The row's chip is worded by it (prunedLabel).
+   */
+  prunedReason?: 'deleted' | 'missing' | null;
+  /**
    * The file lives under the downloads root, i.e. Uchiyomi fetched it and can fetch it again. Only these
    * may be deleted from the server or fetched again: a chapter in a library somebody assembled by hand is
    * theirs, not the updater's, and no button here may touch it.
