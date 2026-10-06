@@ -1398,6 +1398,8 @@ POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
 POST   /api/admin/series/bulk/hide
+POST   /api/admin/series/bulk/auto-update
+POST   /api/admin/series/bulk/chapters/delete
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 POST   /api/admin/series/:id/main-source
@@ -1710,6 +1712,25 @@ writes it, nothing for skipped ids; **400** `bad_request` *Which series should b
 is not `ids`. `GET /api/admin/series/deleted` lists the hidden ones, newest first, and since v0.37.0 each row
 carries `live_books` and `pruned_books` (counted from the chapter rows; `books_count` is the scan's figure
 and may be stale) — `live_books === 0 && pruned_books > 0` is how the panel knows the files are already gone.
+
+**Monitor, Unmonitor and Delete chapters over a selection.** `POST /api/admin/series/bulk/auto-update {seriesIds,
+autoUpdate}` (1 to 500 ids, duplicates once) sets `lib_series.auto_update` — the series' *Auto-update new chapters*,
+`PATCH /api/admin/series/:id {autoUpdate}` — for each. An unmonitored series gets no new chapter searched for or
+downloaded by anything unattended: the sweep, its partial-chapter pass, the nightly repair's failures, short-chapter
+and gap steps, Fix everything and the slow archive (whose queue entry waits where it is). *Check now*, *Fetch*,
+*Fetch again* and *Fill now* on the series still work. It answers `{ok: true, applied, autoUpdate, skipped: [{id,
+reason}]}`, `reason` one of `not_found`, `hidden`, `merged`; one `series.settings` audit row per series.
+
+`POST /api/admin/series/bulk/chapters/delete {seriesIds, pause?}` deletes the downloaded chapters of each series: the
+series page's *Remove chapters* (`chapters/delete`) over every live chapter in the download folder but one — the
+cover chapter (`cover_book_id`, else the lowest), kept so the tile and the thumbnails keep their art. Its rules hold:
+nothing outside the download folder is touched, a bookmarked chapter is skipped, the rows stay as tombstones with
+everyone's progress, and *Fetch again* brings a chapter back. **Not** *Delete files*: that one takes the whole folder
+from every root and stays behind its typed confirm. A series a download, repair or check is inside is skipped as
+`busy`. `pause` (default `true`) also unmonitors each series it deleted from. It answers `{ok: true, applied, chapters,
+bytes, kept, paused, skipped: [{id, reason, message?}]}`, `reason` one of `not_found`, `merged`, `busy`,
+`nothing_to_delete`, `refused` (the download folder refuses writes; `message` says why). One `series.chapters_delete`
+audit row per series, as the single route writes it.
 
 `POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared through the
 fold described under *Typing a title to confirm* below (**400** `confirm_mismatch` otherwise) — is the

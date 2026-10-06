@@ -1917,6 +1917,12 @@ paths:
                       sourceName, extSourceId?}` as described above. While `pending` is set the series downloads
                       nothing until an admin confirms or declines the change (POST
                       /api/admin/series/{id}/numbering).
+                  deletedAsGhosts:
+                    type: boolean
+                    description: >-
+                      The admin's "Show deleted chapters as ghosts" (PATCH /api/admin/settings `deletedAsGhosts`), to
+                      every viewer: the series page draws a chapter whose file was deleted on purpose as a ghost row.
+                      The chapter itself is still in /api/series/{id}/books, `pruned`, with its `prunedReason`.
         "401":
           description: Not authenticated
         "404":
@@ -6232,6 +6238,16 @@ paths:
                     booksUnreadCount, so a fully read series still reports COMPLETED -- and they never
                     affect lastReadContinuousNumberSort. Nothing outside /api/v1 and /api/v2 changes.
                   type: boolean
+                deletedAsGhosts:
+                  description: >-
+                    Show deleted chapters as ghosts. Off by default. A chapter whose file was deleted on purpose (a
+                    tombstone whose pruned_reason is not `missing`, and not a hand-built library's file Rescan
+                    everything found gone) is drawn on the series page as a ghost row -- its read tick, Fetch --
+                    rather than as a deleted chapter, and listed "not downloaded" on the Komga-compatible chapter list
+                    even with komgaGhostChapters off. Display only: the updater, counts and progress read it as
+                    before. Every viewer learns it from GET /api/series/{id}/listing `deletedAsGhosts`; GET answers it
+                    as `deleted_as_ghosts`.
+                  type: boolean
                 adultGenres:
                   description: >-
                     Genres the "Show 18+" switch hides besides 18+ libraries, replaced whole. While a request
@@ -7072,6 +7088,145 @@ paths:
                           enum: [merged, already_hidden, not_found]
         "400":
           description: "bad_request: the body is not { ids } of one to five hundred series ids."
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/bulk/auto-update:
+    post:
+      tags:
+        - admin
+      summary: "Monitor or Unmonitor over a selection: each series' auto_update, as PATCH /api/admin/series/{id} sets it."
+      operationId: postApiAdminSeriesBulkAutoUpdate
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Sets lib_series.auto_update ("Auto-update new
+        chapters") for every series named. An unmonitored series gets no new chapter searched for or downloaded by
+        anything unattended -- the sweep and its partial-chapter pass, the nightly repair's failures, short-chapter and
+        gap steps, Fix everything, the slow archive -- while Check now, Fetch, Fetch again and Fill now on the series
+        still work. A series that is gone, hidden or merged away is skipped with its reason. One `series.settings` audit
+        row per series.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesIds, autoUpdate]
+              properties:
+                seriesIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  description: Series ids, 1-64 characters each; duplicates count once.
+                  items:
+                    type: string
+                autoUpdate:
+                  type: boolean
+                  description: true monitors, false unmonitors.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ ok: true, applied, autoUpdate, skipped: [{ id, reason }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  applied:
+                    type: integer
+                  autoUpdate:
+                    type: boolean
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, hidden, merged]
+        "400":
+          description: "bad_request: the body is not { seriesIds, autoUpdate }."
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/series/bulk/chapters/delete:
+    post:
+      tags:
+        - admin
+      summary: "Delete the downloaded chapters of a selection, the cover chapter kept: Remove chapters once per series."
+      operationId: postApiAdminSeriesBulkChaptersDelete
+      description: >-
+        Requires an admin account and a token carrying the admin scope. POST /api/admin/series/{id}/chapters/delete over
+        every live chapter of each series in the download folder but its cover chapter (cover_book_id, else the lowest),
+        kept so the tile keeps its art. Its rules hold: nothing outside the download folder is touched, a bookmarked
+        chapter is skipped, the rows stay as tombstones with everyone's progress, and Fetch again brings a chapter back.
+        Not Delete files (/api/admin/series/{id}/delete-files), which takes the folder from every root and keeps its
+        typed confirm. A series a download, a repair or a check is inside is skipped as `busy`. `pause` (default true)
+        also unmonitors each series it deleted from, so the sweep does not fetch the newest chapters back. One
+        `series.chapters_delete` audit row per series acted on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesIds]
+              properties:
+                seriesIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  description: Series ids, 1-64 characters each; duplicates count once.
+                  items:
+                    type: string
+                pause:
+                  type: boolean
+                  description: Also unmonitor each series deleted from (auto_update off). Defaults to true.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ ok: true, applied, chapters, bytes, kept, paused, skipped: [{ id, reason, message? }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  applied:
+                    type: integer
+                    description: Series at least one chapter was deleted from.
+                  chapters:
+                    type: integer
+                  bytes:
+                    type: integer
+                  kept:
+                    type: integer
+                    description: Cover chapters kept.
+                  paused:
+                    type: integer
+                    description: Series unmonitored by `pause`.
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, merged, busy, nothing_to_delete, refused]
+                        message:
+                          type: string
+        "400":
+          description: "bad_request: the body is not { seriesIds, pause? }."
         "401":
           description: Not authenticated
         "403":
