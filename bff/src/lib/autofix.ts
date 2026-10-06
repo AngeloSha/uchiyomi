@@ -1240,7 +1240,8 @@ async function tryPackage(a: Run, e: ExtensionInfo, lang: string, targets: Targe
           } else if (t) {
             await held(async () => {
               const have = new Set(await haveNumbers(t.id).catch(() => [] as number[]));
-              const up = await updateSeries(t.id, 100, { hunt: false, cancelled: () => halted(a) }).catch(() => null);
+              // Not for an unmonitored series (auto_update off): the follow stands, its chapters are not fetched.
+              const up = await updateSeries(t.id, 100, { hunt: false, cancelled: () => halted(a), unattended: true }).catch(() => null);
               if (up?.landed.length) {
                 const filled = up.landed.filter((l) => !have.has(l.number)).length;
                 did(a, 'fetched', filled);

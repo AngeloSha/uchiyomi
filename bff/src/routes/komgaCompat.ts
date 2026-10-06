@@ -30,6 +30,7 @@ import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './imag
 import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
 import { readProgressV2, readProgressDetail, markReadUpTo } from '../lib/komgaProgress';
 import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
+import { deletedAsGhostsOn, deliberatelyDeleted } from '../lib/deletedGhosts';
 import { editionLabels } from '../lib/editions';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -295,11 +296,15 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
     const parsed = parseBooksQuery(req.query as Record<string, unknown>);
     const ghosts = await ghostsEnabled();
+    // "Show deleted chapters as ghosts" (lib/deletedGhosts.ts): a chapter deleted on purpose is listed "not downloaded"
+    // like a ghost even with the ghost opt-in off; a file Verify found missing keeps today's treatment.
+    const deletedGhosts = await deletedAsGhostsOn();
+    const absentRow = (b: any) => ghosts || (deletedGhosts && deliberatelyDeleted(b));
     // One query for the whole series rather than a count and a page: the READY filter has to run over the
     // rows, and a series holds hundreds of chapters, not millions.
     const all = await owned.seriesBooks(vc(req), id, 0, 100_000, parsed.sort);
-    const real = parsed.readyOnly && !ghosts ? all.content.filter((b: any) => !b.pruned) : all.content;
-    let rows: unknown[] = real.map((b: any) => komgaBook(b, { absent: ghosts }));
+    const real = parsed.readyOnly && !ghosts ? all.content.filter((b: any) => !b.pruned || absentRow(b)) : all.content;
+    let rows: unknown[] = real.map((b: any) => komgaBook(b, { absent: absentRow(b) }));
     if (ghosts) {
       // Merged by number into the order seriesBooks already returned, rather than appended: the extension
       // renders the list as given, and a chapter list that runs 1..40 and then jumps back to 3 is unreadable.

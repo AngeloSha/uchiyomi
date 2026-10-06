@@ -601,6 +601,9 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
        JOIN lib_series s ON s.id = a.series_id
        LEFT JOIN users u ON u.id = a.added_by
       WHERE a.state = 'queued' AND ${visibleToAll('s')}
+        -- An unmonitored series (auto_update off) fetches nothing unattended: its archive stays queued, where it was,
+        -- and goes on when the series is monitored again.
+        AND s.auto_update
       ORDER BY a.last_at ASC NULLS FIRST, a.created_at ASC, a.series_id`,
   );
   const seen = new Set(rows.map((r) => r.series_id));
