@@ -258,6 +258,29 @@ test('the select bar removes by hiding, never by deleting files', () => {
   assert.match(src, /Remove \{n\} series from the library\?/, 'the dialog title no longer carries the count');
 });
 
+test('Delete chapters deletes downloads only, through the chapters route, never Delete files', () => {
+  // The one file-deleting action the bar has, and deliberately NOT PR #53's: it posts to the bulk form of the series
+  // page's Remove chapters (bff lib/libraryAdmin.ts deleteChapterFiles), which touches the download folder only, skips
+  // bookmarked chapters, keeps every row with everyone's history and keeps each series' cover chapter -- never to
+  // delete-files, which takes the read library's folders too. Reintroduce by pointing it at any other route: the
+  // allow-list below fails; drop the sentence about hand-built libraries: the dialog no longer says what it spares.
+  const src = code(read('app/library/page.tsx'));
+  const deleting = [...src.matchAll(/'(\/api\/[^']*delete[^']*)'/g)].map((m) => m[1]);
+  assert.deepEqual(deleting, ['/api/admin/series/bulk/chapters/delete'], 'the bar reaches a deleting route other than the chapters one');
+  assert.match(src, /tr\('Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay\. Files in a library you built by hand, and bookmarked chapters, are left alone\.'\)/,
+    'the dialog lost the sentence that says what it spares');
+  assert.match(src, /pause: alsoPause/, 'the dialog\'s "Also stop updates" is not sent');
+  assert.match(src, /const \[alsoPause, setAlsoPause\] = useState\(true\)/, '"Also stop updates" is not on by default');
+  assert.match(src, /setMore\(false\); setAlsoPause\(true\); setDeletingChapters\(true\)/, 'Delete chapters opens its dialog under the sheet');
+});
+
+test('Monitor and Unmonitor are rows of More that set auto-update for the selection', () => {
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /'\/api\/admin\/series\/bulk\/auto-update', \{\s*json: \{ seriesIds: \[\.\.\.picked\], autoUpdate: on \}/);
+  assert.match(src, /setMore\(false\); void monitorSelected\(true\)/);
+  assert.match(src, /setMore\(false\); void monitorSelected\(false\)/);
+});
+
 test('Fetch newest starts a job and polls it, rather than holding one request open', () => {
   // The server loop downloads and can run for minutes over a big selection; a request held open that long
   // dies at the proxy while the server keeps going, and a re-tap starts a second loop. Reintroduce by

@@ -233,7 +233,8 @@ before(async () => {
   ({ clearPace } = await import('../src/lib/pace'));
 
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Repair',$2) ON CONFLICT (id) DO NOTHING`, [LIB, DL]);
-  await seedSeries(SHORT, T.short, { source: A });
+  // Monitored: the unattended short-chapter step leaves an unmonitored series alone (Unmonitor, lib/repair.ts stepShort).
+  await seedSeries(SHORT, T.short, { source: A, auto: true });
   await seedSeries(GAP, T.gap, { source: A, auto: true });
   await seedSeries(NOFILL, T.nofill, { source: A, auto: true });
   await seedSeries(WANTS, T.wants, { source: A, auto: true });
