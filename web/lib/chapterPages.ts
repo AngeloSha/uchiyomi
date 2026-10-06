@@ -9,6 +9,13 @@ import type { Row } from './chapterRows';
 
 export const CHAPTER_PAGE = 100;
 
+/**
+ * The page size the series page uses: CHAPTER_PAGE, or every row on one page when the reader asked for the whole list
+ * at once (the account setting `showAllChapters`, lib/showAllChapters.ts). The whole list is a size, never Infinity:
+ * `0 * Infinity` is NaN, and `rows.slice(NaN, NaN)` is an empty page.
+ */
+export const pageSizeFor = (all: boolean, total: number): number => (all ? Math.max(1, total) : CHAPTER_PAGE);
+
 export function pageCount(total: number, size = CHAPTER_PAGE): number {
   return Math.max(1, Math.ceil(total / size));
 }

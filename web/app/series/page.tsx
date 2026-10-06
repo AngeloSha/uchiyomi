@@ -1,5 +1,5 @@
 'use client';
-import { Children, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Children, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -21,10 +21,11 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedLabel, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedLabel, deliberatelyDeleted, ghostOfDeleted, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
-import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
+import { clampPage, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
+import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { fetchingToast } from '@/lib/jobs';
@@ -732,12 +733,19 @@ function SeriesInner() {
   // drops its ghosts from the picks: they leave the screen, and the same rule as `toggleGhosts` applies --
   // a row nobody can see cannot stay picked, or the bar keeps counting and Fetch acts on it.
   const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set());
+  // "Show all chapters at once" (the account's, lib/showAllChapters.ts): one page, every ghost, every run open.
+  // A run the reader folds while it is on is remembered in `foldedRuns` instead -- the runs start open, so what
+  // the page has to hold is the exceptions.
+  const everything = showAllChaptersOn(user?.settings);
+  const [foldedRuns, setFoldedRuns] = useState<Set<number>>(new Set());
+  const runsOpen = useMemo(() => openRuns(everything, expandedRuns, foldedRuns), [everything, expandedRuns, foldedRuns]);
   const toggleRun = (from: number, numbers: number[]) => {
-    const hiding = expandedRuns.has(from);
-    setExpandedRuns((o) => { const next = new Set(o); next.has(from) ? next.delete(from) : next.add(from); return next; });
+    const hiding = runsOpen.has(from);
+    const flip = (o: Set<number>) => { const next = new Set(o); next.has(from) ? next.delete(from) : next.add(from); return next; };
+    if (everything) setFoldedRuns(flip); else setExpandedRuns(flip);
     if (hiding) setPickedGhosts((p) => { const n = new Set(p); for (const x of numbers) n.delete(x); return n; });
   };
-  useEffect(() => { setSelecting(false); setPickedBooks(new Set()); setPickedGhosts(new Set()); setShowAll(false); setExpandedRuns(new Set()); setChapterSheet(null); }, [id, asc]);
+  useEffect(() => { setSelecting(false); setPickedBooks(new Set()); setPickedGhosts(new Set()); setShowAll(false); setExpandedRuns(new Set()); setFoldedRuns(new Set()); setChapterSheet(null); }, [id, asc]);
 
   const { data: series } = useQuery({ queryKey: ['series', id], queryFn: () => api<Series>(`/api/series/${id}`), enabled: !!id });
   const { data: books } = useQuery({
@@ -837,7 +845,13 @@ function SeriesInner() {
   // solid chip promises pages. Reintroduce by passing `haveNumbers` to the sheet: the chip for a pruned
   // number is solid, and tapping it lands on "Deleted from the server".
   const liveNumbers = useMemo(() => heldBy(allBooks.filter((b) => !b.pruned)), [allBooks]);
-  const visibleGhosts = useMemo(() => (showGhosts ? ghosts.filter((g) => !haveNumbers.has(g.number)) : []), [showGhosts, ghosts, haveNumbers]);
+  // The admin's "Show deleted chapters as ghosts" (Listing.deletedAsGhosts): a chapter deleted on purpose leaves the
+  // chapter rows and joins the ghosts (chapterRows.ts ghostOfDeleted) -- unless this device saved a copy, which keeps
+  // it a chapter you can open. The dedupe above still counts it, so a listed ghost on its number is not drawn twice.
+  const asGhost = useCallback((b: Book) => listing?.deletedAsGhosts === true && deliberatelyDeleted(b) && !downloaded.has(b.id), [listing?.deletedAsGhosts, downloaded]);
+  const rowBooks = useMemo(() => allBooks.filter((b) => !asGhost(b)), [allBooks, asGhost]);
+  const deletedGhosts = useMemo(() => allBooks.filter(asGhost).map(ghostOfDeleted), [allBooks, asGhost]);
+  const visibleGhosts = useMemo(() => (showGhosts ? [...ghosts.filter((g) => !haveNumbers.has(g.number)), ...deletedGhosts] : []), [showGhosts, ghosts, haveNumbers, deletedGhosts]);
   // The names the filter offers: the groups route's, or -- when it answered with nothing (a series scanned
   // from disk, a route that is not there) -- whatever the chapters on disk name, so a hand-built library
   // with tagged files still gets the filter.
@@ -850,10 +864,10 @@ function SeriesInner() {
   }, [groups, allBooks]);
   // The filter is applied BEFORE mergeRows, so the run rows and the "Show all" fold are computed over what
   // is shown: a filter that hid 40 of 50 capped ghosts and still said "Show all 120" would be lying.
-  const filteredBooks = useMemo(() => (group === ALL_GROUPS ? allBooks : allBooks.filter((b) => matchesGroup(b, group))), [allBooks, group]);
+  const filteredBooks = useMemo(() => (group === ALL_GROUPS ? rowBooks : rowBooks.filter((b) => matchesGroup(b, group))), [rowBooks, group]);
   const filteredGhosts = useMemo(() => (group === ALL_GROUPS ? visibleGhosts : visibleGhosts.filter((g) => matchesGroup(g, group))), [visibleGhosts, group]);
   // The list, in the list's direction: chapters on disk and, between them, the ghosts (see chapterRows.ts).
-  const rows = useMemo(() => mergeRows(filteredBooks, filteredGhosts, asc, showAll, expandedRuns), [filteredBooks, filteredGhosts, asc, showAll, expandedRuns]);
+  const rows = useMemo(() => mergeRows(filteredBooks, filteredGhosts, asc, showAll || everything, runsOpen), [filteredBooks, filteredGhosts, asc, showAll, everything, runsOpen]);
   // A series with no chapters at all (a "Nothing yet" add) has one thing to show: the run of older chapters
   // under its floor, which is every number the source lists. It opens unfolded, once per series AND
   // direction -- a ref, not an effect on `rows`, or Hide would be undone by the next listing refetch.
@@ -926,7 +940,10 @@ function SeriesInner() {
   useEffect(() => { setCompact(compactChaptersOn()); }, []);
   const [chapterPage, setChapterPage] = useState<number | null>(null);
   useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
-  const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id) : 0), [rows, resumeBook]);
+  // Every row on one page when the account asked for the whole list (pageSizeFor): the pager then has one page and
+  // is not drawn, and every turn-to-a-page below lands on page 0.
+  const pageSize = pageSizeFor(everything, rows.length);
+  const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id, pageSize) : 0), [rows, resumeBook, pageSize]);
   useEffect(() => { if (chapterPage === null && books && listingSettled) setChapterPage(autoPage); }, [chapterPage, books, listingSettled, autoPage]);
   // A link to ONE chapter -- Health's Open (lib/healthLinks.ts) -- turns the list to that chapter's page, brings
   // the row into view and lights it for a moment. A number the library does not hold (a gap) lands on the chapter
@@ -949,31 +966,31 @@ function SeriesInner() {
     const n = landingNumber(held, wantCh);
     const i = n === null ? -1 : rows.findIndex((r) => r.kind === 'book' && r.book.number === n);
     if (n === null || i < 0) return;
-    setChapterPage(Math.floor(i / CHAPTER_PAGE));
+    setChapterPage(Math.floor(i / pageSize));
     setLitCh(n);
     const still = effectsReduced() || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     // Two frames: the page switch renders first, then the row exists to scroll to. getElementById, not a
     // selector: `ch-12.5` is not a valid one.
     requestAnimationFrame(() => requestAnimationFrame(() =>
       document.getElementById(`ch-${n}`)?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })));
-  }, [wantCh, ghostsRead, id, books, listingSettled, rows]);
+  }, [wantCh, ghostsRead, id, books, listingSettled, rows, pageSize]);
   useEffect(() => {
     if (litCh === null) return;
     const t = setTimeout(() => setLitCh(null), 2600);
     return () => clearTimeout(t);
   }, [litCh]);
-  const shownPage = clampPage(chapterPage ?? autoPage, rows.length);
-  const pages = pageCount(rows.length);
-  const pageRows = useMemo(() => pageSlice(rows, shownPage), [rows, shownPage]);
+  const shownPage = clampPage(chapterPage ?? autoPage, rows.length, pageSize);
+  const pages = pageCount(rows.length, pageSize);
+  const pageRows = useMemo(() => pageSlice(rows, shownPage, pageSize), [rows, shownPage, pageSize]);
   // A chip in Sources & translations jumps to a chapter's row, which may be on another page: turn to it
   // first. A number with no row (folded into a run, or filtered out) leaves the page as it is.
   const showChapter = (n: number) => {
     const i = rows.findIndex((r) => (r.kind === 'book' && r.book.number === n) || (r.kind === 'ghost' && r.ghost.number === n));
-    if (i >= 0) setChapterPage(Math.floor(i / CHAPTER_PAGE));
+    if (i >= 0) setChapterPage(Math.floor(i / pageSize));
   };
   const chaptersTop = useRef<HTMLDivElement>(null);
   const goPage = (p: number, scroll: boolean) => {
-    setChapterPage(clampPage(p, rows.length));
+    setChapterPage(clampPage(p, rows.length, pageSize));
     if (scroll) chaptersTop.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
 
@@ -1574,7 +1591,7 @@ function SeriesInner() {
       </div>
       {group !== ALL_GROUPS && (
         <p className="mb-2 text-xs text-fog-500">
-          {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: allBooks.length + visibleGhosts.length })}
+          {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: rowBooks.length + visibleGhosts.length })}
         </p>
       )}
       {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, false)} />}

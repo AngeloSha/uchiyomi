@@ -87,6 +87,9 @@ function LibraryInner() {
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // Delete chapters (the admin's, a row of More): its confirm, and whether the selection is also unmonitored.
+  const [deletingChapters, setDeletingChapters] = useState(false);
+  const [alsoPause, setAlsoPause] = useState(true);
   // The phone's overflow for the two admin actions (see the bar below).
   const [more, setMore] = useState(false);
   // v0.51.0: Find other sources asks first whether to follow automatically or review first.
@@ -264,6 +267,53 @@ function LibraryInner() {
         settle();
       }
     } catch (e) { toast(msgOf(e, tr('Could not remove those')), 'error'); }
+    setActing(false);
+  };
+
+  /**
+   * Monitor / Unmonitor the selection: each series' "Auto-update new chapters" (bff POST
+   * /api/admin/series/bulk/auto-update). Unmonitored, nothing unattended searches for or downloads its new chapters --
+   * the sweep, the nightly repair, Fix everything, the slow archive -- while Check now and Fetch on its page still work.
+   */
+  const monitorSelected = async (on: boolean) => {
+    setActing(true);
+    try {
+      const r = await api<{ ok: true; applied: number; skipped: { id: string; reason: string }[] }>('/api/admin/series/bulk/auto-update', {
+        json: { seriesIds: [...picked], autoUpdate: on },
+      });
+      const parts = [on
+        ? (r.applied === 1 ? tr('Monitored 1 series') : tr('Monitored {n} series', { n: r.applied }))
+        : (r.applied === 1 ? tr('Unmonitored 1 series') : tr('Unmonitored {n} series', { n: r.applied }))];
+      if (r.skipped.length) parts.push(r.skipped.length === 1 ? tr('1 skipped') : tr('{n} skipped', { n: r.skipped.length }));
+      toast(parts.join(' · '), r.applied ? 'success' : 'error');
+      if (r.applied) settle();
+    } catch (e) { toast(msgOf(e, tr('Could not change monitoring')), 'error'); }
+    setActing(false);
+  };
+
+  /**
+   * Delete the downloaded chapters of the selection (bff POST /api/admin/series/bulk/chapters/delete): the series
+   * page's Remove chapters over every chapter of each series but its cover chapter. ⚠️ Download folder only, never
+   * Delete files: a library built by hand, a bookmarked chapter and the rows with everyone's history are all kept, and
+   * Fetch again brings a chapter back. "Also stop updates", on by default, unmonitors them too -- or the next check
+   * fetches the newest chapters straight back. Nothing deleted keeps the selection, in error tone, as Remove does.
+   */
+  const deleteChaptersSelected = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ ok: true; applied: number; chapters: number; paused: number; skipped: { id: string; reason: string }[] }>(
+        '/api/admin/series/bulk/chapters/delete', { json: { seriesIds: [...picked], pause: alsoPause } });
+      setDeletingChapters(false);
+      if (r.chapters === 0) {
+        toast(r.skipped.length === 1 ? tr('Nothing deleted · 1 skipped') : tr('Nothing deleted · {n} skipped', { n: r.skipped.length }), 'error');
+      } else {
+        const parts = [r.chapters === 1 ? tr('Deleted 1 chapter') : tr('Deleted {n} chapters', { n: r.chapters })];
+        if (r.paused) parts.push(r.paused === 1 ? tr('Unmonitored 1 series') : tr('Unmonitored {n} series', { n: r.paused }));
+        if (r.skipped.length) parts.push(r.skipped.length === 1 ? tr('1 skipped') : tr('{n} skipped', { n: r.skipped.length }));
+        toast(parts.join(' · '), 'success');
+        settle();
+      }
+    } catch (e) { toast(msgOf(e, tr('Could not delete those chapters')), 'error'); }
     setActing(false);
   };
 
@@ -547,6 +597,19 @@ function LibraryInner() {
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
                   {tr('Find other sources')}
                 </button>
+                {/* Monitoring is "Auto-update new chapters" (Edit details → New chapters) for the whole selection. */}
+                <button onClick={() => { setMore(false); void monitorSelected(true); }} data-monitor-selected
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Monitor')}
+                </button>
+                <button onClick={() => { setMore(false); void monitorSelected(false); }} data-unmonitor-selected
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Unmonitor')}
+                </button>
+                <button onClick={() => { setMore(false); setAlsoPause(true); setDeletingChapters(true); }} data-delete-chapters-selected
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
+                  {tr('Delete chapters')}
+                </button>
                 <button onClick={() => { setMore(false); setRemoving(true); }}
                   className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
                   {tr('Remove from library')}
@@ -571,6 +634,29 @@ function LibraryInner() {
           }
           onConfirm={removeSelected}
           onClose={() => setRemoving(false)}
+        />
+      )}
+      {deletingChapters && (
+        <ConfirmDialog
+          title={picked.size === 1 ? tr('Delete the downloaded chapters of 1 series?') : tr('Delete the downloaded chapters of {n} series?', { n: picked.size })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Delete chapters')}
+          body={
+            <>
+              <p>{tr('Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.')}</p>
+              <p className="mt-2">{tr('The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.')}</p>
+              <label className="mt-3 flex items-start gap-2 text-sm text-fog-200">
+                <input type="checkbox" className="mt-0.5" checked={alsoPause} onChange={(e) => setAlsoPause(e.target.checked)} data-also-pause />
+                <span>
+                  {tr('Also stop updates for these series')}
+                  <span className="block text-xs text-fog-500">{tr('Otherwise the next check downloads their newest chapters again.')}</span>
+                </span>
+              </label>
+            </>
+          }
+          onConfirm={deleteChaptersSelected}
+          onClose={() => setDeletingChapters(false)}
         />
       )}
       {moving && (

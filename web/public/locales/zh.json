@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3286
+    "strings": 3307
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3289,5 +3289,26 @@
   "Waiting for another task to finish": "正在等待另一项任务完成",
   "Reading the folders": "正在读取文件夹",
   "Finishing": "正在收尾",
-  "Folder {done} of {total}": "文件夹 {done} / {total}"
+  "Folder {done} of {total}": "文件夹 {done} / {total}",
+  "Show all chapters at once": "一次显示所有章节",
+  "A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.": "系列页面在一页中列出所有章节（包括尚未到达的），而不是每次一百个。保存在你的账户中。",
+  "Show deleted chapters as ghosts": "将已删除的章节显示为幽灵章节",
+  "A chapter whose file was deleted is shown like a chapter not downloaded yet, with Fetch to bring it back, instead of as a deleted chapter. Reading history is kept. Mihon lists it as “not downloaded”.": "文件已删除的章节将显示为尚未下载的章节，并可用“获取”取回，而不是显示为已删除的章节。阅读记录会保留。Mihon 会将其列为“not downloaded”。",
+  "deleted": "已删除",
+  "Monitor": "监视",
+  "Unmonitor": "取消监视",
+  "Monitored 1 series": "已监视 1 个系列",
+  "Monitored {n} series": "已监视 {n} 个系列",
+  "Unmonitored 1 series": "已取消监视 1 个系列",
+  "Unmonitored {n} series": "已取消监视 {n} 个系列",
+  "Could not change monitoring": "无法更改监视状态",
+  "Nothing deleted · 1 skipped": "未删除任何内容 · 跳过 1 个",
+  "Nothing deleted · {n} skipped": "未删除任何内容 · 跳过 {n} 个",
+  "Could not delete those chapters": "无法删除这些章节",
+  "Delete the downloaded chapters of 1 series?": "删除 1 个系列已下载的章节？",
+  "Delete the downloaded chapters of {n} series?": "删除 {n} 个系列已下载的章节？",
+  "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "Uchiyomi 下载的每个章节都会从服务器删除，但会保留每个系列的封面章节，以保留封面。你手动整理的书库中的文件以及带书签的章节不受影响。",
+  "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "章节仍会列出，每个人的阅读记录都会保留。在系列页面使用“重新获取”可取回章节。",
+  "Also stop updates for these series": "同时停止这些系列的更新",
+  "Otherwise the next check downloads their newest chapters again.": "否则下次检查会再次下载它们的最新章节。"
 }

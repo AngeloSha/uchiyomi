@@ -299,8 +299,10 @@ export interface Book {
  *   floor    below the series' Latest-N floor; Find missing chapters is the way to reach it
  *   archive  an active slow archive will fetch it (#117): available, under the retry cap, below its boundary
  *   covered  another site's split of a chapter this server holds (v0.50.0): never fetched by itself, still fetchable
+ *   deleted  never sent by the server: a chapter whose file was deleted on purpose, drawn as a ghost on the series
+ *            page under the admin's "Show deleted chapters as ghosts" (lib/chapterRows.ts ghostOfDeleted)
  */
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered' | 'deleted';
 
 /** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
 export interface Ghost {
@@ -339,6 +341,11 @@ export interface Listing {
   archive?: import('./archive').ListingArchive | null;
   /** How the series is numbered and what waits for an admin (v0.49.0, #116; lib/numbering.ts). Absent from an older server. */
   numbering?: import('./numbering').NumberingSummary | null;
+  /**
+   * The admin's "Show deleted chapters as ghosts" (bff lib/deletedGhosts.ts): a chapter whose file was deleted on
+   * purpose is drawn as a ghost row rather than as a deleted chapter. Absent from an older server, which reads as off.
+   */
+  deletedAsGhosts?: boolean;
 }
 
 /** How often a group ships, read off the median gap of its last dated releases. `unknown` with fewer than two dates. */

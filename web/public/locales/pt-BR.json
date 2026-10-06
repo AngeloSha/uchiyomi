@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3286
+    "strings": 3307
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3289,5 +3289,26 @@
   "Waiting for another task to finish": "Aguardando outra tarefa terminar",
   "Reading the folders": "Lendo as pastas",
   "Finishing": "Finalizando",
-  "Folder {done} of {total}": "Pasta {done} de {total}"
+  "Folder {done} of {total}": "Pasta {done} de {total}",
+  "Show all chapters at once": "Mostrar todos os capítulos de uma vez",
+  "A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.": "A página de uma série lista todos os capítulos, inclusive os que ainda não chegaram, em uma só página em vez de cem por vez. Salvo na sua conta.",
+  "Show deleted chapters as ghosts": "Mostrar capítulos excluídos como fantasmas",
+  "A chapter whose file was deleted is shown like a chapter not downloaded yet, with Fetch to bring it back, instead of as a deleted chapter. Reading history is kept. Mihon lists it as “not downloaded”.": "Um capítulo cujo arquivo foi excluído aparece como um capítulo ainda não baixado, com Buscar para trazê-lo de volta, em vez de como um capítulo excluído. O histórico de leitura é mantido. O Mihon o lista como “not downloaded”.",
+  "deleted": "excluído",
+  "Monitor": "Monitorar",
+  "Unmonitor": "Parar de monitorar",
+  "Monitored 1 series": "1 série monitorada",
+  "Monitored {n} series": "{n} séries monitoradas",
+  "Unmonitored 1 series": "1 série deixou de ser monitorada",
+  "Unmonitored {n} series": "{n} séries deixaram de ser monitoradas",
+  "Could not change monitoring": "Não foi possível alterar o monitoramento",
+  "Nothing deleted · 1 skipped": "Nada excluído · 1 ignorada",
+  "Nothing deleted · {n} skipped": "Nada excluído · {n} ignoradas",
+  "Could not delete those chapters": "Não foi possível excluir esses capítulos",
+  "Delete the downloaded chapters of 1 series?": "Excluir os capítulos baixados de 1 série?",
+  "Delete the downloaded chapters of {n} series?": "Excluir os capítulos baixados de {n} séries?",
+  "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "Todo capítulo que o Uchiyomi baixou é excluído do servidor, exceto o capítulo de capa de cada série, para que as capas fiquem. Arquivos de uma biblioteca montada por você e capítulos com marcadores não são tocados.",
+  "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "Os capítulos continuam listados e todos mantêm seu histórico de leitura. Buscar de novo na página da série traz um capítulo de volta.",
+  "Also stop updates for these series": "Também parar as atualizações dessas séries",
+  "Otherwise the next check downloads their newest chapters again.": "Caso contrário, a próxima verificação baixa os capítulos mais recentes de novo."
 }
