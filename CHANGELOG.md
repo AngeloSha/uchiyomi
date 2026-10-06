@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.55.6 — 2026-10-06
+
+**A library scan that takes minutes no longer reads "Scan failed": the scan answers at once, and the page follows it
+to its end with how far it has got.**
+
+### Long library scans no longer fail
+
+- **The cause:** *Scan library now* waited for the whole scan before it answered. A big library on a slow disk can
+  take minutes (Unraid shares, a NAS). That's longer than a proxy in front of the server will hold a request: nginx gives
+  up at 60 seconds, Cloudflare at 100. So the button said *Scan failed* every time while the scan went on. Reported by
+  **@Kedryn** ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)).
+- **Now:** the server answers within 15 seconds, and the page follows the scan until it ends.
+  - The admin home and Health show how far it has got: *Folder 1,200 of 3,400*, a ticking clock, then the counts.
+  - A request a proxy cuts off follows the scan it started instead of failing.
+- **A scan that really fails says why,** in the server's words, instead of a bare *Scan failed*.
+
+### Upgrading
+
+- **Database:** no change. v0.55.5 runs on the same database, so going back is one line of your compose file.
+- **New setting:** `REFRESH_FIRST_ANSWER_MS` (default `15000`), how long *Scan library now* waits before it answers
+  that the scan is still running.
+- **For scripts** ([api.md](docs/api.md)):
+  - `POST /api/refresh` answers `running: true` and `since` when the scan takes longer than that.
+  - It answers `scanned: false, reason: 'error'` when the scan fails, with the server's `message` for an admin.
+  - New `GET /api/refresh` says whether a scan runs, and for an admin its progress and how the last one ended.
+
 ## v0.55.5 — 2026-10-06
 
 **Normal titles are no longer counted as 18+: a site that flags itself 18+ no longer marks every title it shares with
