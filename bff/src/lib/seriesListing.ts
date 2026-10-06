@@ -329,6 +329,86 @@ export const declaredLang = (source: string): string | null => {
   return l === 'any' ? null : l;
 };
 
+/**
+ * A copy every known group of which is blocked: chooseReleases' rule, verbatim (lib/releases.ts). A copy naming no
+ * group is never blocked, and a joint release is blocked only when ALL its groups are.
+ */
+const copyBlocked = (c: { groups?: string[]; scanlator?: string | null }, blocked: ReadonlySet<string>): boolean => {
+  const keys = groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined }).map(normGroup).filter(Boolean);
+  return keys.length > 0 && keys.every((k) => blocked.has(k));
+};
+
+/**
+ * Apply the blocklist AS IT STANDS NOW to the stored listing, without asking any source.
+ *
+ * A number whose every copy is from a blocked group is `blocked`: never shown on the series page or to Mihon, and never
+ * downloaded -- by the sweep, the slow archive or a plain Fetch. The status used to be decided only at the next check,
+ * so blocking a group left its chapters on the page and in the archive's queue for up to a day, and unblocking it left
+ * them hidden as long. A preferences save calls this, so the next request already reads the new state:
+ *   * every copy blocked now, and the row was not:   `blocked` (its chosen copy kept, for display);
+ *   * `blocked`, and a copy is no longer:            `available`, the best unblocked copy chosen (copies are stored
+ *                                                    best first), which the next check refines as it always does;
+ *   * not blocked, but its chosen copy is now:       the best unblocked copy chosen instead, status kept.
+ * Only what changes is written. `seriesIds` absent: every series with a listing (a global blocklist change).
+ * Answers how many rows changed.
+ * Reintroduce by leaving the status to the next sweep: "blocking a group hides its only-copy chapters at once" in
+ * blockedGroups.int.test.ts finds the chapter still listed.
+ */
+export async function reapplyBlocklist(seriesIds?: readonly string[]): Promise<number> {
+  const ids = seriesIds ?? (await q<{ id: string }>('SELECT DISTINCT series_id AS id FROM series_listing')).map((r) => r.id);
+  let changed = 0;
+  for (const id of new Set(ids)) {
+    const prefs = await effectivePrefsFor(await readSeriesPrefs(id));
+    const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
+    const rows = await q<{ number: number; status: ListingStatus; title: string | null; chosen: SourceChapter | null; copies: ListingCopy[] | null }>(
+      'SELECT number, status, title, chosen, copies FROM series_listing WHERE series_id = $1', [id]);
+    const updates: Array<{ number: number; status: ListingStatus; chosen: SourceChapter; copies: ListingCopy[] }> = [];
+    for (const r of rows) {
+      const copies = r.copies ?? [];
+      if (!copies.length) continue;
+      const open = copies.filter((c) => !copyBlocked(c, blocked));
+      if (!open.length) {
+        if (r.status !== 'blocked' && r.chosen) updates.push({ number: r.number, status: 'blocked', chosen: r.chosen, copies });
+        continue;
+      }
+      const chosenOut = r.status === 'blocked' || !r.chosen || copyBlocked(r.chosen, blocked);
+      if (!chosenOut) continue;
+      const pick = open[0];
+      updates.push({
+        number: r.number,
+        status: r.status === 'blocked' ? 'available' : r.status,
+        chosen: copyToChapter(pick, { number: Number(r.number), title: r.title }),
+        copies: [pick, ...copies.filter((c) => c !== pick)],
+      });
+    }
+    if (!updates.length) continue;
+    await tx(async (qq) => {
+      for (const u of updates) {
+        await qq(
+          `UPDATE series_listing SET status = $3, chosen = $4::jsonb, copies = $5::jsonb, source_id = $6, scanlator = $7
+            WHERE series_id = $1 AND number = $2::real`,
+          [id, u.number, u.status, JSON.stringify(u.chosen), JSON.stringify(u.copies), u.chosen.source ?? null, u.chosen.scanlator ?? null]);
+      }
+    });
+    changed += updates.length;
+  }
+  return changed;
+}
+
+/**
+ * The series a change to these groups' blocking can touch: those whose listing names one of them. For a global
+ * blocklist save, so it does not re-read every listing on the server -- plus every series with a `blocked` row, which
+ * an unblock may free.
+ */
+export async function seriesListingGroups(groups: readonly string[]): Promise<string[]> {
+  const keys = new Set(groups.map(normGroup).filter(Boolean));
+  if (!keys.size) return [];
+  const rows = await q<{ id: string; groups: string[] | null; blocked: boolean }>(
+    `SELECT series_id AS id, array_agg(DISTINCT g) AS groups, bool_or(status = 'blocked') AS blocked
+       FROM series_listing LEFT JOIN LATERAL unnest(groups) g ON true GROUP BY series_id`);
+  return rows.filter((r) => r.blocked || (r.groups ?? []).some((g) => g && keys.has(normGroup(g)))).map((r) => r.id);
+}
+
 export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive' | 'covered';
 
 export interface Ghost {
@@ -451,6 +531,10 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         -- A notice chapter the admin hides (lib/noticeChapters.ts) is not missing: it is not a chapter here at all.
         -- Kept in the listing, so switching the hide off shows it again at once.
         AND ${listedShown('s_l', 'l')}
+        -- A chapter only blocked groups released is not shown (reapplyBlocklist keeps the status current): it
+        -- cannot be fetched while the block stands, and a group blocked is a group the reader does not want to see.
+        -- Kept in the listing, so unblocking the group shows it again at once.
+        AND l.status <> 'blocked'
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

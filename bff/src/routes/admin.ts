@@ -70,7 +70,7 @@ import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
-import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
+import { copyToChapter, reapplyBlocklist, seriesListingGroups, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
@@ -714,7 +714,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
-    if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
+    if (b.scanlatorPrefs !== undefined) {
+      const before = (await one<{ p: { blocked?: string[] } | null }>('SELECT scanlator_prefs AS p FROM server_settings WHERE id = 1').catch(() => null))?.p?.blocked ?? [];
+      await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
+      // The groups blocked or unblocked by this save, applied to the stored listing of every series that lists them
+      // (lib/seriesListing.ts reapplyBlocklist): hidden, or shown again, on the next request rather than the next check.
+      const after = b.scanlatorPrefs.blocked ?? [];
+      const key = (g: string) => normGroup(g);
+      const was = new Set(before.map(key)), now = new Set(after.map(key));
+      const moved = [...before.filter((g) => !now.has(key(g))), ...after.filter((g) => !was.has(key(g)))];
+      if (moved.length) {
+        await seriesListingGroups(moved).then((ids) => reapplyBlocklist(ids))
+          .catch((e) => console.warn(`[prefs] reapplying the blocklist failed: ${(e as Error)?.message || e}`));
+      }
+    }
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
     if (b.repairEnabled !== undefined) await q('UPDATE server_settings SET repair_enabled = $1, updated_at = now() WHERE id = 1', [b.repairEnabled]);
@@ -1343,6 +1356,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
         [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
+      // A block or unblock takes effect on the stored listing now, not at the next check (lib/seriesListing.ts
+      // reapplyBlocklist): the page's next request hides, or shows again, the chapters only blocked groups released.
+      await reapplyBlocklist([id]).catch((e) => console.warn(`[prefs] reapplying the blocklist to ${id} failed: ${(e as Error)?.message || e}`));
     }
     if (b.data.sourcePrefs !== undefined) {
       // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one

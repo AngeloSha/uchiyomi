@@ -39,7 +39,9 @@ import { holds } from './chapterRanges';
  * page shows these rows with their reason; this surface leaves them out. A Komga reader's "read up to here" still
  * marks them (lib/komgaProgress.ts): reading past chapter 78 is reading 78's parts, whoever split it.
  */
-export const NOT_COVERED = "l.status <> 'covered'";
+// And never a number only blocked groups released (lib/seriesListing.ts reapplyBlocklist): the series page hides it,
+// and Mihon and the trackers must not count a chapter nobody here will fetch.
+export const NOT_COVERED = "l.status NOT IN ('covered', 'blocked')";
 
 /**
  * A notice chapter the admin hides (lib/noticeChapters.ts) is no chapter of the series, so no ghost either: Mihon

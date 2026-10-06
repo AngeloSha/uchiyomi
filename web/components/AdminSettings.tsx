@@ -51,6 +51,11 @@ export function AdminSettings() {
   const save: Save = async (body) => {
     await api('/api/admin/settings', { method: 'PATCH', json: body });
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
+    // A blocklist save hides, or shows again, every series' chapters only blocked groups released (bff
+    // reapplyBlocklist): any series page already cached refetches its rows, its versions and its groups.
+    if (body.scanlatorPrefs !== undefined) {
+      for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
+    }
   };
   if (!data) {
     return (

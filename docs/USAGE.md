@@ -406,9 +406,12 @@ own row, each tap saved at once. A preferred group's
 copy is taken first whenever it exists; a blocked group's copy is never taken while another copy exists. A
 joint release belongs to every group listed on it: it counts as the preferred group's when any of them is
 preferred, and it is blocked only when *all* of them are. A chapter that only blocked groups have released
-is never fetched on its own — its grey row is still listed, and counted in the line's *{n} not here yet*,
-so you know it exists — until someone else releases it; unblock the group if you would rather have their
-copy than none.
+— one group, or several that are all blocked — is **not shown** and never downloaded: it leaves the chapter
+list, the *{n} not here yet* count and the list Mihon and your trackers read the moment you tap **Block**, with
+no check needed, and nothing fetches it (the hourly check, the slow archive, *Fetch*). A chapter an unblocked
+group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
+just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
+Settings → Scanlators**. A chapter already downloaded from a group you block stays on the shelf.
 
 **Patience** is how long a new chapter waits for a preferred group before the best available copy is
 fetched instead. The default is 2 days, which is roughly how far behind the second group on a popular
@@ -829,10 +832,8 @@ hold. Each grey row's caption says why it is not here:
 - **failed {n} times**, in amber — the download was attempted and gave up; the updater will not try again on
   its own. *Fetch* resets that and tries once more. Admins see the last error at the top of the chapter's
   sheet.
-- **only a blocked group has it · {group}** — every copy on offer is from a blocked group. It is shown so you
-  know it exists; unblock the group if you would rather have their copy than none. The row has no cloud
-  icon and the selection bar's *Fetch* skips it; **Fetch** on the copy itself, in the chapter's sheet, does
-  take it.
+- **only a blocked group has it · {group}** — no longer shown: a chapter only blocked groups released leaves the
+  list as soon as the group is blocked (see *Sources & translations* above), and comes back when it is unblocked.
 - **another split · {group} · via {source}** (since v0.50.0; the row's tooltip says *another split of a chapter you
   have*) — a followed site splits or numbers this chapter's parts differently, and the chapter is already here
   the other way: its 78.1 … 78.9 beside the 78 you have as one file. The updater leaves it alone and it is not

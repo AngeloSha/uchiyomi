@@ -6184,7 +6184,11 @@ paths:
                 scanlatorPrefs:
                   description: >-
                     The server-wide release preferences, replaced whole. Blocks made here apply to every
-                    series; the priority applies to a series that has no ranking of its own.
+                    series; the priority applies to a series that has no ranking of its own. A group blocked or
+                    unblocked here is applied to the stored listing of every series that lists it before the
+                    answer: a chapter only blocked groups released is `blocked` -- no ghost on
+                    /api/series/{id}/listing or the Komga list, never downloaded -- and one an unblocked group
+                    also released takes that group's copy.
                   $ref: "#/components/schemas/ScanlatorPrefs"
                 cleanupRead:
                   description: >-
@@ -6946,7 +6950,9 @@ paths:
                   description: >-
                     The series' own release preferences, replaced whole; null clears them so the server-wide
                     ones apply again. The priority given here replaces the global list for this series, the
-                    blocked list is added to it, and a null patienceDays inherits.
+                    blocked list is added to it, and a null patienceDays inherits. Applied to the series' stored
+                    listing before the answer, as the server-wide save is: a chapter only blocked groups released
+                    leaves /api/series/{id}/listing and the Komga list at once, and comes back on an unblock.
                   oneOf:
                     - $ref: "#/components/schemas/ScanlatorPrefs"
                     - type: "null"
