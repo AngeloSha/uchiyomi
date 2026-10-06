@@ -256,6 +256,58 @@ test('Scan library now answers what it found, and a second press within a minute
   }
 });
 
+test('a scan longer than the first answer is answered running, and GET /api/refresh follows it to its counts (v0.55.6)', { skip }, async () => {
+  // Kedryn (#150): a big library on Unraid scanned for longer than the proxy in front of the server would hold the
+  // request, and the button said "Scan failed" every time while the scan went on. Here the scan is held (a renumber's
+  // hold, lib/library.ts withScansHeld) past a first answer cut to 300 ms. Reintroduce by awaiting the scan in the
+  // route: the POST is answered only once the hold is released, with its counts and no `running`.
+  const catalog = (await import('../src/routes/catalog')).default;
+  const { withScansHeld } = await import('../src/lib/library');
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const c = Fastify();
+  await c.register(jwt, { secret: process.env.JWT_SECRET! });
+  await c.register(catalog);
+  await c.ready();
+  process.env.REFRESH_FIRST_ANSWER_MS = '300';
+  let release: (() => void) | undefined;
+  const holding = withScansHeld(() => new Promise<void>((r) => { release = r; }));
+  const status = async (authorization = adminTok) => (await c.inject({ method: 'GET', url: '/api/refresh', headers: { authorization } })).json();
+  try {
+    runtime.lastScan = 0;
+    // Raced against five seconds: a route that waits the scan out would wait for a hold only this test releases.
+    const posted = c.inject({ method: 'POST', url: '/api/refresh', headers: { authorization: adminTok } }).then((r) => r.json());
+    const a = await Promise.race([posted, new Promise<null>((r) => setTimeout(() => r(null), 5000))]);
+    assert.ok(a, 'answered while the scan was still held, not when it ended');
+    assert.equal(a.running, true, JSON.stringify(a));
+    assert.equal(a.scanned, true);
+    assert.equal(typeof a.since, 'string');
+    const s = await status();
+    assert.equal(s.running, true);
+    assert.equal(s.progress?.phase, 'waiting', 'it says it waits for another task');
+    assert.deepEqual(await status(memberTok), { running: true }, 'a member learns only that a scan runs');
+    release!();
+    await holding;
+    let done = await status();
+    for (let i = 0; i < 300 && (done.running || !done.last || Date.parse(done.last.at) < Date.parse(a.since)); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      done = await status();
+    }
+    assert.equal(done.running, false, 'the scan ended');
+    assert.ok(Date.parse(done.last.at) >= Date.parse(a.since), 'the last scan is the one the press started');
+    assert.equal(typeof done.last.series, 'number');
+    assert.equal(typeof done.last.books, 'number');
+    assert.ok(!('progress' in done), 'no progress once it has ended');
+    assert.ok(!('failed' in done), 'and nothing failed');
+  } finally {
+    delete process.env.REFRESH_FIRST_ANSWER_MS;
+    release?.();
+    await holding.catch(() => {});
+    runtime.lastScan = 0;
+    await c.close();
+  }
+});
+
 test('a chapter sweep in the way is not the same answer as a repair already running', { skip }, async () => {
   // ⚠️ Two different refusals on purpose. "busy" on a press made during a sweep reads as "the repair is
   // stuck", and the page would tell an admin to wait for the wrong thing.

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3281
+    "strings": 3286
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3284,5 +3284,10 @@
   "Series numbered by posting order, or in the middle of a renumber, are not listed.": "投稿順で番号付けされたシリーズや、番号の振り直しの途中のシリーズは載っていません。",
   "File no longer on disk": "ファイルがディスクにありません",
   "1 series had a download or a check running and was left alone": "ダウンロード中またはチェック中だった 1 シリーズには触れませんでした",
-  "{n} series had a download or a check running and were left alone": "ダウンロード中またはチェック中だった {n} シリーズには触れませんでした"
+  "{n} series had a download or a check running and were left alone": "ダウンロード中またはチェック中だった {n} シリーズには触れませんでした",
+  "Scan failed: {reason}": "スキャンに失敗しました：{reason}",
+  "Waiting for another task to finish": "別のタスクの完了を待っています",
+  "Reading the folders": "フォルダーを読み込み中",
+  "Finishing": "仕上げ中",
+  "Folder {done} of {total}": "フォルダー {done} / {total}"
 }

@@ -33,7 +33,7 @@ import { getSource } from '../lib/sources';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
 import { effectiveLang } from '../lib/seriesLang';
-import { DL_ROOT, LIBRARY_ROOT } from '../lib/library';
+import { DL_ROOT, LIBRARY_ROOT, lastScanFailure, lastScanReport, scanProgress, scanRunning } from '../lib/library';
 import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapters';
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { join } from 'node:path';
@@ -133,6 +133,13 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
 
 // How many series the Continue Reading rail carries. 20 hid 33 of the heaviest user's 53 in progress.
 const ON_DECK_LIMIT = 60;
+
+/**
+ * How long POST /api/refresh waits for the library scan before it answers that the scan is still running (v0.55.6):
+ * under every proxy's own limit (nginx 60 s, Cloudflare 100 s), over a small library's whole scan. Read when asked,
+ * so a test can shorten it.
+ */
+const refreshFirstAnswerMs = (): number => Number(process.env.REFRESH_FIRST_ANSWER_MS) || 15_000;
 
 export default async function catalogRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -258,7 +265,23 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // ⚠️ The owned library has ONE scan, of every root, whatever library id it is handed (lib/ownedCatalog.ts):
     // one call per library started that whole scan once per library, all at the same time. Komga scans each.
     const targets = NATIVE_PROGRESS ? libs : [libs[0] ?? { id: 'lib' }];
-    const answers = await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => null)));
+    const admin = roleOf(req) === 'admin';
+    // Each library's answer, or why its scan failed: v0.49.0 swallowed a failure into "scanned" without counts.
+    const run = Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id)
+      .then((a: any) => ({ a }), (e: unknown) => ({ a: null, failed: (e as Error)?.message || String(e) }))));
+    void run.then(() => scheduleHealthSummaryRefresh());
+    // v0.55.6 (#150, Kedryn): answered within refreshFirstAnswerMs, the scan going on when it takes longer. A big
+    // library on a slow disk (Unraid's FUSE) scanned for longer than the proxy in front of the server would hold the
+    // request: the proxy cut it off and the button said "Scan failed", every time, while the scan went on. GET
+    // /api/refresh follows the rest (web lib/refresh.ts). Reintroduce by awaiting `run`: "a scan longer than the first
+    // answer is answered running" in repairRoutes.int.test.ts waits the whole scan out.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const answers = await Promise.race([run, new Promise<null>((r) => { timer = setTimeout(() => r(null), refreshFirstAnswerMs()); })]);
+    clearTimeout(timer);
+    if (!answers) return { scanned: true, running: true, since: new Date(now).toISOString(), libraries: libs.length };
+    const failed = answers.find((x) => 'failed' in x) as { failed: string } | undefined;
+    // The reason is the server's own words, for an admin: a member learns that it failed, not the server's insides.
+    if (failed) return { scanned: false, reason: 'error', ...(admin ? { message: failed.failed } : {}) };
     // v0.49.0: the owned scan's counts, so "Scan library now" can say "212 series, 4,310 chapters, 1 folder
     // skipped" rather than nothing (Komga answers no body: no counts, as before). And the header's summary
     // catches up with what the scan found -- "folders the scan cannot index" is one of its checks.
@@ -268,12 +291,28 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // are the WHOLE library's, restricted and 18+ libraries included: a member limited to one library would
     // learn how big the ones they cannot open are. Reintroduce by dropping the role check: the member half of
     // that test finds a `series` key.
-    const counts = roleOf(req) !== 'admin' ? undefined : answers.find((a: any) => a && typeof a.series === 'number') as
+    const counts = !admin ? undefined : answers.map((x) => x.a).find((a: any) => a && typeof a.series === 'number') as
       { series: number; books: number; ms: number; skipped: number } | undefined;
-    scheduleHealthSummaryRefresh();
     return {
       scanned: true, libraries: libs.length,
       ...(counts ? { series: counts.series, books: counts.books, ms: counts.ms, skipped: counts.skipped } : {}),
+    };
+  });
+
+  // v0.55.6 (#150): the scan POST /api/refresh answered `running` for, followed. Whether one runs, for everyone; for an
+  // admin, how far it has got (lib/library.ts scanProgress), how the last one ended -- its counts, or why it failed --
+  // and the server's clock, so the web compares the server's times with each other and never with its own.
+  app.get('/api/refresh', async (req) => {
+    const running = scanRunning();
+    if (roleOf(req) !== 'admin') return { running };
+    const p = scanProgress();
+    const last = lastScanReport();
+    const failed = lastScanFailure();
+    return {
+      running, now: new Date().toISOString(),
+      ...(p ? { progress: p } : {}),
+      ...(last ? { last: { at: last.at, series: last.series, books: last.books, ms: last.ms, skipped: last.skippedTotal } } : {}),
+      ...(failed ? { failed } : {}),
     };
   });
 

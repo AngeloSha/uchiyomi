@@ -153,6 +153,10 @@ one source's budget; `SEARCH_CONCURRENCY` defaults to `SCAN_CONCURRENCY` (which 
 and the oldest is evicted above `SEARCH_CACHE_MAX` (`50`). A source detail lookup is cached for ten minutes.
 These caches share network work, not authorisation: results are filtered to the account on every response.
 
+**Library scans that take minutes.** *Scan library now* answers within `REFRESH_FIRST_ANSWER_MS` (default `15000`)
+since v0.55.6; a scan that takes longer goes on, and the page follows it to its end with how far it has got. Keep the
+value under the timeout of any proxy in front of the server (nginx 60 s, Cloudflare 100 s).
+
 `FAKE_SOURCE_URLS=name=http://host:port,name2=http://host:port` registers deterministic HTTP adapters used
 by the release test harness. It is empty in every shipped deployment and is not a production source
 configuration. `FAKE_SOURCE_NSFW=name` (since v0.42.0) makes the named ones — a comma-separated list of

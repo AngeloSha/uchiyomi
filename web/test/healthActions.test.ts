@@ -462,7 +462,9 @@ test('Scan library now says what it found, or why it did not scan, and Health is
   // that found nothing. Reintroduce `await triggerRefresh();` with the answer ignored: the first assertion fails.
   const page = code(read(PAGE));
   const hero = page.slice(page.indexOf('function AdminHero'), page.indexOf('function Overview('));
-  assert.match(hero, /const r = await triggerRefresh\(\);\n    setScanned\(scanState\(r, at\)\);/, 'the hero ignores the scan\'s answer');
+  // v0.55.6: and hears how far a long scan has got on the way (components/HealthActions.tsx scanWorking).
+  assert.match(hero, /const r = await triggerRefresh\(\(p\) => setScanned\(scanWorking\(p, at\)\)\);\n    setScanned\(scanState\(r, at\)\);/,
+    'the hero ignores the scan\'s answer, or its progress');
   assert.match(hero, /invalidateQueries\(\{ queryKey: \['admin-health'\] \}\)/, 'Health is not checked again after a scan');
   assert.match(hero, /<ActionStatus state=\{scanned\} \/>/, 'the scan\'s answer is not shown under the button');
   const keys = code(read(KEYS));

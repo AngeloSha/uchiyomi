@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3281
+    "strings": 3286
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3284,5 +3284,10 @@
   "Series numbered by posting order, or in the middle of a renumber, are not listed.": "Serien, die nach Erscheinungsreihenfolge nummeriert sind oder gerade neu nummeriert werden, stehen nicht in der Liste.",
   "File no longer on disk": "Datei nicht mehr auf der Festplatte",
   "1 series had a download or a check running and was left alone": "1 Serie wurde gerade heruntergeladen oder geprüft, nicht angefasst",
-  "{n} series had a download or a check running and were left alone": "{n} Serien wurden gerade heruntergeladen oder geprüft, nicht angefasst"
+  "{n} series had a download or a check running and were left alone": "{n} Serien wurden gerade heruntergeladen oder geprüft, nicht angefasst",
+  "Scan failed: {reason}": "Einlesen fehlgeschlagen: {reason}",
+  "Waiting for another task to finish": "Wartet, bis eine andere Aufgabe fertig ist",
+  "Reading the folders": "Ordner werden gelesen",
+  "Finishing": "Wird abgeschlossen",
+  "Folder {done} of {total}": "Ordner {done} von {total}"
 }

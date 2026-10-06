@@ -753,6 +753,29 @@ let scansStarted = 0;
 export const scanCount = (): number => scansStarted;
 /** A library scan is running right now: Rescan everything's Apply refuses to start beside one (lib/rescan.ts). */
 export const scanRunning = (): boolean => scanning !== null;
+
+/**
+ * How far the scan running now has got (v0.55.6, #150): `waiting` for a renumber or Rescan everything's Apply to
+ * let it start (withScansHeld), `walking` the roots, `indexing` folder `done` of `total`, `finishing` (the ledgers
+ * after the folders). GET /api/refresh answers it, so a scan nobody's request waits for any more still says what
+ * it is doing. Null when no scan runs.
+ */
+export interface ScanProgress { startedAt: string; phase: 'waiting' | 'walking' | 'indexing' | 'finishing'; done: number; total: number }
+let progress: ScanProgress | null = null;
+export const scanProgress = (): ScanProgress | null => progress;
+/**
+ * The last scan that failed outright, and why (v0.55.6): until now only the server log said, and the button said
+ * "Scan failed" for that and for a request a proxy cut off alike. Kept until a scan completes.
+ */
+let lastFailure: { at: string; message: string } | null = null;
+export const lastScanFailure = (): { at: string; message: string } | null => lastFailure;
+/** A scan's own promise, its failure kept and its progress cleared however it ends. */
+const tracked = (run: Promise<ScanResult>): Promise<ScanResult> => run
+  .catch((e: unknown) => {
+    lastFailure = { at: new Date().toISOString(), message: (e as Error)?.message || String(e) };
+    throw e;
+  })
+  .finally(() => { progress = null; });
 /**
  * Scan every root into lib_series/lib_books. One scan at a time.
  *
@@ -766,7 +789,7 @@ export const scanRunning = (): boolean => scanning !== null;
  */
 export function persistScan(): Promise<ScanResult> {
   if (!scanning) {
-    scanning = scanOnce().finally(() => { scanning = null; });
+    scanning = tracked(scanOnce()).finally(() => { scanning = null; });
     return scanning;
   }
   // `scanning ??`: by the time this runs the scan it waited for has ended, so a scan running NOW was started
@@ -810,7 +833,9 @@ export async function withScansHeld<T>(fn: () => Promise<T>): Promise<T> {
 
 async function scanOnce(): Promise<ScanResult> {
   const held = hold;
+  progress = { startedAt: new Date().toISOString(), phase: held ? 'waiting' : 'walking', done: 0, total: 0 };
   if (held) await held.catch(() => undefined);
+  progress.phase = 'walking';
   scansStarted++;
   const t0 = Date.now();
   let nBooks = 0;
@@ -842,9 +867,11 @@ async function scanOnce(): Promise<ScanResult> {
   const onDisk = walks.flatMap((w) => w.found.map((f) => f.folderRel));
   // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
   const libs = await libraryRows();
+  progress = { ...progress!, phase: 'indexing', total: walks.reduce((n, w) => n + w.found.length, 0) };
   for (const { root, found: foundInRoot } of walks) {
     for (const found of foundInRoot) {
       const { folderRel, folderAbs, source: srcName, chapters: files } = found;
+      progress!.done++;
       // ⚠️ ONE FOLDER, NOT THE SCAN (#109). A folder the scanner cannot index -- a ComicInfo field Postgres
       // refuses, a constraint, anything -- used to throw out of the whole pass, and every caller swallowed it
       // (`persistScan().catch(() => {})`). The scan simply stopped there, on every run, and everything after
@@ -1026,6 +1053,7 @@ async function scanOnce(): Promise<ScanResult> {
       }
     }
   }
+  progress!.phase = 'finishing';
   // Best effort, like everything after the folders: every folder is already committed, and one series row this
   // UPDATE cannot write (a lock, a constraint) must not throw the whole scan away at its last step -- the report
   // below would never be written, and the Health page would go on describing the scan before.
@@ -1046,6 +1074,7 @@ async function scanOnce(): Promise<ScanResult> {
   const ms = Date.now() - t0;
   const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
   const meeting = walks.find((w) => w.met !== undefined);
+  lastFailure = null;
   lastScan = {
     at: new Date().toISOString(), startedAt: new Date(t0).toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal,
     walk: [...loud, ...walkIssues.filter((i) => QUIET_WALK.has(i.reason))].slice(0, SKIPS_KEPT),

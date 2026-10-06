@@ -38,7 +38,7 @@ import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/co
 import { isDesktop } from '@/lib/desktop';
 import { languageName } from '@/lib/format';
 import { IDLE, actionButton, isBusy, type ActionState } from '@/lib/actionState';
-import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
+import { triggerRefresh, type RefreshAnswer, type ScanProgress } from '@/lib/refresh';
 import {
   ACTION_COPY, actionCopy, caveatLine, caveatTone, outcomeLine, repairGate, rowState, solverDownLine,
   type CopyCtx,
@@ -96,7 +96,23 @@ export function scanState(r: RefreshAnswer, startedAt: number): ActionState {
   }
   if (r.reason === 'rate_limited') return { kind: 'refused', reason: tr('A scan ran less than a minute ago') };
   if (r.reason === 'in_flight') return { kind: 'refused', reason: tr('A scan is already running') };
-  return { kind: 'failed', finishedAt: Date.now(), reason: tr('Scan failed') };
+  // v0.55.6: the server's own words when it says why (an admin's answer); a request that never reached it says nothing more.
+  return { kind: 'failed', finishedAt: Date.now(), reason: r.message ? tr('Scan failed: {reason}', { reason: r.message }) : tr('Scan failed') };
+}
+
+/**
+ * A running scan, as its status line (v0.55.6): the clock from the press, how far it has got -- folder 1,200 of 3,400
+ * on a big library, which can take minutes -- and what it is doing. Shared by the hero and Health, as scanState is.
+ */
+export function scanWorking(p: ScanProgress, startedAt: number): ActionState {
+  const detail = p.phase === 'waiting' ? tr('Waiting for another task to finish')
+    : p.phase === 'walking' ? tr('Reading the folders')
+    : p.phase === 'finishing' ? tr('Finishing')
+    : tr('Folder {done} of {total}', { done: p.done.toLocaleString(), total: p.total.toLocaleString() });
+  return {
+    kind: 'working', startedAt, step: tr('Scanning library…'), detail,
+    progress: p.phase === 'indexing' && p.total ? Math.min(1, p.done / p.total) : null,
+  };
 }
 
 /**
@@ -736,7 +752,7 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
         const at = Date.now();
         setScan({ kind: 'working', startedAt: at, step: tr('Scanning library…') });
         void (async () => {
-          const r = await triggerRefresh();
+          const r = await triggerRefresh((p) => setScan(scanWorking(p, at)));
           const out = scanState(r, at);
           if (out.kind === 'done') setScan({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
           await rr.recheck().catch(() => {});

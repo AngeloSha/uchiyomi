@@ -16,7 +16,7 @@ import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
-import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
+import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
 import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
@@ -167,7 +167,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   const scan = async () => {
     const at = Date.now();
     setScanned({ kind: 'working', startedAt: at, step: tr('Scanning library…') });
-    const r = await triggerRefresh();
+    const r = await triggerRefresh((p) => setScanned(scanWorking(p, at)));
     setScanned(scanState(r, at));
     await Promise.all([qc.invalidateQueries({ queryKey: ['admin-stats'] }), qc.invalidateQueries({ queryKey: ['admin-health'] })]);
     await qc.invalidateQueries({ queryKey: ['health-summary'] });

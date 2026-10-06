@@ -1651,7 +1651,8 @@ another tab.
   gaps*, *Try every failed chapter again*, or **Reset** for *Reset the solver (3 sources)*), **Merge all** on
   duplicates, and **Scan now** on *Library scan* and *Downloads missing from the library*, which scans the
   library, says what it found (*Scan done: 38 series, 912 chapters*) and checks the page again. A scan can start
-  once a minute.
+  once a minute. A big library on a slow disk can take minutes: the line follows it (*Folder 1,200 of 3,400*) until
+  it ends (since v0.55.6), and a scan that fails says why.
 - **Each finding has small keys and a status line that stays.** While it works: the step, what it is on and a
   ticking clock, with **Stop** on a repair. Then what it did and *Took 0:42*, or why it was refused (amber) or
   failed (red). It is still there after a reload, because it comes from the kept run rather than from a message.

@@ -1493,6 +1493,26 @@ paths:
         not index, which Health lists), so Scan library now can say what it found. A member is never told the
         counts: they are the whole library's, libraries that member cannot open included. It also refreshes the stored Health
         summary the header reads (coalesced, at most once every 30 s).
+        Since v0.55.6 (#150) it answers within REFRESH_FIRST_ANSWER_MS (15 s): a scan that takes longer goes on, and the
+        answer is {scanned: true, running: true, since, libraries} -- GET /api/refresh follows it. A scan that fails
+        answers {scanned: false, reason: 'error'}, with the server's `message` for an admin.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    get:
+      tags:
+        - library
+      summary: Whether a library scan is running, and how the last one ended.
+      operationId: getApiRefresh
+      description: >-
+        Since v0.55.6 (#150): the scan POST /api/refresh answered `running` for, followed. A member gets {running}. An
+        admin also gets the server's clock `now`, `progress` while one runs ({startedAt, phase: waiting | walking |
+        indexing | finishing, done, total}: folder `done` of `total` while indexing), `last` -- the last completed
+        scan's {at, series, books, ms, skipped} -- and `failed` {at, message} when the last scan failed outright.
       security:
         - bearer: []
       responses:

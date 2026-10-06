@@ -766,6 +766,16 @@ owned mode. Anyone else gets `{scanned: true, libraries}`: the counts are the wh
 cannot open included. Both refresh the stored Health summary the header reads (coalesced, at most once every
 30 s).
 
+Since v0.55.6 ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)) `POST /api/refresh` answers within 15
+seconds (`REFRESH_FIRST_ANSWER_MS`), well under a proxy's own limit: a big library on a slow disk can scan for minutes,
+and a proxy that gave up on the request read as *Scan failed* while the scan went on. A scan that takes longer goes on,
+and the answer is `{scanned: true, running: true, since, libraries}`; one that fails answers `{scanned: false, reason:
+'error'}`, with the server's `message` for an admin. `GET /api/refresh` follows it: `{running}` for anyone, and for an
+admin also `now` (the server's clock), `progress` while one runs (`{startedAt, phase, done, total}`, the phase one of
+`waiting` — for a renumber or *Rescan everything* to let it start — `walking`, `indexing` (folder `done` of `total`)
+and `finishing`), `last` (the last completed scan's `{at, series, books, ms, skipped}`) and `failed` (`{at, message}`,
+when the last scan failed outright). `POST /api/admin/library/scan` still answers when its scan ends.
+
 ## 18+ libraries and sources
 
 A library whose `age_rating` is 18 or higher is left out of every **listing** endpoint by default: the home
@@ -942,7 +952,7 @@ GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
 GET    /api/library/sources       GET    /api/adult-filter
 GET    /api/updates               POST   /api/updates/seen
-POST   /api/refresh
+POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
 POST   /api/series/search         GET    /api/leaderboard
