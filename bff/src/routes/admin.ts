@@ -2267,8 +2267,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     const r = await deleteSeriesFiles(id);
     if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
-    await logAudit('series.delete_files', { userId: userIdOf(req), detail: { id, files: r.files, bytes: r.bytes }, req });
-    return r;
+    const { deletedBookIds, ...answer } = r;
+    // Exact identities make the recurring v0.55.8 provenance repair safe on later boots. `files` alone is
+    // not enough: Delete files may also reconcile already-absent rows on a demonstrably mounted library.
+    await logAudit('series.delete_files', {
+      userId: userIdOf(req),
+      detail: { id, files: r.files, bytes: r.bytes, bookIds: deletedBookIds, applied: deletedBookIds.length },
+      req,
+    });
+    return answer;
   });
 
   /**

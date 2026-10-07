@@ -92,19 +92,23 @@ export async function searchByNames(
   names: readonly string[],
   left: () => number,
   searchMs = HUNT_SEARCH_MS,
-): Promise<{ hit: SourceSeries | null; answered: boolean }> {
+  admit?: () => Promise<boolean>,
+): Promise<{ hit: SourceSeries | null; answered: boolean; paused: boolean }> {
   let answered = false;
   for (const [i, term] of [title, ...names].entries()) {
     const ms = left();
     if (ms < MIN_TRY_MS) break;
+    // Each spelling is a separate provider request. An unattended series can be unmonitored while the
+    // preceding spelling is in flight, so admission is deliberately re-read for every one.
+    if (admit && !(await admit().catch(() => false))) return { hit: null, answered, paused: true };
     const results = await bounded(src.search(term), Math.min(budgetFor(src, searchMs), ms)).catch(() => null);
     // A throw on one name is a throw on the next: the site, the solver or the extension is down for all of them.
     if (!results) break;
     answered = true;
     const hit = i === 0 ? pickBest(results, term) : exactHit(results, term);
-    if (hit?.sourceId) return { hit, answered };
+    if (hit?.sourceId) return { hit, answered, paused: false };
   }
-  return { hit: null, answered };
+  return { hit: null, answered, paused: false };
 }
 
 export interface HuntResult {
@@ -173,6 +177,8 @@ export interface HuntOpts {
    * what one run may cost. The switch, the cap and the budget are not overridden by it.
    */
   force?: boolean;
+  /** Last-responsible-moment admission for unattended work. Omitted for actions a person requested. */
+  admit?: () => Promise<boolean>;
 }
 
 /** What huntCandidates found: the judgement the caller wanted, the first `ok` one it did not, and why it stopped. */
@@ -214,6 +220,8 @@ export async function huntCandidates(
 ): Promise<HuntCandidates> {
   let title = '';
   const none = (why: HuntResult['why']): HuntCandidates => ({ chosen: null, fallback: null, why, title });
+  const admitted = () => opts.admit ? opts.admit().catch(() => false) : Promise.resolve(true);
+  if (!(await admitted())) return none('no_candidate');
   if (!(await huntOn())) return none('off');
   if (opts.budget.left <= 0) return none('cooldown');
 
@@ -239,8 +247,22 @@ export async function huntCandidates(
   // ⚠️ Stamped BEFORE the search and charged to the budget BEFORE the search: whatever happens from here
   // on -- a crash, a wall, six sources that all say no -- this series is not searched for again today.
   // `force` skips the check above, never this write: a forced hunt is still today's hunt.
-  await q('UPDATE lib_series SET source_hunt_at = now() WHERE id = $1', [seriesId]);
+  if (!(await admitted())) return none('no_candidate');
+  const stamped = await one<{ at: string }>(
+    // Millisecond precision round-trips through the JS Date parser exactly, so paused() can compare this
+    // hunt's stamp without accidentally clearing a newer concurrent one.
+    `UPDATE lib_series SET source_hunt_at = date_trunc('milliseconds', clock_timestamp())
+      WHERE id = $1 RETURNING source_hunt_at AS at`, [seriesId],
+  );
   opts.budget.left--;
+  // Clear only this hunt's stamp if Unmonitor stops it. A forced/manual hunt may have re-stamped the same
+  // series concurrently; timestamp equality prevents this cleanup from erasing that newer work.
+  const paused = async (): Promise<HuntCandidates> => {
+    if (stamped?.at) {
+      await q('UPDATE lib_series SET source_hunt_at = NULL WHERE id = $1 AND source_hunt_at = $2', [seriesId, stamped.at]).catch(() => {});
+    }
+    return none('no_candidate');
+  };
 
   const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
   const followed = new Set([...(s.source_id ? [s.source_id] : []), ...followers]);
@@ -270,6 +292,7 @@ export async function huntCandidates(
   // source and not the queue; the wall is checked once the slot is held, so a source that waited its turn
   // out is simply not tried rather than charged for the wait.
   const hits: Array<{ source: string; sourceId: string } | null> = new Array(candidates.length).fill(null);
+  let stopped = false;
   // The other names the series goes by (v0.49.1): a source that files it under one of them is searched under it
   // too, and matched exactly (searchByNames). Reintroduce by searching the title alone: "the hunt searches under
   // the other names" in altTitles.int.test.ts finds no candidate.
@@ -279,12 +302,16 @@ export async function huntCandidates(
     try {
       const src = getSource(id);
       if (!src || remaining() < MIN_TRY_MS) return;
+      if (!(await admitted())) { stopped = true; return; }
       // A search that throws or outruns its budget is a source that did not answer -- not a health event:
       // a hunt must never be what puts a source into a cooldown, so nothing here reports.
-      const { hit } = await searchByNames(src, s.title, names, remaining);
+      const searched = await searchByNames(src, s.title, names, remaining, HUNT_SEARCH_MS, opts.admit);
+      if (searched.paused) { stopped = true; return; }
+      const { hit } = searched;
       if (hit?.sourceId) hits[i] = { source: id, sourceId: hit.sourceId };
     } catch { /* not this series' problem */ } finally { releaseHuntSlot(); }
   }));
+  if (stopped || !(await admitted())) return paused();
 
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);
   const primary: PrimaryFacts = { title: s.title, altTitles: names, numbers, lang: lang.lang, exactLang: lang.sameBaseSibling };
@@ -295,7 +322,9 @@ export async function huntCandidates(
     if (!hit) continue;
     const left = remaining();
     if (left < MIN_TRY_MS) break;
-    const j = await bounded(judgeCandidate(primary, hit, { prefs, health }), left).catch(() => null);
+    if (!(await admitted())) return paused();
+    const j = await bounded(judgeCandidate(primary, hit, { prefs, health, admit: opts.admit }), left).catch(() => null);
+    if (!(await admitted())) return paused();
     if (!j || j.why !== 'ok') continue;
     if (opts.wants(j, prefs)) return { chosen: j, fallback, why: 'followed', title };
     fallback ??= j;
@@ -319,7 +348,11 @@ export async function followHunted(
   j: Judgement,
   reason: HuntReason,
   detail: Record<string, unknown> = {},
+  admit?: () => Promise<boolean>,
 ): Promise<{ source: string; sourceSeriesId: string }> {
+  if (admit && !(await admit().catch(() => false))) {
+    throw Object.assign(new Error(`"${title}": automatic follow was paused`), { why: 'no_candidate' });
+  }
   const written = await followJudged(seriesId, j).catch(() => 'gone' as const);
   if (written !== 'inserted') {
     throw Object.assign(new Error(`"${title}": could not follow ${j.source} (${written})`), { why: written === 'cap' ? 'cap' : 'no_candidate' });
@@ -415,9 +448,10 @@ export async function huntSource(seriesId: string, number: number, opts: HuntOpt
   const j = found.chosen ?? found.fallback;
   if (!j) return none(found.why);
   const chapter = (found.chosen && copies.get(found.chosen)) || null;
+  if (opts.admit && !(await opts.admit().catch(() => false))) return none('no_candidate');
   let followed: { source: string; sourceSeriesId: string };
   try {
-    followed = await followHunted(seriesId, found.title, j, opts.reason ?? 'failed_chapter', { number });
+    followed = await followHunted(seriesId, found.title, j, opts.reason ?? 'failed_chapter', { number }, opts.admit);
   } catch (e: any) {
     return none(e?.why === 'cap' ? 'cap' : 'no_candidate');
   }

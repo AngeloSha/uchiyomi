@@ -247,7 +247,14 @@ export function titleMatches(theirs: string, primary: { title: string; altTitles
 export async function judgeCandidate(
   primary: PrimaryFacts,
   candidate: FollowCandidate,
-  opts: { prefs?: ReleasePrefs; health?: Map<string, SourceHealth>; lookupMs?: number; now?: number } = {},
+  opts: {
+    prefs?: ReleasePrefs;
+    health?: Map<string, SourceHealth>;
+    lookupMs?: number;
+    now?: number;
+    /** Last-responsible-moment admission for unattended callers, immediately before provider lookups. */
+    admit?: () => Promise<boolean>;
+  } = {},
 ): Promise<Judgement> {
   const src = getSource(candidate.source);
   const base = {
@@ -272,6 +279,9 @@ export async function judgeCandidate(
   let theirTitle: string | null;
   let raw: SourceChapter[];
   try {
+    // A sweep may be unmonitored while a hunt waits for its shared slot. Fail closed before starting the
+    // paired provider calls; manual/add-time callers omit the callback and keep their existing behaviour.
+    if (opts.admit && !(await opts.admit().catch(() => false))) return { ...base, why: 'unavailable' };
     const [series, chapters] = await bounded(
       Promise.all([src.getSeries(candidate.sourceId), src.listChapters(candidate.sourceId)]),
       budgetFor(src, opts.lookupMs ?? AUTO_FOLLOW_LOOKUP_MS),

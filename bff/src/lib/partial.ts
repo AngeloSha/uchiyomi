@@ -197,13 +197,14 @@ export async function completePartial(
     admit?: () => Promise<boolean>;
   },
 ): Promise<Completion> {
-  const admitted = async (candidate?: SourceChapter): Promise<boolean> => {
-    if (ctx.admit && !(await ctx.admit().catch(() => false))) return false;
+  const admitted = (): Promise<boolean> => ctx.admit
+    ? ctx.admit().catch(() => false)
+    : Promise.resolve(true);
+  const automaticallyAllowed = async (candidate: SourceChapter): Promise<boolean> => {
     // A partial on disk is not a pin for tonight's unattended repair. It is merely the copy that landed on
     // an earlier run, so a group blocked since then must not receive another request. Preference read errors
     // fail closed, matching the other automatic download paths.
-    if (candidate && ctx.automaticAllowed && !(await ctx.automaticAllowed(candidate).catch(() => false))) return false;
-    return true;
+    return ctx.automaticAllowed ? ctx.automaticAllowed(candidate).catch(() => false) : Promise.resolve(true);
   };
   const abs = join(book.root, book.file);
   let manifest: PartialManifest | null;
@@ -251,9 +252,10 @@ export async function completePartial(
   const askable = src && (!ctx.allowed || ctx.allowed(src.id))
     && !(await isDisabled(src.id).catch(() => false))
     && !(await blockedNow(src.id).catch(() => null));
-  if (src && askable) {
+  sameCopy: if (src && askable) {
     let urls: string[] | null = null;
-    if (!(await admitted(chapter))) return result;
+    if (!(await admitted())) return result;
+    if (!(await automaticallyAllowed(chapter))) break sameCopy;
     try {
       urls = await src.getPageUrls(manifest.chapterSourceId);
     } catch (e) {
@@ -263,7 +265,8 @@ export async function completePartial(
     }
     if (urls && urls.length === manifest.expected) {
       // `retry: false`: the source sees exactly one request per hole, tonight and again tomorrow.
-      if (!(await admitted(chapter))) return result;
+      if (!(await admitted())) return result;
+      if (!(await automaticallyAllowed(chapter))) break sameCopy;
       const got = await underGate(src.id, () => fetchPages(src, urls!, missing, { chapterSourceId: manifest.chapterSourceId, retry: false }));
       const filled = missing.filter((i) => got.page[i]);
       if (filled.length) {
@@ -310,7 +313,8 @@ export async function completePartial(
       // The source re-sliced the chapter since the partial was written: index 149 of 155 is not index
       // 149 of 150. Fetch it whole, and keep the new copy only when it is complete or has fewer holes.
       try {
-        if (!(await admitted(chapter))) return result;
+        if (!(await admitted())) return result;
+        if (!(await automaticallyAllowed(chapter))) break sameCopy;
         const r = await downloadChapter({ sourceId: src.id, seriesFolder, chapter, meta }, { replace: true });
         if (r) {
           await restampBook(book.id, abs, []);

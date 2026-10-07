@@ -1061,6 +1061,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           at('searching');
           const h = await huntSource(seriesId, book.number, {
             allowed, budget, reason: 'short_chapter', force: !!opts.bookId,
+            ...(unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
           });
           huntWhy = h.why;
           if (h.followed) notes.followed.push(`${book.title} -> ${h.followed.source}`);
@@ -1631,6 +1632,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       const allowed = (id: string) => adultRule(id) && !resting(id);
       const found = await huntCandidates(s.id, {
         allowed, budget, reason: 'gap', force: !!opts.seriesId,
+        ...(!opts.seriesId ? { admit: () => seriesIsMonitored(s.id) } : {}),
         // The candidate must be able to fill a hole nobody else lists. `assess` over the RAW list it
         // already fetched: this asks what the source HAS, and the release preferences decide later which
         // copy of it the sweep takes.
@@ -1648,7 +1650,10 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
         at('following');
         const fillable = assess(s.have, (found.chosen.chapters ?? []).map((c) => c.number)).fillable.filter((n) => unlisted.has(n));
         try {
-          const f = await followHunted(s.id, found.title, found.chosen, 'gap', { numbers: fillable });
+          const f = await followHunted(
+            s.id, found.title, found.chosen, 'gap', { numbers: fillable },
+            !opts.seriesId ? () => seriesIsMonitored(s.id) : undefined,
+          );
           out.followed = f.source;
           out.coverage = found.chosen.coverage;
           unfillable = [...unlisted].filter((n) => !fillable.includes(n));

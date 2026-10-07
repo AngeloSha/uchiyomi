@@ -629,7 +629,10 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
         refusing, allowed,
         hunt: huntBudget ? async () => {
           if (opts.unattended && !(await seriesIsMonitored(seriesId))) return null;
-          return (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter;
+          return (await huntSource(seriesId, ch.number, {
+            allowed, budget: huntBudget,
+            ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
+          })).chapter;
         } : undefined,
         ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
@@ -830,8 +833,8 @@ export async function runUpdateAll(opts: {
   // budget like a chapter, so a full night's work stays a full night's work. 1500 ms apart, as the series
   // loop paces itself. A partial whose source is in a cooldown is skipped by completePartial itself.
   if (!stopped && PARTIAL_COMPLETE_MAX > 0) {
-    const partials = await q<{ id: string; series_id: string; root: string; file: string; number: number; missing_pages: number[]; source_id: string | null }>(
-      `SELECT b.id, b.series_id, b.root, b.file, b.number, b.missing_pages, b.source_id
+    const partials = await q<{ id: string; series_id: string; root: string; file: string; number: number; missing_pages: number[]; source_id: string | null; scanlator: string | null }>(
+      `SELECT b.id, b.series_id, b.root, b.file, b.number, b.missing_pages, b.source_id, b.scanlator
          FROM lib_books b JOIN lib_series s ON s.id = b.series_id
         WHERE b.missing_pages IS NOT NULL AND b.pruned_at IS NULL AND b.root = $1 AND ${visibleToAll('s')}
           -- An unmonitored series (auto_update off) gets nothing unattended, its missing pages included.
@@ -854,9 +857,13 @@ export async function runUpdateAll(opts: {
               : [],
             allowed,
             hunt: async () => (await seriesIsMonitored(b.series_id))
-              ? (await huntSource(b.series_id, Number(b.number), { allowed, budget: huntBudget })).chapter
+              ? (await huntSource(b.series_id, Number(b.number), {
+                allowed, budget: huntBudget, admit: () => seriesIsMonitored(b.series_id),
+              })).chapter
               : null,
             admit: () => seriesIsMonitored(b.series_id),
+            // An old partial is not a user pin. Re-read the blocklist before each operation on its original copy.
+            automaticAllowed: (chapter) => automaticChapterAllowedFor(b.series_id, chapter),
           },
         );
         if (r === 'completed') completed++;

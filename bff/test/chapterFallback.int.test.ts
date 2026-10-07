@@ -164,6 +164,20 @@ test('an unattended admission change stops before every next source operation', 
     assert.ok(!asked.some((x) => x.startsWith(`${FOL}/`)), 'the alternate was stopped at its own admission check');
     assert.equal(hunts, 0, 'the hunt never started');
   });
+
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[PRI, FOL, NEW]]);
+  asked.length = 0;
+  await t.test('while a hunt that finds nothing is in flight', async () => {
+    failures.set(`${PRI}/hunt-pause-five/4`, 404);
+    let admitted = true;
+    const out = await run(chapter(PRI, 'hunt-pause-five', 32), [], {
+      admit: async () => admitted,
+      hunt: async () => { admitted = false; return null; },
+    }).result;
+    assert.deepEqual(out, { kind: 'skipped', why: 'paused' });
+    assert.equal(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 32.cbz')), false,
+      'a partial was written after Unmonitor landed during the hunt');
+  });
 });
 
 test('the best incomplete hold is written only after every non-refusing option is exhausted', { skip }, async () => {

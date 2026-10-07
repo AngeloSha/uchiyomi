@@ -156,6 +156,8 @@ test('simultaneous series share one search pool', { skip }, async () => {
 // hand `allowed` a rule that admits only them, so the candidate order is exactly hit-a, hit-b, hit-c.
 const HITS = ['hunt-hit-a', 'hunt-hit-b', 'hunt-hit-c'];
 let hitOn = false;
+let huntAdmitted = true;
+let pauseOnFirstSearch = false;
 /** listChapters calls per hit source: one per candidate judged, so "nothing past the accepted one is asked" is countable. */
 const judged = new Map<string, number>();
 let huntCandidates: any, followHunted: any;
@@ -163,6 +165,7 @@ const hitSource = (id: string) => ({
   id, name: id,
   async search() {
     searches.set(id, (searches.get(id) ?? 0) + 1);
+    if (pauseOnFirstSearch && id === HITS[0]) huntAdmitted = false;
     return hitOn ? [{ sourceId: `${id}-series`, source: id, title: TITLE }] : [];
   },
   async getSeries(sid: string) { return { sourceId: sid, source: id, title: TITLE }; },
@@ -179,6 +182,35 @@ before(async () => {
   const sources = await import('../src/lib/sources');
   for (const id of HITS) sources.registerAdapter(hitSource(id) as any);
   ({ huntCandidates, followHunted } = await import('../src/lib/sourceHunt'));
+});
+
+test('an unattended hunt rechecks admission between providers and follows nothing after Unmonitor', { skip }, async () => {
+  // The first provider represents an in-flight request when Unmonitor lands. A second provider may already
+  // have been admitted concurrently, but no queued search, judgement, or automatic follow may start after it.
+  await seed(MAIN);
+  hitOn = true;
+  huntAdmitted = true;
+  pauseOnFirstSearch = true;
+  judged.clear();
+  try {
+    const out = await huntSource(MAIN, 11, {
+      allowed: onlyHits,
+      budget: { left: 5 },
+      admit: async () => huntAdmitted,
+    });
+    assert.equal(out.followed, null);
+    assert.equal((await q('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [MAIN]))[0].n, 0,
+      'the source was followed after admission closed');
+    assert.equal([...judged.values()].reduce((a, b) => a + b, 0), 0,
+      'a provider judgement started after admission closed');
+    assert.equal(searches.get(HITS[2]) ?? 0, 0, 'a queued provider search started after admission closed');
+    assert.equal((await q('SELECT source_hunt_at FROM lib_series WHERE id = $1', [MAIN]))[0]?.source_hunt_at, null,
+      'a paused hunt kept the once-a-day stamp and postponed work after monitoring is restored');
+  } finally {
+    pauseOnFirstSearch = false;
+    huntAdmitted = true;
+    hitOn = false;
+  }
 });
 
 test('wants stops at the first accepted judgement and keeps the first ok one as the fallback', { skip }, async () => {

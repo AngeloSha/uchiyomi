@@ -402,9 +402,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at DESC);
 
 -- v0.55.8: Rescan used to label a vanished read-library file as if Delete files had removed it. That made it a held
 -- tombstone forever, so restoring only the database could never fetch it again. A row outside the owned download root
--- is changed to rescan_missing, except where a chapter-delete audit proves deliberate removal. Its bookIds alone do
--- not prove that a particular request succeeded, because the audit includes skipped requests too, so it proves one
--- book only when every requested id was applied. This intentionally runs on every boot: an older image
+-- is changed to rescan_missing, except where an audit proves deliberate removal. A chapter-delete audit's bookIds
+-- alone do not prove that a particular request succeeded, because the audit includes skipped requests too, so it
+-- proves one book only when every requested id was applied and the audit follows this tombstone's stamp (an older
+-- successful deletion of the same stable id cannot prove what happened after it was restored). Whole-series Delete
+-- files now records the exact affected
+-- ids under the same rule. Older versions recorded only a file count; retain those only when the numeric count exactly
+-- matches every tombstone stamped in the five minutes immediately before the audit. That bounded compatibility case
+-- proves the normal on-disk deletion without allowing an old or mismatched series audit to bless ambiguous rows.
+-- This intentionally runs on every boot: an older image
 -- used after rollback can write the ambiguous value again, and the update is idempotent.
 UPDATE lib_books b
    SET pruned_reason = 'rescan_missing'
@@ -412,13 +418,37 @@ UPDATE lib_books b
    AND b.root IS DISTINCT FROM '${(process.env.DL_ROOT || '/library-dl').replaceAll("'", "''")}'
    AND NOT EXISTS (
      SELECT 1 FROM audit_log a
-      WHERE a.event = 'series.chapters_delete'
-        AND a.detail->>'id' = b.series_id
-        AND jsonb_typeof(a.detail->'bookIds') = 'array'
-        AND a.detail->'bookIds' ? b.id
-        AND CASE WHEN COALESCE(a.detail->>'applied', '') ~ '^[0-9]+$'
-                 THEN (a.detail->>'applied')::int = jsonb_array_length(a.detail->'bookIds')
-                 ELSE false END
+      WHERE a.detail->>'id' = b.series_id
+        AND (
+          (a.event = 'series.chapters_delete'
+           AND a.at >= b.pruned_at
+           AND jsonb_typeof(a.detail->'bookIds') = 'array'
+           AND a.detail->'bookIds' ? b.id
+           AND CASE WHEN COALESCE(a.detail->>'applied', '') ~ '^[0-9]+$'
+                    THEN (a.detail->>'applied')::int = jsonb_array_length(a.detail->'bookIds')
+                    ELSE false END)
+          OR
+          (a.event = 'series.delete_files'
+           AND a.at >= b.pruned_at
+           AND (
+             (jsonb_typeof(a.detail->'bookIds') = 'array'
+              AND a.detail->'bookIds' ? b.id
+              AND CASE WHEN COALESCE(a.detail->>'applied', '') ~ '^[0-9]+$'
+                       THEN (a.detail->>'applied')::int = jsonb_array_length(a.detail->'bookIds')
+                       ELSE false END)
+             OR
+             (COALESCE(a.detail->>'files', '') ~ '^[1-9][0-9]*$'
+              AND b.pruned_at >= a.at - interval '5 minutes'
+              AND (a.detail->>'files')::int = (
+                SELECT count(*)::int
+                  FROM lib_books proved
+                 WHERE proved.series_id = b.series_id
+                   AND proved.pruned_reason = 'deleted'
+                   AND proved.pruned_at >= a.at - interval '5 minutes'
+                   AND proved.pruned_at <= a.at
+              ))
+           ))
+        )
    );
 
 -- per-source health: block / rate-limit detection (status: ok | rate_limited | blocked | down)

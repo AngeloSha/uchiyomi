@@ -39,6 +39,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 let q: <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 let admin: typeof import('../src/lib/libraryAdmin');
+let migrate: typeof import('../src/lib/migrate').migrate;
 let artFile: (id: string, kind: 'cover' | 'banner') => string;
 let app: any;
 let auth: Record<string, string>;
@@ -116,7 +117,7 @@ async function wipe() {
   for (const t of SERIES_TABLES) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ALL]).catch(() => {});
   await q(`DELETE FROM collections WHERE name LIKE 'fg-%'`).catch(() => {});
   await q(`DELETE FROM lib_series WHERE source = $1`, [SRC]);
-  await q(`DELETE FROM audit_log WHERE event = 'series.forget' AND detail->>'id' = ANY($1)`, [ALL]).catch(() => {});
+  await q(`DELETE FROM audit_log WHERE detail->>'id' = ANY($1)`, [ALL]).catch(() => {});
   for (const d of [ROOT, DL]) {
     await rm(d, { recursive: true, force: true }).catch(() => {});
     await mkdir(d, { recursive: true });
@@ -128,7 +129,7 @@ before(async () => {
   await mkdir(ROOT, { recursive: true });
   await mkdir(DL, { recursive: true });
   await mkdir(CONFIG, { recursive: true });
-  const { migrate } = await import('../src/lib/migrate');
+  ({ migrate } = await import('../src/lib/migrate'));
   ({ q } = (await import('../src/lib/db')) as any);
   admin = await import('../src/lib/libraryAdmin');
   ({ artFile } = await import('../src/lib/seriesArt'));
@@ -667,6 +668,31 @@ test('route: a straight apostrophe confirms a curly-apostrophe title', { skip },
   const res = await forget(S, { confirm: typed });
   assert.equal(res.statusCode, 200, res.body);
   assert.equal(await rowsFor('lib_series', 'id', [S]), 0);
+});
+
+test('route: a deliberate read-library Delete files tombstone survives the next boot migration', { skip }, async () => {
+  // The v0.55.8 recurring provenance repair has to run on every boot because a rollback can write the old
+  // ambiguous value again. Whole-series Delete files is also deliberate, though: its exact audit evidence
+  // must keep this row held instead of turning it into a Rescan-missing chapter the updater fetches again.
+  await series(S, 'Reboot proof', { deleted: true });
+  await book('b_fg_1', S, 1);
+  await mkdir(join(ROOT, SRC, S), { recursive: true });
+  await writeFile(join(ROOT, SRC, S, 'ch1.cbz'), 'bytes');
+
+  const res = await app.inject({
+    method: 'POST', url: `/api/admin/series/${S}/delete-files`, headers: auth, payload: { confirm: 'Reboot proof' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.deepEqual(res.json(), { ok: true, files: 1, bytes: 5 }, 'internal proof leaked into the public response');
+  const audit = (await q<{ detail: { bookIds: string[]; applied: number; files: number } }>(
+    `SELECT detail FROM audit_log WHERE event = 'series.delete_files' AND detail->>'id' = $1 ORDER BY id DESC LIMIT 1`, [S]))[0];
+  assert.deepEqual(audit?.detail.bookIds, ['b_fg_1'], 'the audit cannot prove which row this invocation deleted');
+  assert.equal(audit?.detail.applied, 1, 'the audit count does not close over its exact ids');
+  assert.equal(audit?.detail.files, 1);
+
+  await migrate(); // the same DDL/backfill path server startup runs
+  const [row] = await q<{ pruned_reason: string }>('SELECT pruned_reason FROM lib_books WHERE id = $1', ['b_fg_1']);
+  assert.equal(row?.pruned_reason, 'deleted', 'reboot reclassified a deliberate whole-series deletion as missing');
 });
 
 test('route: no body is a 400, an unknown series a 404, a member a 403', { skip }, async () => {

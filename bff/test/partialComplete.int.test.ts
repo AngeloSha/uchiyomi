@@ -150,7 +150,7 @@ const abs = (n: number) => join(DL, FOLDER, `Chapter ${n}.cbz`);
 const entries = (file: string): Map<string, Buffer> =>
   new Map(new AdmZip(file).getEntries().map((e: any) => [e.entryName, e.getData()]));
 const row = async (n: number) => (await q(
-  `SELECT id, series_id, root, file, number, missing_pages, source_id, pages, page_dims, size, fp_at, short_confirmed_at FROM lib_books WHERE series_id = $1 AND number = $2`, [S, n],
+  `SELECT id, series_id, root, file, number, missing_pages, source_id, scanlator, pages, page_dims, size, fp_at, short_confirmed_at FROM lib_books WHERE series_id = $1 AND number = $2`, [S, n],
 ))[0];
 /** A written partial for chapter `n` with page 4 (index 3) missing, scanned and stamped as the sweep would. */
 async function partial(n: number, scanlator?: string): Promise<any> {
@@ -325,6 +325,20 @@ test('the nightly completion pass treats the original partial as automatic, not 
   } finally {
     await q('UPDATE lib_series SET scanlator_prefs = NULL WHERE id = $1', [S]);
   }
+});
+
+test('a newly blocked original partial is skipped in favour of an allowed alternate', { skip }, async () => {
+  const b = await partial(22, 'Blocked Team');
+  failing.delete('c22/3');
+  const out = await completePartial(b, {
+    alternates: async () => [{ source: ALT, sourceId: 'alt22', number: 22, scanlator: 'Open Team' }],
+    automaticAllowed: async (chapter: any) => chapter.scanlator !== 'Blocked Team',
+  });
+  assert.equal(out, 'completed');
+  assert.equal(pageLists.includes('c22'), false, 'the newly blocked original copy was asked');
+  assert.ok(pageLists.includes('alt22'), 'the allowed alternate was not tried');
+  assert.deepEqual((await row(22)).missing_pages, null);
+  assert.equal((await row(22)).source_id, ALT);
 });
 
 test('the nightly completion pass re-reads auto-update between the page list and the page request', { skip }, async () => {

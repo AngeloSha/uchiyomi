@@ -896,7 +896,10 @@ test('migrate: v0.55.8 preserves the natural state underneath a blocked listing'
 });
 
 test('migrate: v0.55.8 distinguishes Rescan-missing legacy tombstones from proven deliberate deletion', { skip }, async () => {
-  const ids = ['t-prov-none', 't-prov-owned', 't-prov-chapter', 't-prov-partial', 't-prov-series', 't-prov-rollback'];
+  const ids = [
+    't-prov-none', 't-prov-owned', 't-prov-chapter', 't-prov-chapter-stale', 't-prov-partial', 't-prov-series',
+    't-prov-series-mismatch', 't-prov-series-stale', 't-prov-series-exact', 't-prov-rollback',
+  ];
   const dl = process.env.DL_ROOT || '/library-dl';
   await q('DELETE FROM audit_log WHERE detail->>\'id\' = ANY($1)', [ids]).catch(() => {});
   await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ids]).catch(() => {});
@@ -910,10 +913,21 @@ test('migrate: v0.55.8 distinguishes Rescan-missing legacy tombstones from prove
     await q(`INSERT INTO audit_log (event, detail) VALUES
       ('series.chapters_delete', $1::jsonb),
       ('series.chapters_delete', $2::jsonb),
-      ('series.delete_files', $3::jsonb)`, [
+      ('series.delete_files', $3::jsonb),
+      ('series.delete_files', $4::jsonb),
+      ('series.delete_files', $5::jsonb)`, [
       JSON.stringify({ id: 't-prov-chapter', bookIds: ['b-t-prov-chapter'], applied: 1 }),
       JSON.stringify({ id: 't-prov-partial', bookIds: ['b-t-prov-partial', 'skipped-book'], applied: 1 }),
       JSON.stringify({ id: 't-prov-series', files: 1, bytes: 12 }),
+      JSON.stringify({ id: 't-prov-series-mismatch', files: 2, bytes: 12 }),
+      JSON.stringify({ id: 't-prov-series-exact', files: 0, bytes: 0, bookIds: ['b-t-prov-series-exact'], applied: 1 }),
+    ]);
+    await q(`INSERT INTO audit_log (at, event, detail)
+             VALUES
+               (now() - interval '10 minutes', 'series.delete_files', $1::jsonb),
+               (now() - interval '10 minutes', 'series.chapters_delete', $2::jsonb)`, [
+      JSON.stringify({ id: 't-prov-series-stale', files: 1, bytes: 12 }),
+      JSON.stringify({ id: 't-prov-chapter-stale', bookIds: ['b-t-prov-chapter-stale'], applied: 1 }),
     ]);
 
     await migrate();
@@ -922,9 +936,17 @@ test('migrate: v0.55.8 distinguishes Rescan-missing legacy tombstones from prove
     assert.equal(await reason('t-prov-none'), 'rescan_missing', 'an unowned ambiguous row stayed deliberately deleted');
     assert.equal(await reason('t-prov-owned'), 'deleted', 'an owned download tombstone was reclassified');
     assert.equal(await reason('t-prov-chapter'), 'deleted', 'an exact successful chapter-delete audit was ignored');
+    assert.equal(await reason('t-prov-chapter-stale'), 'rescan_missing',
+      'an old exact chapter-delete audit was allowed to bless a later ambiguous tombstone for the same stable id');
     assert.equal(await reason('t-prov-partial'), 'rescan_missing', 'a request audit was mistaken for proof its skipped book was deleted');
-    assert.equal(await reason('t-prov-series'), 'rescan_missing',
-      'a series-wide audit without book identities was treated as proof for an unowned row');
+    assert.equal(await reason('t-prov-series'), 'deleted',
+      'a contemporaneous legacy whole-series audit with the exact removed-file count was ignored');
+    assert.equal(await reason('t-prov-series-mismatch'), 'rescan_missing',
+      'a whole-series audit whose file count does not prove every contemporaneous tombstone was trusted');
+    assert.equal(await reason('t-prov-series-stale'), 'rescan_missing',
+      'an old whole-series audit was allowed to bless a later ambiguous tombstone');
+    assert.equal(await reason('t-prov-series-exact'), 'deleted',
+      'the exact affected-book proof written by the current Delete files route was ignored');
 
     // A rollback can create another legacy value after the first v0.55.8 boot. The next boot must repair it too,
     // rather than treating this as a once-only data migration whose stamp survived the rollback.

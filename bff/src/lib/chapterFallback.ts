@@ -216,6 +216,9 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
       const why = whyOf(first.err);
       const found = await f.hunt(why).catch((e) => { console.warn(`[download] ${label}: the source hunt failed: ${(e as Error)?.message || e}`); return null; });
+      // A hunt may spend several provider calls. Unmonitor can land while it is in flight, including when
+      // it finds nothing, so re-read admission before considering its answer or writing a saved partial.
+      if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
       const src = found?.source ?? '';
       if (found && src && src !== via && !f.refusing.has(src) && (!f.allowed || f.allowed(src)) && getSource(src)) {
         if (!(await admitted())) return { kind: 'skipped', why: 'paused' };

@@ -775,7 +775,13 @@ export interface FileOpRefusal { ok: false; reason: string; fix?: string }
  * P2). Reintroduce by rm'ing `row.folder` only: "delete files removes the folder of a row merged into the
  * series" in fileOps.int.test.ts finds the absorbed directory still there.
  */
-export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: number; bytes: number } | FileOpRefusal> {
+export async function deleteSeriesFiles(id: string): Promise<{
+  ok: true;
+  files: number;
+  bytes: number;
+  /** Exact rows this invocation deliberately made (or reclassified as) tombstones; for the audit, not the API. */
+  deletedBookIds: string[];
+} | FileOpRefusal> {
   const row = await one<{ folder: string; deleted_at: string | null }>(
     'SELECT folder, deleted_at FROM lib_series WHERE id = $1', [id],
   );
@@ -820,6 +826,7 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
   let bytes = 0;
   const removed: string[] = [];
   const reconciled: string[] = [];
+  const reclassified: string[] = [];
   for (const root of roots) {
     const rows = await q<{ id: string; file: string; pruned_at: string | null; pruned_reason: string | null }>(
       'SELECT id, file, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 AND root = $2', [id, root],
@@ -853,10 +860,13 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
     if (!(await rootProven(root, id, present, absent))) continue;
     reconciled.push(...absentLive);
     if (stale) {
-      await q(
-        `UPDATE lib_books SET pruned_reason = 'deleted' WHERE series_id = $1 AND root = $2 AND pruned_reason = 'missing'`,
+      const changed = await q<{ id: string }>(
+        `UPDATE lib_books SET pruned_reason = 'deleted'
+          WHERE series_id = $1 AND root = $2 AND pruned_reason = 'missing'
+          RETURNING id`,
         [id, root],
       );
+      reclassified.push(...changed.map((b) => b.id));
     }
   }
   await tombstoneBooks([...removed, ...reconciled], 'deleted');
@@ -869,7 +879,7 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`, [id]);
   }
-  return { ok: true, files, bytes };
+  return { ok: true, files, bytes, deletedBookIds: [...new Set([...removed, ...reconciled, ...reclassified])] };
 }
 
 /** How many live rows of OTHER series are stat'ed for the mount proof when none of this series' own is present. */
