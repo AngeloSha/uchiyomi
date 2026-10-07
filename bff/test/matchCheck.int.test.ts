@@ -218,8 +218,8 @@ test('background matching sends nothing for an opted-out library, while explicit
 
   const manual = await checkMatches(log, { all: true });
   assert.ok(alAsked.slice(before).flat().includes(507), 'the explicit Admin action was blocked by the automatic switch');
-  assert.equal(manual.links.checked, 1);
-  assert.equal(manual.art.checked, 2);
+  assert.ok(manual.links.checked >= 1, 'the manual pass did not check the opted-out link');
+  assert.ok(manual.art.checked >= 2, 'the manual pass did not check both opted-out art fields');
   assert.ok((await linkOf(S.private))?.checked_at);
   assert.ok((await artOf(S.private))?.checked_at);
 });

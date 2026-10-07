@@ -145,3 +145,80 @@ test('a block in the Scanlators settings applies to every series, and so does li
   assert.deepEqual(await shown(S), [1, 2, 3, 4, 5, 6]);
   assert.deepEqual(await shown(OTHER), [1, 2, 3, 4, 5, 6]);
 });
+
+test('unblocking restores held and covered rather than flattening either to available', { skip }, async () => {
+  const extra = [[7, 'held'], [8, 'covered']] as const;
+  const save = (blocked: string[]) => app.inject({
+    method: 'PATCH', url: `/api/admin/series/${S}`, headers: { authorization: tok },
+    payload: { scanlatorPrefs: { priority: ['Preferred'], blocked, patienceDays: 2 } },
+  });
+  try {
+    for (const [n, status] of extra) {
+      const c = { ...copy(n, ['Bad']), publishedAt: new Date().toISOString() };
+      await q(`INSERT INTO series_listing
+                 (series_id, number, title, published_at, scanlator, groups, source_id, chosen, status, copies, unblocked_status)
+               VALUES ($1,$2,$3,$4::timestamptz,'Bad',ARRAY['Bad'],$5,$6::jsonb,$7,$8::jsonb,$7)`,
+        [S, n, `Chapter ${n}`, c.publishedAt, SRC, JSON.stringify({ ...c, number: n }), status, JSON.stringify([c])]);
+    }
+    assert.equal((await save(['Bad'])).statusCode, 200);
+    const hidden = await q('SELECT number, status, unblocked_status FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[]) ORDER BY number', [S, extra.map(([n]) => n)]);
+    assert.deepEqual(hidden.map((r: any) => [Number(r.number), r.status, r.unblocked_status]),
+      [[7, 'blocked', 'held'], [8, 'blocked', 'covered']]);
+    assert.equal((await save([])).statusCode, 200);
+    const restored = await q('SELECT number, status, unblocked_status FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[]) ORDER BY number', [S, extra.map(([n]) => n)]);
+    assert.deepEqual(restored.map((r: any) => [Number(r.number), r.status, r.unblocked_status]),
+      [[7, 'held', 'held'], [8, 'covered', 'covered']]);
+  } finally {
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])', [S, extra.map(([n]) => n)]).catch(() => {});
+    await patchSeries([]).catch(() => {});
+  }
+});
+
+test('a stale listing replacement racing a newer preference save cannot put blocked copies back', { skip }, async () => {
+  const { replaceListing } = await import('../src/lib/seriesListing');
+  assert.equal((await patchSeries([])).statusCode, 200);
+  const stored = await q(`SELECT number, title, published_at, scanlator, groups, source_id, chosen, status, copies, unblocked_status
+                            FROM series_listing WHERE series_id = $1 ORDER BY number`, [S]);
+  // This is the updater's snapshot prepared while no group was blocked. Whichever transaction reaches the series
+  // lock first, the final listing must reflect the preference save: the save reapplies after an older writer, while
+  // a later writer re-reads effective preferences after acquiring the same row/advisory locks.
+  const stale = stored.map((r: any) => ({
+    number: Number(r.number), title: r.title,
+    publishedAt: r.published_at ? new Date(r.published_at).toISOString() : null,
+    scanlator: r.scanlator, groups: r.groups ?? [], sourceId: r.source_id,
+    chosen: r.chosen, status: r.status, copies: r.copies ?? [], unblockedStatus: r.unblocked_status,
+  }));
+  const [, saved] = await Promise.all([replaceListing(S, stale), patchSeries(['Bad', 'Worse'])]);
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.equal((await row(1)).status, 'blocked', 'the stale writer restored a newly blocked copy');
+  assert.deepEqual((await row(3)).chosen.groups, ['Good'], 'the stale writer restored the blocked chosen copy');
+  assert.equal((await patchSeries([])).statusCode, 200);
+});
+
+test('a failed listing reapply rolls back both preference routes and returns a retryable error', { skip }, async () => {
+  const globalBefore = (await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0].scanlator_prefs;
+  const seriesBefore = (await q('SELECT scanlator_prefs FROM lib_series WHERE id = $1', [S]))[0].scanlator_prefs;
+  await q(`CREATE OR REPLACE FUNCTION test_blocklist_reapply_failure() RETURNS trigger LANGUAGE plpgsql AS $fn$
+           BEGIN RAISE EXCEPTION 'forced blocklist reapply failure'; END $fn$`);
+  await q(`CREATE TRIGGER test_blocklist_reapply_failure
+             BEFORE UPDATE ON series_listing FOR EACH ROW EXECUTE FUNCTION test_blocklist_reapply_failure()`);
+  try {
+    const own = await patchSeries(['Bad']);
+    assert.equal(own.statusCode, 503, own.body);
+    assert.equal(own.json().error, 'blocklist_apply_failed');
+    assert.deepEqual((await q('SELECT scanlator_prefs FROM lib_series WHERE id = $1', [S]))[0].scanlator_prefs, seriesBefore,
+      'the per-series preference committed without its listing');
+
+    const global = await app.inject({
+      method: 'PATCH', url: '/api/admin/settings', headers: { authorization: tok },
+      payload: { scanlatorPrefs: { priority: [], blocked: ['Bad'], patienceDays: 2 } },
+    });
+    assert.equal(global.statusCode, 503, global.body);
+    assert.equal(global.json().error, 'blocklist_apply_failed');
+    assert.deepEqual((await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0].scanlator_prefs, globalBefore,
+      'the global preference committed without its listings');
+  } finally {
+    await q('DROP TRIGGER IF EXISTS test_blocklist_reapply_failure ON series_listing').catch(() => {});
+    await q('DROP FUNCTION IF EXISTS test_blocklist_reapply_failure()').catch(() => {});
+  }
+});

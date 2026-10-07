@@ -485,13 +485,14 @@ test('library management', { skip }, async (t) => {
       await q('DELETE FROM libraries WHERE id <> $1 AND path = $2', ['lib', 'Manga/Josei']).catch(() => {});
       const r = await app.inject({
         method: 'POST', url: '/api/admin/libraries', headers: auth,
-        payload: { name: 'Grown-ups only', path: 'Manga/Josei', ageRating: 18 },
+        payload: { name: 'Grown-ups only', path: 'Manga/Josei', ageRating: 18, anilistLookup: false },
       });
       assert.equal(r.statusCode, 200);
       const made = r.json().id;
-      const row = (await q<{ age_rating: number | null }>(
-        'SELECT age_rating FROM libraries WHERE id = $1', [made]))[0];
+      const row = (await q<{ age_rating: number | null; anilist_lookup: boolean }>(
+        'SELECT age_rating, anilist_lookup FROM libraries WHERE id = $1', [made]))[0];
       assert.equal(row.age_rating, 18, 'the rating was accepted and then dropped on the floor');
+      assert.equal(row.anilist_lookup, false, 'the create route dropped the AniList privacy choice');
 
       // And omitting it still means unrated, rather than 0 (which would be a real cap).
       const plain = await app.inject({
@@ -501,6 +502,9 @@ test('library management', { skip }, async (t) => {
       assert.equal(plain.statusCode, 200);
       assert.equal((await q<{ age_rating: number | null }>(
         'SELECT age_rating FROM libraries WHERE id = $1', [plain.json().id]))[0].age_rating, null);
+      assert.equal((await q<{ anilist_lookup: boolean }>(
+        'SELECT anilist_lookup FROM libraries WHERE id = $1', [plain.json().id]))[0].anilist_lookup, true,
+        'omitting the switch did not preserve the compatible on-by-default behaviour');
 
       await q('DELETE FROM libraries WHERE id = ANY($1)', [[made, plain.json().id]]).catch(() => {});
     });
@@ -508,13 +512,25 @@ test('library management', { skip }, async (t) => {
     await t.test('a library carries its rating and its member list back out', async () => {
       await app.inject({
         method: 'PATCH', url: `/api/admin/libraries/${OUTER}`, headers: auth,
-        payload: { ageRating: 18, name: 'Grown-ups' },
+        payload: { ageRating: 18, name: 'Grown-ups', anilistLookup: false },
       });
       const list = (await app.inject({ method: 'GET', url: '/api/admin/libraries', headers: auth })).json();
       const row = list.content.find((l: any) => l.id === OUTER);
       assert.equal(row.name, 'Grown-ups');
       assert.equal(row.age_rating, 18, 'the UI cannot show a rating it is not sent');
+      assert.equal(row.anilist_lookup, false, 'the UI cannot show the AniList privacy choice it is not sent');
       assert.ok(Array.isArray(row.members), 'nor who can see it');
+
+      const { automaticAniListAllowed } = await import('../src/lib/anilistPolicy');
+      assert.equal(await automaticAniListAllowed({ id: 's_lm_a' }), false,
+        'automatic enrichment did not follow the series current library');
+      const on = await app.inject({ method: 'PATCH', url: `/api/admin/libraries/${OUTER}`, headers: auth,
+        payload: { anilistLookup: true } });
+      assert.equal(on.statusCode, 200, on.body);
+      assert.equal(await automaticAniListAllowed({ id: 's_lm_a' }), true, 're-enabling did not take effect immediately');
+      const bad = await app.inject({ method: 'PATCH', url: `/api/admin/libraries/${OUTER}`, headers: auth,
+        payload: { anilistLookup: 'sometimes' } });
+      assert.equal(bad.statusCode, 400, 'a non-boolean privacy setting was accepted');
     });
   } finally {
     await app.close();

@@ -825,3 +825,115 @@ test('migrate: v0.55.7 marks no match as checked that was stored before it, and 
     }
   });
 });
+
+test('migrate: v0.55.8 enables automatic AniList enrichment for existing and rollback-created libraries', { skip }, async () => {
+  const cols = await q<{ data_type: string; column_default: string | null; is_nullable: string }>(
+    `SELECT data_type, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'libraries' AND column_name = 'anilist_lookup'`);
+  assert.deepEqual(cols.map((c) => [c.data_type, c.column_default, c.is_nullable]),
+    [['boolean', 'true', 'NO']], 'the per-library AniList policy is not an additive compatible boolean');
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      // The INSERT an older binary makes after rollback omits the new column and must keep historical behaviour.
+      await c.query(`INSERT INTO libraries (id, name, path) VALUES ('t-anilist-default','Old writer','T AniList Default')`);
+      const { rows } = await c.query(`SELECT anilist_lookup FROM libraries WHERE id = 't-anilist-default'`);
+      assert.equal(rows[0]?.anilist_lookup, true);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});
+
+test('migrate: v0.55.8 preserves the natural state underneath a blocked listing', { skip }, async () => {
+  const id = 't-listing-natural';
+  await q('DELETE FROM lib_series WHERE id = $1', [id]).catch(() => {});
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test',$1,'T!listing-natural')`, [id]);
+    // Model the schema immediately before v0.55.8: the additive column is nullable and has no useful values yet.
+    await q(`ALTER TABLE series_listing DROP CONSTRAINT IF EXISTS series_listing_unblocked_status_check`);
+    await q(`ALTER TABLE series_listing ALTER COLUMN unblocked_status DROP NOT NULL`);
+    await q(`ALTER TABLE series_listing ALTER COLUMN unblocked_status DROP DEFAULT`);
+    for (const [number, status] of [[1, 'blocked'], [2, 'available'], [3, 'held'], [4, 'covered']] as const) {
+      await q(`INSERT INTO series_listing
+                 (series_id, number, source_id, chosen, status, copies, unblocked_status)
+               VALUES ($1,$2,'test',$3::jsonb,$4,'[]'::jsonb,NULL)`,
+        [id, number, JSON.stringify({ sourceId: `c-${number}`, source: 'test', number }), status]);
+    }
+
+    await migrate();
+    const rows = await q<{ number: number; unblocked_status: string }>(
+      `SELECT number, unblocked_status FROM series_listing WHERE series_id = $1 ORDER BY number`, [id]);
+    assert.deepEqual(rows.map((r) => [Number(r.number), r.unblocked_status]),
+      [[1, 'held'], [2, 'available'], [3, 'held'], [4, 'covered']],
+      'legacy blocked rows must fail closed, while visible rows already state their natural status');
+    const col = (await q<{ column_default: string | null; is_nullable: string }>(
+      `SELECT column_default, is_nullable FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'series_listing' AND column_name = 'unblocked_status'`))[0];
+    assert.deepEqual([col?.column_default, col?.is_nullable], ["'available'::text", 'NO']);
+    const check = (await q<{ def: string }>(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+        WHERE conrelid = 'series_listing'::regclass AND conname = 'series_listing_unblocked_status_check'`))[0]?.def;
+    assert.match(check ?? '', /available.*held.*covered/, 'the natural state accepts anything outside its three values');
+
+    // A rollback writer omits the new column. It must get the compatible available state, never fail its insert.
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status, copies)
+             VALUES ($1,5,'test',$2::jsonb,'available','[]'::jsonb)`,
+      [id, JSON.stringify({ sourceId: 'c-5', source: 'test', number: 5 })]);
+    assert.equal((await q<{ unblocked_status: string }>(
+      'SELECT unblocked_status FROM series_listing WHERE series_id = $1 AND number = 5', [id]))[0]?.unblocked_status, 'available');
+    await assert.rejects(
+      q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status, copies, unblocked_status)
+         VALUES ($1,6,'test',$2::jsonb,'blocked','[]'::jsonb,'blocked')`,
+      [id, JSON.stringify({ sourceId: 'c-6', source: 'test', number: 6 })]),
+      /series_listing_unblocked_status_check/,
+    );
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [id]).catch(() => {});
+    // If an assertion above interrupted the schema exercise, leave the shared test database usable.
+    await migrate().catch(() => {});
+  }
+});
+
+test('migrate: v0.55.8 distinguishes Rescan-missing legacy tombstones from proven deliberate deletion', { skip }, async () => {
+  const ids = ['t-prov-none', 't-prov-owned', 't-prov-chapter', 't-prov-partial', 't-prov-series', 't-prov-rollback'];
+  const dl = process.env.DL_ROOT || '/library-dl';
+  await q('DELETE FROM audit_log WHERE detail->>\'id\' = ANY($1)', [ids]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ids]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [ids]).catch(() => {});
+  try {
+    for (const id of ids) {
+      await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test',$1,$2)`, [id, `T!prov/${id}`]);
+      await q(`INSERT INTO lib_books (id, series_id, source, file, root, pruned_at, pruned_reason)
+               VALUES ($1,$2,'test',$3,$4,now(),'deleted')`, [`b-${id}`, id, `T!prov/${id}/1.cbz`, id === 't-prov-owned' ? dl : '/library']);
+    }
+    await q(`INSERT INTO audit_log (event, detail) VALUES
+      ('series.chapters_delete', $1::jsonb),
+      ('series.chapters_delete', $2::jsonb),
+      ('series.delete_files', $3::jsonb)`, [
+      JSON.stringify({ id: 't-prov-chapter', bookIds: ['b-t-prov-chapter'], applied: 1 }),
+      JSON.stringify({ id: 't-prov-partial', bookIds: ['b-t-prov-partial', 'skipped-book'], applied: 1 }),
+      JSON.stringify({ id: 't-prov-series', files: 1, bytes: 12 }),
+    ]);
+
+    await migrate();
+    const reason = async (id: string) => (await q<{ pruned_reason: string }>(
+      'SELECT pruned_reason FROM lib_books WHERE id = $1', [`b-${id}`]))[0]?.pruned_reason;
+    assert.equal(await reason('t-prov-none'), 'rescan_missing', 'an unowned ambiguous row stayed deliberately deleted');
+    assert.equal(await reason('t-prov-owned'), 'deleted', 'an owned download tombstone was reclassified');
+    assert.equal(await reason('t-prov-chapter'), 'deleted', 'an exact successful chapter-delete audit was ignored');
+    assert.equal(await reason('t-prov-partial'), 'rescan_missing', 'a request audit was mistaken for proof its skipped book was deleted');
+    assert.equal(await reason('t-prov-series'), 'rescan_missing',
+      'a series-wide audit without book identities was treated as proof for an unowned row');
+
+    // A rollback can create another legacy value after the first v0.55.8 boot. The next boot must repair it too,
+    // rather than treating this as a once-only data migration whose stamp survived the rollback.
+    await q(`UPDATE lib_books SET pruned_reason = 'deleted' WHERE id = 'b-t-prov-rollback'`);
+    await migrate();
+    assert.equal(await reason('t-prov-rollback'), 'rescan_missing');
+  } finally {
+    await q('DELETE FROM audit_log WHERE detail->>\'id\' = ANY($1)', [ids]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ids]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [ids]).catch(() => {});
+  }
+});

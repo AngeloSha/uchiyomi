@@ -34,7 +34,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const AdmZip = require('adm-zip');
 
 const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', privacy: 'Zzz Om Private', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B' };
-const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit', string> = {} as any;
+const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit' | 'addPrivate', string> = {} as any;
 const ADMIN = 'om-admin';
 // The art hosts: a literal public address, so the cover proxy's SSRF guard needs no DNS to let the fake answer.
 const RED = 'https://1.1.1.1/om/red.png';
@@ -139,7 +139,7 @@ after(async () => {
   for (const t of ['series_trackers', 'series_art', 'series_overrides', 'series_colors']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ids()]);
   await q(`DELETE FROM lib_books WHERE series_id = ANY($1)`, [ids()]);
   await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids()]);
-  await q(`DELETE FROM libraries WHERE id IN ('om-no-anilist','om-yes-anilist')`).catch(() => {});
+  await q(`DELETE FROM libraries WHERE id IN ('om-no-anilist','om-yes-anilist','om-add-private')`).catch(() => {});
   await q(`DELETE FROM users WHERE username = $1`, [ADMIN]);
   await rm(ROOT, { recursive: true, force: true });
   await (await import('../src/lib/db')).pool.end();
@@ -265,6 +265,27 @@ test("an add keeps AniList's art only from an entry named as the series", { skip
   // here, from the add's art lookup (routes/sources.ts artByTitle).
   assert.equal(miss?.banner, null, "another work's banner was stored on an add");
   assert.equal(miss?.cover, RED, "the source's cover is the series' cover");
+
+  // A fresh add is assigned by its destination folder before the detached art lookup starts. The destination
+  // library's policy must therefore suppress the title request without suppressing the source's own cover.
+  registerAdapter(adapter('om-private', 'Zzz Om Add Private') as any);
+  await q(`INSERT INTO libraries (id, name, path, anilist_lookup)
+           VALUES ('om-add-private','Private adds','Zzz Om om-private',false)
+           ON CONFLICT (id) DO UPDATE SET anilist_lookup = false`);
+  await q(`INSERT INTO library_paths (library_id, path) VALUES ('om-add-private','Zzz Om om-private')
+           ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id`);
+  const beforePrivate = asked.length;
+  const added = await addSeriesFromSource({ source: 'om-private', sourceId: 'om-private-1', wait: true });
+  assert.equal(added.ok, true, added.message);
+  ID.addPrivate = (await q(`SELECT id FROM lib_series WHERE source_id = 'om-private'`))[0].id;
+  await new Promise((res) => setTimeout(res, 300));
+  assert.equal(asked.slice(beforePrivate).includes('Zzz Om Add Private'), false,
+    'an automatic add sent an opted-out library title to AniList');
+  const privateRow = (await q(`SELECT library_id FROM lib_series WHERE id = $1`, [ID.addPrivate]))[0];
+  assert.equal(privateRow.library_id, 'om-add-private', 'the test add did not land in the opted-out destination');
+  const privateArt = await art(ID.addPrivate);
+  assert.equal(privateArt?.cover, RED, "the privacy switch removed the source's own cover");
+  assert.equal(privateArt?.banner, null, 'automatic AniList art was stored for an opted-out add');
 });
 
 test('a library opt-out makes a lazy view send no title and store no miss; enabling or moving applies immediately', { skip }, async () => {

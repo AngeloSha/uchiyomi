@@ -275,6 +275,34 @@ CREATE TABLE IF NOT EXISTS series_listing (
 -- of the row. Rows written before v0.33.0 carry the empty default until the series' next check.
 ALTER TABLE series_listing ADD COLUMN IF NOT EXISTS copies jsonb NOT NULL DEFAULT '[]';
 
+-- The visible status can be blocked while a preference hides every stored copy. Keep the state underneath that
+-- temporary block so lifting it restores held/covered faithfully instead of making every chapter available. A row
+-- written before v0.55.8 cannot prove which natural state a blocked chapter had, so it fails closed as held until the
+-- next source refresh rebuilds it. Non-blocked rows already carry their natural state in status.
+ALTER TABLE series_listing ADD COLUMN IF NOT EXISTS unblocked_status text;
+UPDATE series_listing
+   SET unblocked_status = CASE
+     WHEN status IN ('available', 'held', 'covered') THEN status
+     ELSE 'held'
+   END
+ WHERE unblocked_status IS NULL
+    OR unblocked_status NOT IN ('available', 'held', 'covered');
+ALTER TABLE series_listing ALTER COLUMN unblocked_status SET DEFAULT 'available';
+ALTER TABLE series_listing ALTER COLUMN unblocked_status SET NOT NULL;
+DO $migration$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'series_listing'::regclass
+       AND conname = 'series_listing_unblocked_status_check'
+  ) THEN
+    ALTER TABLE series_listing
+      ADD CONSTRAINT series_listing_unblocked_status_check
+      CHECK (unblocked_status IN ('available', 'held', 'covered'));
+  END IF;
+END
+$migration$;
+
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
 -- Nothing reads these yet; a background job fills them in, and fp_at is set even on failure so an unreadable
@@ -302,6 +330,7 @@ CREATE INDEX IF NOT EXISTS lib_books_pruned_idx ON lib_books (pruned_at) WHERE p
 --   'deleted'  the admin's Delete files removed it (lib/libraryAdmin.ts deleteSeriesFiles)
 --   'missing'  the admin's "Verify chapter files" task found no file behind the row (lib/verifyFiles.ts):
 --              a database-only restore, since chapter files are never in a backup
+--   'rescan_missing' Rescan found a read-library entry absent; unlike deliberate deletion it may be fetched again
 -- ⚠️ The updater's have-set reads this. A cleanup or Delete-files tombstone still counts as HELD -- "we let
 -- the bytes go on purpose, do not fetch it again" is the whole point of those marks -- while a 'missing'
 -- one does not, so the next sweep fetches it again. That is what makes a restore recover its chapters
@@ -370,6 +399,27 @@ CREATE TABLE IF NOT EXISTS audit_log (
   user_agent text
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at DESC);
+
+-- v0.55.8: Rescan used to label a vanished read-library file as if Delete files had removed it. That made it a held
+-- tombstone forever, so restoring only the database could never fetch it again. A row outside the owned download root
+-- is changed to rescan_missing, except where a chapter-delete audit proves deliberate removal. Its bookIds alone do
+-- not prove that a particular request succeeded, because the audit includes skipped requests too, so it proves one
+-- book only when every requested id was applied. This intentionally runs on every boot: an older image
+-- used after rollback can write the ambiguous value again, and the update is idempotent.
+UPDATE lib_books b
+   SET pruned_reason = 'rescan_missing'
+ WHERE b.pruned_reason = 'deleted'
+   AND b.root IS DISTINCT FROM '${(process.env.DL_ROOT || '/library-dl').replaceAll("'", "''")}'
+   AND NOT EXISTS (
+     SELECT 1 FROM audit_log a
+      WHERE a.event = 'series.chapters_delete'
+        AND a.detail->>'id' = b.series_id
+        AND jsonb_typeof(a.detail->'bookIds') = 'array'
+        AND a.detail->'bookIds' ? b.id
+        AND CASE WHEN COALESCE(a.detail->>'applied', '') ~ '^[0-9]+$'
+                 THEN (a.detail->>'applied')::int = jsonb_array_length(a.detail->'bookIds')
+                 ELSE false END
+   );
 
 -- per-source health: block / rate-limit detection (status: ok | rate_limited | blocked | down)
 CREATE TABLE IF NOT EXISTS source_health (
@@ -723,6 +773,9 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
 -- A library can carry an age rating that its series inherit. Rating 210 series one at a time is not a thing
 -- anyone does, so without this the age limits shipped alongside are impractical on a real library.
 ALTER TABLE libraries ADD COLUMN IF NOT EXISTS age_rating int;
+-- Per-library privacy boundary for implicit AniList enrichment (#168). Existing and rollback-created libraries keep
+-- the historical behaviour; switching it off never clears art, tracker links, direction or type already learned.
+ALTER TABLE libraries ADD COLUMN IF NOT EXISTS anilist_lookup boolean NOT NULL DEFAULT true;
 
 -- Why a series is in the library it is in. The scanner already keeps an existing series where it is, so a
 -- hand-move survives a rescan by accident; this records that it was DELIBERATE, so creating or re-pathing a

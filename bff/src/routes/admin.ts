@@ -71,7 +71,7 @@ import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
-import { copyToChapter, reapplyBlocklist, seriesListingGroups, type ListingCopy } from '../lib/seriesListing';
+import { copyToChapter, reapplyBlocklistInTransaction, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
@@ -791,17 +791,19 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
     if (b.scanlatorPrefs !== undefined) {
-      const before = (await one<{ p: { blocked?: string[] } | null }>('SELECT scanlator_prefs AS p FROM server_settings WHERE id = 1').catch(() => null))?.p?.blocked ?? [];
-      await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
-      // The groups blocked or unblocked by this save, applied to the stored listing of every series that lists them
-      // (lib/seriesListing.ts reapplyBlocklist): hidden, or shown again, on the next request rather than the next check.
-      const after = b.scanlatorPrefs.blocked ?? [];
-      const key = (g: string) => normGroup(g);
-      const was = new Set(before.map(key)), now = new Set(after.map(key));
-      const moved = [...before.filter((g) => !now.has(key(g))), ...after.filter((g) => !was.has(key(g)))];
-      if (moved.length) {
-        await seriesListingGroups(moved).then((ids) => reapplyBlocklist(ids))
-          .catch((e) => console.warn(`[prefs] reapplying the blocklist failed: ${(e as Error)?.message || e}`));
+      try {
+        await tx(async (qq) => {
+          // Global saves take the settings row first, then every affected series in stable id order inside
+          // reapplyBlocklistInTransaction. A listing refresh takes each series row then its advisory lock, so the
+          // two paths cannot publish a choice calculated from the preferences the save just replaced.
+          await qq('SELECT id FROM server_settings WHERE id = 1 FOR UPDATE');
+          await qq('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+            [JSON.stringify(b.scanlatorPrefs)]);
+          await reapplyBlocklistInTransaction(qq);
+        });
+      } catch (e) {
+        console.warn(`[prefs] applying the global blocklist failed: ${(e as Error)?.message || e}`);
+        return reply.code(503).send({ error: 'blocklist_apply_failed' });
       }
     }
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
@@ -1453,12 +1455,20 @@ export default async function adminRoutes(app: FastifyInstance) {
       detail.autoUpdate = b.data.autoUpdate;
     }
     if (b.data.scanlatorPrefs !== undefined) {
-      await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
-        [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
+      try {
+        await tx(async (qq) => {
+          // The UPDATE takes the series row first; the helper then takes its transaction advisory lock and re-reads
+          // the effective settings before replacing every denormalised chosen field. Preference and listing commit
+          // together, or neither does.
+          await qq('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
+            [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
+          await reapplyBlocklistInTransaction(qq, [id]);
+        });
+      } catch (e) {
+        console.warn(`[prefs] applying the blocklist to ${id} failed: ${(e as Error)?.message || e}`);
+        return reply.code(503).send({ error: 'blocklist_apply_failed' });
+      }
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
-      // A block or unblock takes effect on the stored listing now, not at the next check (lib/seriesListing.ts
-      // reapplyBlocklist): the page's next request hides, or shows again, the chapters only blocked groups released.
-      await reapplyBlocklist([id]).catch((e) => console.warn(`[prefs] reapplying the blocklist to ${id} failed: ${(e as Error)?.message || e}`));
     }
     if (b.data.sourcePrefs !== undefined) {
       // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one
@@ -2468,7 +2478,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         // below still handles it (the file is where it was, so the downloader skips and the mark clears).
         if (e?.code !== 'ENOENT') console.warn(`[refetch] could not set aside ${t.row.file}: ${e?.message || e}`);
       });
-      await tombstoneBooks([t.row.id]);
+      // A live row is marked only while its old file is aside. A deliberate tombstone is already marked,
+      // and overwriting its reason with NULL would make a failed restore lose deletion provenance.
+      if (!t.row.pruned) await tombstoneBooks([t.row.id]);
     }
     await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
       [id, todo.map((t) => t.row.number)]).catch(() => {});
@@ -2598,9 +2610,9 @@ export default async function adminRoutes(app: FastifyInstance) {
   // library into several named after scrapers. Library zero covers the whole root and always exists.
 
   app.get('/api/admin/libraries', async () => {
-    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; n: number; pinned: number; members: string[] }>(
+    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; n: number; pinned: number; members: string[] }>(
       // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
-      `SELECT l.id, l.name, l.path, l.age_rating,
+      `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup,
               (SELECT coalesce(array_agg(lp.path ORDER BY lp.path <> l.path, lp.path), '{}') FROM library_paths lp
                 WHERE lp.library_id = l.id) AS paths,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${visibleToAll('s')}) AS n,
@@ -2741,6 +2753,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // PATCH the rating, which meant a failed second call left a library that silently showed everything
       // to everyone under a "Created" toast.
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
+      // Automatic title/id enrichment only. Manual Admin Art, relink and tracker actions remain available.
+      anilistLookup: z.boolean().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const raw = b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
@@ -2756,8 +2770,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Checked under the lock, so two saves cannot both take one folder.
       const held = await heldElsewhere(qq, id, paths);
       if (held) return { held };
-      await qq(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,$2,$3,$4)`,
-        [id, b.data.name.trim(), paths[0], b.data.ageRating ?? null]);
+      await qq(`INSERT INTO libraries (id, name, path, age_rating, anilist_lookup) VALUES ($1,$2,$3,$4,$5)`,
+        [id, b.data.name.trim(), paths[0], b.data.ageRating ?? null, b.data.anilistLookup ?? true]);
       // Reassignment is deliberate and happens here, not in a scan: the scanner keeps an existing folder in
       // the library it is already in, precisely so it can never re-mint an id by recomputing. The longest folder
       // wins, so a new `Manga/Seinen` takes from `Manga` and never the other way, and a pinned series stays put:
@@ -2783,6 +2797,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       paths: z.array(z.string().max(300)).min(1).max(LIBRARY_MAX_FOLDERS).optional(),
       // A default its series inherit. null clears it.
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
+      // false stops future implicit AniList calls for series currently in this library; it does not erase metadata.
+      anilistLookup: z.boolean().optional(),
       // Who may see it. See the note below: this is not simply "insert a row".
       members: z.array(z.string()).optional(),
     }).safeParse(req.body);
@@ -2816,6 +2832,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     if (b.data.ageRating !== undefined) {
       await q('UPDATE libraries SET age_rating = $2 WHERE id = $1', [id, b.data.ageRating]);
+    }
+    if (b.data.anilistLookup !== undefined) {
+      await q('UPDATE libraries SET anilist_lookup = $2 WHERE id = $1', [id, b.data.anilistLookup]);
     }
 
     /**

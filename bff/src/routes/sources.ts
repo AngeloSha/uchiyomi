@@ -99,6 +99,7 @@ import {
 import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
+import { automaticAniListAllowed } from '../lib/anilistPolicy';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromSource, learnTypeFromAniList } from '../lib/seriesType';
 import { noticeListed } from '../lib/noticeChapters';
@@ -1227,6 +1228,10 @@ async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCt
  */
 async function artByTitle(where: { id: string } | { folder: string }, title: string): Promise<void> {
   try {
+    // This add-time enrichment is implicit. Resolve the policy from the series' current library immediately before
+    // sending its title; by-folder covers a fresh download after persistScan, and fails closed if that row vanished.
+    // A manual Admin Art search deliberately bypasses this helper.
+    if (!(await automaticAniListAllowed(where))) return;
     const names = await namesOf(where);
     if (!names.includes(title)) names.unshift(title);
     const a = await fetchAniListArt(title, names);
