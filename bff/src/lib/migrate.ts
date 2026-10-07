@@ -1477,16 +1477,25 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only bool
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_result jsonb;
 
--- v0.55.7 (#168): an online match is stored only when it is named as the series is (lib/onlineMatch.ts). checked_at is
+-- v0.55.7: ONE block, the release's pieces in order. All additive and nullable: v0.55.6 boots on this schema and
+-- never names them.
+--
+-- (#168) An online match is stored only when it is named as the series is (lib/onlineMatch.ts). checked_at is
 -- when an automatic AniList link (linked_by NULL) or a stored cover or banner was held to that check; NULL is never,
 -- which the background recheck takes up (lib/matchCheck.ts): every row from before this release, a link an edition
 -- copies from another, and whatever an older version writes after a rollback. Deliberately NO DEFAULT: ADD COLUMN would
 -- write it into every existing row, and each would read as checked. The recheck's last run is persisted like Verify's,
--- for the Tasks line. All nullable: v0.55.6 boots on this schema and never names them.
+-- for the Tasks line.
 ALTER TABLE series_trackers ADD COLUMN IF NOT EXISTS checked_at timestamptz;
 ALTER TABLE series_art      ADD COLUMN IF NOT EXISTS checked_at timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_result jsonb;
+--
+-- (#150) The file a scan last read a series' ComicInfo from -- its first chapter archive -- as JSON [how it was
+-- read, path, mtime ms, size] (lib/library.ts infoReadOf). A scan opens that archive again only when the file is no
+-- longer the one it read: on @Kedryn's Unraid every scan opened the first archive of every folder. NULL = read it at the
+-- next scan. v0.55.6 never names it: its scans read every folder, as they always did.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS info_read text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

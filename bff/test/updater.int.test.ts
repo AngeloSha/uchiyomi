@@ -1492,3 +1492,62 @@ test('queues follow the source a series is asked through', { skip }, async () =>
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qmain', 'upd-qcool', 'upd-qfine']]);
   }
 });
+
+test('the sweep leaves a held series for later, and visits it once the hold is gone', { skip }, async () => {
+  // v0.55.7 (#150, a known gap): Rescan everything's Apply holds every series it changes in bulkNewest's busyFolders, the
+  // mark every other writer honours, and the sweep never asked -- it downloaded into a series mid-Apply. Reintroduce by
+  // dropping the folderBusy test in runUpdateAll: the held series is listed and its chapter fetched during the hold.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { busyFolders } = await import('../src/lib/bulkNewest');
+  const asked: string[] = [];
+  /** Called by the source as it lists a series: a test lets a hold go here, while the sweep is mid-way. */
+  let onList: ((ref: string) => void) | null = null;
+  registerAdapter({
+    id: 'upd-hold', name: 'upd-hold',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: 'upd-hold', title: sid }; },
+    async listChapters(ref: string) { asked.push(ref); onList?.(ref); return [{ number: 1, title: 'Chapter 1', sourceId: `${ref}:1` }]; },
+    async getPageUrls(chId: string) { return [`https://example.invalid/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  for (const k of ['hold1', 'hold2', 'free']) {
+    await mkSeries(k, 'upd-hold');
+    await q('UPDATE lib_series SET source_series_id = $2 WHERE id = $1', [S(k), `ref-${k}`]);
+  }
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-hold']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  // The held series first in the sweep's order.
+  const first = async (k: string) => q(
+    `UPDATE lib_series SET source_checked_at = NULL, latest_mtime = CASE id WHEN $1 THEN 2000 ELSE 1000 END WHERE id = ANY($2::text[])`,
+    [S(k), [S(k), S('free')]]);
+  try {
+    // Held for the whole sweep: put back once, still held at its second turn, skipped -- never asked, nothing fetched.
+    await only(['hold1', 'free']);
+    await first('hold1');
+    busyFolders.add(S('hold1'));
+    const r1 = await runUpdateAll({ maxNew: 5 });
+    assert.ok(!asked.includes('ref-hold1') && !onDisk('hold1', 1), 'the sweep went into a series another job holds');
+    assert.ok(onDisk('free', 1), 'the series behind it was not visited');
+    assert.equal((await stamp('hold1')).t, null, 'a series the sweep never asked was stamped checked');
+    assert.deepEqual([r1.visited, r1.outcomes.skipped], [1, 1], JSON.stringify(r1));
+    busyFolders.delete(S('hold1'));
+
+    // Let go while the sweep is on the series behind it: the held one is visited at its second turn.
+    asked.length = 0;
+    await only(['hold2', 'free']);
+    await first('hold2');
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S('free')]);
+    rmSync(join(ROOT, S('free')), { recursive: true, force: true });
+    busyFolders.add(S('hold2'));
+    onList = (ref) => { if (ref === 'ref-free') busyFolders.delete(S('hold2')); };
+    const r2 = await runUpdateAll({ maxNew: 5 });
+    assert.deepEqual(asked, ['ref-free', 'ref-hold2'], 'the series held at its first turn was not visited once the hold was gone');
+    assert.ok(onDisk('hold2', 1));
+    assert.deepEqual([r2.visited, r2.outcomes.skipped], [2, 0], JSON.stringify(r2));
+  } finally {
+    onList = null;
+    busyFolders.delete(S('hold1'));
+    busyFolders.delete(S('hold2'));
+    await q('DELETE FROM source_health WHERE source_id = $1', ['upd-hold']);
+  }
+});

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3295
+    "strings": 3315
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3298,5 +3298,25 @@
   "AniList or MangaDex did not answer: tried again at the next run": "AniList или MangaDex не ответил: повтор при следующем запуске",
   "Use the first page": "Использовать первую страницу",
   "The first page, by your choice: nothing found online replaces it.": "Первая страница — по вашему выбору: найденное в сети её не заменит.",
-  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Автоматически: обложка источника, или из AniList, если запись там называется так же, иначе первая страница."
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Автоматически: обложка источника, или из AniList, если запись там называется так же, иначе первая страница.",
+  "Pointing chapters at their moved files: {done} of {total}": "Главы переносятся на перемещённые файлы: {done} из {total}",
+  "Pointing chapters at their moved files…": "Главы переносятся на перемещённые файлы…",
+  "1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept": "1 файл перемещён или переименован внутри своей серии: при применении глава последует за ним, история чтения сохранится",
+  "{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept": "Файлов, перемещённых или переименованных внутри своей серии: {n}. При применении главы последуют за ними, история чтения сохранится",
+  "1 chapter now follows its moved or renamed file": "1 глава теперь следует за своим перемещённым или переименованным файлом",
+  "{n} chapters now follow their moved or renamed files": "Глав, теперь следующих за своими перемещёнными или переименованными файлами: {n}",
+  "1 moved file kept beside its old chapter: both have reading history": "1 перемещённый файл оставлен рядом со своей прежней главой: у обоих есть история чтения",
+  "{n} moved files kept beside their old chapters: both have reading history": "Перемещённых файлов, оставленных рядом с прежними главами: {n}. В каждой паре история чтения есть у обоих",
+  "Merging series: {done} of {total}": "Объединение серий: {done} из {total}",
+  "Merging series…": "Объединение серий…",
+  "Merge into the series their files went to (optional)": "Объединить с серией, куда ушли их файлы (по желанию)",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "Все файлы глав этих серий теперь в одной другой серии. Отметьте серию, чтобы объединить её с той: история чтения, закладки, избранное и оценки всех перейдут вместе с ней, а главы последуют за своими файлами. На диске ничего не трогается.",
+  "Merge “{from}” into “{into}”": "Объединить «{from}» с «{into}»",
+  "1 series merged into the series its files went to": "1 серия объединена с серией, куда ушли её файлы",
+  "{n} series merged into the series their files went to": "Серий, объединённых с серией, куда ушли их файлы: {n}",
+  "1 merge left alone: the series changed since the preview": "1 объединение не выполнено: серия изменилась после предпросмотра",
+  "{n} merges left alone: the series changed since the preview": "Объединений не выполнено: {n}, серии изменились после предпросмотра",
+  "Nothing is hidden or removed. Open one to remove it.": "Ничего не скрывается и не убирается. Откройте серию, чтобы убрать её.",
+  "Nothing is hidden or removed. Open one to remove it, or merge it below into the series its files went to.": "Ничего не скрывается и не убирается. Откройте серию, чтобы убрать её, или объедините её ниже с серией, куда ушли её файлы.",
+  "Its files are now in “{title}”": "Её файлы теперь в «{title}»"
 }

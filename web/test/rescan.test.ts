@@ -9,8 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  appliedLine, applyRefusalText, exampleLine, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine, unmountedLine,
-  type RescanStatus,
+  appliedLine, applyRefusalText, exampleLine, followLine, intoLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView,
+  uncheckedLine, unmountedLine, type RescanStatus,
 } from '../lib/rescan';
 import { taskResult } from '../lib/tasks';
 
@@ -45,6 +45,9 @@ test('a running rescan says its phase, and how far when there is a count', () =>
   assert.equal(s('pair', 3, 7), 'Checking for moved or renamed files: 3 of 7');
   assert.equal(s('numbers'), 'Reading file names by the new rules…');
   assert.equal(s('mark', 9, 4, 'apply'), 'Applying: 4 of 4', 'done never runs past the total');
+  assert.equal(s('follow', 2, 5, 'apply'), 'Pointing chapters at their moved files: 2 of 5');
+  assert.equal(s('follow', 0, 0, 'apply'), 'Pointing chapters at their moved files…');
+  assert.equal(s('merge', 1, 2, 'apply'), 'Merging series: 1 of 2');
   assert.equal(s(null, 0, null, 'apply'), 'Applying…');
 });
 
@@ -81,6 +84,46 @@ test('what an Apply did leads with a folder it left alone, and is the Tasks line
   // The Tasks line: the rescan's result is told apart by `marked`, and never read as the verify's or the cleanup's.
   // Reintroduce by dropping the `marked` branch in taskResult: the line is empty.
   assert.equal(taskResult(r), ` · ${appliedLine(r)}`);
+});
+
+test('files moved inside their series say their chapters follow them, and the Apply line says how many did', () => {
+  // v0.55.7 (#150): "(kept)" alone read as "left as it is" -- the renamed chapter twice on its page. Reintroduce by
+  // dropping the twins clause from appliedLine: a chapter Apply kept twice, both rows read, reads as a fault.
+  assert.equal(followLine(1), '1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept');
+  assert.equal(followLine(4), '4 files were moved or renamed within their series: on Apply their chapters follow them, reading history kept');
+  const r = { ok: true as const, plan: 'p', marked: 0, back: 0, changed: 0, moved: 5, downloads: 0, emptied: 0, unmounted: [], ms: 40 };
+  assert.equal(appliedLine({ ...r, followed: 4, twins: 1 }),
+    '0 chapters marked as no longer on disk · 5 were probably moved or renamed (kept) · 4 chapters now follow their moved or renamed files · 1 moved file kept beside its old chapter: both have reading history');
+  assert.equal(appliedLine({ ...r, moved: 1, followed: 1 }),
+    '0 chapters marked as no longer on disk · 1 was probably moved or renamed (kept) · 1 chapter now follows its moved or renamed file');
+  assert.match(appliedLine({ ...r, twins: 2 }), / · 2 moved files kept beside their old chapters: both have reading history$/);
+  assert.doesNotMatch(appliedLine(r), /follow|beside/, 'a result from before v0.55.7 grew a clause');
+});
+
+test('a merge offer names both series, isolated, and the Apply line says what was merged and what was left alone', () => {
+  // v0.55.7 (#150), Zagor's folders moved into one. Reintroduce by dropping the notMerged clause from appliedLine: a merge
+  // the admin ticked that no longer held at Apply reads as done.
+  assert.equal(mergeLabel({ title: 'Zagor 1-100', into: { seriesId: 's2', title: 'Zagor' } }), 'Merge “\u2068Zagor 1-100\u2069” into “\u2068Zagor\u2069”');
+  const r = { ok: true as const, plan: 'p', marked: 0, back: 0, changed: 0, moved: 200, downloads: 0, emptied: 0, unmounted: [], ms: 40 };
+  assert.equal(appliedLine({ ...r, followed: 200, merged: 2 }),
+    '0 chapters marked as no longer on disk · 200 were probably moved or renamed (kept) · 200 chapters now follow their moved or renamed files · 2 series merged into the series their files went to');
+  assert.match(appliedLine({ ...r, merged: 1 }), / · 1 series merged into the series its files went to$/);
+  assert.match(appliedLine({ ...r, notMerged: 1 }), / · 1 merge left alone: the series changed since the preview$/);
+  assert.match(appliedLine({ ...r, notMerged: 3 }), / · 3 merges left alone: the series changed since the preview$/);
+});
+
+test('the panel says where a series\'s files went, how many moved files it does not list, and promises no merge it cannot do', () => {
+  // v0.55.7 (#150): the advice told Kedryn to merge his emptied series, and nothing in the panel could. Reintroduce the
+  // old advice: the first match below fails. Reintroduce by dropping the "and N more" under the capped moved list:
+  // a preview with 350 moved files listed 200 and said nothing of the rest.
+  assert.equal(intoLine('Zagor'), 'Its files are now in “\u2068Zagor\u2069”');
+  const panel = code(read('components/RescanTask.tsx'));
+  assert.doesNotMatch(panel, /or to merge it with the series its files went to/, 'the advice promises a merge the panel cannot do');
+  assert.match(panel, /offers \? tr\('Nothing is hidden or removed\. Open one to remove it, or merge it below into the series its files went to\.'\)\s*: tr\('Nothing is hidden or removed\. Open one to remove it\.'\)/,
+    'the advice is not the merge one only when a merge is offered');
+  assert.match(panel, /<Emptied plan=\{plan\} offers=\{merges\.length > 0\} \/>/, 'the preview does not tell the list a merge is offered');
+  assert.match(panel, /\{e\.into && <span[^>]*>\{intoLine\(e\.into\.title\)\}<\/span>\}/, 'a series with nothing left does not say where its files went');
+  assert.match(panel, /\{plan\.moved > plan\.movedList\.length && \(/, 'the capped moved list does not say how many more');
 });
 
 test('a refused Apply names the job it would run beside, and a stale preview asks to run it again', () => {
@@ -132,9 +175,16 @@ test('the Tasks row starts the preview, and the panel under it carries the plan,
     'a started preview does not wake the panel');
   const panel = code(read('components/RescanTask.tsx'));
   // The plan the admin saw, by id, and the series ticked in its opt-in: nothing else decides what Apply does.
-  assert.match(panel, /api<[^>]+>\('\/api\/admin\/tasks\/rescan\/apply', \{\s*method: 'POST', json: \{ plan: plan\.id, renumber: \[\.\.\.ticked\] \},/,
-    'Apply does not send the plan id and the ticked series');
+  assert.match(panel, /api<[^>]+>\('\/api\/admin\/tasks\/rescan\/apply', \{\s*method: 'POST', json: \{ plan: plan\.id, renumber: \[\.\.\.ticked\], merge: \[\.\.\.merging\] \},/,
+    'Apply does not send the plan id, the ticked series and the ticked merges');
   assert.match(panel, /disabled=\{busy \|\| nothing \|\| plan\.stale\}/, 'Apply can be pressed on a stale preview, or with nothing to do');
+  // v0.55.7: files moved inside their series are something for Apply to do, though nothing is gone. Reintroduce by
+  // dropping `!plan.follow`: a preview whose only finding is a renamed file can never be applied.
+  assert.match(panel, /const nothing = plan\.gone === 0 && !plan\.follow && ticked\.size === 0 && merging\.size === 0;/,
+    'a preview with only moved files, or only a merge ticked, cannot be applied');
+  // The merge list scrolls in place too, and each box sends its series.
+  assert.match(panel, /data-rescan-merges/, 'the merge offers are not in the panel');
+  assert.match(panel, /onChange=\{\(e\) => toggleMerge\(m\.seriesId, e\.target\.checked\)\}/, 'a merge box does not tick its series');
   // Every series with nothing left is a link to its page: the rescan never hides one, so the admin decides there.
   assert.match(panel, /<Link href=\{`\/series\/\?id=\$\{encodeURIComponent\(e\.seriesId\)\}`\} dir="auto"/, 'a series with nothing left is not a link');
   // The opt-in's list scrolls in place, so it opts out of the smooth scroll like every inner scroller.

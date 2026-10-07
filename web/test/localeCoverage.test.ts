@@ -251,6 +251,11 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
   'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
   'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',
+  // v0.55.7, Rescan everything: a chapter follows its file (lib/rescan.ts), each a file and a chapter, "its" and "their".
+  '1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept':
+    '{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept',
+  '1 chapter now follows its moved or renamed file': '{n} chapters now follow their moved or renamed files',
+  '1 moved file kept beside its old chapter: both have reading history': '{n} moved files kept beside their old chapters: both have reading history',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {

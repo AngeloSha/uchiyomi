@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3295
+    "strings": 3315
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3298,5 +3298,25 @@
   "AniList or MangaDex did not answer: tried again at the next run": "AniList oder MangaDex hat nicht geantwortet: beim nächsten Lauf erneut versucht",
   "Use the first page": "Erste Seite verwenden",
   "The first page, by your choice: nothing found online replaces it.": "Die erste Seite, von dir gewählt: Nichts, was online gefunden wird, ersetzt sie.",
-  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automatisch: das Cover der Quelle, oder das von AniList, wenn sein Eintrag denselben Namen trägt, sonst die erste Seite."
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automatisch: das Cover der Quelle, oder das von AniList, wenn sein Eintrag denselben Namen trägt, sonst die erste Seite.",
+  "Pointing chapters at their moved files: {done} of {total}": "Kapitel werden auf ihre verschobenen Dateien umgestellt: {done} von {total}",
+  "Pointing chapters at their moved files…": "Kapitel werden auf ihre verschobenen Dateien umgestellt…",
+  "1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept": "1 Datei wurde innerhalb ihrer Serie verschoben oder umbenannt: beim Anwenden folgt ihr das Kapitel, der Leseverlauf bleibt",
+  "{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept": "{n} Dateien wurden innerhalb ihrer Serie verschoben oder umbenannt: beim Anwenden folgen ihnen die Kapitel, der Leseverlauf bleibt",
+  "1 chapter now follows its moved or renamed file": "1 Kapitel folgt jetzt seiner verschobenen oder umbenannten Datei",
+  "{n} chapters now follow their moved or renamed files": "{n} Kapitel folgen jetzt ihren verschobenen oder umbenannten Dateien",
+  "1 moved file kept beside its old chapter: both have reading history": "1 verschobene Datei bleibt neben ihrem alten Kapitel: beide haben einen Leseverlauf",
+  "{n} moved files kept beside their old chapters: both have reading history": "{n} verschobene Dateien bleiben neben ihren alten Kapiteln: jeweils beide haben einen Leseverlauf",
+  "Merging series: {done} of {total}": "Serien werden zusammengeführt: {done} von {total}",
+  "Merging series…": "Serien werden zusammengeführt…",
+  "Merge into the series their files went to (optional)": "Mit der Serie zusammenführen, zu der ihre Dateien gewandert sind (optional)",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "Jede Kapiteldatei dieser Serien liegt jetzt in einer einzigen anderen Serie. Hake eine an, um sie dort hinein zusammenzuführen: Leseverlauf, Lesezeichen, Favoriten und Bewertungen aller gehen mit, und ihre Kapitel folgen ihren Dateien. Auf der Festplatte wird nichts angefasst.",
+  "Merge “{from}” into “{into}”": "„{from}“ mit „{into}“ zusammenführen",
+  "1 series merged into the series its files went to": "1 Serie mit der Serie zusammengeführt, zu der ihre Dateien gewandert sind",
+  "{n} series merged into the series their files went to": "{n} Serien mit der Serie zusammengeführt, zu der ihre Dateien gewandert sind",
+  "1 merge left alone: the series changed since the preview": "1 Zusammenführung nicht ausgeführt: die Serie hat sich seit der Vorschau geändert",
+  "{n} merges left alone: the series changed since the preview": "{n} Zusammenführungen nicht ausgeführt: die Serien haben sich seit der Vorschau geändert",
+  "Nothing is hidden or removed. Open one to remove it.": "Nichts wird ausgeblendet oder entfernt. Öffne eine, um sie zu entfernen.",
+  "Nothing is hidden or removed. Open one to remove it, or merge it below into the series its files went to.": "Nichts wird ausgeblendet oder entfernt. Öffne eine, um sie zu entfernen, oder führe sie unten mit der Serie zusammen, zu der ihre Dateien gewandert sind.",
+  "Its files are now in “{title}”": "Ihre Dateien liegen jetzt in „{title}“"
 }

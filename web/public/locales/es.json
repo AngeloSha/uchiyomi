@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3295
+    "strings": 3315
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3298,5 +3298,25 @@
   "AniList or MangaDex did not answer: tried again at the next run": "AniList o MangaDex no respondió: se reintenta en la próxima ejecución",
   "Use the first page": "Usar la primera página",
   "The first page, by your choice: nothing found online replaces it.": "La primera página, por tu elección: nada que se encuentre en línea la reemplaza.",
-  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automático: la portada de la fuente, o la de AniList cuando su entrada tiene el mismo nombre; si no, la primera página."
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automático: la portada de la fuente, o la de AniList cuando su entrada tiene el mismo nombre; si no, la primera página.",
+  "Pointing chapters at their moved files: {done} of {total}": "Apuntando los capítulos a sus archivos movidos: {done} de {total}",
+  "Pointing chapters at their moved files…": "Apuntando los capítulos a sus archivos movidos…",
+  "1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept": "1 archivo se movió o se renombró dentro de su serie: al Aplicar, su capítulo lo sigue y se conserva el historial de lectura",
+  "{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept": "{n} archivos se movieron o se renombraron dentro de su serie: al Aplicar, sus capítulos los siguen y se conserva el historial de lectura",
+  "1 chapter now follows its moved or renamed file": "1 capítulo sigue ahora a su archivo movido o renombrado",
+  "{n} chapters now follow their moved or renamed files": "{n} capítulos siguen ahora a sus archivos movidos o renombrados",
+  "1 moved file kept beside its old chapter: both have reading history": "1 archivo movido se conserva junto a su capítulo anterior: los dos tienen historial de lectura",
+  "{n} moved files kept beside their old chapters: both have reading history": "{n} archivos movidos se conservan junto a sus capítulos anteriores: en cada caso los dos tienen historial de lectura",
+  "Merging series: {done} of {total}": "Fusionando series: {done} de {total}",
+  "Merging series…": "Fusionando series…",
+  "Merge into the series their files went to (optional)": "Fusionar con la serie a la que fueron sus archivos (opcional)",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "Todos los archivos de capítulo de estas series están ahora en una sola serie distinta. Marca una para fusionarla allí: el historial de lectura, los marcadores, los favoritos y las valoraciones de todos van con ella, y sus capítulos siguen a sus archivos. No se toca nada en el disco.",
+  "Merge “{from}” into “{into}”": "Fusionar «{from}» con «{into}»",
+  "1 series merged into the series its files went to": "1 serie fusionada con la serie a la que fueron sus archivos",
+  "{n} series merged into the series their files went to": "{n} series fusionadas con la serie a la que fueron sus archivos",
+  "1 merge left alone: the series changed since the preview": "1 fusión se dejó sin hacer: la serie cambió desde la vista previa",
+  "{n} merges left alone: the series changed since the preview": "{n} fusiones se dejaron sin hacer: las series cambiaron desde la vista previa",
+  "Nothing is hidden or removed. Open one to remove it.": "No se oculta ni se quita nada. Abre una para quitarla.",
+  "Nothing is hidden or removed. Open one to remove it, or merge it below into the series its files went to.": "No se oculta ni se quita nada. Abre una para quitarla, o fusiónala más abajo con la serie a la que fueron sus archivos.",
+  "Its files are now in “{title}”": "Sus archivos están ahora en «{title}»"
 }

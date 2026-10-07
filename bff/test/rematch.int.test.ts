@@ -212,6 +212,33 @@ test('rematch: never steals a series that is still sitting at its own folder', {
   assert.notEqual((await seriesRow('A Copy')).id, original.id, 'the copy took over the original');
 });
 
+test('rematch: a folder that has its own series is never rematched onto another', { skip }, async () => {
+  // v0.55.7 (#150): Zagor 1-100's chapters moved into the existing Zagor. Zagor's folder now shares every one of
+  // Zagor 1-100's fingerprints, and Zagor 1-100, its own folder gone, is the one candidate. The rematch used to run for
+  // a folder that has a row of its own: it moved Zagor 1-100 onto Zagor's folder, the unique index refused it, and the
+  // scan skipped Zagor's folder -- on every scan. Reintroduce by dropping `!known` from the rematch's condition in
+  // persistScan: the folder is in the scan report's skipped list and its new chapters are missing.
+  const { lastScanReport } = await import('../src/lib/library');
+  await chapter('Host', 'Chapter 1.cbz', 'host-1');
+  await chapter('Host', 'Chapter 2.cbz', 'host-2');
+  await chapter('Extra', 'Chapter 3.cbz', 'extra-3');
+  await chapter('Extra', 'Chapter 4.cbz', 'extra-4');
+  await scanAndFingerprint();
+  const host = await seriesRow('Host');
+  const extra = await seriesRow('Extra');
+
+  for (const f of ['Chapter 3.cbz', 'Chapter 4.cbz']) await rename(join(dir('Extra'), f), join(dir('Host'), f));
+  await rm(dir('Extra'), { recursive: true });
+  await persistScan();
+
+  assert.deepEqual(lastScanReport()?.skipped.filter((s) => s.folder === `${SRC}/Host`), [], 'the folder with its own series was skipped');
+  assert.deepEqual((await booksOf(host.id)).map((b: any) => b.file.split('/').pop()),
+    ['Chapter 1.cbz', 'Chapter 2.cbz', 'Chapter 3.cbz', 'Chapter 4.cbz'], 'the chapters moved into the folder were not indexed');
+  assert.equal((await seriesRow('Host')).id, host.id);
+  assert.equal((await q(`SELECT folder FROM lib_series WHERE id = $1`, [extra.id]))[0].folder, `${SRC}/Extra`,
+    'the other series was moved onto a folder that has its own');
+});
+
 test('rematch: refuses a candidate that is only partly fingerprinted', { skip }, async () => {
   // The specific danger: a series with 2 of its 3 chapters fingerprinted reports a total of 2, so sharing
   // those 2 reads as complete overlap when it is really two thirds. Such a candidate must be ignored.

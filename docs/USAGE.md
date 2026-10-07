@@ -1976,7 +1976,7 @@ Three tasks on **Admin → Tasks** look at your chapter files, and each does one
 
 | | What it does | What it never does |
 |---|---|---|
-| **Library scan** | Adds every chapter file it finds and updates the ones it knows. A file that comes back after it was marked gone is picked up again, on the same row. | Remove anything: a chapter whose file is gone stays listed as it was. |
+| **Library scan** | Adds every chapter file it finds and updates the ones it knows. A file that comes back after it was marked gone is picked up again, on the same row. Since v0.55.7 it reads a series' details (ComicInfo) from its first chapter file only when that file changed since the scan before, so a rescan of a large library on a slow share opens far fewer files. | Remove anything: a chapter whose file is gone stays listed as it was. |
 | **Verify chapter files** | After a database restored without its files (section 12): marks the chapters Uchiyomi *downloaded* whose file is gone, so the next sweep downloads them again onto the same rows. | Mark a chapter in a library you built by hand; it only counts those. |
 | **Rescan everything** (since v0.55.4) | For a library you built by hand: finds the chapters whose file is gone from your own folders, shows you first, and marks them *File no longer on disk* when you press **Apply**. | Erase a chapter, touch a file, hide a series, or change what anyone has read. |
 
@@ -1990,13 +1990,29 @@ nothing left*.
   disk* (never *Deleted from the server*: nothing deleted it), and everyone's progress, bookmarks and notes stay on it;
   the sweep does not fetch it back. Put the file back and the next scan picks it up again on the same row.
 - **Moved or renamed (kept)**: a file renamed in place, or moved into another folder, is a new chapter to the scanner,
-  and its old row looks gone. When the old file's fingerprint matches a file that is there, the old row is kept as it
-  is — the reading history is on it — and listed under *Which ones were probably moved or renamed*.
+  and its old row looks gone. When the old file's fingerprint matches a file that is there, the old row is kept — the
+  reading history is on it — and listed under *Which ones were probably moved or renamed*. Since v0.55.7, when both are
+  in the same series, **Apply** points the old chapter at the new file and removes the copy the scan made, so the
+  chapter shows once, with everyone's progress, bookmarks and notes (*3 files were moved or renamed within their series:
+  on Apply their chapters follow them, reading history kept*). A new copy someone has already opened is never removed:
+  both are kept (*1 moved file kept beside its old chapter: both have reading history*). A file moved into another
+  series is left as it is.
+- **Fingerprints** are what tell a moved file from a gone one, and a file can only be recognised after a move if it was
+  fingerprinted before it. Since v0.55.7 that happens a few minutes after a scan finds a new file (and every six hours,
+  as before), so if you reorganise files you have only just added, give it those few minutes after the scan first.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
-  open one to *Remove* it, or to merge it with the series its files went to (a renamed folder becomes a new series
-  unless `LIBRARY_REMATCH` is on, see CONFIGURATION.md).
+  open one to *Remove* it. When all its files went into one other series, it says which (*Its files are now in
+  “Zagor”*). *Which ones were probably moved or renamed* lists up to 200 files, then how many more.
+- **Merge into the series their files went to** (since v0.55.7, optional): when every chapter file of a series moved
+  into one other series — you unpacked *Zagor* into folders of 100 chapters, each became a series, and then you moved
+  them all into one *Zagor* folder — the preview offers *Merge “Zagor 1-100” into “Zagor”*. Tick the ones you want:
+  **Apply** merges each into the other series, with everyone's reading history, bookmarks, favourites, ratings and the
+  tracker link (when the other series has none), and its chapters follow their files as above, so each chapter shows
+  once. Apply checks each one again first — a series that got a file back, or one hidden, merged or being renumbered
+  since the preview, is left alone (*1 merge left alone: the series changed since the preview*). Nothing is merged
+  without its tick, and nothing on disk is touched.
 - A folder (`/library`, `/library-dl`) with no file behind any of its chapters, or with more than nine in ten gone,
   *looks unmounted*, and nothing under it is touched — the rule *Verify chapter files* follows. A file that could not
   be checked at all (a permission, a disk error) is never called gone.
@@ -2009,7 +2025,8 @@ nothing left*.
 - A series that is downloading or being checked when Apply reaches it — a *Fetch*, the slow archive's next chapter,
   *Fetch newest*, a check for new chapters — is left alone, neither marked nor renumbered (*1 series had a download or a
   check running and was left alone*): run it again when that is done. Every other series it changes waits for it: a
-  *Fetch* there says a download is already running, and the slow archive takes its next chapter once Apply has finished.
+  *Fetch* there says a download is already running, the slow archive takes its next chapter once Apply has finished,
+  and (since v0.55.7) the chapter sweep comes back to it later in the same sweep, or checks it first next time.
 - It never runs by itself — not at start-up, not on a schedule — for Verify's reason: a share that is not mounted yet
   looks exactly like a library with every file gone.
 
