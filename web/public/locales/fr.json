@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3327
+    "strings": 3341
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3330,5 +3330,19 @@
   "+1 chapter vs the current pick": "+1 chapitre par rapport au choix actuel",
   "1 fewer chapter than the current pick": "1 chapitre de moins que le choix actuel",
   "No file": "Absent",
-  "Deleted": "Effacé"
+  "Deleted": "Effacé",
+  "Collection created": "Collection créée",
+  "Could not create the collection": "Impossible de créer la collection",
+  "Delete “{name}”? The series stay in your library.": "Supprimer « {name} » ? Les séries restent dans votre bibliothèque.",
+  "Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page.": "Regroupez des séries en listes de lecture — « À lire », « Favoris terminés », ce que vous voulez. Créez-en une et ajoutez des séries depuis la page de n’importe quelle série.",
+  "Delete “{name}”": "Supprimer « {name} »",
+  "Colour {n}": "Couleur {n}",
+  "Could not change the order": "Impossible de changer l’ordre",
+  "Added to “{name}”": "Ajoutée à « {name} »",
+  "1 file fingerprinted": "Empreinte de 1 fichier enregistrée",
+  "{n} files fingerprinted": "Empreintes de {n} fichiers enregistrées",
+  "1 file could not be read": "1 fichier n’a pas pu être lu",
+  "{n} files could not be read": "{n} fichiers n’ont pas pu être lus",
+  "1 file still being written, left for the next pass": "1 fichier encore en cours d’écriture, laissé pour le prochain passage",
+  "{n} files still being written, left for the next pass": "{n} fichiers encore en cours d’écriture, laissés pour le prochain passage"
 }

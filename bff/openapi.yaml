@@ -6430,6 +6430,8 @@ paths:
         Since v0.55.4 the list always carries `rescan` ("Rescan everything", schedule "on demand"): `running`
         while its preview or Apply runs, and `lastRun`/`lastResult` the last APPLY's (see POST
         /api/admin/tasks/rescan/apply), persisted in server_settings.rescan_last_run / rescan_last_result.
+        The `fingerprint` entry's `lastResult` is this process's last pass, {done, failed, young, ms} -- `young`
+        (since v0.55.7) the files a pass the server started left for a later one, written in the last minute.
       security:
         - bearer: []
       responses:

@@ -22,7 +22,7 @@ function SortChips({ value, onPick }: { value: ListSort; onPick: (s: ListSort) =
   return (
     <div className="flex flex-wrap gap-1.5">
       {LIST_SORTS.map((s) => (
-        <button key={s.key} type="button" onClick={() => onPick(s.key)} aria-pressed={value === s.key}
+        <button key={s.key} type="button" onClick={() => onPick(s.key)} aria-pressed={value === s.key} data-list-sort={s.key}
           className={`chip text-xs ${value === s.key ? 'chip-active' : ''}`}>{tr(s.label)}</button>
       ))}
     </div>
@@ -71,7 +71,7 @@ function CollectionInner() {
 
   const removeItem = async (s: Series) => {
     try { await api(`/api/collections/${id}/items/${s.id}`, { method: 'DELETE' }); inval(); }
-    catch { toast('Failed', 'error'); }
+    catch { toast(tr('Failed'), 'error'); }
   };
 
   const move = async (s: Series, dir: -1 | 1) => {
@@ -81,7 +81,7 @@ function CollectionInner() {
     if (idx < 0 || to < 0 || to >= ids.length) return;
     [ids[idx], ids[to]] = [ids[to], ids[idx]];
     try { await api(`/api/collections/${id}/items`, { method: 'PUT', json: { seriesIds: ids } }); inval(); }
-    catch { toast('Failed to reorder', 'error'); }
+    catch { toast(tr('Could not change the order'), 'error'); }
   };
 
   return (
@@ -101,7 +101,7 @@ function CollectionInner() {
             {!editing && (
               <>
                 {/* On a phone the chip names the order and opens the sheet; from lg up the chips are simply there. */}
-                <button type="button" onClick={() => setSorting(true)} aria-haspopup="dialog"
+                <button type="button" onClick={() => setSorting(true)} aria-haspopup="dialog" data-list-sort-open
                   className={`chip text-xs lg:hidden ${chosen !== 'manual' ? 'chip-active' : ''}`}>
                   {tr('Sort by')} · {tr(active.label)}
                 </button>
@@ -111,7 +111,7 @@ function CollectionInner() {
                 </div>
               </>
             )}
-            <button type="button" onClick={() => setEditing((v) => !v)} aria-pressed={editing}
+            <button type="button" onClick={() => setEditing((v) => !v)} aria-pressed={editing} data-list-edit
               className={`chip ms-auto text-xs ${editing ? 'chip-active' : ''}`}>
               {editing ? tr('Done') : tr('Edit')}
             </button>

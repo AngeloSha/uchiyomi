@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3327
+    "strings": 3341
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3330,5 +3330,19 @@
   "+1 chapter vs the current pick": "عدد الفصول يزيد على الاختيار الحالي بفصل واحد",
   "1 fewer chapter than the current pick": "عدد الفصول يقلّ عن الاختيار الحالي بفصل واحد",
   "No file": "لا ملف",
-  "Deleted": "محذوف"
+  "Deleted": "محذوف",
+  "Collection created": "أُنشئت المجموعة",
+  "Could not create the collection": "تعذّر إنشاء المجموعة",
+  "Delete “{name}”? The series stay in your library.": "حذف «{name}»؟ تبقى السلاسل في مكتبتك.",
+  "Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page.": "اجمع السلاسل في قوائم قراءة — «أنوي قراءتها»، «مفضّلات أنهيتها»، أي شيء. أنشئ واحدة وأضف إليها السلاسل من صفحة أي سلسلة.",
+  "Delete “{name}”": "حذف «{name}»",
+  "Colour {n}": "اللون {n}",
+  "Could not change the order": "تعذّر تغيير الترتيب",
+  "Added to “{name}”": "أُضيفت إلى «{name}»",
+  "1 file fingerprinted": "أُخذت بصمة ملف واحد",
+  "{n} files fingerprinted": "الملفات التي أُخذت بصمتها: {n}",
+  "1 file could not be read": "تعذّرت قراءة ملف واحد",
+  "{n} files could not be read": "ملفات تعذّرت قراءتها: {n}",
+  "1 file still being written, left for the next pass": "ملف واحد ما زال يُكتب، تُرك للمرة التالية",
+  "{n} files still being written, left for the next pass": "ملفات ما زالت تُكتب، تُركت للمرة التالية: {n}"
 }

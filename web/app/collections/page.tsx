@@ -14,6 +14,8 @@ import { useLayer } from '@/lib/layers';
 export interface CollectionRow { id: string; name: string; accent: string | null; sort_order: number; item_count: number }
 
 const ACCENTS = ['#7c5cff', '#ff4dd2', '#22d3ee', '#34d399', '#fbbf24', '#f87171'];
+/** A list's name inside a sentence, isolated: in Arabic a Latin name would reorder the words around it. */
+const iso = (s: string): string => `\u2068${s}\u2069`;
 
 export default function CollectionsPage() {
   const router = useRouter();
@@ -33,21 +35,21 @@ export default function CollectionsPage() {
     if (!n) return;
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n, accent } });
-      toast('Collection created', 'success');
+      toast(tr('Collection created'), 'success');
       setCreating(false);
       setName('');
       qc.invalidateQueries({ queryKey: ['collections'] });
       router.push(`/collection/?id=${c.id}`);
-    } catch { toast('Failed to create', 'error'); }
+    } catch { toast(tr('Could not create the collection'), 'error'); }
   };
 
   const remove = async (c: CollectionRow) => {
-    if (!window.confirm(`Delete “${c.name}”? The series stay in your library.`)) return;
+    if (!window.confirm(tr('Delete “{name}”? The series stay in your library.', { name: iso(c.name) }))) return;
     try {
       await api(`/api/collections/${c.id}`, { method: 'DELETE' });
-      toast('Deleted', 'success');
+      toast(tr('Deleted'), 'success');
       qc.invalidateQueries({ queryKey: ['collections'] });
-    } catch { toast('Failed', 'error'); }
+    } catch { toast(tr('Failed'), 'error'); }
   };
 
   return (
@@ -58,7 +60,7 @@ export default function CollectionsPage() {
         </button>
         <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Collections')}</h1>
         <button onClick={() => setCreating(true)} className="btn-accent ms-auto px-3.5 py-2 text-sm">
-          <IcPlus width={16} height={16} /> New
+          <IcPlus width={16} height={16} aria-hidden />{tr('New collection')}
         </button>
       </header>
 
@@ -68,7 +70,7 @@ export default function CollectionsPage() {
         </div>
       ) : items.length === 0 ? (
         <EmptyState art={ART.emptyLibrary} title={tr('No collections yet')}
-          sub="Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page."
+          sub={tr('Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page.')}
           cta={undefined} />
       ) : (
         <div className="grid grid-cols-1 gap-3 px-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 lg:px-0">
@@ -77,9 +79,9 @@ export default function CollectionsPage() {
               <span aria-hidden className="absolute inset-y-0 left-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
               <Link href={`/collection/?id=${c.id}`} className="block ps-2">
                 <p className="font-display text-lg font-semibold text-fog-50">{c.name}</p>
-                <p className="text-xs text-fog-500">{c.item_count} series</p>
+                <p className="text-xs text-fog-500">{Number(c.item_count) === 1 ? tr('1 series') : tr('{n} series', { n: Number(c.item_count) })}</p>
               </Link>
-              <button onClick={() => remove(c)} aria-label={`Delete ${c.name}`}
+              <button onClick={() => remove(c)} aria-label={tr('Delete “{name}”', { name: iso(c.name) })}
                 className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-500 opacity-0 transition group-hover:opacity-100">
                 <IcTrash width={14} height={14} />
               </button>
@@ -96,8 +98,8 @@ export default function CollectionsPage() {
               placeholder={tr('e.g. Plan to read')} autoFocus
               className="w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-hidden focus:border-accent" />
             <div className="mt-3 flex items-center gap-2">
-              {ACCENTS.map((a) => (
-                <button key={a} onClick={() => setAccent(a)} aria-label={`accent ${a}`}
+              {ACCENTS.map((a, i) => (
+                <button key={a} onClick={() => setAccent(a)} aria-label={tr('Colour {n}', { n: i + 1 })} aria-pressed={accent === a}
                   className={`h-7 w-7 rounded-full transition ${accent === a ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-ink-900' : ''}`}
                   style={{ background: a }} />
               ))}

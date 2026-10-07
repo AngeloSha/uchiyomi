@@ -901,7 +901,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         name: 'Fingerprint library files',
         ...sched('in the background, rechecked every 6h'),
         lastRun: fpState.finishedAt,
-        lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, ms: fpState.ms } : null,
+        // `young` (v0.55.7): files a pass the server started left for a later one, still being written -- said on the
+        // line (web lib/tasks.ts), or the waiting count beside it reads as a job that stalled.
+        lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, young: fpState.young, ms: fpState.ms } : null,
         running: fpState.running,
         remaining: await fingerprintRemaining().catch(() => null),
       },

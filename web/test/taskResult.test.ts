@@ -279,6 +279,21 @@ test('the online-match recheck says what it checked and what went, and is never 
     ' · AniList or MangaDex did not answer: tried again at the next run, 0 matches checked');
 });
 
+test('a fingerprint pass says what it did, the files left for later included', () => {
+  // v0.55.7 integration: the fingerprint job runs a few minutes after a scan that met new files (lane B), and a pass the
+  // server started leaves a file still being written for a later one; the Tasks row said only when it ran, beside a
+  // "waiting" count that then read as a stalled job. Reintroduce by dropping the branch: every line below is empty.
+  assert.equal(taskResult({ done: 40, failed: 2, young: 3, ms: 900 }),
+    ' · 40 files fingerprinted, 2 files could not be read, 3 files still being written, left for the next pass', 'a fingerprint pass has no line');
+  assert.equal(taskResult({ done: 1, failed: 1, young: 1, ms: 9 }),
+    ' · 1 file fingerprinted, 1 file could not be read, 1 file still being written, left for the next pass', 'a count of one is not singular');
+  assert.equal(taskResult({ done: 0, failed: 0, young: 0, ms: 4 }), '', 'a pass with nothing to do says more than when it ran');
+  assert.equal(taskResult({ done: 5, failed: 0, ms: 4 }), ' · 5 files fingerprinted', 'an older server\'s result (no `young`)');
+  // And the route sends `young`.
+  const route = readFileSync(join(__dirname, '../../bff/src/routes/admin.ts'), 'utf8');
+  assert.match(route, /lastResult: fpState\.finishedAt \? \{ done: fpState\.done, failed: fpState\.failed, young: fpState\.young, ms: fpState\.ms \}/);
+});
+
 test('every schedule the tasks route sends is a key the page translates, with its values', () => {
   // bff routes/admin.ts sends `scheduleKey` + `scheduleVars` beside the English `schedule`. A sentence there
   // that is not in SCHEDULE_KEYS (and so in no locale file) shows in English in every language. Reintroduce by

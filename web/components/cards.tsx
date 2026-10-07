@@ -101,8 +101,9 @@ export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Seri
             <IcHeart width={14} height={14} fill="currentColor" stroke="none" />
           </span>
         )}
+        {/* dir="ltr": "99+" is a number and a sign, and in Arabic the paragraph's direction put the sign first ("+99"). */}
         {unread > 0 && (
-          <span className="absolute right-2 top-2 z-10 rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-black shadow-glow">
+          <span dir="ltr" data-unread={unread} className="absolute right-2 top-2 z-10 rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-black shadow-glow">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
@@ -207,8 +208,9 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
             <IcWifiOff width={11} height={11} />
           </span>
         )}
+        {/* dir="ltr", as SeriesCard's: "99+" read "+99" in Arabic. */}
         {unread > 0 && (
-          <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-black">
+          <span dir="ltr" data-unread={unread} className="absolute right-1.5 top-1.5 z-10 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-black">
             {unread > 99 ? '99+' : unread}
           </span>
         )}

@@ -68,11 +68,11 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
   const add = async (c: CollectionRow) => {
     try {
       await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-      toast(`Added to ${c.name}`, 'success');
+      toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
       qc.invalidateQueries({ queryKey: ['collections'] });
       qc.invalidateQueries({ queryKey: ['collection', c.id] });
       onClose();
-    } catch { toast('Failed', 'error'); }
+    } catch { toast(tr('Failed'), 'error'); }
   };
   const createAndAdd = async () => {
     const n = name.trim();
@@ -80,7 +80,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
       await add(c);
-    } catch { toast('Failed to create', 'error'); }
+    } catch { toast(tr('Could not create the collection'), 'error'); }
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>

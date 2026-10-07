@@ -105,3 +105,26 @@ test("a list's page shows the Library's tile, sorts with the chips, and saves th
   // A menu action on a list's tile (Mark all read) moves the list's badge too.
   assert.match(code(read('components/SeriesMenu.tsx')), /\['library'\], \['home'\], \['collection'\]/, "Mark all read from a list's tile leaves its badge stale");
 });
+
+test('the Lists pages say nothing in English only: every toast, question and label goes through tr()', () => {
+  // v0.55.7 integration (lane C's report): the Lists pages -- the lists, one list, and the series page's "Add to
+  // collection" sheet -- toasted "Collection created", "Failed to create", "Failed to reorder", asked "Delete “…”? The
+  // series stay in your library." and said "3 series" and "New" in English in every language. Reintroduce one bare
+  // string: the line that carries it is named.
+  const bare: string[] = [];
+  // The series page only as far as its "Add to collection" sheet: the page's other toasts are not the Lists'.
+  const sheet = (src: string) => src.slice(src.indexOf('function CollectionSheet('), src.indexOf('\nfunction ', src.indexOf('function CollectionSheet(') + 1));
+  for (const [f, part] of [['app/collections/page.tsx', null], ['app/collection/page.tsx', null], ['app/series/page.tsx', sheet]] as const) {
+    const src = code(read(f));
+    const lines = (part ? part(src) : src).split('\n');
+    assert.ok(lines.length > 10, `${f}: the scan found nothing to read`);
+    lines.forEach((l, i) => {
+      // A toast or a question whose words are a literal; an aria-label or a sub-line built from one; a count said bare.
+      if (/\btoast\(\s*['"`]/.test(l) || /\bconfirm\(\s*['"`]/.test(l) || /aria-label=\{?`/.test(l) || /\bsub="/.test(l)
+        || /\{c\.item_count\} series/.test(l) || /\/>\s*New\s*$/.test(l)) bare.push(`${f}:${i + 1}: ${l.trim().slice(0, 120)}`);
+    });
+  }
+  assert.deepEqual(bare, [], `untranslated words on the Lists pages:\n${bare.join('\n')}`);
+  // And the count says its singular.
+  assert.match(code(read('app/collections/page.tsx')), /=== 1 \? tr\('1 series'\) : tr\('\{n\} series', \{ n: Number\(c\.item_count\) \}\)/);
+});

@@ -46,7 +46,7 @@ const leftUnchanged = (n: number): string => (n === 1 ? tr('1 left unchanged') :
  *
  * Duck-typed on the shape of the result, because the tasks endpoint returns whatever the job stored: `added`
  * is the chapter sweep, `bytes` the backup, `refreshed` the extension check, `counted` the nightly repair, `matches`
- * the online-match recheck.
+ * the online-match recheck, `done` the fingerprint pass.
  */
 export function taskResult(r: any): string {
   if (!r) return '';
@@ -170,6 +170,21 @@ export function taskResult(r: any): string {
     const removed = r.removed ?? 0;
     if (removed) bits.push(removed === 1 ? tr('1 removed as another work') : tr('{n} removed as another work', { n: removed }));
     return ` \u00b7 ${bits.join(', ')}`;
+  }
+  // "Fingerprint library files" (v0.55.7): what its last pass did. It runs in the background after a boot, every six
+  // hours and a few minutes after a scan that met new files (bff lib/fingerprintJob.ts), and a pass the server started
+  // leaves a file still being written for a later one -- said, or the "waiting" count beside the line reads as a job that
+  // stalled. `done` is the key: no other job reports one. A pass with nothing to do says nothing more than when it ran.
+  // Reintroduce by dropping the branch: "a fingerprint pass says what it did" in taskResult.test.ts finds an empty line.
+  if (typeof r.done === 'number') {
+    const bits: string[] = [];
+    if (r.done) bits.push(r.done === 1 ? tr('1 file fingerprinted') : tr('{n} files fingerprinted', { n: r.done }));
+    if (r.failed) bits.push(r.failed === 1 ? tr('1 file could not be read') : tr('{n} files could not be read', { n: r.failed }));
+    if (r.young) {
+      bits.push(r.young === 1 ? tr('1 file still being written, left for the next pass')
+        : tr('{n} files still being written, left for the next pass', { n: r.young }));
+    }
+    return bits.length ? ` \u00b7 ${bits.join(', ')}` : '';
   }
   // "Verify chapter files". A root it skipped as unmounted is the one thing that must not read as a quiet
   // run: every chapter under it is still claiming bytes, and "0 missing" is exactly what the admin would

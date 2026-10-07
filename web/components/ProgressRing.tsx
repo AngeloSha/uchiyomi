@@ -132,8 +132,9 @@ export function RingIcon({ children, progress, count, tone = 'accent', size, srL
           {glyph}
         </span>
       )}
+      {/* dir="ltr": "99+" kept a number and a sign in Arabic, where the paragraph's direction read it "+99". */}
       {n && (
-        <span aria-hidden data-ring-count
+        <span aria-hidden data-ring-count dir="ltr"
           className={`absolute -end-3 -top-2 min-w-[14px] rounded-[4px] bg-ink-950 px-[3px] text-center text-[9px] font-bold leading-[13px] tabular-nums ring-1 ring-current/35 ${ARC_CLASS[tone]}`}>
           {n}
         </span>
