@@ -121,6 +121,7 @@ test('every CI job has a timeout, and installs from the lockfile', () => {
   // And not a timeout the job cannot meet: Tests took 54-58 minutes on every green run 2026-09-25..26, and
   // v0.48.4's first run was cancelled at a 60-minute limit with all 1988 tests passed.
   assert.ok(ci.jobs.test['timeout-minutes'] >= 80, 'the test job timeout is below what a green run needs');
+  assert.ok(ci.jobs.e2e['timeout-minutes'] >= 80, 'the browser timeout cannot hold the baseline, embedded and feature walks');
   // What keeps a green run inside that limit since v0.49.0: the bff files run a few at a time, each on a fresh
   // database of its own (test/run-shards.mjs), not one after another on one database. Reintroduce by putting
   // `npm test` back in the BFF step: this names it.
@@ -136,6 +137,28 @@ test('every CI job has a timeout, and installs from the lockfile', () => {
   const installs = steps.filter((st) => /\bnpm (install|ci)\b/.test(st.run));
   assert.ok(installs.length >= 3, 'the install steps went missing');
   for (const st of installs) assert.ok(!/\bnpm install\b/.test(st.run), `${st.job} / ${st.name} uses npm install instead of npm ci`);
+
+  // Build once, then resolve that tag to an immutable image id in up.sh for every stack. Building inside a later
+  // phase made a green feature walk evidence for different bytes than the baseline (and than another phase).
+  const e2e = ci.jobs.e2e.steps ?? [];
+  const image = e2e.find((st: any) => st.name === 'Build the exact browser AIO image once');
+  assert.match(String(image?.run), /docker build -f Dockerfile\.aio -t uchiyomi:e2e-ci \./,
+    'the browser job does not build its one AIO image explicitly');
+  for (const name of ['Bring it up and drive it', 'Bring it up again with the embedded database, and drive it']) {
+    const run = String(e2e.find((st: any) => st.name === name)?.run ?? '');
+    assert.match(run, /E2E_SKIP_BUILD=1/, `${name} silently rebuilds the image`);
+    assert.match(run, /E2E_IMAGE=uchiyomi:e2e-ci/, `${name} does not use the exact browser image`);
+  }
+  assert.match(String(e2e.find((st: any) => st.name === 'Drive every v0.55.8 feature phase on that image')?.run),
+    /E2E_IMAGE=uchiyomi:e2e-ci bash test\/e2e\/run-v558\.sh/,
+    'the required Browser end-to-end check omits the v0.55.8 feature walk');
+  const feature = read('web/test/e2e/run-v558.sh');
+  for (const phase of ['librarysort', 'homelists', 'anilistprivacy', 'bulkdelete'])
+    assert.match(feature, new RegExp(`run_phase ${phase}\\s`), `the browser gate omits ${phase}`);
+  assert.match(feature, /E2E_SKIP_BUILD=1 E2E_IMAGE="\$IMAGE"/, 'a feature phase may rebuild or retag the tested image');
+  const up = read('web/test/e2e/up.sh');
+  assert.match(up, /LIB="\$LIB" E2E_NET="\$NET" node "\$WALK_SCRIPT"/,
+    'the selected feature walk cannot use its disposable filesystem/database, or loses its exit code');
 });
 
 /**

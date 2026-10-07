@@ -64,7 +64,7 @@ jobs:
   e2e:
     name: Browser end-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -73,9 +73,11 @@ jobs:
       - name: Install browser tooling
         working-directory: ./web
         run: npm ci --no-audit --no-fund
+      - name: Build the exact browser AIO image once
+        run: docker build -f Dockerfile.aio -t uchiyomi:e2e-ci .
       - name: Bring it up and drive it
         working-directory: ./web
-        run: KEEP=1 npm run test:e2e
+        run: KEEP=1 E2E_SKIP_BUILD=1 E2E_IMAGE=uchiyomi:e2e-ci npm run test:e2e
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
@@ -86,13 +88,19 @@ jobs:
       # is one of the five required status checks, and a matrix renames it.
       - name: Bring it up again with the embedded database, and drive it
         working-directory: ./web
-        run: E2E_EMBEDDED=1 E2E_NET=uchiyomi-e2e-embedded E2E_PORT=18141 E2E_SUBNET=10.222.1.0/24 npm run test:e2e
+        run: E2E_SKIP_BUILD=1 E2E_IMAGE=uchiyomi:e2e-ci E2E_EMBEDDED=1 E2E_NET=uchiyomi-e2e-embedded E2E_PORT=18141 E2E_SUBNET=10.222.1.0/24 npm run test:e2e
+      - name: Drive every v0.55.8 feature phase on that image
+        working-directory: ./web
+        run: E2E_IMAGE=uchiyomi:e2e-ci bash test/e2e/run-v558.sh
       - name: Tear it down
         if: always()
         run: |
           docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-fake-a uchiyomi-e2e-fake-b \
             uchiyomi-e2e-embedded uchiyomi-e2e-embedded-fake-a uchiyomi-e2e-embedded-fake-b || true
+          docker ps -aq --filter 'name=^/uchiyomi-e2e-v558-' | xargs -r docker rm -f -v || true
           docker network rm uchiyomi-e2e uchiyomi-e2e-embedded || true
+          docker network rm uchiyomi-e2e-v558-librarysort uchiyomi-e2e-v558-homelists \
+            uchiyomi-e2e-v558-anilistprivacy uchiyomi-e2e-v558-bulkdelete || true
       - name: Keep the screenshots when it fails
         if: failure()
         uses: actions/upload-artifact@v7
@@ -101,6 +109,7 @@ jobs:
           path: |
             web/test/e2e/shots/
             web/test/e2e/shots-i18n/
+            web/test/e2e/shots-v558/
           retention-days: 7
 
   test:

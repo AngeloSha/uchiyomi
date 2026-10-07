@@ -288,4 +288,8 @@ sleep 4
 
 echo "· driving the browser"
 cd "$REPO/web"
-BASE="http://127.0.0.1:$PORT" E2E_USER="$USER" E2E_PASS="$PASS" node test/e2e/run.mjs
+WALK_SCRIPT=${E2E_WALK_SCRIPT:-test/e2e/run.mjs}
+# LIB and E2E_NET are harmless extras for the original walk and are the only safe handles the feature walks use to
+# seed their disposable filesystem/database. Keeping the selected script inside this process means this file's EXIT
+# trap owns cleanup and, with `set -e`, the browser's exact exit code reaches CI.
+BASE="http://127.0.0.1:$PORT" E2E_USER="$USER" E2E_PASS="$PASS" LIB="$LIB" E2E_NET="$NET" node "$WALK_SCRIPT"
