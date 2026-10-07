@@ -275,6 +275,17 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
 }
 
 /**
+ * What sites write where a group's name goes when they do not know it (v0.55.7, #158), as normGroup keys: unofficial,
+ * unknown, unknown group, no group, none, n/a -- and "-", which normGroup already makes nothing. Aggregators label every
+ * chapter "Unofficial" or "Unknown", and as a NAME two such copies were "the same group": sameRelease paired them with no
+ * page check, so two different scanlations re-hosted under one label could stand in for each other (DannyDynamite39).
+ * They name no group, and sameRelease now reads them so. Kept short on purpose: a real group that happened to be called
+ * one of these would be paired like the copies that name nobody. In sameRelease ONLY -- the scanlator preference, "Who
+ * scanlates this" and the listing still read and show the label as the site wrote it.
+ */
+const PLACEHOLDER_GROUPS: ReadonlySet<string> = new Set(['unofficial', 'unknown', 'unknowngroup', 'nogroup', 'none', 'na']);
+
+/**
  * The copies of one number that are the SAME RELEASE as `chosen` (v0.55.4, #158): what a download may take from
  * another followed source instead, so that a long series is spread over the sites that carry it rather than asked of
  * one. DannyDynamite39's case is the common one: several aggregators re-host one group's scanlation, and asking them in
@@ -290,6 +301,9 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
  * what `langOf` says its source publishes in, else the server's unstated language (lib/lang.ts sameLanguage). An
  * external link (`pages === 0`) is never a release here, and a chosen external copy has no other.
  *
+ * A placeholder where a group goes ("Unofficial", "Unknown": PLACEHOLDER_GROUPS) names no group, so two such copies
+ * are held to the page counts as well (v0.55.7).
+ *
  * Pure, over the stored copies: which sources may actually be asked -- loaded, allowed, resting or not -- is the
  * caller's (the slow archive, lib/archive.ts; the job card, routes/sources.ts startDownloadJob).
  * Reintroduce by comparing the first group only: "a copy by another group is never the same release" in
@@ -303,7 +317,8 @@ export function sameRelease(
   const out = [chosen];
   if (chosen.pages === 0) return out;
   const followed = new Set(o.followed);
-  const keysOf = (c: ListingCopy) => new Set(groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined }).map(normGroup).filter(Boolean));
+  const keysOf = (c: ListingCopy) => new Set(groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined })
+    .map(normGroup).filter((k) => k && !PLACEHOLDER_GROUPS.has(k)));
   const langOf = (c: ListingCopy) => c.lang ?? o.langOf?.(c.source) ?? null;
   const mine = keysOf(chosen);
   const lang = langOf(chosen);

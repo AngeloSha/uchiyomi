@@ -322,8 +322,9 @@ test('Fix everything: one run over a library with something wrong on every card'
   await seedSeries('dupD'); for (const n of [50, 51, 52]) await seedBook('dupD', n);
   await seedSeries('edA', { source: MAIN, lang: 'en' }); await seedBook('edA', 1);
   await seedSeries('edB', { source: MAIN, lang: 'es' }); await seedBook('edB', 1);
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','af-1'), ($2,'anilist','af-1'),
-             ($3,'anilist','af-2'), ($4,'anilist','af-2'), ($5,'anilist','af-3'), ($6,'anilist','af-3')`,
+  // checked_at: automatic links as v0.55.7 writes them, held to the title check; Health groups only those (lib/health.ts).
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, checked_at) VALUES ($1,'anilist','af-1', now()), ($2,'anilist','af-1', now()),
+             ($3,'anilist','af-2', now()), ($4,'anilist','af-2', now()), ($5,'anilist','af-3', now()), ($6,'anilist','af-3', now())`,
     [S.dupA, S.dupB, S.dupC, S.dupD, S.edA, S.edB]);
   // Numbering: two Istrevelia-shaped series held for a renumber review -- one whose plan is clean, one whose plan would
   // push numbers to a tracker (not clean).
@@ -750,7 +751,7 @@ test('a stopped run leaves what it did not reach to the next run, never to Needs
   // under Needs you" fails -- and the second run below merges them, which a person was told they had to.
   await seedSeries('againA'); for (const n of [1, 2, 3]) await seedBook('againA', n);
   await seedSeries('againB'); for (const n of [1, 2, 3]) await seedBook('againB', n);
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','af-again'), ($2,'anilist','af-again')`, [S.againA, S.againB]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, checked_at) VALUES ($1,'anilist','af-again', now()), ($2,'anilist','af-again', now())`, [S.againA, S.againB]);
   await seedSeries('againOdd'); for (const n of [1, 2, 3]) await seedBook('againOdd', n);
   await seedBook('againOdd', 8888);
 

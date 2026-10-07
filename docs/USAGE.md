@@ -306,6 +306,32 @@ says how many are in hand. The chips:
   from a source puts the same series back, history and all. What each kind of delete does and does not
   erase is spelled out in section 12, *Where your data lives and how to delete for good*.
 
+### Cover and banner
+
+When nobody chose a picture, a series is shown with:
+
+- **its cover**: the cover of the source it was added from; else AniList's, when AniList's entry carries the series'
+  name; else its own first page.
+- **its banner**: AniList's (or its anime adaptation's) on the same condition; else one made from the series' own
+  pages (*New banner* in *Edit details* picks another).
+
+Since v0.55.7 ([#168](https://github.com/AngeloSha/uchiyomi/issues/168)) an online match counts only when one of the
+entry's names — its romaji, English or native title, or a synonym — is exactly one of the series' names: its title, the
+title you set in *Edit details*, its *Other names* (below), with case, accents, punctuation and bracketed asides set
+aside. A name that merely contains the series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
+The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
+**Admin → Content → Art** follows it too. What was matched before v0.55.7 is checked again in the background
+(**Admin → Tasks → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
+came from another work is cleared, so the series shows its source's cover or its own first page.
+
+In **Edit details** (the art column, or the *Art* tab on a phone) the cover has **Upload**, **From a link** and **⋯**:
+
+- **Use the first page** makes the series' own first page its cover for good: nothing found online replaces it, and
+  unless you set a banner yourself, its banner is made from its pages too. **Admin → Content → Art** offers it as well.
+- **Reset to automatic** goes back to the automatic cover described above.
+
+The line under the cover says which it is.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it
@@ -624,7 +650,8 @@ full speed before one that is slowed, and up to three chapters at once, one per 
 series side by side. Two sites whose pages come from one image server count as one. A site that is switched off,
 cooling down, refusing or above your age limit is skipped, and nothing moves for a version you picked by name, for a
 series with its own source order (*Preferring one source*) or for one numbered by posting order. The download card
-counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below).
+counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below). A label
+that stands where a group's name goes ("Unofficial", "Unknown") names no group (v0.55.7).
 
 If at least four pages in five arrived after an ordinary page failure, the chapter is kept with a numbered
 placeholder at every missing position rather than thrown away. Its row says how many pages are missing. The
@@ -725,7 +752,9 @@ sites at once; the series queued on one site take turns, so ten of them share it
 **One release on several sites.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a
 series that follows more than one source takes its chapters from them in turn when they carry the same release: the
 same scanlation group, or — on sites that name no group, as most aggregators don't — no group, the same language and
-the same page count wherever both say. While one site is in its break the next chapter comes from another, the one that
+the same page count wherever both say. Since v0.55.7 a label that stands where a group goes ("Unofficial", "Unknown",
+"No group", "None", "N/A") counts as no group, so two sites that both say "Unofficial" are paired by their page counts,
+never by the label alone. While one site is in its break the next chapter comes from another, the one that
 was asked longest ago, so a series on two such sites is archived about twice as fast while each site still sees only
 its own pace. Two sites whose pages come from one image server (Natomanga and Mangakakalot share one) count as one site:
 one chapter at a time between them, and a break or a refusal on either holds both. It never takes another group's copy
@@ -2306,6 +2335,13 @@ when to run it and what it will not do. Like the sweep, it starts in the backgro
 it found when it is done. **Rescan everything** (since v0.55.4) is its counterpart for a library you built by hand:
 *Library maintenance* above says what it shows before it changes anything, and what it never does.
 
+**Check online matches** (since v0.55.7) holds the AniList links, covers and banners matched by title before v0.55.7 to
+the rule *Cover and banner* (section 4) describes: a link to another work is removed, and a cover or banner of another
+work is cleared. It runs by itself a couple of minutes after the server starts, and then every 6 hours on anything not
+checked yet; **Run now** checks everything again. A link you made by importing your list, a picture you chose and a
+source's own cover are never touched. Its line says how many it checked and how many were another work, for example
+*194 matches checked, 7 removed as another work*, and **Admin → People → Activity** names them.
+
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
 what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
 sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
@@ -2533,6 +2569,10 @@ in place until you paste a new one. A service that is blocking or rate-limiting 
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
 Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its own row, and more than one can
 be connected at once; each syncs on its own.
+
+Uchiyomi finds each series' AniList entry by itself, from the same lookup its art comes from, and since v0.55.7 only
+an entry that carries the series' name (section 4, *Cover and banner*); a series it cannot match has no link, and
+importing your list (below) links every title on it to its own entry.
 
 **Bringing your list over.** The same connection reads in the other direction, once: on the import page
 (section 8, *Sources → Import a list*) the *From your tracker* box loads the account's manga list — the

@@ -4,7 +4,7 @@
 //
 // The type is what the admin's "Hide notice chapters" switch is keyed by (lib/noticeChapters.ts): one switch per
 // type, because the habit of posting notices as x.y chapters belongs to some scenes and not to others.
-import { titleKey } from './directionSignals';
+import { namesMatch } from './onlineMatch';
 
 /** Every type a series can be. `unknown` is never stored: NULL means nothing has spoken, and reads as unknown. */
 export const SERIES_TYPES = ['manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'unknown'] as const;
@@ -87,15 +87,14 @@ export function typeFromCountry(country: string | null | undefined): KnownSeries
 }
 
 /**
- * AniList's country -- only from an entry that is visibly this series, by the rule
- * lib/directionSignals.ts directionFromAniListMatch applies to the reading direction.
+ * AniList's country -- only from an entry that is visibly this series, by the rule every match stored by title is
+ * held to (lib/onlineMatch.ts namesMatch), as lib/directionSignals.ts directionFromAniListMatch applies it to the
+ * reading direction.
  */
 export function typeFromAniListMatch(
   seriesTitles: Array<string | null | undefined> | string,
   match: { country?: string | null; titles?: Array<string | null | undefined> | null } | null | undefined,
 ): KnownSeriesType | null {
-  if (!match) return null;
-  const want = new Set((Array.isArray(seriesTitles) ? seriesTitles : [seriesTitles]).map(titleKey).filter(Boolean));
-  if (!(match.titles ?? []).some((t) => want.has(titleKey(t)))) return null;
+  if (!match || !namesMatch(seriesTitles, match.titles)) return null;
   return typeFromCountry(match.country);
 }

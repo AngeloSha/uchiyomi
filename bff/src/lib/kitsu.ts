@@ -1,10 +1,13 @@
 // Kitsu (kitsu.io) — free JSON:API, no key. Its manga entries carry a WIDE coverImage that AniList often
 // lacks for manhwa/manhua, making it the best second source for hero banner art.
+import { namesMatch } from './onlineMatch';
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-
-/** Wide cover (banner-shaped) art for a manga title, or null. Loose title check guards against bad matches. */
-export async function fetchKitsuBanner(rawTitle: string): Promise<string | null> {
+/**
+ * Wide cover (banner-shaped) art for a manga title, or null. Searched by `rawTitle`, and taken only from an entry named
+ * as the series is (`names`, lib/onlineMatch.ts namesMatch, v0.55.7). Until then any entry whose name merely contained
+ * the title, or sat inside it, was taken: the containment a spin-off shares with its parent.
+ */
+export async function fetchKitsuBanner(rawTitle: string, names: readonly string[]): Promise<string | null> {
   const title = rawTitle.replace(/\([^)]*\)/g, '').trim();
   if (!title) return null;
   try {
@@ -14,16 +17,13 @@ export async function fetchKitsuBanner(rawTitle: string): Promise<string | null>
     });
     if (!r.ok) return null;
     const data: any[] = ((await r.json()) as any)?.data ?? [];
-    const want = norm(title);
     for (const d of data) {
       const a = d?.attributes;
       const url = a?.coverImage?.original || a?.coverImage?.large;
       if (!url) continue;
-      // accept when any of the entry's titles loosely matches the query (equality or containment)
-      const names = [a?.canonicalTitle, ...(Object.values(a?.titles ?? {}) as string[]), ...((a?.abbreviatedTitles ?? []) as string[])]
-        .filter(Boolean)
-        .map((n) => norm(String(n)));
-      if (names.some((n) => n === want || n.includes(want) || want.includes(n))) return url;
+      const entryNames = [a?.canonicalTitle, ...(Object.values(a?.titles ?? {}) as string[]), ...((a?.abbreviatedTitles ?? []) as string[])]
+        .filter((n): n is string => typeof n === 'string');
+      if (namesMatch(names, entryNames)) return url;
     }
     return null;
   } catch {

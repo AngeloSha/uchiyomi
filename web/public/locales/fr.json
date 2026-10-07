@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3286
+    "strings": 3295
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3289,5 +3289,14 @@
   "Waiting for another task to finish": "En attente de la fin d’une autre tâche",
   "Reading the folders": "Lecture des dossiers",
   "Finishing": "Finalisation",
-  "Folder {done} of {total}": "Dossier {done} sur {total}"
+  "Folder {done} of {total}": "Dossier {done} sur {total}",
+  "Check online matches": "Vérifier les correspondances en ligne",
+  "1 match checked": "1 correspondance vérifiée",
+  "{n} matches checked": "{n} correspondances vérifiées",
+  "1 removed as another work": "1 retirée : une autre œuvre",
+  "{n} removed as another work": "{n} retirées : d’autres œuvres",
+  "AniList or MangaDex did not answer: tried again at the next run": "AniList ou MangaDex n’a pas répondu : nouvel essai au prochain passage",
+  "Use the first page": "Utiliser la première page",
+  "The first page, by your choice: nothing found online replaces it.": "La première page, selon votre choix : rien de ce qui est trouvé en ligne ne la remplace.",
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automatique : la couverture de la source, ou celle d’AniList quand sa fiche porte le même nom, sinon la première page."
 }

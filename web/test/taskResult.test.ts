@@ -267,6 +267,18 @@ test('a repair says how long it took, last, and the English line is otherwise un
   assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 0 }), ' · 7 failures reset', 'a zero time is said');
 });
 
+test('the online-match recheck says what it checked and what went, and is never read as another job', () => {
+  // v0.55.7 (#168), lib/matchCheck.ts in the bff. Reintroduce by dropping its branch: every line below is empty. Its key
+  // is `matches` because `checked` is Verify's: a result keyed so would read "194 checked, none missing" here.
+  const r = { matches: 194, removed: 7, links: { checked: 150, removed: 5 }, art: { checked: 44, cleared: 2 }, unanswered: 1, ms: 9000 };
+  assert.equal(taskResult(r), ' · 194 matches checked, 7 removed as another work', 'the recheck has no line of its own');
+  assert.equal(taskResult({ ...r, matches: 1, removed: 1 }), ' · 1 match checked, 1 removed as another work', 'a count of one is not singular');
+  assert.equal(taskResult({ ...r, matches: 3, removed: 0 }), ' · 3 matches checked', 'nothing removed is said by saying nothing more');
+  // A run AniList or MangaDex stopped leads with that: the counts after it are partial.
+  assert.equal(taskResult({ ...r, matches: 0, removed: 0, stopped: 'unavailable' }),
+    ' · AniList or MangaDex did not answer: tried again at the next run, 0 matches checked');
+});
+
 test('every schedule the tasks route sends is a key the page translates, with its values', () => {
   // bff routes/admin.ts sends `scheduleKey` + `scheduleVars` beside the English `schedule`. A sentence there
   // that is not in SCHEDULE_KEYS (and so in no locale file) shows in English in every language. Reintroduce by

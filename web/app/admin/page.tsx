@@ -576,7 +576,7 @@ function Members() {
 }
 
 // ---- Art Review: see every series' art at a glance, fix the ugly ones in two clicks ----
-interface ArtRow { id: string; title: string; books_count: number; has_banner: boolean; has_cover: boolean; override_banner: boolean; override_cover: boolean; override_v: number | null }
+interface ArtRow { id: string; title: string; books_count: number; has_banner: boolean; has_cover: boolean; override_banner: boolean; override_cover: boolean; first_page?: boolean; override_v: number | null }
 interface ArtCandidate { origin: string; title: string; banner: string | null; cover: string | null }
 
 function ArtReview() {
@@ -643,14 +643,17 @@ function ArtReview() {
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-fog-100">{r.title}</p>
                 <p className="text-[10px] text-fog-500">
-                  {(r.override_banner || r.override_cover) ? 'custom art' : r.has_banner ? 'banner ✓' : r.has_cover ? 'cover only' : 'first-page art'}
+                  {r.first_page ? 'first-page art' : (r.override_banner || r.override_cover) ? 'custom art' : r.has_banner ? 'banner ✓' : r.has_cover ? 'cover only' : 'first-page art'}
                 </p>
               </div>
             </div>
           </button>
         ))}
       </div>
-      {open && <ArtPicker row={open} onClose={() => setOpen(null)} onApplied={() => { setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
+      {/* The row as the gallery has it now, not as it was when the picker opened: after Use the first page or a reset the
+          picker's keys follow what the series has. */}
+      {open && <ArtPicker row={(data?.content ?? []).find((r) => r.id === open.id) ?? open} onClose={() => setOpen(null)}
+        onApplied={() => { setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
     </div>
   );
 }
@@ -682,6 +685,14 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
     catch { toast(tr('Failed'), 'error'); }
     setBusy(false);
   };
+  // Use the first page (v0.55.7, #168), as Edit details offers it: the series' own first page is its cover for good.
+  const firstPage = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind: 'cover', mode: 'first_page' } }); toast(tr('Cover updated'), 'success'); onApplied(); }
+    catch { toast(tr('Could not change the cover'), 'error'); }
+    setBusy(false);
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
       {/* max-w-xl, the widest a centred panel may be: from lg up the notices' column beside it is sized to clear
@@ -691,12 +702,11 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
-        {(row.override_banner || row.override_cover) && (
-          <div className="mb-3 flex gap-2">
-            {row.override_cover && <button onClick={() => reset('cover')} disabled={busy} className="chip text-xs">{tr('Reset cover to auto')}</button>}
-            {row.override_banner && <button onClick={() => reset('banner')} disabled={busy} className="chip text-xs">{tr('Reset banner to auto')}</button>}
-          </div>
-        )}
+        <div className="mb-3 flex flex-wrap gap-2">
+          <button data-art-first-page onClick={() => firstPage()} disabled={busy || row.first_page} className="btn-key">{tr('Use the first page')}</button>
+          {row.override_cover && <button onClick={() => reset('cover')} disabled={busy} className="btn-key">{tr('Reset cover to auto')}</button>}
+          {row.override_banner && <button onClick={() => reset('banner')} disabled={busy} className="btn-key">{tr('Reset banner to auto')}</button>}
+        </div>
         {isLoading ? (
           <p className="py-8 text-center text-sm text-fog-500">{tr('Searching AniList + MangaDex…')}</p>
         ) : !(data?.content?.length) ? (

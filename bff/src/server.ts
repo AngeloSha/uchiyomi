@@ -21,6 +21,7 @@ import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
+import { scheduleMatchCheck } from './lib/matchCheck';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -329,6 +330,14 @@ async function main() {
     };
     setTimeout(tick, firstRunFloor(20 * 60 * 1000, 'healthSummary')).unref();
   }
+
+  /**
+   * The online matches stored by title before v0.55.7 checked them (#168, lib/matchCheck.ts): a couple of minutes after
+   * boot -- on the upgrade, the one look at every AniList link, cover and banner stored before -- then every six hours
+   * for whatever is still unchecked. Health's Duplicate series reads only checked links (lib/health.ts), so nothing is
+   * grouped -- or merged by Fix everything -- on a link this has not looked at yet.
+   */
+  scheduleMatchCheck(app.log);
 
   /**
    * The opt-in install count.

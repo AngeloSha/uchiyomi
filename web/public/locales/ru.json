@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3286
+    "strings": 3295
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3289,5 +3289,14 @@
   "Waiting for another task to finish": "Ждём, пока закончится другая задача",
   "Reading the folders": "Читаем папки",
   "Finishing": "Завершаем",
-  "Folder {done} of {total}": "Папка {done} из {total}"
+  "Folder {done} of {total}": "Папка {done} из {total}",
+  "Check online matches": "Проверить совпадения из сети",
+  "1 match checked": "проверено 1 совпадение",
+  "{n} matches checked": "проверено совпадений: {n}",
+  "1 removed as another work": "убрано 1 — другое произведение",
+  "{n} removed as another work": "убрано как другие произведения: {n}",
+  "AniList or MangaDex did not answer: tried again at the next run": "AniList или MangaDex не ответил: повтор при следующем запуске",
+  "Use the first page": "Использовать первую страницу",
+  "The first page, by your choice: nothing found online replaces it.": "Первая страница — по вашему выбору: найденное в сети её не заменит.",
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Автоматически: обложка источника, или из AniList, если запись там называется так же, иначе первая страница."
 }

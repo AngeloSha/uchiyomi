@@ -169,6 +169,29 @@ export async function mangadexOriginalLanguages(ids: string[]): Promise<Map<stri
   return out;
 }
 
+/**
+ * Every name of many titles at once -- each language's title and every alternative title -- for the recheck of a
+ * cover the art backfill took from a MangaDex search before the title check existed (v0.55.7, lib/matchCheck.ts).
+ * Batched and rated like mangadexOriginalLanguages, through the same limiter; a title MangaDex does not answer for
+ * is absent, and a failure throws.
+ */
+export async function mangadexTitles(ids: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const qs = chunk.map((id) => `ids[]=${encodeURIComponent(id)}`).join('&');
+    const j = await mdGet(`${API}/manga?${qs}&limit=100&${RATINGS}&contentRating[]=pornographic`);
+    for (const m of j.data || []) {
+      if (typeof m?.id !== 'string') continue;
+      const a = m.attributes || {};
+      const names = [...Object.values(a.title || {}), ...((a.altTitles || []) as any[]).flatMap((t) => Object.values(t || {}))]
+        .filter((n): n is string => typeof n === 'string' && !!n.trim());
+      out.set(m.id.toLowerCase(), names);
+    }
+  }
+  return out;
+}
+
 
 /**
  * Languages tried, in order, when a title has no English chapters (the English adapter only).
