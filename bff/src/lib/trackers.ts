@@ -98,7 +98,11 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
 
 /** Record which external entry a series maps to. Called wherever an AniList match is resolved (art lookup,
  *  backfill, or an admin picking a match by hand) so the mapping is a by-product of work already happening.
- *  An explicit `linkedBy` marks a human choice, which automatic matching then leaves alone. */
+ *  An explicit `linkedBy` marks a human choice, which automatic matching then leaves alone.
+ *  `checked_at` (v0.55.7): every automatic caller resolves the entry through lib/anilist.ts fetchAniListArt, which
+ *  holds it to the series' names (lib/onlineMatch.ts), so a link written here is checked; the background recheck
+ *  (lib/matchCheck.ts) takes up only the rows written without the mark -- before v0.55.7, by an older version after a
+ *  rollback, or copied by a statement that does not name the column. */
 export async function linkSeries(
   seriesId: string,
   externalId: string | number,
@@ -109,12 +113,12 @@ export async function linkSeries(
   provider: Provider = 'anilist',
 ): Promise<void> {
   await q(
-    `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by)
-     VALUES ($1,$5,$2,$3,$4)
+    `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, checked_at)
+     VALUES ($1,$5,$2,$3,$4, now())
      ON CONFLICT (series_id, provider) DO UPDATE
        SET external_id = EXCLUDED.external_id, title = EXCLUDED.title,
            linked_by = COALESCE(EXCLUDED.linked_by, series_trackers.linked_by),
-           updated_at = now()
+           updated_at = now(), checked_at = now()
      WHERE series_trackers.linked_by IS NULL OR EXCLUDED.linked_by IS NOT NULL`,
     [seriesId, String(externalId), title, linkedBy, provider],
   ).catch(() => {});

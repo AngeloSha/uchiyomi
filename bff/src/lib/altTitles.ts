@@ -176,9 +176,9 @@ export async function altTitleRows(seriesId: string): Promise<AltTitleRow[]> {
 
 /**
  * Every name each series goes by HERE (v0.55.7): its title, an admin's display title (Edit details), its other names
- * -- and those of the other language editions of its work, one work under several names. What an online match must be
- * called to be stored as this series' (lib/onlineMatch.ts namesMatch). The series' own title first, for a search to
- * ask by; a series not there has none.
+ * -- and those of the other language editions of its work, one work under several names (a link a work's edition
+ * copied from another is checked against them). What an online match must be called to be stored as this series'
+ * (lib/onlineMatch.ts namesMatch). The series' own title first, for a search to ask by; a series not there has none.
  */
 export async function namesOfMany(ids: readonly string[], by: 'id' | 'folder' = 'id'): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();

@@ -1219,9 +1219,9 @@ async function artByTitle(where: { id: string } | { folder: string }, title: str
     const a = await fetchAniListArt(title, names);
     const merge = `ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`;
     if ('id' in where) {
-      await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3) ${merge}`, [where.id, a.banner, a.cover]).catch(() => {});
+      await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now()) ${merge}`, [where.id, a.banner, a.cover]).catch(() => {});
     } else {
-      await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $2, $3 FROM lib_series WHERE folder = $1 ${merge}`,
+      await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) SELECT id, $2, $3, now() FROM lib_series WHERE folder = $1 ${merge}`,
         [where.folder, a.banner, a.cover]).catch(() => {});
     }
     await learnDirection(where, directionFromAniListMatch(names, a), 'anilist');
@@ -1516,8 +1516,11 @@ export async function addSeriesFromSource(opts: {
       jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}), ...(linked ? { edition: linked } : {}) });
       judgeAlsoFollow(folder, id, opts);
     }
+    // The source's own cover, then AniList's art for what it does not have. checked_at (lib/matchCheck.ts): a row
+    // started here holds nothing found by title unchecked -- the source's cover, then AniList's answer held to the
+    // series' names (lib/onlineMatch.ts) -- while a row that was already there keeps its own mark.
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover) VALUES ($1, $2)
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) VALUES ($1, $2, now())
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
     }
     await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
@@ -1625,7 +1628,7 @@ export async function addSeriesFromSource(opts: {
       }
     }
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, now() FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     void artByTitle({ folder }, title);
@@ -1758,7 +1761,7 @@ export async function addSeriesFromSource(opts: {
       judgeAlsoFollow(folder, seriesId, opts);
     }
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, now() FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     void artByTitle({ folder }, title);

@@ -19,7 +19,7 @@
 //
 // The search may be asked with a cleaned title (lib/anilist.ts drops "(Remake)" and a "- Season 2" tail before asking);
 // the ANSWER must still name the series as it is called here. Pure, and importing nothing, so every side can use it:
-// the art lookups, the add, the backfill and the direction and type signals.
+// the art lookups, the add, the backfill, the recheck (lib/matchCheck.ts) and the direction and type signals.
 
 /**
  * A title as a comparison key: accents, case, bracketed asides and punctuation set aside, any script kept.
@@ -47,4 +47,38 @@ export function namesMatch(
     if (k && want.has(k)) return true;
   }
   return false;
+}
+
+/** An AniList media an image on its CDN belongs to: covers and banners carry the entry's id in their file name. */
+export interface AniListMedia { type: 'MANGA' | 'ANIME'; id: number }
+
+/**
+ * The AniList entry a stored cover or banner came from, read off its URL, or null for anything else (another host, a
+ * default picture with no id). `.../media/manga/cover/large/bx105398-b673Vt5ZSuz3.jpg` is manga 105398;
+ * `.../media/anime/banner/16498-8jpFCOcDmneX.jpg` is anime 16498 -- the banner of an adaptation, which the art lookup
+ * takes when the manga has none of its own (lib/anilist.ts).
+ */
+export function aniListMediaOf(url: string | null | undefined): AniListMedia | null {
+  let u: URL;
+  try { u = new URL(String(url ?? '')); } catch { return null; }
+  if (!/(^|\.)anilist\.co$/i.test(u.hostname)) return null;
+  const m = /\/media\/(manga|anime)\/(?:cover\/[a-z]+|banner)\/[a-z]{0,2}(\d{1,10})(?=[-_.])/i.exec(u.pathname);
+  if (!m) return null;
+  const id = Number(m[2]);
+  return Number.isSafeInteger(id) && id > 0 ? { type: m[1].toLowerCase() === 'anime' ? 'ANIME' : 'MANGA', id } : null;
+}
+
+/** MangaDex's ids are UUIDs. */
+const MANGADEX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The MangaDex title a stored cover came from, read off its URL (`https://uploads.mangadex.org/covers/<id>/<file>`, the
+ * shape the MangaDex adapter builds), or null for anything else.
+ */
+export function mangaDexIdOf(url: string | null | undefined): string | null {
+  let u: URL;
+  try { u = new URL(String(url ?? '')); } catch { return null; }
+  if (!/(^|\.)mangadex\.org$/i.test(u.hostname)) return null;
+  const m = /^\/covers\/([^/]+)\//.exec(u.pathname);
+  return m && MANGADEX_UUID.test(m[1]) ? m[1].toLowerCase() : null;
 }

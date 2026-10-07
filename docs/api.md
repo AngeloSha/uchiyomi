@@ -1849,6 +1849,24 @@ renumbered: {series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /a
 `server_settings.rescan_last_run` / `rescan_last_result`; audit `library.rescan`, and `library.rescan_numbers` when
 the opt-in renumbered something. Never at boot or on a schedule.
 
+**Check online matches.** (since v0.55.7, #168) The matches stored by title before v0.55.7 checked them, held to the
+title check (*Online matches carry the series' name*, under the image routes): every automatic AniList link
+(`series_trackers.linked_by` NULL) and every cover and banner of `series_art` served from AniList's or MangaDex's
+servers, against what AniList and MangaDex call those entries -- asked by id, 50 per AniList request and 100 per
+MangaDex request, paced. A link to another work is removed, with the tracker floors recorded against it; a cover or
+banner of another work is cleared to a miss (an adaptation's banner stands when its anime is related to a manga named
+as the series); a person's link, an admin's art, a source's own cover and an entry the service no longer answers for
+(`unanswered`) are left as they are. It runs in the background a couple of minutes after a start, then every 6 h, on
+whatever is still unchecked (`checked_at` NULL on either table: rows from before v0.55.7, a link an edition copies,
+rows an older version writes after a rollback) -- resumable, every verdict written as it is reached; a service that
+does not answer stops the run with nothing decided for what it had to judge (`stopped: 'unavailable'`). `POST
+/api/admin/tasks/matches/run` checks every automatic match again, detached: `{ok: true, started: true}` or `{ok:
+false, error: 'busy'}`. `GET /api/admin/tasks` lists it as `{id: 'matches', name: 'Check online matches', schedule:
+'in the background, rechecked every 6h'}` with the last run that checked something: `{matches, removed, links:
+{checked, removed}, art: {checked, cleared}, unanswered, stopped?, ms}`, persisted in
+`server_settings.match_check_last_run` / `match_check_last_result`; audit `library.match_check` with the counts and
+the links and pictures removed (up to 50 named).
+
 **Repair the library.** `POST /api/admin/tasks/repair/run` (since v0.41.0; the Tasks panel's *Repair
 library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solver* action on the Health tab —
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
@@ -2363,7 +2381,9 @@ names -- its title, an admin's display title, its other names (`GET /api/admin/s
 the other language editions of its work -- once case, accents, bracketed asides and punctuation are set aside. Never
 containment: a spin-off's name contains its parent's. An answer that is another work is stored as the miss a "no
 match" is, so it is not asked again on every view. `/img/series/:id/thumb` is an admin's cover, else the source's
-cover or a checked AniList one, else the series' first page.
+cover or a checked AniList one, else the series' first page. What was stored before v0.55.7 is held to the same rule
+by **Check online matches** (Admin → Tasks, above); Health's *Duplicate series* groups only links a person made or
+that were checked.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

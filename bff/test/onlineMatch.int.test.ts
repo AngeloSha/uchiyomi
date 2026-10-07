@@ -1,8 +1,10 @@
 // Online matches carry the series' name (v0.55.7, #168), where they are stored: the backdrop's lazy AniList lookup (the
-// cover, the banner and the tracker link), an add's AniList art and the art backfill's hunt.
+// cover, the banner and the tracker link), an add's AniList art, the art backfill's hunt, and Health's Duplicate series,
+// which groups only links known to be the series'.
 //
 // Kedryn's case: a comic with no online source took a manga's cover and banner, and the manga's AniList link, because
-// AniList's answer to a title search was stored with no look at its name. The rule itself is onlineMatch.test.ts.
+// AniList's answer to a title search was stored with no look at its name. The rule itself is onlineMatch.test.ts; the
+// recheck of what was stored before is matchCheck.int.test.ts.
 //
 // Driven through the real routes over real CBZ chapters, with AniList, Kitsu and the art hosts faked at globalThis.fetch:
 // nothing here reaches the network. Skipped automatically unless TEST_DATABASE_URL is set.
@@ -143,8 +145,8 @@ after(async () => {
 });
 
 const img = (path: string) => app.inject({ method: 'GET', url: path, headers: { cookie: adminCookie } });
-const art = async (id: string) => (await q(`SELECT banner, cover FROM series_art WHERE series_id = $1`, [id]))[0] ?? null;
-const link = async (id: string) => (await q(`SELECT external_id, linked_by FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`, [id]))[0] ?? null;
+const art = async (id: string) => (await q(`SELECT banner, cover, checked_at FROM series_art WHERE series_id = $1`, [id]))[0] ?? null;
+const link = async (id: string) => (await q(`SELECT external_id, linked_by, checked_at FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`, [id]))[0] ?? null;
 
 test("another work's answer to the backdrop's title search is stored as a miss: no cover, no banner, no link", { skip }, async () => {
   // Reintroduce by returning AniList's entry unchecked (fetchAniListArt without namesMatch): the comic stores the manga's
@@ -156,6 +158,7 @@ test("another work's answer to the backdrop's title search is stored as a miss: 
   assert.ok(a, 'a miss is a stored row, as a 404 is: without one every view asks again');
   assert.equal(a.banner, null, "another work's banner was stored");
   assert.equal(a.cover, null, "another work's cover was stored");
+  assert.ok(a.checked_at, 'a row the backdrop writes is checked');
   assert.equal(await link(ID.morgan), null, "the series was linked to another work's AniList entry");
   // Not asked again on the next view: the miss stands.
   const before = asked.filter((s) => s === FOLDERS.morgan).length;
@@ -164,13 +167,15 @@ test("another work's answer to the backdrop's title search is stored as a miss: 
   assert.equal(asked.filter((s) => s === FOLDERS.morgan).length, before, 'AniList was asked again on the next view');
 });
 
-test('an answer named as the series is stored and linked', { skip }, async () => {
+test('an answer named as the series is stored, linked, and both are marked checked', { skip }, async () => {
   assert.equal((await img(`/img/series/${ID.sasaki}/backdrop`)).statusCode, 200);
   const a = await art(ID.sasaki);
   assert.deepEqual([a?.banner, a?.cover], [MANGA_BANNER, MANGA_COVER], 'the right entry\'s art was not kept');
+  assert.ok(a.checked_at);
   const l = await link(ID.sasaki);
   assert.equal(l?.external_id, '9001');
   assert.equal(l?.linked_by, null, 'an automatic link');
+  assert.ok(l?.checked_at, 'a link written by the art lookup is checked (lib/trackers.ts linkSeries)');
 });
 
 test("an add keeps AniList's art only from an entry named as the series", { skip }, async () => {
@@ -234,4 +239,17 @@ test('the backfill stores only what is named as the series: AniList, the anime s
   assert.equal(a?.cover, MINE, 'the cover is not the hit named as the series');
   assert.equal(found, 'cover');
   assert.equal(await link(ID.hunt), null, 'the backfill linked another work');
+});
+
+test('Health groups only links known to be the series\'; an unchecked automatic link groups nothing', { skip }, async () => {
+  const { findingOf } = (await import('../src/lib/health')) as any;
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','om-dup'), ($2,'anilist','om-dup')`, [ID.dupA, ID.dupB]);
+  // Reintroduce by reading every link in duplicateSeries: the two unrelated series one title search gave the same wrong
+  // entry are a finding -- and Fix everything's merge.
+  assert.equal(await findingOf('duplicates', 'anilist:om-dup'), null, 'an unchecked link groups nothing');
+  await q(`UPDATE series_trackers SET checked_at = now() WHERE series_id = ANY($1)`, [[ID.dupA, ID.dupB]]);
+  assert.ok(await findingOf('duplicates', 'anilist:om-dup'), 'two checked links on one entry are no longer found');
+  // A person's link counts as it stands.
+  await q(`UPDATE series_trackers SET checked_at = NULL, linked_by = (SELECT id FROM users WHERE username = $2) WHERE series_id = ANY($1)`, [[ID.dupA, ID.dupB], ADMIN]);
+  assert.ok(await findingOf('duplicates', 'anilist:om-dup'), "a person's links are not grouped");
 });

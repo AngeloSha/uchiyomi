@@ -10,7 +10,7 @@ import { appliedLine } from './rescan';
 export const TASK_NAMES = keys(
   'Library scan', 'Check for new chapters', 'Backup database & config', 'Fingerprint library files',
   'Find repeated pages', 'Verify chapter files', 'Repair library', 'Delete read chapters', 'Extension updates',
-  'Rescan everything',
+  'Rescan everything', 'Check online matches',
 );
 
 /**
@@ -45,7 +45,8 @@ const leftUnchanged = (n: number): string => (n === 1 ? tr('1 left unchanged') :
  * updating looked exactly like a quiet week.
  *
  * Duck-typed on the shape of the result, because the tasks endpoint returns whatever the job stored: `added`
- * is the chapter sweep, `bytes` the backup, `refreshed` the extension check, `counted` the nightly repair.
+ * is the chapter sweep, `bytes` the backup, `refreshed` the extension check, `counted` the nightly repair, `matches`
+ * the online-match recheck.
  */
 export function taskResult(r: any): string {
   if (!r) return '';
@@ -157,6 +158,18 @@ export function taskResult(r: any): string {
     // tell a nightly that takes two minutes from one that takes two hours.
     if (typeof r.ms === 'number' && r.ms > 0) bits.push(tr('took {d}', { d: durationText(r.ms) }));
     return bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : '';
+  }
+  // "Check online matches" (v0.55.7, #168): the AniList links, covers and banners stored by title before they were
+  // held to the title check, checked, and how many were another work's and went. `matches` is the key -- not `checked`,
+  // which is Verify's, below. A run a service stopped leads, for the verify's reason: the counts after it are partial.
+  // Reintroduce by keying it on `checked`: "a recheck is not read as a verify run" finds "checked, none missing".
+  if (typeof r.matches === 'number') {
+    const bits: string[] = [];
+    if (r.stopped === 'unavailable') bits.push(tr('AniList or MangaDex did not answer: tried again at the next run'));
+    bits.push(r.matches === 1 ? tr('1 match checked') : tr('{n} matches checked', { n: r.matches }));
+    const removed = r.removed ?? 0;
+    if (removed) bits.push(removed === 1 ? tr('1 removed as another work') : tr('{n} removed as another work', { n: removed }));
+    return ` \u00b7 ${bits.join(', ')}`;
   }
   // "Verify chapter files". A root it skipped as unmounted is the one thing that must not read as a quiet
   // run: every chapter under it is still claiming bytes, and "0 missing" is exactly what the admin would

@@ -289,14 +289,16 @@ test('Komga titles an edition with its language while a sibling is in sight', { 
 // ---- Health, merge, forget, the 18+ rating -------------------------------------------------------------------
 
 test('two editions of one work are no duplicate; a copy beside them is, and a pair in two languages is linked', { skip }, async () => {
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','ed-101','Edition Tale'), ($2,'anilist','ed-101','Edition Tale')
-           ON CONFLICT (series_id, provider) DO UPDATE SET external_id = EXCLUDED.external_id`, [A, B]);
+  // checked_at: automatic links as v0.55.7 writes them, held to the title check (lib/onlineMatch.ts); Health groups only
+  // those (lib/health.ts duplicateSeries).
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1,'anilist','ed-101','Edition Tale', now()), ($2,'anilist','ed-101','Edition Tale', now())
+           ON CONFLICT (series_id, provider) DO UPDATE SET external_id = EXCLUDED.external_id, checked_at = EXCLUDED.checked_at`, [A, B]);
   // Reintroduce by grouping the check by series again (`HAVING count(*) > 1`): the work's two editions are a finding.
   assert.equal(await findingOf('duplicates', 'anilist:ed-101'), null, 'one work on one entry is no duplicate');
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','ed-101','Copy Tale')`, [C]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1,'anilist','ed-101','Copy Tale', now())`, [C]);
   await seed(X, 'Linkable Tale', null);
   await seed(Y, 'Cuento Enlazable', 'pt-BR');
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','ed-303','x'), ($2,'anilist','ed-303','y')`, [X, Y]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1,'anilist','ed-303','x', now()), ($2,'anilist','ed-303','y', now())`, [X, Y]);
   const dupes = (await runHealthChecks()).checks.find((c: any) => c.id === 'duplicates');
   const copy = dupes.items.find((i: any) => i.key === 'anilist:ed-101');
   assert.ok(copy, 'an English copy beside the work is a duplicate');

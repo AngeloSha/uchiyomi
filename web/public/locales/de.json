@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3286
+    "strings": 3292
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3289,5 +3289,11 @@
   "Waiting for another task to finish": "Wartet, bis eine andere Aufgabe fertig ist",
   "Reading the folders": "Ordner werden gelesen",
   "Finishing": "Wird abgeschlossen",
-  "Folder {done} of {total}": "Ordner {done} von {total}"
+  "Folder {done} of {total}": "Ordner {done} von {total}",
+  "Check online matches": "Online-Treffer prüfen",
+  "1 match checked": "1 Treffer geprüft",
+  "{n} matches checked": "{n} Treffer geprüft",
+  "1 removed as another work": "1 als anderes Werk entfernt",
+  "{n} removed as another work": "{n} als anderes Werk entfernt",
+  "AniList or MangaDex did not answer: tried again at the next run": "AniList oder MangaDex hat nicht geantwortet: beim nächsten Lauf erneut versucht"
 }

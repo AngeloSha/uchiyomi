@@ -370,9 +370,10 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
       } catch {}
       const title = names[0] ?? '';
       const fetched = title ? await fetchAniListArt(title, names) : { banner: null, cover: null };
+      // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
       await q(
-        `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-         ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now()`,
+        `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
+         ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now(), checked_at = now()`,
         [id, fetched.banner, fetched.cover],
       );
       // the same match also anchors tracker sync — record it while we have it

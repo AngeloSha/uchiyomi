@@ -24,6 +24,7 @@ import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
+import { matchCheckState, runMatchCheck } from '../lib/matchCheck';
 import { startRescan, rescanState } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
@@ -427,11 +428,14 @@ export async function huntArt(t: { id: string; title: string }): Promise<'banner
     } catch { /* mangadex miss is fine */ }
   }
   if (!art.banner && !art.cover) return null;
+  // checked_at (lib/matchCheck.ts): a row this writes whole is checked; one it only fills keeps the mark of what it
+  // already held.
   await q(
-    `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+    `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
      ON CONFLICT (series_id) DO UPDATE SET
        banner = COALESCE(EXCLUDED.banner, series_art.banner),
-       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
+       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now(),
+       checked_at = CASE WHEN EXCLUDED.banner IS NOT NULL AND EXCLUDED.cover IS NOT NULL THEN now() ELSE series_art.checked_at END`,
     [t.id, art.banner, art.cover],
   );
   if (art.mediaId) {
@@ -847,13 +851,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     scheduleVars: vars,
   });
   app.get('/api/admin/tasks', async (req) => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any; match_check_last_run: string | null; match_check_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
               verify_last_run, verify_last_result,
               repair_enabled, repair_last_run, repair_last_result,
-              rescan_last_run, rescan_last_result
+              rescan_last_run, rescan_last_result,
+              match_check_last_run, match_check_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -898,6 +903,18 @@ export default async function adminRoutes(app: FastifyInstance) {
           : null,
         running: phState.running,
         remaining: await pageHashRemaining().catch(() => null),
+      },
+      // v0.55.7 (#168): the online matches stored by title before they were checked -- AniList links, covers and banners
+      // -- held to the title check (lib/matchCheck.ts): in the background after a boot, then every 6h for whatever is
+      // still unchecked; Run now checks every automatic one again. Its line is the last run that checked something,
+      // persisted like Verify's.
+      {
+        id: 'matches',
+        name: 'Check online matches',
+        ...sched('in the background, rechecked every 6h'),
+        lastRun: matchCheckState.finishedAt || (s?.match_check_last_run ? new Date(s.match_check_last_run).getTime() : null),
+        lastResult: matchCheckState.finishedAt ? matchCheckState.lastResult : (s?.match_check_last_result ?? null),
+        running: matchCheckState.running,
       },
       // On demand only, and never at boot (the header of lib/verifyFiles.ts says why): the repair for a
       // database restored without its chapter files. Listed always, because the moment it is needed is the
@@ -1143,6 +1160,15 @@ export default async function adminRoutes(app: FastifyInstance) {
         (r) => logAudit('library.verify', { userId, detail: { checked: r.checked, missing: r.missing, readLibraryMissing: r.readLibraryMissing, unmounted: r.unmounted, ms: r.ms }, req }),
         () => {}, // runVerify logs it and clears the result; this only stops an unhandled rejection
       );
+      return { ok: true, started: true };
+    }
+    if (id === 'matches') {
+      // Every automatic match again, not only the unchecked ones the background pass takes (lib/matchCheck.ts): a
+      // Run now that found nothing to do would read as a button that does nothing (#34). Never awaited: it asks
+      // AniList and MangaDex, paced. The Tasks line shows what it did.
+      const run = runMatchCheck(app.log, { all: true });
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch((e) => app.log.warn(`matches: the check failed: ${(e as Error)?.message || e}`));
       return { ok: true, started: true };
     }
     if (id === 'rescan') {

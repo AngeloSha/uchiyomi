@@ -1476,6 +1476,17 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only bool
 -- boots on this schema and never names them.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_result jsonb;
+
+-- v0.55.7 (#168): an online match is stored only when it is named as the series is (lib/onlineMatch.ts). checked_at is
+-- when an automatic AniList link (linked_by NULL) or a stored cover or banner was held to that check; NULL is never,
+-- which the background recheck takes up (lib/matchCheck.ts): every row from before this release, a link an edition
+-- copies from another, and whatever an older version writes after a rollback. Deliberately NO DEFAULT: ADD COLUMN would
+-- write it into every existing row, and each would read as checked. The recheck's last run is persisted like Verify's,
+-- for the Tasks line. All nullable: v0.55.6 boots on this schema and never names them.
+ALTER TABLE series_trackers ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE series_art      ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_result jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

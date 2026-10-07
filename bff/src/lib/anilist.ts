@@ -93,6 +93,17 @@ const COUNTRIES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANG
  */
 export async function fetchAniListCountries(ids: number[]): Promise<Map<number, { country: string; titles: string[] }>> {
   const out = new Map<number, { country: string; titles: string[] }>();
+  await mediaById(COUNTRIES, ids, (m) => {
+    if (Number.isInteger(m?.id) && typeof m?.countryOfOrigin === 'string') out.set(m.id, { country: m.countryOfOrigin, titles: titlesOf(m) });
+  });
+  return out;
+}
+
+/**
+ * One `query($ids)` over many entries, fifty ids per request, `each` called with every media AniList answers. Paced
+ * like the art jobs between pages; a 429 is waited out as fetchAniListArt waits it out, anything else throws.
+ */
+async function mediaById(query: string, ids: number[], each: (m: any) => void): Promise<void> {
   for (let i = 0; i < ids.length; i += 50) {
     if (i) await new Promise((res) => setTimeout(res, 2200)); // stay under AniList's ~30 req/min
     const chunk = ids.slice(i, i + 50);
@@ -101,7 +112,7 @@ export async function fetchAniListCountries(ids: number[]): Promise<Map<number, 
       const r = await fetch('https://graphql.anilist.co', {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ query: COUNTRIES, variables: { ids: chunk } }),
+        body: JSON.stringify({ query, variables: { ids: chunk } }),
         signal: AbortSignal.timeout(10000),
       });
       if (r.status === 429 && retry < 2) {
@@ -113,10 +124,39 @@ export async function fetchAniListCountries(ids: number[]): Promise<Map<number, 
       j = await r.json();
       break;
     }
-    for (const m of j?.data?.Page?.media ?? []) {
-      if (Number.isInteger(m?.id) && typeof m?.countryOfOrigin === 'string') out.set(m.id, { country: m.countryOfOrigin, titles: titlesOf(m) });
-    }
+    for (const m of j?.data?.Page?.media ?? []) each(m);
   }
+}
+
+/** What AniList calls an entry, and which entries it is related to: what a stored match is held to again. */
+export interface AniListEntry {
+  id: number;
+  type: 'MANGA' | 'ANIME';
+  titles: string[];
+  /** The related entries (an anime's source manga, a manga's adaptations): id and type. */
+  related: Array<{ id: number; type: 'MANGA' | 'ANIME' }>;
+}
+
+const ENTRIES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids){id type title{romaji english native}synonyms relations{edges{node{id type}}}}}}`;
+
+/**
+ * Every name of many entries at once, manga or anime, with what each is related to (v0.55.7): the recheck of the
+ * matches stored by title before the title check existed (lib/matchCheck.ts). By id, so nothing is searched and the
+ * answer is the entry itself. An id AniList does not answer for is simply absent; a failure throws, so the recheck
+ * stops for now and records no verdict. Public data: no token.
+ */
+export async function fetchAniListEntries(ids: number[]): Promise<Map<number, AniListEntry>> {
+  const out = new Map<number, AniListEntry>();
+  const typeOf = (t: unknown): 'MANGA' | 'ANIME' | null => (t === 'MANGA' || t === 'ANIME' ? t : null);
+  await mediaById(ENTRIES, [...new Set(ids)], (m) => {
+    const type = typeOf(m?.type);
+    if (!Number.isInteger(m?.id) || !type) return;
+    const related = ((m?.relations?.edges ?? []) as any[]).flatMap((e) => {
+      const t = typeOf(e?.node?.type);
+      return Number.isInteger(e?.node?.id) && t ? [{ id: e.node.id as number, type: t }] : [];
+    });
+    out.set(m.id, { id: m.id, type, titles: titlesOf(m), related });
+  });
   return out;
 }
 

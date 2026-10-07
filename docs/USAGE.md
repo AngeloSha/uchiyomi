@@ -320,7 +320,9 @@ entry's names — its romaji, English or native title, or a synonym — is exact
 title you set in *Edit details*, its *Other names* (below), with case, accents, punctuation and bracketed asides set
 aside. A name that merely contains the series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
 The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
-**Admin → Content → Art** follows it too.
+**Admin → Content → Art** follows it too. What was matched before v0.55.7 is checked again in the background
+(**Admin → Tasks → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
+came from another work is cleared, so the series shows its source's cover or its own first page.
 
 ### Sources & translations
 
@@ -2324,6 +2326,13 @@ runs by itself: it is the repair for a database restored without its chapter fil
 when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
 it found when it is done. **Rescan everything** (since v0.55.4) is its counterpart for a library you built by hand:
 *Library maintenance* above says what it shows before it changes anything, and what it never does.
+
+**Check online matches** (since v0.55.7) holds the AniList links, covers and banners matched by title before v0.55.7 to
+the rule *Cover and banner* (section 4) describes: a link to another work is removed, and a cover or banner of another
+work is cleared. It runs by itself a couple of minutes after the server starts, and then every 6 hours on anything not
+checked yet; **Run now** checks everything again. A link you made by importing your list, a picture you chose and a
+source's own cover are never touched. Its line says how many it checked and how many were another work, for example
+*194 matches checked, 7 removed as another work*, and **Admin → People → Activity** names them.
 
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
 what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter

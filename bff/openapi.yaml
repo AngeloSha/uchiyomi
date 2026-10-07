@@ -6635,7 +6635,7 @@ paths:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan).
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches).
         {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off,
         {ok:false,error:sweep_running} for `repair` while a chapter sweep is going, and
         {ok:false,error:repair_running} for `update` while a library repair is going.
@@ -6693,10 +6693,13 @@ paths:
             the repair for a database restored without its chapter files. `repair` is the nightly library
             repair and is the only one that takes a body. `rescan` (since v0.55.4, "Rescan everything") starts
             a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
-            progress and plan are on GET /api/admin/tasks/rescan/status.
+            progress and plan are on GET /api/admin/tasks/rescan/status. `matches` (since v0.55.7, "Check online
+            matches") holds every automatic AniList link and every cover and banner found by a title search to the
+            title check again, detached; its last run is the `matches` entry of GET /api/admin/tasks
+            ({matches, removed, links, art, unanswered, stopped?, ms}), audited as `library.match_check`.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches]
       requestBody:
         required: false
         description: Only `repair` reads a body; every other task ignores it.
