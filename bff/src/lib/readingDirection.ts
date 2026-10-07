@@ -114,7 +114,8 @@ export async function detectDirections(opts: { max: number; log?: Log }): Promis
                        (SELECT ss.source_series_id FROM series_sources ss
                          WHERE ss.series_id = s.id AND (ss.source_id = 'mangadex' OR ss.source_id LIKE 'mangadex-%') LIMIT 1)) AS md
          FROM lib_series s
-        WHERE ${visibleToAll('s')} AND s.auto_update
+         JOIN libraries l ON l.id = s.library_id
+        WHERE ${visibleToAll('s')} AND s.auto_update AND l.anilist_lookup
           AND (s.reading_direction_from IS NULL OR s.reading_direction_from = 'anilist')
           AND (s.source_id = 'mangadex' OR s.source_id LIKE 'mangadex-%'
                OR EXISTS (SELECT 1 FROM series_sources ss
@@ -133,7 +134,8 @@ export async function detectDirections(opts: { max: number; log?: Log }): Promis
         // A library may be unmonitored while this repair is queued. Re-read immediately before the
         // outbound batch and drop every series whose background work is now disabled.
         const live = new Set((await q<{ id: string }>(
-          'SELECT id FROM lib_series WHERE id = ANY($1::text[]) AND auto_update',
+          `SELECT s.id FROM lib_series s JOIN libraries l ON l.id = s.library_id
+            WHERE s.id = ANY($1::text[]) AND s.auto_update AND l.anilist_lookup`,
           [[...new Set([...byMd.values()].flat())]],
         )).map((r) => r.id));
         for (const [md, ids] of byMd) {
