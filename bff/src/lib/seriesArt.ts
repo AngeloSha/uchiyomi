@@ -4,6 +4,7 @@
 import { join } from 'path';
 import { env } from '../env';
 import { q } from './db';
+import { containedPath } from './fsGuard';
 import { visibleToAll } from './visibility';
 
 export const ART_DIR = join(env.CONFIG_DIR, 'series-art');
@@ -18,7 +19,13 @@ export const ART_DIR = join(env.CONFIG_DIR, 'series-art');
  */
 export const FIRST_PAGE = 'first_page';
 const safeId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
-export const artFile = (id: string, kind: 'cover' | 'banner') => join(ART_DIR, `${safeId(id)}-${kind}.webp`);
+export const artFile = (id: string, kind: 'cover' | 'banner') => {
+  const file = containedPath(ART_DIR, `${safeId(id)}-${kind}.webp`);
+  // safeId permits only a single filename component, so this is unreachable unless that contract changes.
+  // Keep the containment check here anyway: every reader, writer and remover then shares the same boundary.
+  if (!file) throw new Error('Invalid series art path');
+  return file;
+};
 
 /**
  * The largest picture an upload takes, and the request body that carries one (v0.53.0).

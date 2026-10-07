@@ -49,7 +49,7 @@ import { lastSuwayomiLoad, rememberMissing } from '../lib/sources/suwayomi/regis
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
-import { dirname, resolve } from 'path';
+import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
@@ -2787,7 +2787,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // own pages -- nothing found online is shown or looked up for it (lib/seriesArt.ts FIRST_PAGE). Reset to automatic
   // takes it back.
   app.put('/api/admin/series/:id/art', { bodyLimit: ART_BODY_LIMIT }, async (req, reply) => {
-    const { id } = req.params as { id: string };
+    const requestedId = (req.params as { id: string }).id;
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
       mode: z.enum(['url', 'upload', 'reset', 'first_page']),
@@ -2795,16 +2795,26 @@ export default async function adminRoutes(app: FastifyInstance) {
       dataUrl: z.string().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // Use the exact canonical id read from the database, not a route segment, in persistent file paths. Besides
+    // removing user input from the path expression, this prevents two malformed ids that safeId() normalises to
+    // the same filename from deleting or replacing one another before the foreign key rejects the write.
+    const series = await one<{ id: string }>('SELECT id FROM lib_series WHERE id = $1', [requestedId]);
+    if (!series) return reply.code(404).send({ error: 'not_found' });
+    const id = series.id;
     const { kind, mode } = b.data;
     if (mode === 'first_page' && kind !== 'cover') return reply.code(400).send({ error: 'bad_request', message: 'The first page is a cover, not a banner.' });
+    const artPath = artFile(id, kind);
+    // artFile has the same containment guard for every caller. Keep an explicit sink-adjacent check here too:
+    // this endpoint begins at an HTTP parameter and writes or removes a persistent file.
+    if (!artPath.startsWith(resolve(ART_DIR) + sep)) return reply.code(400).send({ error: 'bad_path' });
     let value: string | null = null;
     if (mode === 'first_page') {
-      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      await rm(artPath, { force: true }).catch(() => {});
       value = FIRST_PAGE;
     } else if (mode === 'url') {
       if (!b.data.url) return reply.code(400).send({ error: 'no_url', message: 'Paste an image URL.' });
       value = b.data.url;
-      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      await rm(artPath, { force: true }).catch(() => {});
     } else if (mode === 'upload') {
       const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(b.data.dataUrl || '');
       if (!m) return reply.code(400).send({ error: 'bad_image', message: 'Upload a valid image.' });
@@ -2814,10 +2824,10 @@ export default async function adminRoutes(app: FastifyInstance) {
         buf = await sharp(Buffer.from(m[1], 'base64')).rotate().resize({ width: maxW, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
       } catch { return reply.code(400).send({ error: 'bad_image', message: "That file isn't a readable image." }); }
       await mkdir(ART_DIR, { recursive: true }).catch(() => {});
-      await writeFile(artFile(id, kind), buf);
+      await writeFile(artPath, buf);
       value = 'upload';
     } else {
-      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      await rm(artPath, { force: true }).catch(() => {});
       value = null;
     }
     const col = kind === 'cover' ? 'cover' : 'banner';

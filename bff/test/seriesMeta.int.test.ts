@@ -77,6 +77,27 @@ test('editing a series over HTTP', { skip }, async (t) => {
       'SELECT title, author, genres, age_rating FROM series_overrides WHERE series_id = $1', [S]))[0];
 
   try {
+    await t.test('an unknown id that normalises to a real id cannot remove its art', async () => {
+      const { ART_DIR, artFile } = await import('../src/lib/seriesArt');
+      const { mkdir, readFile, rm, writeFile } = await import('node:fs/promises');
+      const victim = artFile(S, 'cover');
+      await mkdir(ART_DIR, { recursive: true });
+      await writeFile(victim, 'keep me');
+      try {
+        // safeId('s_.sm_a') === safeId('s_sm_a'): before the database lookup, first_page removed the
+        // victim's upload and only then let the foreign key notice that the requested series did not exist.
+        const r = await app.inject({
+          method: 'PUT', url: '/api/admin/series/s_.sm_a/art', headers: auth,
+          payload: { kind: 'cover', mode: 'first_page' },
+        });
+        assert.equal(r.statusCode, 404);
+        assert.deepEqual(r.json(), { error: 'not_found' });
+        assert.equal(await readFile(victim, 'utf8'), 'keep me');
+      } finally {
+        await rm(victim, { force: true });
+      }
+    });
+
     await t.test('THE REGRESSION: an ordinary edit saves', async () => {
       // The shape the modal sends when someone only changed the title. This 500'd for a whole release.
       const r = await put(meta({ title: 'A Better Title' }));
