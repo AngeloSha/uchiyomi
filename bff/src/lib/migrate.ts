@@ -1503,6 +1503,33 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS info_read text;
 -- "not downloaded", instead of as a deleted chapter. Display only: the updater, the counts and progress read the
 -- tombstone as before. Off by default; an older build boots on this schema and never names it.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS deleted_as_ghosts boolean NOT NULL DEFAULT false;
+
+-- v0.55.8: Delete downloaded chapters for a selection is a detached admin job. Keeping the selection, progress and
+-- result in Postgres means closing the browser or crossing a proxy timeout cannot turn a destructive operation into an
+-- unknown retry. worker_id distinguishes this process from a row a previous process left running; the admin plugin
+-- closes those rows as interrupted at boot. There may be only one active run, matching the one shared folder-writer
+-- lock used by downloads, repairs, rescans and renumbering.
+CREATE TABLE IF NOT EXISTS admin_bulk_delete_runs (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id        uuid NOT NULL,
+  started_by       uuid REFERENCES users(id) ON DELETE SET NULL,
+  started_at       timestamptz NOT NULL DEFAULT now(),
+  finished_at      timestamptz,
+  heartbeat_at     timestamptz NOT NULL DEFAULT now(),
+  status           text NOT NULL DEFAULT 'running'
+                   CHECK (status IN ('running', 'done', 'cancelled', 'failed', 'interrupted')),
+  cancel_requested boolean NOT NULL DEFAULT false,
+  pause            boolean NOT NULL DEFAULT true,
+  series_ids       text[] NOT NULL,
+  total            int NOT NULL,
+  done             int NOT NULL DEFAULT 0,
+  summary          jsonb NOT NULL DEFAULT '{"applied":0,"chapters":0,"bytes":0,"kept":0,"paused":0,"skipped":0,"failed":0,"chapterSkips":{}}'::jsonb,
+  results          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  error            text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_bulk_delete_one_running
+  ON admin_bulk_delete_runs ((true)) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_admin_bulk_delete_started ON admin_bulk_delete_runs (started_at DESC);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

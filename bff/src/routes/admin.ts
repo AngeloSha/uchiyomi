@@ -20,7 +20,7 @@ import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
-import { runUpdateAll, updateSeries, runSweep, runsInside } from '../lib/updater';
+import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
@@ -97,6 +97,9 @@ import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
+import {
+  initialiseBulkChapterDeleteRuns, readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
+} from '../lib/bulkChapterDelete';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -543,6 +546,9 @@ export const CATALOG_PAGE_MAX = 400;
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
+  // A destructive bulk run is persisted. Anything a previous process left running is made explicitly interrupted
+  // before this process accepts a new one; completed and partial results remain readable after a restart.
+  await initialiseBulkChapterDeleteRuns();
   // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
   await app.register(numberingRoutes);
   // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
@@ -1903,42 +1909,28 @@ export default async function adminRoutes(app: FastifyInstance) {
       pause: z.boolean().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series?' });
-    const pause = b.data.pause !== false;
     const ids = [...new Set(b.data.seriesIds)];
-    const rows = await q<{ id: string; title: string; folder: string; deleted_at: string | null; merged_into: string | null; cover_book_id: string | null }>(
-      'SELECT id, title, folder, deleted_at, merged_into, cover_book_id FROM lib_series WHERE id = ANY($1)', [ids]);
-    const byId = new Map(rows.map((r) => [r.id, r]));
-    type Skip = { id: string; reason: 'not_found' | 'merged' | 'busy' | 'nothing_to_delete' | 'refused'; message?: string };
-    const skipped: Skip[] = [];
-    let series = 0, chapters = 0, bytes = 0, kept = 0;
-    const paused: string[] = [];
-    for (const id of ids) {
-      const s = byId.get(id);
-      if (!s) { skipped.push({ id, reason: 'not_found' }); continue; }
-      if (s.merged_into) { skipped.push({ id, reason: 'merged' }); continue; }
-      if (jobBusy(s.folder) || runsInside(id) > 0) { skipped.push({ id, reason: 'busy' }); continue; }
-      const live = await q<{ id: string }>(
-        `SELECT id FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND root = $2
-          ORDER BY number ASC, file ASC`, [id, DL_ROOT]);
-      // The cover chapter: the series' own, while it is live and here; else the lowest live downloaded chapter.
-      const cover = live.some((r) => r.id === s.cover_book_id) ? s.cover_book_id : live[0]?.id ?? null;
-      const todo = live.map((r) => r.id).filter((x) => x !== cover);
-      if (!todo.length) { skipped.push({ id, reason: 'nothing_to_delete' }); continue; }
-      const r = await deleteChapterFiles(id, todo, { userId: userIdOf(req), req });
-      if ('refused' in r) { skipped.push({ id, reason: 'refused', message: r.refused.reason }); continue; }
-      if (cover) kept++;
-      if (r.applied) series++;
-      chapters += r.applied;
-      bytes += r.bytes;
-      if (pause && r.applied) paused.push(id);
-    }
-    if (paused.length) {
-      await q('UPDATE lib_series SET auto_update = false WHERE id = ANY($1) AND auto_update', [paused]);
-      for (const id of paused) {
-        await logAudit('series.settings', { userId: userIdOf(req), detail: { id, title: byId.get(id)?.title ?? null, autoUpdate: false, via: 'bulk_delete' }, req });
-      }
-    }
-    return { ok: true, applied: series, chapters, bytes, kept, paused: paused.length, skipped };
+    const run = await startBulkChapterDelete({
+      ids, pause: b.data.pause !== false, userId: userIdOf(req), req, busy: jobBusy,
+    });
+    if (!run) return reply.code(409).send({ error: 'bulk_delete_busy', message: 'Another chapter cleanup is already running.' });
+    return reply.code(202).send({ ok: true, runId: run.id, total: run.total });
+  });
+
+  app.get('/api/admin/series/bulk/chapters/delete', async (req, reply) => {
+    const parsed = z.object({ runId: z.string().uuid().optional() }).safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'That run id is not valid.' });
+    const run = await readBulkChapterDeleteRun(parsed.data.runId);
+    if (parsed.data.runId && !run) return reply.code(404).send({ error: 'not_found' });
+    return { run };
+  });
+
+  app.post('/api/admin/series/bulk/chapters/delete/cancel', async (req, reply) => {
+    const parsed = z.object({ runId: z.string().uuid().optional() }).optional().safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'That run id is not valid.' });
+    const id = await requestBulkChapterDeleteCancel(parsed.data?.runId);
+    if (!id) return reply.code(404).send({ error: 'not_running', message: 'That chapter cleanup is no longer running.' });
+    return { ok: true, runId: id, cancelRequested: true };
   });
 
   app.post('/api/admin/series/:id/restore', async (req, reply) => {

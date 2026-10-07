@@ -8,7 +8,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +34,8 @@ const A = 's_bmd_a', B = 's_bmd_b', C = 's_bmd_c', BUSY = 's_bmd_busy';
 const FOLDER = (s: string) => `T!bmd/${s}`;
 const ADMIN = 'bmd-admin';
 let q: any, app: any, updateSeries: any, busyFolders: Set<string>, issueApiToken: any;
+let jobBusy: (folder: string) => boolean;
+let setDeleteHooks: (hooks: any) => void, closeInterrupted: () => Promise<number>;
 let adminTok: string, adminId: string, apiKey: string;
 let savedGhosts: boolean | undefined;
 
@@ -45,6 +47,9 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   ({ updateSeries } = (await import('../src/lib/updater')) as any);
   ({ busyFolders } = (await import('../src/lib/bulkNewest')) as any);
+  ({ jobBusy } = (await import('../src/routes/sources')) as any);
+  ({ setBulkChapterDeleteTestHooks: setDeleteHooks, closeInterruptedBulkChapterDeleteRuns: closeInterrupted } =
+    (await import('../src/lib/bulkChapterDelete')) as any);
   ({ issueApiToken } = (await import('../src/lib/auth')) as any);
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
@@ -95,18 +100,42 @@ after(async () => {
   if (ROOT) rmSync(ROOT, { recursive: true, force: true });
   if (!DSN) return;
   await app?.close();
+  setDeleteHooks?.({});
   await q('UPDATE server_settings SET komga_ghost_chapters = $1, deleted_as_ghosts = false WHERE id = 1', [savedGhosts ?? false]).catch(() => {});
-  await q('DELETE FROM bookmarks WHERE series_id = ANY($1)', [[A, B, C, BUSY]]).catch(() => {});
-  await q('DELETE FROM read_progress WHERE series_id = ANY($1)', [[A, B, C, BUSY]]).catch(() => {});
-  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[A, B, C, BUSY]]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[A, B, C, BUSY]]).catch(() => {});
+  await q(`DELETE FROM admin_bulk_delete_runs r
+            WHERE r.started_by = $1 OR EXISTS (SELECT 1 FROM unnest(r.series_ids) id WHERE id LIKE 's_bmd_%')`, [adminId]).catch(() => {});
+  await q(`DELETE FROM bookmarks WHERE series_id LIKE 's_bmd_%'`).catch(() => {});
+  await q(`DELETE FROM read_progress WHERE series_id LIKE 's_bmd_%'`).catch(() => {});
+  await q(`DELETE FROM lib_books WHERE series_id LIKE 's_bmd_%'`).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE id LIKE 's_bmd_%'`).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
 });
 
 const post = (url: string, payload: any) => app.inject({ method: 'POST', url, headers: { authorization: adminTok }, payload });
+const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: adminTok } });
 const monitored = async (id: string) => (await q('SELECT auto_update FROM lib_series WHERE id = $1', [id]))[0].auto_update;
 const pruned = async (id: string) => !!(await q('SELECT pruned_at FROM lib_books WHERE id = $1', [id]))[0].pruned_at;
+const until = async (f: () => Promise<any> | any, label: string, tries = 300) => {
+  for (let i = 0; i < tries; i++) { const value = await f(); if (value) return value; await new Promise((r) => setTimeout(r, 10)); }
+  throw new Error(`timed out waiting for ${label}`);
+};
+const runState = async (id: string) => (await get(`/api/admin/series/bulk/chapters/delete?runId=${id}`)).json().run;
+const finishedRun = async (id: string) => until(async () => {
+  const run = await runState(id);
+  return run?.status !== 'running' ? run : null;
+}, `bulk delete ${id}`);
+const seedSeries = async (id: string, chapters = 2) => {
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, auto_update)
+           VALUES ($1,'T!bmd',$1,$2,$3,$4,true)`, [id, FOLDER(id), chapters, LIB]);
+  for (let n = 1; n <= chapters; n++) {
+    const bookId = `b_${id}_${n}`;
+    const rel = `${FOLDER(id)}/Chapter ${n}.cbz`;
+    file(DL, rel);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root)
+             VALUES ($1,$2,'T!bmd',$3,$4,$5,1,$6)`, [bookId, id, rel, n, `Chapter ${n}`, DL]);
+  }
+};
 
 test('Unmonitor and Monitor set auto_update for the selection, skip what is gone, and audit each', { skip }, async () => {
   const r = await post('/api/admin/series/bulk/auto-update', { seriesIds: [A, B, A, 's_bmd_nope'], autoUpdate: false });
@@ -125,8 +154,8 @@ test('an unmonitored series answers `paused` to an unattended run, before any so
   const r = await updateSeries(A, 10, { unattended: true });
   assert.equal(r.outcome, 'paused');
   assert.equal(r.asked, false);
-  // A listing-only refresh downloads nothing, and still goes ahead; so does a run a person started.
-  assert.notEqual((await updateSeries(A, 0, { unattended: true })).outcome, 'paused');
+  // An unattended listing refresh is still network work and stays paused; a run a person started goes ahead.
+  assert.equal((await updateSeries(A, 0, { unattended: true })).outcome, 'paused');
   assert.notEqual((await updateSeries(A, 10)).outcome, 'paused');
   const back = await post('/api/admin/series/bulk/auto-update', { seriesIds: [A, B], autoUpdate: true });
   assert.equal(back.json().applied, 2);
@@ -136,14 +165,18 @@ test('an unmonitored series answers `paused` to an unattended run, before any so
 
 test('Delete chapters takes downloads only, keeps the cover chapter and bookmarks, and unmonitors by default', { skip }, async () => {
   busyFolders.add(FOLDER(BUSY));
+  let run: any;
   try {
     const r = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [A, B, BUSY, 's_bmd_nope'] });
-    assert.equal(r.statusCode, 200, r.body);
-    const body = r.json();
-    assert.equal(body.chapters, 1, 'only chapter 2 of A goes');
-    assert.equal(body.applied, 1);
-    assert.equal(body.paused, 1);
-    const reasons = Object.fromEntries(body.skipped.map((s: any) => [s.id, s.reason]));
+    assert.equal(r.statusCode, 202, r.body);
+    assert.equal(r.json().total, 4);
+    run = await finishedRun(r.json().runId);
+    assert.equal(run.status, 'done');
+    assert.equal(run.summary.chapters, 1, 'only chapter 2 of A goes');
+    assert.equal(run.summary.applied, 1);
+    assert.equal(run.summary.paused, 1);
+    assert.equal(run.summary.chapterSkips.bookmarked, 1, 'chapter-level guards are retained in the run result');
+    const reasons = Object.fromEntries(run.results.filter((s: any) => s.outcome === 'skipped').map((s: any) => [s.id, s.reason]));
     assert.deepEqual(reasons, { [B]: 'nothing_to_delete', [BUSY]: 'busy', s_bmd_nope: 'not_found' });
   } finally { busyFolders.delete(FOLDER(BUSY)); }
   // The cover chapter, the bookmarked one and the read library's are all still there; chapter 2 is a tombstone.
@@ -162,12 +195,111 @@ test('Delete chapters takes downloads only, keeps the cover chapter and bookmark
 
 test('Delete chapters with pause off leaves the series monitored, and keeps the lowest chapter when none is the cover', { skip }, async () => {
   const r = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [C], pause: false });
-  assert.equal(r.statusCode, 200, r.body);
-  assert.equal(r.json().chapters, 1);
-  assert.equal(r.json().paused, 0);
+  assert.equal(r.statusCode, 202, r.body);
+  const run = await finishedRun(r.json().runId);
+  assert.equal(run.summary.chapters, 1);
+  assert.equal(run.summary.paused, 0);
   assert.equal(await monitored(C), true);
   assert.equal(await pruned('b_bmd_c1'), false, 'the lowest live chapter is the cover and stays');
   assert.equal(await pruned('b_bmd_c2'), true);
+});
+
+test('the run claims the shared writer lock before an await, pauses under it, rejects another run, and cancels between series', { skip }, async () => {
+  const RACE = 's_bmd_race', LATER = 's_bmd_later';
+  await seedSeries(RACE);
+  await seedSeries(LATER);
+  let claimed!: () => void, release!: () => void;
+  const claim = new Promise<void>((resolve) => { claimed = resolve; });
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  let pauseObserved = false;
+  setDeleteHooks({
+    afterClaim: async (s: any) => {
+      if (s.id !== RACE) return;
+      assert.equal(jobBusy(s.folder), true, 'another writer sees the folder as busy immediately after the check');
+      claimed();
+      await hold;
+    },
+    afterPause: async (s: any) => {
+      if (s.id !== RACE) return;
+      assert.equal(busyFolders.has(s.folder), true, 'the pause and audit happen before releasing the writer lock');
+      assert.equal(await monitored(RACE), false);
+      pauseObserved = true;
+    },
+  });
+  try {
+    const started = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [RACE, LATER] });
+    assert.equal(started.statusCode, 202, started.body);
+    await claim;
+    const other = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [B] });
+    assert.equal(other.statusCode, 409, other.body);
+    assert.equal(other.json().error, 'bulk_delete_busy');
+    const cancel = await post('/api/admin/series/bulk/chapters/delete/cancel', { runId: started.json().runId });
+    assert.equal(cancel.statusCode, 200, cancel.body);
+    release();
+    const run = await finishedRun(started.json().runId);
+    assert.equal(run.status, 'cancelled');
+    assert.equal(run.done, 2);
+    assert.equal(run.results[0].id, RACE);
+    assert.equal(run.results[0].outcome, 'applied');
+    assert.equal(run.results[1].id, LATER);
+    assert.equal(run.results[1].reason, 'cancelled');
+    assert.equal(await pruned(`b_${LATER}_2`), false, 'cancellation is observed before the next series');
+    assert.equal(pauseObserved, true);
+    assert.equal(busyFolders.has(FOLDER(RACE)), false, 'the claim is always released');
+  } finally {
+    release?.();
+    setDeleteHooks({});
+  }
+});
+
+test('hidden, all-bookmarked and unlink-failed series retain precise persisted reasons', { skip }, async () => {
+  const HIDDEN = 's_bmd_hidden', MARKED = 's_bmd_marked', UNLINK = 's_bmd_unlink';
+  await seedSeries(HIDDEN);
+  await seedSeries(MARKED, 3);
+  await seedSeries(UNLINK);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [HIDDEN]);
+  await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page) VALUES ($1,$2,$3,1),($1,$4,$3,1)`,
+    [adminId, `b_${MARKED}_2`, MARKED, `b_${MARKED}_3`]);
+  const unlinkFolder = join(DL, FOLDER(UNLINK));
+  chmodSync(unlinkFolder, 0o555);
+  try {
+    const started = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [HIDDEN, MARKED, UNLINK] });
+    assert.equal(started.statusCode, 202, started.body);
+    // The POST has already returned; a separate request can recover the durable run and its eventual result.
+    assert.ok((await runState(started.json().runId)).startedAt);
+    const run = await finishedRun(started.json().runId);
+    const byId = new Map(run.results.map((r: any) => [r.id, r]));
+    assert.equal(byId.get(HIDDEN).reason, 'hidden');
+    assert.equal(byId.get(MARKED).reason, 'nothing_to_delete');
+    assert.deepEqual(byId.get(MARKED).chapterSkips, { bookmarked: 2 });
+    assert.equal(run.summary.chapterSkips.bookmarked, 2);
+    assert.equal(byId.get(UNLINK).reason, 'nothing_to_delete');
+    assert.deepEqual(byId.get(UNLINK).chapterSkips, { unlink_failed: 1 });
+    assert.equal(run.summary.chapterSkips.unlink_failed, 1);
+    assert.equal(existsSync(join(unlinkFolder, 'Chapter 2.cbz')), true, 'a failed unlink is never tombstoned');
+    assert.equal(await pruned(`b_${UNLINK}_2`), false);
+  } finally {
+    chmodSync(unlinkFolder, 0o755);
+  }
+});
+
+test('a run left by another process becomes interrupted and its partial result stays retrievable', { skip }, async () => {
+  const stale = (await q(
+    `INSERT INTO admin_bulk_delete_runs
+       (worker_id, pause, series_ids, total, done, summary, results)
+     VALUES (gen_random_uuid(), true, ARRAY['s_bmd_restart'], 2, 1,
+       '{"applied":1,"chapters":1,"bytes":1,"kept":1,"paused":1,"skipped":0,"failed":0,"chapterSkips":{}}'::jsonb,
+       '[{"id":"s_bmd_restart","outcome":"applied","chapters":1,"bytes":1,"kept":1,"paused":true,"chapterSkips":{}}]'::jsonb)
+     RETURNING id`,
+  ))[0].id;
+  assert.equal(await closeInterrupted(), 1);
+  const response = await get(`/api/admin/series/bulk/chapters/delete?runId=${stale}`);
+  assert.equal(response.statusCode, 200, response.body);
+  const run = response.json().run;
+  assert.equal(run.status, 'interrupted');
+  assert.equal(run.done, 1);
+  assert.equal(run.results[0].chapters, 1);
+  assert.match(run.error, /server stopped/i);
 });
 
 test('Show deleted chapters as ghosts: off by default, told to every viewer, and listed "not downloaded" to Mihon', { skip }, async () => {
