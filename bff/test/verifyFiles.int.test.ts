@@ -421,6 +421,23 @@ test('the sweep fetches a chapter the verify task marked missing', { skip }, asy
   assert.ok(await exists(join(DL, FOLDER_S, 'Chapter 3.cbz')), 'the missing chapter did not land');
 });
 
+test('the sweep also fetches a chapter Rescan found missing', { skip }, async () => {
+  // Rescan learned the same nondeliberate fact as Verify through a different walk: the bytes are absent. Treating
+  // that provenance like Delete files strands the chapter forever. Reintroduce by omitting `rescan_missing` from
+  // heldBooks in lib/chapterCleanup.ts: the source is never asked for chapter 3 below.
+  await seed();
+  await tombstoneBooks([B.three], 'rescan_missing');
+  assert.equal((await pruned(B.three)).pruned_reason, 'rescan_missing', 'precondition');
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_ID]);
+
+  const r = await updateSeries(S, 5);
+
+  assert.deepEqual(asked, [3], `the rescan-missing chapter alone is not held; asked for: ${asked}`);
+  assert.equal(r.added, 1);
+  assert.ok(await exists(join(DL, FOLDER_S, 'Chapter 3.cbz')), 'the rescan-missing chapter did not land');
+});
+
 test('a cleanup tombstone is still held, so the sweep does not fetch it back', { skip }, async () => {
   // A chapter the read-chapter cleanup deleted -- or Delete files removed -- was let go on purpose, and
   // the tombstone exists so the sweep does not fetch it back every night (the note on pruned_at in

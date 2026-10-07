@@ -160,8 +160,8 @@ export async function dueCountCached(days: number): Promise<number> {
  * over a library the cleanup has pruned cannot relabel a deliberate deletion as a missing file.
  *
  * `reason` says why the bytes are gone (the column note in lib/migrate.ts): this job passes nothing, the
- * admin's Delete files passes 'deleted', the verify task passes 'missing'. Only 'missing' changes what the
- * updater does -- see heldBooks below.
+ * admin's Delete files passes 'deleted', Verify passes 'missing', and Rescan passes 'rescan_missing'. The
+ * latter two are observations rather than deliberate deletions, so the updater recovers both -- see heldBooks.
  */
 export type PrunedReason = 'deleted' | 'missing' | 'rescan_missing';
 
@@ -184,7 +184,8 @@ export async function tombstoneBooks(ids: string[], reason: PrunedReason | null 
  * too: the bytes went on purpose, and the whole point of keeping the row (the note on pruned_at in
  * lib/migrate.ts) is that the sweep does not fetch them back every night. A 'missing' tombstone is NOT
  * held: the verify task wrote it because the file was simply not there -- a database restored without its
- * chapter files -- and fetching it again is exactly what the person wants.
+ * chapter files -- and fetching it again is exactly what the person wants. A `rescan_missing` tombstone is
+ * the same nondeliberate fact discovered by Rescan, and must be recoverable too.
  * ⚠️ `IS DISTINCT FROM`, not `<>`: a NULL reason compared with `<>` is NULL, which reads as false, and
  * every cleanup tombstone would silently become "missing".
  * Reintroduce by returning `${col}pruned_at IS NULL`: "a cleanup tombstone is still held, so the sweep
@@ -192,7 +193,7 @@ export async function tombstoneBooks(ids: string[], reason: PrunedReason | null 
  */
 export const heldBooks = (alias = ''): string => {
   const col = alias ? `${alias}.` : '';
-  return `(${col}pruned_at IS NULL OR ${col}pruned_reason IS DISTINCT FROM 'missing')`;
+  return `(${col}pruned_at IS NULL OR (${col}pruned_reason IS DISTINCT FROM 'missing' AND ${col}pruned_reason IS DISTINCT FROM 'rescan_missing'))`;
 };
 
 /**

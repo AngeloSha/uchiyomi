@@ -185,17 +185,26 @@ type Completion = 'completed' | 'improved' | 'unchanged' | 'gone';
  * the same-copy pass works before it lands, and a missing module simply ends the attempt at 'unchanged'.
  */
 export async function completePartial(
-  book: { id: string; series_id: string; root: string; file: string; number: number; missing_pages: number[]; source_id: string | null },
+  book: { id: string; series_id: string; root: string; file: string; number: number; missing_pages: number[]; source_id: string | null; scanlator?: string | null },
   ctx: {
     alternates: () => Promise<SourceChapter[]>;
     /** The sweep's age rule. It applies to the old copy as well as every fallback copy. */
     allowed?: (source: string) => boolean;
+    /** Current scanlator rules for the original copy. Re-read before every source operation. */
+    automaticAllowed?: (chapter: SourceChapter) => Promise<boolean>;
     hunt?: (why: string) => Promise<SourceChapter | null>;
     /** Last-responsible-moment admission for the nightly completion pass. Manual callers may omit it. */
     admit?: () => Promise<boolean>;
   },
 ): Promise<Completion> {
-  const admitted = () => ctx.admit ? ctx.admit().catch(() => false) : Promise.resolve(true);
+  const admitted = async (candidate?: SourceChapter): Promise<boolean> => {
+    if (ctx.admit && !(await ctx.admit().catch(() => false))) return false;
+    // A partial on disk is not a pin for tonight's unattended repair. It is merely the copy that landed on
+    // an earlier run, so a group blocked since then must not receive another request. Preference read errors
+    // fail closed, matching the other automatic download paths.
+    if (candidate && ctx.automaticAllowed && !(await ctx.automaticAllowed(candidate).catch(() => false))) return false;
+    return true;
+  };
   const abs = join(book.root, book.file);
   let manifest: PartialManifest | null;
   try {
@@ -227,7 +236,12 @@ export async function completePartial(
   // dirnameRel, not dirname: book.file is the stored `/` form (lib/relPath.ts), and this folder is handed
   // back to the downloader, whose chapterFileRel must land on the same row.
   const seriesFolder = dirnameRel(book.file);
-  const chapter: SourceChapter = { sourceId: manifest.chapterSourceId, number: book.number };
+  const chapter: SourceChapter = {
+    sourceId: manifest.chapterSourceId,
+    number: book.number,
+    source: manifest.source,
+    ...(book.scanlator ? { scanlator: book.scanlator } : {}),
+  };
   const label = `[partial] "${title}" ch ${book.number}`;
   let result: Completion = 'unchanged';
   const before = (await stat(abs)).size;
@@ -239,7 +253,7 @@ export async function completePartial(
     && !(await blockedNow(src.id).catch(() => null));
   if (src && askable) {
     let urls: string[] | null = null;
-    if (!(await admitted())) return result;
+    if (!(await admitted(chapter))) return result;
     try {
       urls = await src.getPageUrls(manifest.chapterSourceId);
     } catch (e) {
@@ -249,7 +263,7 @@ export async function completePartial(
     }
     if (urls && urls.length === manifest.expected) {
       // `retry: false`: the source sees exactly one request per hole, tonight and again tomorrow.
-      if (!(await admitted())) return result;
+      if (!(await admitted(chapter))) return result;
       const got = await underGate(src.id, () => fetchPages(src, urls!, missing, { chapterSourceId: manifest.chapterSourceId, retry: false }));
       const filled = missing.filter((i) => got.page[i]);
       if (filled.length) {
@@ -296,7 +310,7 @@ export async function completePartial(
       // The source re-sliced the chapter since the partial was written: index 149 of 155 is not index
       // 149 of 150. Fetch it whole, and keep the new copy only when it is complete or has fewer holes.
       try {
-        if (!(await admitted())) return result;
+        if (!(await admitted(chapter))) return result;
         const r = await downloadChapter({ sourceId: src.id, seriesFolder, chapter, meta }, { replace: true });
         if (r) {
           await restampBook(book.id, abs, []);

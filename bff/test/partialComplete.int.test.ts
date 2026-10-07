@@ -45,7 +45,7 @@ const ALT = 'pc-alt';
 const S = 's_pcomp_series';
 const FOLDER = 'T!pcomp/Partial Complete';
 
-let q: any, owned: any, downloadChapter: any, completePartial: any, setBookMeta: any, persistScan: any, clearPace: () => void;
+let q: any, owned: any, downloadChapter: any, completePartial: any, setBookMeta: any, persistScan: any, runUpdateAll: any, clearPace: () => void;
 let app: any, headers: Record<string, string>;
 const USER = 'pcomp-user';
 /** (chapter id, page index) pairs the site answers 404 for; everything else is a real, distinct PNG. */
@@ -54,6 +54,9 @@ const failing = new Set<string>();
 const pageCount = new Map<string, number>();
 /** Every image request, as `chapter/index`: what the source was asked for. */
 let asked: string[] = [];
+/** Page-list requests are source operations too; image requests alone cannot prove the blocklist stopped one. */
+let pageLists: string[] = [];
+let afterPageList: ((chapterId: string) => Promise<void>) | null = null;
 const pngs = new Map<number, Buffer>();
 const realFetch = globalThis.fetch;
 
@@ -76,7 +79,11 @@ const adapter = {
   async search() { return []; },
   async getSeries() { return null; },
   async listChapters() { return []; },
-  async getPageUrls(ch: string) { return Array.from({ length: pageCount.get(ch) ?? 5 }, (_, i) => `https://example.invalid/${ch}/p${i}.png`); },
+  async getPageUrls(ch: string) {
+    pageLists.push(ch);
+    await afterPageList?.(ch);
+    return Array.from({ length: pageCount.get(ch) ?? 5 }, (_, i) => `https://example.invalid/${ch}/p${i}.png`);
+  },
 };
 
 before(async () => {
@@ -93,6 +100,7 @@ before(async () => {
   ({ owned } = (await import('../src/lib/ownedCatalog')) as any);
   ({ downloadChapter } = await import('../src/lib/downloader'));
   ({ completePartial } = await import('../src/lib/partial'));
+  ({ runUpdateAll } = await import('../src/lib/updater'));
   ({ setBookMeta, persistScan } = await import('../src/lib/library'));
   ({ clearPace } = await import('../src/lib/pace'));
   const { registerAdapter } = await import('../src/lib/sources');
@@ -122,6 +130,8 @@ before(async () => {
 // Cleared before every test, as chapterActions.int.test.ts does, so each test starts where its cause is.
 beforeEach(async () => {
   asked = [];
+  pageLists = [];
+  afterPageList = null;
   clearPace();
   if (DSN) await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, ALT, ADULT_SRC]]).catch(() => {});
 });
@@ -143,16 +153,17 @@ const row = async (n: number) => (await q(
   `SELECT id, series_id, root, file, number, missing_pages, source_id, pages, page_dims, size, fp_at, short_confirmed_at FROM lib_books WHERE series_id = $1 AND number = $2`, [S, n],
 ))[0];
 /** A written partial for chapter `n` with page 4 (index 3) missing, scanned and stamped as the sweep would. */
-async function partial(n: number): Promise<any> {
+async function partial(n: number, scanlator?: string): Promise<any> {
   failing.add(`c${n}/3`);
-  const err = await downloadChapter({ sourceId: SRC, seriesFolder: FOLDER, chapter: { sourceId: `c${n}`, number: n }, meta: { series: 'Partial Complete' } })
+  const err = await downloadChapter({ sourceId: SRC, seriesFolder: FOLDER, chapter: { sourceId: `c${n}`, number: n, scanlator }, meta: { series: 'Partial Complete' } })
     .then(() => null, (e: any) => e);
   assert.deepEqual(err?.partial?.missing, [3], 'the hold is offered');
   const w = await err.partial.write();
   await persistScan();
-  await setBookMeta(FOLDER, [{ number: n, source: SRC, missing: w.missing.map((i: number) => i + 1) }]);
+  await setBookMeta(FOLDER, [{ number: n, source: SRC, scanlator, missing: w.missing.map((i: number) => i + 1) }]);
   // The seeding download is not the subject: neither its requests nor the cooldown it earned.
   asked = [];
+  pageLists = [];
   await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
   return row(n);
 }
@@ -289,6 +300,55 @@ test('the completion pass rechecks admission before asking the source', { skip }
   assert.deepEqual(asked, [], 'no source or page request was made');
   assert.ok(before.equals(await readFile(abs(14))), 'the partial archive was not touched');
   assert.deepEqual((await row(14)).missing_pages, [4]);
+});
+
+test('the nightly completion pass treats the original partial as automatic, not pinned, and obeys a new group block', { skip }, async () => {
+  // The file came from Blocked Team before the admin blocked that team. Its origin is not an explicit pick for
+  // tonight's repair: the completion pass must re-read the current preference before even asking for page URLs.
+  // Reintroduce by dropping automaticAllowed from updater's completePartial call (or its check in partial.ts): c20
+  // appears in pageLists and the blocked group receives an unattended request.
+  await q('UPDATE lib_books SET missing_pages = NULL WHERE series_id = $1', [S]);
+  await q(`UPDATE lib_series SET auto_update = true,
+            scanlator_prefs = '{"priority":[],"blocked":["Blocked Team"],"patienceDays":null}'::jsonb
+          WHERE id = $1`, [S]);
+  await partial(20, 'Blocked Team');
+  const before = await readFile(abs(20));
+  failing.delete('c20/3');
+
+  try {
+    const r = await runUpdateAll({ maxNew: 5, sweepMax: 5 });
+    assert.equal(r.completed, 0);
+    assert.deepEqual(pageLists, [], 'a newly blocked original copy was contacted as though it were pinned');
+    assert.deepEqual(asked, []);
+    assert.deepEqual((await row(20)).missing_pages, [4]);
+    assert.ok((await readFile(abs(20))).equals(before), 'the partial remains untouched');
+  } finally {
+    await q('UPDATE lib_series SET scanlator_prefs = NULL WHERE id = $1', [S]);
+  }
+});
+
+test('the nightly completion pass re-reads auto-update between the page list and the page request', { skip }, async () => {
+  // Unmonitor can land while a source operation is in flight. The page-list request was already admitted, but no
+  // subsequent image request may start under the stale true value. Reintroduce by removing the second admitted()
+  // check in completePartial: c21/3 appears in asked and the archive becomes complete after Unmonitor.
+  await q('UPDATE lib_books SET missing_pages = NULL WHERE series_id = $1', [S]);
+  await q('UPDATE lib_series SET auto_update = true, scanlator_prefs = NULL WHERE id = $1', [S]);
+  await partial(21, 'Open Team');
+  failing.delete('c21/3');
+  afterPageList = async (chapterId) => {
+    if (chapterId === 'c21') await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [S]);
+  };
+
+  try {
+    const r = await runUpdateAll({ maxNew: 5, sweepMax: 5 });
+    assert.equal(r.completed, 0);
+    assert.deepEqual(pageLists, ['c21'], 'the admitted page-list operation did not run');
+    assert.deepEqual(asked, [], 'an image request began after the series was unmonitored');
+    assert.deepEqual((await row(21)).missing_pages, [4]);
+  } finally {
+    afterPageList = null;
+    await q('UPDATE lib_series SET auto_update = true WHERE id = $1', [S]);
+  }
 });
 
 test('a worse alternate is rejected before it can replace the canonical partial', { skip }, async () => {
