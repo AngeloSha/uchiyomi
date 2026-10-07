@@ -133,7 +133,7 @@ export default function CollectionsPage() {
                   aria-pressed={homeIds.includes(c.id)}
                   className={`chip text-xs disabled:opacity-50 ${homeIds.includes(c.id) ? 'chip-active' : ''}`}>
                   <IcHome width={13} height={13} aria-hidden />
-                  {homeIds.includes(c.id) ? `${tr('Home')} ${homeIds.indexOf(c.id) + 1}` : tr('Show on Home')}
+                  {homeIds.includes(c.id) ? tr('Home {n}', { n: homeIds.indexOf(c.id) + 1 }) : tr('Show on Home')}
                 </button>
                 {homeIds.includes(c.id) && homeIds.length > 1 && (
                   <>

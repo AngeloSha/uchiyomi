@@ -70,8 +70,8 @@ test('Lists edits clean stale IDs, refuse a fourth choice, and expose ordered ac
     'choosing a fourth List is not refused with an explanation');
   assert.match(src, /api\('\/api\/settings', \{ method: 'PUT', json: \{ homeCollections: next \} \}\)/,
     'the complete cleaned order is not persisted');
-  assert.match(src, /homeIds\.includes\(c\.id\) \? `\$\{tr\('Home'\)\} \$\{homeIds\.indexOf\(c\.id\) \+ 1\}` : tr\('Show on Home'\)/,
-    'cards do not expose their Home positions');
+  assert.match(src, /homeIds\.includes\(c\.id\) \? tr\('Home \{n\}', \{ n: homeIds\.indexOf\(c\.id\) \+ 1 \}\) : tr\('Show on Home'\)/,
+    'cards do not expose their translated, bidi-safe Home positions');
   assert.match(src, /aria-label=\{tr\('Move earlier'\)\}[\s\S]{0,500}aria-label=\{tr\('Move later'\)\}/,
     'the order controls are not named to assistive technology');
   assert.match(src, /onClick=\{\(\) => moveHome\(c\.id, -1\)\}[\s\S]{0,350}\{rtl \? <IcChevronRight[^:]*: <IcChevronLeft/,
