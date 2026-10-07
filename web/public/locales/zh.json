@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3516
+    "strings": 3537
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3521,5 +3521,24 @@
   "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "Uchiyomi 下载的每个章节都会从服务器删除，但会保留每个系列的封面章节，以保留封面。你手动整理的书库中的文件以及带书签的章节不受影响。",
   "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "章节仍会列出，每个人的阅读记录都会保留。在系列页面使用“重新获取”可取回章节。",
   "Also stop updates for these series": "同时停止这些系列的更新",
-  "Otherwise the next check downloads their newest chapters again.": "否则下次检查会再次下载它们的最新章节。"
+  "Otherwise the next check downloads their newest chapters again.": "否则下次检查会再次下载它们的最新章节。",
+  "Choose up to 3 lists for Home": "最多选择 3 个在首页显示的列表",
+  "Choose up to 3 lists for Home. Empty lists stay selected and appear when they have series.": "最多选择 3 个在首页显示的列表。空列表会保持选中，并在其中有系列后显示。",
+  "Show on Home": "在首页显示",
+  "Could not start the cleanup": "无法开始清理",
+  "Could not stop the cleanup": "无法停止清理",
+  "Interrupted": "已中断",
+  "Deleting a chapter being read can lose its reading position.": "删除正在阅读的章节可能会丢失阅读位置。",
+  "Series not found": "找不到系列",
+  "Series is hidden": "系列已隐藏",
+  "Series was merged": "系列已合并",
+  "Series is busy": "系列正在处理中",
+  "Nothing to delete": "没有可删除的内容",
+  "Deletion was refused": "删除被拒绝",
+  "1 chapter kept": "保留了 1 个章节",
+  "{n} chapters kept": "保留了 {n} 个章节",
+  "Stopping after the current series…": "将在当前系列处理完毕后停止…",
+  "This cleanup keeps running if you close this window or reload the page.": "即使关闭此窗口或重新加载页面，此清理任务仍会继续运行。",
+  "Results": "结果",
+  "Updates stopped": "已停止更新"
 }

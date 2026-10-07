@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3516
+    "strings": 3537
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3521,5 +3521,24 @@
   "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "Se elimina del servidor cada capítulo que Uchiyomi descargó, excepto el capítulo de portada de cada serie, para que las portadas se mantengan. Los archivos de una biblioteca que montaste tú y los capítulos con marcadores no se tocan.",
   "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "Los capítulos siguen en la lista y todos conservan su historial de lectura. Volver a obtener en la página de la serie recupera un capítulo.",
   "Also stop updates for these series": "Detener también las actualizaciones de estas series",
-  "Otherwise the next check downloads their newest chapters again.": "Si no, la próxima comprobación vuelve a descargar sus capítulos más recientes."
+  "Otherwise the next check downloads their newest chapters again.": "Si no, la próxima comprobación vuelve a descargar sus capítulos más recientes.",
+  "Choose up to 3 lists for Home": "Elige hasta 3 listas para Inicio",
+  "Choose up to 3 lists for Home. Empty lists stay selected and appear when they have series.": "Elige hasta 3 listas para Inicio. Las listas vacías siguen seleccionadas y aparecerán cuando contengan series.",
+  "Show on Home": "Mostrar en Inicio",
+  "Could not start the cleanup": "No se pudo iniciar la limpieza",
+  "Could not stop the cleanup": "No se pudo detener la limpieza",
+  "Interrupted": "Interrumpida",
+  "Deleting a chapter being read can lose its reading position.": "Eliminar un capítulo que se está leyendo puede hacer que se pierda la posición de lectura.",
+  "Series not found": "No se encontró la serie",
+  "Series is hidden": "La serie está oculta",
+  "Series was merged": "La serie se fusionó",
+  "Series is busy": "La serie se está procesando",
+  "Nothing to delete": "Nada que eliminar",
+  "Deletion was refused": "Se rechazó la eliminación",
+  "1 chapter kept": "Se conservó 1 capítulo",
+  "{n} chapters kept": "Se conservaron {n} capítulos",
+  "Stopping after the current series…": "Deteniéndose después de la serie actual…",
+  "This cleanup keeps running if you close this window or reload the page.": "Esta limpieza sigue ejecutándose si cierras esta ventana o recargas la página.",
+  "Results": "Resultados",
+  "Updates stopped": "Actualizaciones detenidas"
 }

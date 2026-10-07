@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3516
+    "strings": 3537
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3521,5 +3521,24 @@
   "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "С сервера удаляется каждая глава, скачанная Uchiyomi, кроме главы обложки каждой серии, чтобы обложки остались. Файлы в библиотеке, собранной вручную, и главы с закладками не затрагиваются.",
   "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "Главы остаются в списке, и у всех сохраняется история чтения. «Загрузить заново» на странице серии возвращает главу.",
   "Also stop updates for these series": "Также остановить обновления этих серий",
-  "Otherwise the next check downloads their newest chapters again.": "Иначе следующая проверка снова скачает их новейшие главы."
+  "Otherwise the next check downloads their newest chapters again.": "Иначе следующая проверка снова скачает их новейшие главы.",
+  "Choose up to 3 lists for Home": "Выберите до 3 списков для главной",
+  "Choose up to 3 lists for Home. Empty lists stay selected and appear when they have series.": "Выберите до 3 списков для главной. Пустые списки останутся выбранными и появятся, когда в них будут добавлены серии.",
+  "Show on Home": "Показывать на главной",
+  "Could not start the cleanup": "Не удалось запустить очистку",
+  "Could not stop the cleanup": "Не удалось остановить очистку",
+  "Interrupted": "Прервано",
+  "Deleting a chapter being read can lose its reading position.": "При удалении главы, которую сейчас читают, может потеряться позиция чтения.",
+  "Series not found": "Серия не найдена",
+  "Series is hidden": "Серия скрыта",
+  "Series was merged": "Серия объединена",
+  "Series is busy": "Серия уже обрабатывается",
+  "Nothing to delete": "Нечего удалять",
+  "Deletion was refused": "Удаление отклонено",
+  "1 chapter kept": "Сохранена 1 глава",
+  "{n} chapters kept": "Сохранено глав: {n}",
+  "Stopping after the current series…": "Остановка после текущей серии…",
+  "This cleanup keeps running if you close this window or reload the page.": "Очистка продолжится, даже если закрыть это окно или перезагрузить страницу.",
+  "Results": "Результаты",
+  "Updates stopped": "Обновления остановлены"
 }

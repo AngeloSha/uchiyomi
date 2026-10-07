@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3516
+    "strings": 3537
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3502,7 +3502,7 @@
   "Confirm": "Confirmer",
   "Vol. {n}": "Tome {n}",
   "Show all chapters at once": "Afficher tous les chapitres d’un coup",
-  "A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.": "La page d’une série liste tous les chapitres, y compris ceux pas encore là, sur une seule page au lieu de cent à la fois. Enregistré sur votre compte.",
+  "A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.": "La page d’une série répertorie tous les chapitres, y compris ceux qui ne sont pas encore présents, sur une seule page au lieu de cent à la fois. Enregistré sur votre compte.",
   "Show deleted chapters as ghosts": "Afficher les chapitres supprimés comme des fantômes",
   "A chapter whose file was deleted is shown like a chapter not downloaded yet, with Fetch to bring it back, instead of as a deleted chapter. Reading history is kept. Mihon lists it as “not downloaded”.": "Un chapitre dont le fichier a été supprimé s’affiche comme un chapitre pas encore téléchargé, avec Récupérer pour le faire revenir, plutôt que comme un chapitre supprimé. L’historique de lecture est conservé. Mihon l’affiche « not downloaded ».",
   "deleted": "supprimé",
@@ -3521,5 +3521,24 @@
   "Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.": "Chaque chapitre téléchargé par Uchiyomi est supprimé du serveur, sauf le chapitre de couverture de chaque série, pour garder les couvertures. Les fichiers d’une bibliothèque montée à la main et les chapitres avec des marque-pages ne sont pas touchés.",
   "The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.": "Les chapitres restent listés et chacun garde son historique de lecture. Récupérer à nouveau sur la page de la série fait revenir un chapitre.",
   "Also stop updates for these series": "Arrêter aussi les mises à jour de ces séries",
-  "Otherwise the next check downloads their newest chapters again.": "Sinon, la prochaine vérification retélécharge leurs chapitres les plus récents."
+  "Otherwise the next check downloads their newest chapters again.": "Sinon, la prochaine vérification retélécharge leurs chapitres les plus récents.",
+  "Choose up to 3 lists for Home": "Choisir jusqu’à 3 listes pour l’accueil",
+  "Choose up to 3 lists for Home. Empty lists stay selected and appear when they have series.": "Choisissez jusqu’à 3 listes pour l’accueil. Les listes vides restent sélectionnées et apparaissent dès qu’elles contiennent des séries.",
+  "Show on Home": "Afficher sur l’accueil",
+  "Could not start the cleanup": "Impossible de démarrer le nettoyage",
+  "Could not stop the cleanup": "Impossible d’arrêter le nettoyage",
+  "Interrupted": "Interrompu",
+  "Deleting a chapter being read can lose its reading position.": "La suppression d’un chapitre en cours de lecture peut faire perdre la position de lecture.",
+  "Series not found": "Série introuvable",
+  "Series is hidden": "Série masquée",
+  "Series was merged": "Série fusionnée",
+  "Series is busy": "Série en cours de traitement",
+  "Nothing to delete": "Rien à supprimer",
+  "Deletion was refused": "La suppression a été refusée",
+  "1 chapter kept": "1 chapitre conservé",
+  "{n} chapters kept": "{n} chapitres conservés",
+  "Stopping after the current series…": "Arrêt après la série en cours…",
+  "This cleanup keeps running if you close this window or reload the page.": "Ce nettoyage continue si vous fermez cette fenêtre ou rechargez la page.",
+  "Results": "Résultats",
+  "Updates stopped": "Mises à jour arrêtées"
 }
