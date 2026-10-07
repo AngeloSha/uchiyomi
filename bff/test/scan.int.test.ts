@@ -93,6 +93,46 @@ const oneSeries = async (folder: string) =>
 const booksOf = async (seriesId: string) =>
   q(`SELECT id, file, root, number, title FROM lib_books WHERE series_id = $1 ORDER BY file`, [seriesId]);
 
+// First in the file, so the library holds only its own folders: it counts every first archive a scan opens.
+test('persistScan: a rescan opens no first archive it has read already, and one that changed is read and written again', { skip }, async () => {
+  // v0.55.7 (#150): every scan opened the first archive of every folder for its ComicInfo -- on @Kedryn's Unraid share,
+  // one spun-up disk read per folder, to write the same values again. Reintroduce by always reading (drop the
+  // info_read test in persistScan): the second scan opens all four.
+  const { comicInfoReads } = await import('../src/lib/library');
+  const { utimes } = await import('fs/promises');
+  const src = 'T!info';
+  for (const t of ['Alpha', 'Beta']) for (const n of [1, 2]) await writeCbz(chapter(ROOT_A, src, t, `Chapter ${n}.cbz`), { series: `${t} Series` });
+  // A chapter that is a folder of images is read every time: a tagger can rewrite its ComicInfo.xml in place.
+  const loose = join(seriesDir(ROOT_A, src, 'Gamma'), 'Chapter 1');
+  await mkdir(loose, { recursive: true });
+  await writeFile(join(loose, '001.jpg'), Buffer.from('page'));
+  await writeFile(join(loose, 'ComicInfo.xml'), '<ComicInfo><Series>Gamma Series</Series></ComicInfo>');
+  // And a first archive that cannot be read is tried again by every scan, as it always was.
+  await mkdir(seriesDir(ROOT_A, src, 'Delta'), { recursive: true });
+  await writeFile(chapter(ROOT_A, src, 'Delta', 'Chapter 1.cbz'), Buffer.from('not a zip'));
+  const reads = async () => { const n = comicInfoReads(); await persistScan(); return comicInfoReads() - n; };
+  const title = async (t: string) => (await oneSeries(`${src}/${t}`))?.title;
+
+  assert.equal(await reads(), 4, 'precondition: a first scan reads every folder');
+  assert.equal(await title('Alpha'), 'Alpha Series');
+  assert.equal(await reads(), 2, 'a rescan opened a first archive it had read already');
+  assert.deepEqual([await title('Alpha'), await title('Beta'), await title('Gamma'), await title('Delta')],
+    ['Alpha Series', 'Beta Series', 'Gamma Series', 'Delta']);
+
+  // Alpha's first file replaced by a retagged one: read, and the series written from it, as every scan did.
+  const a1 = chapter(ROOT_A, src, 'Alpha', 'Chapter 1.cbz');
+  await writeCbz(a1, { series: 'Alpha Retagged', genre: 'Comedy' });
+  const later = new Date(Date.now() + 5_000);
+  await utimes(a1, later, later);
+  assert.equal(await reads(), 3, 'a first archive that changed was not read again');
+  const alpha = await oneSeries(`${src}/Alpha`);
+  assert.deepEqual([alpha.title, alpha.genres], ['Alpha Retagged', ['Comedy']], 'the retagged file was not written to the series');
+  // A new first chapter is another file: read.
+  await writeCbz(chapter(ROOT_A, src, 'Beta', 'Chapter 0.cbz'), { series: 'Beta From Zero' });
+  assert.equal(await reads(), 3, 'a new first chapter was not read');
+  assert.equal(await title('Beta'), 'Beta From Zero');
+});
+
 test('persistScan: a fresh scan creates the series and its chapters', { skip }, async () => {
   const src = 'T!fresh';
   await writeCbz(chapter(ROOT_A, src, 'Solo Leveling', 'Chapter 1.cbz'), { series: 'Solo Leveling', number: 1 });
@@ -190,6 +230,36 @@ test('persistScan: re-downloading a chapter in place keeps the same book id', { 
   const [bookAfter] = await booksOf(s.id);
 
   assert.equal(bookAfter.id, bookBefore.id, 'a re-download changed the book id');
+});
+
+test('persistScan: a file whose mtime moved is fingerprinted again; one that did not keeps its fingerprint', { skip }, async () => {
+  // v0.55.7 (#150): the fingerprint is of the bytes. A file replaced by hand -- or one the backfill read while it was
+  // still being unpacked, stamped unreadable for good -- kept the old one, and Rescan everything could never pair it
+  // after a move. Reintroduce by dropping the four fingerprint CASEs from persistScan's upsert: the scan after the
+  // replacement leaves the old fingerprint on the row.
+  const { runFingerprintBackfill } = await import('../src/lib/fingerprintJob');
+  const { utimes } = await import('fs/promises');
+  const src = 'T!fpmt';
+  const file = chapter(ROOT_A, src, 'Replaced', 'Chapter 1.cbz');
+  await writeCbz(file, { series: 'Replaced', pages: 1 });
+  await persistScan();
+  await runFingerprintBackfill();
+  const row = async () => (await q<{ fingerprint: string | null; fp_kind: string | null; fp_at: string | null; size: string | null }>(
+    `SELECT fingerprint, fp_kind, fp_at, size FROM lib_books WHERE root = $1 AND file = $2`, [ROOT_A, `${src}/Replaced/Chapter 1.cbz`]))[0];
+  const first = await row();
+  assert.ok(first.fingerprint && first.fp_at && first.size, `precondition: fingerprinted ${JSON.stringify(first)}`);
+
+  await persistScan();
+  assert.deepEqual(await row(), first, 'a scan that found the same file cleared its fingerprint');
+
+  await writeCbz(file, { series: 'Replaced', pages: 3, pixel: 'other-bytes' });
+  const later = new Date(Date.now() + 5_000);
+  await utimes(file, later, later);
+  await persistScan();
+  assert.deepEqual(await row(), { fingerprint: null, fp_kind: null, fp_at: null, size: null }, 'the old fingerprint stayed on a file whose mtime moved');
+  await runFingerprintBackfill();
+  const again = await row();
+  assert.ok(again.fingerprint && again.fingerprint !== first.fingerprint, 'the replaced file was not read again');
 });
 
 test('persistScan: TODAY renaming a folder orphans the series — this is the bug being fixed', { skip }, async () => {

@@ -1340,6 +1340,12 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
  * -- else the oldest. Two sides whose languages differ are the same work in two languages, and the chip is Link as
  * editions instead of Merge. Reintroduce by grouping by series again: "two editions of one work are no duplicate" in
  * editions.int.test.ts finds the pair.
+ *
+ * Only links that are known to be the series' (v0.55.7, #168): a person's, or an automatic one held to the title check
+ * (series_trackers.checked_at, lib/onlineMatch.ts). Before that check, a title search gave unrelated series one wrong
+ * entry, this grouped them, and Fix everything could merge them; a link stored before it waits for the background
+ * recheck (lib/matchCheck.ts) before it groups anything. Reintroduce by reading every link: "an unchecked link groups
+ * nothing" in onlineMatch.int.test.ts finds the pair.
  */
 export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const found = await q<{ external_id: string; members: Array<{ id: string; title: string; work: string; lang: string | null; source_id: string | null }> }>(
@@ -1347,7 +1353,7 @@ export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<Hea
             json_agg(json_build_object('id', ls.id, 'title', ls.title, 'work', COALESCE(ls.work_id::text, ls.id),
                                        'lang', ls.lang, 'source_id', ls.source_id) ORDER BY ls.title, ls.created_at, ls.id) AS members
        FROM series_trackers t JOIN lib_series ls ON ls.id = t.series_id AND ${visibleToAll('ls')}
-      WHERE t.provider = 'anilist'
+      WHERE t.provider = 'anilist' AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
       GROUP BY t.external_id HAVING count(DISTINCT COALESCE(ls.work_id::text, ls.id)) > 1
       ORDER BY count(DISTINCT COALESCE(ls.work_id::text, ls.id)) DESC`,
   );

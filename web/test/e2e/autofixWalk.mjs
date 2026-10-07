@@ -272,11 +272,13 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     const bookOf = (title, n) => sql(`SELECT id FROM lib_books WHERE series_id = ${lit(ID[title])} AND number = ${n} AND pruned_at IS NULL`);
     // The bookmark on 7777, through the reader's own route.
     await send('PUT', `/api/bookmarks/${encodeURIComponent(bookOf('Odd Mark', 7777))}/1`, {});
-    // One AniList entry for each pair; a tracker on Number Held, which the renumbering would push numbers to.
-    sql(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES
-           (${lit(ID['Twin Walk'])}, 'anilist', 'walk-twin'), (${lit(ID['Twin Walk Again'])}, 'anilist', 'walk-twin'),
-           (${lit(ID['Edition Walk'])}, 'anilist', 'walk-edition'), (${lit(ID['Edición Walk'])}, 'anilist', 'walk-edition'),
-           (${lit(ID['Number Held'])}, 'mal', 'walk-held') ON CONFLICT DO NOTHING`);
+    // One AniList entry for each pair; a tracker on Number Held, which the renumbering would push numbers to. Held to
+    // the title check (checked_at): since v0.55.7 Health's Duplicate series groups only a link a person made or one the
+    // online-match check has looked at (bff lib/health.ts), and an unchecked one groups nothing.
+    sql(`INSERT INTO series_trackers (series_id, provider, external_id, checked_at) VALUES
+           (${lit(ID['Twin Walk'])}, 'anilist', 'walk-twin', now()), (${lit(ID['Twin Walk Again'])}, 'anilist', 'walk-twin', now()),
+           (${lit(ID['Edition Walk'])}, 'anilist', 'walk-edition', now()), (${lit(ID['Edición Walk'])}, 'anilist', 'walk-edition', now()),
+           (${lit(ID['Number Held'])}, 'mal', 'walk-held', now()) ON CONFLICT DO NOTHING`);
     await send('PATCH', `/api/admin/series/${ID['Edición Walk']}`, { lang: 'es' });
     // Gap Only's own translation group: what ranks Gap Scans first among the extensions to try (no site is named in code).
     sql(`UPDATE lib_books SET scanlator = 'Gap Scans' WHERE series_id = ${lit(ID['Gap Only'])}`);

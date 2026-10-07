@@ -40,9 +40,10 @@ async function titles(ids: string[]): Promise<Map<string, string>> {
 export default async function rescanRoutes(app: FastifyInstance) {
   /**
    * The rescan, live and planned: `running` ('preview' | 'apply' | null), the `phase` it is in ('scan', 'look' and
-   * 'pair' for a preview, 'mark' for an Apply) with `done` of `of`, the newest `plan` -- its counts, and its lists by
-   * series with titles -- and the `last` Apply with `lastRun`. Polled by the Tasks panel every two seconds while a run
-   * is going; the plan is memory, so it costs a title lookup and nothing that grows with the library.
+   * 'pair' for a preview, 'mark', 'merge' and 'follow' for an Apply) with `done` of `of`, the newest `plan` -- its
+   * counts, and its lists by series with titles -- and the `last` Apply with `lastRun`. Polled by the Tasks panel every
+   * two seconds while a run is going; the plan is memory, so it costs a title lookup and nothing that grows with the
+   * library.
    */
   app.get('/api/admin/tasks/rescan/status', async (req) => {
     const s = rescanState;
@@ -50,13 +51,23 @@ export default async function rescanRoutes(app: FastifyInstance) {
     if (s.plan) {
       const v = planView(s.plan);
       const ids = [...new Set([
-        ...v.emptiedList.map((e) => e.seriesId), ...v.movedList.flatMap((m) => [m.seriesId, m.to.seriesId]), ...v.numbers.map((n) => n.seriesId),
+        ...v.emptiedList.flatMap((e) => (e.into ? [e.seriesId, e.into] : [e.seriesId])), ...v.movedList.flatMap((m) => [m.seriesId, m.to.seriesId]),
+        ...v.numbers.map((n) => n.seriesId), ...v.merges.flatMap((m) => [m.seriesId, m.into]),
       ])];
       const [ok, named] = await Promise.all([listable(req, ids), titles(ids)]);
       plan = {
         ...v,
+        // Where its files went (v0.55.7) is a series too: named only when this viewer may list it as well.
         emptiedList: v.emptiedList.filter((e) => ok.has(e.seriesId)).slice(0, LIST_MAX)
-          .map((e) => ({ ...e, title: named.get(e.seriesId) ?? '' })),
+          .map(({ into, ...e }) => ({
+            ...e, title: named.get(e.seriesId) ?? '', ...(into && ok.has(into) ? { into: { seriesId: into, title: named.get(into) ?? '' } } : {}),
+          })),
+        // The merge opt-in (v0.55.7), by title: offered only when both series may be listed -- the series a tick merges
+        // into is named on the box. `mergesTotal` counts all.
+        merges: v.merges.filter((m) => ok.has(m.seriesId) && ok.has(m.into))
+          .map((m) => ({ seriesId: m.seriesId, title: named.get(m.seriesId) ?? '', into: { seriesId: m.into, title: named.get(m.into) ?? '' }, chapters: m.chapters }))
+          .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true })).slice(0, NUMBERS_MAX),
+        mergesTotal: v.merges.length,
         // A pair is named when both of its series may be: the moved file's new series is a title too.
         movedList: v.movedList.filter((m) => ok.has(m.seriesId) && ok.has(m.to.seriesId)).slice(0, LIST_MAX)
           .map((m) => ({ ...m, title: named.get(m.seriesId) ?? '', to: { ...m.to, title: named.get(m.to.seriesId) ?? '' } })),
@@ -80,7 +91,8 @@ export default async function rescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Apply the plan the admin saw (`plan`, its id), and renumber the series they ticked in its opt-in (`renumber`).
+   * Apply the plan the admin saw (`plan`, its id), renumber the series they ticked in its opt-in (`renumber`), and
+   * merge the ones they ticked in the merge opt-in (`merge`, v0.55.7) into the series their files went to.
    * Detached like the preview -- it stats every planned file again -- so it answers {ok: true, started: true}, or
    * {ok: false, error} when it may not start: `busy` (a preview or an Apply is running), `no_plan`, `stale` (a newer
    * preview replaced it, or it is older than 30 minutes), `applied`, `not_in_plan` (a ticked series the preview did
@@ -92,6 +104,7 @@ export default async function rescanRoutes(app: FastifyInstance) {
     const b = z.object({
       plan: z.string().uuid(),
       renumber: z.array(z.string().min(1).max(64)).max(10_000).optional(),
+      merge: z.array(z.string().min(1).max(64)).max(10_000).optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
     const r = startApply(b.data, { userId: userIdOf(req) ?? null, req, log: app.log });

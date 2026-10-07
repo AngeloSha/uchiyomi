@@ -154,9 +154,11 @@ export async function filenamesWalk(ctx) {
 
       // 1. The series page: each number, the range as one row, in order.
       await visit(`/series/?id=${s.id}`, 3500);
-      const want = ['Ch. 0', 'Ch. 1–7', 'Ch. 12', 'Ch. 12', 'Ch. 12'];
+      const chapterLabel = (n) => say('Ch. {n}', { n });
+      const want = [chapterLabel('0'), chapterLabel('1–7'), chapterLabel('12'), chapterLabel('12'), chapterLabel('12')];
       const rows = await waitFor(async () => { const r = await rowLabels(); return r.length >= 5 ? r : null; }, 15_000, 400) ?? await rowLabels();
-      const asc = [...rows].sort((a, b) => parseFloat(a.slice(4)) - parseFloat(b.slice(4)));
+      const numberOf = (label) => parseFloat(label.match(/\d+(?:\.\d+)?/)?.[0] ?? 'NaN');
+      const asc = [...rows].sort((a, b) => numberOf(a) - numberOf(b));
       check(`filenames @${t}: the series page says Ch. 0, Ch. 1–7 and Ch. 12 three times`,
         JSON.stringify(asc) === JSON.stringify(want) && (JSON.stringify(rows) === JSON.stringify(want) || JSON.stringify(rows) === JSON.stringify([...want].reverse())),
         JSON.stringify(rows));
@@ -201,7 +203,7 @@ export async function filenamesWalk(ctx) {
           `${steps} screens scrolled`);
       }
       const chapters = await readerChapters(say('Chapters'));
-      check(`filenames @${t}: the reader's chapter list says Ch. 1–7 too`, chapters.includes('Ch. 1–7') && chapters.includes('Ch. 0'), JSON.stringify(chapters));
+      check(`filenames @${t}: the reader's chapter list says Ch. 1–7 too`, chapters.includes(chapterLabel('1–7')) && chapters.includes(chapterLabel('0')), JSON.stringify(chapters));
       await shot(`filenames-${t}-3-reader`);
       await page.keyboard.press('Escape');
       const run = await mihon();
@@ -211,7 +213,7 @@ export async function filenamesWalk(ctx) {
       const read = await page.evaluate(() => [...document.querySelectorAll('[id^="ch-"] p.truncate')]
         .filter((p) => p.className.includes('text-fog-500')).map((p) => p.childNodes[0]?.textContent?.trim()));
       check(`filenames @${t}: the series page shows Ch. 0 and Ch. 1–7 read, and only those`,
-        JSON.stringify([...read].sort()) === JSON.stringify(['Ch. 0', 'Ch. 1–7']), JSON.stringify(read));
+        JSON.stringify([...read].sort()) === JSON.stringify([chapterLabel('0'), chapterLabel('1–7')].sort()), JSON.stringify(read));
 
       // 4. A rescan changes nothing.
       await scan();

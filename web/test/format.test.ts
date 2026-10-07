@@ -11,6 +11,7 @@ import {
   isVolumeName, chapterLabel, chapterName, bytes, progressOf, formatClock, durationText, etaLine, etaText, untilText,
   relativeTime, relativeTimeShort, setActiveLocale, activeLocale, wallClock,
 } from '../lib/format';
+import { setActiveDict } from '../lib/i18n';
 
 test('recognises volume-style names', () => {
   for (const n of ['Tome 01', 'tome12', 'Volume 12', 'Vol. 3', 'vol.3', 'T05', 'v01', 'Berserk T41', 'Naruto Tome 07 (FR)']) {
@@ -42,6 +43,19 @@ test('chapterLabel picks the right noun', () => {
   assert.equal(chapterLabel({ metadata: { number: '1–7' }, number: 1, name: 'Batman 01-07 (1987)' }), 'Ch. 1–7');
   assert.equal(chapterLabel({ name: 'Extras' }), 'Extras', 'no number -> fall back to the name');
   assert.equal(chapterLabel({}), '');
+});
+
+test('chapterLabel says "Ch." and "Vol." in the reader\'s language', () => {
+  // "Ch. 12" was English on every chapter row, in the reader's chapter list and on the edition chips, in every
+  // language (v0.55.7). The number is isolated too: otherwise Arabic displays the range 1–7 as 7–1.
+  // Reintroduce the `Ch. ${n}` template, or remove its isolates: these assertions fail.
+  setActiveDict({ 'Ch. {n}': 'الفصل \u2066{n}\u2069', 'Vol. {n}': 'المجلد {n}' });
+  try {
+    assert.equal(chapterLabel({ number: 12, name: 'Chapter 12' }), 'الفصل \u206612\u2069', "a chapter's label is English");
+    assert.equal(chapterLabel({ metadata: { number: '1–7' }, number: 1 }), 'الفصل \u20661–7\u2069');
+    assert.equal(chapterLabel({ number: 1, name: 'Tome 01' }), 'المجلد 1', "a volume's label is English");
+    assert.equal(chapterLabel({ name: 'Extras' }), 'Extras');
+  } finally { setActiveDict({}); }
 });
 
 test("chapterName is the server's name for the chapter, and never the file's", () => {

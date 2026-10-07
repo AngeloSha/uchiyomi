@@ -21,6 +21,7 @@ import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
+import { scheduleMatchCheck } from './lib/matchCheck';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -329,6 +330,14 @@ async function main() {
     };
     setTimeout(tick, firstRunFloor(20 * 60 * 1000, 'healthSummary')).unref();
   }
+
+  /**
+   * The online matches stored by title before v0.55.7 checked them (#168, lib/matchCheck.ts): a couple of minutes after
+   * boot -- on the upgrade, the one look at every AniList link, cover and banner stored before -- then every six hours
+   * for whatever is still unchecked. Health's Duplicate series reads only checked links (lib/health.ts), so nothing is
+   * grouped -- or merged by Fix everything -- on a link this has not looked at yet.
+   */
+  scheduleMatchCheck(app.log);
 
   /**
    * The opt-in install count.
@@ -729,7 +738,10 @@ async function main() {
 
   // Content fingerprints for the library, filled in behind the server rather than during boot: it reads
   // every archive on disk, so putting it on the boot path would make start-up time grow with the size of
-  // someone's library. Nothing reads the column yet, so not finishing is harmless.
+  // someone's library. Not finishing is harmless -- a row without one is "not known" -- but late is not: Rescan
+  // everything tells a moved or renamed file from a gone one, and LIBRARY_REMATCH a moved folder, only by a
+  // fingerprint taken BEFORE the move. So besides a pass a minute after boot and every six hours, a scan that meets
+  // files with no fingerprint arms one a few minutes on (lib/fingerprintJob.ts, v0.55.7).
   if (process.env.LIBRARY_BACKEND !== 'komga') scheduleFingerprintBackfill();
 
   // Page hashes, for skipping the pages that are not the story. Started later than the fingerprint job and

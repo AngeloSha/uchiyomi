@@ -1459,7 +1459,8 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS number_end real;
 -- looked in chapter rows and, while a notice switch is on, leaves out the hidden notices among the rows that came
 -- (lib/enrich.ts newSinceSeen) -- which it can only tell apart by when they came. Taken by number, a file collected
 -- late below the series' top (a 01-07 omnibus beside a hidden 44.5) was the notice, and swallowed. The scan's
--- INSERT takes the default and its ON CONFLICT never names the column, so a row keeps the time it first came. Rows
+-- ON CONFLICT never names the column, so a row keeps the time it first came; since v0.55.7 its INSERT names it, with
+-- the time the scan began (lib/library.ts firstSeen: Rescan everything tells two scans apart by it). Rows
 -- from before this release all carry the time of the upgrade and tie, ordered by number as before. v0.55.1 boots on
 -- this schema: it never names the column, and its INSERTs take the default.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
@@ -1476,6 +1477,26 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only bool
 -- boots on this schema and never names them.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_result jsonb;
+
+-- v0.55.7: ONE block, the release's pieces in order. All additive and nullable: v0.55.6 boots on this schema and
+-- never names them.
+--
+-- (#168) An online match is stored only when it is named as the series is (lib/onlineMatch.ts). checked_at is
+-- when an automatic AniList link (linked_by NULL) or a stored cover or banner was held to that check; NULL is never,
+-- which the background recheck takes up (lib/matchCheck.ts): every row from before this release, a link an edition
+-- copies from another, and whatever an older version writes after a rollback. Deliberately NO DEFAULT: ADD COLUMN would
+-- write it into every existing row, and each would read as checked. The recheck's last run is persisted like Verify's,
+-- for the Tasks line.
+ALTER TABLE series_trackers ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE series_art      ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_result jsonb;
+--
+-- (#150) The file a scan last read a series' ComicInfo from -- its first chapter archive -- as JSON [how it was
+-- read, path, mtime ms, size] (lib/library.ts infoReadOf). A scan opens that archive again only when the file is no
+-- longer the one it read: on @Kedryn's Unraid every scan opened the first archive of every folder. NULL = read it at the
+-- next scan. v0.55.6 never names it: its scans read every folder, as they always did.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS info_read text;
 
 -- Deleted chapters shown as ghosts (lib/deletedGhosts.ts): with it on, a chapter whose file was deleted on purpose -- a
 -- tombstone whose pruned_reason is not 'missing' -- is drawn on the series page as a ghost row and listed to Mihon as

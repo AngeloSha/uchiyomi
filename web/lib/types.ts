@@ -175,6 +175,12 @@ export interface Series {
    * Absent on older servers.
    */
   autoHero?: { seed: number } | null;
+  /**
+   * A list's items only (GET /api/collections/:id, v0.55.7, #164), for its sorts: when this reader last read in the
+   * series, and when its newest chapter arrived. null for never / no chapter; absent everywhere else.
+   */
+  lastReadAt?: string | null;
+  latestChapterAt?: string | null;
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;

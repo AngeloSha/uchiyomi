@@ -598,3 +598,18 @@ test('the Library asks for one card per work, and the card names the work\'s lan
   assert.match(cards, /\{!!series\.edition\?\.langs && series\.edition\.langs\.length > 1 && \(/, 'the card does not name its languages');
   assert.match(cards, /libraryCaption\(series\.edition\.langs, series\.lang\)/, 'the shown edition is not the one marked');
 });
+
+test('a capped count reads "99+" in Arabic too: every "99+" sits in a left-to-right box', () => {
+  // v0.55.7 integration (lane C's report): the Library tile's unread badge read "+99" in Arabic -- "99+" is a number and
+  // a sign, and the sign took the right-to-left paragraph's side. The tiles' badges and the nav ring's count say it.
+  // Reintroduce by dropping a `dir="ltr"`: the element that renders that "99+" is named.
+  for (const f of ['components/cards.tsx', 'components/ProgressRing.tsx']) {
+    const src = code(read(f));
+    // Each element that renders a capped count -- `'99+'` inline, or ringCount's -- opens with dir="ltr".
+    const opens = [...src.matchAll(/<span\b[^>]*>\s*\{(?:unread > 99 \? '99\+' : unread|n)\}/g)].map((m) => m[0]);
+    assert.ok(opens.length > 0, `${f}: no capped count found -- the scan no longer sees the badge`);
+    for (const o of opens) assert.match(o, /\bdir="ltr"/, `${f}: a capped count is not left-to-right: ${o.replace(/\s+/g, ' ').slice(0, 140)}`);
+  }
+  // ringCount is where the nav ring's count is capped, and the one place it is.
+  assert.match(read('lib/ring.ts'), /return n > 99 \? '99\+' : String\(Math\.floor\(n\)\);/);
+});

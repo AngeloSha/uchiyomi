@@ -6,6 +6,7 @@ import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
+import { t as tr } from './i18n';
 
 export interface Avatar { emoji?: string; color?: string }
 interface User {
@@ -253,13 +254,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch {}
       if (body.error === 'totp_required') return { ok: false, totp: true };
+      // The reason by its code first, in the reader's words: the server's own sentence for three of these is English,
+      // and the sign-in screen is translated before anyone signs in (lib/i18n.ts). Anything else as the server said it.
       const msg =
-        body.message ||
-        (body.error === 'invalid_credentials' ? 'Incorrect username or password.'
-          : body.error === 'totp_invalid' ? 'Incorrect authentication code.'
-          : body.error === 'disabled' ? 'This account is disabled.'
-          : body.error === 'locked' ? 'Account locked — too many attempts. Try again later.'
-          : 'Login failed — please try again.');
+        body.error === 'invalid_credentials' ? tr('Incorrect username or password.')
+          : body.error === 'totp_invalid' ? tr('Incorrect authentication code.')
+          : body.error === 'disabled' ? tr('This account is disabled.')
+          : body.error === 'locked' ? tr('Account locked — too many attempts. Try again later.')
+          : body.message || tr('Login failed — please try again.');
       return { ok: false, error: msg };
     }
   };
@@ -274,7 +276,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e: any) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch {}
-      return { ok: false, error: body.message || 'Setup failed — please try again.' };
+      // By its code first, as a sign-in's refusal is: the server's sentences are English.
+      const error = body.error === 'bad_request' ? tr('Username: letters, numbers, . _ - (2–64 characters).')
+        : body.error === 'already_configured' ? tr('This server is already set up.')
+        : body.error === 'weak_password' ? tr('Password must be at least 8 characters.')
+        : body.message || tr('Setup failed — please try again.');
+      return { ok: false, error };
     }
   };
 

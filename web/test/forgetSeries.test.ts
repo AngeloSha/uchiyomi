@@ -26,8 +26,9 @@ test('Forget is offered only once nothing on disk could bring the series back', 
   // Delete files · Forget" squeezed a title to 21 px. Reintroduce by gating Delete files on `!filesGone(r)`.
   assert.match(src, /\{r\.live_books > 0 && \(\s*<button onClick=\{\(\) => setPurge\(r\)\}/, 'Delete files must be offered only while a chapter row still claims a file');
   assert.match(src, /setForget\(r\)\}[^>]*className="chip[^"]*rose-500[^"]*"[^>]*>\{tr\('Forget'\)\}/, 'the Forget chip is not the rose one');
-  // and it sits after Delete files in the same button group, so the order reads Put back → Delete files → Forget
-  const group = src.slice(src.indexOf("tr('Delete files')"), src.lastIndexOf("tr('Forget')"));
+  // and it sits after Delete files in the same button group, so the order reads Put back → Delete files → Forget.
+  // The row's key, found from its handler: the Delete files dialog above the rows says `tr('Delete files')` too (v0.55.7).
+  const group = src.slice(src.indexOf("tr('Delete files')", src.indexOf('setPurge(r)')), src.lastIndexOf("tr('Forget')"));
   assert.ok(group.length > 0 && !group.includes('</div>'), 'Forget must sit in the same button group as Delete files, after it');
 });
 

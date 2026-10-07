@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useRef } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
 import { IcX } from './icons';
+import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
 
@@ -85,6 +86,13 @@ export function ReaderSettings({
             ))}
           </div>
         </Row>
+
+        {/* #170: the cover's colour across the top and bottom of the screen. A switch on one line, the only boolean here:
+            on by default, and the same setting as Profile → Settings → Reading -- every title, not this one. */}
+        <div className="flex items-center justify-between gap-3 py-3">
+          <span className="text-sm font-medium text-fog-200">{tr('Cover colour at the edges')}</span>
+          <Switch on={prefs.coverEdges} onChange={(coverEdges) => set({ coverEdges })} label={tr('Cover colour at the edges')} />
+        </div>
 
         <Row label={`${tr('Brightness')} · ${Math.round(prefs.brightness * 100)}%`}>
           <input type="range" min={0.25} max={1} step={0.05} value={prefs.brightness}

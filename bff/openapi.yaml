@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.55.6
+  version: 0.55.7
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -4403,6 +4403,11 @@ paths:
       tags:
         - personal
       summary: One collection and its series.
+      description: >-
+        `{id, name, accent, sort_order, items}`: the series in the list's own order, enriched like every listing
+        (`yomi.unread` is the unread badge), a series hidden by the 18+ switch or an age cap left out. Since v0.55.7 (#164)
+        each item also carries `lastReadAt` (when the caller last read in it, their own progress only; null if never)
+        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts.
       operationId: getApiCollectionsId
       parameters:
         - name: id
@@ -4429,6 +4434,7 @@ paths:
       tags:
         - personal
       summary: Add a series to a collection.
+      description: At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them.
       operationId: postApiCollectionsIdItems
       parameters:
         - name: id
@@ -5195,6 +5201,11 @@ paths:
       tags:
         - personal
       summary: Save the caller's reader and app settings.
+      description: >-
+        Merged into the stored settings by top-level key, so an object value is replaced whole. Among the keys:
+        `reader` (the reader's defaults; since v0.55.7 with `coverEdges`, default true, the cover's colour at the
+        reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
+        each list is shown in; a list's own order is not stored).
       operationId: putApiSettings
       requestBody:
         required: false
@@ -6439,6 +6450,8 @@ paths:
         Since v0.55.4 the list always carries `rescan` ("Rescan everything", schedule "on demand"): `running`
         while its preview or Apply runs, and `lastRun`/`lastResult` the last APPLY's (see POST
         /api/admin/tasks/rescan/apply), persisted in server_settings.rescan_last_run / rescan_last_result.
+        The `fingerprint` entry's `lastResult` is this process's last pass, {done, failed, young, ms} -- `young`
+        (since v0.55.7) the files a pass the server started left for a later one, written in the last minute.
       security:
         - bearer: []
       responses:
@@ -6552,7 +6565,7 @@ paths:
         the library, then looks for every live chapter row's own file under the library folder and the download
         folder -- never a hidden or merged series', nor one in the middle of a renumber -- and keeps a plan in
         memory. Answers {running: 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' (a
-        preview) | 'mark' | 'renumber' (an Apply) | null, done, of (rows or files of the phase, null while scanning
+        preview) | 'mark' | 'merge' | 'follow' (both v0.55.7) | 'renumber' (an Apply) | null, done, of (rows or files of the phase, null while scanning
         or reading names), startedAt, error: 'failed' |
         'stopped' | null (how the last preview or Apply ended when it did not end well), plan, last (the last
         Apply's result, below, this process's or the one server_settings kept), lastRun (epoch ms or null)}.
@@ -6562,10 +6575,19 @@ paths:
         never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
         behind any of its rows, or more than 90 % of them gone: looks unmounted, and nothing under it is
         planned), gone (rows in your own library folder whose file is gone), moved (gone rows whose file is
-        another live row's now, by fingerprint: renamed or moved, kept), downloads (rows in the download
+        another live row's now, by fingerprint: renamed or moved, kept -- and since v0.55.7 a row never
+        fingerprinted, by the ONE live row anywhere with its file name in another folder, exactly its stored
+        mtime and, when both know it, its size, first seen by a scan after the one that last saw the gone row;
+        zero or two such rows, or one another gone row or a fingerprint twin claims too, is no pair, and such a
+        pair never marks a row), follow (v0.55.7: of those, the pairs
+        inside one series, whose chapters Apply points at the new file), downloads (rows in the download
         folder whose file is gone: Verify chapter files' to mark, counted only), emptied (series with every
-        live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title}], movedList [{seriesId,
-        title, file, to: {seriesId, title, file}}], numbers, numbersTotal}. The lists hold at most 200 entries
+        live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title, into?: {seriesId, title}}]
+        (into, v0.55.7: the one series every live chapter of it moved into, named when this viewer may list it),
+        movedList [{seriesId, title, file, to: {seriesId, title, file}}], numbers, numbersTotal, merges, mergesTotal}.
+        `merges` (v0.55.7, at most 1000, by title) is the merge opt-in: [{seriesId, title, into: {seriesId, title},
+        chapters}], each a series with nothing left whose every live chapter moved into `into`, which the merge route
+        would merge there and neither mid-renumber; offered only when both may be listed. The lists hold at most 200 entries
         each and name only series this viewer may list (the 18+ hide, as on the repair status); the counts are
         always whole. `numbers` is the opt-in, every series (by title, at most 1000) whose chapter numbers the
         file-name rules of v0.55.2 would change -- each row still read by an older rule, read again with rule 2
@@ -6575,8 +6597,9 @@ paths:
         how many a tracker would be told higher, or lower -- which the tracker floor refuses), examples [{file,
         from, to}] (at most 3, numbers as text: "2" -> "5", "1" -> "1–7")}]. A series numbered by posting order,
         or in the middle of a renumber, is never listed; a row Verify marked 'missing' is never read again.
-        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, busy, downloads,
-        emptied, unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'}.
+        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, followed, twins, merged,
+        notMerged, busy, downloads, emptied, unmounted [{root}], renumbered {series, chapters}, ms, stopped?:
+        'shutdown'} (followed, twins, merged and notMerged since v0.55.7).
       security:
         - bearer: []
       responses:
@@ -6597,18 +6620,38 @@ paths:
         v0.55.4 (discussion #150). Detached like the preview, because it stats every planned file again: answers
         {ok: true, started: true}, or {ok: false, error} when it may not start -- `busy` (a preview or an Apply is
         running), `no_plan`, `stale` (a newer preview replaced it, or it is older than 30 minutes), `applied`
-        (each plan is applied once), `not_in_plan` (a series in `renumber` the preview did not list), or the job
+        (each plan is applied once), `not_in_plan` (a series in `renumber` the preview did not list, or in `merge`
+        one it did not offer), or the job
         it would run beside: `sweep_running`, `autofix_running`,
         `repair_running`, `verify_running`, `cleanup_running`, `scan_running`. One writer per series, as a renumber
         has it: a series a download is writing into or a check is reading as Apply reaches it (a Fetch and its lanes,
         the slow archive's chapter, Fetch newest, a repair) is left alone -- neither marked nor renumbered, counted in
         the result's `busy` for the next Rescan -- and every other series it changes is held busy until it is done, so
-        no Fetch (409 `busy`), archive chapter or Fetch newest starts in it meanwhile. With every library scan held off,
+        no Fetch (409 `busy`), archive chapter or Fetch newest starts in it meanwhile, and the chapter sweep (since
+        v0.55.7) puts it to the back of its queue once, then skips it. With every library scan held off,
         each planned row is asked again -- the same id at the same file, still live, its series neither hidden,
         merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
         library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
         'deleted'` (held: the sweep never fetches it back), and the cover and books_count of every series it
-        touched are recomputed. It never erases a row, touches a file on disk, marks a row in the download folder
+        touched are recomputed. Since v0.55.7 each pair of the plan inside ONE series (a file moved or renamed
+        within its series) is asked again too -- both rows unchanged, one fingerprint (or, for a row never
+        fingerprinted, still the one live row with its name and time), the old file still gone and the new one
+        there -- and, when the new row holds nothing of anyone's (no reading progress, reading event,
+        bookmark, note, offline copy, number or title set by hand, or page marked by hand; asked with both rows
+        locked), the old row takes the new file (root, file, mtime, size, fingerprint; its number and title read
+        from the new name by its own name_rule), the new row is deleted and a cover on it moves to the old row:
+        the chapter shows once, with its id and everyone's history (`followed`). A new row that holds something is
+        kept beside the old one (`twins`); a pair whose old file came back is `back`, one changed since the preview
+        `changed`. Each series in `merge` (v0.55.7) is asked again with both series held -- the merge route's
+        checks (mergeRefusal) still pass, neither is mid-renumber, every live row of it is still gone and has a live
+        twin in the other series whose file is there -- else it is left alone (`notMerged`); then its tracker link is
+        copied to the other series for each provider that has none (a person's link as it is; an automatic one
+        keeps checked_at only when every name the absorbed series goes by is one the other will go by and the
+        online-match check is not running, else it goes unchecked for that check), it is merged exactly as POST
+        /api/admin/series/{id}/merge merges (every row and everyone's history, favourites, ratings, collections,
+        read marks and tracker floor; audited `series.merge` with via 'rescan' and the plan id), and its pairs
+        follow as above (`merged`).
+        It never erases a row with anything on it, touches a file on disk, marks a row in the download folder
         (Verify chapter files' to mark), relabels a row already pruned, hides or forgets a series, or changes a
         tracker floor, read mark, favourite or rating. A file that comes back is picked up on the same row by the
         next scan. Then, in the same hold and in ONE transaction, the series in `renumber` (the opt-in) are read
@@ -6618,7 +6661,8 @@ paths:
         preview is left alone. Nothing is pushed to any tracker: the next chapter a reader finishes sends its
         number as usual. The result lands on the status route's `last` and on GET /api/admin/tasks as the
         `rescan` entry's lastResult, persisted in server_settings.rescan_last_run / rescan_last_result. Audit:
-        `library.rescan` {plan, marked, back, changed, moved, busy, downloads, emptied, unmounted, ms}, and
+        `library.rescan` {plan, marked, back, changed, moved, followed, twins, merged, notMerged, busy, downloads, emptied,
+        unmounted, ms}, and
         `library.rescan_numbers` {plan, series, chapters, ids} when the opt-in renumbered something.
       requestBody:
         required: true
@@ -6640,13 +6684,21 @@ paths:
                     in plan.numbers. Omitted or empty renumbers nothing.
                   items:
                     type: string
+                merge:
+                  type: array
+                  maxItems: 10000
+                  description: >-
+                    Since v0.55.7, the merge opt-in: the series to merge into the series their files went to, each one
+                    the preview offered in plan.merges. Omitted or empty merges nothing.
+                  items:
+                    type: string
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: The body is not {plan} with a uuid, and `renumber` series ids if any.
+          description: The body is not {plan} with a uuid, and `renumber` and `merge` series ids if any.
         "401":
           description: Not authenticated
         "403":
@@ -6655,7 +6707,7 @@ paths:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan).
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches).
         {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off,
         {ok:false,error:sweep_running} for `repair` while a chapter sweep is going, and
         {ok:false,error:repair_running} for `update` while a library repair is going.
@@ -6713,10 +6765,13 @@ paths:
             the repair for a database restored without its chapter files. `repair` is the nightly library
             repair and is the only one that takes a body. `rescan` (since v0.55.4, "Rescan everything") starts
             a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
-            progress and plan are on GET /api/admin/tasks/rescan/status.
+            progress and plan are on GET /api/admin/tasks/rescan/status. `matches` (since v0.55.7, "Check online
+            matches") holds every automatic AniList link and every cover and banner found by a title search to the
+            title check again, detached; its last run is the `matches` entry of GET /api/admin/tasks
+            ({matches, removed, links, art, unanswered, stopped?, ms}), audited as `library.match_check`.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches]
       requestBody:
         required: false
         description: Only `repair` reads a body; every other task ignores it.
@@ -8862,7 +8917,10 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
         image of up to 11 MB as a base64 data URL; the body may be up to about 14.7 MB to carry one (v0.53.0; 12 MB
         before, which refused pictures between 9 and 11 MB). `url` stores the address the art is fetched from, and
-        `reset` hands the art back to the automatic source.
+        `reset` hands the art back to the automatic source. `first_page` (v0.55.7, the cover only; a banner is a 400)
+        makes the series' own first page its cover for good: `overrides.cover` on the series reads `first_page`, and
+        nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one.
+        Automatic art is kept from an online entry only when it is named as the series is (v0.55.7).
       parameters:
         - name: id
           in: path
@@ -8882,7 +8940,7 @@ paths:
                   enum: [cover, banner]
                 mode:
                   type: string
-                  enum: [url, upload, reset]
+                  enum: [url, upload, reset, first_page]
                 url:
                   type: string
                   format: uri
@@ -8911,7 +8969,8 @@ paths:
         - admin
       summary: Which series have real art and which fall back to a page.
       operationId: getApiAdminArtOverview
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row
+        says `first_page` when an admin made the series' first page its cover (v0.55.7).
       security:
         - bearer: []
       responses:

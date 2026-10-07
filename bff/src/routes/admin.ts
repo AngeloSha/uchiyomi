@@ -24,13 +24,14 @@ import { runUpdateAll, updateSeries, runSweep, runsInside } from '../lib/updater
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
+import { matchCheckState, runMatchCheck } from '../lib/matchCheck';
 import { startRescan, rescanState } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { recordAltTitles } from '../lib/altTitles';
+import { namesOf, recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
@@ -48,9 +49,9 @@ import { lastSuwayomiLoad, rememberMissing } from '../lib/sources/suwayomi/regis
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
-import { dirname, resolve } from 'path';
+import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
-import { ART_BODY_LIMIT, ART_DIR, artFile, artOverview } from '../lib/seriesArt';
+import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
@@ -87,7 +88,8 @@ import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } f
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { MANGADEX_LANGS, canonLang, mdLang, setUnstatedLang } from '../lib/lang';
 import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
-import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
+import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner, type AniListArt } from '../lib/anilist';
+import { namesMatch } from '../lib/onlineMatch';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
@@ -386,6 +388,74 @@ async function closeBatchIfSettled(batchId: string): Promise<ImportBatchRow | nu
       RETURNING *`,
     [batchId],
   ).catch(() => null);
+}
+
+/**
+ * The series the art backfill hunts for: every visible one with no banner, neither found nor an admin's -- and not one
+ * an admin set to Use the first page (v0.55.7, lib/seriesArt.ts FIRST_PAGE), for which nothing is looked up. Reintroduce
+ * by dropping that condition: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds it here.
+ */
+export const artBackfillTargets = () => q<{ id: string; title: string }>(
+  `SELECT s.id, s.title FROM lib_series s
+     LEFT JOIN series_art a ON a.series_id = s.id
+     LEFT JOIN series_overrides o ON o.series_id = s.id
+    WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL AND o.cover IS DISTINCT FROM $1
+    ORDER BY s.title`, [FIRST_PAGE]);
+
+/**
+ * The art backfill's hunt for one series (Admin → Art → Backfill missing banners): a banner, widest net first-hit-wins
+ * -- AniList manga (its banner, or its anime adaptation's, same query) → a harsher-cleaned retry → a direct AniList ANIME
+ * search → Kitsu's wide cover -- and a cover from MangaDex when AniList had none. What it found is stored under what
+ * the series has (an empty field is filled, never one an admin set: the route asks only for series without a banner
+ * override), and an AniList entry found is linked. Answers what it stored: 'banner', 'cover', or null for nothing.
+ *
+ * Every answer is kept only when it is named as the series is (v0.55.7, #168, lib/onlineMatch.ts namesMatch): each
+ * search answers with its best guess, and the harsher title -- cut at the first dash or colon -- asks for exactly the
+ * parent a spin-off is named after, so its answer must still be called what the series is called. MangaDex's FIRST
+ * hit was taken as it came. Reintroduce by keeping the first hit: "the backfill stores only what is named as the
+ * series" in onlineMatch.int.test.ts finds the other work's cover.
+ */
+export async function huntArt(t: { id: string; title: string }): Promise<'banner' | 'cover' | null> {
+  const names = await namesOf({ id: t.id });
+  if (!names.length) names.push(t.title);
+  const none: AniListArt = { banner: null, cover: null };
+  let art: AniListArt = await fetchAniListArt(t.title, names).catch(() => none);
+  const harsh = t.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim();
+  if (!art.banner && harsh && harsh !== t.title) {
+    const retry = await fetchAniListArt(harsh, names).catch(() => none);
+    // The entry linked below is whichever answer was this series (both were held to its names): the retry's art used to
+    // replace the first answer whole, and the link and the direction went with it.
+    art = { ...(art.mediaId ? art : retry), banner: retry.banner ?? art.banner, cover: art.cover ?? retry.cover };
+  }
+  if (!art.banner) art.banner = await fetchAnimeBanner(t.title, names).catch(() => null);
+  if (!art.banner) art.banner = await fetchKitsuBanner(t.title, names);
+  if (!art.banner && harsh && harsh !== t.title) art.banner = await fetchKitsuBanner(harsh, names);
+  if (!art.cover) {
+    try {
+      // The first hit NAMED as the series is, never simply the first hit: a search's first result for a title it does
+      // not carry is another work (lib/titleMatch.ts).
+      const mdSrc = getSource('mangadex');
+      const res = mdSrc ? await mdSrc.search(t.title) : [];
+      art.cover = (res ?? []).find((r) => r.coverUrl && namesMatch(names, [r.title]))?.coverUrl || null;
+    } catch { /* mangadex miss is fine */ }
+  }
+  if (!art.banner && !art.cover) return null;
+  // checked_at (lib/matchCheck.ts): a row this writes whole is checked; one it only fills keeps the mark of what it
+  // already held.
+  await q(
+    `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
+     ON CONFLICT (series_id) DO UPDATE SET
+       banner = COALESCE(EXCLUDED.banner, series_art.banner),
+       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now(),
+       checked_at = CASE WHEN EXCLUDED.banner IS NOT NULL AND EXCLUDED.cover IS NOT NULL THEN now() ELSE series_art.checked_at END`,
+    [t.id, art.banner, art.cover],
+  );
+  if (art.mediaId) {
+    await linkSeries(t.id, art.mediaId, art.mediaTitle ?? null);
+    await learnDirection({ id: t.id }, directionFromAniListMatch(names, art), 'anilist').catch(() => {});
+    await learnTypeFromAniList({ id: t.id }, names, art);
+  }
+  return art.banner ? 'banner' : 'cover';
 }
 
 /**
@@ -812,13 +882,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     scheduleVars: vars,
   });
   app.get('/api/admin/tasks', async (req) => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any; match_check_last_run: string | null; match_check_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
               verify_last_run, verify_last_result,
               repair_enabled, repair_last_run, repair_last_result,
-              rescan_last_run, rescan_last_result
+              rescan_last_run, rescan_last_result,
+              match_check_last_run, match_check_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -849,7 +920,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         name: 'Fingerprint library files',
         ...sched('in the background, rechecked every 6h'),
         lastRun: fpState.finishedAt,
-        lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, ms: fpState.ms } : null,
+        // `young` (v0.55.7): files a pass the server started left for a later one, still being written -- said on the
+        // line (web lib/tasks.ts), or the waiting count beside it reads as a job that stalled.
+        lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, young: fpState.young, ms: fpState.ms } : null,
         running: fpState.running,
         remaining: await fingerprintRemaining().catch(() => null),
       },
@@ -863,6 +936,18 @@ export default async function adminRoutes(app: FastifyInstance) {
           : null,
         running: phState.running,
         remaining: await pageHashRemaining().catch(() => null),
+      },
+      // v0.55.7 (#168): the online matches stored by title before they were checked -- AniList links, covers and banners
+      // -- held to the title check (lib/matchCheck.ts): in the background after a boot, then every 6h for whatever is
+      // still unchecked; Run now checks every automatic one again. Its line is the last run that checked something,
+      // persisted like Verify's.
+      {
+        id: 'matches',
+        name: 'Check online matches',
+        ...sched('in the background, rechecked every 6h'),
+        lastRun: matchCheckState.finishedAt || (s?.match_check_last_run ? new Date(s.match_check_last_run).getTime() : null),
+        lastResult: matchCheckState.finishedAt ? matchCheckState.lastResult : (s?.match_check_last_result ?? null),
+        running: matchCheckState.running,
       },
       // On demand only, and never at boot (the header of lib/verifyFiles.ts says why): the repair for a
       // database restored without its chapter files. Listed always, because the moment it is needed is the
@@ -1108,6 +1193,15 @@ export default async function adminRoutes(app: FastifyInstance) {
         (r) => logAudit('library.verify', { userId, detail: { checked: r.checked, missing: r.missing, readLibraryMissing: r.readLibraryMissing, unmounted: r.unmounted, ms: r.ms }, req }),
         () => {}, // runVerify logs it and clears the result; this only stops an unhandled rejection
       );
+      return { ok: true, started: true };
+    }
+    if (id === 'matches') {
+      // Every automatic match again, not only the unchecked ones the background pass takes (lib/matchCheck.ts): a
+      // Run now that found nothing to do would read as a button that does nothing (#34). Never awaited: it asks
+      // AniList and MangaDex, paced. The Tasks line shows what it did.
+      const run = runMatchCheck(app.log, { all: true });
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch((e) => app.log.warn(`matches: the check failed: ${(e as Error)?.message || e}`));
       return { ok: true, started: true };
     }
     if (id === 'rescan') {
@@ -2806,21 +2900,38 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic. The body
   // limit fits the largest picture Edit details takes once it is base64 (lib/seriesArt.ts ART_BODY_LIMIT).
+  // `first_page` (v0.55.7, #168, the cover only): the series' own first page is its cover for good, and its art is its
+  // own pages -- nothing found online is shown or looked up for it (lib/seriesArt.ts FIRST_PAGE). Reset to automatic
+  // takes it back.
   app.put('/api/admin/series/:id/art', { bodyLimit: ART_BODY_LIMIT }, async (req, reply) => {
-    const { id } = req.params as { id: string };
+    const requestedId = (req.params as { id: string }).id;
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
-      mode: z.enum(['url', 'upload', 'reset']),
+      mode: z.enum(['url', 'upload', 'reset', 'first_page']),
       url: z.string().url().optional(),
       dataUrl: z.string().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // Use the exact canonical id read from the database, not a route segment, in persistent file paths. Besides
+    // removing user input from the path expression, this prevents two malformed ids that safeId() normalises to
+    // the same filename from deleting or replacing one another before the foreign key rejects the write.
+    const series = await one<{ id: string }>('SELECT id FROM lib_series WHERE id = $1', [requestedId]);
+    if (!series) return reply.code(404).send({ error: 'not_found' });
+    const id = series.id;
     const { kind, mode } = b.data;
+    if (mode === 'first_page' && kind !== 'cover') return reply.code(400).send({ error: 'bad_request', message: 'The first page is a cover, not a banner.' });
+    const artPath = artFile(id, kind);
+    // artFile has the same containment guard for every caller. Keep an explicit sink-adjacent check here too:
+    // this endpoint begins at an HTTP parameter and writes or removes a persistent file.
+    if (!artPath.startsWith(resolve(ART_DIR) + sep)) return reply.code(400).send({ error: 'bad_path' });
     let value: string | null = null;
-    if (mode === 'url') {
+    if (mode === 'first_page') {
+      await rm(artPath, { force: true }).catch(() => {});
+      value = FIRST_PAGE;
+    } else if (mode === 'url') {
       if (!b.data.url) return reply.code(400).send({ error: 'no_url', message: 'Paste an image URL.' });
       value = b.data.url;
-      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      await rm(artPath, { force: true }).catch(() => {});
     } else if (mode === 'upload') {
       const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(b.data.dataUrl || '');
       if (!m) return reply.code(400).send({ error: 'bad_image', message: 'Upload a valid image.' });
@@ -2830,10 +2941,10 @@ export default async function adminRoutes(app: FastifyInstance) {
         buf = await sharp(Buffer.from(m[1], 'base64')).rotate().resize({ width: maxW, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
       } catch { return reply.code(400).send({ error: 'bad_image', message: "That file isn't a readable image." }); }
       await mkdir(ART_DIR, { recursive: true }).catch(() => {});
-      await writeFile(artFile(id, kind), buf);
+      await writeFile(artPath, buf);
       value = 'upload';
     } else {
-      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      await rm(artPath, { force: true }).catch(() => {});
       value = null;
     }
     const col = kind === 'cover' ? 'cover' : 'banner';
@@ -2858,10 +2969,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const s = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
     const cleaned = s.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim() || s.title;
+    // A person picks from these, so AniList's several answers are offered as they come; Kitsu's one banner is offered
+    // from an entry named as the series is, the rule it is stored by (lib/kitsu.ts).
+    const names = await namesOf({ id });
     const [anilist, anilistLoose, kitsu, md] = await Promise.all([
       fetchAniListCandidates(s.title).catch(() => []),
       cleaned !== s.title ? fetchAniListCandidates(cleaned).catch(() => []) : Promise.resolve([]),
-      fetchKitsuBanner(s.title).then((b) => (b ? [{ title: s.title, banner: b, cover: null as string | null }] : [])).catch(() => []),
+      fetchKitsuBanner(s.title, names.length ? names : [s.title]).then((b) => (b ? [{ title: s.title, banner: b, cover: null as string | null }] : [])).catch(() => []),
       (async () => {
         try {
           const mdSrc = getSource('mangadex');
@@ -2885,58 +2999,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { title: s.title, content: out };
   });
 
-  // Bulk backfill: re-hunt art for series missing a banner (or any art). AniList first (cleaned-title retry),
-  // MangaDex cover as a second source. Runs in the background; poll /api/admin/art/backfill/status.
+  // Bulk backfill: re-hunt art for series missing a banner (or any art), one at a time (huntArt above, every answer held
+  // to the series' names since v0.55.7). Runs in the background; poll /api/admin/art/backfill/status.
   app.post('/api/admin/art/backfill', async (req, reply) => {
     if (artJob?.running) return reply.code(409).send({ error: 'busy', message: 'A backfill is already running.' });
-    const targets = await q<{ id: string; title: string }>(
-      `SELECT s.id, s.title FROM lib_series s
-       LEFT JOIN series_art a ON a.series_id = s.id
-       LEFT JOIN series_overrides o ON o.series_id = s.id
-       WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
-       ORDER BY s.title`,
-    );
+    const targets = await artBackfillTargets();
     const job: ArtJob = { running: true, total: targets.length, done: 0, banners: 0, covers: 0, misses: 0, startedAt: Date.now() };
     artJob = job;
     await logAudit('art.backfill_start', { userId: userIdOf(req), detail: { count: targets.length }, req });
     void (async () => {
       for (const t of targets) {
-        try {
-          // banner hunt, widest net first-hit-wins: AniList manga (banner or its anime adaptation's, same
-          // query) → harsher-cleaned retry → direct AniList ANIME search → Kitsu wide cover.
-          let art = await fetchAniListArt(t.title).catch(() => ({ banner: null as string | null, cover: null as string | null }));
-          const harsh = t.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim();
-          if (!art.banner && harsh && harsh !== t.title) {
-            const retry = await fetchAniListArt(harsh).catch(() => ({ banner: null, cover: null }));
-            art = { banner: retry.banner ?? art.banner, cover: art.cover ?? retry.cover };
-          }
-          if (!art.banner) art.banner = await fetchAnimeBanner(t.title).catch(() => null);
-          if (!art.banner) art.banner = await fetchKitsuBanner(t.title);
-          if (!art.banner && harsh && harsh !== t.title) art.banner = await fetchKitsuBanner(harsh);
-          if (!art.cover) {
-            try {
-              const mdSrc = getSource('mangadex');
-              const res = mdSrc ? await mdSrc.search(t.title) : [];
-              art.cover = res?.[0]?.coverUrl || null;
-            } catch { /* mangadex miss is fine */ }
-          }
-          if (art.banner || art.cover) {
-            await q(
-              `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-               ON CONFLICT (series_id) DO UPDATE SET
-                 banner = COALESCE(EXCLUDED.banner, series_art.banner),
-                 cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
-              [t.id, art.banner, art.cover],
-            );
-            if ((art as any).mediaId) {
-              await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
-              await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, art as any), 'anilist').catch(() => {});
-              await learnTypeFromAniList({ id: t.id }, t.title, art as any);
-            }
-            if (art.banner) job.banners++;
-            else job.covers++;
-          } else job.misses++;
-        } catch { job.misses++; }
+        const found = await huntArt(t).catch(() => null);
+        if (found === 'banner') job.banners++;
+        else if (found === 'cover') job.covers++;
+        else job.misses++;
         job.done++;
         await new Promise((r) => setTimeout(r, 2200)); // stay under AniList's ~30 req/min
       }
@@ -3489,11 +3565,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     void (async () => {
       for (const t of targets) {
         try {
-          const m = await fetchAniListArt(t.title);
+          // Only an entry named as the series is (v0.55.7, lib/onlineMatch.ts): the link is where progress is pushed.
+          const names = await namesOf({ id: t.id });
+          if (!names.length) names.push(t.title);
+          const m = await fetchAniListArt(t.title, names);
           if (m.mediaId) {
             await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null);
-            await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, m), 'anilist').catch(() => {});
-            await learnTypeFromAniList({ id: t.id }, t.title, m);
+            await learnDirection({ id: t.id }, directionFromAniListMatch(names, m), 'anilist').catch(() => {});
+            await learnTypeFromAniList({ id: t.id }, names, m);
             job.linked++;
           }
           else job.misses++;

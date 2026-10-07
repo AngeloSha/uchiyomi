@@ -786,3 +786,42 @@ test('migrate: v0.55.2 reads every chapter already in a library by rule 1, and v
     }
   });
 });
+
+test('migrate: v0.55.7 marks no match as checked that was stored before it, and v0.55.6 keeps writing its rows', { skip }, async () => {
+  // #168: checked_at NULL is what the background recheck takes up (lib/matchCheck.ts), so every link and art row that is
+  // there when the column arrives must read NULL -- a DEFAULT is written into every existing row by ADD COLUMN, and each
+  // would read as checked, never to be looked at. v0.55.6 boots on this schema and INSERTs without naming it: its rows
+  // are unchecked too. Reintroduce `DEFAULT now()` on either column: the declared default reads now(), and "a v0.55.6
+  // row reads as checked" fails.
+  // The same block's #150 piece (the integration folded both lanes' into one): lib_series.info_read, the file a scan last
+  // read a series' ComicInfo from, nullable with no default -- NULL is "read it at the next scan", which is what a series
+  // v0.55.6 adds after a rollback must be. Reintroduce a default: "a v0.55.6 series reads as read" fails.
+  const cols = await q<{ table_name: string; column_name: string; data_type: string; column_default: string | null; is_nullable: string }>(
+    `SELECT table_name, column_name, data_type, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name IN ('series_trackers', 'series_art', 'server_settings', 'lib_series')
+        AND column_name IN ('checked_at', 'match_check_last_run', 'match_check_last_result', 'info_read')
+      ORDER BY table_name, column_name`);
+  assert.deepEqual(cols.map((c) => [c.table_name, c.column_name, c.data_type, c.column_default, c.is_nullable]), [
+    ['lib_series', 'info_read', 'text', null, 'YES'],
+    ['series_art', 'checked_at', 'timestamp with time zone', null, 'YES'],
+    ['series_trackers', 'checked_at', 'timestamp with time zone', null, 'YES'],
+    ['server_settings', 'match_check_last_result', 'jsonb', null, 'YES'],
+    ['server_settings', 'match_check_last_run', 'timestamp with time zone', null, 'YES'],
+  ], 'a v0.55.7 column is missing, required, or has a default');
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-match', 'test', 'T', 'T!match-m/T')`);
+      // Exactly the INSERTs v0.55.6 makes: the backdrop's art row (routes/images.ts) and its link (lib/trackers.ts).
+      await c.query(`INSERT INTO series_art (series_id, banner, cover) VALUES ('t-match', NULL, 'https://example.org/c.jpg')`);
+      await c.query(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by) VALUES ('t-match', 'anilist', '1', 'T', NULL)`);
+      const { rows } = await c.query(`SELECT (SELECT checked_at FROM series_art WHERE series_id = 't-match') AS art,
+                                             (SELECT checked_at FROM series_trackers WHERE series_id = 't-match') AS link,
+                                             (SELECT info_read FROM lib_series WHERE id = 't-match') AS info`);
+      assert.deepEqual([rows[0].art, rows[0].link], [null, null], 'a v0.55.6 row reads as checked');
+      assert.equal(rows[0].info, null, 'a v0.55.6 series reads as read');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});

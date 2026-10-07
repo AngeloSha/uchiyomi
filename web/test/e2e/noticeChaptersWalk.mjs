@@ -31,10 +31,7 @@ const SERIES = 'Notice Walk';
 const FILES = {
   'Chapter 1.cbz': 4, 'Chapter 2.cbz': 4, 'Chapter 2.5.cbz': 2, 'Chapter 3.cbz': 4, 'Chapter 3.5.cbz': 20, 'Chapter 4.cbz': 4,
 };
-const ALL = ['Ch. 1', 'Ch. 2', 'Ch. 2.5', 'Ch. 3', 'Ch. 3.5', 'Ch. 4'];
-const SHOWN = ALL.filter((l) => l !== 'Ch. 2.5');
-/** "Only hide short ones" off (v0.55.3): every chapter numbered like 12.5 hides, the twenty-page 3.5 too. */
-const WHOLE_ONLY = ALL.filter((l) => !/\.5$/.test(l));
+const NUMBERS = ['1', '2', '2.5', '3', '3.5', '4'];
 /** Manhwa's switch: the second of Settings' notice switches, in the server's type order (web lib/seriesTypes.ts). */
 const MANHWA = 1;
 
@@ -134,7 +131,8 @@ export async function noticeChaptersWalk(ctx) {
       await visit(`/series/?id=${s.id}`, 3500);
       const rows = await waitFor(async () => { const r = await rowLabels(); return r.length >= n ? r : null; }, 15_000, 400) ?? await rowLabels();
       const header = await page.evaluate(() => document.body.innerText);
-      return { rows: [...rows].sort((a, b) => parseFloat(a.slice(4)) - parseFloat(b.slice(4))), says: header.includes(say('{n} chapters', { n })) };
+      const numberOf = (label) => parseFloat(label.match(/\d+(?:\.\d+)?/)?.[0] ?? 'NaN');
+      return { rows: [...rows].sort((a, b) => numberOf(a) - numberOf(b)), says: header.includes(say('{n} chapters', { n })) };
     };
     const reader = async () => {
       await visit(`/reader/?book=${encodeURIComponent(ids['2'])}`, 3500);
@@ -147,6 +145,10 @@ export async function noticeChaptersWalk(ctx) {
       console.log(`\n  noticechapters @${w}${l === 'ar' ? ' ar' : ''}`);
       if (l !== lang()) await setLang(l);
       await page.setViewport({ width: w, height: w < 1024 ? 844 : 900 });
+      const all = NUMBERS.map((n) => say('Ch. {n}', { n }));
+      const shown = all.filter((_, i) => i !== 2);
+      /** "Only hide short ones" off: both half chapters hide, including the twenty-page 3.5. */
+      const wholeOnly = all.filter((_, i) => i !== 2 && i !== 4);
 
       // 1. On.
       await flip(true, t);
@@ -155,7 +157,7 @@ export async function noticeChaptersWalk(ctx) {
       // 2. The series page and every count.
       const p = await seriesPage(5);
       check(`noticechapters @${t}: the series page leaves out the two-page 2.5 and keeps the twenty-page 3.5`,
-        JSON.stringify(p.rows) === JSON.stringify(SHOWN), JSON.stringify(p.rows));
+        JSON.stringify(p.rows) === JSON.stringify(shown), JSON.stringify(p.rows));
       check(`noticechapters @${t}: ...and its header says "${say('{n} chapters', { n: 5 })}"`, p.says);
       check(`noticechapters @${t}: no sideways scroll`, await noSideScroll());
       await page.evaluate(() => document.getElementById('ch-3.5')?.scrollIntoView({ block: 'center' }));
@@ -166,7 +168,7 @@ export async function noticeChaptersWalk(ctx) {
 
       // 3. The reader.
       const sheet = await reader();
-      check(`noticechapters @${t}: the reader's chapter list leaves 2.5 out and keeps 3.5`, JSON.stringify(sheet) === JSON.stringify(SHOWN), JSON.stringify(sheet));
+      check(`noticechapters @${t}: the reader's chapter list leaves 2.5 out and keeps 3.5`, JSON.stringify(sheet) === JSON.stringify(shown), JSON.stringify(sheet));
       await shot(`noticechapters-${t}-3-reader`);
       await page.keyboard.press('Escape');
       const next = await call(`/api/books/${ids['2']}/next`, { allow: [404] });
@@ -185,7 +187,7 @@ export async function noticeChaptersWalk(ctx) {
       await shot(`noticechapters-${t}-3b-short-only-off`);
       const whole = await seriesPage(4);
       check(`noticechapters @${t}: "Only hide short ones" off, the twenty-page 3.5 leaves the series page too`,
-        JSON.stringify(whole.rows) === JSON.stringify(WHOLE_ONLY), JSON.stringify(whole.rows));
+        JSON.stringify(whole.rows) === JSON.stringify(wholeOnly), JSON.stringify(whole.rows));
       check(`noticechapters @${t}: ...and its header says "${say('{n} chapters', { n: 4 })}"`, whole.says);
       const c3 = await counts();
       check(`noticechapters @${t}: every count is 4, and Hidden now is 2`,
@@ -195,7 +197,7 @@ export async function noticeChaptersWalk(ctx) {
       await flipShort(true, t);
       const shortAgain = await seriesPage(5);
       check(`noticechapters @${t}: on again, the twenty-page 3.5 is back and only the two-page 2.5 stays hidden`,
-        JSON.stringify(shortAgain.rows) === JSON.stringify(SHOWN), JSON.stringify(shortAgain.rows));
+        JSON.stringify(shortAgain.rows) === JSON.stringify(shown), JSON.stringify(shortAgain.rows));
       const c4 = await counts();
       check(`noticechapters @${t}: ...every count is 5 again, Hidden now 1`,
         JSON.stringify(c4) === JSON.stringify({ series: 5, card: 5, unread: 5, mihon: 5, hidden: 1 }), JSON.stringify(c4));
@@ -204,13 +206,13 @@ export async function noticeChaptersWalk(ctx) {
       await flip(false, t);
       await shot(`noticechapters-${t}-4-settings-off`);
       const back = await seriesPage(6);
-      check(`noticechapters @${t}: switched off, the series page lists 2.5 again`, JSON.stringify(back.rows) === JSON.stringify(ALL), JSON.stringify(back.rows));
+      check(`noticechapters @${t}: switched off, the series page lists 2.5 again`, JSON.stringify(back.rows) === JSON.stringify(all), JSON.stringify(back.rows));
       check(`noticechapters @${t}: ...and says "${say('{n} chapters', { n: 6 })}"`, back.says);
       const c2 = await counts();
       check(`noticechapters @${t}: every count is 6 again, and nothing is hidden`,
         JSON.stringify(c2) === JSON.stringify({ series: 6, card: 6, unread: 6, mihon: 6, hidden: 0 }), JSON.stringify(c2));
       const sheet2 = await reader();
-      check(`noticechapters @${t}: the reader lists 2.5 again`, JSON.stringify(sheet2) === JSON.stringify(ALL), JSON.stringify(sheet2));
+      check(`noticechapters @${t}: the reader lists 2.5 again`, JSON.stringify(sheet2) === JSON.stringify(all), JSON.stringify(sheet2));
       await page.keyboard.press('Escape');
       const there = await call(`/api/books/${ids['2.5']}`, { status: true, allow: [404] });
       check(`noticechapters @${t}: ...and opens it by id`, there.status === 200, String(there.status));

@@ -156,9 +156,21 @@
 //   adultsearch with E2E_ADULT=1 -- Discover's search with Show 18+ on offers All · Hide 18+ · 18+ only and marks each
 //   18+ result, and with it off shows no chip and no 18+ result. At 1280, 390 and 390 in Arabic (multisource at 1280).
 //
+//   matches, rescanmerge, readeredges, lists -- v0.55.7 (v557Walk.mjs), each on a stack of its own: matches with up.sh's
+//   E2E_ANILIST=1 (a fake AniList: nothing asks the real one), LIB and E2E_NET -- a folder AniList's search answers with
+//   another work stores no cover, banner or link and shows its first page, one AniList knows by its name stores them, and
+//   Edit details -> Cover -> Use the first page sticks across a reload and a scan with no new lookup; Admin -> Art's picker
+//   and Admin -> Tasks -> Check online matches; rescanmerge on a plain one with LIB and E2E_NET -- two folders moved into
+//   one offered as merges by Rescan everything and merged on Apply (one series, read marks and the list carried; the 390
+//   pass never fingerprinted), and a renamed chapter shown once; readeredges on a plain one -- Cover colour at the edges
+//   on by default, off from Profile -> Settings -> Reading, on again from the reader's sheet, and no gap at the screen
+//   edge while the bars spring in (a pixel check mid-spring, against the same check with the panes taken away); lists on
+//   a plain one with LIB -- each item's unread badge ("99+" left to right in Arabic) and every sort order, kept across a
+//   reload. At 1280, 390 and 390 in Arabic.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
 //   libraries, nosource, filenames, noticechapters, replace, autofix, solver, find, rescan, multisource, adultsearch,
-//   engine. The engine phase resets the fake engine
+//   matches, rescanmerge, readeredges, lists, engine. The engine phase resets the fake engine
 //   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
 //   failing, which only the engine phase then meets, and it never searches.
 //
@@ -204,7 +216,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
 const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver',
-  'find', 'rescan', 'multisource', 'adultsearch', 'engine'];
+  'find', 'rescan', 'multisource', 'adultsearch', 'matches', 'rescanmerge', 'readeredges', 'lists', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1494,6 +1506,26 @@ try {
   if (PHASES.includes('adultsearch')) {
     const { adultSearchWalk } = await import('./v554Walk.mjs');
     await adultSearchWalk(v554);
+  }
+  // v0.55.7: online matches held to the series' name and Use the first page (#168), Rescan everything's merges (#150), the
+  // reader's cover-colour edges and its bars' edge (#170), and Lists' badges and sorting (#164) -- v557Walk.mjs, each on
+  // its own stack (its header). `out` for the frames the readeredges phase keeps.
+  const v557 = { ...v554, out: OUT };
+  if (PHASES.includes('matches')) {
+    const { matchesWalk } = await import('./v557Walk.mjs');
+    await matchesWalk(v557);
+  }
+  if (PHASES.includes('rescanmerge')) {
+    const { rescanMergeWalk } = await import('./v557Walk.mjs');
+    await rescanMergeWalk(v557);
+  }
+  if (PHASES.includes('readeredges')) {
+    const { readerEdgesWalk } = await import('./v557Walk.mjs');
+    await readerEdgesWalk(v557);
+  }
+  if (PHASES.includes('lists')) {
+    const { listsWalk } = await import('./v557Walk.mjs');
+    await listsWalk(v557);
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.

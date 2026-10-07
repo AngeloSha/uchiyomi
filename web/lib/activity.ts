@@ -13,12 +13,32 @@
 //     the series' status so a finished title's groups are grey, not amber.
 
 import type { Cadence, GroupStat } from './types';
+import { keys, t as tr } from './i18n';
 
 export type ActivityStatus = 'active' | 'quiet' | 'done' | 'unknown';
 
 /** Whether `status` (the series' metadata status, free text from sources) says the series is over. */
 export function seriesFinished(status: string | null | undefined): boolean {
   return /\b(completed?|finished|ended?|cancell?ed|dropped)\b/i.test(status ?? '');
+}
+
+// The four statuses the Library filters by (components/LibraryFilters.tsx STATUS_LABELS), declared again here
+// because statusText reaches them through a variable.
+const STATUS_WORDS = keys('Ongoing', 'Completed', 'Hiatus', 'Cancelled');
+
+/**
+ * A series' status in the reader's words: the four the Library filters by and their synonyms, read the way the
+ * server reads them for Komga (bff lib/komgaDto.ts komgaStatus), through their keys; any other words a source
+ * wrote, as it wrote them. The series page and the home hero printed `status.toLowerCase()`, which read "ongoing"
+ * in every language.
+ */
+export function statusText(status: string): string {
+  const s = status.trim().toUpperCase().replace(/[\s_-]+/g, ' ');
+  if (s === 'ONGOING' || s === 'PUBLISHING' || s === 'RELEASING') return tr(STATUS_WORDS[0]);
+  if (s === 'COMPLETED' || s === 'COMPLETE' || s === 'FINISHED' || s === 'PUBLISHING FINISHED' || s === 'ENDED') return tr(STATUS_WORDS[1]);
+  if (s === 'ON HIATUS' || s === 'HIATUS' || s === 'PAUSED') return tr(STATUS_WORDS[2]);
+  if (s === 'CANCELLED' || s === 'CANCELED' || s === 'DROPPED' || s === 'ABANDONED') return tr(STATUS_WORDS[3]);
+  return status.toLowerCase();
 }
 
 /**

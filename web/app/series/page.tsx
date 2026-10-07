@@ -16,12 +16,13 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedLabel, deliberatelyDeleted, ghostOfDeleted, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { clampPage, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
@@ -69,11 +70,11 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
   const add = async (c: CollectionRow) => {
     try {
       await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-      toast(`Added to ${c.name}`, 'success');
+      toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
       qc.invalidateQueries({ queryKey: ['collections'] });
       qc.invalidateQueries({ queryKey: ['collection', c.id] });
       onClose();
-    } catch { toast('Failed', 'error'); }
+    } catch { toast(tr('Failed'), 'error'); }
   };
   const createAndAdd = async () => {
     const n = name.trim();
@@ -81,14 +82,14 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
       await add(c);
-    } catch { toast('Failed to create', 'error'); }
+    } catch { toast(tr('Could not create the collection'), 'error'); }
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label={tr('Add to collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         {isLoading ? (
           <div className="skeleton h-24 rounded-xl" />
@@ -157,7 +158,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
     setRefusal(null);
     try {
       await api(`/api/admin/series/${id}/rename-folder`, { method: 'POST', json: { folder: next.trim() } });
-      toast('Folder renamed', 'success');
+      toast(tr('Folder renamed'), 'success');
       onSaved();
       onClose();
     } catch (e: any) {
@@ -166,19 +167,19 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         const b = JSON.parse(e?.body || '{}');
         if (b.message || b.fix) { setRefusal({ message: b.message, fix: b.fix }); shown = true; }
       } catch {}
-      if (!shown) toast(msgOf(e, 'Could not rename the folder'), 'error');
+      if (!shown) toast(msgOf(e, tr('Could not rename the folder')), 'error');
     }
     setBusy(false);
   };
 
   const changed = next.trim() !== folder.trim() && next.trim().length > 0;
+  const [currentlyBefore, currentlyAfter] = tr('Currently: {folder}').split('{folder}');
 
   return (
-    <Modal title={`Rename the folder for \u201c${title}\u201d`} onClose={onClose}>
+    <Modal title={tr('Rename the folder for “{title}”', { title: `\u2068${title}\u2069` })} onClose={onClose}>
       <div className="space-y-3">
         <p className="text-xs text-fog-500">
-          This moves the folder on disk. Chapter ids and everyone&rsquo;s reading progress stay exactly as
-          they are, so nothing is marked unread and nothing is re-downloaded.
+          {tr('This moves the folder on disk. Chapter ids and everyone’s reading progress stay exactly as they are, so nothing is marked unread and nothing is re-downloaded.')}
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-fog-500">{tr('Folder, relative to your library root')}</span>
@@ -189,7 +190,9 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
             className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 font-mono text-sm text-fog-100 outline-hidden focus:border-accent/60"
           />
         </label>
-        <p className="text-[11px] text-fog-600">{tr('Currently')}<span className="font-mono">{folder}</span></p>
+        {/* One sentence split around the folder, which is set in mono: `tr('Currently')` glued to it read
+            "Currentlymanga/Solo Leveling" in every language. */}
+        <p className="text-[11px] text-fog-600">{currentlyBefore}<span dir="ltr" className="font-mono">{folder}</span>{currentlyAfter}</p>
 
         {refusal && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
@@ -201,7 +204,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="chip text-xs">{tr('Cancel')}</button>
           <button onClick={save} disabled={busy || !changed} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
-            {busy ? 'Renaming\u2026' : 'Rename folder'}
+            {busy ? tr('Renaming…') : tr('Rename folder')}
           </button>
         </div>
       </div>
@@ -219,7 +222,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
 
   const save = async (reset = false) => {
     const n = reset ? null : Number(number);
-    if (!reset && !Number.isFinite(n)) { toast('Chapter number must be a number', 'error'); return; }
+    if (!reset && !Number.isFinite(n)) { toast(tr('Chapter number must be a number'), 'error'); return; }
     setBusy(true);
     try {
       const r = await api<{ affectedUsers: number }>(`/api/admin/books/${book.id}/meta`, {
@@ -239,7 +242,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
       <div role="dialog" aria-modal="true" aria-label={tr('Edit chapter')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapter number')}</label>
         <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
@@ -247,9 +250,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         {completed && (
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
-            You have finished this chapter. Changing its number changes what gets reported to a connected
-            tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps
-            the higher one until an admin imports your list again under Admin → Import (From your tracker).
+            {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin → Import (From your tracker).')}
           </p>
         )}
         <div className="mt-4 flex gap-2">
@@ -265,8 +266,8 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
  * The muted caption under a chapter's label: who translated it, `via {source}` when the copy came from a
  * source other than the series' own, and `{n} versions` when the number has more than one copy on offer.
  * Plain text, one line, truncating -- the bordered pills this replaces put three boxes of text on every row,
- * which at 390 px was more chrome than chapter. `Deleted from the server` stays a small chip before it: a
- * tombstone is a state, not a caption.
+ * which at 390 px was more chrome than chapter. `Deleted from the server` stays a small tag before it: a
+ * tombstone is a state, not a caption (and since v0.55.7 its words wrap rather than being cut; see below).
  *
  * ⚠️ `{n} versions` is TEXT, never a button. This caption sits inside the row's opener, which is itself a
  * <button>, and a button inside a button is invalid DOM that browsers un-nest unpredictably (the v0.33 strip
@@ -278,8 +279,8 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   via?: string | null;
   versions?: number;
   tone?: string;
-  /** A tombstone's chip, in its words (lib/chapterRows.ts prunedLabel); null for a chapter with its file. */
-  pruned?: string | null;
+  /** A tombstone's tag, in its words, whole and short (lib/chapterRows.ts prunedWords); null for a chapter with its file. */
+  pruned?: { full: string; short: string } | null;
   /**
    * A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). `full`
    * is the sentence a short reason stands for ("another split" for "another split of a chapter you have"): the title
@@ -314,18 +315,43 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   if (via) { const t = tr('via {source}', { source: via }); parts.push(<span key="via">{t}</span>); plain.push(t); }
   if (versions && versions >= 2) { const t = tr('{n} versions', { n: versions }); parts.push(<span key="v">{t}</span>); plain.push(t); }
   if (!parts.length && !pruned && !short) return null;
-  const title = [...(pruned ? [pruned] : []), ...(short ? [short] : []), ...plain].join(' · ');
+  const title = [...(pruned ? [pruned.full] : []), ...(short ? [short] : []), ...plain].join(' · ');
+  if (pruned) {
+    const caption = parts.map((n, i) => (
+      <span key={i}>
+        {i > 0 && <span aria-hidden className="text-ink-600"> · </span>}
+        {n}
+      </span>
+    ));
+    return (
+      // A tombstone's words are read whole, wherever the row is (v0.55.7). As a chip in the one truncating line below,
+      // "File no longer on disk" came out "File no lo…" in the three-column grid at 1280, where a row with a full
+      // date leaves this caption 51-68 px. So the words are a tag of their own: the sentence below lg, a word or two
+      // in the grid (prunedWords says why) with the sentence as the title and for a screen reader, and it takes the
+      // line's width and wraps inside it when even that does not fit -- squared, as the chapter sheet's tags are, so
+      // a second line reads as one box. The group's caption follows, on the same line when both fit, and ends in an
+      // ellipsis as before (one shrinking part, never a row of shrink-0 ones that would run under the date).
+      <div className={`mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] ${tone}`} title={title}>
+        {/* Shown even when a copy is saved on this device -- it is still gone from the server, and "yours is the
+            last one" is exactly what somebody wants to know before clearing downloads. One wording for every
+            tombstone the server deleted: the same mark is left by an admin's Delete from server as by the scheduled
+            cleanup, and the row cannot tell which, so "to free space" blamed a job that is off on most installs. A
+            file Rescan everything found gone from a library built by hand has words of its own (prunedLabel,
+            v0.55.4): nothing deleted it. */}
+        <span data-tombstone className="max-w-full break-words rounded-[4px] border border-ink-700 px-1 text-[10px] leading-4 text-fog-600">
+          <span aria-hidden="true" className="lg:hidden">{pruned.full}</span>
+          <span aria-hidden="true" className="hidden lg:inline">{pruned.short}</span>
+          <span className="sr-only">{pruned.full}</span>
+        </span>
+        {short && <span className="max-w-full truncate rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
+        {parts.length > 0 && <span className="min-w-12 flex-1 basis-0 truncate">{caption}</span>}
+      </div>
+    );
+  }
   return (
     // One block that truncates as a whole (inline children, no flex): a flex row of shrink-0 parts would
     // run under the date at the end of the row instead of ending in an ellipsis.
     <p className={`mt-0.5 truncate text-[11px] ${tone}`} title={title}>
-      {/* Shown even when a copy is saved on this device -- it is still gone from the server, and "yours is
-          the last one" is exactly what somebody wants to know before clearing downloads. One wording for
-          every tombstone the server deleted: the same mark is left by an admin's Delete from server as by the
-          scheduled cleanup, and the row cannot tell which, so "to free space" blamed a job that is off on most
-          installs. A file Rescan everything found gone from a library built by hand has words of its own
-          (prunedLabel, v0.55.4): nothing deleted it. */}
-      {pruned && <span className="me-1 rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{pruned}</span>}
       {/* Before the group, as a chip and not a caption part: "3 pages missing · Asura Scans" would read as
           the group's fault. The count is the file's -- the reader shows the caption on exactly those pages. */}
       {short && <span className="me-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
@@ -446,9 +472,9 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
             {/* The chapter's own name, when the source gave one that is not just the number again. */}
             {chapterName(book) && <span className="text-fog-500"> · {chapterName(book)}</span>}
           </p>
-          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedLabel(book)} missing={book.missingPages?.length} />
+          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedWords(book)} missing={book.missingPages?.length} />
           {state === 'reading' && rp && (
-            <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
+            <p className="text-[11px] text-accent">{tr('page {page}/{pages}', { page: rp.page, pages: book.media.pagesCount })}</p>
           )}
         </div>
       </button>
@@ -1418,10 +1444,10 @@ function SeriesInner() {
     setBusyAdmin(true);
     try {
       await api(`/api/admin/series/${id}`, { method: 'DELETE' });
-      toast('Series removed from the library', 'success');
+      toast(tr('Series removed from the library'), 'success');
       router.push('/library');
     } catch (e) {
-      toast(msgOf(e, 'Could not remove it'), 'error');
+      toast(msgOf(e, tr('Could not remove it')), 'error');
     }
     setBusyAdmin(false);
   };
@@ -1523,8 +1549,8 @@ function SeriesInner() {
   );
 
   const metaBits: ReactNode[] = [
-    author ? <span className="text-fog-300">by {author}</span> : null,
-    meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
+    author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
+    meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
@@ -1744,7 +1770,7 @@ function SeriesInner() {
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
           {(meta?.status || rating) && (
             <div className="mb-2 flex items-center gap-2">
-              {meta?.status && <span className="chip text-[11px] capitalize">{meta.status.toLowerCase()}</span>}
+              {meta?.status && <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>}
               {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
             </div>
           )}
@@ -1835,7 +1861,7 @@ function SeriesInner() {
           title={tr('Remove from library?')}
           danger
           busy={busyAdmin}
-          confirmLabel="Remove"
+          confirmLabel={tr('Remove')}
           confirmText={series.name}
           body={
             <>
@@ -1843,8 +1869,8 @@ function SeriesInner() {
               {editions && series.lang && (
                 <p className="mb-2">{tr('This removes the {language} edition. The other editions stay.', { language: languageName(series.lang) })}</p>
               )}
-              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
-              <p className="mt-2">Everyone&rsquo;s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin &rarr; Library, or just add it again.</p>
+              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong>{' '}{tr('The chapters stay exactly where they are on disk, and nothing in your library folder is touched.')}</p>
+              <p className="mt-2">{tr('Everyone’s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin → Library, or just add it again.')}</p>
             </>
           }
           onConfirm={doDelete}

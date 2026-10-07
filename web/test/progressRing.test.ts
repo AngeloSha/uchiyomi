@@ -167,7 +167,8 @@ test('a determinate ring fills from the top, and is a named progressbar only whe
 test('RingIcon: a squared count, an amber dot, nothing at all on an idle nav tab', () => {
   // Reintroduce the round count (`rounded-full px-1`) and "the count is a capsule" fails.
   const busy = html(createElement(RingIcon, { progress: 0.5, size: 'nav', count: 120, attention: true, srLabel: 'Library — fetching', children: 'icon' }));
-  const tag = busy.match(/<span aria-hidden="true" data-ring-count="true" class="([^"]*)">([^<]*)<\/span>/);
+  // dir="ltr" (v0.55.7): "99+" stays a number and its sign in Arabic, where the paragraph's direction read it "+99".
+  const tag = busy.match(/<span aria-hidden="true" data-ring-count="true" dir="ltr" class="([^"]*)">([^<]*)<\/span>/);
   assert.ok(tag, 'no count tag');
   assert.doesNotMatch(tag![1], /rounded-full/, 'the count is a capsule');
   assert.match(tag![1], /rounded-\[4px\]/, 'the count lost its squared corners');

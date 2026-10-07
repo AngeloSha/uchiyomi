@@ -60,6 +60,51 @@
  *   first, at most PAIR_MAX per preview. Reintroduce by planning every gone row: "a moved or renamed file is paired
  *   before anything is planned" finds the renamed chapter's old row in the plan.
  *
+ * ⚠️ A ROW NEVER FINGERPRINTED IS PAIRED BY ITS NAME AND ITS TIME, AND ONLY WHEN NOTHING ELSE COULD BE ITS FILE (v0.55.7
+ *   integration, the owner's decision for #150). Before v0.55.7 a file was fingerprinted up to six hours after a scan
+ *   met it, so @Kedryn's Zagor rows were most likely never read before he moved their files -- and a gone file can
+ *   never be read again. `mv` keeps a file's name, its modification time and its size, so a gone row WITHOUT a
+ *   fingerprint pairs with a live row in another folder that has the same file name and exactly the same stored mtime
+ *   (and the same size, when both rows know it), first seen by a scan after the one that last saw the gone row -- only
+ *   when exactly ONE live row anywhere qualifies, and that row is no other gone row's candidate and no fingerprint's
+ *   twin: zero or two (a second copy, two folders unpacked from one archive at the same second) is no pair, and so is a
+ *   file a scan saw beside the gone one (written in the same instant with the same name: it was there, it did not
+ *   arrive). It counts for FOLLOW and for MERGE alike, asked again at Apply, and it is never a reason to mark anything:
+ *   it only ever keeps a row. A renamed file has another name, so without a fingerprint it stays unpaired. Reintroduce
+ *   by pairing on the name alone (drop the mtime): "a never-fingerprinted file is paired only when nothing else could be
+ *   its file" in rescan.int.test.ts pairs the touched copy; by dropping the fallback: "the Zagor case, never
+ *   fingerprinted" plans every chapter as gone.
+ *
+ * ⚠️ A CHAPTER FOLLOWS ITS FILE (v0.55.7, #150). Kept was not enough: the old row stayed live with no file and the new
+ *   row held the file with none of the history, so a renamed chapter showed twice on its series page. For a pair inside
+ *   one series, Apply points the OLD row -- its id, and with it everyone's progress, bookmarks, notes and events -- at
+ *   the new file (where it is and what was measured of it: root, file, mtime, size, the fingerprint; its number and
+ *   title read from the new name by its own rule, as the next scan would), and the new row goes. Only when the new row
+ *   holds NOTHING of anyone's: no progress, events, bookmark, note, offline copy, number or title set by hand, nor a
+ *   page marked by hand -- a person who opened it in the minutes since the scan made it keeps both rows, counted
+ *   (`twins`). Never the other way round: a row with history is never removed. It needs no tick: it keeps every row
+ *   that holds anything and only ever puts history back on the file. A pair across two series is left as it was,
+ *   unless the whole series merges (below). Reintroduce by skipping followFiles: "a chapter follows its renamed file"
+ *   in rescan.int.test.ts finds the chapter twice; by dropping the history test: "a renamed file someone opened since
+ *   the scan is kept beside its old chapter" finds that reader's bookmark pointing at nothing.
+ *
+ * ⚠️ MERGE, AN OPT-IN FOR A SERIES WHOSE FILES ALL WENT INTO ONE OTHER (v0.55.7, #150). @Kedryn unpacked Zagor into
+ *   folders of 100 chapters, each indexed as a series, then moved them all into one folder: "Zagor" a new series, the
+ *   old ones with nothing left -- and the panel told him to merge them, which nothing in it could. A series with
+ *   nothing left whose every live chapter is a pair into ONE other series, which the merge route itself would merge it
+ *   into (lib/libraryAdmin.ts mergeRefusal) and neither in the middle of a renumber, is offered (`merges`), and merged
+ *   only if the admin ticks it. Apply asks again, with both series held: still no refusal, neither renumbering, every
+ *   live row of it still gone and still with a live twin in that series whose file is there -- else it is left alone
+ *   (`notMerged`). Then the tracker link is carried where the other series has none of its own (mergeSeries drops the
+ *   absorbed series' link, and the series its files went to is often one the scan just made, linked to nothing), the
+ *   series is merged (mergeSeries: every row, with everyone's progress, events, notes, bookmarks, favourites, ratings,
+ *   collections, read marks, tracker floor and other names), the merge is audited as the merge route audits it, and
+ *   its pairs -- inside one series now -- go to FOLLOW. Merged first and followed after: each step leaves a library that
+ *   holds together (a merge's duplicates are what Health's merge leaves), and a FOLLOW that fails is the next Rescan's.
+ *   Reintroduce by dropping the ask-again: "a merge whose series changed since the preview is left alone" in
+ *   rescan.int.test.ts merges into a hidden series; by merging every offer: "only a ticked merge is applied" merges
+ *   both.
+ *
  * ⚠️ APPLY LOOKS AGAIN, UNDER THE SCAN HOLD. Minutes can pass between the preview and the press: a file comes back,
  *   a renumber or a rename moves a row to another file, Verify or a cleanup marks one, a share is unmounted. So a
  *   planned row is marked only if it is still the row that was looked at and its file is still not there, the folder
@@ -112,11 +157,15 @@ import { tombstoneBooks } from './chapterCleanup';
 import { verifyState } from './verifyFiles';
 import { folderBusy, renumberRunning } from './numbering';
 import { busyFolders } from './bulkNewest';
+import { mergeRefusal, mergeSeries } from './libraryAdmin';
 import { runsInside } from './updater';
 import { logAudit } from './audit';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { numberByRule } from './naming';
 import { numberText } from './chapterRanges';
+import { matchCheckState } from './matchCheck';
+import { namesOfMany } from './altTitles';
+import { nameKey } from './onlineMatch';
 
 /** How many stats are in flight at once: a NAS answers a handful in parallel well and thousands badly (Verify's). */
 const CONCURRENCY = 16;
@@ -135,13 +184,22 @@ export const PLAN_TTL_MS = 30 * 60_000;
 /** Example changes the opt-in shows per series. */
 const EXAMPLES = 3;
 
-export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber';
+export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'merge' | 'follow' | 'renumber';
 
 /** A root the whole-root rules refused: no present file at all, or `missing` of the `of` rows looked at (the 90 % rule). */
 export interface Unmounted { root: string; missing?: number; of?: number }
 
 /** A chapter row the plan is about: its id, its series and the file it named when it was looked at. */
 export interface PlanRow { id: string; seriesId: string; file: string }
+/**
+ * A gone row of your own folder, and `to`, the live row now at its file (moved or renamed): same fingerprint -- or, for
+ * a row never fingerprinted, `by: 'name'`: the same file name and time, and no other live row that could be its file
+ * (the header).
+ */
+export interface MovedPair extends PlanRow { to: PlanRow & { root: string }; by?: 'name' }
+
+/** A series every live chapter of which moved into ONE other series, `into`: offered for a merge there (MERGE). */
+export interface MergeOffer { seriesId: string; into: string; chapters: number }
 
 /** A series whose chapter numbers the newer file-name rules would change (the header's opt-in). */
 export interface NumberSeries {
@@ -174,11 +232,18 @@ export interface RescanPlan {
   /** Rows in your own library folder whose file is gone, with no live twin: what Apply marks. */
   mark: PlanRow[];
   /** Gone rows in your own folder whose file is another live row's now: kept, never marked. `to` is that row. */
-  moved: Array<PlanRow & { to: PlanRow }>;
+  moved: MovedPair[];
+  /** Of `moved`, the pairs inside one series: Apply points the old row at the new file (FOLLOW, the header). */
+  follow: number;
   /** Rows in the download folder whose file is gone: Verify chapter files' to mark, counted here only. */
   downloads: number;
-  /** Series with a live row and every live row's file gone (marked, moved or in the download folder). */
-  emptied: Array<{ seriesId: string; chapters: number }>;
+  /**
+   * Series with a live row and every live row's file gone (marked, moved or in the download folder). `into`: the one
+   * series every one of its live chapters moved into, when they all went to one (v0.55.7).
+   */
+  emptied: Array<{ seriesId: string; chapters: number; into?: string }>;
+  /** Of `emptied`, those that may be merged into the series their files went to: the opt-in's ticks (MERGE). */
+  merges: MergeOffer[];
   /** Files present under the library folder at the preview, for Apply's look before it marks there. */
   samples: string[];
   /** The opt-in: every series the newer file-name rules would renumber. */
@@ -202,6 +267,13 @@ export interface RescanApplied {
   changed: number;
   /** Gone rows kept because their file is another live row's: the preview's pairs, and any found at Apply. */
   moved: number;
+  /** Of those, chapters now pointing at their moved or renamed file: the old row kept, the new one gone (FOLLOW). */
+  followed: number;
+  /** Pairs kept as two chapters because the new row holds history of its own (FOLLOW): nothing was combined. */
+  twins: number;
+  /** The merge opt-in: the ticked series merged into the series their files went to, and those asked again and refused. */
+  merged: number;
+  notMerged: number;
   /**
    * Series left alone because something was writing into them, or checking them, when Apply reached them (the header):
    * neither their planned rows nor the opt-in's numbers were touched -- the next Rescan has them.
@@ -275,8 +347,14 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out;
 }
 
-interface Row { id: string; series_id: string; file: string; fingerprint: string | null }
-interface Gone extends PlanRow { fingerprint: string | null }
+interface Row { id: string; series_id: string; file: string; fingerprint: string | null; mtime: string | number; size: string | number | null; updated_at: Date }
+/**
+ * A gone row as the pairing reads it: its fingerprint, and for one without, the file's stored time and size, and when a
+ * scan last saw it (`seen`, its updated_at).
+ */
+interface Gone extends PlanRow { fingerprint: string | null; mtime: number; size: number | null; seen: Date }
+/** A stored bigint (node-pg hands it over as text) as a number, or null. */
+const num = (v: string | number | null | undefined): number | null => (v == null ? null : Number(v));
 
 /**
  * The rows a rescan looks at: live chapters of a series that is neither hidden nor merged away, nor in the middle of
@@ -331,7 +409,7 @@ export async function previewRescan(): Promise<RescanPlan | null> {
     for (;;) {
       if (runtime.stopping) return null;
       const page = await q<Row>(
-        `SELECT b.id, b.series_id, b.file, b.fingerprint FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+        `SELECT b.id, b.series_id, b.file, b.fingerprint, b.mtime, b.size, b.updated_at FROM lib_books b JOIN lib_series s ON s.id = b.series_id
           WHERE b.root = $1 AND b.id > $2 AND ${LOOKED_AT}
           ORDER BY b.id LIMIT $3`,
         [root, after, PAGE],
@@ -344,7 +422,10 @@ export async function previewRescan(): Promise<RescanPlan | null> {
         if (!l) return;
         if (l === 'unchecked') { uncheckedHere++; return; }
         seen++;
-        if (l === 'gone') { gone.push({ id: r.id, seriesId: r.series_id, file: r.file, fingerprint: r.fingerprint }); return; }
+        if (l === 'gone') {
+          gone.push({ id: r.id, seriesId: r.series_id, file: r.file, fingerprint: r.fingerprint, mtime: num(r.mtime) ?? 0, size: num(r.size), seen: r.updated_at });
+          return;
+        }
         // A handful of present files spread over the whole root (a reservoir), for Apply's look at the root.
         present++;
         if (kept.length < SAMPLES) kept.push(r.file);
@@ -389,6 +470,7 @@ export async function previewRescan(): Promise<RescanPlan | null> {
   if (runtime.stopping) return null;
   const movedIds = new Set(moved.map((m) => m.id));
   const mark = own.filter((g) => !movedIds.has(g.id)).map(({ id, seriesId, file }) => ({ id, seriesId, file }));
+  const follow = moved.filter((m) => m.to.seriesId === m.seriesId).length;
 
   // A series with nothing left: every live row it has is gone, whichever way. Listed for the admin, never hidden.
   const emptied: RescanPlan['emptied'] = [];
@@ -396,15 +478,43 @@ export async function previewRescan(): Promise<RescanPlan | null> {
     const live = await q<{ id: string; n: number }>(
       `SELECT series_id AS id, count(*)::int AS n FROM lib_books WHERE series_id = ANY($1) AND pruned_at IS NULL GROUP BY series_id`,
       [[...goneBySeries.keys()]]);
-    for (const r of live) if ((goneBySeries.get(r.id) ?? 0) >= r.n) emptied.push({ seriesId: r.id, chapters: r.n });
+    const went = new Map<string, MovedPair[]>();
+    for (const m of moved) went.set(m.seriesId, [...(went.get(m.seriesId) ?? []), m]);
+    for (const r of live) {
+      if ((goneBySeries.get(r.id) ?? 0) < r.n) continue;
+      // Where its files went, when every live chapter of it moved into ONE other series (MERGE): said, and offered.
+      const pairs = went.get(r.id) ?? [];
+      const to = new Set(pairs.map((m) => m.to.seriesId));
+      const into = pairs.length === r.n && to.size === 1 && !to.has(r.id) ? pairs[0].to.seriesId : null;
+      emptied.push(into ? { seriesId: r.id, chapters: r.n, into } : { seriesId: r.id, chapters: r.n });
+    }
   }
+  const merges = await mergeOffers(emptied);
 
   const numbers = await numberChanges();
 
   return {
     id: randomUUID(), at: Date.now(), scannedAt, ms: Date.now() - t0, looked, unchecked, unmounted,
-    mark, moved, downloads, emptied, samples, numbers, applied: false,
+    mark, moved, follow, downloads, emptied, merges, samples, numbers, applied: false,
   };
+}
+
+/**
+ * MERGE's offers (the header): of the series with nothing left whose files all went into one other series, those the
+ * merge route would merge there (mergeRefusal) with neither in the middle of a renumber.
+ */
+async function mergeOffers(emptied: RescanPlan['emptied']): Promise<MergeOffer[]> {
+  const wanted = emptied.filter((e): e is { seriesId: string; chapters: number; into: string } => !!e.into);
+  if (!wanted.length) return [];
+  const renumbering = new Set((await q<{ id: string }>(
+    'SELECT id FROM lib_series WHERE id = ANY($1) AND renumber_plan IS NOT NULL', [wanted.map((e) => e.into)])).map((r) => r.id));
+  const out: MergeOffer[] = [];
+  for (const e of wanted) {
+    if (renumbering.has(e.into) || renumberRunning(e.into) || renumberRunning(e.seriesId)) continue;
+    if (await mergeRefusal(e.seriesId, e.into)) continue;
+    out.push({ seriesId: e.seriesId, into: e.into, chapters: e.chapters });
+  }
+  return out;
 }
 
 /**
@@ -506,31 +616,85 @@ async function numberChanges(): Promise<NumberSeries[]> {
 /**
  * The gone rows of your own folder whose file lives on as another live row (the header): renamed in place, or moved
  * to another folder. The live rows that were never fingerprinted are fingerprinted first, newest first -- the scan
- * that just ran made the new row, and the background backfill has not reached it.
+ * that just ran made the new row, and the background backfill has not reached it. A gone row that was never
+ * fingerprinted itself is paired by its name and its time, when nothing else could be its file (nameTwins).
  */
-async function pairMoved(own: Gone[], goneIds: Set<string>, roots: string[]): Promise<RescanPlan['moved']> {
-  if (!own.some((g) => g.fingerprint)) return [];
+async function pairMoved(own: Gone[], goneIds: Set<string>, roots: string[]): Promise<MovedPair[]> {
+  if (!own.length) return [];
   const ids = [...goneIds];
-  const todo = await q<{ id: string; root: string; file: string }>(
-    `SELECT b.id, b.root, b.file FROM lib_books b JOIN lib_series s ON s.id = b.series_id
-      WHERE b.fp_at IS NULL AND b.root = ANY($1) AND ${LOOKED_AT} AND NOT (b.id = ANY($2::text[]))
-      ORDER BY b.created_at DESC, b.id LIMIT $3`,
-    [roots, ids, PAIR_MAX]);
-  setPhase('pair', todo.length);
-  await mapLimit(todo, PAIR_CONCURRENCY, async (b) => {
-    if (runtime.stopping) return;
-    await fingerprintOne(b).catch(() => false);
-    rescanState.done++;
-  });
-  const twins = new Map((await q<{ fingerprint: string; id: string; series_id: string; file: string }>(
-    `SELECT DISTINCT ON (b.fingerprint) b.fingerprint, b.id, b.series_id, b.file FROM lib_books b
-      WHERE b.pruned_at IS NULL AND b.fingerprint = ANY($1::text[]) AND NOT (b.id = ANY($2::text[]))
-      ORDER BY b.fingerprint, b.created_at DESC, b.id`,
-    [[...new Set(own.map((g) => g.fingerprint).filter((f): f is string => !!f))], ids])).map((r) => [r.fingerprint, r]));
-  const out: RescanPlan['moved'] = [];
+  const twins = new Map<string, { id: string; series_id: string; file: string; root: string }>();
+  if (own.some((g) => g.fingerprint)) {
+    const todo = await q<{ id: string; root: string; file: string }>(
+      `SELECT b.id, b.root, b.file FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+        WHERE b.fp_at IS NULL AND b.root = ANY($1) AND ${LOOKED_AT} AND NOT (b.id = ANY($2::text[]))
+        ORDER BY b.created_at DESC, b.id LIMIT $3`,
+      [roots, ids, PAIR_MAX]);
+    setPhase('pair', todo.length);
+    await mapLimit(todo, PAIR_CONCURRENCY, async (b) => {
+      if (runtime.stopping) return;
+      await fingerprintOne(b).catch(() => false);
+      rescanState.done++;
+    });
+    for (const r of await q<{ fingerprint: string; id: string; series_id: string; file: string; root: string }>(
+      `SELECT DISTINCT ON (b.fingerprint) b.fingerprint, b.id, b.series_id, b.file, b.root FROM lib_books b
+        WHERE b.pruned_at IS NULL AND b.fingerprint = ANY($1::text[]) AND NOT (b.id = ANY($2::text[]))
+        ORDER BY b.fingerprint, b.created_at DESC, b.id`,
+      [[...new Set(own.map((g) => g.fingerprint).filter((f): f is string => !!f))], ids])) twins.set(r.fingerprint, r);
+  }
+  // The rows never fingerprinted (the header): a live row a fingerprint pairs is that row's file, and nobody else's.
+  const bare = own.filter((g) => !g.fingerprint);
+  const named = bare.length && !runtime.stopping
+    ? await nameTwins(bare, ids, new Set([...twins.values()].map((t) => t.id)))
+    : new Map<string, PlanRow & { root: string }>();
+  const out: MovedPair[] = [];
   for (const g of own) {
     const t = g.fingerprint ? twins.get(g.fingerprint) : undefined;
-    if (t) out.push({ id: g.id, seriesId: g.seriesId, file: g.file, to: { id: t.id, seriesId: t.series_id, file: t.file } });
+    if (t) out.push({ id: g.id, seriesId: g.seriesId, file: g.file, to: { id: t.id, seriesId: t.series_id, file: t.file, root: t.root } });
+    else if (named.has(g.id)) out.push({ id: g.id, seriesId: g.seriesId, file: g.file, to: named.get(g.id)!, by: 'name' });
+  }
+  return out;
+}
+
+/**
+ * The fallback for a gone row never fingerprinted (the header): for each, the ONE live row that could be its file --
+ * the same file name in another folder, exactly the same stored mtime (a stat that failed stored 0, which is no time
+ * at all), the same size when both rows know it, and first seen by a scan after the one that last saw the gone row
+ * (created_at > the gone row's updated_at: a scan stamps a new row with its own start, lib/library.ts) -- or nothing.
+ * The last because a file written in the same instant as another of the same name -- two folders unpacked from one
+ * archive, a burst of copies -- has the same name and time too; one a scan saw beside the gone file is not where it
+ * went. A gone row with two or more such rows is no pair, nor is one whose row another gone row would pair with too,
+ * nor one whose row is a fingerprint's twin (`claimed`): each of those is a second file the name and the time could
+ * be. `exclude`: the rows known gone, which are nobody's file. The same rule at the preview and at Apply.
+ */
+async function nameTwins(
+  gone: ReadonlyArray<{ id: string; file: string; mtime: number; size: number | null; seen: Date }>,
+  exclude: readonly string[],
+  claimed: ReadonlySet<string>,
+): Promise<Map<string, PlanRow & { root: string }>> {
+  const out = new Map<string, PlanRow & { root: string }>();
+  const want = gone.filter((g) => g.mtime > 0);
+  if (!want.length) return out;
+  // Every live row with the name and the time. A suffix compare, never LIKE: a file name may hold `%` or `_`.
+  const rows = await q<{ gone: string; id: string; series_id: string; file: string; root: string }>(
+    `SELECT x.id AS gone, b.id, b.series_id, b.file, b.root
+       FROM unnest($1::text[], $2::text[], $3::bigint[], $4::bigint[], $6::timestamptz[]) AS x(id, name, mtime, size, seen)
+       JOIN lib_books b ON b.mtime = x.mtime AND b.pruned_at IS NULL
+        AND (b.file = x.name OR right(b.file, length(x.name) + 1) = '/' || x.name)
+        AND (x.size IS NULL OR b.size IS NULL OR b.size = x.size)
+        AND b.created_at > x.seen
+      WHERE NOT (b.id = ANY($5::text[]))`,
+    [want.map((g) => g.id), want.map((g) => baseName(g.file)), want.map((g) => g.mtime), want.map((g) => g.size), [...exclude], want.map((g) => g.seen)]);
+  const byGone = new Map<string, typeof rows>();
+  const byLive = new Map<string, number>();
+  for (const r of rows) {
+    byGone.set(r.gone, [...(byGone.get(r.gone) ?? []), r]);
+    byLive.set(r.id, (byLive.get(r.id) ?? 0) + 1);
+  }
+  for (const [g, list] of byGone) {
+    if (list.length !== 1) continue;
+    const t = list[0];
+    if (byLive.get(t.id) !== 1 || claimed.has(t.id)) continue;
+    out.set(g, { id: t.id, seriesId: t.series_id, file: t.file, root: t.root });
   }
   return out;
 }
@@ -556,7 +720,8 @@ export function startRescan(log?: Log): Promise<RescanPlan | null> | false {
       if (!plan) rescanState.error = 'stopped';
       else {
         log?.info(`rescan: ${plan.looked} chapter file(s) looked for; ${plan.mark.length} gone from the library folder, `
-          + `${plan.moved.length} moved or renamed, ${plan.downloads} gone from the download folder, ${plan.emptied.length} series with nothing left`);
+          + `${plan.moved.length} moved or renamed (${plan.follow} inside their own series), ${plan.downloads} gone from the download folder, `
+          + `${plan.emptied.length} series with nothing left`);
         for (const u of plan.unmounted) log?.warn(`rescan: ${u.root}: no file (or almost none) behind its chapter rows -- is the volume mounted? Nothing under it is planned`);
       }
       return plan;
@@ -612,7 +777,7 @@ function clashing(): ApplyRefusal | null {
  * admin ticked in its opt-in, every one of them in the plan.
  */
 export function startApply(
-  input: { plan: string; renumber?: string[] },
+  input: { plan: string; renumber?: string[]; merge?: string[] },
   who: ApplyWho,
   opts: ApplyOpts = {},
 ): { ok: true; run: Promise<RescanApplied> } | { ok: false; error: ApplyRefusal } {
@@ -627,6 +792,10 @@ export function startApply(
   const listed = new Set(plan.numbers.map((n) => n.seriesId));
   const renumber = [...new Set(input.renumber ?? [])];
   if (renumber.some((id) => !listed.has(id))) return { ok: false, error: 'not_in_plan' };
+  // The same for a merge: only a series the preview offered, into the series it named.
+  const offered = new Set(plan.merges.map((m) => m.seriesId));
+  const merge = [...new Set(input.merge ?? [])];
+  if (merge.some((id) => !offered.has(id))) return { ok: false, error: 'not_in_plan' };
   const clash = clashing();
   if (clash) return { ok: false, error: clash };
   // Taken now, in the same turn as the checks: a second press is `busy`, and a plan is applied once whatever happens.
@@ -637,7 +806,7 @@ export function startApply(
   setPhase('mark', plan.mark.length);
   const run = (async () => {
     try {
-      const r = await applyPlan(plan, renumber, opts);
+      const r = await applyPlan(plan, renumber, merge, who, opts);
       rescanState.appliedAt = Date.now();
       rescanState.lastApplied = r;
       if (r.stopped) rescanState.error = 'stopped';
@@ -648,7 +817,11 @@ export function startApply(
       // A library-wide change, so the Activity feed says who made it and what it did.
       await logAudit('library.rescan', {
         userId: who.userId,
-        detail: { plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, busy: r.busy, downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}) },
+        detail: {
+          plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, followed: r.followed, twins: r.twins,
+          merged: r.merged, notMerged: r.notMerged, busy: r.busy,
+          downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}),
+        },
         req: who.req,
       });
       // The opt-in, an entry of its own: chapter numbers are what a tracker is told, and the feed must say who changed
@@ -660,6 +833,10 @@ export function startApply(
       }
       scheduleHealthSummaryRefresh();
       who.log?.info(`rescan: ${r.marked} chapter(s) marked as no longer on disk; ${r.back} back on disk and ${r.changed} changed since the preview, left alone`
+        + (r.followed ? `; ${r.followed} chapter(s) now point at their moved or renamed file` : '')
+        + (r.twins ? `; ${r.twins} moved file(s) kept beside their old chapter, both with reading history` : '')
+        + (r.merged ? `; ${r.merged} series merged into the series their files went to` : '')
+        + (r.notMerged ? `; ${r.notMerged} merge(s) left alone, the series changed since the preview` : '')
         + (r.busy ? `; ${r.busy} series with a download or a check running, left for the next rescan` : '')
         + (r.renumbered.series ? `; ${r.renumbered.chapters} chapter(s) of ${r.renumbered.series} series renumbered by the new file-name rules` : '')
         + (r.stopped ? ' (stopped for shutdown)' : ''));
@@ -691,12 +868,15 @@ async function stillMounted(root: string, samples: string[]): Promise<boolean> {
 /** Marked per statement: a shutdown is honoured between batches, and no statement names thousands of ids. */
 const MARK_BATCH = 500;
 
-async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts): Promise<RescanApplied> {
+async function applyPlan(plan: RescanPlan, renumber: string[], merge: string[], who: ApplyWho, opts: ApplyOpts): Promise<RescanApplied> {
   const t0 = Date.now();
   const out: RescanApplied = {
-    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, busy: 0,
-    downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
+    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, followed: 0, twins: 0, merged: 0, notMerged: 0,
+    busy: 0, downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
   };
+  // The pairs inside one series: their chapters follow their files (FOLLOW, the header).
+  const inSeries = plan.moved.filter((m) => m.to.seriesId === m.seriesId);
+  const offers = plan.merges.filter((m) => merge.includes(m.seriesId));
   // ⚠️ With every scan held off (the header): a scan between the look below and the mark could bring a row back, or
   // move it, and the mark would land on a chapter whose file is there -- and one between the opt-in's read and its
   // write would re-read a row by its old rule under the new one's number.
@@ -704,11 +884,17 @@ async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts):
   // start inside the Apply.
   await withScansHeld(async () => {
     // ⚠️ One writer per series (the header): every series this Apply may change, held -- or left alone, if it is taken.
-    const hold = await holdSeries([...plan.mark.map((m) => m.seriesId), ...renumber]);
+    const hold = await holdSeries([
+      ...plan.mark.map((m) => m.seriesId), ...inSeries.map((m) => m.seriesId), ...offers.flatMap((o) => [o.seriesId, o.into]), ...renumber,
+    ]);
     try {
       out.busy = hold.busy.size;
       await opts.held?.();
       await markGone(plan, out, hold.busy);
+      // Before the opt-in renumber, which reads each row's number again from its file -- the new one, by then.
+      const pairs = inSeries.filter((m) => !hold.busy.has(m.seriesId));
+      if (offers.length && !out.stopped) pairs.push(...await mergeInto(plan, offers, out, hold.busy, who));
+      if (pairs.length && !out.stopped) await followFiles(pairs, out);
       const free = renumber.filter((id) => !hold.busy.has(id));
       if (free.length && !out.stopped) {
         setPhase('renumber', free.length);
@@ -754,11 +940,11 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
     out.unmounted.push({ root: LIBRARY_ROOT });
     return;
   }
-  const now = new Map((await q<{ id: string; file: string; root: string; pruned_at: string | null; fingerprint: string | null; series_id: string; looked: boolean }>(
-    `SELECT b.id, b.file, b.root, b.pruned_at, b.fingerprint, b.series_id, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked
+  const now = new Map((await q<{ id: string; file: string; root: string; pruned_at: string | null; fingerprint: string | null; series_id: string; looked: boolean; mtime: string; size: string | null; updated_at: Date }>(
+    `SELECT b.id, b.file, b.root, b.pruned_at, b.fingerprint, b.series_id, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked, b.mtime, b.size, b.updated_at
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = ANY($1)`,
     [rows.map((m) => m.id)])).map((r) => [r.id, r]));
-  const gone: Array<{ id: string; seriesId: string; fingerprint: string | null }> = [];
+  const gone: Array<{ id: string; seriesId: string; file: string; fingerprint: string | null; mtime: number; size: number | null; seen: Date }> = [];
   await mapLimit(rows, CONCURRENCY, async (m) => {
     const c = now.get(m.id);
     // ⚠️ Still the row that was looked at: never one pruned since (Verify's 'missing' keeps its mark), moved to
@@ -767,7 +953,7 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
     else {
       const l = await look(LIBRARY_ROOT, m.file);
       if (l === 'present') out.back++;
-      else if (l === 'gone') gone.push({ id: m.id, seriesId: c.series_id, fingerprint: c.fingerprint });
+      else if (l === 'gone') gone.push({ id: m.id, seriesId: c.series_id, file: c.file, fingerprint: c.fingerprint, mtime: num(c.mtime) ?? 0, size: num(c.size), seen: c.updated_at });
       else out.changed++;
     }
     rescanState.done++;
@@ -778,7 +964,13 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
   const twinned = fps.length ? new Set((await q<{ fingerprint: string }>(
     `SELECT DISTINCT fingerprint FROM lib_books WHERE pruned_at IS NULL AND fingerprint = ANY($1::text[]) AND NOT (id = ANY($2::text[]))`,
     [fps, gone.map((g) => g.id)])).map((r) => r.fingerprint)) : new Set<string>();
-  const todo = gone.filter((g) => !(g.fingerprint && twinned.has(g.fingerprint)));
+  // And a row never fingerprinted whose file turned up under another folder since, by its name and time (the header):
+  // the fallback only ever keeps a row. The rows already known gone are nobody's file.
+  const bare = gone.filter((g) => !g.fingerprint);
+  const named = bare.length
+    ? await nameTwins(bare, [...gone.map((g) => g.id), ...plan.moved.map((m) => m.id)], new Set())
+    : new Map<string, PlanRow & { root: string }>();
+  const todo = gone.filter((g) => !(g.fingerprint && twinned.has(g.fingerprint)) && !named.has(g.id));
   out.moved += gone.length - todo.length;
   const touched = new Set<string>();
   for (let i = 0; i < todo.length; i += MARK_BATCH) {
@@ -788,6 +980,236 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
     await tombstoneBooks(batch.map((g) => g.id), 'deleted');
     out.marked += batch.length;
     for (const g of batch) touched.add(g.seriesId);
+  }
+  if (touched.size) await refreshSeries([...touched]);
+}
+
+/**
+ * MERGE (the header): each ticked offer asked again, then the tracker link carried, the series merged and audited, and
+ * its pairs -- now inside the series it merged into -- handed back for FOLLOW. Inside Apply's scan hold, both series
+ * held; an offer whose series is `busy` is left for the next Rescan (counted in `busy`).
+ */
+async function mergeInto(plan: RescanPlan, offers: MergeOffer[], out: RescanApplied, busy: ReadonlySet<string>, who: ApplyWho): Promise<MovedPair[]> {
+  setPhase('merge', offers.length);
+  const pairs: MovedPair[] = [];
+  const merged = new Set<string>();
+  for (const o of offers) {
+    if (runtime.stopping) { out.stopped = 'shutdown'; break; }
+    if (!busy.has(o.seriesId) && !busy.has(o.into)) {
+      const now = await stillMerges(o, plan);
+      if (!now) out.notMerged++;
+      else {
+        // ⚠️ The tracker link: mergeSeries drops the absorbed series' (the header), and the series its files went to
+        // keeps its own where it has one, per provider -- never replaced, so an unchecked automatic link is never carried
+        // over a checked one. The link goes as the online-match check (lib/matchCheck.ts, v0.55.7 #168) would judge it
+        // on the series it lands on: a person's link as it is (the check never touches one); an automatic one with its
+        // `checked_at` only when every name the absorbed series goes by is one the other will go by (its other names go
+        // with the merge, its title does not), so a check that passed for it passes there -- else unchecked, for the
+        // background recheck to hold to the names it has now (Health groups nothing by it meanwhile). And unchecked
+        // while that check is running: it may be judging this very link against the old names.
+        // Reintroduce by carrying `checked_at` as it is: "a merge carries the tracker link as the online-match check
+        // would judge it" in rescan.int.test.ts finds a link checked against a name the series no longer goes by.
+        const keepChecked = !matchCheckState.running && await namesCarry(o.seriesId, o.into);
+        await q(
+          `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, updated_at, checked_at)
+           SELECT $2, provider, external_id, title, linked_by, updated_at, CASE WHEN linked_by IS NOT NULL OR $3 THEN checked_at END
+             FROM series_trackers WHERE series_id = $1
+           ON CONFLICT (series_id, provider) DO NOTHING`, [o.seriesId, o.into, keepChecked]);
+        const names = new Map((await q<{ id: string; title: string }>(
+          'SELECT id, title FROM lib_series WHERE id = ANY($1)', [[o.seriesId, o.into]])).map((r) => [r.id, r.title]));
+        const r = await mergeSeries(o.seriesId, o.into);
+        // As the merge route audits one (routes/admin.ts), with where it came from.
+        await logAudit('series.merge', {
+          userId: who.userId,
+          detail: { from: o.seriesId, fromTitle: names.get(o.seriesId) ?? '', into: o.into, intoTitle: names.get(o.into) ?? '', ...r, via: 'rescan', plan: plan.id },
+          req: who.req,
+        });
+        out.merged++;
+        merged.add(o.seriesId);
+        pairs.push(...now);
+      }
+    }
+    rescanState.done++;
+  }
+  // A series merged away has no longer "nothing left": it is gone into the other. The panel's result lists the rest.
+  if (merged.size) {
+    plan.emptied = plan.emptied.filter((e) => !merged.has(e.seriesId));
+    out.emptied = plan.emptied.length;
+  }
+  return pairs;
+}
+
+/**
+ * Will every name `fromId` goes by be one `intoId` goes by once it is merged there (MERGE's tracker link)? Its other
+ * names go with the merge (lib/altTitles.ts carryAltTitles); its title, an admin's display title and its editions'
+ * names do not. Compared folded, as the online-match check compares them (lib/onlineMatch.ts nameKey).
+ */
+async function namesCarry(fromId: string, intoId: string): Promise<boolean> {
+  const names = await namesOfMany([fromId, intoId]);
+  const carried = await q<{ title: string }>('SELECT title FROM series_alt_titles WHERE series_id = $1 AND removed_at IS NULL', [fromId]);
+  const will = new Set([...(names.get(intoId) ?? []), ...carried.map((a) => a.title)].map(nameKey).filter(Boolean));
+  return (names.get(fromId) ?? []).every((n) => !nameKey(n) || will.has(nameKey(n)));
+}
+
+/**
+ * An offer asked again (MERGE): its pairs into the other series as they stand now, or null when it may no longer be
+ * merged -- refused by the merge route's checks (one of them hidden or merged away since, an edition of one work), one
+ * of them in the middle of a renumber, or a live row of it no longer gone, or without a live twin there whose file is:
+ * by its fingerprint, or for a row never fingerprinted by its name and time, as the preview paired it (nameTwins).
+ */
+async function stillMerges(o: MergeOffer, plan: RescanPlan): Promise<MovedPair[] | null> {
+  if (await mergeRefusal(o.seriesId, o.into)) return null;
+  const renumbering = await q<{ id: string }>('SELECT id FROM lib_series WHERE id = ANY($1) AND renumber_plan IS NOT NULL', [[o.seriesId, o.into]]);
+  if (renumbering.length || renumberRunning(o.seriesId) || renumberRunning(o.into)) return null;
+  const live = await q<{ id: string; root: string; file: string; fingerprint: string | null; mtime: string; size: string | null; updated_at: Date }>(
+    'SELECT id, root, file, fingerprint, mtime, size, updated_at FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [o.seriesId]);
+  if (!live.length || live.some((b) => b.root !== LIBRARY_ROOT)) return null;
+  const twins = new Map((await q<{ fingerprint: string; id: string; root: string; file: string }>(
+    `SELECT DISTINCT ON (fingerprint) fingerprint, id, root, file FROM lib_books
+      WHERE series_id = $1 AND pruned_at IS NULL AND fingerprint = ANY($2::text[])
+      ORDER BY fingerprint, created_at DESC, id`,
+    [o.into, [...new Set(live.flatMap((b) => (b.fingerprint ? [b.fingerprint] : [])))]])).map((r) => [r.fingerprint, r]));
+  const bare = live.filter((b) => !b.fingerprint).map((b) => ({ id: b.id, file: b.file, mtime: num(b.mtime) ?? 0, size: num(b.size), seen: b.updated_at }));
+  // Nobody's file: this series' own rows, and every row the preview found gone.
+  const named = bare.length
+    ? await nameTwins(bare, [...live.map((b) => b.id), ...plan.moved.map((m) => m.id), ...plan.mark.map((m) => m.id)], new Set([...twins.values()].map((t) => t.id)))
+    : new Map<string, PlanRow & { root: string }>();
+  const pairs: MovedPair[] = [];
+  for (const b of live) {
+    const t = b.fingerprint ? twins.get(b.fingerprint) : named.get(b.id);
+    if (!t || ('seriesId' in t && t.seriesId !== o.into)) return null;
+    pairs.push({ id: b.id, seriesId: o.into, file: b.file, to: { id: t.id, seriesId: o.into, file: t.file, root: t.root }, ...(b.fingerprint ? {} : { by: 'name' as const }) });
+  }
+  const looks = await mapLimit(pairs, CONCURRENCY, async (p) => [await look(LIBRARY_ROOT, p.file), await look(p.to.root, p.to.file)]);
+  return looks.every(([was, now]) => was === 'gone' && now === 'present') ? pairs : null;
+}
+
+/** A chapter file's title as the scan writes it: its name without the archive's extension (lib/library.ts persistScan). */
+const EXT = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
+
+/**
+ * Anything of anyone's on a chapter row (FOLLOW, the header): reading progress, reading events, a bookmark, a note, an
+ * offline copy, a number or title set by hand, a page marked by hand. Page hashes the nightly job measured are not --
+ * they are of the same bytes as the old row's, and go with the row (ON DELETE CASCADE).
+ */
+const HOLDS = `SELECT book_id AS id FROM read_progress WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM reading_events WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM bookmarks WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM notes WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM offline_downloads WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM book_overrides WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM page_hashes WHERE book_id = ANY($1) AND override IS NOT NULL`;
+
+interface PairRow {
+  id: string; series_id: string; root: string; file: string; pruned_at: string | null; fingerprint: string | null;
+  name_rule: number; looked: boolean; mtime: string; size: string | null; updated_at: Date;
+}
+
+/**
+ * FOLLOW (the header): each pair asked again -- both rows still what the preview saw, in one series still looked at,
+ * one fingerprint, the old file still not there and the new one there -- then, per batch, in ONE transaction with both
+ * rows locked: a new row that holds anything of anyone's is kept beside the old one (`twins`); otherwise the series'
+ * cover moves to the old row (the same chapter), the new row goes, and the old row takes the new file. Inside Apply's
+ * scan hold, its series held. A pair whose old file is back is `back` (two copies now, both kept); one that changed
+ * since the preview is `changed`.
+ */
+async function followFiles(pairs: MovedPair[], out: RescanApplied): Promise<void> {
+  // One new row for one old row: two old rows of one file (a chapter kept twice) cannot both take it.
+  const takenN = new Set<string>();
+  const takenO = new Set<string>();
+  const todo = pairs.filter((p) => {
+    if (takenN.has(p.to.id) || takenO.has(p.id)) return false;
+    takenN.add(p.to.id);
+    takenO.add(p.id);
+    return true;
+  });
+  setPhase('follow', pairs.length);
+  rescanState.done += pairs.length - todo.length;
+  const touched = new Set<string>();
+  for (let i = 0; i < todo.length; i += MARK_BATCH) {
+    if (runtime.stopping) { out.stopped = 'shutdown'; break; }
+    const batch = todo.slice(i, i + MARK_BATCH);
+    const rows = new Map((await q<PairRow>(
+      `SELECT b.id, b.series_id, b.root, b.file, b.pruned_at, b.fingerprint, b.name_rule, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked,
+              b.mtime, b.size, b.updated_at
+         FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = ANY($1)`,
+      [batch.flatMap((p) => [p.id, p.to.id])])).map((r) => [r.id, r]));
+    // A pair by name and time (a row never fingerprinted, the header) asked again: still nothing else that could be its
+    // file. Every pair's old row is known gone; a fingerprint pair's new row is its own row's file.
+    const byName = batch.filter((p) => p.by === 'name' && rows.get(p.id));
+    const named = byName.length
+      ? await nameTwins(byName.map((p) => { const o = rows.get(p.id)!; return { id: o.id, file: o.file, mtime: num(o.mtime) ?? 0, size: num(o.size), seen: o.updated_at }; }),
+        pairs.map((p) => p.id), new Set(batch.filter((p) => p.by !== 'name').map((p) => p.to.id)))
+      : new Map<string, PlanRow & { root: string }>();
+    const ok: Array<{ o: PairRow; n: PairRow }> = [];
+    await mapLimit(batch, CONCURRENCY, async (p) => {
+      const o = rows.get(p.id);
+      const n = rows.get(p.to.id);
+      // ⚠️ Still the pair that was looked at: neither row pruned or moved since, both in one series still looked at,
+      // and one fingerprint -- the only evidence that the new file is the old chapter -- or, for a row never
+      // fingerprinted, still the one live row with its name and time.
+      if (!o || !n || o.pruned_at || n.pruned_at || o.file !== p.file || o.root !== LIBRARY_ROOT || n.file !== p.to.file
+        || n.root !== p.to.root || o.series_id !== n.series_id || !o.looked || renumberRunning(o.series_id)
+        || (p.by === 'name' ? (!!o.fingerprint || named.get(o.id)?.id !== n.id) : (!o.fingerprint || o.fingerprint !== n.fingerprint))) {
+        out.changed++;
+        return;
+      }
+      const [was, now] = await Promise.all([look(LIBRARY_ROOT, o.file), look(n.root, n.file)]);
+      if (was === 'present') out.back++;
+      else if (was !== 'gone' || now !== 'present') out.changed++;
+      else ok.push({ o, n });
+    });
+    rescanState.done += batch.length;
+    if (!ok.length) continue;
+    await tx(async (qq) => {
+      // Both rows locked: a progress write on the new row waits for this transaction (its foreign key), and then finds
+      // the row gone -- never a row removed under a reader's fresh progress.
+      const locked = new Map((await qq<{ id: string; series_id: string; file: string; pruned_at: string | null }>(
+        'SELECT id, series_id, file, pruned_at FROM lib_books WHERE id = ANY($1) ORDER BY id FOR UPDATE',
+        [ok.flatMap(({ o, n }) => [o.id, n.id])])).map((r) => [r.id, r]));
+      // ⚠️ The new row must hold nothing of anyone's (HOLDS): asked inside the lock. Reintroduce by dropping this:
+      // "a renamed file someone opened since the scan is kept beside its old chapter" finds their bookmark on nothing.
+      const holding = new Set((await qq<{ id: string }>(HOLDS, [ok.map(({ n }) => n.id)])).map((r) => r.id));
+      const go: Array<{ o: PairRow; n: PairRow }> = [];
+      for (const pr of ok) {
+        const lo = locked.get(pr.o.id);
+        const ln = locked.get(pr.n.id);
+        if (!lo || !ln || lo.pruned_at || ln.pruned_at || lo.file !== pr.o.file || ln.file !== pr.n.file || lo.series_id !== ln.series_id) out.changed++;
+        else if (holding.has(pr.n.id)) out.twins++;
+        else go.push(pr);
+      }
+      if (!go.length) return;
+      const oIds = go.map(({ o }) => o.id);
+      const nIds = go.map(({ n }) => n.id);
+      // The old row's number and title, read from the new name by the old row's own rule, as the next scan reads it: a
+      // row keeps the rule it was born with (lib/naming.ts), and the opt-in renumber is how a series moves to rule 2.
+      const reads = go.map(({ o, n }) => {
+        const name = n.file.split('/').pop() || n.file;
+        const r = numberByRule(name, Number(o.name_rule));
+        return { number: r.number, end: r.end, title: name.replace(EXT, '') };
+      });
+      // The cover first: the same chapter, on the same file, under the id that stays -- never a moment without one.
+      await qq(
+        `UPDATE lib_series s SET cover_book_id = v.o FROM unnest($1::text[], $2::text[]) AS v(n, o) WHERE s.cover_book_id = v.n`,
+        [nIds, oIds]);
+      // What was measured of the file comes from the new row while it is still there; pages and page sizes only where
+      // the old row has none -- one fingerprint is one entry table, so the old row's are as true.
+      await qq(
+        `UPDATE lib_books b SET mtime = n.mtime, size = n.size, fingerprint = n.fingerprint, fp_kind = n.fp_kind, fp_at = n.fp_at,
+                source = n.source, pages = CASE WHEN b.pages > 0 THEN b.pages ELSE n.pages END, page_dims = COALESCE(b.page_dims, n.page_dims),
+                number = v.num, number_end = v.num_end, title = v.title, updated_at = now()
+           FROM unnest($1::text[], $2::text[], $3::real[], $4::real[], $5::text[]) AS v(o, n, num, num_end, title)
+           JOIN lib_books n ON n.id = v.n
+          WHERE b.id = v.o`,
+        [oIds, nIds, reads.map((r) => r.number), reads.map((r) => r.end), reads.map((r) => r.title)]);
+      // Then the new rows go -- their computed page hashes with them (CASCADE) -- and their (root, file) is free.
+      await qq('DELETE FROM lib_books WHERE id = ANY($1)', [nIds]);
+      await qq(
+        `UPDATE lib_books b SET root = v.root, file = v.file FROM unnest($1::text[], $2::text[], $3::text[]) AS v(id, root, file) WHERE b.id = v.id`,
+        [oIds, go.map(({ n }) => n.root), go.map(({ n }) => n.file)]);
+      out.followed += go.length;
+      for (const { o } of go) touched.add(o.series_id);
+    });
   }
   if (touched.size) await refreshSeries([...touched]);
 }
@@ -867,12 +1289,16 @@ export interface PlanView {
   /** The headline's four counts: gone from your folders, moved or renamed, in the download folder, series emptied. */
   gone: number;
   moved: number;
+  /** Of `moved`, the pairs inside one series, whose chapters Apply points at their new file (FOLLOW). */
+  follow: number;
   downloads: number;
   emptied: number;
   /** How many series lose a chapter to Apply. */
   goneSeries: number;
-  emptiedList: Array<{ seriesId: string; chapters: number }>;
+  emptiedList: Array<{ seriesId: string; chapters: number; into?: string }>;
   movedList: Array<{ seriesId: string; file: string; to: { seriesId: string; file: string } }>;
+  /** The merge opt-in (v0.55.7): every series offered for a merge into the series its files went to. */
+  merges: MergeOffer[];
   /** The opt-in: every series the newer rules would renumber, and how many in all. */
   numbers: NumberSeries[];
   numbersTotal: number;
@@ -882,10 +1308,11 @@ export function planView(p: RescanPlan, now = Date.now()): PlanView {
   return {
     id: p.id, at: p.at, scannedAt: p.scannedAt, ms: p.ms, stale: now - p.at > PLAN_TTL_MS, applied: p.applied,
     looked: p.looked, unchecked: p.unchecked, unmounted: p.unmounted,
-    gone: p.mark.length, moved: p.moved.length, downloads: p.downloads, emptied: p.emptied.length,
+    gone: p.mark.length, moved: p.moved.length, follow: p.follow, downloads: p.downloads, emptied: p.emptied.length,
     goneSeries: new Set(p.mark.map((m) => m.seriesId)).size,
     emptiedList: p.emptied,
     movedList: p.moved.map((m) => ({ seriesId: m.seriesId, file: m.file, to: { seriesId: m.to.seriesId, file: m.to.file } })),
+    merges: p.merges,
     numbers: p.numbers,
     numbersTotal: p.numbers.length,
   };

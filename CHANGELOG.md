@@ -1,5 +1,93 @@
 # Changelog
 
+## v0.55.7 — 2026-10-07
+
+**Online matches must carry the series' name, Rescan everything merges moved folders, and the reader's cover-colour edges
+get a switch. Lists gain unread badges and sorting, and scans are faster on slow disks.**
+
+### Online matches carry the series' name
+
+- **The cause:**
+  - For a series with no source, Uchiyomi looked its title up on AniList (and MangaDex for art) and took the top answer
+    without checking its name.
+  - Two of **@Kedryn**'s *Morgan Lost* comics got a manga's cover that way
+    ([#168](https://github.com/AngeloSha/uchiyomi/discussions/168)).
+  - The same wrong answer became the series' AniList link, so progress was pushed there, and it could group two unrelated
+    series as duplicates.
+- **Now:** an AniList, MangaDex or Kitsu answer counts only when one of its names is the series' name or one of its other
+  names (a leading "The", "A" or "An" aside when the remaining name is long enough). A spin-off is not the work.
+- **What's already stored gets checked:**
+  - *Check online matches* (Admin → Tasks) goes over every automatic AniList link and every cover or banner found online,
+    a few minutes after the upgrade.
+  - It removes those that belong to another work. It never touches a link you made or your own art choices.
+  - On the maintainer's library the final pre-release dry run kept 192 of 194 links and identified 2 for removal.
+- **Health's *Duplicate series*** only groups links a person made or the check confirmed, so *Fix everything* never merges on a
+  wrong match.
+- **Edit details → Cover → Use the first page** keeps the series' own first page as its cover, whatever a lookup finds. Admin →
+  Art has it too.
+
+### Rescan everything: merged folders and renamed files
+
+- **A chapter follows its renamed or moved file**, keeping everyone's reading history. It no longer shows twice.
+- **Merge "Zagor 1-100" into "Zagor":** when every chapter of a series moved into one other series' folder, the preview offers
+  the merge for you to tick. Reading history, favourites and lists follow. Reported by **@Kedryn**
+  ([#150](https://github.com/AngeloSha/uchiyomi/discussions/150)).
+- **Moves are recognised sooner:**
+  - Files are fingerprinted a few minutes after a scan finds them, and never mid-unpack, so a later move is recognised.
+  - A file moved before it was fingerprinted is recognised by its name and its exact modification time, when exactly one file
+    matches.
+- **The scheduled update check** leaves a series alone while Rescan, a renumber or a download holds it.
+
+### Faster scans on slow disks
+
+A scan reopened the first chapter file of every series to read its details. Now it does so only when that file has changed. On
+2,000 series on a slow disk, a rescan with nothing new went from about 56 seconds to about 13.
+
+### Reader
+
+- **Cover colour at the edges:** the soft wash of the cover's colour at the top and bottom of the reader can be switched off.
+  - It's in *Profile → Settings → Reading* or in the reader's own settings, and on by default.
+  - Asked about by **@jordanske** ([#170](https://github.com/AngeloSha/uchiyomi/discussions/170)).
+- **The controls** no longer leave a thin gap at the screen edge as they spring in. Spotted by **@DannyDynamite39**.
+
+### Lists
+
+Asked for by **@AlexisJAnderson** ([#164](https://github.com/AngeloSha/uchiyomi/discussions/164)):
+
+- **Badges:** every series in a list shows the Library's unread badge, and its NEW, favourite and offline marks.
+- **Sorting:** *Your order*, *A–Z*, *Z–A*, *Last read*, *Most unread* or *Latest chapter*, remembered per list.
+- **Editing:** *Edit* replaces the hidden delete button. It removes a series, or moves it in your own order.
+- **Adding:** a series added to a list goes to its end.
+
+### Smaller
+
+- **Placeholder group names:** sites that label every chapter "Unofficial" or "Unknown" no longer count as one scanlation group,
+  so downloads only take turns between them when their page counts agree
+  ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)).
+- **Series page:** "File no longer on disk" and "Deleted from the server" are never cut off.
+- **Translations:** every message in the app is now translated, including the last English-only notices and Admin → Art. In
+  Arabic, "99+" reads correctly and counts read correctly for any number.
+- **`LIBRARY_REMATCH`** never moves a series onto a folder that has its own.
+- **Dependencies:** Next.js 16.3.8, Electron 44.5.1, pg 8.23.1, sharp 0.35.5, and others.
+
+### Upgrading
+
+- **Database:** additive columns only:
+  - `series_trackers.checked_at`, `series_art.checked_at`;
+  - `lib_series.info_read`;
+  - `server_settings.match_check_last_run` / `match_check_last_result`.
+
+  v0.55.6 runs on the same database, so going back is one line of your compose file.
+- **After the upgrade:**
+  - *Check online matches* runs in the background, paced for AniList, for a few minutes.
+  - What it removes is listed in its result and in the audit log. A tracker import re-links a series by id.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET /api/collections/:id` items carry `lastReadAt` and `latestChapterAt`.
+  - New settings keys: `reader.coverEdges` and `listSorts`.
+  - Rescan's plan and apply gain `follow` and `merges`.
+  - The cover mode `first_page`, and the `matches` task.
+  - `ANILIST_API_URL` also moves the title and id lookups.
+
 ## v0.55.6 — 2026-10-06
 
 **A library scan that takes minutes no longer reads "Scan failed": the scan answers at once, and the page follows it

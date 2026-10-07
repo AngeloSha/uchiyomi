@@ -153,6 +153,55 @@ test('the app shell still mounts all three layers, and only the switch removes t
   assert.match(code(read('components/AppShell.tsx')), /<CinematicFX \/>/, 'the app shell no longer mounts CinematicFX');
 });
 
+test("the reader's cover washes are its look by default, and only their own switch takes them away (#170)", () => {
+  // The washes stay exactly as they were for everyone who leaves Cover colour at the edges on: 144 px, the cover at
+  // 16 %, fading to clear. They are not a performance cost (two static gradients), so Reduce effects does not touch
+  // them; their switch removes the two elements, not their colour, because a band without the colour is 16 % black.
+  // Reintroduce by keying them on Reduce effects (`!reduced &&`) or by tinting them transparent when off instead:
+  // "the washes are shown on something other than their own switch" / "a cover wash changed" fails.
+  const src = code(read('app/reader/page.tsx'));
+  const wash = (edge: 'top' | 'bottom') =>
+    // `data-cover-edge`: the browser walk's hook (v557Walk.mjs readeredges), the look itself unchanged.
+    `<div data-cover-edge="${edge}" className="pointer-events-none absolute inset-x-0 ${edge}-0 z-20 h-36" style={{ background: 'linear-gradient(to ${edge === 'top' ? 'bottom' : 'top'}, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />`;
+  const at = src.indexOf(wash('top'));
+  assert.ok(at > 0, 'the top cover wash changed');
+  assert.ok(src.indexOf(wash('bottom'), at) > at, 'the bottom cover wash changed');
+  assert.equal(src.split('rgb(var(--cover, 0 0 0) / 0.16)').length - 1, 2, 'a cover wash was added, or one is drawn a second way');
+  const guard = src.lastIndexOf('{prefs.coverEdges && (', at);
+  assert.ok(guard > 0 && /^\{prefs\.coverEdges && \(\s*<>\s*$/.test(src.slice(guard, at)), 'the washes are shown on something other than their own switch');
+});
+
+test("the reader's bars leave no gap at the screen edge while they bounce in (#170)", async () => {
+  // The bars come in on framer's default spring for `y`, which overshoots -- about 8 px around 170 ms from 64 px out --
+  // and the gradient moved with them, so for that moment the page showed through between the screen edge and the bar,
+  // unshaded, behind a hard line. Each bar's dark pane runs on past its edge instead, in the gradient's own starting
+  // colour, at least as far as the spring overshoots; at rest it is off screen. The spring is framer's own, asked here
+  // rather than copied, so an upgrade that bounces further fails this instead of opening the gap again. The look
+  // stays: the bars keep the default spring. Reintroduce by dropping the top bar's `before:` pane: "the top bar's dark
+  // pane does not reach past the screen edge" fails.
+  const { getDefaultTransition, spring } = await import('framer-motion');
+  const src = code(read('app/reader/page.tsx'));
+  for (const [tag, name, side, edge] of [['header', 'top', 'before', 'bottom-full'], ['footer', 'bottom', 'after', 'top-full']] as const) {
+    const s = src.indexOf(`<motion.${tag} initial=`);
+    assert.ok(s > 0, `the reader's ${name} bar moved`);
+    const open = src.slice(s, src.indexOf('className="', s));
+    const classes = /className="([^"]*)"/.exec(src.slice(s))![1].split(/\s+/);
+    assert.doesNotMatch(open, /transition=/, `the ${name} bar no longer comes in on the default spring`);
+    const from = Number(/initial=\{\{ y: (-?\d+)/.exec(open)?.[1]);
+    assert.ok(from && Math.sign(from) === (name === 'top' ? -1 : 1), `the ${name} bar no longer slides in from its edge`);
+    const motion = spring({ keyframes: [from, 0], ...getDefaultTransition('y', { keyframes: [from, 0] }) });
+    let over = 0;
+    for (let ms = 0; ms <= 2000; ms++) over = Math.max(over, -Math.sign(from) * motion.next(ms).value);
+    assert.ok(over > 1, `the spring no longer overshoots (${over.toFixed(2)} px): this guard measures nothing now`);
+    for (const c of ['absolute', 'inset-x-0', edge, 'bg-black/90']) {
+      assert.ok(classes.includes(`${side}:${c}`), `the ${name} bar's dark pane does not reach past the screen edge (no ${side}:${c})`);
+    }
+    assert.ok(classes.includes('from-black/90'), `the ${name} bar's gradient no longer starts at black/90, the pane's colour`);
+    const h = classes.map((c) => new RegExp(`^${side}:h-(\\d+)$`).exec(c)).find(Boolean);
+    assert.ok(h && Number(h[1]) * 4 >= over, `the ${name} bar's pane (${h ? Number(h[1]) * 4 : 0} px) is shorter than the spring's ${over.toFixed(1)} px overshoot`);
+  }
+});
+
 /* ================================================================ what the switch turns off */
 
 test('the Reduce effects rules are unlayered and turn off the fx layers, every backdrop blur and the shimmer', () => {

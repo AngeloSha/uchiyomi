@@ -24,7 +24,7 @@ import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { withOrigin } from './downloadActivity';
-import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
+import { decideNumbering, folderBusy, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
 import { isListedNotice } from './noticeChapters';
 import { seriesHidesNotices } from './noticeSettings';
@@ -685,12 +685,15 @@ export async function runUpdateAll(opts: {
   // What each series is asked through, for its queue below: its followers in follow order, and its numbering.
   const routing = `ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id ORDER BY ss.created_at, ss.source_id) AS extra,
     s.numbering, s.numbering_source`;
-  type SweepRow = { id: string; source_id: string | null; title: string; extra: string[] | null; numbering: string | null; numbering_source: string | null };
+  type SweepRow = { id: string; source_id: string | null; title: string; folder: string; extra: string[] | null; numbering: string | null; numbering_source: string | null };
   const rows = opts.onlyFavorites
-      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.source_checked_at, s.latest_mtime, ${routing} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
-      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, ${routing} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.folder, s.source_checked_at, s.latest_mtime, ${routing} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
+      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, s.folder, ${routing} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
   const card = opts.card;
   const titles = new Map(rows.map((r) => [r.id, r.title] as const));
+  const folders = new Map(rows.map((r) => [r.id, r.folder] as const));
+  /** Series put back once because their folder was held when their turn came (the hold's note in the loop). */
+  const deferred = new Set<string>();
   if (card) card.total = rows.length;
 
   // One queue per source the series is ASKED through: the first it follows that is loaded and not switched off, in
@@ -726,7 +729,7 @@ export async function runUpdateAll(opts: {
   const huntBudget = { left: HUNT_MAX_PER_SWEEP };
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
-  // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
+  // `skipped` is what the budget, a parked source or a hold (below) left unvisited: not a failure, and not nothing either.
   const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, paused: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
@@ -741,6 +744,22 @@ export async function runUpdateAll(opts: {
       if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
       const id = ids.shift()!;
       progressed = true;
+      // ⚠️ A HELD SERIES WAITS (v0.55.7, #150). Every other writer honours the one busy mark (numbering.ts folderBusy:
+      // bulkNewest's busyFolders, a download running into the folder): Rescan everything's Apply holds each series it
+      // marks, merges or renumbers, a renumber the folder it renames, the slow archive the one it fetches into, a
+      // Fetch newest the series it is in. The sweep never asked, and downloaded into a series an Apply was changing --
+      // chapters chosen by numbers the Apply was about to move. It goes to the back of its queue once; held still when
+      // its turn comes again, it is `skipped`: not asked, not stamped, so the next sweep takes it first. The test and
+      // updateSeries (which counts itself inside the series, runsInside, before its first await) are one turn: a hold
+      // taken after this sees the sweep inside and leaves the series alone (lib/rescan.ts holdSeries).
+      // Reintroduce by dropping the test: "the sweep leaves a held series for later" in updater.int.test.ts finds the
+      // held series listed and its chapter fetched.
+      const folder = folders.get(id);
+      if (folder && folderBusy(folder)) {
+        if (deferred.has(id)) outcomes.skipped++;
+        else { deferred.add(id); ids.push(id); }
+        continue;
+      }
       visited++;
       if (card) card.current = { id, title: titles.get(id) ?? '' };
       // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of

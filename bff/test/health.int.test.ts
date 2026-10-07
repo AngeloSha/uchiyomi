@@ -1121,7 +1121,8 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
                                         VALUES ($1,$1,'x','user','password') RETURNING id`, [USER]))[0].id;
   await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,5,true)`,
     [uid, `b_${D2}_1`, D2]);
-  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','hl-dup-1','Dup'), ($2,'anilist','hl-dup-1','Dup')`, [D1, D2]);
+  // checked_at: automatic links as v0.55.7 writes them, held to the title check; Health groups only those.
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1,'anilist','hl-dup-1','Dup', now()), ($2,'anilist','hl-dup-1','Dup', now())`, [D1, D2]);
   const item = async () => {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'duplicates');
     await assertSaid([c]);

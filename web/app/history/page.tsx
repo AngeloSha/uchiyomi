@@ -56,7 +56,7 @@ export default function HistoryPage() {
         </div>
       ) : rows.length === 0 ? (
         <EmptyState art={ART.emptyUpdates} title={tr('Nothing here yet')}
-          sub="Chapters you read will show up here, newest first." cta={{ href: '/library', label: 'Browse library' }} />
+          sub={tr('Chapters you read will show up here, newest first.')} cta={{ href: '/library', label: tr('Browse library') }} />
       ) : (
         <div className="px-4 pt-2 lg:mx-auto lg:max-w-2xl lg:px-0">
           {groups.map((g) => (
@@ -72,14 +72,14 @@ export default function HistoryPage() {
                     </Link>
                     <div className="min-w-0 flex-1">
                       <Link href={`/series/?id=${r.series_id}`} className="block truncate text-sm font-medium text-fog-100">
-                        {r.series_title || 'Unknown series'}
+                        {r.series_title || tr('Unknown series')}
                       </Link>
                       <p className="truncate text-[11px] text-fog-500">
                         {r.book_title}
                         <span className="text-fog-600"> · {relativeTime(r.created_at)}</span>
                         {r.completed
-                          ? <span className="ms-1.5 inline-flex items-center gap-0.5 text-emerald-400"><IcCheck width={11} height={11} /> finished</span>
-                          : <span className="ms-1.5 text-accent">page {r.page}</span>}
+                          ? <span className="ms-1.5 inline-flex items-center gap-0.5 text-emerald-400"><IcCheck width={11} height={11} /> {tr('finished')}</span>
+                          : <span className="ms-1.5 text-accent">{tr('page {n}', { n: r.page })}</span>}
                       </p>
                     </div>
                     <Link href={`/reader/?book=${r.book_id}`} aria-label={tr('Open in reader')}

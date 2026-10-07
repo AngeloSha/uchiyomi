@@ -17,7 +17,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { metaBody, metaSaver, seedMeta, type MetaBody } from '../lib/seriesMeta';
 import type { Series } from '../lib/types';
-import { SeriesEditor, type EditTab } from '../components/SeriesEditor';
+import { SeriesEditor, coverChoices, FIRST_PAGE_COVER, type EditTab } from '../components/SeriesEditor';
 import { scopeTakes } from '../components/settings';
 
 // Under tsx the components compile to the classic `React.createElement`, which they look up as a global.
@@ -198,12 +198,12 @@ test('the art: each preview as the series page shows it, with its keys', () => {
     assert.match(tagWith(html, key), /class="btn-key[ "]/, `${key} is not a key`);
   }
   assert.match(tagWith(html, 'data-art-more="banner"'), /aria-haspopup="menu"/);
-  // The cover's ⋯ holds Reset alone, so it is there only with an admin's cover to take back: a menu of one greyed item
-  // takes no focus, and Escape then closed the dialog under it. Reintroduce it unconditionally: "the cover has a ⋯ of
-  // nothing" fails.
-  assert.equal(tagWith(html, 'data-art-more="cover"'), '', 'the cover has a ⋯ of nothing');
-  assert.match(tagWith(render('details', series({ overrides: { ...OVERRIDES, cover: 'upload' } })), 'data-art-more="cover"'), /aria-haspopup="menu"/,
-    'an uploaded cover cannot be reset');
+  // The cover's ⋯ holds Use the first page and Reset to automatic (v0.55.7), one of them always to press, so it is
+  // always there (coverChoices, below): an automatic cover, an upload and the first page alike.
+  for (const cover of [null, 'upload', FIRST_PAGE_COVER]) {
+    assert.match(tagWith(render('details', series({ overrides: { ...OVERRIDES, cover } })), 'data-art-more="cover"'), /aria-haspopup="menu"/,
+      `a ${cover ?? 'automatic'} cover has no ⋯`);
+  }
   // New banner: only while the background is an automatic one, and only where the page hands its shuffle in.
   const shuffle = async () => {};
   assert.ok(tagWith(render('details', series(), { onNewBanner: shuffle }), 'data-art-new-banner'), 'no New banner for an automatic banner');
@@ -213,6 +213,31 @@ test('the art: each preview as the series page shows it, with its keys', () => {
   assert.match(html, /<input type="file" accept="image\/\*" hidden=""/, 'no image file input');
   assert.match(html, /Images up to 11 MB\. You can also drop one onto a preview\./, 'the 11 MB limit is not said');
   for (const p of ['cover', 'banner']) assert.match(tagWith(html, `data-art-preview="${p}"`), /data-busy="false"/, `the ${p} preview has no busy state`);
+});
+
+test('Use the first page: offered unless it already is, Reset only over a choice, and the cover says which it is', () => {
+  // v0.55.7 (#168). A menu of nothing but greyed items takes no focus, and the Escape meant to close it closed the dialog
+  // under it: every state leaves one of the two. Reintroduce Use the first page as always on (`firstPage: true`): "a
+  // cover that is the first page offers it again" fails; Reset as always on: "an automatic cover offers Reset".
+  assert.deepEqual(coverChoices(null), { firstPage: true, reset: false }, 'an automatic cover offers Reset');
+  assert.deepEqual(coverChoices('upload'), { firstPage: true, reset: true });
+  assert.deepEqual(coverChoices('https://example.org/c.jpg'), { firstPage: true, reset: true });
+  assert.deepEqual(coverChoices(FIRST_PAGE_COVER), { firstPage: false, reset: true }, 'a cover that is the first page offers it again');
+  for (const c of [null, undefined, 'upload', FIRST_PAGE_COVER]) {
+    const can = coverChoices(c);
+    assert.ok(can.firstPage || can.reset, `the ⋯ of a ${c ?? 'automatic'} cover holds nothing to press`);
+  }
+  // The menu is built from them, with the first page's own hook for the browser walk.
+  const src = read(EDITOR);
+  assert.match(src, /label: tr\('Use the first page'\), onSelect: \(\) => void firstPage\(\), disabled: !can\.firstPage, hook: 'cover-first-page'/);
+  assert.match(src, /label: tr\('Reset to automatic'\), onSelect: \(\) => void reset\('cover'\), disabled: !can\.reset/);
+  assert.match(src, /mode: 'first_page'/, 'the choice is not the route\'s first_page');
+  // Under the cover: what automatic means -- what Reset to automatic gives back -- or the choice; an upload needs no words.
+  const note = (cover: string | null) => elementWith(render('details', series({ overrides: { ...OVERRIDES, cover } })), 'data-art-cover-note');
+  assert.match(note(null), /Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page\./);
+  assert.match(note(FIRST_PAGE_COVER), /The first page, by your choice: nothing found online replaces it\./);
+  assert.equal(note('upload'), '', 'an uploaded cover is explained in words');
+  assert.match(elementWith(render('details'), 'data-art-cover-note'), /Automatic:/, 'a series with no overrides at all says nothing');
 });
 
 test('Mark caught up and the folder paths are still there, in Updates and Files', () => {

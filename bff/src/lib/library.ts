@@ -1,6 +1,7 @@
 // Owned library scanner: reads the CBZ folder Suwayomi writes (replacing Komga's library role).
 // Layout: <root>/<source>/<series title>/<chapter>.cbz ; each cbz carries ComicInfo.xml + page images.
 import { readdir, stat, lstat, readFile, realpath } from 'fs/promises';
+import type { Stats } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import { q, one, tx } from './db';
@@ -235,6 +236,27 @@ async function rarExtract(ex: any, name: string): Promise<Buffer> {
   if (!f?.extraction) throw new Error('rar entry not found');
   return Buffer.from(f.extraction);
 }
+
+/**
+ * How the scan reads a series' ComicInfo, as a number: part of every lib_series.info_read (infoReadOf). Raise it when
+ * that changes -- a field read differently, a cleaning step like v0.55.5's cleanGenres -- and every folder's first
+ * archive is read again on the next scan, as a data migration would have to otherwise.
+ */
+const COMICINFO_READ = 1;
+
+/**
+ * What a scan stores of the file it read a series' ComicInfo from (lib_series.info_read, v0.55.7): JSON, so no file name
+ * can make two of them equal. Null for a chapter that is a folder of loose images, read every time: its ComicInfo.xml
+ * is a file of its own, which a tagger can rewrite in place without the folder's mtime or size moving.
+ */
+export function infoReadOf(abs: string, st: { mtimeMs: number; size: number }): string | null {
+  if (chapterKind(abs) === 'dir') return null;
+  return JSON.stringify([COMICINFO_READ, abs, Math.floor(st.mtimeMs), st.size]);
+}
+
+/** How many first archives this process's scans opened for a series' ComicInfo: the tests and the speed measurement. */
+let infoReads = 0;
+export const comicInfoReads = (): number => infoReads;
 
 /** Open one chapter (CBZ/CBR/folder); return its ComicInfo.xml (if any) + image page count. */
 async function readArchive(path: string): Promise<{ xml: string; pages: number }> {
@@ -806,6 +828,15 @@ export function persistScan(): Promise<ScanResult> {
 let hold: Promise<void> | null = null;
 
 /**
+ * Told after a scan that left chapter rows with no fingerprint attempt (v0.55.7, #150): files it met for the first
+ * time, and files whose mtime moved -- the scan clears their old fingerprint. lib/fingerprintJob.ts arms a pass a few
+ * minutes on, so a file is fingerprinted while it is still where it was found: a file moved before that cannot be told
+ * from a gone one (Rescan everything, LIBRARY_REMATCH). A hook, because fingerprintJob.ts reads this module.
+ */
+const unprintedHooks: Array<(n: number) => void> = [];
+export function onUnprintedFiles(fn: (n: number) => void): void { unprintedHooks.push(fn); }
+
+/**
  * Run `fn` with no library scan in flight: wait out the one running, and keep the next from starting until
  * `fn` settles. A renumber (lib/numbering.ts) renames a series' files and then updates their rows in place;
  * a scan between the two would read `Chapter 20.cbz` as a new book -- a second row and a new id -- or meet
@@ -838,7 +869,18 @@ async function scanOnce(): Promise<ScanResult> {
   progress.phase = 'walking';
   scansStarted++;
   const t0 = Date.now();
+  /**
+   * A new row's created_at: when this SCAN began, not the moment its folder's turn came (v0.55.7 integration). Every row
+   * a scan finds present gets its updated_at during the scan, so "first seen after the other was last seen" --
+   * created_at > updated_at -- is then true only across two scans, never for two files one scan saw side by side. Rescan
+   * everything's pairing of a row never fingerprinted rests on it (lib/rescan.ts nameTwins): a file that was there beside
+   * the gone one is not where it went. Reintroduce now(): "a never-fingerprinted file is paired only when nothing else
+   * could be its file" in rescan.int.test.ts pairs a file with one that was scanned beside it.
+   */
+  const firstSeen = new Date(t0);
   let nBooks = 0;
+  /** Rows the folders' upserts left with no fingerprint attempt: the hook above. */
+  let unprinted = 0;
   const skipped: ScanSkip[] = [];
   let skippedTotal = 0;
   let removed = 0;
@@ -890,8 +932,8 @@ async function scanOnce(): Promise<ScanResult> {
         // belong to: unordered, the deleted twin could come back first and the `continue` below skipped the
         // folder for good. Reintroduce by dropping the ORDER BY: "a deleted twin does not hide the live row"
         // in scanResilience.int.test.ts finds its books missing.
-        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string; renumbering: boolean }>(
-          `SELECT id, deleted_at, merged_into, library_id, renumber_plan IS NOT NULL AS renumbering FROM lib_series WHERE folder = $1
+        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string; renumbering: boolean; info_read: string | null }>(
+          `SELECT id, deleted_at, merged_into, library_id, renumber_plan IS NOT NULL AS renumbering, info_read FROM lib_series WHERE folder = $1
             ORDER BY (deleted_at IS NOT NULL), (merged_into IS NOT NULL), created_at LIMIT 1`,
           [folderRel],
         );
@@ -908,11 +950,19 @@ async function scanOnce(): Promise<ScanResult> {
         const mergeTarget = known?.merged_into || null;
 
         // Only a folder with no row of its own can be a move. Anything already known is the normal path.
+        // ⚠️ `!known`, the half of that rule the line below once lacked (v0.55.7, #150). A known folder that took in
+        // another series' files (Zagor 1-100's chapters moved into Zagor) shares their fingerprints, and that series,
+        // its own folder gone, is the one candidate: applyRematch moved it onto THIS folder, the unique index
+        // (library_id, folder) refused it, and the catch below skipped the folder -- on every scan, so nothing new
+        // in it was ever indexed again. Reintroduce by dropping `!known`: "a folder that has its own series is never
+        // rematched onto another" in rematch.int.test.ts finds the folder skipped.
         let rematched: { id: string; oldFolder: string } | null = null;
-        if (env.LIBRARY_REMATCH !== 'off' && !seenFolders.has(folderRel)) {
+        if (env.LIBRARY_REMATCH !== 'off' && !known && !seenFolders.has(folderRel)) {
           rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, libraryIdFor(folderRel, libs));
         }
 
+        // The first file's stat, when the series' info was looked at below: the chapter loop reuses it.
+        let firstStat: Stats | null | undefined;
         const seriesId = await tx(async (qq) => {
           let id = seenFolders.get(folderRel) || mergeTarget || undefined;
           if (mergeTarget) seenFolders.set(folderRel, mergeTarget);
@@ -920,8 +970,27 @@ async function scanOnce(): Promise<ScanResult> {
             id = rematched.id;
             seenFolders.set(folderRel, id);
           }
+          const first = join(folderAbs, files[0]);
+          if (!id) firstStat = await stat(first).catch(() => null);
+          const infoRead = firstStat ? infoReadOf(first, firstStat) : null;
+          // ⚠️ FASTER SCANS ON A SLOW DISK (v0.55.7, #150): a series whose first archive is the file the last scan read
+          // (lib_series.info_read: the path, mtime and size, and how it was read) is not opened again. Every scan opened
+          // the first archive of every folder -- and a .cbr whole -- to upsert the very same ComicInfo, on @Kedryn's
+          // Unraid share one spun-up disk read per folder. Only the scan writes what that upsert writes (source, title,
+          // summary, author, status, genres, web, age rating, reading direction: an admin's edit is series_overrides),
+          // so reading the same file again would write the same values; a file that changed is read, and written, as
+          // before -- cleanGenres and the type learning included. Reintroduce by always reading: "a rescan opens no
+          // first archive it has read already" in scan.int.test.ts counts one per folder.
+          if (!id && known && infoRead && known.info_read === infoRead) {
+            id = known.id;
+            seenFolders.set(folderRel, id);
+            await qq('UPDATE lib_series SET scanned_at = now() WHERE id = $1', [id]);
+          }
           if (!id) {
-            const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
+            infoReads++;
+            // A read that failed stores no info_read: the next scan tries the file again, as every scan did.
+            const read = await readArchive(first).then((r) => ({ xml: r.xml, ok: true }), () => ({ xml: '', ok: false }));
+            const firstXml = read.xml;
             // Conflict on FOLDER, not id: the row keeps whatever id it already had, so ids survive a rescan
             // without being derived from the path. A brand-new folder mints one.
             const rows = await qq<{ id: string }>(
@@ -930,8 +999,8 @@ async function scanOnce(): Promise<ScanResult> {
               // reassigned, made the conflict target miss and mint a second row with a new id -- which is
               // the one thing that strands everyone's reading progress. Reassignment is a deliberate UPDATE.
               `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, age_rating,
-                                       reading_direction, reading_direction_from, scanned_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+                                       reading_direction, reading_direction_from, scanned_at, info_read)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now(), $15)
                ON CONFLICT (library_id, folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
                  author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
                  -- Never overwrite a rating we have with one we do not: a chapter whose ComicInfo omits
@@ -943,7 +1012,7 @@ async function scanOnce(): Promise<ScanResult> {
                  reading_direction=COALESCE(EXCLUDED.reading_direction, lib_series.reading_direction),
                  reading_direction_from=CASE WHEN EXCLUDED.reading_direction IS NOT NULL
                    THEN EXCLUDED.reading_direction_from ELSE lib_series.reading_direction_from END,
-                 scanned_at=now()
+                 scanned_at=now(), info_read=EXCLUDED.info_read
                RETURNING id`,
               [
                 newSeriesId(), srcName, field(firstXml, 'Series') || folderRel.split('/').pop()!, cleanSummary(field(firstXml, 'Summary')),
@@ -955,6 +1024,7 @@ async function scanOnce(): Promise<ScanResult> {
                 parseComicInfoAgeRating(field(firstXml, 'AgeRating')),
                 directionFromComicInfo(field(firstXml, 'Manga')),
                 directionFromComicInfo(field(firstXml, 'Manga')) ? 'comicinfo' : null,
+                read.ok ? infoRead : null,
               ],
             );
             id = rows[0].id;
@@ -991,14 +1061,14 @@ async function scanOnce(): Promise<ScanResult> {
           const tuples: string[] = [];
           for (const f of files) {
             const rel = `${folderRel}/${f}`;
-            const st = await stat(join(folderAbs, f)).catch(() => null);
+            const st = f === files[0] && firstStat !== undefined ? firstStat : await stat(join(folderAbs, f)).catch(() => null);
             const rule = rules.get(rel) ?? NAME_RULE;
             // A range (`Batman 01-07`) is one file and seven chapters: its end rides in number_end, and rule 1 knows none.
             const read = numberByRule(f, rule);
             const b = params.length;
-            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10})`);
+            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11})`);
             params.push(newBookId(), id, srcName, rel, read.number, f.replace(/\.(cbz|cbr|zip|rar|pdf|epub)$/i, ''),
-              st ? Math.floor(st.mtimeMs) : 0, root, rule, read.end);
+              st ? Math.floor(st.mtimeMs) : 0, root, rule, read.end, firstSeen);
             nBooks++;
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
@@ -1021,13 +1091,28 @@ async function scanOnce(): Promise<ScanResult> {
           // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
           //
           // name_rule is written by the INSERT alone: a row keeps the rule it was born with (see NEW FILES ONLY above).
-          await qq(
-            `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end) VALUES ${tuples.join(',')}
-             ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number, number_end=EXCLUDED.number_end,
-               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
-               short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
+          //
+          // The fingerprint goes with the mtime too (v0.55.7, #150), as restampBook (lib/partial.ts) clears it for a
+          // file it rewrote: it is a hash of the bytes, and a file whose mtime moved is other bytes -- a chapter
+          // replaced by hand, or one the backfill read while it was still being unpacked and stamped as unreadable
+          // (fp_at is never retried) or as half a chapter. Kept, Rescan everything could never pair the file once it
+          // moved. Cleared, the next pass reads it again; the count below arms that pass. Reintroduce by dropping the
+          // four CASEs: "a file whose mtime moved is fingerprinted again" in scan.int.test.ts reads the old fingerprint.
+          const [up] = await qq<{ unprinted: number }>(
+            `WITH up AS (
+               INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end, created_at) VALUES ${tuples.join(',')}
+               ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number, number_end=EXCLUDED.number_end,
+                 title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
+                 short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END,
+                 fingerprint = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fingerprint END,
+                 fp_kind = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_kind END,
+                 fp_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_at END,
+                 size = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.size END
+               RETURNING fp_at)
+             SELECT count(*) FILTER (WHERE fp_at IS NULL)::int AS unprinted FROM up`,
             params,
           );
+          unprinted += up?.unprinted ?? 0;
 
           // Set the cover AFTER the books exist. It used to be computed by hashing the first chapter's path,
           // which only worked while ids were a pure function of the path -- now it would dangle, and a
@@ -1071,6 +1156,8 @@ async function scanOnce(): Promise<ScanResult> {
   // read-chapter cleanup delete what the sweep just fetched. Best effort, like the ledger above: a scan must
   // never fail over it, and the marks keep until the next scan.
   await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
+  // Files with no fingerprint yet: read them while they are where the scan found them (the hook's note).
+  if (unprinted) for (const fn of unprintedHooks) { try { fn(unprinted); } catch { /* a timer is not worth a scan */ } }
   const ms = Date.now() - t0;
   const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
   const meeting = walks.find((w) => w.met !== undefined);

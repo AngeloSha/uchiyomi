@@ -267,6 +267,33 @@ test('a repair says how long it took, last, and the English line is otherwise un
   assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 0 }), ' · 7 failures reset', 'a zero time is said');
 });
 
+test('the online-match recheck says what it checked and what went, and is never read as another job', () => {
+  // v0.55.7 (#168), lib/matchCheck.ts in the bff. Reintroduce by dropping its branch: every line below is empty. Its key
+  // is `matches` because `checked` is Verify's: a result keyed so would read "194 checked, none missing" here.
+  const r = { matches: 194, removed: 7, links: { checked: 150, removed: 5 }, art: { checked: 44, cleared: 2 }, unanswered: 1, ms: 9000 };
+  assert.equal(taskResult(r), ' · 194 matches checked, 7 removed as another work', 'the recheck has no line of its own');
+  assert.equal(taskResult({ ...r, matches: 1, removed: 1 }), ' · 1 match checked, 1 removed as another work', 'a count of one is not singular');
+  assert.equal(taskResult({ ...r, matches: 3, removed: 0 }), ' · 3 matches checked', 'nothing removed is said by saying nothing more');
+  // A run AniList or MangaDex stopped leads with that: the counts after it are partial.
+  assert.equal(taskResult({ ...r, matches: 0, removed: 0, stopped: 'unavailable' }),
+    ' · AniList or MangaDex did not answer: tried again at the next run, 0 matches checked');
+});
+
+test('a fingerprint pass says what it did, the files left for later included', () => {
+  // v0.55.7 integration: the fingerprint job runs a few minutes after a scan that met new files (lane B), and a pass the
+  // server started leaves a file still being written for a later one; the Tasks row said only when it ran, beside a
+  // "waiting" count that then read as a stalled job. Reintroduce by dropping the branch: every line below is empty.
+  assert.equal(taskResult({ done: 40, failed: 2, young: 3, ms: 900 }),
+    ' · 40 files fingerprinted, 2 files could not be read, 3 files still being written, left for the next pass', 'a fingerprint pass has no line');
+  assert.equal(taskResult({ done: 1, failed: 1, young: 1, ms: 9 }),
+    ' · 1 file fingerprinted, 1 file could not be read, 1 file still being written, left for the next pass', 'a count of one is not singular');
+  assert.equal(taskResult({ done: 0, failed: 0, young: 0, ms: 4 }), '', 'a pass with nothing to do says more than when it ran');
+  assert.equal(taskResult({ done: 5, failed: 0, ms: 4 }), ' · 5 files fingerprinted', 'an older server\'s result (no `young`)');
+  // And the route sends `young`.
+  const route = readFileSync(join(__dirname, '../../bff/src/routes/admin.ts'), 'utf8');
+  assert.match(route, /lastResult: fpState\.finishedAt \? \{ done: fpState\.done, failed: fpState\.failed, young: fpState\.young, ms: fpState\.ms \}/);
+});
+
 test('every schedule the tasks route sends is a key the page translates, with its values', () => {
   // bff routes/admin.ts sends `scheduleKey` + `scheduleVars` beside the English `schedule`. A sentence there
   // that is not in SCHEDULE_KEYS (and so in no locale file) shows in English in every language. Reintroduce by

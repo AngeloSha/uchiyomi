@@ -207,3 +207,63 @@ test('a deleted chapter is neither attempted nor counted as remaining', { skip }
   assert.equal(row.fp_at, null, 'the job attempted a chapter whose file was deleted');
   assert.equal(row.fp_kind, null);
 });
+
+// ---- v0.55.7 (#150): early enough to recognise a move ---------------------------------------------------------------
+
+test('a scheduled pass leaves a file written in the last minute for a later one, unstamped', { skip, timeout: 60_000 }, async () => {
+  // An archive read while it is still being unpacked has no entry table yet, and a failure is stamped for good: the
+  // chapter could then never be paired after a move. Reintroduce by dropping the young test in fingerprintOne: the
+  // half-written file is stamped `error`. Reintroduce the old "first rows still NULL" batch query: this pass never
+  // ends (the test's timeout).
+  const { utimes } = await import('fs/promises');
+  const abs = join(ROOT, rel('unpacking.cbz'));
+  await mkdir(join(abs, '..'), { recursive: true });
+  await writeFile(abs, Buffer.from('PK half an archive'));
+  await insertBook('b_fpjob_young', rel('unpacking.cbz'));
+
+  const pass = await job.scheduledPass();
+  const [row] = await q(`SELECT fingerprint, fp_kind, fp_at FROM lib_books WHERE id = 'b_fpjob_young'`);
+  assert.deepEqual([row.fp_kind, row.fp_at], [null, null], 'a file still being written was stamped');
+  assert.ok(pass.young >= 1, 'it was not counted as left for later');
+
+  // A minute on, the file is what it is: read, and a file that really is unreadable is stamped as one, once.
+  const old = new Date(Date.now() - 2 * 60_000);
+  await utimes(abs, old, old);
+  await job.scheduledPass();
+  const [later] = await q(`SELECT fingerprint, fp_kind, fp_at FROM lib_books WHERE id = 'b_fpjob_young'`);
+  assert.equal(later.fp_kind, 'error');
+  assert.ok(later.fp_at, 'a file that is no longer being written was not read');
+});
+
+test('a scan that meets new files arms a pass a few minutes on, and one that meets none does not', { skip }, async () => {
+  // @Kedryn's Zagor: unpacked, scanned, and merged into one folder before the six-hourly pass ever read a file -- so
+  // Rescan everything could not tell a moved chapter from a gone one. Reintroduce by dropping the onUnprintedFiles
+  // line in scheduleFingerprintBackfill (or the hook call at the end of persistScan): no pass runs.
+  const { persistScan } = await import('../src/lib/library');
+  // The hand-made rows above are not a scan's: their files go, so the scan meets only the folder below.
+  await rm(join(ROOT, 'FpJob'), { recursive: true, force: true });
+  await rm(join(ROOT, '_dl', 'FpJob'), { recursive: true, force: true });
+  let passes = 0;
+  job.scheduleFingerprintBackfill(1e9, 1e9, async () => { passes++; await job.runFingerprintBackfill(); }, 40);
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 400));
+    for (let i = 0; i < 100 && job.fpState.running; i++) await new Promise((r) => setTimeout(r, 50));
+  };
+  try {
+    const zip = new AdmZip();
+    zip.addFile('001.jpg', Buffer.from('scanned-new'));
+    await mkdir(join(ROOT, 'FpScan', 'New'), { recursive: true });
+    await writeFile(join(ROOT, 'FpScan', 'New', 'Chapter 1.cbz'), zip.toBuffer());
+    await persistScan();
+    await settle();
+    assert.equal(passes, 1, 'a scan that met a new file armed no pass');
+    const [row] = await q(`SELECT fingerprint FROM lib_books WHERE root = $1 AND file = 'FpScan/New/Chapter 1.cbz'`, [ROOT]);
+    assert.ok(row?.fingerprint, 'the new file was not fingerprinted by the pass');
+    await persistScan();
+    await settle();
+    assert.equal(passes, 1, 'a scan that met nothing new armed a pass');
+  } finally {
+    await q(`DELETE FROM lib_books WHERE root = $1 AND file LIKE 'FpScan/%'`, [ROOT]).catch(() => {});
+    await q(`DELETE FROM lib_series WHERE folder = 'FpScan/New'`).catch(() => {});
+  }
+});

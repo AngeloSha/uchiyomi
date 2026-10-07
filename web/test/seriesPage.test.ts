@@ -171,6 +171,33 @@ test('a row caption carries its text as a title, and the desktop grid shows the 
   assert.match(date, /className="lg:hidden">\{relativeTime\(iso\)\}/, 'the phone keeps the long one');
 });
 
+test("a tombstone's words are read whole at every width: a tag of their own that wraps (v0.55.7)", () => {
+  // In the three-column grid at 1280 a row with a full date leaves the caption 51-68 px, and the tombstone chip sat in
+  // the one line that truncates as a whole: "File no longer on disk" read "File no lo…", "Deleted from the server"
+  // "Deleted from th…", and in German not even at 390. Now the words are a tag of their own that takes the line's
+  // width and wraps inside it: the sentence below lg, the short words in the grid, the sentence for a screen reader
+  // and on hover. Reintroduce the chip as it was (`me-1 rounded-full`, one line): "the tombstone's words are cut"
+  // fails; show the sentence in the grid too: "the grid shows the sentence" fails.
+  const page = code(read('app/series/page.tsx'));
+  const cap = page.slice(page.indexOf('function RowCaption('), page.indexOf('function RowDate('));
+  const at = cap.indexOf('<span data-tombstone');
+  assert.ok(at > 0, "the tombstone's words are not a tag of their own");
+  const tag = cap.slice(at, cap.indexOf('{short &&', at));
+  const cls = /className="([^"]*)"/.exec(tag)![1].split(/\s+/);
+  for (const c of ['max-w-full', 'break-words']) assert.ok(cls.includes(c), `the tombstone's words are cut (no ${c})`);
+  assert.ok(!cls.some((c) => /^(truncate|whitespace-nowrap|shrink-0)$/.test(c)), "the tombstone's words are cut (held to one line)");
+  // A box that may take two lines is a squared tag, as the chapter sheet's are; a capsule bent round two lines is not.
+  assert.ok(!cls.includes('rounded-full'), 'a tag that wraps is a capsule');
+  assert.match(tag, /<span aria-hidden="true" className="lg:hidden">\{pruned\.full\}<\/span>/, 'the list below lg does not show the sentence');
+  assert.match(tag, /<span aria-hidden="true" className="hidden lg:inline">\{pruned\.short\}<\/span>/, 'the grid shows the sentence');
+  assert.match(tag, /<span className="sr-only">\{pruned\.full\}<\/span>/, 'a screen reader does not hear the sentence');
+  assert.match(cap, /const title = \[\.\.\.\(pruned \? \[pruned\.full\] : \[\]\)/, 'the hover title does not say the sentence');
+  // In a row that wraps, with the hover title, and the group's caption after it still ending in an ellipsis.
+  const row = cap.slice(cap.lastIndexOf('<div', at), at);
+  assert.match(row, /className=\{`mt-0\.5 flex flex-wrap [^`]*`\} title=\{title\}/, "the tombstone's words are cut (not in a row that wraps)");
+  assert.match(cap, /<span className="min-w-12 flex-1 basis-0 truncate">\{caption\}<\/span>/, "the group's caption beside a tombstone no longer ends in an ellipsis");
+});
+
 // ---- #69: read marks on the grey rows (chapters the server does not hold) -------------------------------
 
 test('a grey row the reader marked reads as read, stays grey, and carries Mark read / Mark unread', () => {

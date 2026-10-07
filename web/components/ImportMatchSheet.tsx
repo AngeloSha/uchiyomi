@@ -168,7 +168,9 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
           {delta != null && (
             <p className={`text-center text-[11px] ${delta === 0 ? 'text-fog-500' : delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
               {delta === 0 ? tr('Same chapter count as the current pick')
+                : delta === 1 ? tr('+1 chapter vs the current pick')
                 : delta > 0 ? tr('+{n} chapters vs the current pick', { n: delta })
+                : delta === -1 ? tr('1 fewer chapter than the current pick')
                 : tr('{n} fewer chapters than the current pick', { n: Math.abs(delta) })}
             </p>
           )}

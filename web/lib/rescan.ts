@@ -11,7 +11,7 @@ import { t as tr } from './i18n';
 
 // ---- the server's shapes (bff routes/rescan.ts) ------------------------------------------------------------------
 
-export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber';
+export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'merge' | 'follow' | 'renumber';
 
 /** A folder that looked unmounted: no file at all behind its rows, or `missing` of `of` gone (the 90 % rule). */
 export interface RescanUnmounted { root: string; missing?: number; of?: number }
@@ -46,15 +46,30 @@ export interface RescanPlanView {
   unmounted: RescanUnmounted[];
   gone: number;
   moved: number;
+  /**
+   * v0.55.7: of `moved`, the files moved or renamed inside their own series, whose chapters Apply points at the new
+   * file -- the old row and its history kept, the duplicate row gone. Absent from a server before it.
+   */
+  follow?: number;
   downloads: number;
   emptied: number;
   goneSeries: number;
-  emptiedList: Array<{ seriesId: string; chapters: number; title: string }>;
+  /** `into` (v0.55.7): the one series every live chapter of it moved into, when it may be named to this viewer. */
+  emptiedList: Array<{ seriesId: string; chapters: number; title: string; into?: { seriesId: string; title: string } }>;
   movedList: Array<{ seriesId: string; title: string; file: string; to: { seriesId: string; title: string; file: string } }>;
   /** The opt-in (absent from a server before it): every series it would change, and how many in all. */
   numbers?: RescanNumbers[];
   numbersTotal?: number;
+  /**
+   * v0.55.7 (#150), the merge opt-in: every series whose files all went into one other series, offered for a merge
+   * into it, and how many in all (a series the viewer may not see named is counted, not offered).
+   */
+  merges?: RescanMerge[];
+  mergesTotal?: number;
 }
+
+/** A series the preview offers to merge into the series its files went to. */
+export interface RescanMerge { seriesId: string; title: string; into: { seriesId: string; title: string }; chapters: number }
 
 export interface RescanApplied {
   ok: true;
@@ -63,6 +78,12 @@ export interface RescanApplied {
   back: number;
   changed: number;
   moved: number;
+  /** v0.55.7: chapters now pointing at their moved or renamed file (the duplicate row gone), and pairs kept as two. */
+  followed?: number;
+  twins?: number;
+  /** v0.55.7: the ticked series merged into the series their files went to, and merges refused when asked again. */
+  merged?: number;
+  notMerged?: number;
   /**
    * Series left alone because a download or a check was running in them as Apply reached them (v0.55.4: a Fetch's
    * lanes, the slow archive's chapter): none of their chapters marked or renumbered, for the next Rescan.
@@ -110,6 +131,8 @@ export function progressLine(s: Pick<RescanStatus, 'running' | 'phase' | 'done' 
     case 'pair': return n ? tr('Checking for moved or renamed files: {done} of {total}', n) : tr('Checking for moved or renamed files…');
     case 'numbers': return tr('Reading file names by the new rules…');
     case 'mark': return n ? tr('Applying: {done} of {total}', n) : tr('Applying…');
+    case 'merge': return n ? tr('Merging series: {done} of {total}', n) : tr('Merging series…');
+    case 'follow': return n ? tr('Pointing chapters at their moved files: {done} of {total}', n) : tr('Pointing chapters at their moved files…');
     case 'renumber': return tr('Renumbering the series you ticked…');
     default: return s.running === 'apply' ? tr('Applying…') : tr('Scanning the library…');
   }
@@ -135,6 +158,21 @@ export function planHeadline(p: Pick<RescanPlanView, 'gone' | 'moved' | 'downloa
 
 const movedText = (n: number): string =>
   (n === 1 ? tr('1 was probably moved or renamed (kept)') : tr('{n} were probably moved or renamed (kept)', { n }));
+
+/**
+ * v0.55.7 (#150): what Apply does with the files moved or renamed inside their own series -- the chapter follows its
+ * file. Said under the headline, because "kept" alone read as "left as it is", the chapter twice on its page.
+ */
+export const followLine = (n: number): string =>
+  (n === 1 ? tr('1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept')
+    : tr('{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept', { n }));
+
+/** Where a series with nothing left went (v0.55.7): the one series every chapter file of it moved into. */
+export const intoLine = (title: string): string => tr('Its files are now in “{title}”', { title: iso(title) });
+
+/** One merge of the opt-in, as its box says it: both titles isolated, so neither reorders the sentence around it. */
+export const mergeLabel = (m: Pick<RescanMerge, 'title' | 'into'>): string =>
+  tr('Merge “{from}” into “{into}”', { from: iso(m.title), into: iso(m.into.title) });
 
 /** A folder the preview (or an Apply) left alone because it looked unmounted, with the share of it when that was why. */
 export function unmountedLine(u: RescanUnmounted): string {
@@ -184,6 +222,24 @@ export function appliedLine(r: RescanApplied): string {
   if (r.back) bits.push(r.back === 1 ? tr('1 back on disk before Apply, left alone') : tr('{n} back on disk before Apply, left alone', { n: r.back }));
   if (r.changed) bits.push(r.changed === 1 ? tr('1 changed since the preview, left alone') : tr('{n} changed since the preview, left alone', { n: r.changed }));
   if (r.moved) bits.push(movedText(r.moved));
+  if (r.followed) {
+    bits.push(r.followed === 1 ? tr('1 chapter now follows its moved or renamed file')
+      : tr('{n} chapters now follow their moved or renamed files', { n: r.followed }));
+  }
+  // Said, or the chapter that still shows twice reads as a fault: both rows hold someone's reading.
+  if (r.twins) {
+    bits.push(r.twins === 1 ? tr('1 moved file kept beside its old chapter: both have reading history')
+      : tr('{n} moved files kept beside their old chapters: both have reading history', { n: r.twins }));
+  }
+  if (r.merged) {
+    bits.push(r.merged === 1 ? tr('1 series merged into the series its files went to')
+      : tr('{n} series merged into the series their files went to', { n: r.merged }));
+  }
+  // Said, or a merge the admin ticked reads as done: asked again at Apply, it no longer held.
+  if (r.notMerged) {
+    bits.push(r.notMerged === 1 ? tr('1 merge left alone: the series changed since the preview')
+      : tr('{n} merges left alone: the series changed since the preview', { n: r.notMerged }));
+  }
   // Said, or a series Apply did not touch reads as one it found nothing in: the next Rescan has it.
   if (r.busy) {
     bits.push(r.busy === 1 ? tr('1 series had a download or a check running and was left alone')

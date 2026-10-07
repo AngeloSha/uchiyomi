@@ -105,6 +105,12 @@ test('the scan itself sees the app: inline keys, keys() arrays, and nothing from
   assert.ok(keys.get('Needs attention')?.has('lib/status.ts (keys)'), 'a keys() array in lib/ is not scanned');
   assert.ok(keys.has('Up to {n} minutes'), 'an inline tr() in lib/ is not scanned');
   assert.ok(keys.has('Not asked: enough other sources already list this series'), 'an inline tr() in components/ is not scanned');
+  assert.ok(keys.has('1 series is no longer in the library'), 'the Library bulk-action result lost its subject');
+  assert.ok(keys.has('{n} series are no longer in the library'), 'the Library bulk-action plural lost its subject');
+  assert.ok(keys.has('Create admin account & open Uchiyomi'), 'first-run setup no longer names the account it creates');
+  assert.ok(!keys.has('1 is no longer in the library') && !keys.has('{n} are no longer in the library'),
+    'the ambiguous Library bulk-action keys came back');
+  assert.ok(!keys.has('Create admin & open Uchiyomi'), 'the ambiguous first-run action came back');
   // The case on a snippet of its own: the app's one such string (Edit details' file input, v0.53.0) is the last thing
   // in its file, where the naive regex finds no comment end to run to and so eats nothing a real scan would miss.
   const tricky = '<input accept="image/*" hidden />\n<p>{tr(\'After the accept\')}</p>\n{/* a comment */}\n';
@@ -123,6 +129,8 @@ test('every key the app translates is in all eight locale files, non-empty, with
   assert.deepEqual(files, ['ar.json', 'de.json', 'es.json', 'fr.json', 'ja.json', 'pt-BR.json', 'ru.json', 'zh.json']);
   for (const f of files) {
     const dict = JSON.parse(readFileSync(join(ROOT, 'public/locales', f), 'utf8')) as Record<string, unknown>;
+    const meta = dict._meta as { strings?: unknown } | undefined;
+    assert.equal(meta?.strings, Object.keys(dict).length - 1, `${f} has a stale _meta.strings count`);
     const missing: string[] = [];
     const broken: string[] = [];
     for (const k of keys.keys()) {
@@ -251,6 +259,14 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
   'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
   'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',
+  // v0.55.7, Rescan everything: a chapter follows its file (lib/rescan.ts), each a file and a chapter, "its" and "their".
+  '1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept':
+    '{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept',
+  '1 chapter now follows its moved or renamed file': '{n} chapters now follow their moved or renamed files',
+  '1 moved file kept beside its old chapter: both have reading history': '{n} moved files kept beside their old chapters: both have reading history',
+  // v0.55.7, the import sheet's count against the current pick: "fewer" stands between the count and its noun, so
+  // the matcher does not ask for this pair by itself, and it left SHIPPED_UNPAIRED with its "+1 chapter" sibling.
+  '1 fewer chapter than the current pick': '{n} fewer chapters than the current pick',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
@@ -274,7 +290,7 @@ const NOT_PAIRED: Record<string, string> = {
  * ("{n} chapters saved" with "1 chapter saved with pages missing"); they are as old as the rest.
  */
 const SHIPPED_UNPAIRED = [
-  '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
+  'All {n} chapters are already in your library', 'Best {n} days',
   'Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.',
   'File {n} series',
   'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
@@ -288,10 +304,10 @@ const SHIPPED_UNPAIRED = [
   'failed {n} times',
   '{n} titles matched', '{n} chapters listed', '{n} chapters listed · none fetched yet',
   '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.',
-  'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
+  'Fetch {n} chapters again?',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 32;
+const SHIPPED_UNPAIRED_MAX = 30;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

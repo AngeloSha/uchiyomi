@@ -8,15 +8,23 @@ import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
 import { t as tr } from '@/lib/i18n';
 
-const SSO_ERRORS: Record<string, string> = {
-  no_account: "You signed in successfully, but there's no account here for you yet. Ask the admin to create one.",
-  username_taken: 'An account with that username already exists here and is not linked to SSO.',
-  disabled: 'That account is disabled.',
-  expired: 'That sign-in took too long. Please try again.',
-  state_mismatch: 'That sign-in could not be verified. Please try again.',
-  exchange_failed: 'The login provider rejected the sign-in.',
-  oidc_unavailable: 'Could not reach the login provider.',
-  access_denied: 'Sign-in was cancelled.',
+/**
+ * Why the OIDC callback could not sign someone in, by the reason it sends back. A function, so each sentence is
+ * translated when it is said: the screen is the first one anybody sees, and it is translated before sign-in
+ * (lib/i18n.ts). It was a table of English sentences.
+ */
+const ssoError = (reason: string): string => {
+  switch (reason) {
+    case 'no_account': return tr('You signed in successfully, but there’s no account here for you yet. Ask the admin to create one.');
+    case 'username_taken': return tr('An account with that username already exists here and is not linked to SSO.');
+    case 'disabled': return tr('That account is disabled.');
+    case 'expired': return tr('That sign-in took too long. Please try again.');
+    case 'state_mismatch': return tr('That sign-in could not be verified. Please try again.');
+    case 'exchange_failed': return tr('The login provider rejected the sign-in.');
+    case 'oidc_unavailable': return tr('Could not reach the login provider.');
+    case 'access_denied': return tr('Sign-in was cancelled.');
+    default: return tr('Could not sign in with SSO.');
+  }
 };
 
 export function LoginScreen() {
@@ -62,7 +70,7 @@ export function LoginScreen() {
     // the OIDC callback sends people back here with a reason when it couldn't sign them in
     const reason = new URLSearchParams(window.location.search).get('sso_error');
     if (reason) {
-      setErrMsg(SSO_ERRORS[reason] || 'Could not sign in with SSO.');
+      setErrMsg(ssoError(reason));
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
@@ -75,7 +83,7 @@ export function LoginScreen() {
     const r = await login(username.trim() || 'admin', pw, needTotp ? code.trim() : undefined);
     if (!r.ok) {
       if (r.totp) { setNeedTotp(true); setCode(''); }
-      else { setErrMsg(r.error || 'Login failed.'); setCode(''); if (!needTotp) setPw(''); }
+      else { setErrMsg(r.error || tr('Login failed — please try again.')); setCode(''); if (!needTotp) setPw(''); }
     }
     setBusy(false);
   };
@@ -83,13 +91,13 @@ export function LoginScreen() {
   const submitSetup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    if (username.trim().length < 2) { setErrMsg('Pick a username (at least 2 characters).'); return; }
-    if (pw.length < 8) { setErrMsg('Password must be at least 8 characters.'); return; }
-    if (pw !== confirm) { setErrMsg('Passwords do not match.'); return; }
+    if (username.trim().length < 2) { setErrMsg(tr('Pick a username (at least 2 characters).')); return; }
+    if (pw.length < 8) { setErrMsg(tr('Password must be at least 8 characters.')); return; }
+    if (pw !== confirm) { setErrMsg(tr('Passwords do not match.')); return; }
     setBusy(true);
     setErrMsg('');
     const r = await firstRunSetup(username.trim(), pw);
-    if (!r.ok) setErrMsg(r.error || 'Setup failed.');
+    if (!r.ok) setErrMsg(r.error || tr('Setup failed — please try again.'));
     setBusy(false);
   };
 
@@ -139,7 +147,7 @@ export function LoginScreen() {
         <div className="mb-8 flex flex-col items-center text-center">
           <Mark size={56} />
           <Wordmark className="mt-5 text-5xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.6)]" />
-          <p className="mt-2 text-sm text-fog-300">{mode === 'setup' ? 'Welcome — create your admin account.' : 'Your library, your way.'}</p>
+          <p className="mt-2 text-sm text-fog-300">{mode === 'setup' ? tr('Welcome — create your admin account.') : tr('Your library, your way.')}</p>
         </div>
 
         {mode === 'desktop' && (
@@ -178,7 +186,7 @@ export function LoginScreen() {
             />
             {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
             <button type="submit" disabled={busy} className="btn-accent mt-4 w-full disabled:opacity-50">
-              {busy ? 'Creating…' : 'Create admin & open Uchiyomi'}
+              {busy ? tr('Creating…') : tr('Create admin account & open Uchiyomi')}
             </button>
             <p className="mt-3 text-center text-xs text-fog-500">{tr('This first account becomes the server admin.')}</p>
           </form>
@@ -215,27 +223,27 @@ export function LoginScreen() {
             )}
             {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
             <button type="submit" disabled={busy || (needTotp ? !code.trim() : !pw)} className="btn-accent mt-4 w-full disabled:opacity-50">
-              {busy ? (needTotp ? 'Verifying…' : 'Opening…') : needTotp ? 'Verify' : 'Open Uchiyomi'}
+              {busy ? (needTotp ? tr('Verifying…') : tr('Opening…')) : needTotp ? tr('Verify') : tr('Open Uchiyomi')}
             </button>
             {needTotp && (
-              <button type="button" onClick={() => { setNeedTotp(false); setErrMsg(''); setCode(''); }} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300">‹ Back</button>
+              <button type="button" onClick={() => { setNeedTotp(false); setErrMsg(''); setCode(''); }} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300">‹ {tr('Back')}</button>
             )}
             {sso.enabled && !needTotp && (
               <>
                 <div className="my-4 flex items-center gap-3">
                   <span className="h-px flex-1 bg-ink-700" />
-                  <span className="text-[11px] uppercase tracking-wider text-fog-600">or</span>
+                  <span className="text-[11px] uppercase tracking-wider text-fog-600 rtl:tracking-normal">{tr('or')}</span>
                   <span className="h-px flex-1 bg-ink-700" />
                 </div>
                 <a href="/auth/oidc/start" className="block w-full rounded-xl border border-ink-700 bg-ink-850/60 py-2.5 text-center text-sm text-fog-100 transition hover:border-accent hover:text-white">
-                  Continue with {sso.name}
+                  {tr('Continue with {name}', { name: `\u2068${sso.name}\u2069` })}
                 </a>
               </>
             )}
           </form>
         )}
 
-        <p className="mt-6 text-center text-xs text-fog-500">{mode === 'setup' ? 'First-run setup' : 'Private library · single sign-in'}</p>
+        <p className="mt-6 text-center text-xs text-fog-500">{mode === 'setup' ? tr('First-run setup') : tr('Private library · single sign-in')}</p>
       </motion.div>
     </div>
   );

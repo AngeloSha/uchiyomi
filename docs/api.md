@@ -1332,6 +1332,20 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+**Lists** (collections; the app's *Lists*). `GET /api/collections/:id` answers `{id, name, accent, sort_order, items}`:
+the list's series in its own order (`position`, which `PUT /api/collections/:id/items {seriesIds}` rewrites; since
+v0.55.7 `POST /api/collections/:id/items` adds a series at the end, as the bulk add does), each enriched like every
+listing — `yomi.unread` is the cover's unread badge, against the caller's own progress — and a series hidden by the
+18+ switch or an age cap left out. Since v0.55.7 ([#164](https://github.com/AngeloSha/uchiyomi/discussions/164)) each
+item also carries `lastReadAt`, when the caller last read in the series (their own progress only; null if never), and
+`latestChapterAt`, when its newest chapter arrived (the newest chapter file's time, as the Library's *Updated* sort
+uses; null without a chapter), for the list's sorts. The web app sorts a list itself, a list being one request: the
+list's own order (the default), A–Z, Z–A, last read, most unread and latest chapter, ties kept in the list's order.
+The order chosen for each list is kept in the caller's settings, `PUT /api/settings {listSorts: {"<list id>": "az" |
+"za" | "read" | "unread" | "latest"}}` — the whole map, since the settings merge top-level keys; the list's own order
+is not stored. The reader's defaults are the settings' `reader` object, and since v0.55.7 (#170) it carries
+`coverEdges` (default `true`): `false` takes the cover's colour off the reader's top and bottom edges.
+
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
 drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below
@@ -1846,29 +1860,71 @@ row's own file under the library and the download folder (never a hidden or merg
 detached like Verify — it answers `{ok: true, started: true}` or `{ok: false, error: 'busy'}`. `GET
 /api/admin/tasks/rescan/status` is the run, live, and the plan it ends with (polled every 2 s while one runs): `{running:
 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber' | null, done, of,
-startedAt, error, plan, last, lastRun}`. Per root it applies Verify's whole-batch rule and 90 % rule (`plan.unmounted
-[{root, missing?, of?}]`); only ENOENT is a gone file (`plan.unchecked` counts the rest, left alone); a gone row in
-your own folder whose fingerprint matches a live row's is *moved or renamed* and kept (`plan.moved`, `movedList`); the
+startedAt, error, plan, last, lastRun}` (an Apply's phases since v0.55.7: `'mark' | 'merge' | 'follow' | 'renumber'`). Per root it
+applies Verify's whole-batch rule and 90 % rule (`plan.unmounted [{root, missing?, of?}]`); only ENOENT is a gone file
+(`plan.unchecked` counts the rest, left alone); a gone row in your own folder whose fingerprint matches a live row's is
+*moved or renamed* and kept (`plan.moved`, `movedList`) -- and since v0.55.7 one never fingerprinted pairs with the ONE
+live row anywhere with the same file name in another folder, exactly the same stored mtime and, when both rows know it,
+the same size, first seen by a scan after the one that last saw the gone row (`created_at` > its `updated_at`; since
+v0.55.7 a scan stamps a new row's `created_at` with its own start) -- zero or two such rows, or a row another gone row
+or a fingerprint twin would claim too, is no pair; the pair is used for `follow` and `merges` alike and never to mark a
+row -- and `plan.follow` (v0.55.7) counts the pairs inside one series; the
 download folder's gone rows are only counted (`plan.downloads`, Verify's to mark); and `plan.emptied` / `emptiedList`
-are the series with every live chapter gone. `plan.numbers` is the opt-in: each series whose numbers the v0.55.2
+are the series with every live chapter gone (`emptiedList[].into {seriesId, title}`, v0.55.7: the one series every live
+chapter of it moved into, when they all went to one and the viewer may list it). `plan.merges [{seriesId, title, into:
+{seriesId, title}, chapters}]` / `mergesTotal` (v0.55.7) are the merge opt-in: those series, when the merge route itself
+would merge them there and neither is mid-renumber. `plan.numbers` is the opt-in: each series whose numbers the v0.55.2
 file-name rules would change, with `chapters`, `readers`, `overrides`, `tracked`, `up`, `down` and `examples` —
 posting-order and mid-renumber series left out. Lists name only series the viewer may list. `POST
-/api/admin/tasks/rescan/apply {plan, renumber?: seriesId[]}` applies it, detached, refused as `{ok: false, error}`
+/api/admin/tasks/rescan/apply {plan, renumber?: seriesId[], merge?: seriesId[]}` applies it, detached, refused as `{ok: false, error}`
 with `busy`, `no_plan`, `stale` (replaced, or older than 30 minutes), `applied`, `not_in_plan`, or the job it would
 run beside (`sweep_running`, `autofix_running`, `repair_running`, `verify_running`, `cleanup_running`,
 `scan_running`). A series a download is writing into or a check is reading as it reaches it (a Fetch and its lanes,
 the slow archive's chapter, Fetch newest, a repair) is left alone — neither marked nor renumbered, counted in `busy` —
 and every other series it changes is held busy until it is done, so no Fetch (409 `busy`), archive chapter or Fetch
-newest starts in it meanwhile. Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
+newest starts in it meanwhile, and the chapter sweep (since v0.55.7) puts it to the back of its queue once, then skips
+it (`skipped`, unstamped, so the next sweep takes it first). Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
 gone, no live fingerprint twin, the library folder still holding a file the preview saw) and marked pruned with
 `pruned_reason = 'deleted'` — held, so the sweep never fetches it back — and the covers and counts of the series it
-touched are recomputed; then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
+touched are recomputed. Since v0.55.7 every pair inside one series is asked again too (both rows unchanged, one
+fingerprint -- or, for a row never fingerprinted, still the one live row with its name and time -- the old file still
+gone and the new one there) and, when the new row holds nothing of anyone's (no
+progress, reading event, bookmark, note, offline copy, override, or page marked by hand), the old row takes the new
+file — root, file, mtime, size, fingerprint, its number and title read from the new name by its own rule — the new row
+is deleted and the cover moves with it: the chapter shows once, its id and history kept (`followed`); a new row that
+holds something is kept beside it (`twins`). Each series in `merge` (only ones `plan.merges` offered, else
+`not_in_plan`) is asked again — `mergeRefusal` still null, neither mid-renumber, every live row still gone with a live
+twin in the other series whose file is there, both held — else left alone (`notMerged`); then the tracker link is
+copied to the other series where it has none for that provider (never over one it has; a person's link as it is, an
+automatic one keeping `checked_at` only when every name the absorbed series goes by is one the other will go by and
+Check online matches is not running, else unchecked for that check to judge), the series is merged as `POST
+/api/admin/series/:id/merge` merges (audited `series.merge` with `via: 'rescan'` and the plan id), and its pairs follow
+as above (`merged`). Then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
 number set by hand and a `'missing'` row are kept), with nothing pushed to any tracker. It never erases a row, touches
 a file, marks the download folder, relabels a row already pruned, hides a series or changes a tracker floor, read
-mark, favourite or rating. The result (`{marked, back, changed, moved, busy, downloads, emptied, unmounted,
+mark, favourite or rating; the only row it deletes is a duplicate the scan made for a moved file, holding nothing. The
+result (`{marked, back, changed, moved, followed, twins, merged, notMerged, busy, downloads, emptied, unmounted,
 renumbered: {series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
 `server_settings.rescan_last_run` / `rescan_last_result`; audit `library.rescan`, and `library.rescan_numbers` when
 the opt-in renumbered something. Never at boot or on a schedule.
+
+**Check online matches.** (since v0.55.7, #168) The matches stored by title before v0.55.7 checked them, held to the
+title check (*Online matches carry the series' name*, under the image routes): every automatic AniList link
+(`series_trackers.linked_by` NULL) and every cover and banner of `series_art` served from AniList's or MangaDex's
+servers, against what AniList and MangaDex call those entries -- asked by id, 50 per AniList request and 100 per
+MangaDex request, paced. A link to another work is removed, with the tracker floors recorded against it; a cover or
+banner of another work is cleared to a miss (an adaptation's banner stands when its anime is related to a manga named
+as the series); a person's link, an admin's art, a source's own cover and an entry the service no longer answers for
+(`unanswered`) are left as they are. It runs in the background a couple of minutes after a start, then every 6 h, on
+whatever is still unchecked (`checked_at` NULL on either table: rows from before v0.55.7, a link an edition copies,
+rows an older version writes after a rollback) -- resumable, every verdict written as it is reached; a service that
+does not answer stops the run with nothing decided for what it had to judge (`stopped: 'unavailable'`). `POST
+/api/admin/tasks/matches/run` checks every automatic match again, detached: `{ok: true, started: true}` or `{ok:
+false, error: 'busy'}`. `GET /api/admin/tasks` lists it as `{id: 'matches', name: 'Check online matches', schedule:
+'in the background, rechecked every 6h'}` with the last run that checked something: `{matches, removed, links:
+{checked, removed}, art: {checked, cleared}, unanswered, stopped?, ms}`, persisted in
+`server_settings.match_check_last_run` / `match_check_last_result`; audit `library.match_check` with the counts and
+the links and pictures removed (up to 50 named).
 
 **Repair the library.** `POST /api/admin/tasks/repair/run` (since v0.41.0; the Tasks panel's *Repair
 library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solver* action on the Health tab —
@@ -2374,6 +2430,24 @@ source check.
 copy of itself); and since v0.53.0, with `style=banner`, what the series page shows: a real banner -- AniList's or an
 admin's -- sharp and uncropped (at most 1920 wide), and for a series without one the same ambient wash of its cover,
 which looks bad stretched sharp. `av=<n>` is the art version, a cache-buster.
+
+**Online matches carry the series' name** (since v0.55.7, [#168](https://github.com/AngeloSha/uchiyomi/discussions/168)).
+The art a series is shown with when nobody chose any -- AniList's cover and banner, looked up by title the first time
+its backdrop is asked for, after an add, or by Admin → Art's backfill (with Kitsu's and MangaDex's) -- and the AniList
+entry it is linked to for tracker sync are kept only from an entry named as the series is: one of the entry's titles
+(romaji, English, native, a synonym; MangaDex's titles and alternative titles; Kitsu's) must EQUAL one of the series'
+names -- its title, an admin's display title, its other names (`GET /api/admin/series/:id/alt-titles`), and those of
+the other language editions of its work -- once case, accents, bracketed asides and punctuation are set aside. A
+leading *The*, *A* or *An* is ignored only when at least six letters remain; otherwise matching is never by
+containment, because a spin-off's name contains its parent's. An answer that is another work is stored as the miss a "no
+match" is, so it is not asked again on every view. `/img/series/:id/thumb` is an admin's cover, else the source's
+cover or a checked AniList one, else the series' first page. What was stored before v0.55.7 is held to the same rule
+by **Check online matches** (Admin → Tasks, above); Health's *Duplicate series* groups only links a person made or
+that were checked. `PUT /api/admin/series/:id/art {kind: 'cover', mode: 'first_page'}` makes the series' own first page
+its cover for good: the series payload's `overrides.cover` reads `'first_page'` (beside `'upload'` and a pasted URL),
+nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one -- and
+`mode: 'reset'` takes it back to the automatic art, which the choice never changed; `kind: 'banner'` with it is a
+**400**. `GET /api/admin/art/overview` marks such a series `first_page: true`.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

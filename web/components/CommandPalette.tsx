@@ -110,7 +110,7 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
       key: 'surprise', label: tr('Surprise me'), hint: tr('random series'), icon: <IcSparkle width={16} height={16} />,
       run: async () => {
         try { const r = await api<{ seriesId: string | null }>('/api/random'); if (r.seriesId) go(`/series/?id=${r.seriesId}`); }
-        catch { toast('No luck — try again', 'error'); }
+        catch { toast(tr('No luck — try again'), 'error'); }
       },
     },
     { key: 'updates', label: tr('Updates'), hint: tr('new chapters'), icon: <IcBell width={16} height={16} />, run: () => go('/updates') },

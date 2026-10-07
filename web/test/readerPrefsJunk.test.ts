@@ -6,7 +6,7 @@
 // switched the feature OFF.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { migratePrefs, DEFAULT_PREFS } from '../lib/readerPrefs';
+import { migratePrefs, DEFAULT_PREFS, LOOK_KEYS, globalPrefsChange, seriesPinChange } from '../lib/readerPrefs';
 
 test('someone who turned skipping off stays off', () => {
   // ⚠️ The one that matters. Reintroduce by asking the MERGED object whether `junkPages` is present instead
@@ -68,4 +68,20 @@ test('paged mode follows the series unless overridden', () => {
   assert.equal(migratePrefs({ pagedDirection: 'ltr' }).pagedDirection, 'ltr');
   // Anything else out of storage (a typo, a future value an older build does not know) is not trusted.
   assert.equal(migratePrefs({ pagedDirection: 'sideways' as never }).pagedDirection, 'series');
+});
+
+// The cover's colour at the edges (#170) is part of the reader's look, so it stays on for everyone who has not turned it
+// off -- every reader stored before the switch existed included, which has no key for it -- and it is ONE setting: a
+// change in the reader's sheet goes to the default, never into a title's memory.
+// Reintroduce by defaulting it to false: "a reader stored before the switch keeps the edges" fails, and the wash is gone
+// on upgrade for everyone; by adding it to LOOK_KEYS: "the edges are not a title's look" fails.
+test('the cover colour at the edges stays on until it is switched off, for every title at once', () => {
+  assert.equal(DEFAULT_PREFS.coverEdges, true, 'the edges are off by default');
+  assert.equal(migratePrefs({ theme: 'sepia', gap: 4 }).coverEdges, true, 'a reader stored before the switch keeps the edges');
+  assert.equal(migratePrefs({ coverEdges: false }).coverEdges, false, 'switched off did not stay off');
+  // Out of storage, only a real `false` turns them off: a hand-edited or foreign value keeps the look.
+  assert.equal(migratePrefs({ coverEdges: 'no' } as never).coverEdges, true, 'a value that is not a boolean is trusted');
+  assert.ok(!(LOOK_KEYS as readonly string[]).includes('coverEdges'), "the edges are not a title's look");
+  assert.deepEqual(globalPrefsChange({ coverEdges: false }, true), { coverEdges: false }, 'switched off with a title open, the default did not change');
+  assert.equal(seriesPinChange({ coverEdges: false }, { ...DEFAULT_PREFS, coverEdges: false }), null, "switched off in the reader, it pinned the title's look");
 });

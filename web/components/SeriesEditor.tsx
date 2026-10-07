@@ -727,6 +727,22 @@ const IcMore = () => (
 );
 
 /**
+ * series.overrides.cover when an admin chose Use the first page (v0.55.7, #168; bff lib/seriesArt.ts FIRST_PAGE): the
+ * cover is the series' own first page for good, and its art is its own pages -- nothing found online replaces them.
+ */
+export const FIRST_PAGE_COVER = 'first_page';
+
+/**
+ * What the cover's ⋯ offers (v0.55.7): Use the first page, unless it already is; Reset to automatic, only over an
+ * admin's choice. Every state leaves one of the two to press, so the ⋯ is always there: a menu of nothing but greyed
+ * items takes no focus, and the Escape meant to close it closed the dialog under it. Reintroduce Use the first page as
+ * always on: "a cover that is the first page offers it again" in seriesEditor.test.ts fails.
+ */
+export function coverChoices(cover: string | null | undefined): { firstPage: boolean; reset: boolean } {
+  return { firstPage: cover !== FIRST_PAGE_COVER, reset: !!cover };
+}
+
+/**
  * The cover and the background, each as the series page shows it, with its keys under it.
  *
  * - The cover at 2:3, the poster's own picture; the background as the page's banner draws it -- a real banner
@@ -734,7 +750,9 @@ const IcMore = () => (
  *   here is what readers see. Both carry the series' art version, which every change bumps.
  * - Upload is a file input, and an image dropped on a preview is the same upload. From a link sets the address the
  *   server fetches the art from (an inline field, Enter or Set). Reset to automatic hands it back to the source,
- *   AniList or the first page. New banner shuffles the automatic banner, only while there is one.
+ *   AniList or the first page -- AniList's only from an entry with the series' name since v0.55.7 (#168), and a line
+ *   under the cover says so while it is automatic. Use the first page (v0.55.7) makes the series' own first page its
+ *   cover for good. New banner shuffles the automatic banner, only while there is one.
  * - One thing at a time: while one works its preview is covered and every art key waits (a ring that stands still
  *   under Reduce effects and reduced motion, ProgressRing's rule). The notices say how it went, in words.
  */
@@ -780,6 +798,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
     if (await change(kind, { mode: 'url', url }, word(kind, tr('Cover updated'), tr('Banner updated')))) setLinkFor(null);
   };
   const reset = (kind: ArtKind) => change(kind, { mode: 'reset' }, word(kind, tr('Cover reset to automatic'), tr('Banner reset to automatic')));
+  const firstPage = () => change('cover', { mode: 'first_page' }, tr('Cover updated'));
   const shuffle = async () => {
     if (!onNewBanner || busy) return;
     setBusy('banner');
@@ -787,10 +806,12 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
   };
   const choose = (kind: ArtKind) => { fileFor.current = kind; file.current?.click(); };
 
-  // Reset is offered only where there is something of the admin's to take back. The cover's ⋯ holds nothing else, so
-  // it is there only then: a menu of one greyed item takes no focus, and the Escape meant to close it closed the dialog.
+  // Reset is offered only where there is something of the admin's to take back, and Use the first page only where the
+  // cover is not that already (coverChoices): one of them always, so the ⋯ is always there.
+  const can = coverChoices(ov?.cover);
   const coverMenu = useContextMenu(() => [
-    { label: tr('Reset to automatic'), onSelect: () => void reset('cover') },
+    { label: tr('Use the first page'), onSelect: () => void firstPage(), disabled: !can.firstPage, hook: 'cover-first-page' },
+    { label: tr('Reset to automatic'), onSelect: () => void reset('cover'), disabled: !can.reset, hook: 'cover-reset' },
   ], { label: tr('More cover options') });
   const bannerMenu = useContextMenu(() => [
     { label: tr('From a link'), onSelect: () => setLinkFor('banner') },
@@ -810,12 +831,19 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
           <button type="button" data-art-upload="cover" disabled={!!busy} onClick={() => choose('cover')} className="btn-key"><IcUpload />{tr('Upload')}</button>
           <button type="button" data-art-link="cover" aria-expanded={linkFor === 'cover'} disabled={!!busy}
             onClick={() => setLinkFor(linkFor === 'cover' ? null : 'cover')} className="btn-key">{tr('From a link')}</button>
-          {!!ov?.cover && (
-            <button type="button" data-art-more="cover" aria-label={tr('More cover options')} aria-haspopup="menu" aria-expanded={coverMenu.open}
-              disabled={!!busy} onClick={(e) => coverMenu.openFrom(e.currentTarget)} className="btn-key w-8 px-0"><IcMore /></button>
-          )}
+          <button type="button" data-art-more="cover" aria-label={tr('More cover options')} aria-haspopup="menu" aria-expanded={coverMenu.open}
+            disabled={!!busy} onClick={(e) => coverMenu.openFrom(e.currentTarget)} className="btn-key w-8 px-0"><IcMore /></button>
         </div>
         {linkFor === 'cover' && <LinkField kind="cover" busy={busy === 'cover'} onSet={(u) => void fromLink('cover', u)} onCancel={() => setLinkFor(null)} />}
+        {/* What the cover is when nobody chose one -- what Reset to automatic gives back -- and the one choice that stays
+            put whatever is found online. An upload or a link needs no words: it is the picture above. */}
+        {(ov?.cover === FIRST_PAGE_COVER || !ov?.cover) && (
+          <p data-art-cover-note className="mt-2 text-[11px] leading-relaxed text-fog-500">
+            {ov?.cover === FIRST_PAGE_COVER
+              ? tr('The first page, by your choice: nothing found online replaces it.')
+              : tr('Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.')}
+          </p>
+        )}
       </div>
 
       <div>

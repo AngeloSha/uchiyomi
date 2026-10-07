@@ -49,6 +49,7 @@ import { checkRunning } from './sourceWatchdog';
 import { getOrFetch, type FetchedImage } from './imageCache';
 import { firstRunFloor } from './desktop';
 import { ADULT_RATING, visibleToAll } from './visibility';
+import { FIRST_PAGE } from './seriesArt';
 
 // ── the frames ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -546,14 +547,18 @@ async function drawHero(picks: Sourced[], deadline: number): Promise<HeroImages>
  * itself adult is checked in code (adultSource), since only the source registry knows.
  *
  * And no banner of its own: an admin's override, or AniList's -- which only counts as absent once it has been looked
- * up (a series_art row), because that lookup happens when the backdrop is first asked for.
+ * up (a series_art row), because that lookup happens when the backdrop is first asked for. A series an admin set to
+ * Use the first page (v0.55.7, lib/seriesArt.ts FIRST_PAGE) shows no online art at all, so whatever series_art holds is
+ * no banner of its own: its banner is made from its pages. Reintroduce by dropping that half: "the first page, chosen,
+ * keeps online art away" in onlineMatch.int.test.ts finds no banner offered for it.
  *
  * Interpolates only code constants, so it can be dropped into any query without renumbering its parameters.
  */
 export function heroEligible(alias: string): string {
   const s = alias;
   return `${s}.books_count > 0
-    AND EXISTS (SELECT 1 FROM series_art ha WHERE ha.series_id = ${s}.id AND COALESCE(ha.banner, '') = '')
+    AND (EXISTS (SELECT 1 FROM series_art ha WHERE ha.series_id = ${s}.id AND COALESCE(ha.banner, '') = '')
+         OR EXISTS (SELECT 1 FROM series_overrides hf WHERE hf.series_id = ${s}.id AND hf.cover = '${FIRST_PAGE}'))
     AND NOT EXISTS (SELECT 1 FROM series_overrides ho WHERE ho.series_id = ${s}.id
                      AND (ho.banner IS NOT NULL OR ho.age_rating >= ${ADULT_RATING}))
     AND COALESCE(${s}.age_rating, 0) < ${ADULT_RATING}
