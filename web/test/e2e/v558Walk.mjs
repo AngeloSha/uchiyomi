@@ -9,10 +9,12 @@
 //     controls, selected order on Home, an empty list appearing in its retained slot once populated, and a deleted
 //     stale id being dropped by the next edit. The settled controls and rails are also checked at 390 and 390 in Arabic.
 //
-//   anilistprivacy -- up.sh with E2E_ANILIST=1, LIB and E2E_NET. The default library's UI turns automatic AniList
-//     lookup off and explains that manual actions can still connect. A new, known-to-the-fake series is scanned and
-//     opened with zero AniList requests and no negative art/match cache row. The same control is inspected at 390 and
-//     390 in Arabic; turning it back on then performs the deferred lookup, proving re-enable works.
+//   anilistprivacy -- up.sh with E2E_ANILIST=1, LIB and E2E_NET. A known-to-the-fake series first receives art, a
+//     link, type and direction. The default library's UI turns automatic AniList lookup off and explains that manual
+//     actions can still connect: the metadata stays, and Admin -> Tasks -> Check online matches contacts the fake by
+//     id while the opt-out remains. Two fresh copies opened in that library make zero requests and no negative cache;
+//     moving one to an enabled library permits its deferred lookup, while the other waits for the default library to
+//     be re-enabled. The same policy control is inspected at 390 and 390 in Arabic.
 //
 //   bulkdelete -- a plain stack. At 1280, 390 and 390 in Arabic, Library selection reaches the warning without
 //     deleting anything. At 1280 the browser intercepts only the durable-run endpoints: a synthetic persisted job
@@ -264,7 +266,7 @@ export async function homeListsWalk(ctx) {
 
 export async function anilistPrivacyWalk(ctx) {
   const { page, check, waitFor, sleep, lib, base } = ctx;
-  const { call, say, setLang, visit, noSideScroll, seriesNamed, scan, lang } = kit(ctx);
+  const { call, say, setLang, visit, noSideScroll, scan, lang } = kit(ctx);
   const net = process.env.E2E_NET;
   if (!lib || !net) {
     check('anilistprivacy: LIB and E2E_NET name the disposable E2E_ANILIST=1 instance', false);
@@ -276,6 +278,30 @@ export async function anilistPrivacyWalk(ctx) {
   const resetLog = async () => { const r = await fetch(`${anilist}/__reset`, { method: 'POST' }); return r.ok; };
   const libraries = async () => (await call('/api/admin/libraries')).content;
   const policy = async () => (await libraries()).find((row) => row.id === 'lib')?.anilist_lookup;
+  const idInFolder = (folder) => sql(`SELECT id FROM lib_series WHERE folder = ${lit(folder)}`);
+  const cached = (id) => sql(`SELECT (SELECT count(*) FROM series_art WHERE series_id = ${lit(id)}) || '|' ||
+                                    (SELECT count(*) FROM series_trackers WHERE series_id = ${lit(id)} AND provider = 'anilist')`);
+  const metadata = (id) => {
+    const raw = sql(`SELECT json_build_object(
+      'art', (SELECT json_build_object('banner', banner, 'cover', cover) FROM series_art WHERE series_id = s.id),
+      'link', (SELECT json_build_object('externalId', external_id, 'linkedBy', linked_by)
+                 FROM series_trackers WHERE series_id = s.id AND provider = 'anilist'),
+      'direction', s.reading_direction, 'directionFrom', s.reading_direction_from,
+      'type', s.series_type, 'typeFrom', s.series_type_from, 'libraryId', s.library_id)::text
+      FROM lib_series s WHERE s.id = ${lit(id)}`);
+    try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+  const enriched = (id) => {
+    const m = metadata(id);
+    return m?.art?.banner && m?.art?.cover && m?.link?.externalId === '970002'
+      && m.direction === 'WEBTOON' && m.directionFrom === 'anilist'
+      && m.type === 'manhwa' && m.typeFrom === 'anilist' ? m : null;
+  };
+  const backdrop = (id, name) => page.evaluate(async (seriesId, walk) => {
+    const r = await fetch(`/img/series/${encodeURIComponent(seriesId)}/backdrop?style=banner&walk=${encodeURIComponent(walk)}`, { cache: 'no-store' });
+    return r.status;
+  }, id, name);
+  const matchTask = async () => (await call('/api/admin/tasks')).content.find((row) => row.id === 'matches');
   const openDefault = async (width, language) => {
     if (language !== lang()) await setLang(language);
     await page.setViewport({ width, height: width < 1024 ? 844 : 900 });
@@ -289,9 +315,30 @@ export async function anilistPrivacyWalk(ctx) {
     return opened;
   };
   const privacyCopy = "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.";
+  const existingFolder = 'v558 Existing/Walk Nightfall';
+  const privateFolder = 'v558 Privacy/Walk Nightfall';
+  const movingFolder = 'v558 Move Probe/Walk Nightfall';
+  const enabledRoot = 'v558 Enabled Area';
 
   check('anilistprivacy: the fake AniList answers (up.sh with E2E_ANILIST=1)', Array.isArray(await log().catch(() => null)));
   await setLang('en');
+
+  // Establish all four AniList-derived fields before opting out. The rest of the phase compares this exact payload,
+  // excluding only check timestamps, so "preserve" means more than keeping a picture visible in the browser.
+  check('anilistprivacy: fake request history was reset before the enabled-library baseline', await resetLog());
+  writeShelf(lib, existingFolder, { 'Nightfall 001.cbz': 3, 'Nightfall 002.cbz': 3 });
+  const baselineScan = await scan();
+  check('anilistprivacy: the enabled-library baseline was scanned', typeof baselineScan?.books === 'number', JSON.stringify(baselineScan));
+  const existingId = await waitFor(() => idInFolder(existingFolder) || null, 15_000, 300);
+  check('anilistprivacy: the baseline series exists in the default library', !!existingId);
+  if (!existingId) return;
+  await page.setViewport({ width: 1280, height: 900 });
+  await visit(`/series/?id=${existingId}`, 5000);
+  const baselineBackdrop = await backdrop(existingId, 'v558-baseline');
+  const beforeOptOut = await waitFor(() => enriched(existingId), 20_000, 400);
+  check('anilistprivacy: while enabled, automatic lookup stores art, link, type and direction',
+    baselineBackdrop === 200 && !!beforeOptOut, `${baselineBackdrop} ${JSON.stringify(metadata(existingId))} ${JSON.stringify(await log())}`);
+
   check('anilistprivacy: the default library editor opens', await openDefault(1280, 'en'));
   const initial = await page.$eval('[data-library-anilist-lookup]', (e) => e.checked);
   const wording = await page.$eval('[data-library-dialog="lib"]', (e) => e.textContent.replace(/\s+/g, ' ').trim());
@@ -302,26 +349,64 @@ export async function anilistPrivacyWalk(ctx) {
   check('anilistprivacy: saving the default library turns automatic lookup off',
     !!(await waitFor(async () => (await policy()) === false ? true : null, 10_000, 250)));
 
+  // Existing derived data is retained. Visiting it again is implicit work and must neither erase it nor call AniList.
+  check('anilistprivacy: fake request history was reset after opting out', await resetLog());
+  await visit(`/series/?id=${existingId}`, 4000);
+  const keptBackdrop = await backdrop(existingId, 'v558-preserved');
+  await sleep(500);
+  check('anilistprivacy: existing art, link, type and direction survive opt-out',
+    keptBackdrop === 200 && JSON.stringify(metadata(existingId)) === JSON.stringify(beforeOptOut) && (await log()).length === 0,
+    `${keptBackdrop} ${JSON.stringify(metadata(existingId))} ${JSON.stringify(await log())}`);
+
+  // The exception in the editor is real, not only copy: this explicit Admin action includes opted-out libraries.
+  await visit('/admin/?tab=Tasks', 3500);
+  await waitFor(() => page.$('#task-matches > button'), 10_000, 200);
+  await waitFor(async () => (await matchTask())?.running ? null : true, 30_000, 500);
+  await resetLog();
+  const ranManually = await page.evaluate(() => {
+    const button = document.querySelector('#task-matches > button');
+    const ready = !!button && !button.disabled;
+    if (ready) button.click();
+    return ready;
+  });
+  const manualRequest = await waitFor(async () => {
+    const rows = await log();
+    return rows.some((row) => row.kind === 'ids' && (row.ids ?? []).includes(970002)) ? rows : null;
+  }, 30_000, 500);
+  const manualDone = await waitFor(async () => (await matchTask())?.running ? null : true, 60_000, 600);
+  check('anilistprivacy: explicit Check online matches contacts AniList while opt-out remains',
+    ranManually && !!manualRequest && !!manualDone && (await policy()) === false,
+    JSON.stringify({ ranManually, manualRequest, task: await matchTask(), policy: await policy() }));
+  check('anilistprivacy: the manual check leaves the preserved metadata intact',
+    JSON.stringify(metadata(existingId)) === JSON.stringify(beforeOptOut), JSON.stringify(metadata(existingId)));
+  await ctx.shot('v558-anilistprivacy-1280-1-manual-exception');
+
   check('anilistprivacy: fake request history was reset before the private-library exercise', await resetLog());
-  writeShelf(lib, 'v558 Privacy/Walk Nightfall', { 'Nightfall 001.cbz': 3, 'Nightfall 002.cbz': 3 });
+  writeShelf(lib, privateFolder, { 'Nightfall 011.cbz': 3, 'Nightfall 012.cbz': 3 });
+  writeShelf(lib, movingFolder, { 'Nightfall 021.cbz': 3, 'Nightfall 022.cbz': 3 });
+  // A real, otherwise-empty folder for the enabled destination library. It is deliberately unknown to the fake.
+  writeShelf(lib, `${enabledRoot}/Policy Holder`, { 'Policy Holder 001.cbz': 3 });
   const scanned = await scan();
   check('anilistprivacy: the private library was scanned', typeof scanned?.books === 'number', JSON.stringify(scanned));
-  const night = await waitFor(() => seriesNamed('Walk Nightfall'), 15_000, 300);
-  check('anilistprivacy: the known-to-AniList folder became a series', !!night);
-  if (!night) return;
-  await visit(`/series/?id=${night.id}`, 5000);
-  // A unique URL bypasses the browser's prior image response while still exercising the same automatic backdrop route.
-  const offBackdrop = await page.evaluate(async (id) => {
-    const r = await fetch(`/img/series/${encodeURIComponent(id)}/backdrop?style=banner&walk=v558-off`, { cache: 'no-store' });
-    return r.status;
-  }, night.id);
+  const privateId = await waitFor(() => idInFolder(privateFolder) || null, 15_000, 300);
+  const movingId = await waitFor(() => idInFolder(movingFolder) || null, 15_000, 300);
+  check('anilistprivacy: both known-to-AniList private folders became separate series', !!privateId && !!movingId,
+    JSON.stringify({ privateId, movingId }));
+  if (!privateId || !movingId) return;
+  check('anilistprivacy: the move probe starts in the opted-out default library', metadata(movingId)?.libraryId === 'lib',
+    JSON.stringify(metadata(movingId)));
+  await visit(`/series/?id=${privateId}`, 5000);
+  const offBackdrop = await backdrop(privateId, 'v558-off-private');
+  await visit(`/series/?id=${movingId}`, 5000);
+  const movingOffBackdrop = await backdrop(movingId, 'v558-off-moving');
   await sleep(2500);
   const whileOff = await log();
-  const cached = sql(`SELECT (SELECT count(*) FROM series_art WHERE series_id = ${lit(night.id)}) || '|' ||
-                             (SELECT count(*) FROM series_trackers WHERE series_id = ${lit(night.id)} AND provider = 'anilist')`);
-  check('anilistprivacy: scan and automatic series art make zero AniList requests while the library is opted out',
-    offBackdrop === 200 && whileOff.length === 0, `${offBackdrop} ${JSON.stringify(whileOff)}`);
-  check('anilistprivacy: the skipped lookup creates neither an art miss nor an automatic match row', cached === '0|0', cached);
+  check('anilistprivacy: scan and automatic art for both series make zero AniList requests in the opted-out destination',
+    offBackdrop === 200 && movingOffBackdrop === 200 && whileOff.length === 0,
+    `${offBackdrop}|${movingOffBackdrop} ${JSON.stringify(whileOff)}`);
+  check('anilistprivacy: skipped lookups create neither art misses nor automatic match rows',
+    cached(privateId) === '0|0' && cached(movingId) === '0|0',
+    JSON.stringify({ private: cached(privateId), moving: cached(movingId) }));
   await ctx.shot('v558-anilistprivacy-1280-1-no-automatic-lookup');
 
   for (const [width, language] of [[390, 'en'], [390, 'ar']]) {
@@ -336,28 +421,50 @@ export async function anilistPrivacyWalk(ctx) {
     await page.keyboard.press('Escape');
   }
 
-  // No negative cache row was written, so re-enabling can perform the ordinary lazy lookup for the same series.
+  // Move one of the untouched rows into an enabled destination. The series move, rather than its folder, decides the
+  // privacy boundary; the same lazy request that was silent above is now allowed without toggling the default library.
+  if (lang() !== 'en') await setLang('en');
+  const enabled = await call('/api/admin/libraries', {
+    json: { name: 'v558 AniList enabled', paths: [enabledRoot], anilistLookup: true },
+  });
+  check('anilistprivacy: an enabled destination library was created', !!enabled?.id, JSON.stringify(enabled));
+  if (!enabled?.id) return;
+  await call(`/api/admin/series/${movingId}/library`, { json: { libraryId: enabled.id } });
+  check('anilistprivacy: the probe moved into the enabled destination', metadata(movingId)?.libraryId === enabled.id,
+    JSON.stringify(metadata(movingId)));
+  await resetLog();
+  await visit(`/series/?id=${movingId}`, 5000);
+  const movedBackdrop = await backdrop(movingId, 'v558-after-move');
+  const movedRequest = await waitFor(async () => {
+    const rows = await log();
+    return rows.some((row) => row.kind === 'search' && String(row.s).toLowerCase() === 'walk nightfall') ? rows : null;
+  }, 20_000, 400);
+  const movedMetadata = await waitFor(() => enriched(movingId), 15_000, 400);
+  check('anilistprivacy: after the move, the enabled destination permits automatic AniList enrichment',
+    movedBackdrop === 200 && !!movedRequest && movedMetadata?.libraryId === enabled.id,
+    `${movedBackdrop} ${JSON.stringify(movedRequest)} ${JSON.stringify(metadata(movingId))}`);
+  check('anilistprivacy: the default library stayed opted out while the destination allowed that request',
+    (await policy()) === false, String(await policy()));
+  await ctx.shot('v558-anilistprivacy-1280-3-destination-policy');
+
+  // No negative cache row was written for the series left behind, so re-enabling can perform its ordinary lazy lookup.
   check('anilistprivacy: the editor opens to re-enable the policy', await openDefault(1280, 'en'));
   await page.click('[data-library-anilist-lookup]');
   await page.click('[data-library-save]');
   check('anilistprivacy: the default library policy is on again',
     !!(await waitFor(async () => (await policy()) === true ? true : null, 10_000, 250)));
   await resetLog();
-  await visit(`/series/?id=${night.id}`, 5000);
-  await page.evaluate(async (id) => {
-    await fetch(`/img/series/${encodeURIComponent(id)}/backdrop?style=banner&walk=v558-on`, { cache: 'no-store' });
-  }, night.id);
+  await visit(`/series/?id=${privateId}`, 5000);
+  const onBackdrop = await backdrop(privateId, 'v558-on');
   const asked = await waitFor(async () => {
     const rows = await log();
     return rows.some((row) => row.kind === 'search' && String(row.s).toLowerCase() === 'walk nightfall') ? rows : null;
   }, 20_000, 400);
-  check('anilistprivacy: re-enabling performs the deferred automatic title lookup', !!asked, JSON.stringify(await log()));
-  const stored = await waitFor(async () => {
-    const value = sql(`SELECT (cover IS NOT NULL)::int || '|' || (banner IS NOT NULL)::int FROM series_art WHERE series_id = ${lit(night.id)}`);
-    return value === '1|1' ? value : null;
-  }, 15_000, 400);
-  check('anilistprivacy: the re-enabled lookup stores the matching art', stored === '1|1', String(stored));
-  await ctx.shot('v558-anilistprivacy-1280-3-re-enabled');
+  check('anilistprivacy: re-enabling performs the deferred automatic title lookup',
+    onBackdrop === 200 && !!asked, `${onBackdrop} ${JSON.stringify(await log())}`);
+  const stored = await waitFor(() => enriched(privateId), 15_000, 400);
+  check('anilistprivacy: the re-enabled lookup stores art, link, type and direction', !!stored, JSON.stringify(metadata(privateId)));
+  await ctx.shot('v558-anilistprivacy-1280-4-re-enabled');
   if (lang() !== 'en') await setLang('en');
 }
 
