@@ -161,7 +161,8 @@ test("the reader's cover washes are its look by default, and only their own swit
   // "the washes are shown on something other than their own switch" / "a cover wash changed" fails.
   const src = code(read('app/reader/page.tsx'));
   const wash = (edge: 'top' | 'bottom') =>
-    `<div className="pointer-events-none absolute inset-x-0 ${edge}-0 z-20 h-36" style={{ background: 'linear-gradient(to ${edge === 'top' ? 'bottom' : 'top'}, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />`;
+    // `data-cover-edge`: the browser walk's hook (v557Walk.mjs readeredges), the look itself unchanged.
+    `<div data-cover-edge="${edge}" className="pointer-events-none absolute inset-x-0 ${edge}-0 z-20 h-36" style={{ background: 'linear-gradient(to ${edge === 'top' ? 'bottom' : 'top'}, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />`;
   const at = src.indexOf(wash('top'));
   assert.ok(at > 0, 'the top cover wash changed');
   assert.ok(src.indexOf(wash('bottom'), at) > at, 'the bottom cover wash changed');

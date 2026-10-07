@@ -11,10 +11,11 @@
 //   rescan -- a plain up.sh stack, LIB naming its library folder and E2E_NET its network. A folder collected by hand per
 //     pass: two of its files deleted, one renamed, two chapters read first; and two series of hand-named files read the
 //     way a library scanned before v0.55.2 holds them. Admin → Tasks → Rescan everything → Start: the preview names the
-//     two gone files, the renamed one as moved (kept), and offers the two series for the new file-name rules; one is
-//     ticked; Apply marks the two "File no longer on disk" on the series page, their read marks kept, and renumbers the
-//     ticked series alone. Then, once, every file of the library moved out of the folder: the preview says the folder
-//     looks unmounted and Apply has nothing to do.
+//     two gone files, the renamed one as moved (kept) -- and, since v0.55.7, says its chapter follows it -- and offers the
+//     two series for the new file-name rules; one is ticked; Apply marks the two "File no longer on disk" on the series
+//     page, their read marks kept, points the renamed chapter's own row at its new file (one chapter, not two), and
+//     renumbers the ticked series alone. Then, once, every file of the library moved out of the folder: the preview says
+//     the folder looks unmounted and Apply has nothing to do.
 //
 //   multisource -- a plain up.sh stack, E2E_NET. Walk Tale added from fake-a with nothing yet, following fake-b: one
 //     release (no group named, English, twelve pages) on two sites, each serving its pages from its own host -- two image
@@ -224,10 +225,13 @@ export async function rescanWalk(ctx) {
       check(`rescan @${t}: Start ends in the preview`, !!shown, await rowText() ?? '');
       if (!shown) continue;
       const headline = await textOf(page, '[data-rescan-headline]');
-      // Each earlier pass's renamed file is still paired with its new name: kept, and counted again.
-      const moved = i === 0 ? say('1 was probably moved or renamed (kept)') : say('{n} were probably moved or renamed (kept)', { n: i + 1 });
+      // Since v0.55.7 an earlier pass's renamed file is no pair any more: its chapter followed it at that Apply.
+      const moved = say('1 was probably moved or renamed (kept)');
       check(`rescan @${t}: the preview names the two gone files, and the renamed one as moved`,
         headline === `${say('{n} chapter files are gone from your folders', { n: 2 })} · ${moved}`, JSON.stringify(headline));
+      const follow = await textOf(page, '[data-rescan-follow]');
+      check(`rescan @${t}: and says its chapter follows it on Apply`,
+        follow === say('1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept'), JSON.stringify(follow));
       await page.evaluate(() => { const d = document.querySelector('[data-rescan-moved]'); if (d) d.open = true; });
       const movedList = await textOf(page, '[data-rescan-moved]');
       check(`rescan @${t}: Chapter 4.cbz is listed as moved to Chapter 04.cbz`,
@@ -243,12 +247,13 @@ export async function rescanWalk(ctx) {
 
       // Apply, and what it did: the Tasks line -- this pass's, told from the last pass's by the count of moved files.
       await tap(page, '[data-rescan-apply]');
-      const applied = [say('{n} chapters marked as no longer on disk', { n: 2 }), moved, say('1 series renumbered by the new rules')].join(' · ');
+      const applied = [say('{n} chapters marked as no longer on disk', { n: 2 }), moved, say('1 chapter now follows its moved or renamed file'),
+        say('1 series renumbered by the new rules')].join(' · ');
       const result = await waitFor(async () => {
         const r = await rowText();
         return r?.includes(applied) && !(await page.$('[data-rescan-panel="running"]')) ? r : null;
       }, 60_000, 500);
-      check(`rescan @${t}: Apply says two chapters were marked, the renamed one kept, and the ticked series renumbered`,
+      check(`rescan @${t}: Apply says two chapters were marked, the renamed one followed, and the ticked series renumbered`,
         !!result, JSON.stringify(await rowText()));
       await page.evaluate(() => document.getElementById('task-rescan')?.scrollIntoView({ block: 'center' }));
       await shot(`rescan-${t}-2-result`);
@@ -256,8 +261,12 @@ export async function rescanWalk(ctx) {
       const after = await byName(shelf.id);
       check(`rescan @${t}: chapters 2 and 3 are marked "deleted", every other chapter left live`,
         ['Chapter 2', 'Chapter 3'].every((n) => after[n]?.pruned && after[n]?.prunedReason === 'deleted')
-          && ['Chapter 1', 'Chapter 4', 'Chapter 04', 'Chapter 5'].every((n) => after[n] && !after[n].pruned),
+          && ['Chapter 1', 'Chapter 04', 'Chapter 5'].every((n) => after[n] && !after[n].pruned),
         JSON.stringify(Object.fromEntries(Object.entries(after).map(([n, b]) => [n, [b.pruned, b.prunedReason]]))));
+      // v0.55.7: the renamed chapter is ONE row -- its own, on the new file -- not the old row beside a new one.
+      check(`rescan @${t}: Chapter 4 followed its file: one chapter, its own row, now Chapter 04`,
+        !after['Chapter 4'] && after['Chapter 04']?.id === before['Chapter 4']?.id,
+        JSON.stringify({ old: before['Chapter 4']?.id, now: after['Chapter 04']?.id, stillOld: !!after['Chapter 4'] }));
       check(`rescan @${t}: the read marks are kept, the gone chapter's too`,
         after['Chapter 1']?.readProgress?.completed === true && after['Chapter 2']?.readProgress?.completed === true,
         JSON.stringify([after['Chapter 1']?.readProgress, after['Chapter 2']?.readProgress]));

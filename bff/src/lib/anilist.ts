@@ -5,6 +5,14 @@
 import { plainText } from './htmlText';
 import { namesMatch } from './onlineMatch';
 
+/**
+ * Where AniList is: ANILIST_API_URL, the test knob the tracker calls already read (lib/trackerProviders.ts), moves these
+ * title and id lookups too (v0.55.7) -- the browser walk points it at a fake AniList (web/test/e2e/fakeAniList.mjs), so
+ * no walk asks the real one. Read once at module load; unset, it is AniList's own endpoint (docs/CONFIGURATION.md).
+ * Reintroduce the hard-coded address: "every AniList lookup goes where ANILIST_API_URL says" in anilistUrl.test.ts.
+ */
+const ANILIST = (process.env.ANILIST_API_URL || 'https://graphql.anilist.co').replace(/\/+$/, '');
+
 // `countryOfOrigin` rides along for the series' reading direction (lib/readingDirection.ts), with every title
 // the entry goes by so the direction is taken only from an entry that is visibly the series searched for
 // (directionFromAniListMatch): the same match, the same request, no extra rate cost.
@@ -50,7 +58,7 @@ export interface AniListArt {
 export async function fetchAniListArt(rawTitle: string, names: readonly string[], retry = 0): Promise<AniListArt> {
   const s = clean(rawTitle);
   if (!s) return { banner: null, cover: null };
-  const r = await fetch('https://graphql.anilist.co', {
+  const r = await fetch(ANILIST, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ query: QUERY, variables: { s } }),
@@ -109,7 +117,7 @@ async function mediaById(query: string, ids: number[], each: (m: any) => void): 
     const chunk = ids.slice(i, i + 50);
     let j: any = null;
     for (let retry = 0; ; retry++) {
-      const r = await fetch('https://graphql.anilist.co', {
+      const r = await fetch(ANILIST, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ query, variables: { ids: chunk } }),
@@ -170,7 +178,7 @@ const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MAT
 export async function fetchAnimeBanner(rawTitle: string, names: readonly string[], retry = 0): Promise<string | null> {
   const s = clean(rawTitle);
   if (!s) return null;
-  const r = await fetch('https://graphql.anilist.co', {
+  const r = await fetch(ANILIST, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ query: ANIME_QUERY, variables: { s } }),
@@ -197,7 +205,7 @@ export interface ArtCandidate { title: string; banner: string | null; cover: str
 export async function fetchAniListCandidates(rawTitle: string, retry = 0): Promise<ArtCandidate[]> {
   const s = rawTitle.trim();
   if (!s) return [];
-  const r = await fetch('https://graphql.anilist.co', {
+  const r = await fetch(ANILIST, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ query: CANDIDATES, variables: { s } }),
@@ -233,7 +241,7 @@ export interface TrendingItem {
 
 /** Globally trending manhwa (Korean-origin manga) from AniList — for the Discover "Trending" rail. */
 export async function fetchTrendingManhwa(page = 1, retry = 0): Promise<TrendingItem[]> {
-  const r = await fetch('https://graphql.anilist.co', {
+  const r = await fetch(ANILIST, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ query: TRENDING, variables: { page } }),

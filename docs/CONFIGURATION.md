@@ -90,14 +90,16 @@ match also records the AniList id progress sync writes against. The admin panel'
 card — its *Backfill*, and picking art for one series by hand — asks AniList again and, for wide cover art,
 Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every unlinked series. Discover's
 *Trending* rail is AniList's own trending list, fetched at most once every six hours. These lookups carry
-your server's IP address and the title asked for, and nothing else; they are not moved by the knobs below,
-which point only the token-bearing tracker calls elsewhere.
+your server's IP address and the title asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
+moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.
 
 `ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL` are **test knobs**: they point an adapter at a
 stand-in server instead of the real service (the defaults are `https://graphql.anilist.co`,
 `https://api.myanimelist.net/v2` and `https://kitsu.app/api/edge`). They exist so the browser tests can
-drive a tracker import without a real account, and there is no reason to set them on an install you read on
-— a wrong value here makes every tracker call fail, or worse, sends your token somewhere else.
+drive a tracker import without a real account — and, `ANILIST_API_URL` since v0.55.7, check online matches
+against a fake AniList, so it moves every AniList call, the title lookups above included. There is no reason to
+set them on an install you read on — a wrong value here makes every tracker call fail, or worse, sends your token
+somewhere else.
 
 ### Notification targets
 
