@@ -267,9 +267,8 @@ export interface Book {
    */
   chapterName?: string | null;
   /**
-   * The file was deleted by the server's read-chapter cleanup. The chapter is still part of the series and
-   * still carries everyone's progress -- there are simply no pages behind it any more, and there will not
-   * be again. Nothing may offer to open or download it.
+   * The file is absent but the chapter remains as a tombstone carrying its identity and everyone's progress.
+   * `prunedReason` distinguishes deliberate deletion from a file that Verify or Rescan found missing.
    */
   pruned?: boolean;
   /**
