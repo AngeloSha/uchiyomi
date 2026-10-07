@@ -165,7 +165,7 @@ import { numberByRule } from './naming';
 import { numberText } from './chapterRanges';
 import { matchCheckState } from './matchCheck';
 import { namesOfMany } from './altTitles';
-import { titleKey } from './onlineMatch';
+import { nameKey } from './onlineMatch';
 
 /** How many stats are in flight at once: a NAS answers a handful in parallel well and thousands badly (Verify's). */
 const CONCURRENCY = 16;
@@ -1042,13 +1042,13 @@ async function mergeInto(plan: RescanPlan, offers: MergeOffer[], out: RescanAppl
 /**
  * Will every name `fromId` goes by be one `intoId` goes by once it is merged there (MERGE's tracker link)? Its other
  * names go with the merge (lib/altTitles.ts carryAltTitles); its title, an admin's display title and its editions'
- * names do not. Compared folded, as the online-match check compares them (lib/onlineMatch.ts titleKey).
+ * names do not. Compared folded, as the online-match check compares them (lib/onlineMatch.ts nameKey).
  */
 async function namesCarry(fromId: string, intoId: string): Promise<boolean> {
   const names = await namesOfMany([fromId, intoId]);
   const carried = await q<{ title: string }>('SELECT title FROM series_alt_titles WHERE series_id = $1 AND removed_at IS NULL', [fromId]);
-  const will = new Set([...(names.get(intoId) ?? []), ...carried.map((a) => a.title)].map(titleKey).filter(Boolean));
-  return (names.get(fromId) ?? []).every((n) => !titleKey(n) || will.has(titleKey(n)));
+  const will = new Set([...(names.get(intoId) ?? []), ...carried.map((a) => a.title)].map(nameKey).filter(Boolean));
+  return (names.get(fromId) ?? []).every((n) => !nameKey(n) || will.has(nameKey(n)));
 }
 
 /**

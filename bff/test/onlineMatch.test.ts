@@ -4,7 +4,7 @@
 // -- the art routes, the add, the backfill, the recheck, Health -- is onlineMatch.int.test.ts and matchCheck.int.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { namesMatch, titleKey, aniListMediaOf, mangaDexIdOf } from '../src/lib/onlineMatch';
+import { namesMatch, nameKey, titleKey, aniListMediaOf, mangaDexIdOf } from '../src/lib/onlineMatch';
 import { fetchAniListArt, fetchAnimeBanner, fetchAniListEntries } from '../src/lib/anilist';
 import { fetchKitsuBanner } from '../src/lib/kitsu';
 import { mangadexTitles, _setMangadexPacing, _resetMangadexLimiter } from '../src/lib/sources/mangadex';
@@ -159,4 +159,21 @@ test("MangaDex's names by id: every title and alternative title, a hundred a req
   assert.deepEqual(out.get('id-0'), ['Title id-0', '제목 id-0', 'Romaji id-0'], 'keyed by the lower-case id, every name');
   globalThis.fetch = (async () => json({}, 503)) as typeof fetch;
   await assert.rejects(mangadexTitles(['x']), /mangadex 503/);
+});
+
+test('a leading article is not part of the name, unless what follows is too short to be one', () => {
+  // The owner's library before release: the plain titleKey rule unlinked eight true matches over a "The" beside the one
+  // wrong link it was for. Reintroduce titleKey in namesMatch: The God Game is unlinked again.
+  assert.ok(namesMatch('God Game', ['Kami-sama Game', 'The God Game']));
+  assert.ok(namesMatch('Player Who Can’t Level Up', ["The Player Who Can't Level Up"]));
+  assert.ok(namesMatch('The Ultimate Shut-In', ['Ultimate Shut-in']));
+  assert.ok(namesMatch('Boundless Necromancer', ['Boundless Ascension', 'The Boundless Necromancer']), 'a synonym with "The"');
+  assert.ok(namesMatch("A Returner's Magic Should Be Special", ["Returner's Magic Should Be Special"]));
+  // Still exact, and still not a spin-off: the one wrong link the check found on that library stays refused.
+  assert.ok(!namesMatch('Kaiju No. 8', ['Kaiju No. 8: Relax']), 'a spin-off is still not the work');
+  // Too short to set the article aside: "The One" is not "One", "A Bad" is not "Bad".
+  assert.ok(!namesMatch('The One', ['One']));
+  assert.equal(nameKey('The One'), 'theone');
+  assert.equal(nameKey('A'), 'a');
+  assert.equal(nameKey('Theory of Everything'), titleKey('Theory of Everything'), 'a word that starts with "the" is not an article');
 });

@@ -32,7 +32,24 @@ export function titleKey(t: string | null | undefined): string {
 }
 
 /**
- * Does any name the entry goes by equal any name the series goes by, by titleKey? False when either side has no name
+ * A name as namesMatch compares it: its titleKey, with a leading English article set aside when what follows still says
+ * something. "The God Game" and "God Game" are one name, on AniList and on the site a series came from: run over the
+ * owner's library before release, the plain titleKey rule unlinked eight true matches over a "The" -- "Player Who Can't
+ * Level Up" for AniList's "The Player Who Can't Level Up", "Boundless Necromancer" whose AniList entry goes by "The
+ * Boundless Necromancer" -- beside the one wrong link it was for (Kaiju No. 8 → the spin-off "Kaiju No. 8: Relax").
+ * Not when the rest is short (under six letters): "The One" is not "One". Reintroduce titleKey here: "a leading article
+ * is not part of the name" in onlineMatch.test.ts unlinks The God Game.
+ */
+export function nameKey(t: string | null | undefined): string {
+  const k = titleKey(t);
+  const m = /^\s*(?:the|a|an)\s+(\S.*)$/is.exec(String(t ?? ''));
+  if (!m) return k;
+  const rest = titleKey(m[1]);
+  return rest.length >= 6 ? rest : k;
+}
+
+/**
+ * Does any name the entry goes by equal any name the series goes by, by nameKey? False when either side has no name
  * that folds to something: an empty key never equals another empty key. Reintroduce containment (`k.includes(w)`):
  * "a spin-off is not the work" in onlineMatch.test.ts accepts "Morgan Lost: Dark Novels" for "Morgan Lost".
  */
@@ -40,10 +57,10 @@ export function namesMatch(
   ours: Iterable<string | null | undefined> | string,
   theirs: Iterable<string | null | undefined> | null | undefined,
 ): boolean {
-  const want = new Set([...(typeof ours === 'string' ? [ours] : ours)].map(titleKey).filter(Boolean));
+  const want = new Set([...(typeof ours === 'string' ? [ours] : ours)].map(nameKey).filter(Boolean));
   if (!want.size) return false;
   for (const t of theirs ?? []) {
-    const k = titleKey(t);
+    const k = nameKey(t);
     if (k && want.has(k)) return true;
   }
   return false;
