@@ -59,6 +59,7 @@ import notifyRoutes from './routes/notify';
 import { isDesktop } from './lib/desktop';
 import { installDesktopGuards } from './lib/desktopGuard';
 import { ensureDesktopUser } from './lib/desktopUser';
+import { initialiseBulkChapterDeleteRuns } from './lib/bulkChapterDelete';
 
 async function main() {
   await migrate();
@@ -72,6 +73,10 @@ async function main() {
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // v0.55.0: a Fix everything run the last process was in the middle of (lib/autofix.ts) reads `interrupted`, not running.
   await closeInterruptedAutofix(null).catch((e) => console.warn(`[autofix] could not close interrupted runs: ${(e as Error)?.message || e}`));
+  // A destructive bulk run is persisted. Anything a previous process left running is made explicitly interrupted
+  // before routes can accept a new run; completed and partial results remain readable after a restart. This belongs
+  // on the real boot path, not in the admin route plugin: documentation tests register routes without a database.
+  await initialiseBulkChapterDeleteRuns();
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
   // What finished downloading in the last day, back into the Downloads view, and every chapter from here on

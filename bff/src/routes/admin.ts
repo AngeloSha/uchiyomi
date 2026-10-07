@@ -98,7 +98,7 @@ import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
 import {
-  initialiseBulkChapterDeleteRuns, readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
+  readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
 } from '../lib/bulkChapterDelete';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
@@ -546,9 +546,6 @@ export const CATALOG_PAGE_MAX = 400;
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
-  // A destructive bulk run is persisted. Anything a previous process left running is made explicitly interrupted
-  // before this process accepts a new one; completed and partial results remain readable after a restart.
-  await initialiseBulkChapterDeleteRuns();
   // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
   await app.register(numberingRoutes);
   // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
