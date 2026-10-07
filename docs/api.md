@@ -956,7 +956,8 @@ POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
 POST   /api/series/search         GET    /api/leaderboard
-GET    /api/books/:id             GET    /api/books/:id/pages
+GET    /api/books/:id             POST   /api/books/:id/refetch
+GET    /api/books/:id/pages
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan             GET    /api/series/:id/listing
@@ -1045,10 +1046,14 @@ below will touch) — and `pruned` — the file was deleted by the read-chapter 
 row is a tombstone: reading progress is still attached, but there are no pages behind it. A pruned chapter
 is listed by `GET /api/series/:id/books` (with the flag) and skipped everywhere a chapter is *served*:
 `next`, Continue reading, the OPDS feed, the offline plan; its download manifest answers **410** `pruned`.
-Since v0.55.4 it also carries `prunedReason: 'deleted' | 'missing' | null` — why the file is gone, null while it
-has one: `'deleted'` by *Delete files*, or by *Rescan everything* for a file gone from a library built by hand
-(`owned` false: the web says *File no longer on disk*, not *Deleted from the server*); `'missing'` by *Verify
-chapter files*; null for the read-chapter cleanup, a chapter's own delete, or a mark from before v0.37.0.
+Since v0.55.4 it also carries `prunedReason`; in v0.55.8 its complete shape is
+`'deleted' | 'missing' | 'rescan_missing' | null` — why the file is gone, null while it has one. `'deleted'` is a
+deliberate *Delete files*, chapter delete or bulk cleanup; `'missing'` is *Verify chapter files* finding no file
+behind a downloaded row; `'rescan_missing'` is *Rescan everything* finding a read-library entry absent. A null reason
+on a tombstone is the read-chapter cleanup or a legacy deliberate mark. Missing evidence is not presented as a
+deliberate deletion and is eligible for automatic recovery; a deliberate tombstone remains held until somebody asks
+to restore it. A v0.55.8 migration conservatively changes ambiguous legacy, unowned `'deleted'` rows to
+`'rescan_missing'` unless an audit row proves a deliberate deletion.
 
 Since v0.40.0 every chapter object also carries `missingPages: number[] | null`: 1-based indices whose
 images are repair placeholders in a partial chapter. `GET /api/books/:id/pages` keeps those entries in
@@ -1064,6 +1069,17 @@ chapter. `number` and `metadata.numberSort` stay the start, 1 there, which is wh
 that one number and `numberEnd: null`. Every number from the start to the end counts as held: no gap, ghost or
 fetch is offered inside it, and finishing the file tells the trackers its end. The download manifest's `number` is
 the same display string.
+
+**Restore one deliberate tombstone by book id (v0.55.8).** A tombstone keeps its original `id`, `number`,
+`numberEnd`, title and the caller's `readProgress`; duplicate chapter numbers and ranges therefore remain distinct.
+`POST /api/books/:id/refetch` is the member-authorized restore used by a deleted ghost. It accepts no body and derives
+the only permitted copy from the row's stored source and source-chapter id. The row must be visible to this account,
+under the download root at the canonical single-chapter path, deliberate rather than `missing`/`rescan_missing`, and
+its exact source copy must still be followed, enabled, outside cooldown and inside the account's age limit. The copy
+is pinned: an explicit restore may override the blocklist but never falls back to another copy. The standard download
+job answer is `{ok, started, folder, total}`; **404** deliberately covers an unknown/inaccessible id, and **409**
+`not_refetchable` covers a manual file, range, unsafe path, stale/unavailable copy, pending renumber or unwritable
+download root (`busy` while another writer owns the folder). Progress remains on the same book id when it lands.
 
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
@@ -1332,6 +1348,20 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+**Account settings.** `GET /api/settings` answers the caller's whole forwards-compatible object; `PUT /api/settings`
+takes top-level keys directly and merges them into that object (an object value is replaced whole). Unknown keys stay
+accepted and retained for compatibility. v0.55.8 validates three public keys:
+
+- `librarySort: 'updated' | 'new' | 'az' | 'unread'`, the Library's saved default. A valid URL sort wins for that
+  visit; the web writes this key only from a direct sort-control click, so opening a shared URL does not change it.
+- `homeCollections: string[]`, ordered, de-duplicated, at most three collection ids owned by the caller. Missing means
+  the legacy first three nonempty Lists; `[]` explicitly means no Home List rails. A selected empty List keeps its
+  slot. Home ignores an already-stored stale/unowned id and the web app omits it on the next edit; the API refuses a
+  request that tries to add one.
+- `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
+
+The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
+
 **Lists** (collections; the app's *Lists*). `GET /api/collections/:id` answers `{id, name, accent, sort_order, items}`:
 the list's series in its own order (`position`, which `PUT /api/collections/:id/items {seriesIds}` rewrites; since
 v0.55.7 `POST /api/collections/:id/items` adds a series at the end, as the bulk add does), each enriched like every
@@ -1345,6 +1375,8 @@ The order chosen for each list is kept in the caller's settings, `PUT /api/setti
 "za" | "read" | "unread" | "latest"}}` — the whole map, since the settings merge top-level keys; the list's own order
 is not stored. The reader's defaults are the settings' `reader` object, and since v0.55.7 (#170) it carries
 `coverEdges` (default `true`): `false` takes the cover's colour off the reader's top and bottom edges.
+`homeCollections` controls which zero to three Lists also appear on Home and in what order. Home shows up to twelve
+series per selected rail; an empty selected List reserves its position and appears once it has a series.
 
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
@@ -1414,6 +1446,8 @@ POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
 POST   /api/admin/series/bulk/hide
 POST   /api/admin/series/bulk/auto-update
 POST   /api/admin/series/bulk/chapters/delete
+GET    /api/admin/series/bulk/chapters/delete
+POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 POST   /api/admin/series/:id/main-source
@@ -1457,8 +1491,9 @@ foot of the admin menu prints it. Whether a newer one exists is Health's `update
 the page reads from its own copy of that answer: this route asks GitHub nothing.
 
 **Libraries.** A library is declared on one or more folders under the library root (since v0.55.1, #148): `POST
-/api/admin/libraries {name, paths, ageRating?}`, where `paths` is every folder it holds and `path` alone still means
-one; `PATCH /api/admin/libraries/:id` takes the same fields, `paths` replacing the list whole, and `members`. Each
+/api/admin/libraries {name, paths, ageRating?, anilistLookup?}`, where `paths` is every folder it holds and `path` alone
+still means one; `PATCH /api/admin/libraries/:id` takes the same fields, `paths` replacing the list whole, and
+`members`. Each
 folder is checked as `path` always was, the same folder twice is held once, and a folder belongs to one library at
 most: **409** `duplicate` names the first folder another library holds (`path`) and that library (`library: {id,
 name}`), and nothing is saved. `GET /api/admin/libraries` gives each library its `paths`, the first first -- the one
@@ -1474,10 +1509,19 @@ series, sample}` (the series an admin can see, and up to 20 of their titles), an
 holds; with `&id=` it is an edit of that library, counting what would leave it as well as what would come in. A folder
 is matched by its name: `_` and `%` in it are not wildcards.
 
+Since v0.55.8 ([#168](https://github.com/AngeloSha/uchiyomi/discussions/168)), `anilistLookup` defaults true and
+`GET /api/admin/libraries` returns it as `anilist_lookup` on every row, including the default library. False prevents
+automatic art lookup, title/id matching, reading-direction/type repair, the startup match check and scheduled
+enrichment for series currently in that library. It writes no negative lookup cache entry and clears none of the art,
+links, type or direction already stored; moving a series immediately makes the destination library's policy apply.
+Explicit Admin Art, Relink, Check online matches, tracker import/sync and Discover actions remain available because
+they are manual actions; clients should say that those actions may contact AniList.
+
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`, plus
+`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`,
+`deleted_as_ghosts`, plus
 `extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
@@ -1489,6 +1533,7 @@ after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` 
 `scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
 `hideNoticeTypes` (notice chapters, below),
+`deletedAsGhosts` (deliberate tombstones as ghosts, off by default; missing/rescan-missing evidence is excluded),
 `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Since v0.52.0 it also takes `mangadexLangs` and `unstatedLang`: `mangadexLangs` is the MangaDex
@@ -1653,6 +1698,19 @@ neither fetched nor counted as missing. A series only ever *waits* for a group w
 list is non-empty: with none, the best available copy is taken at once, so a series from a source that
 names no groups is never held.
 
+Since v0.55.8 a preference save and the stored-listing replacement are atomic. Each affected series is rebuilt from
+all stored copies with the effective global/per-series preferences, source priority, follow order and the same release
+chooser used by a fresh check; title, date, scanlator, source, source id, copy order and status change together. The
+visible status may be `blocked`, while `series_listing.unblocked_status` retains the calculated natural `available`,
+`held` or `covered` state so an unblock restores it faithfully (a legacy blocked row starts conservatively as `held`
+until refreshed). A series-row lock then transaction advisory lock serializes replacement; a global change locks the
+settings row and processes series ids in sorted order. Effective preferences are re-read after the lock. If any
+reapplication fails, the preference rolls back and the route answers **503** `blocklist_apply_failed`.
+
+The same effective block applies to ordinary Fetch, archive fallback, partial repair and same-release rotation. Only
+a copy explicitly pinned by a user action may override it; a pinned download receives no fallback. Ordinary automatic
+fallback may try followed copies that pass the rules, but a 403/429 refusal never falls back or starts a source hunt.
+
 **Source order** (since v0.47.0, from #93). When a series follows more than one source, the copy of a number
 it does not have yet is taken from the highest-ranked source that lists it. The order ranks **below** the
 release preferences and the hosted-before-external rule, so it decides only between copies those call equal —
@@ -1680,12 +1738,15 @@ gathered from the files on disk and from the persisted listings of every source 
 themselves; this is one call for the whole library), merged by the same group equality the release rules
 use, `series` counting the series the group appears on. Memoised for 30 seconds.
 
-**Deleting a chapter from the server, and fetching it again.** Both are admin actions on chosen chapters,
-and both touch the download directory only: a chapter the scanner found in the read library is never
+**Deleting a chapter from the server, and fetching it again.** The series-wide delete/refetch controls below are admin
+actions on chosen chapters; the narrower `POST /api/books/:id/refetch` described under Library is available to a
+member who may download and restores only that tombstone's canonical stored copy. All touch the download directory
+only: a chapter the scanner found in the read library is never
 touched (`owned: false` on the Book), on the same footing as the read-chapter cleanup. Neither takes a
 typed confirmation; the client confirms with the count.
 `POST /api/admin/series/:id/chapters/delete {bookIds[]}` (1–500) deletes the files and keeps the rows as
-tombstones, so reading history survives and the updater does not re-download them; the cover moves to the
+tombstones with `pruned_reason = 'deleted'`, so reading history survives and the updater does not re-download them;
+the cover moves to the
 lowest live chapter. A chapter somebody has a bookmark in is skipped (`bookmarked`), as the cleanup skips
 it: a bookmark names a page inside the file. A chapter whose file *and* folder are missing is skipped
 (`unlink_failed`) rather than marked — that is the download volume not being mounted, not a deleted
@@ -1735,16 +1796,28 @@ and gap steps, Fix everything and the slow archive (whose queue entry waits wher
 *Fetch again* and *Fill now* on the series still work. It answers `{ok: true, applied, autoUpdate, skipped: [{id,
 reason}]}`, `reason` one of `not_found`, `hidden`, `merged`; one `series.settings` audit row per series.
 
-`POST /api/admin/series/bulk/chapters/delete {seriesIds, pause?}` deletes the downloaded chapters of each series: the
-series page's *Remove chapters* (`chapters/delete`) over every live chapter in the download folder but one — the
-cover chapter (`cover_book_id`, else the lowest), kept so the tile and the thumbnails keep their art. Its rules hold:
-nothing outside the download folder is touched, a bookmarked chapter is skipped, the rows stay as tombstones with
-everyone's progress, and *Fetch again* brings a chapter back. **Not** *Delete files*: that one takes the whole folder
-from every root and stays behind its typed confirm. A series a download, repair or check is inside is skipped as
-`busy`. `pause` (default `true`) also unmonitors each series it deleted from. It answers `{ok: true, applied, chapters,
-bytes, kept, paused, skipped: [{id, reason, message?}]}`, `reason` one of `not_found`, `merged`, `busy`,
-`nothing_to_delete`, `refused` (the download folder refuses writes; `message` says why). One `series.chapters_delete`
-audit row per series, as the single route writes it.
+`POST /api/admin/series/bulk/chapters/delete {seriesIds, pause?}` now claims a detached persisted run and answers
+**202** `{ok, runId, total}` before file work. Only one may be active (**409** `bulk_delete_busy`). The worker applies
+the series page's *Remove chapters* over every live download-root chapter except the cover (`cover_book_id`, else the
+lowest owned chapter); it keeps manual files and bookmarks, and it keeps every row and everyone's progress. **Deleting
+a chapter somebody is reading can still lose their position in that file.** This is not *Delete files*, which takes
+the whole folder from every root and stays behind its typed confirm. `pause` defaults true and unmonitors a series only
+after at least one file was deleted.
+
+The worker claims the shared folder lock before awaited work and holds it through unlinking, optional unmonitoring and
+the audit. It rechecks hidden, merged, busy and ownership state when that series executes. `GET` on the same path,
+optionally `?runId=<uuid>`, returns `{run}` with `status` (`running`, `done`, `cancelled`, `failed`, `interrupted`),
+timestamps, `cancelRequested`, `pause`, `total`, `done`, `summary`, `results` and `error`; each result carries
+`outcome`, chapters, bytes, kept files, pause state, chapter-level skip counts and a stable reason (`not_found`,
+`hidden`, `merged`, `busy`, `nothing_to_delete`, `refused`, `cancelled` or `failed`). Browser reloads and proxy
+timeouts can therefore rejoin rather than retry a destructive request. An active row left by a stopped server becomes
+`interrupted` at boot. `POST /api/admin/series/bulk/chapters/delete/cancel {runId?}` records a cancellation request,
+observed between series and never during unlinking.
+
+The v0.55.8 database changes behind these contracts are additive: `libraries.anilist_lookup`,
+`series_listing.unblocked_status`, and the persisted `admin_bulk_delete_runs` table. `lib_books.pruned_reason` remains
+the existing text column and gains the `rescan_missing` provenance value plus the audited legacy backfill described
+above. Rolling the application back does not require dropping any of them; an older build simply does not name them.
 
 `POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared through the
 fold described under *Typing a title to confirm* below (**400** `confirm_mismatch` otherwise) — is the
@@ -2614,6 +2687,14 @@ numbers the sources listed at the last check with no chapter row at all, from `s
 reason they are absent, the chapter floor included. They are merged into the ordinary chapter order by number,
 not appended. Since v0.50.0 a `covered` number — another site's split of a chapter this server holds — is not a
 ghost: the reader has the chapter, and Mihon could neither fetch it nor clear it.
+
+The narrower v0.55.8 **Show deleted chapters as ghosts** setting (`deleted_as_ghosts`) exposes deliberate
+tombstones in the same not-downloaded form even when the broad Komga ghost switch is off; `missing` and
+`rescan_missing` evidence stays excluded. One absent-book predicate now governs the series list, one-book detail,
+page list, page bytes and thumbnails: any tombstone a setting exposes is `READY`/not downloaded in both list and
+detail, returns an empty page list, and has no page or thumbnail bytes. The web's hidden-ghost control likewise counts
+both source ghosts and deliberate tombstones, so a saved hide preference can never hide the control needed to reveal
+them.
 
 A ghost's id is `g_<series id>~<number>`, the decimal point kept as a point (chapter 10.5 is `g_s_…~10.5`).
 The separator is a `~` and not a `_` because `g_s_x_1_5` reads equally as series `s_x` chapter 1.5 and as

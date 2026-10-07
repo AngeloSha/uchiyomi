@@ -84,7 +84,7 @@ each connected by you under **Profile → Connections → Progress tracking**, a
 import) and reporting what you finished. Nothing carrying a token goes to a tracker you have not connected.
 
 Two of those services are also asked **without** any token, by title, whether or not anyone has connected
-them. Every series added gets its title sent to AniList (`graphql.anilist.co`) once, for banner and cover
+them. By default, every series added gets its title sent to AniList (`graphql.anilist.co`) once, for banner and cover
 art; a series with no art on record is looked up the same way the first time its art is requested, and that
 match also records the AniList id progress sync writes against. The admin panel's **Cover & banner health**
 card — its *Backfill*, and picking art for one series by hand — asks AniList again and, for wide cover art,
@@ -92,6 +92,14 @@ Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every
 *Trending* rail is AniList's own trending list, fetched at most once every six hours. These lookups carry
 your server's IP address and the title asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
 moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.
+
+Since v0.55.8 ([discussion #168](https://github.com/AngeloSha/uchiyomi/discussions/168)), each library — the default
+one included — has **Look up art and metadata on AniList automatically** under Admin → Content → Libraries. Switch it
+off to prevent automatic art lookup, title/id matching, reading-direction/type repair, startup match checks and
+scheduled enrichment for series currently in that library. Uchiyomi creates no negative lookup cache entry while it
+is off, clears none of the art, links, type or direction it already learned, and applies the destination library's
+policy when a series moves. Explicit Admin Art, Relink, Check online matches, tracker import/sync and Discover actions
+remain available and can contact AniList because they are actions you asked for, rather than background enrichment.
 
 `ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL` are **test knobs**: they point an adapter at a
 stand-in server instead of the real service (the defaults are `https://graphql.anilist.co`,

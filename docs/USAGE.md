@@ -94,6 +94,11 @@ to the end first. Each cover shows a **NEW** ribbon when
 there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
 filters currently show.
 
+Since v0.55.8 ([discussion #150](https://github.com/AngeloSha/uchiyomi/discussions/150)), the sort you click —
+**Updated**, **Newest**, **A–Z** or **Most unread** — becomes this account's Library default on every device. A valid
+`sort` in a shared Library URL wins for that visit without changing the saved default; only clicking the sort control
+saves one. The grid stays in the order you picked if saving fails, while the former default is kept for the next visit.
+
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
@@ -105,6 +110,13 @@ the default), **A–Z**, **Z–A**, **Last read** (what you read most recently f
 (the series whose newest chapter came most recently first). Each list remembers its own order, on your account, so it
 opens the same way on your other devices. **Edit** removes series from the list and moves them within your order with
 the arrows; a series added to a list goes to its end.
+
+Each List card also has **Show on Home** (v0.55.8, the remaining part of
+[#164](https://github.com/AngeloSha/uchiyomi/discussions/164)). Pick zero to three and arrange their Home positions
+with the earlier/later arrows. Home follows that order and shows up to twelve series per rail. An empty selected List
+keeps its position and appears as soon as it has a series; a deleted List is ignored and disappears from the saved
+choice on the next edit. Choosing none is deliberate and shows no List rails. Until you edit this once, Home keeps the
+old behaviour: the first three nonempty Lists.
 
 **Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
 and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
@@ -301,8 +313,13 @@ says how many are in hand. The chips:
   tiles keep their covers. Files in a library you built by hand and bookmarked chapters are left alone, the
   chapters stay listed with everyone's reading history, and *Fetch again* brings one back. **Also stop updates
   for these series**, ticked by default, unmonitors them too — otherwise the next check downloads their newest
-  chapters again. A series a download is running for is skipped and counted. This is not *Delete files*, which
-  takes a series' whole folder and stays a per-title step on **Content → Library**.
+  chapters again. **Deleting a chapter somebody is reading can lose their position in that file**, which the
+  confirmation says before it starts. The cleanup is a saved server job: its window shows series and chapter
+  progress, may be closed, and rejoins after a reload or proxy timeout instead of starting an unknown second delete.
+  **Stop after this series** requests cancellation between series, never while a file is being removed. A series that
+  is hidden, merged or busy when its turn arrives is skipped and named; a server restart marks the unfinished run
+  interrupted. This is not *Delete files*, which takes a series' whole folder and stays a per-title step on
+  **Content → Library**.
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
@@ -448,6 +465,13 @@ no check needed, and nothing fetches it (the hourly check, the slow archive, *Fe
 group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
 just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
 Settings → Scanlators**. A chapter already downloaded from a group you block stays on the shelf.
+
+In v0.55.8 the preference and every affected stored chapter choice change together. If the rebuild cannot finish,
+nothing is saved and the page reports the failure; a concurrent check cannot put an older blocklist back over the new
+one. Unblocking restores whether a chapter was naturally available, held or covered by another split, rather than
+turning every row available. Fetch, slow-archive recovery, partial repair and same-release rotation all obey the same
+block. The one exception is a copy you deliberately tap in **Versions**: that named copy may be blocked, but it is
+pinned and never falls back to a different source.
 
 **Patience** is how long a new chapter waits for a preferred group before the best available copy is
 fetched instead. The default is 2 days, which is roughly how far behind the second group on a popular
@@ -2149,7 +2173,10 @@ it back; Mihon lists it as *not downloaded*, as the switch above would. Nothing 
 place, everyone's reading history and its counts, and it is still not downloaded again by itself. A chapter whose
 file *Verify chapter files* found missing is not one of these — the hourly check fetches those back — and keeps its
 own look, as does a file gone from a library you built by hand (*File no longer on disk*). A copy saved on your
-device keeps the row a chapter you can open.
+device keeps the row a chapter you can open. Anyone allowed to download may press ☁: Uchiyomi restores only the exact
+source copy recorded on that deleted row, if the series still follows that source and it is safe and available. It
+never guesses another copy or fallback, and a manual-library file or a file holding a chapter range is left for an
+admin to restore by hand.
 
 Since v0.43.0 the missing chapters can be marked read on the series page (section 4, *Marking chapters you
 don't have as read*), and with this switch on the marks reach Mihon:
@@ -2205,6 +2232,14 @@ source names sorted last and flagged `source?`.
 `Manga/Seinen` belongs to the inner one: the most specific folder wins, whichever library holds it and however
 many other folders either library holds. Removing the inner one, or taking `Manga/Seinen` out of it, hands its
 series back to `Manga`, not to the default.
+
+**AniList privacy per library** (v0.55.8,
+[#168](https://github.com/AngeloSha/uchiyomi/discussions/168)). Each library card, the default library included, has
+**Look up art and metadata on AniList automatically**. Turn it off to stop background art, title/id, reading-direction
+and type lookups for series currently filed there, including the startup online-match check and scheduled enrichment.
+Nothing already learned is erased, and moving a series follows the destination library's choice. Admin Art, Relink,
+Check online matches, tracker import/sync and Discover still work when you choose them; those manual actions say that
+they may contact AniList.
 
 **Age rating.** A library can carry one, and everything in it inherits it, so marking a shelf 18+ is one
 action rather than two hundred. A single title can still be rated differently from its own page, which is
@@ -2972,6 +3007,9 @@ scrolls under it, momentum scrolling, covers that sharpen in. On a modest PC tho
 measured in headless browsers on a 200-series library at 1440 px, switching it on took scrolling from about
 40 to 60 frames a second in Chrome at a 4× CPU throttle, and from under 8 to about 58 in Firefox. It turns
 off:
+
+Since v0.55.8 ([#174](https://github.com/AngeloSha/uchiyomi/issues/174)), client-side links switch pages
+synchronously in this mode; the outgoing page cannot leave the main body hidden while the next route is already open.
 
 - the animated background, the film grain and the vignette;
 - every backdrop blur, with the glass panels turning solid;
