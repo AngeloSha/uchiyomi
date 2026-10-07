@@ -339,14 +339,20 @@ export async function rescanMergeWalk(ctx) {
       await page.evaluate(() => { document.querySelector('[data-rescan-merges]')?.scrollIntoView({ block: 'center' }); });
       await shot(`rescanmerge-${t}-1-preview`);
 
-      // Apply.
+      // Apply -- and this pass's Apply, told from the last pass's (whose line reads the same) by the preview it applied.
+      const planId = (await call('/api/admin/tasks/rescan/status'))?.plan?.id;
       await tap(page, '[data-rescan-apply]');
+      const done = await waitFor(async () => {
+        const st = await call('/api/admin/tasks/rescan/status');
+        return st && !st.running && st.last?.plan === planId ? st : null;
+      }, 90_000, 500);
+      check(`rescanmerge @${t}: Apply ends, its result this preview's`, !!planId && !!done, JSON.stringify(done?.last ?? null));
       const merged = say('{n} series merged into the series their files went to', { n: 2 });
       const result = await waitFor(async () => {
         const s = await textOf(page, '#task-rescan');
         return s?.includes(merged) && !(await page.$('[data-rescan-panel="running"]')) ? s : null;
-      }, 60_000, 500);
-      check(`rescanmerge @${t}: Apply says both series were merged`, !!result, JSON.stringify(await textOf(page, '#task-rescan')));
+      }, 30_000, 500);
+      check(`rescanmerge @${t}: Apply says both series were merged`, !!result && done?.last?.merged === 2, JSON.stringify(await textOf(page, '#task-rescan')));
       await page.evaluate(() => document.getElementById('task-rescan')?.scrollIntoView({ block: 'center' }));
       await shot(`rescanmerge-${t}-2-result`);
 

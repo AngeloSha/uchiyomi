@@ -245,8 +245,15 @@ export async function rescanWalk(ctx) {
       await page.evaluate(() => { document.querySelector('[data-rescan-panel="preview"]')?.scrollIntoView({ block: 'start' }); window.scrollBy(0, -96); });
       await shot(`rescan-${t}-1-preview`);
 
-      // Apply, and what it did: the Tasks line -- this pass's, told from the last pass's by the count of moved files.
+      // Apply, and what it did: the Tasks line -- this pass's, told from the last pass's (since v0.55.7 its line reads the
+      // same: a renamed chapter follows its file, so no earlier pair is counted again) by the preview it applied.
+      const planId = (await call('/api/admin/tasks/rescan/status'))?.plan?.id;
       await tap(page, '[data-rescan-apply]');
+      const done = await waitFor(async () => {
+        const st = await call('/api/admin/tasks/rescan/status');
+        return st && !st.running && st.last?.plan === planId ? st : null;
+      }, 90_000, 500);
+      check(`rescan @${t}: Apply ends, its result this preview's`, !!planId && !!done, JSON.stringify(done?.last ?? null));
       const applied = [say('{n} chapters marked as no longer on disk', { n: 2 }), moved, say('1 chapter now follows its moved or renamed file'),
         say('1 series renumbered by the new rules')].join(' · ');
       const result = await waitFor(async () => {
