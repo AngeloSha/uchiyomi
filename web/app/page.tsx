@@ -24,8 +24,16 @@ interface CollectionRow { id: string; name: string; accent: string | null; item_
 
 /** One home rail per (non-empty) collection, capped at 3 — links through to the collection page. */
 function CollectionRails() {
+  const { user } = useAuth();
   const { data } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections'), staleTime: 300000 });
-  const cols = (data?.content ?? []).filter((c) => c.item_count > 0).slice(0, 3);
+  const all = data?.content ?? [];
+  const saved = user?.settings?.homeCollections;
+  // No setting means the pre-v0.55.8 behaviour.  Once a reader makes an explicit choice, including choosing
+  // none, that exact order wins.  Empty selected lists remain in the setting but their rail stays quiet until
+  // something is added; stale or foreign ids cannot occur in this account-scoped response and are ignored.
+  const cols = Array.isArray(saved)
+    ? saved.slice(0, 3).map((id) => all.find((c) => c.id === id)).filter((c): c is CollectionRow => !!c)
+    : all.filter((c) => Number(c.item_count) > 0).slice(0, 3);
   if (!cols.length) return null;
   return (
     <>

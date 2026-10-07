@@ -858,10 +858,37 @@ export default async function personalRoutes(app: FastifyInstance) {
     return row?.data ?? {};
   });
 
-  app.put('/api/settings', async (req) => {
+  app.put('/api/settings', async (req, reply) => {
     const uid = userIdOf(req);
     // zod 4 requires a key schema as well as a value schema; z.record(valueOnly) was a v3 signature.
-    const data = z.record(z.string(), z.any()).parse(req.body ?? {});
+    const body = z.record(z.string(), z.any()).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'bad_settings', message: 'Settings must be an object.' });
+    const data = body.data;
+    // Most of this object intentionally remains forwards-compatible: old servers must retain settings written
+    // by a newer web client.  The settings that alter navigation or name database rows are stricter, though.
+    // Without this boundary an arbitrary sort leaks into the catalogue query, and a forged collection id can
+    // make Home disclose whether another account owns it.
+    if ('librarySort' in data) {
+      const sort = z.enum(['updated', 'new', 'az', 'unread']).safeParse(data.librarySort);
+      if (!sort.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose a valid Library sort.' });
+      data.librarySort = sort.data;
+    }
+    if ('showAllChapters' in data && typeof data.showAllChapters !== 'boolean') {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Show all chapters must be on or off.' });
+    }
+    if ('homeCollections' in data) {
+      const parsed = z.array(z.string().min(1).max(64)).max(30).safeParse(data.homeCollections);
+      if (!parsed.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
+      const ids = [...new Set(parsed.data)];
+      if (ids.length > 3) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
+      if (ids.length) {
+        const owned = await q<{ id: string }>('SELECT id FROM collections WHERE user_id = $1 AND id = ANY($2)', [uid, ids]);
+        if (owned.length !== ids.length) {
+          return reply.code(400).send({ error: 'bad_settings', message: 'One of those lists is no longer available.' });
+        }
+      }
+      data.homeCollections = ids;
+    }
     await q(
       `INSERT INTO app_settings (user_id, data) VALUES ($1, $2::jsonb)
        ON CONFLICT (user_id) DO UPDATE SET data = app_settings.data || EXCLUDED.data`,

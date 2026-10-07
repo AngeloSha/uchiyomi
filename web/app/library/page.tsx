@@ -54,7 +54,12 @@ function conditionFrom(read: string, status: string, genres: string[], lib: stri
 function LibraryInner() {
   const params = useSearchParams();
   const router = useRouter();
-  const sortKey = params.get('sort') || 'updated';
+  const { isAdmin, user, status: authStatus, setSettings } = useAuth();
+  const validSort = (v: unknown): v is string => typeof v === 'string' && SORTS.some((s) => s.key === v);
+  const urlSort = params.get('sort');
+  // A sort in a shared URL controls this visit only.  With none (or old/junk input), the account's explicit
+  // default wins; clicking a sort below is the only thing that changes that default.
+  const sortKey = validSort(urlSort) ? urlSort : validSort(user?.settings?.librarySort) ? user!.settings.librarySort : 'updated';
   const active = useMemo(() => SORTS.find((s) => s.key === sortKey) || SORTS[0], [sortKey]);
 
   // Filters live in the URL so they survive the back button and can be shared, and they are part of the
@@ -102,7 +107,6 @@ function LibraryInner() {
   // phone, and a notice has to rise above whichever height it has.
   const toolbarRef = useRef<HTMLDivElement>(null);
   useLayer('toolbar', selecting && picked.size > 0, { ref: toolbarRef });
-  const { isAdmin, user, status: authStatus } = useAuth();
   // Series | Downloads (v0.49.0): which of the page's two views, from the URL on every render -- a link to
   // `?view=downloads` while already on /library (the desktop's header button, the palette) does not remount
   // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
@@ -123,6 +127,14 @@ function LibraryInner() {
     // first chapter). Any change made on the page has moved on from it.
     next.delete('folder');
     router.replace(`/library?${next.toString()}`);
+    if (k === 'sort' && validSort(v)) {
+      const previous = user?.settings?.librarySort;
+      setSettings({ librarySort: v });
+      void api('/api/settings', { method: 'PUT', json: { librarySort: v } }).catch(() => {
+        setSettings({ librarySort: previous });
+        toast(tr('Could not save'), 'error');
+      });
+    }
   };
 
   // Everything `activeCount` counts, cleared. Sort survives because it is not a filter -- clearing it would
