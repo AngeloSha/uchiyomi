@@ -642,6 +642,7 @@ function ArtReview() {
           <div>
             <h2 className="font-display text-lg font-semibold">{tr('Cover & banner health')}</h2>
             <p className="text-xs text-fog-500">{tr('Backfill re-hunts AniList + MangaDex for missing art. Click a series to pick art by hand.')}</p>
+            <p className="mt-1 text-[11px] text-fog-500">{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}</p>
           </div>
           <button onClick={startBackfill} disabled={!!job?.running} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
             {job?.running ? tr('Backfilling {done} of {total}…', { done: job.done, total: job.total }) : tr('Backfill missing banners')}
@@ -832,6 +833,9 @@ function Tasks() {
               {taskResult(t.lastResult)}
               {typeof t.remaining === 'number' && t.remaining > 0 && (
                 <span className="text-amber-300"> · {tr('{n} waiting', { n: t.remaining.toLocaleString() })}</span>
+              )}
+              {t.id === 'matches' && (
+                <span className="mt-1 block">{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}</span>
               )}
             </p>
             {t.id === 'repair' && (

@@ -2342,10 +2342,12 @@ paths:
       description: >-
         Available to a member who may download. The server derives the only permitted copy from the tombstone:
         its canonical download-root path, stored source and stored source chapter id. It accepts no client-supplied
-        source, chapter number or path. The source must still be followed, enabled, outside cooldown and allowed by
-        the caller's age boundary. The copy is pinned, so this explicit choice may override a scanlator block, but
-        it never falls back to another copy. Ranges, manual/read-library files, missing evidence and a copy no longer
-        canonical are not refetchable. Progress stays attached to the same book id.
+        source, chapter number or path. The exact historical source need not still be followed: the tombstone's
+        book id, series, stored source, stored source chapter id and canonical download-root path are its authority.
+        That source must still have an installed adapter, be enabled, be outside cooldown and be allowed by the
+        caller's age boundary. The copy is pinned, so this explicit choice may override a scanlator block, but it
+        never falls back to another copy. Ranges, manual/read-library files, missing evidence and a copy whose stored
+        identity or canonical path changed are not refetchable. Progress stays attached to the same book id.
       parameters:
         - name: id
           in: path

@@ -146,6 +146,15 @@ test('the dialog keeps a list of folders, sends `paths`, and the browser\'s rows
   assert.equal(dialog.match(/btn-key-primary/g)?.length, 1, 'the dialog has more or fewer than one filled key');
 });
 
+test('every manual AniList surface states that it can cross an automatic opt-out', () => {
+  const key = "tr('Manual AniList actions can contact AniList even when automatic lookups are off.')";
+  const admin = code(read('app/admin/page.tsx'));
+  assert.ok(admin.split(key).length - 1 >= 2, 'Admin Art or Check online matches does not disclose the manual AniList request');
+  assert.ok(code(read('app/discover/page.tsx')).includes(key), 'Discover does not disclose its manual AniList request');
+  assert.ok(code(read('components/ProfileConnections.tsx')).includes(key), 'AniList tracker import/sync does not disclose its manual request');
+  assert.ok(code(read('components/SeriesEditor.tsx')).includes(key), 'the series Art/Relink surface does not disclose its manual request');
+});
+
 test('a library card and Move to library say the first folder and "+{n} more"', () => {
   // Reintroduce `{l.path || tr('everything not in another library')}` on the card: "the card shows one folder" fails.
   const admin = code(read('app/admin/page.tsx'));

@@ -863,7 +863,10 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
         {linkFor === 'banner' && <LinkField kind="banner" busy={busy === 'banner'} onSet={(u) => void fromLink('banner', u)} onCancel={() => setLinkFor(null)} />}
       </div>
 
-      <p className="text-[11px] leading-relaxed text-fog-500">{tr('Images up to {n} MB. You can also drop one onto a preview.', { n: ART_MAX_MB })}</p>
+      <div className="space-y-1 text-[11px] leading-relaxed text-fog-500">
+        <p>{tr('Images up to {n} MB. You can also drop one onto a preview.', { n: ART_MAX_MB })}</p>
+        <p>{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}</p>
+      </div>
       <FilePicker inputRef={file} onPick={(f) => void upload(fileFor.current, f)} />
       {coverMenu.element}
       {bannerMenu.element}

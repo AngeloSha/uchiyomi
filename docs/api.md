@@ -1073,13 +1073,15 @@ the same display string.
 **Restore one deliberate tombstone by book id (v0.55.8).** A tombstone keeps its original `id`, `number`,
 `numberEnd`, title and the caller's `readProgress`; duplicate chapter numbers and ranges therefore remain distinct.
 `POST /api/books/:id/refetch` is the member-authorized restore used by a deleted ghost. It accepts no body and derives
-the only permitted copy from the row's stored source and source-chapter id. The row must be visible to this account,
-under the download root at the canonical single-chapter path, deliberate rather than `missing`/`rescan_missing`, and
-its exact source copy must still be followed, enabled, outside cooldown and inside the account's age limit. The copy
-is pinned: an explicit restore may override the blocklist but never falls back to another copy. The standard download
-job answer is `{ok, started, folder, total}`; **404** deliberately covers an unknown/inaccessible id, and **409**
-`not_refetchable` covers a manual file, range, unsafe path, stale/unavailable copy, pending renumber or unwritable
-download root (`busy` while another writer owns the folder). Progress remains on the same book id when it lands.
+the only permitted copy from the row's stable book id, series, stored source and source-chapter id, and canonical
+download-root path. A client cannot supply or redirect any of them. The row must be visible to this account and
+deliberate rather than `missing`/`rescan_missing`. Its exact historical source need not still be followed: that stored
+identity is the authority, while its adapter must still be installed, enabled, outside cooldown and inside the
+account's age limit. The copy is pinned: an explicit restore may override the blocklist but never falls back to
+another copy. The standard download job answer is `{ok, started, folder, total}`; **404** deliberately covers an
+unknown/inaccessible id, and **409** `not_refetchable` covers a manual file, range, unsafe path, changed identity or
+canonical path, unavailable adapter, pending renumber or unwritable download root (`busy` while another writer owns
+the folder). Progress remains on the same book id when it lands.
 
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the

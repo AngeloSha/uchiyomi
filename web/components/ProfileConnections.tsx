@@ -157,6 +157,9 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
           <>
             {tr('Finished chapters sync automatically')}
             {t.lastSyncAt && <> · {tr('last synced {when}', { when: relativeTime(t.lastSyncAt) })}</>}
+            {t.provider === 'anilist' && (
+              <span className="mt-1 block">{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}</span>
+            )}
             {/* Notes are spans inside the help paragraph rather than paragraphs of their own: a <p> may not
                 hold a <p>, and a block-level span keeps them inside this provider's row of the divider list. */}
             {t.expiringSoon && (
@@ -184,7 +187,9 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
       <Row
         className={open ? 'border-b-0 pb-1' : undefined}
         label={tr('Sync your reading to {name}', { name: label })}
-        help={t.lastError ? <span className="text-red-300">{t.lastError}</span> : undefined}
+        help={t.provider === 'anilist'
+          ? <>{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}{t.lastError && <span className="mt-1 block text-red-300">{t.lastError}</span>}</>
+          : t.lastError ? <span className="text-red-300">{t.lastError}</span> : undefined}
       >
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={formId} className="chip text-xs">
           {open ? tr('Cancel') : tr('Connect')}

@@ -479,6 +479,9 @@ export default function DiscoverPage() {
                   searched — and search is one of the surfaces the reveal now changes. */}
               <AdultToggle alsoWhen={showAdultChip} className="shrink-0 text-xs" />
             </div>
+            <p className="mt-1 max-w-prose text-[11px] text-fog-500">
+              {tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}
+            </p>
           </div>
           <form onSubmit={search} className="flex w-full items-center gap-2 sm:w-auto">
             <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">

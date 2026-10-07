@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3538
+    "strings": 3539
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -180,6 +180,7 @@
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "该库中的所有内容都会继承它。单个系列仍可在自己的页面上设置不同的分级。",
   "Look up art and metadata on AniList automatically": "自动在 AniList 上查找图片和元数据",
   "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "关闭后，自动查找不会将此库中的标题发送到 AniList。现有图片和匹配结果会保留，手动 AniList 操作仍可连接。",
+  "Manual AniList actions can contact AniList even when automatic lookups are off.": "即使关闭了自动查找，手动 AniList 操作仍可能联系 AniList。",
   "Everything looks healthy": "一切正常",
   "Expired": "已过期",
   "Extensions": "扩展",
