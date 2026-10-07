@@ -2439,7 +2439,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       sourceState.set(sid, st);
       return st;
     };
-    const todo: Array<{ row: typeof eligible[number]; chapter: SourceChapter }> = [];
+    const todo: Array<{ row: typeof eligible[number]; chapter: SourceChapter & { pinned?: boolean } }> = [];
     for (const e of eligible) {
       const l = listed.get(e.number);
       const pick = pickOf.get(e.id);
@@ -2450,7 +2450,10 @@ export default async function adminRoutes(app: FastifyInstance) {
         if (!l || !copy) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
         const st = await stateOf(copy.source);
         if (st !== 'ok') { skipped.push({ id: e.id, reason: st }); continue; }
-        todo.push({ row: e, chapter: copyToChapter(copy, { number: e.number, title: l.title }) });
+        // Carry the explicit-pick marker into startDownloadJob. It is the downloader's authorization to
+        // use this blocked copy, and also prevents downloadWithFallback from silently choosing another
+        // version if the named copy fails.
+        todo.push({ row: e, chapter: { ...copyToChapter(copy, { number: e.number, title: l.title }), pinned: true } });
         continue;
       }
       if (!l) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
