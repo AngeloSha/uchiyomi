@@ -184,11 +184,11 @@ function LibraryInner() {
         json: { seriesIds: [...picked], ...extra },
       });
       // Say what was skipped rather than silently applying to fewer than were selected. Each count its own pair of
-      // keys, and its own words: "1 no longer exist" was English, and wrong English, in every language, and the
+      // keys, and its own words: "1 series is no longer…" names what disappeared in every language, and the
       // Tasks line's "{n} updated" counts extensions.
       const updated = r.applied === 1 ? tr('1 series updated') : tr('{n} series updated', { n: r.applied });
-      const gone = r.skipped.length === 1 ? tr('1 is no longer in the library')
-        : tr('{n} are no longer in the library', { n: r.skipped.length });
+      const gone = r.skipped.length === 1 ? tr('1 series is no longer in the library')
+        : tr('{n} series are no longer in the library', { n: r.skipped.length });
       toast(r.skipped.length ? `${updated} · ${gone}` : updated, 'success');
       settle();
     } catch { toast(tr('Could not apply that'), 'error'); }

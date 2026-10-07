@@ -105,6 +105,12 @@ test('the scan itself sees the app: inline keys, keys() arrays, and nothing from
   assert.ok(keys.get('Needs attention')?.has('lib/status.ts (keys)'), 'a keys() array in lib/ is not scanned');
   assert.ok(keys.has('Up to {n} minutes'), 'an inline tr() in lib/ is not scanned');
   assert.ok(keys.has('Not asked: enough other sources already list this series'), 'an inline tr() in components/ is not scanned');
+  assert.ok(keys.has('1 series is no longer in the library'), 'the Library bulk-action result lost its subject');
+  assert.ok(keys.has('{n} series are no longer in the library'), 'the Library bulk-action plural lost its subject');
+  assert.ok(keys.has('Create admin account & open Uchiyomi'), 'first-run setup no longer names the account it creates');
+  assert.ok(!keys.has('1 is no longer in the library') && !keys.has('{n} are no longer in the library'),
+    'the ambiguous Library bulk-action keys came back');
+  assert.ok(!keys.has('Create admin & open Uchiyomi'), 'the ambiguous first-run action came back');
   // The case on a snippet of its own: the app's one such string (Edit details' file input, v0.53.0) is the last thing
   // in its file, where the naive regex finds no comment end to run to and so eats nothing a real scan would miss.
   const tricky = '<input accept="image/*" hidden />\n<p>{tr(\'After the accept\')}</p>\n{/* a comment */}\n';
@@ -123,6 +129,8 @@ test('every key the app translates is in all eight locale files, non-empty, with
   assert.deepEqual(files, ['ar.json', 'de.json', 'es.json', 'fr.json', 'ja.json', 'pt-BR.json', 'ru.json', 'zh.json']);
   for (const f of files) {
     const dict = JSON.parse(readFileSync(join(ROOT, 'public/locales', f), 'utf8')) as Record<string, unknown>;
+    const meta = dict._meta as { strings?: unknown } | undefined;
+    assert.equal(meta?.strings, Object.keys(dict).length - 1, `${f} has a stale _meta.strings count`);
     const missing: string[] = [];
     const broken: string[] = [];
     for (const k of keys.keys()) {

@@ -186,7 +186,7 @@ export function LoginScreen() {
             />
             {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
             <button type="submit" disabled={busy} className="btn-accent mt-4 w-full disabled:opacity-50">
-              {busy ? tr('Creating…') : tr('Create admin & open Uchiyomi')}
+              {busy ? tr('Creating…') : tr('Create admin account & open Uchiyomi')}
             </button>
             <p className="mt-3 text-center text-xs text-fog-500">{tr('This first account becomes the server admin.')}</p>
           </form>
