@@ -88,6 +88,33 @@ export const PACE_MS = 1500;
  */
 export const busyFolders = new Set<string>();
 
+export interface FolderWriterClaim { readonly folders: readonly string[]; release(): void }
+
+/**
+ * Atomically claim one or more folders in stable order. JavaScript cannot interleave between the final busy checks
+ * and the Set writes, so a multi-series mutation either owns every folder or none. `busy` includes download-job
+ * reservations when routes pass jobBusy; libs may omit it when the shared set is their only peer.
+ */
+export function claimWriterFolders(
+  folders: readonly string[], busy: (folder: string) => boolean = (folder) => busyFolders.has(folder),
+  occupied: () => boolean = () => false,
+): FolderWriterClaim | null {
+  const ordered = [...new Set(folders.filter(Boolean))].sort();
+  // `occupied` is checked in the same turn as the folder tests and Set writes. updateSeries increments runsInside
+  // before its first await, so either that updater owns the series or this destructive claim does.
+  if (!ordered.length || occupied() || ordered.some((folder) => busy(folder))) return null;
+  for (const folder of ordered) busyFolders.add(folder);
+  let held = true;
+  return {
+    folders: ordered,
+    release() {
+      if (!held) return;
+      held = false;
+      for (const folder of ordered) busyFolders.delete(folder);
+    },
+  };
+}
+
 export interface BulkNewestInput {
   /** Every id the caller asked for, in order. Ones not in `live` are reported skipped, never fetched. */
   ids: string[];
@@ -138,6 +165,7 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
 function explain(r: Awaited<ReturnType<typeof updateSeries>>): { outcome: NewestOutcome; reason: string } {
   switch (r.outcome) {
     case 'gone': return { outcome: 'skipped', reason: 'Not in your library any more.' };
+    case 'busy': return { outcome: 'skipped', reason: 'Another task is changing that series.' };
     case 'unrouted': return { outcome: 'skipped', reason: 'No source is installed for this series.' };
     case 'blocked': return { outcome: 'skipped', reason: 'Its source is in a cooldown. Try again later.' };
     case 'source_error': return { outcome: 'failed', reason: 'Its source did not answer.' };
@@ -198,7 +226,7 @@ async function run(input: BulkNewestInput, card?: RunCard): Promise<void> {
     busyFolders.add(row.folder);
     if (card) card.current = { id, title: row.title };
     try {
-      const r = await updateSeries(id, 1, { newestOnly: true, sourceAllowed: input.sourceAllowed, ...(card ? { cancelled: () => stopRequested(card) } : {}) });
+      const r = await updateSeries(id, 1, { newestOnly: true, sourceAllowed: input.sourceAllowed, folderHeld: true, ...(card ? { cancelled: () => stopRequested(card) } : {}) });
       // Only a run that actually asked a source for a listing pays the pause below. The earlier rule
       // (`outcome !== 'gone' && !== 'unrouted'`) counted a cooldown as asked, so 500 series on one
       // cooled-down source slept 12.5 minutes to say "in a cooldown" 500 times; updateSeries now says

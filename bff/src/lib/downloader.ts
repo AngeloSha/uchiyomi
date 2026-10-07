@@ -17,6 +17,7 @@ import { writeAtomic } from './fsAtomic';
 import { pagePace, paceLevel, noteDownloaded, notePageHosts, noteRateLimited, rateKeyOf, restLeft, resumePace } from './pace';
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
+import { realContainedPath } from './fsGuard';
 
 /**
  * A title as a folder name.
@@ -297,7 +298,11 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
   if (!src) throw new Error(`unknown source ${input.sourceId}`);
 
   const rel = chapterFileRel(input.seriesFolder, input.chapter.number);
-  const abs = join(DL_ROOT, rel);
+  // A fresh install may not have downloaded anything yet. Create only the configured root before resolving it;
+  // the untrusted series path is still untouched until realContainedPath has checked every existing component.
+  await mkdir(DL_ROOT, { recursive: true });
+  const abs = await realContainedPath(DL_ROOT, rel);
+  if (!abs) throw new Error('unsafe download path outside the library root');
   // A PATH check under DL_ROOT, and nothing more: is the file this very call would write already there.
   // It is free, so it runs before queueing for a slot, and it catches the same chapter twice in one run.
   //
@@ -708,7 +713,11 @@ async function fetchChapter(
     scanlator: input.chapter.scanlator,
   })));
 
+  // Recheck after the network work and after creating a missing parent: an existing series folder may have
+  // become an intermediate symlink while pages were fetched. Never hand writeAtomic an escaping path.
+  if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
   await mkdir(dirname(abs), { recursive: true });
+  if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
   // Atomic, because the skip check at the top of downloadChapter is a bare stat(): a chapter half-written
   // when the container went down would otherwise be honoured as complete on every later sweep, forever.
   await writeAtomic(abs, zip.toBuffer());
@@ -775,7 +784,9 @@ function holdFor(
         status: input.meta?.status,
         scanlator: input.chapter.scanlator,
       })));
+      if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
       await mkdir(dirname(abs), { recursive: true });
+      if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
       await writeAtomic(abs, zip.toBuffer());
       return { file: rel, pages: total, missing };
     })(),

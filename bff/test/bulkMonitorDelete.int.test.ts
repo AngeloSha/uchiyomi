@@ -35,6 +35,7 @@ const FOLDER = (s: string) => `T!bmd/${s}`;
 const ADMIN = 'bmd-admin';
 let q: any, app: any, updateSeries: any, busyFolders: Set<string>, issueApiToken: any;
 let jobBusy: (folder: string) => boolean;
+let claimDownloadJob: (folder: string, seriesId?: string) => unknown;
 let setDeleteHooks: (hooks: any) => void, closeInterrupted: () => Promise<number>;
 let adminTok: string, adminId: string, apiKey: string;
 let savedGhosts: boolean | undefined;
@@ -47,7 +48,7 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   ({ updateSeries } = (await import('../src/lib/updater')) as any);
   ({ busyFolders } = (await import('../src/lib/bulkNewest')) as any);
-  ({ jobBusy } = (await import('../src/routes/sources')) as any);
+  ({ jobBusy, claimDownloadJob } = (await import('../src/routes/sources')) as any);
   ({ setBulkChapterDeleteTestHooks: setDeleteHooks, closeInterruptedBulkChapterDeleteRuns: closeInterrupted } =
     (await import('../src/lib/bulkChapterDelete')) as any);
   ({ issueApiToken } = (await import('../src/lib/auth')) as any);
@@ -216,6 +217,24 @@ test('the run claims the shared writer lock before an await, pauses under it, re
     afterClaim: async (s: any) => {
       if (s.id !== RACE) return;
       assert.equal(jobBusy(s.folder), true, 'another writer sees the folder as busy immediately after the check');
+      assert.equal(claimDownloadJob(s.folder, s.id), null, 'a route cannot reserve a download after destructive claim');
+      assert.equal((await updateSeries(s.id, 10)).outcome, 'busy', 'the updater itself honours the destructive claim');
+      const legacy = await post(`/api/admin/update/${s.id}`, { maxNew: 10 });
+      assert.equal(legacy.statusCode, 409, `the direct update entered a destructive folder: ${legacy.body}`);
+      assert.equal(legacy.json().error, 'busy');
+      const check = await post(`/api/admin/series/${s.id}/check`, { maxNew: 10 });
+      assert.equal(check.statusCode, 409, `Check entered a destructive folder: ${check.body}`);
+      assert.equal(check.json().error, 'busy');
+      const chapterDelete = await post(`/api/admin/series/${s.id}/chapters/delete`, { bookIds: [`b_${s.id}_2`] });
+      assert.equal(chapterDelete.statusCode, 409, `direct delete entered the bulk folder: ${chapterDelete.body}`);
+      const wholeDelete = await post(`/api/admin/series/${s.id}/delete-files`, { confirm: s.title });
+      assert.equal(wholeDelete.statusCode, 409, `whole-series delete entered the bulk folder: ${wholeDelete.body}`);
+      const rename = await post(`/api/admin/series/${s.id}/rename-folder`, { folder: `${s.folder}-renamed` });
+      assert.equal(rename.statusCode, 409, `rename entered the bulk folder: ${rename.body}`);
+      const merge = await post(`/api/admin/series/${s.id}/merge`, { into: LATER });
+      assert.equal(merge.statusCode, 409, `merge entered the bulk folder: ${merge.body}`);
+      const hide = await app.inject({ method: 'DELETE', url: `/api/admin/series/${s.id}`, headers: { authorization: adminTok } });
+      assert.equal(hide.statusCode, 409, `hide entered the bulk folder: ${hide.body}`);
       claimed();
       await hold;
     },
@@ -249,6 +268,40 @@ test('the run claims the shared writer lock before an await, pauses under it, re
   } finally {
     release?.();
     setDeleteHooks({});
+  }
+});
+
+test('an updater that entered first refuses bulk and direct destructive writers', { skip }, async () => {
+  const UPDATE = 's_bmd_update_first';
+  await seedSeries(UPDATE);
+  const sourceId = 'bmd-update-first';
+  let listed!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => { listed = resolve; });
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const { registerAdapter } = await import('../src/lib/sources');
+  registerAdapter({
+    id: sourceId, name: 'Writer hold', lang: 'en',
+    search: async () => [], getSeries: async () => null,
+    listChapters: async () => { listed(); await hold; return []; },
+    getPageUrls: async () => [], latest: async () => [],
+  } as any);
+  await q('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [UPDATE, sourceId, 'held']);
+
+  const checking = updateSeries(UPDATE, 0);
+  await entered;
+  try {
+    const bulk = await post('/api/admin/series/bulk/chapters/delete', { seriesIds: [UPDATE] });
+    assert.equal(bulk.statusCode, 202, bulk.body);
+    const run = await finishedRun(bulk.json().runId);
+    assert.equal(run.results[0].reason, 'busy', 'bulk delete entered a series whose updater was already inside');
+
+    const direct = await post(`/api/admin/series/${UPDATE}/chapters/delete`, { bookIds: [`b_${UPDATE}_2`] });
+    assert.equal(direct.statusCode, 409, `direct delete entered an updater-owned series: ${direct.body}`);
+    assert.equal(direct.json().error, 'busy');
+    assert.equal(existsSync(join(DL, FOLDER(UPDATE), 'Chapter 2.cbz')), true);
+  } finally {
+    release();
+    await checking;
   }
 });
 

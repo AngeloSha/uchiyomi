@@ -24,7 +24,7 @@ import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { withOrigin } from './downloadActivity';
-import { decideNumbering, folderBusy, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
+import { decideNumbering, folderBusy, numberedChapters, renumberRunning, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
 import { isListedNotice } from './noticeChapters';
 import { seriesHidesNotices } from './noticeSettings';
@@ -40,6 +40,7 @@ import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
  */
 export type UpdateOutcome =
   | 'ok'            // the source answered, whether or not anything was new
+  | 'busy'          // another writer owns the series folder; nothing was read or written
   | 'gone'          // hidden, merged or deleted since the sweep started
   | 'unrouted'      // no source installed, or the row was never stamped with one
   | 'blocked'       // the source is inside a back-off window
@@ -203,6 +204,12 @@ export interface UpdateOpts {
    * Fetch, Fetch again, Fill now -- which an unmonitored series still answers.
    */
   unattended?: boolean;
+  /**
+   * The caller already owns this folder's shared writer mark (`busyFolders`). Internal only: bulk newest,
+   * archive and repair take the mark synchronously before entering updateSeries and must be allowed through
+   * their own guard. Every unmarked entry point is refused while any writer owns the folder.
+   */
+  folderHeld?: boolean;
 }
 
 /**
@@ -246,6 +253,17 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,auto_update,
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
+  // This is the common boundary for direct Check/update calls as well as background refreshes. Route-level
+  // jobBusy checks make the usual answer a 409, but only this last-responsible-moment check closes the gap in
+  // which a destructive bulk run claims the folder after a request's lookup and before updateSeries starts.
+  // Callers that deliberately took the shared mark pass folderHeld; nobody else may list, stamp or download
+  // while a delete, rescan, renumber, archive turn or download job owns the folder.
+  // A second check is deliberately allowed to join an in-process renumber journal: it waits for the first runner,
+  // re-reads the journal, and then continues under the finished numbering. That mark is the numbering operation's
+  // own shared claim, not an unrelated writer. `runsInside` prevents a destructive writer from entering meanwhile.
+  if (!opts.folderHeld && folderBusy(s.folder) && !(s.renumber_plan && renumberRunning(seriesId))) {
+    return nothing(s.title, 'busy');
+  }
   // Unmonitored (UpdateOpts.unattended): nothing searched for or downloaded by a run nobody started on this series.
   if (opts.unattended && s.auto_update === false) return nothing(s.title, 'paused');
   // A renumber a crash interrupted is finished before anything here reads lib_books: its files are at their new
@@ -766,7 +784,7 @@ export async function runUpdateAll(opts: {
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget, a parked source or a hold (below) left unvisited: not a failure, and not nothing either.
-  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, paused: 0, threw: 0, skipped: 0 };
+  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, busy: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, paused: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 

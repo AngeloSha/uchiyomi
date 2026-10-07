@@ -122,6 +122,23 @@ test('merge: chapters move and the absorbed series points at its survivor', { sk
   assert.ok((await seriesRow(A)).cover_book_id, 'the survivor lost its cover');
 });
 
+test('merge: opposite concurrent requests lock in one order and only one may move the rows', { skip }, async () => {
+  const results = await Promise.allSettled([admin.mergeSeries(B, A), admin.mergeSeries(A, B)]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  const lost = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  assert.ok(lost, 'both stale preflight decisions were allowed to merge');
+  assert.ok(lost.reason instanceof admin.MergeConflictError, String(lost.reason));
+
+  const rows = await q<{ id: string; merged_into: string | null }>(
+    'SELECT id, merged_into FROM lib_series WHERE id = ANY($1) ORDER BY id', [[A, B]],
+  );
+  const survivor = rows.find((r) => r.merged_into === null)!;
+  const absorbed = rows.find((r) => r.merged_into !== null)!;
+  assert.equal(absorbed.merged_into, survivor.id);
+  assert.equal((await booksOf(survivor.id)).length, 4);
+  assert.equal((await booksOf(absorbed.id)).length, 0);
+});
+
 test('merge: a user who favourited BOTH ends up with one favourite, not a crash', { skip }, async () => {
   for (const s of [A, B]) {
     await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1,$2)`, [users[0], s]);

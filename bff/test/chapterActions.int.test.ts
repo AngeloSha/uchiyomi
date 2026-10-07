@@ -9,7 +9,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -478,6 +478,56 @@ test('the download root itself is never a chapter', { skip }, async () => {
   }
 });
 
+test('delete and both refetch paths refuse corrupt and symlink-escaping owned rows', { skip }, async () => {
+  const ESC = 's_act_escape', BOOK = 'b_act_escape';
+  const linkTop = 'T!act-escape-link';
+  const folder = `${linkTop}/Escaped Series`;
+  const rel = `${folder}/Chapter 1.cbz`;
+  const outside = join(ROOT, 'outside-download-root');
+  const outsideFile = join(outside, 'Escaped Series', 'Chapter 1.cbz');
+  mkdirSync(join(outsideFile, '..'), { recursive: true });
+  writeFileSync(outsideFile, 'must survive');
+  symlinkSync(outside, join(DL, linkTop), 'dir');
+  await q(`INSERT INTO lib_series
+      (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+    VALUES ($1,'T!act','Escaped Series',$2,1,$3,$4,'act-escape',true)`, [ESC, folder, LIB, SRC]);
+  await q(`INSERT INTO lib_books
+      (id, series_id, source, file, number, title, pages, root, source_id, source_chapter_id)
+    VALUES ($1,$2,'T!act',$3,1,'Chapter 1',1,$4,$5,'c/1/Group A')`, [BOOK, ESC, rel, DL, SRC]);
+  try {
+    const deleted = await del([BOOK], adminTok, ESC);
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    assert.deepEqual(deleted.json().skipped, [{ id: BOOK, reason: 'outside_root' }]);
+    assert.equal(readFileSync(outsideFile, 'utf8'), 'must survive');
+    assert.equal((await q('SELECT pruned_at FROM lib_books WHERE id = $1', [BOOK]))[0].pruned_at, null);
+
+    await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [BOOK]);
+    const member = await refetchBook(BOOK);
+    assert.equal(member.statusCode, 409, member.body);
+    assert.equal(member.json().error, 'not_refetchable');
+    const admin = await post(`/api/admin/series/${ESC}/chapters/refetch`, { bookIds: [BOOK] });
+    assert.equal(admin.statusCode, 409, admin.body);
+    assert.deepEqual(admin.json().skipped, [{ id: BOOK, reason: 'not_ours' }]);
+    assert.equal(readFileSync(outsideFile, 'utf8'), 'must survive');
+
+    // A corrupt row with a lexical escape is rejected by the routes and by the shared downloader backstop.
+    await q(`UPDATE lib_series SET folder = '../escaped' WHERE id = $1`, [ESC]);
+    await q(`UPDATE lib_books SET file = '../escaped/Chapter 1.cbz' WHERE id = $1`, [BOOK]);
+    const corrupt = await refetchBook(BOOK);
+    assert.equal(corrupt.statusCode, 409, corrupt.body);
+    assert.equal(corrupt.json().error, 'not_refetchable');
+    const { downloadChapter } = await import('../src/lib/downloader');
+    await assert.rejects(downloadChapter({
+      sourceId: SRC, seriesFolder: '../escaped', chapter: ch(1, 'Group A'), meta: { series: 'Escaped Series' },
+    }), /unsafe download path/i);
+    assert.equal(readFileSync(outsideFile, 'utf8'), 'must survive');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [ESC]).catch(() => {});
+    try { unlinkSync(join(DL, linkTop)); } catch { /* already gone */ }
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('refetch replaces the file with the copy the rules choose now, on the same row', { skip }, async (t) => {
   // On disk: Group A's chapter 2, with measured page dims and a reader part-way through. The listing has
   // A and B, and B is the priority now.
@@ -701,6 +751,28 @@ test('a member can restore only the deliberate tombstone by its stored canonical
     assert.equal(books.length, 1);
     assert.deepEqual(books[0], { id: B.one, pruned_at: null, source_id: SRC, source_chapter_id: 'c/1/Group A' });
     assert.equal((await q('SELECT page FROM read_progress WHERE user_id = $1 AND book_id = $2', [adminId, B.one]))[0]?.page, 1);
+  });
+
+  await t.test('two simultaneous restores reserve one folder and start only one writer', async () => {
+    const removedAgain = await del([B.one]);
+    assert.equal(removedAgain.statusCode, 200, removedAgain.body);
+    slowPages.add('c/1/Group A');
+    pageCalls.length = 0;
+    try {
+      // Both requests traverse the tombstone/source/writable reads together. The synchronous claim immediately
+      // before audit/job creation is the arbiter; the loser must not overwrite the first job card or write beside it.
+      const answers = await Promise.all([refetchBook(B.one), refetchBook(B.one)]);
+      assert.deepEqual(answers.map((r) => r.statusCode).sort((a, b) => a - b), [200, 409], answers.map((r) => r.body).join('\n'));
+      const refused = answers.find((r) => r.statusCode === 409)!;
+      assert.equal(refused.json().error, 'busy');
+      const job = await jobDone();
+      assert.equal(job?.status, 'done', JSON.stringify(job));
+      assert.deepEqual(pageCalls, ['c/1/Group A'], 'both restore requests reached the source');
+      assert.ok(existsSync(join(DL, FOLDER, 'Chapter 1.cbz')));
+      assert.equal((await row(B.one)).pruned_at, null);
+    } finally {
+      slowPages.delete('c/1/Group A');
+    }
   });
 
   await t.test('missing evidence, a range, and a noncanonical path are not refetchable', async () => {

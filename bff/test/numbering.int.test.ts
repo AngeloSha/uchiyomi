@@ -848,7 +848,7 @@ test('a resume inside a run that marked the folder itself leaves that mark to it
   busyFolders.add(FOLDER20);
   let checked: any, markedAfter: boolean | null = null;
   try {
-    checked = await updater.updateSeries(S20, 0);
+    checked = await updater.updateSeries(S20, 0, { folderHeld: true });
     markedAfter = busyFolders.has(FOLDER20);
   } finally {
     busyFolders.delete(FOLDER20);

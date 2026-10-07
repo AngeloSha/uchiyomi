@@ -799,6 +799,9 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
     // The queue query is a snapshot. Unmonitor may be pressed while another series takes its turn; claim
     // neither a source slot nor a folder for a row that is no longer automatic work.
     if (!(await seriesIsMonitored(r.series_id))) continue;
+    // Monitoring is a database read. A user download or destructive cleanup can reserve the folder while it is
+    // awaited; make that reservation authoritative at the last synchronous boundary before begin() marks our turn.
+    if (busy(r.folder)) { wait(r, { why: 'series_busy', source: name }); continue; }
 
     claimed.add(rateKeyOf(S));
     lastWaits.delete(r.series_id);
@@ -909,7 +912,7 @@ async function runListing(r: QueuedRow, S: string, set: ArchiveSettings, rand: (
   let placed = false;
   try {
     // maxNew 0: listed, persisted and stamped, nothing downloaded. Never a hunt: the archive does not go looking.
-    const res = await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false, unattended: true }));
+    const res = await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false, unattended: true, folderHeld: true }));
     if (res.outcome !== 'ok') {
       deps.log.warn(`the listing of "${r.title}" could not be read (${res.outcome})`);
     } else if (r.boundary != null) {

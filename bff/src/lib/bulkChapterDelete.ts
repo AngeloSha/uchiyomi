@@ -505,7 +505,9 @@ async function processSeries(runId: string, seriesId: string, input: StartInput)
 
   // There must be no await between the shared checks and this claim. Every in-process writer observes the same set;
   // once this turn claims it, a download, repair, rescan or renumber cannot start in the gap before the book query.
-  if (input.busy(series.folder) || runsInside(seriesId) > 0) return skipped(seriesId, 'busy', series.title);
+  // Autofix holds this while it scans/merges/deletes. It also takes the folder lock for each destructive step, which
+  // closes the reverse ordering (a bulk run that claimed first); this check closes Autofix-first before our Set write.
+  if (runtime.repairing || input.busy(series.folder) || runsInside(seriesId) > 0) return skipped(seriesId, 'busy', series.title);
   busyFolders.add(series.folder);
   try {
     await testHooks.afterClaim?.({ id: series.id, title: series.title, folder: series.folder });
@@ -573,6 +575,32 @@ async function processSeries(runId: string, seriesId: string, input: StartInput)
       id: seriesId, title: series.title, outcome: 'applied', chapters: deleted.applied, bytes: deleted.bytes,
       kept, paused, chapterSkips: countedChapterSkips(deleted.skipped),
     };
+  } catch (e) {
+    // Test-only exact crash point: a dead process drops its in-memory lock and leaves the durable intent for startup
+    // recovery. Every live failure is instead reconciled before this finally releases the shared folder claim, so a
+    // download/update cannot enter between unlink and the recovered tombstone, cover, pause or audit side effects.
+    if (e instanceof SimulatedWorkerExit) throw e;
+    const rows = await q<{ current: StoredCurrent | null }>(
+      'SELECT current FROM admin_bulk_delete_runs WHERE id = $1 AND status = \'running\'', [runId],
+    ).catch(() => []);
+    if (rows[0]?.current) {
+      try {
+        const result = await interruptedResult(runId, rows[0].current);
+        await finalizeRecoveredSeries(runId, result, input.pause, input.userId);
+        result.message = `${result.message} Worker error: ${errorText(e)}`;
+        return result;
+      } catch (recoveryError) {
+        return {
+          id: seriesId, title: series.title, outcome: 'failed', reason: 'failed',
+          message: `${errorText(e)}; recovery failed: ${errorText(recoveryError)}`,
+          chapters: 0, bytes: 0, kept: 0, paused: false, chapterSkips: {},
+        };
+      }
+    }
+    return {
+      id: seriesId, title: series.title, outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0,
+      bytes: 0, kept: 0, paused: false, chapterSkips: {},
+    };
   } finally {
     busyFolders.delete(series.folder);
   }
@@ -604,32 +632,13 @@ async function run(id: string, input: StartInput): Promise<void> {
       try {
         result = await processSeries(id, input.ids[index], input);
       } catch (e) {
-        // Test-only exact crash point: leave the row and intent exactly as a dead process would. The next boot owns
-        // reconciliation. No production path can construct this signal.
+        // Leave the row and intent exactly as a dead process would. The next boot owns reconciliation. Every ordinary
+        // worker failure after the folder claim is handled inside processSeries while that claim is still retained.
         if (e instanceof SimulatedWorkerExit) return;
-        // A live-process failure after unlink gets the same deterministic reconciliation immediately, rather than
-        // clearing `current` and leaving an unknown live row until another restart.
-        const rows = await q<{ current: StoredCurrent | null }>(
-          'SELECT current FROM admin_bulk_delete_runs WHERE id = $1 AND status = \'running\'', [id],
-        ).catch(() => []);
-        if (rows[0]?.current) {
-          try {
-            result = await interruptedResult(id, rows[0].current);
-            await finalizeRecoveredSeries(id, result, input.pause, input.userId);
-            result.message = `${result.message} Worker error: ${errorText(e)}`;
-          } catch (recoveryError) {
-            result = {
-              id: input.ids[index], outcome: 'failed', reason: 'failed',
-              message: `${errorText(e)}; recovery failed: ${errorText(recoveryError)}`,
-              chapters: 0, bytes: 0, kept: 0, paused: false, chapterSkips: {},
-            };
-          }
-        } else {
-          result = {
-            id: input.ids[index], outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0, bytes: 0,
-            kept: 0, paused: false, chapterSkips: {},
-          };
-        }
+        result = {
+          id: input.ids[index], outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0, bytes: 0,
+          kept: 0, paused: false, chapterSkips: {},
+        };
       }
       results.push(result);
       done++;

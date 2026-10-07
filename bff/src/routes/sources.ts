@@ -81,7 +81,7 @@ import { diskSpelling } from '../lib/libraryAdmin';
 import { isDesktop } from '../lib/desktop';
 import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
-import { updateSeries } from '../lib/updater';
+import { runsInside, updateSeries } from '../lib/updater';
 import { busyFolders } from '../lib/bulkNewest';
 import { enqueueArchive, archiveBusy, archiveScanPending, archiveSeriesIds, archiveView, type EnqueueOutcome } from '../lib/archive';
 import { registerArchiveRoutes } from './archive';
@@ -140,7 +140,7 @@ import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editi
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
 import { canonLang, sameLanguage } from '../lib/lang';
 import { searchByNames, takeHuntSlot, releaseHuntSlot } from '../lib/sourceHunt';
-import { allWritable } from '../lib/fsGuard';
+import { allWritable, realContainedPath } from '../lib/fsGuard';
 import { deliberatelyDeleted } from '../lib/deletedGhosts';
 
 interface Job {
@@ -219,6 +219,37 @@ interface Job {
   origin: Origin;
 }
 const jobs = new Map<string, Job>();
+/**
+ * A helper job owns its folder until its detached tail (settle hooks, scan and stamps included) is finished.
+ * A card may become `error` before that tail ends, so the card status alone is not a writer lock.
+ */
+const activeJobFolders = new Set<string>();
+const pendingJobClaims = new Map<string, symbol>();
+
+/** Opaque synchronous reservation used by routes that must await audit/DB work before starting the job. */
+export interface DownloadJobClaim { readonly folder: string; readonly token: symbol }
+
+/**
+ * Reserve one folder without awaiting. `runsInside` closes the opposite race: updateSeries increments it before
+ * its first await, so either the check owns the series or this claim does, never both.
+ */
+function reserveDownloadJob(folder: string, seriesId: string, waitBehindSharedWriter: boolean): DownloadJobClaim | null {
+  if (activeJobFolders.has(folder) || pendingJobClaims.has(folder) || jobs.get(folder)?.status === 'downloading') return null;
+  if (!waitBehindSharedWriter && busyFolders.has(folder)) return null;
+  if (seriesId && runsInside(seriesId) > 0) return null;
+  const token = Symbol(folder);
+  pendingJobClaims.set(folder, token);
+  return { folder, token };
+}
+
+export function claimDownloadJob(folder: string, seriesId = ''): DownloadJobClaim | null {
+  return reserveDownloadJob(folder, seriesId, false);
+}
+
+/** Release an unconsumed claim. Consumed/stale claims are harmless no-ops. */
+export function releaseDownloadJobClaim(claim: DownloadJobClaim | null | undefined): void {
+  if (claim && pendingJobClaims.get(claim.folder) === claim.token) pendingJobClaims.delete(claim.folder);
+}
 
 /**
  * The jobs a Try again can redo through POST /api/sources/fetch, and so the only ones a `left` is set on. That
@@ -258,13 +289,14 @@ function sweepJobs(now = Date.now()): void {
  * busy" in bulkNewest.int.test.ts starts the second download.
  */
 export function jobBusy(folder: string): boolean {
-  return jobs.get(folder)?.status === 'downloading' || busyFolders.has(folder);
+  return activeJobFolders.has(folder) || pendingJobClaims.has(folder)
+    || jobs.get(folder)?.status === 'downloading' || busyFolders.has(folder);
 }
 // A renumber (lib/numbering.ts) never renames under a job that is writing into the folder, and a failed card's
 // Try again list names the chapters it lacked by number: after a renumber those are other posts, so the list
 // moves with the files -- and a number the renumber has no place for is dropped rather than fetched as the wrong
 // post.
-registerBusyProbe((folder) => jobs.get(folder)?.status === 'downloading');
+registerBusyProbe((folder) => activeJobFolders.has(folder) || pendingJobClaims.has(folder) || jobs.get(folder)?.status === 'downloading');
 
 /**
  * Why a manual fetch or a fill must wait, when it must (#116): a renumber is pending review or half-applied, and
@@ -475,10 +507,25 @@ const JOB_LANES = 3;
 /** How often a job that found its folder taken by another writer looks again (startDownloadJob). */
 const FOLDER_WAIT_MS = 500;
 
-export function startDownloadJob(input: DownloadJobInput): { total: number } {
+export function startDownloadJob(input: DownloadJobInput, reserved: DownloadJobClaim): { total: number };
+export function startDownloadJob(input: DownloadJobInput): { total: number } | null;
+export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJobClaim): { total: number } | null {
   const { folder, title, seriesId, chapters, meta } = input;
   const origin = input.origin ?? 'fetch';
+  // The no-reservation form keeps the long-standing direct-helper behaviour: if a Rescan acquired its mark
+  // between a route's check and this call, the detached job reserves its card and waits behind it. Routes that
+  // mutate state before start use claimDownloadJob instead, which refuses an already-held shared folder.
+  const claim = reserved ?? reserveDownloadJob(folder, seriesId, true);
+  if (!claim) return null;
+  if (claim.folder !== folder || pendingJobClaims.get(folder) !== claim.token) {
+    if (reserved) throw new Error('download job reservation was lost');
+    return null;
+  }
+  // From this instruction onward another synchronous claimant sees `activeJobFolders`; there is no unlocked turn
+  // between consuming the reservation and publishing the job card.
+  activeJobFolders.add(folder);
   jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), origin, ...(input.by ? { by: input.by } : {}) });
+  pendingJobClaims.delete(folder);
   const settle = async (ch: SourceChapter, landed: boolean) => {
     if (!input.onSettled) return;
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
@@ -764,7 +811,15 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       tell(j, ...cancelledParts(j, failures));
     } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
     noteLeft();
-  });
+  }).catch((e) => {
+    const j = jobs.get(folder);
+    if (j?.status === 'downloading') {
+      j.status = 'error';
+      j.finishedAt = Date.now();
+      tell(j, say('job.failed', { n: 1, error: String((e as Error)?.message || e).slice(0, 120) }));
+    }
+    console.warn(`[download] ${folder}: detached job threw: ${(e as Error)?.message || e}`);
+  }).finally(() => { activeJobFolders.delete(folder); });
 
   return { total: chapters.length };
 }
@@ -2592,24 +2647,30 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (renumbering) return reply.code(409).send(renumbering);
 
     const picked = auth.chapters;
-    await logAudit('series.fill', {
-      userId: userIdOf(req),
-      detail: { seriesId: plan.seriesId, title: s.title, source, sourceSeriesId, numbers: picked.map((c) => c.number) },
-      req,
-    });
-    // Every copy stamped with the source the person picked: the shared loop routes each chapter by its own.
-    const { total } = startDownloadJob({
-      origin: 'fill',
-      folder: s.folder, title: s.title, seriesId: plan.seriesId,
-      chapters: picked.map((c) => ({ ...c, source })),
-      meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
-      allowed: (id) => {
-        const candidate = getSource(id);
-        return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
-      },
-      by: userIdOf(req),
-    });
-    return { ok: true, started: true, folder: s.folder, total };
+    const claim = claimDownloadJob(s.folder, plan.seriesId);
+    if (!claim) return reply.code(409).send({ error: 'busy' });
+    try {
+      await logAudit('series.fill', {
+        userId: userIdOf(req),
+        detail: { seriesId: plan.seriesId, title: s.title, source, sourceSeriesId, numbers: picked.map((c) => c.number) },
+        req,
+      });
+      // Every copy stamped with the source the person picked: the shared loop routes each chapter by its own.
+      const { total } = startDownloadJob({
+        origin: 'fill',
+        folder: s.folder, title: s.title, seriesId: plan.seriesId,
+        chapters: picked.map((c) => ({ ...c, source })),
+        meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+        allowed: (id) => {
+          const candidate = getSource(id);
+          return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
+        },
+        by: userIdOf(req),
+      }, claim);
+      return { ok: true, started: true, folder: s.folder, total };
+    } finally {
+      releaseDownloadJobClaim(claim);
+    }
   });
 
   /**
@@ -2650,7 +2711,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
     const n = Number(row.number);
-    const canonical = row.root === DL_ROOT
+    const safePath = row.root === DL_ROOT ? await realContainedPath(DL_ROOT, row.file) : null;
+    const canonical = !!safePath
+      && row.root === DL_ROOT
       && Number.isFinite(n)
       && row.number_end == null
       && row.file === chapterFileRel(row.folder, n)
@@ -2678,6 +2741,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const writable = await allWritable([DL_ROOT]);
     if (!writable.ok) return reply.code(409).send({ error: 'not_refetchable', message: writable.reason, fix: writable.fix });
 
+    const claim = claimDownloadJob(row.folder, row.series_id);
+    if (!claim) return reply.code(409).send({ error: 'busy' });
     const chapter: SourceChapter & { pinned: true } = {
       source: row.source_id!,
       sourceId: row.source_chapter_id!,
@@ -2685,29 +2750,39 @@ export default async function sourceRoutes(app: FastifyInstance) {
       title: row.chapter_name ?? row.title ?? undefined,
       pinned: true,
     };
-    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = $2::real', [row.series_id, n]).catch(() => {});
-    await logAudit('book.refetch', {
-      userId: userIdOf(req),
-      detail: { bookId: row.id, seriesId: row.series_id, source: row.source_id, sourceId: row.source_chapter_id, number: n },
-      req,
-    });
-    const { total } = startDownloadJob({
-      origin: 'refetch',
-      folder: row.folder,
-      title: row.series_title,
-      seriesId: row.series_id,
-      chapters: [chapter],
-      meta: { series: row.series_title, summary: row.summary ?? undefined, author: row.author ?? undefined,
-        genres: row.genres, url: row.web ?? undefined, status: row.status ?? undefined },
-      // Redundant for a pinned job today, and intentional: if the downloader ever grows another recovery
-      // path it still cannot cross this member's age boundary.
-      allowed: (id) => {
-        const candidate = getSource(id);
-        return !!candidate && sourceAllowedFor(candidate, vc(req).maxAgeRating);
-      },
-      by: userIdOf(req),
-    });
-    return { ok: true, started: true, folder: row.folder, total };
+    try {
+      // Several source/policy and writability reads happened after the first realpath check. Revalidate after owning
+      // the folder and immediately before publishing the writer, so a symlink swap is a synchronous contract refusal
+      // instead of an asynchronous failed download card.
+      if (!safePath || await realContainedPath(DL_ROOT, row.file) !== safePath) {
+        return reply.code(409).send({ error: 'not_refetchable' });
+      }
+      await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = $2::real', [row.series_id, n]).catch(() => {});
+      await logAudit('book.refetch', {
+        userId: userIdOf(req),
+        detail: { bookId: row.id, seriesId: row.series_id, source: row.source_id, sourceId: row.source_chapter_id, number: n },
+        req,
+      });
+      const { total } = startDownloadJob({
+        origin: 'refetch',
+        folder: row.folder,
+        title: row.series_title,
+        seriesId: row.series_id,
+        chapters: [chapter],
+        meta: { series: row.series_title, summary: row.summary ?? undefined, author: row.author ?? undefined,
+          genres: row.genres, url: row.web ?? undefined, status: row.status ?? undefined },
+        // Redundant for a pinned job today, and intentional: if the downloader ever grows another recovery
+        // path it still cannot cross this member's age boundary.
+        allowed: (id) => {
+          const candidate = getSource(id);
+          return !!candidate && sourceAllowedFor(candidate, vc(req).maxAgeRating);
+        },
+        by: userIdOf(req),
+      }, claim);
+      return { ok: true, started: true, folder: row.folder, total };
+    } finally {
+      releaseDownloadJobClaim(claim);
+    }
   });
 
   /**
@@ -2935,24 +3010,30 @@ export default async function sourceRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: 'nothing_to_fetch', message, skipped });
     }
 
-    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
-      [seriesId, chapters.map((c) => c.number)]).catch(() => {});
-    const picks = chapters.filter((c) => pickOf.has(c.number)).map((c) => ({ number: c.number, source: c.source, sourceId: c.sourceId }));
-    await logAudit('series.chapters_fetch', {
-      userId: userIdOf(req),
-      detail: { seriesId, title: s.title, numbers: chapters.map((c) => c.number), ...(picks.length ? { picks } : {}), skipped },
-      req,
-    });
-    const { total } = startDownloadJob({
-      folder: s.folder, title: s.title, seriesId, chapters,
-      meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
-      allowed: (id) => {
-        const candidate = getSource(id);
-        return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
-      },
-      by: userIdOf(req),
-    });
-    return { ok: true, started: true, folder: s.folder, total, skipped };
+    const claim = claimDownloadJob(s.folder, seriesId);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+    try {
+      await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
+        [seriesId, chapters.map((c) => c.number)]).catch(() => {});
+      const picks = chapters.filter((c) => pickOf.has(c.number)).map((c) => ({ number: c.number, source: c.source, sourceId: c.sourceId }));
+      await logAudit('series.chapters_fetch', {
+        userId: userIdOf(req),
+        detail: { seriesId, title: s.title, numbers: chapters.map((c) => c.number), ...(picks.length ? { picks } : {}), skipped },
+        req,
+      });
+      const { total } = startDownloadJob({
+        folder: s.folder, title: s.title, seriesId, chapters,
+        meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+        allowed: (id) => {
+          const candidate = getSource(id);
+          return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
+        },
+        by: userIdOf(req),
+      }, claim);
+      return { ok: true, started: true, folder: s.folder, total, skipped };
+    } finally {
+      releaseDownloadJobClaim(claim);
+    }
   });
 
   /**

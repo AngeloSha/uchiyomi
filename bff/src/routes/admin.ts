@@ -13,14 +13,14 @@ import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { applyMoves, heldElsewhere, lockLibrarySaves, previewMoves, setFolders, storedFolders, underSql, LIBRARY_MAX_FOLDERS } from '../lib/libraryFolders';
-import { containedPath, allWritable } from '../lib/fsGuard';
-import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
+import { containedPath, allWritable, realContainedPath } from '../lib/fsGuard';
+import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, MergeConflictError, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
 import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
-import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
+import { runUpdateAll, updateSeries, runSweep, runsInside } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
@@ -60,7 +60,10 @@ import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { sanitiseNoticeTypes } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
-import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import {
+  addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, claimDownloadJob, releaseDownloadJobClaim,
+  startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS,
+} from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
@@ -72,6 +75,7 @@ import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, reapplyBlocklistInTransaction, type ListingCopy } from '../lib/seriesListing';
+import { claimWriterFolders } from '../lib/bulkNewest';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
@@ -555,6 +559,10 @@ export default async function adminRoutes(app: FastifyInstance) {
   // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
   await app.register(rescanRoutes);
 
+  /** Synchronous two-sided hand-off between updateSeries and destructive route writers. */
+  const claimSeriesWriter = (seriesIds: readonly string[], folders: readonly string[]) =>
+    claimWriterFolders(folders, jobBusy, () => seriesIds.some((id) => runsInside(id) > 0));
+
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
   // header summary to catch up with what the scan found (v0.49.0).
@@ -566,7 +574,15 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
-  app.post('/api/admin/update/:id', async (req) => withOrigin('check', userIdOf(req), () => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10)));
+  app.post('/api/admin/update/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (jobBusy(row.folder)) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    const result = await withOrigin('check', userIdOf(req), () => updateSeries(id, Number((req.body as any)?.maxNew) || 10));
+    if (result.outcome === 'busy') return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    return result;
+  });
   // Through runSweep, as the schedule and Run now are (#117): `runtime.updating` is the flag every other job --
   // the repair, the slow archive -- stands aside for, and a bare runUpdateAll here ran without it. 409 while a
   // sweep or a repair runs; the sweep's result, as before, when it ends.
@@ -1799,6 +1815,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (seriesChecks.get(id)?.running) return reply.code(409).send({ error: 'busy', message: 'Already checking that series.' });
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (jobBusy(row.folder)) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
     seriesChecks.set(id, { running: true, startedAt: Date.now() });
     // A followed source's chapters arrive through this check, so its downloads are the check's (#82 follow-up).
     void withOrigin('check', userIdOf(req), () => updateSeries(id, Number((req.body as any)?.maxNew) || 10))
@@ -1839,9 +1856,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'not_found' });
     if (row.deleted_at) return reply.code(400).send({ error: 'already_deleted', message: 'That series is already hidden.' });
     if (row.merged_into) return reply.code(400).send({ error: 'merged', message: 'That series was merged into another one.' });
-    const r = await deleteSeries(id);
-    await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
-    return r;
+    const claim = claimSeriesWriter([id], [row.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const r = await deleteSeries(id);
+      await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
+      return r;
+    } finally { claim.release(); }
   });
 
   // The library page's "Remove from library" over a selection: the single DELETE above, once per id, and
@@ -1857,16 +1878,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     const b = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(500) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should be removed?' });
     let hidden = 0;
-    const skipped: Array<{ id: string; reason: 'merged' | 'already_hidden' | 'not_found' }> = [];
+    const skipped: Array<{ id: string; reason: 'merged' | 'already_hidden' | 'not_found' | 'busy' }> = [];
     // One id listed twice is one series: the second pass would read `already_hidden` and mislabel it.
     for (const id of new Set(b.data.ids)) {
       const row = await getSeriesRow(id);
       if (!row) { skipped.push({ id, reason: 'not_found' }); continue; }
       if (row.deleted_at) { skipped.push({ id, reason: 'already_hidden' }); continue; }
       if (row.merged_into) { skipped.push({ id, reason: 'merged' }); continue; }
-      const r = await deleteSeries(id);
-      hidden++;
-      await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
+      const claim = claimSeriesWriter([id], [row.folder]);
+      if (!claim) { skipped.push({ id, reason: 'busy' }); continue; }
+      try {
+        const r = await deleteSeries(id);
+        hidden++;
+        await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
+      } finally { claim.release(); }
     }
     return { ok: true, hidden, skipped };
   });
@@ -1957,9 +1982,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
     if (!row.deleted_at) return reply.code(400).send({ error: 'not_deleted', message: 'That series is not hidden.' });
-    await restoreSeries(id);
-    await logAudit('series.restore', { userId: userIdOf(req), detail: { id, title: row.title }, req });
-    return { ok: true };
+    const claim = claimSeriesWriter([id], [row.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      await restoreSeries(id);
+      await logAudit('series.restore', { userId: userIdOf(req), detail: { id, title: row.title }, req });
+      return { ok: true };
+    } finally { claim.release(); }
   });
 
   /**
@@ -2000,15 +2029,33 @@ export default async function adminRoutes(app: FastifyInstance) {
         case 'same_work': return reply.code(409).send({ error: 'same_work', message: 'These are two language editions of one work. Unlink one first if they really are the same edition.' });
       }
     }
-    const from = (await getSeriesRow(id))!;
-    const into = (await getSeriesRow(b.data.into))!;
-    const r = await mergeSeries(id, into.id);
-    await logAudit('series.merge', {
-      userId: userIdOf(req),
-      detail: { from: id, fromTitle: from.title, into: into.id, intoTitle: into.title, ...r },
-      req,
-    });
-    return r;
+    // One read, followed immediately by the synchronous multi-folder claim. Two separate awaits let a rename of the
+    // first series finish between them, leaving us holding its old folder while merging the row now writing elsewhere.
+    const current = await q<{ id: string; title: string; folder: string }>(
+      'SELECT id, title, folder FROM lib_series WHERE id = ANY($1::text[])', [[id, b.data.into]],
+    );
+    const from = current.find((r) => r.id === id);
+    const into = current.find((r) => r.id === b.data.into);
+    if (!from || !into) return reply.code(404).send({ error: 'not_found' });
+    const claim = claimSeriesWriter([id, into.id], [from.folder, into.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing one of those series.' });
+    try {
+      const r = await mergeSeries(id, into.id);
+      await logAudit('series.merge', {
+        userId: userIdOf(req),
+        detail: { from: id, fromTitle: from.title, into: into.id, intoTitle: into.title, ...r },
+        req,
+      });
+      return r;
+    } catch (e) {
+      if (e instanceof MergeConflictError) {
+        return reply.code(409).send({
+          error: 'merge_changed',
+          message: 'One of those series changed while the merge was starting. Refresh and try again.',
+        });
+      }
+      throw e;
+    } finally { claim.release(); }
   });
 
   /**
@@ -2277,17 +2324,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!sameTitle(b.data.confirm, row.title)) {
       return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title to confirm — typography does not have to match.' });
     }
-    const r = await deleteSeriesFiles(id);
-    if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
-    const { deletedBookIds, ...answer } = r;
-    // Exact identities make the recurring v0.55.8 provenance repair safe on later boots. `files` alone is
-    // not enough: Delete files may also reconcile already-absent rows on a demonstrably mounted library.
-    await logAudit('series.delete_files', {
-      userId: userIdOf(req),
-      detail: { id, files: r.files, bytes: r.bytes, bookIds: deletedBookIds, applied: deletedBookIds.length },
-      req,
-    });
-    return answer;
+    const folders = (await q<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1 OR merged_into = $1 ORDER BY folder', [id])).map((x) => x.folder);
+    const claim = claimSeriesWriter([id], folders);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const r = await deleteSeriesFiles(id);
+      if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
+      const { deletedBookIds, ...answer } = r;
+      // Exact identities make the recurring v0.55.8 provenance repair safe on later boots. `files` alone is
+      // not enough: Delete files may also reconcile already-absent rows on a demonstrably mounted library.
+      await logAudit('series.delete_files', {
+        userId: userIdOf(req),
+        detail: { id, files: r.files, bytes: r.bytes, bookIds: deletedBookIds, applied: deletedBookIds.length },
+        req,
+      });
+      return answer;
+    } finally { claim.release(); }
   });
 
   /**
@@ -2308,17 +2360,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!sameTitle(b.data.confirm, row.title)) {
       return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title to confirm — typography does not have to match.' });
     }
-    const r = await forgetSeries(id);
-    if (!r.ok) {
-      if (r.refused === 'not_found') return reply.code(404).send({ error: 'not_found' });
-      return reply.code(409).send({ error: 'refused', message: r.message, fix: r.fix });
-    }
-    await logAudit('series.forget', {
-      userId: userIdOf(req),
-      detail: { id, title: r.title, folder: r.folder, books: r.books, absorbed: r.absorbed, absorbedIds: r.absorbedIds, users: r.users, rowsByTable: r.rowsByTable },
-      req,
-    });
-    return { ok: true, books: r.books, absorbed: r.absorbed, users: r.users };
+    const owned = await q<{ id: string; folder: string }>(
+      'SELECT id, folder FROM lib_series WHERE id = $1 OR merged_into = $1 ORDER BY id', [id],
+    );
+    const claim = claimSeriesWriter(owned.map((s) => s.id), owned.map((s) => s.folder));
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const r = await forgetSeries(id);
+      if (!r.ok) {
+        if (r.refused === 'not_found') return reply.code(404).send({ error: 'not_found' });
+        return reply.code(409).send({ error: 'refused', message: r.message, fix: r.fix });
+      }
+      await logAudit('series.forget', {
+        userId: userIdOf(req),
+        detail: { id, title: r.title, folder: r.folder, books: r.books, absorbed: r.absorbed, absorbedIds: r.absorbedIds, users: r.users, rowsByTable: r.rowsByTable },
+        req,
+      });
+      return { ok: true, books: r.books, absorbed: r.absorbed, users: r.users };
+    } finally { claim.release(); }
   });
 
   // ---- chapter-level file operations ----
@@ -2346,9 +2405,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'not_found' });
     // lib/libraryAdmin.ts deleteChapterFiles (v0.55.0): the route's own rules, in one place, which Fix everything's files
     // phase runs too -- the bookmark veto, the download folder only, the root itself never.
-    const r = await deleteChapterFiles(id, b.data.bookIds, { userId: userIdOf(req), req });
-    if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
-    return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
+    const claim = claimSeriesWriter([id], [row.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const r = await deleteChapterFiles(id, b.data.bookIds, { userId: userIdOf(req), req });
+      if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
+      return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
+    } finally { claim.release(); }
   });
 
   /**
@@ -2410,10 +2473,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
       const number = Number(r.number);
       const abs = containedPath(DL_ROOT, r.file);
+      const realSafe = abs ? await realContainedPath(DL_ROOT, r.file) : null;
       // The root itself can never be the chapter file (the path check below already forbids it: a chapter
       // file ends in `Chapter <n>.cbz`), but the rename below is a destructive move and the comparison is
       // free -- the same guard the delete route and the cleanup carry.
-      if (!abs || abs === root || r.file !== chapterFileRel(s.folder, number)) { skipped.push({ id: bid, reason: 'not_ours' }); continue; }
+      if (!abs || realSafe !== abs || abs === root || r.file !== chapterFileRel(s.folder, number)) { skipped.push({ id: bid, reason: 'not_ours' }); continue; }
       eligible.push({ id: bid, number, file: r.file, abs, pruned: !!r.pruned_at });
     }
     // The listing is refreshed FIRST, so the copy fetched is the one the release rules choose NOW -- which
@@ -2487,56 +2551,73 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
     const w = await allWritable([DL_ROOT]);
     if (!w.ok) return reply.code(409).send({ error: 'refused', message: w.reason, fix: w.fix });
+    // Reserve synchronously before the first set-aside rename. A bulk cleanup may have claimed the shared
+    // folder while allWritable was awaited; in that case this refuses instead of renaming under its unlink.
+    const claim = claimDownloadJob(s.folder, id);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
 
-    // Set aside, mark, forget the failures -- per row, before the job starts, so the downloader's own
-    // "already on disk" check does not skip the very file we are replacing.
-    const byNumber = new Map(todo.map((t) => [t.row.number, t.row]));
-    for (const t of todo) {
-      await rename(t.row.abs, `${t.row.abs}${REFETCH_BAK}`).catch((e: any) => {
-        // No file behind a tombstone is expected; anything else is worth a line, and the settle hook
-        // below still handles it (the file is where it was, so the downloader skips and the mark clears).
-        if (e?.code !== 'ENOENT') console.warn(`[refetch] could not set aside ${t.row.file}: ${e?.message || e}`);
-      });
-      // A live row is marked only while its old file is aside. A deliberate tombstone is already marked,
-      // and overwriting its reason with NULL would make a failed restore lose deletion provenance.
-      if (!t.row.pruned) await tombstoneBooks([t.row.id]);
-    }
-    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
-      [id, todo.map((t) => t.row.number)]).catch(() => {});
-    const picks = todo.filter((t) => pickOf.has(t.row.id)).map((t) => ({ bookId: t.row.id, number: t.row.number, source: t.chapter.source, sourceId: t.chapter.sourceId }));
-    await logAudit('series.chapters_refetch', {
-      userId: userIdOf(req),
-      detail: { id, title: s.title, bookIds: todo.map((t) => t.row.id), numbers: todo.map((t) => t.row.number), ...(picks.length ? { picks } : {}), skipped },
-      req,
-    });
-    const { total } = startDownloadJob({
-      origin: 'refetch',
-      folder: s.folder, title: s.title, seriesId: id,
-      chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
-      meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
-      by: userIdOf(req),
-      // A Cancel (#82) settles every chapter the job did not reach as not landed, so each set-aside copy
-      // below is put back exactly as for a chapter that failed.
-      onSettled: async (ch, landed) => {
-        const r = byNumber.get(ch.number);
-        if (!r) return;
-        const bak = `${r.abs}${REFETCH_BAK}`;
-        if (landed) {
-          await rm(bak, { force: true });
-          // A copy picked by name is the admin's choice, and the nightly group upgrade (lib/repair.ts
-          // stepGroups) leaves it alone; a plain Fetch again hands the choice back to the preferences.
-          await q('UPDATE lib_books SET picked_at = $2 WHERE id = $1', [r.id, pickOf.has(r.id) ? new Date() : null]).catch(() => {});
-          return;
+    try {
+      // `allWritable`, the listing refresh and the claim all awaited after the first validation. Check every path
+      // again before the first set-aside rename so an intermediate symlink swapped in meanwhile cannot move a file
+      // outside DL_ROOT. Nothing has been mutated yet, so one unsafe row refuses the whole replacement cleanly.
+      for (const t of todo) {
+        if (await realContainedPath(DL_ROOT, t.row.file) !== t.row.abs) {
+          return reply.code(409).send({ error: 'nothing_to_fetch', message: 'None of those chapters can be fetched again safely.',
+            skipped: [...skipped, { id: t.row.id, reason: 'not_ours' }] });
         }
-        // Not landed: put the old copy back if it was set aside, and un-mark the row whenever a file is
-        // there to read -- the restored one, or the original a failed rename left in place. A row that had
-        // no file to begin with (a tombstone being fetched again) keeps its mark: the bytes are still gone.
-        const exists = (p: string) => stat(p).then(() => true, () => false);
-        if (await exists(bak) && !(await exists(r.abs))) await rename(bak, r.abs).catch(() => {});
-        if (await exists(r.abs)) await q('UPDATE lib_books SET pruned_at = NULL WHERE id = $1', [r.id]).catch(() => {});
-      },
-    });
-    return { ok: true, started: true, folder: s.folder, total, skipped };
+      }
+      // Set aside, mark, forget the failures -- per row, before the job starts, so the downloader's own
+      // "already on disk" check does not skip the very file we are replacing.
+      const byNumber = new Map(todo.map((t) => [t.row.number, t.row]));
+      for (const t of todo) {
+        await rename(t.row.abs, `${t.row.abs}${REFETCH_BAK}`).catch((e: any) => {
+          // No file behind a tombstone is expected; anything else is worth a line, and the settle hook
+          // below still handles it (the file is where it was, so the downloader skips and the mark clears).
+          if (e?.code !== 'ENOENT') console.warn(`[refetch] could not set aside ${t.row.file}: ${e?.message || e}`);
+        });
+        // A live row is marked only while its old file is aside. A deliberate tombstone is already marked,
+        // and overwriting its reason with NULL would make a failed restore lose deletion provenance.
+        if (!t.row.pruned) await tombstoneBooks([t.row.id]);
+      }
+      await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
+        [id, todo.map((t) => t.row.number)]).catch(() => {});
+      const picks = todo.filter((t) => pickOf.has(t.row.id)).map((t) => ({ bookId: t.row.id, number: t.row.number, source: t.chapter.source, sourceId: t.chapter.sourceId }));
+      await logAudit('series.chapters_refetch', {
+        userId: userIdOf(req),
+        detail: { id, title: s.title, bookIds: todo.map((t) => t.row.id), numbers: todo.map((t) => t.row.number), ...(picks.length ? { picks } : {}), skipped },
+        req,
+      });
+      const { total } = startDownloadJob({
+        origin: 'refetch',
+        folder: s.folder, title: s.title, seriesId: id,
+        chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
+        meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+        by: userIdOf(req),
+        // A Cancel (#82) settles every chapter the job did not reach as not landed, so each set-aside copy
+        // below is put back exactly as for a chapter that failed.
+        onSettled: async (ch, landed) => {
+          const r = byNumber.get(ch.number);
+          if (!r) return;
+          const bak = `${r.abs}${REFETCH_BAK}`;
+          if (landed) {
+            await rm(bak, { force: true });
+            // A copy picked by name is the admin's choice, and the nightly group upgrade (lib/repair.ts
+            // stepGroups) leaves it alone; a plain Fetch again hands the choice back to the preferences.
+            await q('UPDATE lib_books SET picked_at = $2 WHERE id = $1', [r.id, pickOf.has(r.id) ? new Date() : null]).catch(() => {});
+            return;
+          }
+          // Not landed: put the old copy back if it was set aside, and un-mark the row whenever a file is
+          // there to read -- the restored one, or the original a failed rename left in place. A row that had
+          // no file to begin with (a tombstone being fetched again) keeps its mark: the bytes are still gone.
+          const exists = (p: string) => stat(p).then(() => true, () => false);
+          if (await exists(bak) && !(await exists(r.abs))) await rename(bak, r.abs).catch(() => {});
+          if (await exists(r.abs)) await q('UPDATE lib_books SET pruned_at = NULL WHERE id = $1', [r.id]).catch(() => {});
+        },
+      }, claim);
+      return { ok: true, started: true, folder: s.folder, total, skipped };
+    } finally {
+      releaseDownloadJobClaim(claim);
+    }
   });
 
   /**
@@ -2611,10 +2692,16 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const b = z.object({ folder: z.string().min(1).max(400) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const r = await renameSeriesFolder(id, b.data.folder);
-    if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
-    await logAudit('series.rename_folder', { userId: userIdOf(req), detail: { id, folder: b.data.folder }, req });
-    return r;
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const claim = claimSeriesWriter([id], [row.folder, b.data.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that folder.' });
+    try {
+      const r = await renameSeriesFolder(id, b.data.folder);
+      if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
+      await logAudit('series.rename_folder', { userId: userIdOf(req), detail: { id, folder: b.data.folder }, req });
+      return r;
+    } finally { claim.release(); }
   });
 
   /** The 409 for a folder another library holds: which folder, and whose, named in the message too. */

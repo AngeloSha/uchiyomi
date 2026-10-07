@@ -15,7 +15,7 @@ import type { FastifyRequest } from 'fastify';
 import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
-import { allWritable, containedPath } from './fsGuard';
+import { allWritable, containedPath, realContainedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
@@ -109,6 +109,17 @@ export interface MergeResult {
 }
 
 /**
+ * The optimistic route/autofix check is only an explanation for the caller. The merge repeats it after taking both
+ * series-row locks; this error means another process changed one end before those locks were acquired.
+ */
+export class MergeConflictError extends Error {
+  constructor(readonly refusal: MergeRefusal) {
+    super(`merge no longer allowed: ${refusal.refused}`);
+    this.name = 'MergeConflictError';
+  }
+}
+
+/**
  * The absorbed copy's main source, when the survivor can follow it (v0.55.0): it still carries a series -- usable, or
  * only cooling down (lib/sourceStanding.ts) -- it is not the survivor's own main source, it is in the survivor's
  * language (the follow guard every automatic follow passes), and the survivor is not numbered by posting order, whose
@@ -136,8 +147,32 @@ async function carryable(fromId: string, intoId: string): Promise<{ sourceId: st
  * everyone a phantom NEW badge, or hide one.
  */
 export async function mergeSeries(fromId: string, intoId: string): Promise<MergeResult> {
-  const carry = await carryable(fromId, intoId).catch(() => null);
+  // The standing/language checks use several ordinary pool reads. Do them before opening the transaction so a burst
+  // of unrelated merges cannot occupy every pool client and then deadlock waiting for another one. Core source facts
+  // are compared again under the row locks below before this candidate may be carried.
+  const carryCandidate = await carryable(fromId, intoId).catch(() => null);
   return tx(async (qq) => {
+    if (fromId === intoId) throw new MergeConflictError({ refused: 'same_series' });
+    // Stable lock order prevents two opposite/crossing merges from deadlocking. More importantly, the visibility and
+    // edition checks happen again *under* the locks: two BFF processes can both pass mergeRefusal(), but only the first
+    // may move rows. The second observes the first one's merged_into (or a concurrent hide) and refuses.
+    const locked = await qq<SeriesRow & { work_id: string | null; source_id: string | null; source_series_id: string | null; numbering: string | null }>(
+      `SELECT id, title, folder, deleted_at, merged_into, work_id, source_id, source_series_id, numbering
+         FROM lib_series WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE`, [[fromId, intoId]],
+    );
+    const from = locked.find((r) => r.id === fromId);
+    const into = locked.find((r) => r.id === intoId);
+    if (!from || !into) throw new MergeConflictError({ refused: 'not_found' });
+    if (from.deleted_at) throw new MergeConflictError({ refused: 'deleted', which: 'source' });
+    if (into.deleted_at) throw new MergeConflictError({ refused: 'deleted', which: 'target' });
+    if (from.merged_into) throw new MergeConflictError({ refused: 'merged', which: 'source' });
+    if (into.merged_into) throw new MergeConflictError({ refused: 'merged', which: 'target' });
+    if (from.work_id && from.work_id === into.work_id) throw new MergeConflictError({ refused: 'same_work' });
+
+    const carry = carryCandidate
+      && from.source_id === carryCandidate.sourceId && from.source_series_id === carryCandidate.ref
+      && into.source_id !== carryCandidate.sourceId && into.numbering !== 'posting_order'
+      ? { ...carryCandidate, title: from.title } : null;
     const moved = await qq<{ id: string }>(
       `UPDATE lib_books SET series_id = $2 WHERE series_id = $1 RETURNING id`,
       [fromId, intoId],
@@ -387,6 +422,13 @@ export async function deleteChapterFiles(
   let applied = 0;
   let bytes = 0;
   for (const t of todo) {
+    // Re-resolve at the destructive boundary. A lexically contained row can still walk through an
+    // intermediate (or final) symlink to an unrelated file; an absent final file is safe only when its
+    // nearest existing parent resolves under the real download root.
+    if (await realContainedPath(DL_ROOT, t.rel) !== t.abs) {
+      await recordSkip(t.id, 'outside_root', t.position, { root: DL_ROOT, file: t.rel });
+      continue;
+    }
     const st = await stat(t.abs).catch(() => null);
     const item: ChapterDeleteJournalItem = {
       id: t.id, root: DL_ROOT, file: t.rel, position: t.position, bytes: st?.size ?? 0,

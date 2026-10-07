@@ -4,8 +4,8 @@
 // errno is the worst possible outcome: a failed rename is indistinguishable from "nothing happened". The
 // library is the harder case, because the answer is usually "set PUID", not "chown this" -- a library belongs
 // to the user, and telling them to give it away to uid 10002 is what PUID exists to avoid.
-import { mkdtemp, rmdir, stat } from 'fs/promises';
-import { join, resolve, sep } from 'path';
+import { lstat, mkdtemp, realpath, rmdir, stat } from 'fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { forDesktop } from './desktop';
 
 export type Writability =
@@ -88,4 +88,44 @@ export function containedPath(root: string, rel: string): string | null {
   const base = resolve(root);
   const full = resolve(base, rel);
   return full === base || full.startsWith(base + sep) ? full : null;
+}
+
+/** A resolved path is below a resolved root, on every supported platform. */
+const inside = (base: string, candidate: string): boolean => {
+  const rel = relative(base, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+};
+
+/**
+ * Lexical containment plus filesystem containment through every existing symlink.
+ *
+ * The final file may legitimately be absent (a tombstone being restored, or a new chapter). In that case the
+ * nearest existing parent is resolved and checked. If the final entry exists, it is resolved too, so both an
+ * intermediate symlink and a final symlink out of the download root are refused. Call this again immediately
+ * before a destructive operation or write: an earlier validation is not a lock on the filesystem.
+ */
+export async function realContainedPath(root: string, rel: string): Promise<string | null> {
+  const full = containedPath(root, rel);
+  if (!full) return null;
+  const base = await realpath(resolve(root)).catch(() => null);
+  if (!base) return null;
+
+  let parent = dirname(full);
+  let realParent: string | null = null;
+  for (;;) {
+    realParent = await realpath(parent).catch(() => null);
+    if (realParent) break;
+    const up = dirname(parent);
+    if (up === parent) return null;
+    parent = up;
+  }
+  if (!inside(base, realParent)) return null;
+
+  const entry = await lstat(full).catch((e: NodeJS.ErrnoException) => e?.code === 'ENOENT' ? null : false);
+  if (entry === false) return null;
+  if (entry) {
+    const target = await realpath(full).catch(() => null);
+    if (!target || !inside(base, target)) return null;
+  }
+  return full;
 }

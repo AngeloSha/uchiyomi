@@ -79,6 +79,7 @@ import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
 import { withOrigin } from './downloadActivity';
 import { standingsOf } from './sourceStanding';
+import { folderBusy } from './numbering';
 
 /**
  * Which of the eight steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
@@ -757,7 +758,7 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     { const h = halted(); if (h) { stopped = h; break; } }
     const folder = folders.get(id);
     if (!folder) continue;
-    if (busyFolders.has(folder)) {
+    if (folderBusy(folder)) {
       skip(r, { step: 'failures', target: { seriesId: id, title: titles.get(id) }, why: 'folder_busy' });
       continue;
     }
@@ -766,7 +767,7 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     busyFolders.add(folder);
     try {
       // Never hunting for "Fix all": its search budget belongs to the gaps step, which runs after this one.
-      const up = await updateSeries(id, 10, { hunt: wide ? false : budget, cancelled, unattended: true });
+      const up = await updateSeries(id, 10, { hunt: wide ? false : budget, cancelled, unattended: true, folderHeld: true });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -814,12 +815,12 @@ async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Pro
   let stopped: RepairResult['stopped'];
   for (const [i, s] of rows.entries()) {
     { const h = halted(); if (h) { stopped = h; break; } }
-    if (busyFolders.has(s.folder)) continue;
+    if (folderBusy(s.folder)) continue;
     here({ kind: 'series', seriesId: s.id, title: s.title, phase: 'rechecking', done: i, of: rows.length });
     series++;
     busyFolders.add(s.folder);
     try {
-      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled, unattended: true, ...restingOpt() });
+      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled, unattended: true, folderHeld: true, ...restingOpt() });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -949,7 +950,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
     // Somebody else is already downloading into this folder (a series-page fetch, a Fetch newest run).
     // Two writers on one path is a lost file and a rate-limit strike each; this one simply waits a night.
     // Reintroduce the silent `continue`: "a Fix on a chapter whose folder is busy says so" finds no skip.
-    if (busyFolders.has(folder)) {
+    if (folderBusy(folder)) {
       skip(r, {
         step: 'short', why: 'folder_busy',
         target: { seriesId, title: rows[0].title, ...(opts.bookId ? { bookId: opts.bookId, number: Number(rows[0].number) } : {}) },
@@ -969,12 +970,21 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
     );
     if (primary?.source_id) followed.add(primary.source_id);
 
+    // The source/permission reads above awaited. Recheck at the claim boundary so a user job that reserved the
+    // folder meanwhile wins; folderHeld below is permission to cross only our own mark.
+    if (folderBusy(folder)) {
+      skip(r, {
+        step: 'short', why: 'folder_busy',
+        target: { seriesId, title: rows[0].title, ...(opts.bookId ? { bookId: opts.bookId, number: Number(rows[0].number) } : {}) },
+      });
+      continue;
+    }
     busyFolders.add(folder);
     try {
       // The listing the copies come from is as old as the last sweep, and a source that has since fixed a
       // broken chapter would not be noticed. `maxNew: 0` downloads nothing: it is a listing refresh, the
       // same one the refetch route does, under the same kind of wall so a dead source costs ten seconds.
-      await withTimeout(updateSeries(seriesId, 0, { ...restingOpt(), unattended }), LISTING_REFRESH_MS).catch(() => {});
+      await withTimeout(updateSeries(seriesId, 0, { ...restingOpt(), unattended, folderHeld: true }), LISTING_REFRESH_MS).catch(() => {});
 
       for (const book of rows) {
         { const h = halted(); if (h) { stopped = h; break series; } }
@@ -1276,7 +1286,7 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
     { const h = halted(); if (h) { stopped = h; break; } }
     if (!(await seriesIsMonitored(seriesId))) continue;
     const folder = rows[0].folder;
-    if (busyFolders.has(folder)) continue;
+    if (folderBusy(folder)) continue;
     const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
     const primary = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
     const followed = new Set<string>(
@@ -1284,12 +1294,13 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
     );
     if (primary?.source_id) followed.add(primary.source_id);
 
+    if (folderBusy(folder)) continue;
     busyFolders.add(folder);
     try {
       // The listing is as old as the last sweep: refreshed first, so the copy judged is one the sources list
       // now. A series whose refresh did not come back is left for tomorrow -- a stale listing is how a copy
       // a site has since taken down would be "the preferred group's version".
-      const refreshed = await withTimeout(updateSeries(seriesId, 0, { unattended: true }), LISTING_REFRESH_MS).catch(() => null);
+      const refreshed = await withTimeout(updateSeries(seriesId, 0, { unattended: true, folderHeld: true }), LISTING_REFRESH_MS).catch(() => null);
       if (!refreshed || refreshed.outcome !== 'ok') {
         if (refreshed?.outcome !== 'paused') r.groups.left += rows.length;
         continue;
@@ -1578,7 +1589,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   let stopped: RepairResult['stopped'];
   for (const [i, s] of take.entries()) {
     { const h = halted(); if (h) { stopped = h; break; } }
-    if (busyFolders.has(s.folder)) {
+    if (folderBusy(s.folder)) {
       skip(r, { step: 'gaps', target: { seriesId: s.id, title: s.title }, why: 'folder_busy' });
       continue;
     }
@@ -1712,6 +1723,10 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
   async function fetchGaps(
     s: { id: string; title: string; folder: string }, gapSet: Set<number>, out: GapsResult | null, log?: Log,
   ): Promise<{ fetched: number; numbers: Set<number>; pending: Dated | null; disk: boolean }> {
+    if (folderBusy(s.folder)) {
+      skip(r, { step: 'gaps', target: { seriesId: s.id, title: s.title }, why: 'folder_busy' });
+      return { fetched: 0, numbers: new Set(), pending: null, disk: false };
+    }
     busyFolders.add(s.folder);
     try {
       // Fill now fetches below an active slow archive's boundary too (#117): the person asked for these
@@ -1721,7 +1736,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       // below an active archive's boundary" in repair.int.test.ts fetches nothing.
       const up = await updateSeries(s.id, opts.autofix ? AUTOFIX_GAP_CHAPTERS : REPAIR_GAP_CHAPTERS, {
         // Fill now (`opts.seriesId`) is a person asking for this series; the nightly and Fix everything are not.
-        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId, unattended: !opts.seriesId, ...restingOpt(),
+        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId, unattended: !opts.seriesId, folderHeld: true, ...restingOpt(),
       });
       const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
       // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the

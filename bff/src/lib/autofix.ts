@@ -77,7 +77,8 @@ import {
 import { gapsOf, splitAtFloor } from './fill';
 import { loadIgnores, noIgnores } from './healthIgnore';
 import { storeHealthSummary, scheduleHealthSummaryRefresh } from './healthSummary';
-import { mergeRefusal, mergeSeries, deleteChapterFiles, getSeriesRow } from './libraryAdmin';
+import { mergeRefusal, mergeSeries, MergeConflictError, deleteChapterFiles, getSeriesRow } from './libraryAdmin';
+import { claimWriterFolders } from './bulkNewest';
 import { linkPair } from './editions';
 import { haveNumbers } from './libraryNumbers';
 import { effectiveLang, seriesLanguage } from './seriesLang';
@@ -918,11 +919,31 @@ async function mergeCopies(a: Run, ids: readonly string[]): Promise<void> {
       continue;
     }
     if (await mergeRefusal(other.id, keep.id)) continue;
-    const r = await mergeSeries(other.id, keep.id);
-    await logAudit('series.merge', {
-      userId: a.by, detail: { from: other.id, fromTitle: other.title, into: keep.id, intoTitle: keep.title, ...r, via: 'autofix', runId: a.id },
-    });
-    did(a, 'merged', 1, say('autofix.item.merged', { from: other.title, into: keep.title, seriesIds: [other.id, keep.id] }));
+    // `runtime.repairing` keeps a sweep out, but a bulk deletion may already own either folder. Claim the same shared
+    // writer lock as routes/Rescan so Autofix never moves book ownership while that worker is unlinking a chapter.
+    const live = await q<{ id: string; folder: string }>(
+      'SELECT id, folder FROM lib_series WHERE id = ANY($1::text[])', [[other.id, keep.id]],
+    );
+    const fromNow = live.find((r) => r.id === other.id);
+    const intoNow = live.find((r) => r.id === keep.id);
+    const claim = fromNow && intoNow
+      ? claimWriterFolders([fromNow.folder, intoNow.folder], folderBusy,
+        () => runsInside(other.id) > 0 || runsInside(keep.id) > 0)
+      : null;
+    if (!claim) continue;
+    try {
+      const r = await mergeSeries(other.id, keep.id);
+      await logAudit('series.merge', {
+        userId: a.by, detail: { from: other.id, fromTitle: other.title, into: keep.id, intoTitle: keep.title, ...r, via: 'autofix', runId: a.id },
+      });
+      did(a, 'merged', 1, say('autofix.item.merged', { from: other.title, into: keep.title, seriesIds: [other.id, keep.id] }));
+    } catch (e) {
+      // Another BFF can win after the optimistic health check. The transaction's locked recheck makes that a clean
+      // refusal, not a half-merge or a failed Autofix run.
+      if (!(e instanceof MergeConflictError)) throw e;
+    } finally {
+      claim.release();
+    }
   }
 }
 
@@ -1350,10 +1371,16 @@ async function files(a: Run): Promise<void> {
       }
       if (!ids.length) continue;
       now(a, say('autofix.now.files'), { title: series.title, seriesIds: [series.seriesId] });
-      const r = await deleteChapterFiles(series.seriesId, ids, { userId: a.by, via: 'autofix', runId: a.id });
-      if ('applied' in r && r.applied) {
-        did(a, 'deletedTwice', r.applied, say('autofix.item.deleted', { title: series.title, n: r.applied, seriesIds: [series.seriesId] }));
-      }
+      const row = await getSeriesRow(series.seriesId);
+      const claim = row && !row.deleted_at && !row.merged_into
+        ? claimWriterFolders([row.folder], folderBusy, () => runsInside(series.seriesId) > 0) : null;
+      if (!claim) continue;
+      try {
+        const r = await deleteChapterFiles(series.seriesId, ids, { userId: a.by, via: 'autofix', runId: a.id });
+        if ('applied' in r && r.applied) {
+          did(a, 'deletedTwice', r.applied, say('autofix.item.deleted', { title: series.title, n: r.applied, seriesIds: [series.seriesId] }));
+        }
+      } finally { claim.release(); }
     }
     // Impossible numbers: the Health check's own findings (an ignored one is left), every such chapter of each series.
     const report = await runHealthChecks().catch(() => null);
@@ -1368,8 +1395,14 @@ async function files(a: Run): Promise<void> {
           WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2`, [it.seriesId, limit]).catch(() => []);
       if (!books.length) continue;
       now(a, say('autofix.now.files'), { title: it.title, seriesIds: [it.seriesId!] });
-      const r = await deleteChapterFiles(it.seriesId!, books.map((b) => b.id), { userId: a.by, via: 'autofix', runId: a.id });
-      if ('applied' in r && r.applied) did(a, 'deletedOdd', r.applied, say('autofix.item.deleted', { title: it.title, n: r.applied, seriesIds: [it.seriesId!] }));
+      const row = await getSeriesRow(it.seriesId!);
+      const claim = row && !row.deleted_at && !row.merged_into
+        ? claimWriterFolders([row.folder], folderBusy, () => runsInside(it.seriesId!) > 0) : null;
+      if (!claim) continue;
+      try {
+        const r = await deleteChapterFiles(it.seriesId!, books.map((b) => b.id), { userId: a.by, via: 'autofix', runId: a.id });
+        if ('applied' in r && r.applied) did(a, 'deletedOdd', r.applied, say('autofix.item.deleted', { title: it.title, n: r.applied, seriesIds: [it.seriesId!] }));
+      } finally { claim.release(); }
     }
   });
 }
