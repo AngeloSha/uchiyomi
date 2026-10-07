@@ -241,7 +241,9 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
 
     // 2. Your sources: three extensions installed in the engine's own page, none of their sources on, one update waiting.
     if (width === 390) {
-      const now = await waitFor(async () => { const p = await panelNow(); return p.attention.some((a) => a.kind === 'updates') ? p : null; }, 15_000);
+      // 40 s, not 15: sourcesOverview keeps the update count for 30 s, so a pass that met the engine before the catalogue
+      // listed the update waits out that cache (the v0.55.7 integration's one engine-walk miss).
+      const now = await waitFor(async () => { const p = await panelNow(); return p.attention.some((a) => a.kind === 'updates') ? p : null; }, 40_000);
       const upd = now?.attention.find((a) => a.kind === 'updates');
       check(`${tag}: no bars and no hint line; the update waiting is one row of Needs attention, "1 extension has an update", with Update`,
         !!now && now.bars === 0 && !now.hint && !!upd && /1 extension has an update/.test(upd.text) && /Manga Ball/.test(upd.text) && upd.update && !upd.updateAll,

@@ -128,3 +128,12 @@ test('the Lists pages say nothing in English only: every toast, question and lab
   // And the count says its singular.
   assert.match(code(read('app/collections/page.tsx')), /=== 1 \? tr\('1 series'\) : tr\('\{n\} series', \{ n: Number\(c\.item_count\) \}\)/);
 });
+
+test("the Lists index card's accent bar and delete key sit by the reading direction, not by left and right", () => {
+  // The accent bar is the card's leading edge and the delete key its trailing corner: in Arabic both used to stay where
+  // English puts them (left-0, right-3), the bar at the card's end. Reintroduce `left-0`: this fails.
+  const src = read('app/collections/page.tsx');
+  assert.match(src, /absolute inset-y-0 start-0 w-1\.5/, 'the accent bar is not on the leading edge');
+  assert.match(src, /absolute end-3 top-3/, 'the delete key is not in the trailing corner');
+  assert.doesNotMatch(src, /\b(?:left|right)-\d/, 'a physical left/right is left on the Lists index');
+});

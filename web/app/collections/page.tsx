@@ -76,13 +76,13 @@ export default function CollectionsPage() {
         <div className="grid grid-cols-1 gap-3 px-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 lg:px-0">
           {items.map((c) => (
             <div key={c.id} className="card group relative overflow-hidden p-4">
-              <span aria-hidden className="absolute inset-y-0 left-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
+              <span aria-hidden className="absolute inset-y-0 start-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
               <Link href={`/collection/?id=${c.id}`} className="block ps-2">
                 <p className="font-display text-lg font-semibold text-fog-50">{c.name}</p>
                 <p className="text-xs text-fog-500">{Number(c.item_count) === 1 ? tr('1 series') : tr('{n} series', { n: Number(c.item_count) })}</p>
               </Link>
               <button onClick={() => remove(c)} aria-label={tr('Delete “{name}”', { name: iso(c.name) })}
-                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-500 opacity-0 transition group-hover:opacity-100">
+                className="absolute end-3 top-3 grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-500 opacity-0 transition group-hover:opacity-100">
                 <IcTrash width={14} height={14} />
               </button>
             </div>
