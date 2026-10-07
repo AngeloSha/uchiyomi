@@ -41,6 +41,7 @@ test('chapterLabel picks the right noun', () => {
   assert.equal(chapterLabel({ metadata: { number: '4.5' }, name: 'Chapter 4.5' }), 'Ch. 4.5');
   // A file holding a range (v0.55.2): the server's `metadata.number` says it, and the label is the server's.
   assert.equal(chapterLabel({ metadata: { number: '1–7' }, number: 1, name: 'Batman 01-07 (1987)' }), 'Ch. 1–7');
+  assert.equal(chapterLabel({ number: 1, numberEnd: 7 }), 'Ch. 1–7', 'a tombstone range keeps its identity without metadata');
   assert.equal(chapterLabel({ name: 'Extras' }), 'Extras', 'no number -> fall back to the name');
   assert.equal(chapterLabel({}), '');
 });

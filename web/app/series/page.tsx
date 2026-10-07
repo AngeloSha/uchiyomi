@@ -765,11 +765,11 @@ function SeriesInner() {
   const everything = showAllChaptersOn(user?.settings);
   const [foldedRuns, setFoldedRuns] = useState<Set<number>>(new Set());
   const runsOpen = useMemo(() => openRuns(everything, expandedRuns, foldedRuns), [everything, expandedRuns, foldedRuns]);
-  const toggleRun = (from: number, numbers: number[]) => {
+  const toggleRun = (from: number, keys: string[]) => {
     const hiding = runsOpen.has(from);
     const flip = (o: Set<number>) => { const next = new Set(o); next.has(from) ? next.delete(from) : next.add(from); return next; };
     if (everything) setFoldedRuns(flip); else setExpandedRuns(flip);
-    if (hiding) setPickedGhosts((p) => { const n = new Set(p); for (const x of numbers) n.delete(x); return n; });
+    if (hiding) setPickedGhosts((p) => { const n = new Set(p); for (const key of keys) n.delete(key); return n; });
   };
   useEffect(() => { setSelecting(false); setPickedBooks(new Set()); setPickedGhosts(new Set()); setShowAll(false); setExpandedRuns(new Set()); setFoldedRuns(new Set()); setChapterSheet(null); }, [id, asc]);
 
@@ -1700,7 +1700,9 @@ function SeriesInner() {
             const { key, args } = runLabel(r, { paused: archivePaused });
             // The run's own numbers, from the same filtered list the row was built from, so "Fetch all 5"
             // fetches the five the sentence counts and not a sixth the group filter hid.
-            const numbers = filteredGhosts.filter((g) => g.why === r.why && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);
+            const runGhosts = filteredGhosts.filter((g) => g.why === r.why && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number));
+            const numbers = runGhosts.map((g) => g.number);
+            const keys = runGhosts.map(ghostKey);
             // A run the slow archive is fetching (#117) says how far it has got and offers nothing but Show:
             // its Pause and Stop are the band's. An older-chapters run may start one instead.
             const archiving = r.why === 'archive';
@@ -1710,7 +1712,7 @@ function SeriesInner() {
                 {/* The two chips travel together: when the sentence leaves no room they wrap as one pair to
                     the end of the next line, not one chip after the sentence and one orphaned below. */}
                 <span className="ms-auto flex shrink-0 gap-1.5">
-                  <button type="button" onClick={() => toggleRun(r.from, numbers)} aria-expanded={r.open} className={`chip shrink-0 px-2.5 py-1 text-[11px] ${r.open ? 'chip-active' : ''}`}>
+                  <button type="button" onClick={() => toggleRun(r.from, keys)} aria-expanded={r.open} className={`chip shrink-0 px-2.5 py-1 text-[11px] ${r.open ? 'chip-active' : ''}`}>
                     {r.open ? tr('Hide') : tr('Show')}
                   </button>
                   {!archiving && canDownload(user) && numbers.length > 0 && (

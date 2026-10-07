@@ -127,7 +127,8 @@ test('hiding an older-chapters run drops its ghosts from the selection', () => {
   // "Hide un-picks the run's numbers" fails.
   const page = code(read('app/series/page.tsx'));
   assert.match(fn(page, 'toggleRun'), /setPickedGhosts\(/, 'Hide un-picks the run\'s numbers');
-  assert.match(page, /toggleRun\(r\.from, numbers\)/, 'the row hands the run its numbers');
+  assert.match(page, /const keys = runGhosts\.map\(ghostKey\)/, 'the row keeps stable ids for duplicate-number tombstones');
+  assert.match(page, /toggleRun\(r\.from, keys\)/, 'the row hands the run its stable ghost keys');
 });
 
 test('the admin footer of the sources sheet is one row, and a sheet with a footer may take 85vh', () => {
@@ -262,7 +263,8 @@ test('the series page only starts a slow archive; watching it is the band\'s', (
     'Archive slowly is offered on a series already being archived, or with nothing to archive');
   assert.match(page, /\{!archiving && canDownload\(user\) && numbers\.length > 0 && \(/, "the archive's run offers Fetch all");
   assert.match(page, /\{!archiving && mayArchive && numbers\.length > 0 && \(/, "the archive's own run offers to start it again");
-  assert.match(page, /const numbers = filteredGhosts\.filter\(\(g\) => g\.why === r\.why &&/, 'a run hands Hide the other kind\'s numbers');
+  assert.match(page, /const runGhosts = filteredGhosts\.filter\(\(g\) => g\.why === r\.why &&/, 'a run hands Hide the other kind\'s ghosts');
+  assert.match(page, /const numbers = runGhosts\.map\(\(g\) => g\.number\)/, 'a run still hands Fetch all its chapter numbers');
   // The supply line's "not here yet" is what the sweep would take: the archive's numbers are not. Since v0.50.0 the
   // rule is lib/chapterRows.ts countsAsBehind, which chapterRows.test.ts holds to it for every kind of ghost.
   assert.match(page, /notHere: ghosts\.filter\(\(g\) => countsAsBehind\(g\) && !haveNumbers\.has\(g\.number\)\)\.length,/,
