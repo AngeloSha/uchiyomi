@@ -16,6 +16,9 @@
 #     app's archive timing, and a walk without it skips the archive checks that need that timing
 #   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
 #   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
+#   KEEP=1 E2E_SKIP_BUILD=1 E2E_IMAGE=uchiyomi:e2e-final E2E_NO_WALK=1 bash web/test/e2e/up.sh
+#     reuses that already-built AIO image. Skip mode requires an explicit E2E_IMAGE, verifies it before changing any
+#     stack state, and runs its resolved image ID, so every phase can exercise the exact same final build.
 #   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v54 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # the stack for walk49's replace
 #   KEEP=1 E2E_ENGINE=fake E2E_FAKE_EXTRA=v55 E2E_MAX_SOURCES=2 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's autofix
 #   KEEP=1 E2E_SOLVERS=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's solver: a main and a backup solver, fake-b
@@ -85,6 +88,20 @@ ENGINE=${E2E_ENGINE:-}
 # The image's tag: its own per run when several instances are built at once (parallel lanes), so one run never
 # starts another's build.
 IMAGE=${E2E_IMAGE:-uchiyomi:e2e}
+SKIP_BUILD=${E2E_SKIP_BUILD:-0}
+case "$SKIP_BUILD" in
+  0) ;;
+  1)
+    # Fail before mktemp, container removal or network creation. A typo must not silently run whatever happens to be
+    # tagged uchiyomi:e2e, and resolving the explicit ref now keeps this stack on one immutable local image ID.
+    [ -n "${E2E_IMAGE:-}" ] || { echo "E2E_SKIP_BUILD=1 requires an explicit E2E_IMAGE" >&2; exit 1; }
+    IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null) \
+      || { echo "E2E_SKIP_BUILD=1 image does not exist: $IMAGE" >&2; exit 1; }
+    [ -n "$IMAGE_ID" ] || { echo "E2E_SKIP_BUILD=1 could not resolve image: $IMAGE" >&2; exit 1; }
+    IMAGE="$IMAGE_ID"
+    ;;
+  *) echo "E2E_SKIP_BUILD must be 0 or 1" >&2; exit 1 ;;
+esac
 LIB=$(mktemp -d)
 DATA=$(mktemp -d)
 # The v0.42.0 walk needs one provider that declares itself adult, to prove the "Show 18+" reveal keeps it
@@ -218,8 +235,12 @@ else
   python3 "$REPO/web/test/e2e/seed.py" "$LIB"
 fi
 
-echo "· building the all-in-one image"
-docker build -q -f "$REPO/Dockerfile.aio" -t "$IMAGE" "$REPO" >/dev/null
+if [ "$SKIP_BUILD" = "1" ]; then
+  echo "· using the prebuilt all-in-one image $IMAGE"
+else
+  echo "· building the all-in-one image"
+  docker build -q -f "$REPO/Dockerfile.aio" -t "$IMAGE" "$REPO" >/dev/null
+fi
 
 if [ "$EMBEDDED" = "1" ]; then
   echo "· embedded database: no Postgres container, DATABASE_URL unset, /data mounted"
