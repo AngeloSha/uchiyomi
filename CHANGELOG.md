@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.55.8 — 2026-10-07
+## v0.55.8 — 2026-10-08
 
 **Your Library sort is now a default, up to three Lists can live on Home, and each library can opt out of automatic
 AniList lookups. Chapter cleanup is durable and recoverable, scanlator blocks apply safely everywhere, and Reduce
