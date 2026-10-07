@@ -9,6 +9,7 @@ import {
   SERIES_TYPE_FROM, isKnownSeriesType, typeFromGenres, typeFromLanguage, typeFromAniListMatch,
   type KnownSeriesType, type SeriesTypeFrom,
 } from './seriesTypeSignals';
+import type { ScopedQuery } from './anilistPolicy';
 
 export * from './seriesTypeSignals';
 
@@ -16,14 +17,15 @@ export * from './seriesTypeSignals';
  * Record what one piece of evidence says, unless something more trusted already spoke. By id, or by folder where
  * the add flow has not learned the id yet. A null type is no evidence and changes nothing.
  */
-export async function learnSeriesType(
+export async function learnSeriesTypeWith(
+  qq: ScopedQuery,
   where: { id: string } | { folder: string },
   type: KnownSeriesType | null | undefined,
   from: SeriesTypeFrom,
 ): Promise<boolean> {
   if (!isKnownSeriesType(type)) return false;
   const byId = 'id' in where;
-  const rows = await q<{ id: string }>(
+  const rows = await qq<{ id: string }>(
     `UPDATE lib_series SET series_type = $2, series_type_from = $3
       WHERE ${byId ? 'id' : 'folder'} = $1
         AND COALESCE(array_position($4::text[], series_type_from), 0) <= array_position($4::text[], $3::text)
@@ -32,6 +34,15 @@ export async function learnSeriesType(
     [byId ? where.id : where.folder, type, from, SERIES_TYPE_FROM],
   );
   return rows.length > 0;
+}
+
+/** Unconditional/manual wrapper. Automatic AniList work uses the scoped form under `withAniListMutation`. */
+export async function learnSeriesType(
+  where: { id: string } | { folder: string },
+  type: KnownSeriesType | null | undefined,
+  from: SeriesTypeFrom,
+): Promise<boolean> {
+  return learnSeriesTypeWith(q, where, type, from);
 }
 
 /**
@@ -50,10 +61,20 @@ export async function learnTypeFromSource(
 }
 
 /** AniList's country, from the art match, when the entry is visibly this title. Best effort. */
+export async function learnTypeFromAniListWith(
+  qq: ScopedQuery,
+  where: { id: string } | { folder: string },
+  title: Array<string | null | undefined> | string,
+  match: { country?: string | null; titles?: Array<string | null | undefined> | null } | null | undefined,
+): Promise<boolean> {
+  return learnSeriesTypeWith(qq, where, typeFromAniListMatch(title, match), 'anilist');
+}
+
+/** Unconditional/manual wrapper used by explicit Admin actions. */
 export async function learnTypeFromAniList(
   where: { id: string } | { folder: string },
   title: Array<string | null | undefined> | string,
   match: { country?: string | null; titles?: Array<string | null | undefined> | null } | null | undefined,
 ): Promise<void> {
-  await learnSeriesType(where, typeFromAniListMatch(title, match), 'anilist').catch(() => false);
+  await learnTypeFromAniListWith(q, where, title, match).catch(() => false);
 }

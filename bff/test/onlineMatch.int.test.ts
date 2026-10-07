@@ -331,6 +331,12 @@ test('a source cover added while opted out stays private, then gains missing onl
   // The current destination decides at request time.  Moving to an enabled library must enrich the same cover-only
   // row without a restart, cache clear, or destructive replacement of the cover supplied by its source.
   await q(`UPDATE lib_series SET library_id = 'om-yes-anilist' WHERE id = $1`, [ID.addPrivate]);
+  // The background match checker validates URLs already found by title; it did not perform this pending title search
+  // and must not consume the NULL retry marker before the first view gets a chance to do so.
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  await checkMatches({ info() {}, warn() {} });
+  assert.equal((await art(ID.addPrivate))?.checked_at, null,
+    'the match checker consumed a source cover before title enrichment');
   assert.equal((await img(`/img/series/${ID.addPrivate}/backdrop`)).statusCode, 200);
   assert.ok(asked.slice(before).includes('Zzz Om Add Private'), 'moving to an enabled library did not permit the lookup');
   const stored = await art(ID.addPrivate);
@@ -361,6 +367,40 @@ test('a lazy lookup whose series moves to an opted-out library while AniList ans
   assert.equal(moved, true, 'the test did not move the series during the lookup');
   assert.equal(await art(ID.privacy), null, 'the stale AniList response was cached after the destination opted out');
   assert.equal(await link(ID.privacy), null, 'the stale AniList response linked the opted-out series');
+});
+
+test('a move in the final pre-write window atomically refuses art, link, direction and type', { skip }, async () => {
+  const { setAniListMutationHooks } = await import('../src/lib/anilistPolicy');
+  await q(`UPDATE lib_series SET library_id = 'om-yes-anilist', reading_direction = NULL,
+             reading_direction_from = NULL, series_type = NULL, series_type_from = NULL
+           WHERE id = $1`, [ID.addPrivate]);
+  await q(`DELETE FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`, [ID.addPrivate]);
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1,NULL,$2,NULL)
+           ON CONFLICT (series_id) DO UPDATE SET banner = NULL, cover = EXCLUDED.cover, checked_at = NULL`,
+    [ID.addPrivate, RED]);
+
+  let moved = false;
+  setAniListMutationHooks({
+    async beforeLock(where) {
+      if (!('id' in where) || where.id !== ID.addPrivate || moved) return;
+      moved = true;
+      await q(`UPDATE lib_series SET library_id = 'om-add-private' WHERE id = $1`, [ID.addPrivate]);
+    },
+  });
+  try {
+    assert.equal((await img(`/img/series/${ID.addPrivate}/backdrop`)).statusCode, 200);
+  } finally {
+    setAniListMutationHooks();
+  }
+
+  assert.equal(moved, true, 'the lookup did not reach the controlled post-answer write boundary');
+  assert.deepEqual(await art(ID.addPrivate), { banner: null, cover: RED, checked_at: null },
+    'the response changed or completed art after the atomic policy check refused it');
+  assert.equal(await link(ID.addPrivate), null, 'the response linked the series after the move');
+  const metadata = (await q(`SELECT reading_direction, reading_direction_from, series_type, series_type_from
+                               FROM lib_series WHERE id = $1`, [ID.addPrivate]))[0];
+  assert.deepEqual(metadata, { reading_direction: null, reading_direction_from: null, series_type: null, series_type_from: null },
+    'the response changed direction or type after the move');
 });
 
 test('the backfill stores only what is named as the series: AniList, the anime search, Kitsu and MangaDex alike', { skip }, async () => {

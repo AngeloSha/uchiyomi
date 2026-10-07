@@ -32,6 +32,7 @@ import { fetchAniListEntries, type AniListEntry } from './anilist';
 import { mangadexTitles } from './sources/mangadex';
 import { namesOfMany } from './altTitles';
 import { aniListMediaOf, mangaDexIdOf, namesMatch, type AniListMedia } from './onlineMatch';
+import { withAniListMutation, type AniListAuthority } from './anilistPolicy';
 
 type Log = { info: (m: string) => void; warn: (m: string) => void };
 
@@ -91,6 +92,7 @@ async function currentlyAllowed(ids: readonly string[], all: boolean): Promise<S
 export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Promise<MatchCheckResult> {
   const t0 = Date.now();
   const all = !!opts.all;
+  const authority: AniListAuthority = all ? 'manual' : 'automatic';
   const out: MatchCheckResult = { matches: 0, removed: 0, links: { checked: 0, removed: 0 }, art: { checked: 0, cleared: 0 }, unanswered: 0, ms: 0 };
   const links = await q<{ series_id: string; external_id: string }>(
     `SELECT t.series_id, t.external_id FROM series_trackers t JOIN lib_series s ON s.id = t.series_id
@@ -99,20 +101,18 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
         AND t.external_id ~ '^[0-9]{1,10}$' AND ($1 OR t.checked_at IS NULL)
       ORDER BY t.series_id`, [all]);
   // `own`: the ids the series has on its sources, main and followed -- a MangaDex cover of one of them is the source's.
-  const arts = await q<{ series_id: string; banner: string | null; cover: string | null; own: string[]; anilist_lookup: boolean }>(
+  const arts = await q<{ series_id: string; banner: string | null; cover: string | null; own: string[] }>(
     `SELECT a.series_id, a.banner, a.cover,
-            array_remove(ARRAY[s.source_series_id] || ARRAY(SELECT ss.source_series_id FROM series_sources ss WHERE ss.series_id = s.id), NULL) AS own,
-            l.anilist_lookup
+            array_remove(ARRAY[s.source_series_id] || ARRAY(SELECT ss.source_series_id FROM series_sources ss WHERE ss.series_id = s.id), NULL) AS own
        FROM series_art a JOIN lib_series s ON s.id = a.series_id
        JOIN libraries l ON l.id = s.library_id
       WHERE ($1 OR l.anilist_lookup) AND ($1 OR a.checked_at IS NULL)
       ORDER BY a.series_id`, [all]);
 
   const fields: Judged[] = [];
-  const nothingByTitle: string[] = [];
+  const artSnapshots = new Map(arts.map((a) => [a.series_id, { banner: a.banner, cover: a.cover }]));
   for (const a of arts) {
     const own = new Set(a.own.map((x) => String(x).toLowerCase()));
-    const before = fields.length;
     for (const field of ['banner', 'cover'] as const) {
       const url = a[field];
       if (!url) continue;
@@ -121,14 +121,10 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       const mangadex = mangaDexIdOf(url);
       if (mangadex && !own.has(mangadex)) fields.push({ seriesId: a.series_id, field, url, mangadex });
     }
-    if (fields.length === before) nothingByTitle.push(a.series_id);
   }
-  // A row holding nothing found by title -- a source's cover, a miss -- is checked as it stands.
-  if (nothingByTitle.length) await q(
-    `UPDATE series_art a SET checked_at = now()
-       FROM lib_series s JOIN libraries l ON l.id = s.library_id
-      WHERE a.series_id = ANY($1::text[]) AND s.id = a.series_id AND ($2 OR l.anilist_lookup)`,
-    [nothingByTitle, all]);
+  // Do not stamp a row that holds only a source cover (or no art). NULL is also the add/lazy lookup's durable
+  // “title enrichment not completed” state; only the title lookup itself may turn that into a cached miss. Marking it
+  // here consumed the retry before a newly enabled library had ever sent the title.
   if (!links.length && !fields.length) {
     out.ms = Date.now() - t0;
     return out;
@@ -190,23 +186,46 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       const e = entries.get(id);
       const mine = namesOfSeries(l.series_id);
       if (!e) {
-        out.unanswered++;
-        await q(`UPDATE series_trackers SET checked_at = now() WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL`,
-          [l.series_id, l.external_id]);
+        const applied = await withAniListMutation({ id: l.series_id }, authority, async (qq, seriesId) => {
+          const rows = await qq(
+            `UPDATE series_trackers SET checked_at = now()
+              WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL
+              RETURNING 1`,
+            [seriesId, l.external_id],
+          );
+          return rows.length > 0;
+        });
+        if (applied.applied && applied.value) out.unanswered++;
         continue;
       }
-      out.links.checked++;
       if (namesMatch(mine, e.titles)) {
-        await q(`UPDATE series_trackers SET checked_at = now() WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL`,
-          [l.series_id, l.external_id]);
+        const applied = await withAniListMutation({ id: l.series_id }, authority, async (qq, seriesId) => {
+          const rows = await qq(
+            `UPDATE series_trackers SET checked_at = now()
+              WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL
+              RETURNING 1`,
+            [seriesId, l.external_id],
+          );
+          return rows.length > 0;
+        });
+        if (applied.applied && applied.value) out.links.checked++;
         continue;
       }
       // Another work. Still the automatic link to this entry it was when it was read, or nothing is removed: a person
-      // may have linked the series meanwhile. Its floors go with it (one statement each, the link first).
-      const gone = await q(`DELETE FROM series_trackers WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL RETURNING 1`,
-        [l.series_id, l.external_id]);
-      if (!gone.length) continue;
-      await q(`DELETE FROM tracker_progress WHERE series_id = $1 AND provider = 'anilist'`, [l.series_id]);
+      // may have linked the series meanwhile. Its floors go with it in the SAME policy-locked transaction.
+      const applied = await withAniListMutation({ id: l.series_id }, authority, async (qq, seriesId) => {
+        const gone = await qq(
+          `DELETE FROM series_trackers
+            WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL
+            RETURNING 1`,
+          [seriesId, l.external_id],
+        );
+        if (!gone.length) return false;
+        await qq(`DELETE FROM tracker_progress WHERE series_id = $1 AND provider = 'anilist'`, [seriesId]);
+        return true;
+      });
+      if (!applied.applied || !applied.value) continue;
+      out.links.checked++;
       out.links.removed++;
       if (removed.length < AUDIT_NAMED) removed.push({ id: l.series_id, title: mine[0] ?? null, anilist: id, was: e.titles[0] ?? null });
     }
@@ -223,6 +242,8 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
     const mine = namesOfSeries(seriesId);
     const clear: Partial<Record<Field, string>> = {};
     let pending = false;
+    let checked = 0;
+    let unanswered = 0;
     for (const f of list) {
       let titles: string[] | undefined;
       let related: AniListEntry['related'] = [];
@@ -235,19 +256,33 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
         if (!md) { pending = true; continue; }
         titles = md.get(f.mangadex);
       }
-      if (!titles) { out.unanswered++; continue; }
-      out.art.checked++;
+      if (!titles) { unanswered++; continue; }
+      checked++;
       const ok = namesMatch(mine, titles)
         || related.some((r) => r.type === 'MANGA' && namesMatch(mine, entries?.get(r.id)?.titles));
       if (!ok) clear[f.field] = f.url;
     }
-    const rows = await q<{ banner: boolean; cover: boolean }>(
-      `UPDATE series_art a SET banner = CASE WHEN a.banner = $2 THEN NULL ELSE a.banner END,
-                               cover  = CASE WHEN a.cover  = $3 THEN NULL ELSE a.cover  END,
-                               checked_at = CASE WHEN $4 THEN a.checked_at ELSE now() END
-         FROM series_art b WHERE a.series_id = $1 AND b.series_id = a.series_id
-       RETURNING (b.banner IS NOT NULL AND a.banner IS NULL) AS banner, (b.cover IS NOT NULL AND a.cover IS NULL) AS cover`,
-      [seriesId, clear.banner ?? null, clear.cover ?? null, pending]);
+    const snapshot = artSnapshots.get(seriesId);
+    if (!snapshot) continue;
+    const applied = await withAniListMutation({ id: seriesId }, authority, async (qq, lockedId) => {
+      const rows = await qq<{ banner: boolean; cover: boolean }>(
+        `UPDATE series_art a
+            SET banner = CASE WHEN a.banner = $4 THEN NULL ELSE a.banner END,
+                cover  = CASE WHEN a.cover  = $5 THEN NULL ELSE a.cover  END,
+                checked_at = CASE WHEN $6::boolean THEN a.checked_at ELSE now() END
+          WHERE a.series_id = $1
+            AND a.banner IS NOT DISTINCT FROM $2::text
+            AND a.cover  IS NOT DISTINCT FROM $3::text
+        RETURNING ($4::text IS NOT NULL AND a.banner IS NULL) AS banner,
+                  ($5::text IS NOT NULL AND a.cover IS NULL) AS cover`,
+        [lockedId, snapshot.banner, snapshot.cover, clear.banner ?? null, clear.cover ?? null, pending],
+      );
+      return rows[0] ?? null;
+    });
+    if (!applied.applied || !applied.value) continue;
+    out.art.checked += checked;
+    out.unanswered += unanswered;
+    const rows = [applied.value];
     for (const field of ['banner', 'cover'] as const) {
       if (!rows[0]?.[field]) continue;
       out.art.cleared++;

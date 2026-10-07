@@ -5,11 +5,11 @@ import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
-import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
-import { learnTypeFromAniList } from '../lib/seriesType';
-import { automaticAniListAllowed } from '../lib/anilistPolicy';
+import { learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
+import { learnTypeFromAniListWith } from '../lib/seriesType';
+import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPolicy';
 import { noticeBook, noticeShown } from '../lib/noticeChapters';
-import { linkSeries } from '../lib/trackers';
+import { linkSeriesWith } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { solverMayVisit } from '../lib/sources/imageHosts';
@@ -392,24 +392,35 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
         if (title && !(await automaticAniListAllowed({ id }))) {
           throw new Error('automatic AniList lookup disabled');
         }
-        // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
-        const stored = await q<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
-          `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
-           ON CONFLICT (series_id) DO UPDATE SET
-             banner = COALESCE(series_art.banner, EXCLUDED.banner),
-             cover = COALESCE(series_art.cover, EXCLUDED.cover),
-             fetched_at = now(), checked_at = now()
-           RETURNING banner, cover, checked_at`,
-          [id, fetched.banner, fetched.cover],
-        );
-        // the same match also anchors tracker sync — record it while we have it
-        if (fetched.mediaId) {
-          await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
-          // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
-          await learnDirection({ id }, directionFromAniListMatch(names, fetched), 'anilist').catch(() => {});
-          await learnTypeFromAniList({ id }, names, fetched);
+        // The last policy read above is still not write authority: a move or toggle can commit in the few instructions
+        // before the INSERT. Lock the series and its current library, then apply the art, link, direction and type as
+        // one decision. A refused transaction stores no negative result, so enabling later can take the lookup up.
+        const applied = await withAniListMutation({ id }, 'automatic', async (qq, seriesId) => {
+          // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
+          const stored = await qq<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
+            `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
+             ON CONFLICT (series_id) DO UPDATE SET
+               banner = COALESCE(series_art.banner, EXCLUDED.banner),
+               cover = COALESCE(series_art.cover, EXCLUDED.cover),
+               fetched_at = now(), checked_at = now()
+             RETURNING banner, cover, checked_at`,
+            [seriesId, fetched.banner, fetched.cover],
+          );
+          // The same match also anchors tracker sync and carries the weakest direction/type evidence.
+          if (fetched.mediaId) {
+            await linkSeriesWith(qq, seriesId, fetched.mediaId, fetched.mediaTitle ?? null);
+            await learnDirectionWith(qq, { id: seriesId }, directionFromAniListMatch(names, fetched), 'anilist');
+            await learnTypeFromAniListWith(qq, { id: seriesId }, names, fetched);
+          }
+          return stored[0] ?? null;
+        });
+        if (applied.applied) {
+          art = applied.value ?? { banner: art?.banner ?? fetched.banner, cover: art?.cover ?? fetched.cover, checked_at: new Date() };
+        } else {
+          art = await one<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
+            'SELECT banner, cover, checked_at FROM series_art WHERE series_id = $1', [id],
+          ) ?? art ?? { banner: null, cover: null, checked_at: null };
         }
-        art = stored[0] ?? { banner: art?.banner ?? fetched.banner, cover: art?.cover ?? fetched.cover, checked_at: new Date() };
       } catch {
         art ??= { banner: null, cover: null, checked_at: null }; // transient AniList error: don't cache; fall back this view
       }

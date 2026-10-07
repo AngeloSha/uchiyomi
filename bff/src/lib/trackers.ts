@@ -18,6 +18,7 @@ import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
 import { lastNumber } from './chapterRanges';
+import type { ScopedQuery } from './anilistPolicy';
 export type { Provider } from './trackerProviders';
 
 
@@ -103,7 +104,8 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
  *  holds it to the series' names (lib/onlineMatch.ts), so a link written here is checked; the background recheck
  *  (lib/matchCheck.ts) takes up only the rows written without the mark -- before v0.55.7, by an older version after a
  *  rollback, or copied by a statement that does not name the column. */
-export async function linkSeries(
+export async function linkSeriesWith(
+  qq: ScopedQuery,
   seriesId: string,
   externalId: string | number,
   title: string | null,
@@ -111,17 +113,30 @@ export async function linkSeries(
   // Was hardcoded to 'anilist' in the INSERT below despite the table keying on provider, so every link a
   // second tracker made would have been written as an AniList one and then read back as the wrong id.
   provider: Provider = 'anilist',
-): Promise<void> {
-  await q(
+): Promise<boolean> {
+  const rows = await qq<{ linked: number }>(
     `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, checked_at)
      VALUES ($1,$5,$2,$3,$4, now())
      ON CONFLICT (series_id, provider) DO UPDATE
        SET external_id = EXCLUDED.external_id, title = EXCLUDED.title,
            linked_by = COALESCE(EXCLUDED.linked_by, series_trackers.linked_by),
            updated_at = now(), checked_at = now()
-     WHERE series_trackers.linked_by IS NULL OR EXCLUDED.linked_by IS NOT NULL`,
+     WHERE series_trackers.linked_by IS NULL OR EXCLUDED.linked_by IS NOT NULL
+     RETURNING 1 AS linked`,
     [seriesId, String(externalId), title, linkedBy, provider],
-  ).catch(() => {});
+  );
+  return rows.length > 0;
+}
+
+/** Unconditional/manual wrapper. Automatic callers use `linkSeriesWith` inside `withAniListMutation`. */
+export async function linkSeries(
+  seriesId: string,
+  externalId: string | number,
+  title: string | null,
+  linkedBy: string | null = null,
+  provider: Provider = 'anilist',
+): Promise<void> {
+  await linkSeriesWith(q, seriesId, externalId, title, linkedBy, provider).catch(() => {});
 }
 
 /**

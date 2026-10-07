@@ -180,9 +180,10 @@ test('every unchecked match is held to the title check: another work goes, the s
   assert.equal((await artOf(S.md))?.cover, null, "another work's MangaDex cover was kept");
   assert.equal((await artOf(S.ownMd))?.cover, mdCover(UUID_OWN), "the source's own cover was cleared");
   assert.ok(!mdAsked.flat().includes(UUID_OWN), 'MangaDex was asked about the series\' own source');
-  // A cover from anywhere else is a source's: checked as it stands, nobody asked.
+  // A cover from anywhere else is a source's. Its NULL mark is also the title-enrichment retry state, so a job that
+  // did not search by title must not consume it; enabling later lets the lazy/add lookup fill what is missing.
   const src = await artOf(S.src);
-  assert.deepEqual([src?.cover, !!src?.checked_at], ['https://example.org/covers/mc.jpg', true]);
+  assert.deepEqual([src?.cover, src?.checked_at], ['https://example.org/covers/mc.jpg', null]);
 
   assert.deepEqual({ links: r.links, art: r.art, unanswered: r.unanswered, stopped: r.stopped },
     { links: { checked: 4, removed: 1 }, art: { checked: 5, cleared: 4 }, unanswered: 1, stopped: undefined });
@@ -263,6 +264,41 @@ test('a move to an opted-out library while a background check is assembling name
   assert.deepEqual(result.art, { checked: 0, cleared: 0 });
   assert.equal((await linkOf(S.private))?.checked_at, null, 'the skipped link was stamped');
   assert.equal((await artOf(S.private))?.checked_at, null, 'the skipped art was stamped');
+});
+
+test('a policy toggle after the online answer but immediately before its writes refuses every verdict', { skip }, async () => {
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  const { setAniListMutationHooks } = await import('../src/lib/anilistPolicy');
+  await q(`UPDATE libraries SET anilist_lookup = true WHERE id = 'mc-private'`);
+  await q(`UPDATE lib_series SET library_id = 'mc-private' WHERE id = $1`, [S.private]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at)
+           VALUES ($1,'anilist','507','Zzz Mc Private',NULL)
+           ON CONFLICT (series_id, provider) DO UPDATE SET external_id = EXCLUDED.external_id,
+             title = EXCLUDED.title, linked_by = NULL, checked_at = NULL`, [S.private]);
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1,$2,$3,NULL)
+           ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, checked_at = NULL`,
+    [S.private, banner(507), cover(507)]);
+
+  let toggled = false;
+  setAniListMutationHooks({
+    async beforeLock(where) {
+      if (!('id' in where) || where.id !== S.private || toggled) return;
+      toggled = true;
+      await q(`UPDATE libraries SET anilist_lookup = false WHERE id = 'mc-private'`);
+    },
+  });
+  let result: Awaited<ReturnType<typeof checkMatches>>;
+  try {
+    result = await checkMatches(log);
+  } finally {
+    setAniListMutationHooks();
+  }
+
+  assert.equal(toggled, true, 'the check did not reach the controlled post-answer write boundary');
+  assert.deepEqual(result!.links, { checked: 0, removed: 0 }, 'a link verdict crossed the atomic policy boundary');
+  assert.deepEqual(result!.art, { checked: 0, cleared: 0 }, 'an art verdict crossed the atomic policy boundary');
+  assert.equal((await linkOf(S.private))?.checked_at, null, 'the answered link was stamped after opt-out');
+  assert.equal((await artOf(S.private))?.checked_at, null, 'the answered art was stamped after opt-out');
 });
 
 test('a service that does not answer decides nothing; the next run takes up what is left', { skip }, async () => {
