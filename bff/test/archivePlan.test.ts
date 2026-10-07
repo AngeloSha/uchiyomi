@@ -157,8 +157,9 @@ test('a listing that could not be read is read again 1 h, 3 h, 12 h, then a day 
 
 test("a cycle sample keeps the chapter's time and loses the window's and the backoff's", () => {
   const base = { breakEnd: null, backoffUntil: null, windowFrom: null, windowTo: null, inWindow };
-  const at = (h: number, m = 0) => Date.UTC(2026, 8, 27, h, m);
-  // TZ=UTC in the test runner; the window is in local hours, and these are local hours there.
+  // Archive windows use the server's local clock, so make these instants from local wall-clock times too.
+  // UTC instants only happened to match this assertion when the test process itself ran in UTC.
+  const at = (h: number, m = 0) => new Date(2026, 8, 27, h, m, 0, 0).getTime();
   assert.equal(outsideCycleMs({ ...base, from: at(10), to: at(11) }), 0, 'no window, no backoff: all of it is the pace');
   // A window of 10:00-11:00: a chapter at 10:50, the next at 10:01 the day after. The 23 hours it was shut are
   // the window's; the ten minutes before it shut and the minute after it opened are the pace.
