@@ -9,8 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  appliedLine, applyRefusalText, exampleLine, followLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine,
-  unmountedLine, type RescanStatus,
+  appliedLine, applyRefusalText, exampleLine, followLine, intoLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView,
+  uncheckedLine, unmountedLine, type RescanStatus,
 } from '../lib/rescan';
 import { taskResult } from '../lib/tasks';
 
@@ -110,6 +110,20 @@ test('a merge offer names both series, isolated, and the Apply line says what wa
   assert.match(appliedLine({ ...r, merged: 1 }), / · 1 series merged into the series its files went to$/);
   assert.match(appliedLine({ ...r, notMerged: 1 }), / · 1 merge left alone: the series changed since the preview$/);
   assert.match(appliedLine({ ...r, notMerged: 3 }), / · 3 merges left alone: the series changed since the preview$/);
+});
+
+test('the panel says where a series\'s files went, how many moved files it does not list, and promises no merge it cannot do', () => {
+  // v0.55.7 (#150): the advice told Kedryn to merge his emptied series, and nothing in the panel could. Reintroduce the
+  // old advice: the first match below fails. Reintroduce by dropping the "and N more" under the capped moved list:
+  // a preview with 350 moved files listed 200 and said nothing of the rest.
+  assert.equal(intoLine('Zagor'), 'Its files are now in “\u2068Zagor\u2069”');
+  const panel = code(read('components/RescanTask.tsx'));
+  assert.doesNotMatch(panel, /or to merge it with the series its files went to/, 'the advice promises a merge the panel cannot do');
+  assert.match(panel, /offers \? tr\('Nothing is hidden or removed\. Open one to remove it, or merge it below into the series its files went to\.'\)\s*: tr\('Nothing is hidden or removed\. Open one to remove it\.'\)/,
+    'the advice is not the merge one only when a merge is offered');
+  assert.match(panel, /<Emptied plan=\{plan\} offers=\{merges\.length > 0\} \/>/, 'the preview does not tell the list a merge is offered');
+  assert.match(panel, /\{e\.into && <span[^>]*>\{intoLine\(e\.into\.title\)\}<\/span>\}/, 'a series with nothing left does not say where its files went');
+  assert.match(panel, /\{plan\.moved > plan\.movedList\.length && \(/, 'the capped moved list does not say how many more');
 });
 
 test('a refused Apply names the job it would run beside, and a stale preview asks to run it again', () => {

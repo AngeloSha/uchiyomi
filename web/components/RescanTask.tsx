@@ -17,8 +17,8 @@ import { bookCountText, relativeTime } from '@/lib/format';
 import { useReduceEffects } from '@/lib/effects';
 import { useToast } from '@/components/Toast';
 import {
-  applyRefusalText, exampleLine, fileName, followLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine,
-  unmountedLine, type RescanPlanView, type RescanStatus,
+  applyRefusalText, exampleLine, fileName, followLine, intoLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView,
+  uncheckedLine, unmountedLine, type RescanPlanView, type RescanStatus,
 } from '@/lib/rescan';
 
 export const RESCAN_KEY = ['rescan-status'];
@@ -87,22 +87,30 @@ function Running({ s }: { s: RescanStatus }) {
   );
 }
 
-/** The series every chapter of which is gone: listed with a link, never hidden or removed by the rescan. */
-function Emptied({ plan }: { plan: RescanPlanView }) {
+/**
+ * The series every chapter of which is gone: listed with a link, never hidden or removed by the rescan -- and, since
+ * v0.55.7, where its files went when they all went into one other series. `offers`: the preview offers a merge below
+ * (the advice says so; an Apply's result, or a series whose files went nowhere one, cannot be merged from here).
+ */
+function Emptied({ plan, offers = false }: { plan: RescanPlanView; offers?: boolean }) {
   if (!plan.emptied) return null;
   const more = plan.emptied - plan.emptiedList.length;
   return (
     <div className="min-w-0" data-rescan-emptied>
       <p className="text-[12px] font-medium text-fog-200">{tr('Series with nothing left')}</p>
       <p className="mt-0.5 text-[11px] leading-relaxed text-fog-500">
-        {tr('Nothing is hidden or removed. Open one to remove it, or to merge it with the series its files went to.')}
+        {offers ? tr('Nothing is hidden or removed. Open one to remove it, or merge it below into the series its files went to.')
+          : tr('Nothing is hidden or removed. Open one to remove it.')}
       </p>
       <ul className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
         {plan.emptiedList.map((e) => (
-          <li key={e.seriesId} className="flex min-w-0 items-baseline gap-2 text-[12px]">
-            <Link href={`/series/?id=${encodeURIComponent(e.seriesId)}`} dir="auto"
-              className="min-w-0 truncate text-fog-100 underline-offset-2 hover:text-accent hover:underline">{e.title}</Link>
-            <span className="shrink-0 text-fog-500">{bookCountText(e.chapters)}</span>
+          <li key={e.seriesId} className="min-w-0 text-[12px]">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <Link href={`/series/?id=${encodeURIComponent(e.seriesId)}`} dir="auto"
+                className="min-w-0 truncate text-fog-100 underline-offset-2 hover:text-accent hover:underline">{e.title}</Link>
+              <span className="shrink-0 text-fog-500">{bookCountText(e.chapters)}</span>
+            </span>
+            {e.into && <span className="block truncate text-[11px] text-fog-500" data-rescan-into>{intoLine(e.into.title)}</span>}
           </li>
         ))}
       </ul>
@@ -153,7 +161,7 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
           {tr('Apply marks them “File no longer on disk”. Nothing is erased and no file is touched: everyone’s reading history stays, and a file that comes back is picked up again by the next scan.')}
         </p>
       )}
-      <Emptied plan={plan} />
+      <Emptied plan={plan} offers={merges.length > 0} />
       {merges.length > 0 && (
         // v0.55.7 (#150): a series whose every chapter file went into one other series, merged there only when ticked.
         <div className="min-w-0 border-t border-ink-800/70 pt-3">
@@ -202,6 +210,12 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
               </li>
             ))}
           </ul>
+          {/* The list is capped (200, routes/rescan.ts) and names only what this viewer may list; the count is whole. */}
+          {plan.moved > plan.movedList.length && (
+            <p className="mt-1 text-[11px] text-fog-500" data-rescan-moved-more>
+              {(plan.moved - plan.movedList.length) === 1 ? tr('and 1 more') : tr('and {n} more', { n: plan.moved - plan.movedList.length })}
+            </p>
+          )}
         </details>
       )}
       {numbers.length > 0 && (

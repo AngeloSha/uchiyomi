@@ -1974,7 +1974,8 @@ nothing left*.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
-  open one to *Remove* it.
+  open one to *Remove* it. When all its files went into one other series, it says which (*Its files are now in
+  “Zagor”*). *Which ones were probably moved or renamed* lists up to 200 files, then how many more.
 - **Merge into the series their files went to** (since v0.55.7, optional): when every chapter file of a series moved
   into one other series — you unpacked *Zagor* into folders of 100 chapters, each became a series, and then you moved
   them all into one *Zagor* folder — the preview offers *Merge “Zagor 1-100” into “Zagor”*. Tick the ones you want:

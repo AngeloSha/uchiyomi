@@ -167,6 +167,9 @@ export const followLine = (n: number): string =>
   (n === 1 ? tr('1 file was moved or renamed within its series: on Apply its chapter follows it, reading history kept')
     : tr('{n} files were moved or renamed within their series: on Apply their chapters follow them, reading history kept', { n }));
 
+/** Where a series with nothing left went (v0.55.7): the one series every chapter file of it moved into. */
+export const intoLine = (title: string): string => tr('Its files are now in “{title}”', { title: iso(title) });
+
 /** One merge of the opt-in, as its box says it: both titles isolated, so neither reorders the sentence around it. */
 export const mergeLabel = (m: Pick<RescanMerge, 'title' | 'into'>): string =>
   tr('Merge “{from}” into “{into}”', { from: iso(m.title), into: iso(m.into.title) });
