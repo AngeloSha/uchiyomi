@@ -289,6 +289,11 @@ test('every consumer honours the switch', () => {
     assert.match(src, /initial=\{reduced \? false : \{ opacity: 0, y: \d+ \}\}/, `${f} still animates in under Reduce effects`);
     assert.match(src, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.2\d/, `${f} still animates in under Reduce effects`);
   }
+  const page = code(read('components/PageTransition.tsx'));
+  assert.match(page, /mode=\{reduced \? 'sync' : 'wait'\}/,
+    'PageTransition still waits for a zero-duration exit under Reduce effects');
+  assert.match(page, /exit=\{reduced \? undefined : \{ opacity: 0, y: -\d+ \}\}/,
+    'PageTransition still supplies an exit target under Reduce effects');
   // …and its `reduced` is the switch OR the system's reduced-motion setting, both hooks called on every render.
   // Reintroduce `const reduced = useReduceEffects() || useReducedMotion();`: "Toast.tsx reads the motion
   // settings conditionally" fails -- the second hook is skipped whenever the first is true, which breaks the
