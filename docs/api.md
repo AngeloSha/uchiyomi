@@ -1807,15 +1807,20 @@ after at least one file was deleted.
 The worker claims the shared folder lock before awaited work and holds it through unlinking, optional unmonitoring and
 the audit. It rechecks hidden, merged, busy and ownership state when that series executes. `GET` on the same path,
 optionally `?runId=<uuid>`, returns `{run}` with `status` (`running`, `done`, `cancelled`, `failed`, `interrupted`),
-timestamps, `cancelRequested`, `pause`, `total`, `done`, `summary`, `results` and `error`; each result carries
+timestamps, `cancelRequested`, `pause`, `total`, `done`, `summary`, `results`, `current` and `error`. While a series is
+in progress, `current` persists its id/title, total and processed chapter counts, chapters and bytes removed, files kept,
+pause state and chapter-level skip counts; it is `null` between series and after a settled run. Each result carries
 `outcome`, chapters, bytes, kept files, pause state, chapter-level skip counts and a stable reason (`not_found`,
 `hidden`, `merged`, `busy`, `nothing_to_delete`, `refused`, `cancelled` or `failed`). Browser reloads and proxy
 timeouts can therefore rejoin rather than retry a destructive request. An active row left by a stopped server becomes
-`interrupted` at boot. `POST /api/admin/series/bulk/chapters/delete/cancel {runId?}` records a cancellation request,
-observed between series and never during unlinking.
+`interrupted` at boot. A per-chapter intent journal lets that startup pass distinguish an unlink that completed from one
+that did not; it reconciles database tombstones without repeating destructive filesystem work. `POST
+/api/admin/series/bulk/chapters/delete/cancel {runId?}` records a cancellation request, observed between series and
+never during unlinking.
 
 The v0.55.8 database changes behind these contracts are additive: `libraries.anilist_lookup`,
-`series_listing.unblocked_status`, and the persisted `admin_bulk_delete_runs` table. `lib_books.pruned_reason` remains
+`series_listing.unblocked_status`, the persisted `admin_bulk_delete_runs.current` progress snapshot, and the
+`admin_bulk_delete_items` recovery journal. `lib_books.pruned_reason` remains
 the existing text column and gains the `rescan_missing` provenance value plus the audited legacy backfill described
 above. Rolling the application back does not require dropping any of them; an older build simply does not name them.
 

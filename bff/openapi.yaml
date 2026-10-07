@@ -261,7 +261,7 @@ components:
           additionalProperties: { type: integer, minimum: 0 }
     AdminBulkDeleteRun:
       type: object
-      required: [id, status, startedAt, finishedAt, cancelRequested, pause, total, done, summary, results, error]
+      required: [id, status, startedAt, finishedAt, cancelRequested, pause, total, done, summary, results, current, error]
       properties:
         id: { type: string, format: uuid }
         status: { type: string, enum: [running, done, cancelled, failed, interrupted] }
@@ -275,6 +275,24 @@ components:
         results:
           type: array
           items: { $ref: '#/components/schemas/AdminBulkDeleteResult' }
+        current:
+          type: [object, "null"]
+          description: >-
+            Chapter-granular progress for the series currently being processed. It remains persisted with the
+            deletion journal so a stopped worker can reconcile an unlink before reporting a terminal result.
+          required: [id, title, total, processed, chapters, bytes, kept, paused, chapterSkips]
+          properties:
+            id: { type: string }
+            title: { type: string }
+            total: { type: integer, minimum: 0 }
+            processed: { type: integer, minimum: 0 }
+            chapters: { type: integer, minimum: 0 }
+            bytes: { type: integer, minimum: 0 }
+            kept: { type: integer, minimum: 0 }
+            paused: { type: boolean }
+            chapterSkips:
+              type: object
+              additionalProperties: { type: integer, minimum: 0 }
         error: { type: [string, "null"] }
     AdminLibrary:
       type: object

@@ -79,7 +79,8 @@ Asked for in [#168](https://github.com/AngeloSha/uchiyomi/discussions/168):
 - **Database:** additive changes only:
   - `libraries.anilist_lookup`;
   - `series_listing.unblocked_status`;
-  - the persisted `admin_bulk_delete_runs` table;
+  - the persisted `admin_bulk_delete_runs` table and its chapter-level `current` progress snapshot;
+  - the `admin_bulk_delete_items` intent journal used to reconcile an interrupted unlink without repeating it;
   - the new `rescan_missing` value in the existing `lib_books.pruned_reason` provenance field, with an audited legacy
     backfill.
 
