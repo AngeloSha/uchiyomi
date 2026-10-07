@@ -26,6 +26,8 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const LIB = 'lib_bulk_crash';
 const SERIES = 's_bulk_crash';
 const folder = 'T!crash/Crash Journal';
+const RECOVERY_SERIES = 's_bulk_recovery_deferred';
+const recoveryFolder = 'T!crash/Recovery Deferred';
 let q: any;
 let startRun: any;
 let readRun: any;
@@ -33,6 +35,7 @@ let closeInterrupted: any;
 let setHooks: any;
 
 const pathFor = (n: number) => join(DL, folder, `Chapter ${n}.cbz`);
+const recoveryPathFor = (n: number) => join(DL, recoveryFolder, `Chapter ${n}.cbz`);
 const until = async (f: () => Promise<any> | any, label: string, tries = 300) => {
   for (let i = 0; i < tries; i++) {
     const value = await f();
@@ -54,7 +57,9 @@ before(async () => {
   } = await import('../src/lib/bulkChapterDelete') as any);
   await migrate();
   await q('DELETE FROM admin_bulk_delete_runs WHERE $1 = ANY(series_ids)', [SERIES]);
+  await q('DELETE FROM admin_bulk_delete_runs WHERE $1 = ANY(series_ids)', [RECOVERY_SERIES]);
   await q('DELETE FROM lib_series WHERE id = $1', [SERIES]);
+  await q('DELETE FROM lib_series WHERE id = $1', [RECOVERY_SERIES]);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Crash journal',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   await q(
     `INSERT INTO lib_series (id, source, title, folder, books_count, library_id, auto_update)
@@ -72,6 +77,22 @@ before(async () => {
     );
   }
   await q(`UPDATE lib_series SET cover_book_id = 'b_bulk_crash_1' WHERE id = $1`, [SERIES]);
+  await q(
+    `INSERT INTO lib_series (id, source, title, folder, books_count, library_id, auto_update)
+     VALUES ($1,'T!crash','Recovery Deferred',$2,3,$3,true)`,
+    [RECOVERY_SERIES, recoveryFolder, LIB],
+  );
+  for (let n = 1; n <= 3; n++) {
+    const file = `${recoveryFolder}/Chapter ${n}.cbz`;
+    mkdirSync(join(recoveryPathFor(n), '..'), { recursive: true });
+    writeFileSync(recoveryPathFor(n), `deferred-${n}`);
+    await q(
+      `INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root)
+       VALUES ($1,$2,'T!crash',$3,$4,$5,1,$6)`,
+      [`b_bulk_deferred_${n}`, RECOVERY_SERIES, file, n, `Chapter ${n}`, DL],
+    );
+  }
+  await q(`UPDATE lib_series SET cover_book_id = 'b_bulk_deferred_1' WHERE id = $1`, [RECOVERY_SERIES]);
 });
 
 after(async () => {
@@ -79,8 +100,9 @@ after(async () => {
   if (!DSN) return;
   setHooks?.({});
   await q('DELETE FROM admin_bulk_delete_runs WHERE $1 = ANY(series_ids)', [SERIES]).catch(() => {});
-  await q('DELETE FROM lib_books WHERE series_id = $1', [SERIES]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = $1', [SERIES]).catch(() => {});
+  await q('DELETE FROM admin_bulk_delete_runs WHERE $1 = ANY(series_ids)', [RECOVERY_SERIES]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[SERIES, RECOVERY_SERIES]]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[SERIES, RECOVERY_SERIES]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
 });
 
@@ -98,6 +120,49 @@ test('migration exposes a per-chapter intent journal and a current progress snap
       WHERE table_schema = current_schema() AND table_name = 'admin_bulk_delete_runs' AND column_name = 'current'`,
   );
   assert.equal(current[0]?.data_type, 'jsonb');
+});
+
+test('a reconciliation failure keeps the current journal for a successful startup retry', { skip }, async () => {
+  let recoveryReached!: () => void;
+  const attempted = new Promise<void>((resolve) => { recoveryReached = resolve; });
+  setHooks({
+    afterUnlink: (item: any) => {
+      if (item.id === 'b_bulk_deferred_2') throw new Error('worker failed after unlink');
+    },
+    beforeRecovery: (series: any) => {
+      if (series.id !== RECOVERY_SERIES) return;
+      recoveryReached();
+      throw new Error('reconciliation temporarily unavailable');
+    },
+  });
+  const started = await startRun({ ids: [RECOVERY_SERIES], pause: true, userId: null, busy: () => false });
+  assert.ok(started?.id);
+  await attempted;
+  await until(async () => (await readRun(started.id)).error?.includes('recovery deferred'), 'deferred recovery state');
+
+  const deferred = await readRun(started.id);
+  assert.equal(deferred.status, 'running', 'the active row remains available to startup reconciliation');
+  assert.equal(deferred.done, 0);
+  assert.equal(deferred.current.id, RECOVERY_SERIES, 'persistProgress never cleared the uncertain series snapshot');
+  assert.deepEqual(deferred.results, []);
+  assert.equal((await q(
+    `SELECT state FROM admin_bulk_delete_items WHERE run_id = $1 AND book_id = 'b_bulk_deferred_2'`, [started.id],
+  ))[0].state, 'intent', 'the unresolved unlink intent stays durable');
+  assert.equal(existsSync(recoveryPathFor(2)), false);
+  assert.equal((await q(`SELECT pruned_at FROM lib_books WHERE id = 'b_bulk_deferred_2'`))[0].pruned_at, null);
+
+  // The next process no longer has the injected recovery failure and owns the old worker's row.
+  setHooks({});
+  await q('UPDATE admin_bulk_delete_runs SET worker_id = gen_random_uuid() WHERE id = $1', [started.id]);
+  assert.equal(await closeInterrupted(), 1);
+  const recovered = await readRun(started.id);
+  assert.equal(recovered.status, 'interrupted');
+  assert.equal(recovered.current, null);
+  assert.equal(recovered.done, 1);
+  assert.equal(recovered.results[0].outcome, 'applied');
+  assert.equal(recovered.results[0].chapters, 1);
+  assert.equal(recovered.results[0].paused, true);
+  assert.equal((await q(`SELECT pruned_reason FROM lib_books WHERE id = 'b_bulk_deferred_2'`))[0].pruned_reason, 'deleted');
 });
 
 test('a restart reconciles process death between unlink and tombstone without touching the next chapter', { skip }, async () => {

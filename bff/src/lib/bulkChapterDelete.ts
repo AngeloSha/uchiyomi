@@ -92,6 +92,8 @@ type TestHooks = {
   afterPause?: (series: { id: string; title: string; folder: string }) => Promise<void> | void;
   /** Returning simulate_crash models process death after unlink and before the tombstone. */
   afterUnlink?: (item: ChapterDeleteJournalItem & { seriesId: string; runId: string }) => Promise<'simulate_crash' | void> | 'simulate_crash' | void;
+  /** Throws in tests to model reconciliation itself becoming unavailable after the worker failed. */
+  beforeRecovery?: (series: { id: string; title: string; folder: string; runId: string }) => Promise<void> | void;
   afterSettled?: (result: BulkDeleteResult, done: number) => Promise<void> | void;
 };
 let testHooks: TestHooks = {};
@@ -364,6 +366,18 @@ type StartInput = {
 const errorText = (e: unknown) => ((e as Error)?.message || String(e)).slice(0, 500);
 const conflict = (e: unknown) => (e as { code?: string })?.code === '23505';
 class SimulatedWorkerExit extends Error {}
+class RecoveryDeferred extends Error {}
+
+/** Keep the durable snapshot active: only startup recovery may clear it after reconciliation succeeds. */
+async function deferRecovery(runId: string, workerError: unknown, recoveryError: unknown): Promise<never> {
+  const message = `${errorText(workerError)}; recovery deferred: ${errorText(recoveryError)}`.slice(0, 500);
+  await q(
+    `UPDATE admin_bulk_delete_runs SET error = $2, heartbeat_at = now()
+      WHERE id = $1 AND status = 'running' AND current IS NOT NULL`,
+    [runId, message],
+  ).catch(() => {});
+  throw new RecoveryDeferred(message);
+}
 
 /** Atomically records one run and detaches its worker. A database partial unique index is the final one-active guard. */
 export async function startBulkChapterDelete(input: StartInput): Promise<{ id: string; total: number } | null> {
@@ -580,21 +594,23 @@ async function processSeries(runId: string, seriesId: string, input: StartInput)
     // recovery. Every live failure is instead reconciled before this finally releases the shared folder claim, so a
     // download/update cannot enter between unlink and the recovered tombstone, cover, pause or audit side effects.
     if (e instanceof SimulatedWorkerExit) throw e;
-    const rows = await q<{ current: StoredCurrent | null }>(
-      'SELECT current FROM admin_bulk_delete_runs WHERE id = $1 AND status = \'running\'', [runId],
-    ).catch(() => []);
+    let rows: Array<{ current: StoredCurrent | null }>;
+    try {
+      rows = await q<{ current: StoredCurrent | null }>(
+        'SELECT current FROM admin_bulk_delete_runs WHERE id = $1 AND status = \'running\'', [runId],
+      );
+    } catch (recoveryError) {
+      return await deferRecovery(runId, e, recoveryError);
+    }
     if (rows[0]?.current) {
       try {
+        await testHooks.beforeRecovery?.({ id: series.id, title: series.title, folder: series.folder, runId });
         const result = await interruptedResult(runId, rows[0].current);
         await finalizeRecoveredSeries(runId, result, input.pause, input.userId);
         result.message = `${result.message} Worker error: ${errorText(e)}`;
         return result;
       } catch (recoveryError) {
-        return {
-          id: seriesId, title: series.title, outcome: 'failed', reason: 'failed',
-          message: `${errorText(e)}; recovery failed: ${errorText(recoveryError)}`,
-          chapters: 0, bytes: 0, kept: 0, paused: false, chapterSkips: {},
-        };
+        return await deferRecovery(runId, e, recoveryError);
       }
     }
     return {
@@ -634,7 +650,7 @@ async function run(id: string, input: StartInput): Promise<void> {
       } catch (e) {
         // Leave the row and intent exactly as a dead process would. The next boot owns reconciliation. Every ordinary
         // worker failure after the folder claim is handled inside processSeries while that claim is still retained.
-        if (e instanceof SimulatedWorkerExit) return;
+        if (e instanceof SimulatedWorkerExit || e instanceof RecoveryDeferred) return;
         result = {
           id: input.ids[index], outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0, bytes: 0,
           kept: 0, paused: false, chapterSkips: {},
