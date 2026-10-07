@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3292
+    "strings": 3295
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3295,5 +3295,8 @@
   "{n} matches checked": "{n} Treffer geprüft",
   "1 removed as another work": "1 als anderes Werk entfernt",
   "{n} removed as another work": "{n} als anderes Werk entfernt",
-  "AniList or MangaDex did not answer: tried again at the next run": "AniList oder MangaDex hat nicht geantwortet: beim nächsten Lauf erneut versucht"
+  "AniList or MangaDex did not answer: tried again at the next run": "AniList oder MangaDex hat nicht geantwortet: beim nächsten Lauf erneut versucht",
+  "Use the first page": "Erste Seite verwenden",
+  "The first page, by your choice: nothing found online replaces it.": "Die erste Seite, von dir gewählt: Nichts, was online gefunden wird, ersetzt sie.",
+  "Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.": "Automatisch: das Cover der Quelle, oder das von AniList, wenn sein Eintrag denselben Namen trägt, sonst die erste Seite."
 }

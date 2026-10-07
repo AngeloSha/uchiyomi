@@ -51,7 +51,7 @@ import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import sharp from 'sharp';
-import { ART_BODY_LIMIT, ART_DIR, artFile, artOverview } from '../lib/seriesArt';
+import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
@@ -389,6 +389,18 @@ async function closeBatchIfSettled(batchId: string): Promise<ImportBatchRow | nu
     [batchId],
   ).catch(() => null);
 }
+
+/**
+ * The series the art backfill hunts for: every visible one with no banner, neither found nor an admin's -- and not one
+ * an admin set to Use the first page (v0.55.7, lib/seriesArt.ts FIRST_PAGE), for which nothing is looked up. Reintroduce
+ * by dropping that condition: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds it here.
+ */
+export const artBackfillTargets = () => q<{ id: string; title: string }>(
+  `SELECT s.id, s.title FROM lib_series s
+     LEFT JOIN series_art a ON a.series_id = s.id
+     LEFT JOIN series_overrides o ON o.series_id = s.id
+    WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL AND o.cover IS DISTINCT FROM $1
+    ORDER BY s.title`, [FIRST_PAGE]);
 
 /**
  * The art backfill's hunt for one series (Admin → Art → Backfill missing banners): a banner, widest net first-hit-wins
@@ -2769,18 +2781,25 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic. The body
   // limit fits the largest picture Edit details takes once it is base64 (lib/seriesArt.ts ART_BODY_LIMIT).
+  // `first_page` (v0.55.7, #168, the cover only): the series' own first page is its cover for good, and its art is its
+  // own pages -- nothing found online is shown or looked up for it (lib/seriesArt.ts FIRST_PAGE). Reset to automatic
+  // takes it back.
   app.put('/api/admin/series/:id/art', { bodyLimit: ART_BODY_LIMIT }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
-      mode: z.enum(['url', 'upload', 'reset']),
+      mode: z.enum(['url', 'upload', 'reset', 'first_page']),
       url: z.string().url().optional(),
       dataUrl: z.string().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { kind, mode } = b.data;
+    if (mode === 'first_page' && kind !== 'cover') return reply.code(400).send({ error: 'bad_request', message: 'The first page is a cover, not a banner.' });
     let value: string | null = null;
-    if (mode === 'url') {
+    if (mode === 'first_page') {
+      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      value = FIRST_PAGE;
+    } else if (mode === 'url') {
       if (!b.data.url) return reply.code(400).send({ error: 'no_url', message: 'Paste an image URL.' });
       value = b.data.url;
       await rm(artFile(id, kind), { force: true }).catch(() => {});
@@ -2855,13 +2874,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // to the series' names since v0.55.7). Runs in the background; poll /api/admin/art/backfill/status.
   app.post('/api/admin/art/backfill', async (req, reply) => {
     if (artJob?.running) return reply.code(409).send({ error: 'busy', message: 'A backfill is already running.' });
-    const targets = await q<{ id: string; title: string }>(
-      `SELECT s.id, s.title FROM lib_series s
-       LEFT JOIN series_art a ON a.series_id = s.id
-       LEFT JOIN series_overrides o ON o.series_id = s.id
-       WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
-       ORDER BY s.title`,
-    );
+    const targets = await artBackfillTargets();
     const job: ArtJob = { running: true, total: targets.length, done: 0, banners: 0, covers: 0, misses: 0, startedAt: Date.now() };
     artJob = job;
     await logAudit('art.backfill_start', { userId: userIdOf(req), detail: { count: targets.length }, req });

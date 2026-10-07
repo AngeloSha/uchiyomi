@@ -23,7 +23,7 @@ import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
-import { artFile } from '../lib/seriesArt';
+import { artFile, FIRST_PAGE } from '../lib/seriesArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
@@ -342,7 +342,7 @@ const bannerSharp = (input: Buffer) =>
 async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: HeroAr, ctx: ViewCtx): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
   const hero = style === 'hero';
   // admin override wins (uploaded banner/cover or pasted URL)
-  const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
+  const ovr = await one<{ banner: string | null; cover: string | null; v: string }>('SELECT banner, cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
   if (ovr?.banner) {
     return {
       variant: `artw7${hero ? `h${ar}` : style === 'banner' ? 'b' : ''}:${id}:ov:${Math.floor(Number(ovr.v))}`,
@@ -357,7 +357,13 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
       },
     };
   }
-  let art = await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
+  // Use the first page (v0.55.7, lib/seriesArt.ts FIRST_PAGE): the series' art is its own pages -- the first page's wash
+  // here, and the banner made from its pages -- and nothing online is looked up or shown for it. Reintroduce by reading
+  // series_art for it: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds the stored
+  // banner's variant.
+  let art: { banner: string | null; cover: string | null } | null = ovr?.cover === FIRST_PAGE
+    ? { banner: null, cover: null }
+    : await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
   if (!art) {
     try {
       // Every name the series goes by (lib/altTitles.ts namesOf): the search asks by its title, and the answer is kept
@@ -553,9 +559,9 @@ const thumbWidth = (req: FastifyRequest): number => {
   const w = Number((req.query as any)?.w);
   return w === 800 || w === 1600 ? w : 400;
 };
-// Series cover: an admin's (an upload or a link), else the real cover art (the source's, or AniList's when its entry is
-// named as the series is, cached in series_art.cover); fall back to the first page of chapter 1. Distinct cache
-// variants so it upgrades to the real cover once one is known.
+// Series cover: an admin's (an upload, a link, or the first page by choice), else the real cover art (the source's, or
+// AniList's when its entry is named as the series is, cached in series_art.cover); fall back to the first page of
+// chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
 export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
   // The series-level art routes read lib_series and series_art by id, so they need the check that
   // bookFileAbs now carries for chapters. Without it a hidden series' cover still renders, which is
@@ -569,6 +575,8 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
     return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
       let input: Buffer;
       if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
+      // Use the first page (v0.55.7): nothing to fetch, and series_art is not read -- whatever it holds.
+      else if (ovr.cover === FIRST_PAGE) input = await firstPageInput(id, vc(req));
       else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id, vc(req)); } }
       storeColor(id, input);
       const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();

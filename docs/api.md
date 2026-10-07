@@ -2383,7 +2383,11 @@ containment: a spin-off's name contains its parent's. An answer that is another 
 match" is, so it is not asked again on every view. `/img/series/:id/thumb` is an admin's cover, else the source's
 cover or a checked AniList one, else the series' first page. What was stored before v0.55.7 is held to the same rule
 by **Check online matches** (Admin → Tasks, above); Health's *Duplicate series* groups only links a person made or
-that were checked.
+that were checked. `PUT /api/admin/series/:id/art {kind: 'cover', mode: 'first_page'}` makes the series' own first page
+its cover for good: the series payload's `overrides.cover` reads `'first_page'` (beside `'upload'` and a pasted URL),
+nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one -- and
+`mode: 'reset'` takes it back to the automatic art, which the choice never changed; `kind: 'banner'` with it is a
+**400**. `GET /api/admin/art/overview` marks such a series `first_page: true`.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

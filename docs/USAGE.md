@@ -324,6 +324,14 @@ The same rule picks the AniList entry a series is linked to for tracker sync (se
 (**Admin → Tasks → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
 came from another work is cleared, so the series shows its source's cover or its own first page.
 
+In **Edit details** (the art column, or the *Art* tab on a phone) the cover has **Upload**, **From a link** and **⋯**:
+
+- **Use the first page** makes the series' own first page its cover for good: nothing found online replaces it, and
+  unless you set a banner yourself, its banner is made from its pages too. **Admin → Content → Art** offers it as well.
+- **Reset to automatic** goes back to the automatic cover described above.
+
+The line under the cover says which it is.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it

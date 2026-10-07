@@ -8704,8 +8704,10 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
         image of up to 11 MB as a base64 data URL; the body may be up to about 14.7 MB to carry one (v0.53.0; 12 MB
         before, which refused pictures between 9 and 11 MB). `url` stores the address the art is fetched from, and
-        `reset` hands the art back to the automatic source. Automatic art is kept from an online entry only when it is
-        named as the series is (v0.55.7).
+        `reset` hands the art back to the automatic source. `first_page` (v0.55.7, the cover only; a banner is a 400)
+        makes the series' own first page its cover for good: `overrides.cover` on the series reads `first_page`, and
+        nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one.
+        Automatic art is kept from an online entry only when it is named as the series is (v0.55.7).
       parameters:
         - name: id
           in: path
@@ -8725,7 +8727,7 @@ paths:
                   enum: [cover, banner]
                 mode:
                   type: string
-                  enum: [url, upload, reset]
+                  enum: [url, upload, reset, first_page]
                 url:
                   type: string
                   format: uri
@@ -8754,7 +8756,8 @@ paths:
         - admin
       summary: Which series have real art and which fall back to a page.
       operationId: getApiAdminArtOverview
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row
+        says `first_page` when an admin made the series' first page its cover (v0.55.7).
       security:
         - bearer: []
       responses:

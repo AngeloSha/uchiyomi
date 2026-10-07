@@ -1,6 +1,6 @@
 // Online matches carry the series' name (v0.55.7, #168), where they are stored: the backdrop's lazy AniList lookup (the
-// cover, the banner and the tracker link), an add's AniList art, the art backfill's hunt, and Health's Duplicate series,
-// which groups only links known to be the series'.
+// cover, the banner and the tracker link), an add's AniList art, the art backfill's hunt, Edit details → Cover → Use the
+// first page, and Health's Duplicate series, which groups only links known to be the series'.
 //
 // Kedryn's case: a comic with no online source took a manga's cover and banner, and the manga's AniList link, because
 // AniList's answer to a title search was stored with no look at its name. The rule itself is onlineMatch.test.ts; the
@@ -176,6 +176,54 @@ test('an answer named as the series is stored, linked, and both are marked check
   assert.equal(l?.external_id, '9001');
   assert.equal(l?.linked_by, null, 'an automatic link');
   assert.ok(l?.checked_at, 'a link written by the art lookup is checked (lib/trackers.ts linkSeries)');
+});
+
+test('the first page, chosen, keeps online art away -- and Reset to automatic gives it back', { skip }, async () => {
+  const { heroServable } = await import('../src/lib/autoHero');
+  const { artBackfillTargets } = await import('../src/routes/admin');
+  const { fetchCoverImage, UnfetchableCoverUrl } = await import('../src/routes/images');
+  const id = ID.first;
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())`, [id, BLUE, RED]);
+  const thumb = async () => colourOf((await img(`/img/series/${id}/thumb`)).rawPayload);
+  const banner = async () => colourOf((await img(`/img/series/${id}/backdrop?style=banner`)).rawPayload);
+  const put = (body: Record<string, unknown>) => app.inject({ method: 'PUT', url: `/api/admin/series/${id}/art`, headers: adminAuth, payload: body });
+  assert.equal(await thumb(), 'red', 'the stored cover is not the cover to start with');
+  assert.equal(await banner(), 'blue');
+  assert.equal((await heroServable([id])).has(id), false, 'a series with a banner of its own has no banner made from its pages');
+
+  const r = await put({ kind: 'cover', mode: 'first_page' });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal((await q(`SELECT cover FROM series_overrides WHERE series_id = $1`, [id]))[0]?.cover, 'first_page');
+  const payload = (await app.inject({ method: 'GET', url: `/api/series/${id}`, headers: adminAuth })).json();
+  assert.equal(payload.overrides?.cover, 'first_page', 'Edit details cannot tell the choice from a link');
+  const { artOverview } = await import('../src/lib/seriesArt');
+  const tile = async () => (await artOverview()).find((t) => t.id === id);
+  assert.deepEqual([(await tile())?.first_page, (await tile())?.override_cover], [true, true], 'Admin → Art cannot tell the choice from a link');
+  assert.equal(await thumb(), 'green', 'the cover is not the first page');
+  // Reintroduce by reading series_art for it in backdropRecipe: the stored banner is drawn, and this reads blue.
+  assert.equal(await banner(), 'green', "the series' banner is still the one found online");
+  // Reintroduce by dropping the first-page half of heroEligible: no banner is made from its pages.
+  assert.equal((await heroServable([id])).has(id), true, 'no banner from its own pages is offered in its place');
+  // The backfill hunts for a series with no banner -- the comic above, whose lookup was a miss -- but not once its cover
+  // is the first page by choice. Reintroduce by dropping the condition from artBackfillTargets: it is hunted for again.
+  const hunted = async () => (await artBackfillTargets()).some((t) => t.id === ID.morgan);
+  assert.ok(await hunted(), 'a series with no banner is not hunted for: the next assertion would prove nothing');
+  assert.equal((await app.inject({ method: 'PUT', url: `/api/admin/series/${ID.morgan}/art`, headers: adminAuth, payload: { kind: 'cover', mode: 'first_page' } })).statusCode, 200);
+  assert.ok(!(await hunted()), 'the backfill still hunts art for a series whose cover is the first page by choice');
+  await app.inject({ method: 'PUT', url: `/api/admin/series/${ID.morgan}/art`, headers: adminAuth, payload: { kind: 'cover', mode: 'reset' } });
+  // Nothing found online is touched by the choice: Reset to automatic shows it again.
+  assert.deepEqual(Object.values(await art(id)).slice(0, 2), [BLUE, RED], 'the choice threw away what was found online');
+  // A banner is not a first page, and a link is not the sentinel.
+  assert.equal((await put({ kind: 'banner', mode: 'first_page' })).statusCode, 400);
+  assert.equal((await put({ kind: 'cover', mode: 'url', url: 'first_page' })).statusCode, 400);
+  // v0.55.6 after a rollback reads the sentinel as a link it cannot fetch -- and falls back to the same first page.
+  await assert.rejects(fetchCoverImage('first_page'), (e: unknown) => e instanceof UnfetchableCoverUrl);
+
+  assert.equal((await put({ kind: 'cover', mode: 'reset' })).statusCode, 200);
+  assert.equal((await tile())?.first_page, false);
+  assert.equal(await thumb(), 'red', 'Reset to automatic did not give the automatic cover back');
+  assert.equal(await banner(), 'blue');
+  assert.equal((await heroServable([id])).has(id), false);
 });
 
 test("an add keeps AniList's art only from an entry named as the series", { skip }, async () => {
