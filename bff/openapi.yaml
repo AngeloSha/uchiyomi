@@ -6590,7 +6590,8 @@ paths:
         has it: a series a download is writing into or a check is reading as Apply reaches it (a Fetch and its lanes,
         the slow archive's chapter, Fetch newest, a repair) is left alone -- neither marked nor renumbered, counted in
         the result's `busy` for the next Rescan -- and every other series it changes is held busy until it is done, so
-        no Fetch (409 `busy`), archive chapter or Fetch newest starts in it meanwhile. With every library scan held off,
+        no Fetch (409 `busy`), archive chapter or Fetch newest starts in it meanwhile, and the chapter sweep (since
+        v0.55.7) puts it to the back of its queue once, then skips it. With every library scan held off,
         each planned row is asked again -- the same id at the same file, still live, its series neither hidden,
         merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
         library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =

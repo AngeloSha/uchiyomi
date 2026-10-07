@@ -1996,7 +1996,8 @@ nothing left*.
 - A series that is downloading or being checked when Apply reaches it — a *Fetch*, the slow archive's next chapter,
   *Fetch newest*, a check for new chapters — is left alone, neither marked nor renumbered (*1 series had a download or a
   check running and was left alone*): run it again when that is done. Every other series it changes waits for it: a
-  *Fetch* there says a download is already running, and the slow archive takes its next chapter once Apply has finished.
+  *Fetch* there says a download is already running, the slow archive takes its next chapter once Apply has finished,
+  and (since v0.55.7) the chapter sweep comes back to it later in the same sweep, or checks it first next time.
 - It never runs by itself — not at start-up, not on a schedule — for Verify's reason: a share that is not mounted yet
   looks exactly like a library with every file gone.
 

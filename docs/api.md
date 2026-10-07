@@ -1842,7 +1842,8 @@ run beside (`sweep_running`, `autofix_running`, `repair_running`, `verify_runnin
 `scan_running`). A series a download is writing into or a check is reading as it reaches it (a Fetch and its lanes,
 the slow archive's chapter, Fetch newest, a repair) is left alone — neither marked nor renumbered, counted in `busy` —
 and every other series it changes is held busy until it is done, so no Fetch (409 `busy`), archive chapter or Fetch
-newest starts in it meanwhile. Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
+newest starts in it meanwhile, and the chapter sweep (since v0.55.7) puts it to the back of its queue once, then skips
+it (`skipped`, unstamped, so the next sweep takes it first). Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
 gone, no live fingerprint twin, the library folder still holding a file the preview saw) and marked pruned with
 `pruned_reason = 'deleted'` — held, so the sweep never fetches it back — and the covers and counts of the series it
 touched are recomputed. Since v0.55.7 every pair inside one series is asked again too (both rows unchanged, one
