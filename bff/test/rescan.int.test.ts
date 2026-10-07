@@ -857,6 +857,14 @@ test('the Zagor case: two folders moved into one are offered as merges, and the 
   assert.deepEqual(plan.emptiedList.map((e: any) => [e.title, e.into?.title]).sort(), [['Zagor 1-2', 'Zagor'], ['Zagor 3-4', 'Zagor']],
     'a series with nothing left does not say where its files went');
   assert.equal(plan.gone, 0, 'a moved chapter was planned as gone');
+  // An admin who hides 18+ is told how many, never which: Zagor rated 18 is named neither as a merge nor as where the
+  // files went (routes/rescan.ts listable, for both series). Reintroduce by filtering merges on the series alone: the
+  // merges are offered.
+  await q(`UPDATE lib_series SET age_rating = 18 WHERE id = $1`, [zagorId]);
+  const hiding = (await call('GET', '/api/admin/tasks/rescan/status')).json().plan;
+  assert.deepEqual([hiding.merges, hiding.mergesTotal], [[], 2], 'a merge into an 18+ series was offered to an admin who hides 18+');
+  assert.ok(hiding.emptiedList.length === 2 && hiding.emptiedList.every((e: any) => !e.into), 'an 18+ series was named as where files went');
+  await q(`UPDATE lib_series SET age_rating = NULL WHERE id = $1`, [zagorId]);
 
   const started = (await call('POST', '/api/admin/tasks/rescan/apply', { plan: plan.id, merge: [s1] })).json();
   assert.deepEqual(started, { ok: true, started: true });
@@ -924,6 +932,15 @@ test('a merge whose series changed since the preview is left alone, and an unoff
   assert.deepEqual((await q(`SELECT id, merged_into FROM lib_series WHERE id = ANY($1) ORDER BY title`, [[s1, s2]])).map((x) => x.merged_into),
     [null, null], 'a series was merged although it changed since the preview');
   assert.deepEqual([r.merged, r.notMerged], [0, 2], JSON.stringify(r));
+
+  // Zagor visible again, offered again -- and merged away into another series since that preview: left alone too.
+  await q(`UPDATE lib_series SET deleted_at = NULL WHERE id = $1`, [zagorId]);
+  const again = await preview();
+  assert.deepEqual(again.merges.map((m: any) => m.seriesId), [s1], JSON.stringify(again.merges));
+  await q(`UPDATE lib_series SET merged_into = $2 WHERE id = $1`, [zagorId, await seriesOf(`${SRC}/Kept`)]);
+  const r2 = await (startApply({ plan: again.id, merge: [s1] }, { userId: adminId }) as any).run;
+  assert.equal((await q(`SELECT merged_into FROM lib_series WHERE id = $1`, [s1]))[0].merged_into, null, 'merged into a series merged away');
+  assert.deepEqual([r2.merged, r2.notMerged], [0, 1], JSON.stringify(r2));
 });
 
 test('a merge whose target is being renumbered, or written into, waits; a twin with history of its own is kept', { skip }, async () => {
