@@ -908,8 +908,14 @@ async function scanOnce(): Promise<ScanResult> {
         const mergeTarget = known?.merged_into || null;
 
         // Only a folder with no row of its own can be a move. Anything already known is the normal path.
+        // ⚠️ `!known`, the half of that rule the line below once lacked (v0.55.7, #150). A known folder that took in
+        // another series' files (Zagor 1-100's chapters moved into Zagor) shares their fingerprints, and that series,
+        // its own folder gone, is the one candidate: applyRematch moved it onto THIS folder, the unique index
+        // (library_id, folder) refused it, and the catch below skipped the folder -- on every scan, so nothing new
+        // in it was ever indexed again. Reintroduce by dropping `!known`: "a folder that has its own series is never
+        // rematched onto another" in rematch.int.test.ts finds the folder skipped.
         let rematched: { id: string; oldFolder: string } | null = null;
-        if (env.LIBRARY_REMATCH !== 'off' && !seenFolders.has(folderRel)) {
+        if (env.LIBRARY_REMATCH !== 'off' && !known && !seenFolders.has(folderRel)) {
           rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, libraryIdFor(folderRel, libs));
         }
 
