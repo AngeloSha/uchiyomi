@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3537
+    "strings": 3538
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3540,5 +3540,6 @@
   "Stopping after the current series…": "Parando após a série atual…",
   "This cleanup keeps running if you close this window or reload the page.": "Esta limpeza continua em execução se você fechar esta janela ou recarregar a página.",
   "Results": "Resultados",
-  "Updates stopped": "Atualizações interrompidas"
+  "Updates stopped": "Atualizações interrompidas",
+  "Home {n}": "Início {n}"
 }
