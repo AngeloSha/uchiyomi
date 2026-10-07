@@ -168,9 +168,20 @@
 //   a plain one with LIB -- each item's unread badge ("99+" left to right in Arabic) and every sort order, kept across a
 //   reload. At 1280, 390 and 390 in Arabic.
 //
+//   librarysort, homelists, anilistprivacy, bulkdelete -- v0.55.8 (v558Walk.mjs), each on a stack of its own:
+//   librarysort on a plain stack -- the account's saved Library sort, a shared URL overriding it for one visit without
+//   saving, and a direct click updating both URL and default; homelists on a plain stack with E2E_NET -- legacy first
+//   three nonempty, explicit zero, ordered 1–3 including an empty slot, the fourth-list refusal, later population and
+//   stale-id cleanup; anilistprivacy with E2E_ANILIST=1, LIB and E2E_NET -- the per-library toggle and manual-contact
+//   explanation, zero automatic requests/cache rows while off, and the deferred lookup after re-enabling; bulkdelete
+//   on a plain stack -- the destructive warning at every viewport and, with only its HTTP endpoints simulated, durable
+//   progress, close/reopen, reload recovery and cancellation without deleting a file. At 1280, 390 and 390 in Arabic
+//   where the phase has UI at that size. Issue #174's reduced-effects check stays in walk43: it follows actual in-app
+//   links under reduced motion, not page.goto reloads.
+//
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
 //   libraries, nosource, filenames, noticechapters, replace, autofix, solver, find, rescan, multisource, adultsearch,
-//   matches, rescanmerge, readeredges, lists, engine. The engine phase resets the fake engine
+//   matches, rescanmerge, readeredges, lists, librarysort, homelists, anilistprivacy, bulkdelete, engine. The engine phase resets the fake engine
 //   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
 //   failing, which only the engine phase then meets, and it never searches.
 //
@@ -216,7 +227,8 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
 const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver',
-  'find', 'rescan', 'multisource', 'adultsearch', 'matches', 'rescanmerge', 'readeredges', 'lists', 'engine'];
+  'find', 'rescan', 'multisource', 'adultsearch', 'matches', 'rescanmerge', 'readeredges', 'lists',
+  'librarysort', 'homelists', 'anilistprivacy', 'bulkdelete', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
 check(`PHASES names only phases this walk has (${KNOWN_PHASES.join(', ')})`, !unknownPhases.length,
   `not a phase here: ${unknownPhases.join(', ')} -- the release plan's downloads checks are run.mjs's, Health clarity is walk41's`);
@@ -1526,6 +1538,25 @@ try {
   if (PHASES.includes('lists')) {
     const { listsWalk } = await import('./v557Walk.mjs');
     await listsWalk(v557);
+  }
+  // v0.55.8: saved Library defaults (#150), ordered Home lists (#164), per-library AniList privacy (#168), and the
+  // durable bulk chapter cleanup from PR #171 -- v558Walk.mjs, each on a stack of its own (its header). The related
+  // Reduce-effects client-navigation regression (#174) is walk43's real-link phase and is not repeated here.
+  if (PHASES.includes('librarysort')) {
+    const { librarySortWalk } = await import('./v558Walk.mjs');
+    await librarySortWalk(v557);
+  }
+  if (PHASES.includes('homelists')) {
+    const { homeListsWalk } = await import('./v558Walk.mjs');
+    await homeListsWalk(v557);
+  }
+  if (PHASES.includes('anilistprivacy')) {
+    const { anilistPrivacyWalk } = await import('./v558Walk.mjs');
+    await anilistPrivacyWalk(v557);
+  }
+  if (PHASES.includes('bulkdelete')) {
+    const { bulkDeleteWalk } = await import('./v558Walk.mjs');
+    await bulkDeleteWalk(v557);
   }
   // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake). Last: it
   // resets the fake engine and takes it down.
