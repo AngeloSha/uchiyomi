@@ -191,8 +191,11 @@ export async function completePartial(
     /** The sweep's age rule. It applies to the old copy as well as every fallback copy. */
     allowed?: (source: string) => boolean;
     hunt?: (why: string) => Promise<SourceChapter | null>;
+    /** Last-responsible-moment admission for the nightly completion pass. Manual callers may omit it. */
+    admit?: () => Promise<boolean>;
   },
 ): Promise<Completion> {
+  const admitted = () => ctx.admit ? ctx.admit().catch(() => false) : Promise.resolve(true);
   const abs = join(book.root, book.file);
   let manifest: PartialManifest | null;
   try {
@@ -236,6 +239,7 @@ export async function completePartial(
     && !(await blockedNow(src.id).catch(() => null));
   if (src && askable) {
     let urls: string[] | null = null;
+    if (!(await admitted())) return result;
     try {
       urls = await src.getPageUrls(manifest.chapterSourceId);
     } catch (e) {
@@ -245,6 +249,7 @@ export async function completePartial(
     }
     if (urls && urls.length === manifest.expected) {
       // `retry: false`: the source sees exactly one request per hole, tonight and again tomorrow.
+      if (!(await admitted())) return result;
       const got = await underGate(src.id, () => fetchPages(src, urls!, missing, { chapterSourceId: manifest.chapterSourceId, retry: false }));
       const filled = missing.filter((i) => got.page[i]);
       if (filled.length) {
@@ -291,6 +296,7 @@ export async function completePartial(
       // The source re-sliced the chapter since the partial was written: index 149 of 155 is not index
       // 149 of 150. Fetch it whole, and keep the new copy only when it is complete or has fewer holes.
       try {
+        if (!(await admitted())) return result;
         const r = await downloadChapter({ sourceId: src.id, seriesFolder, chapter, meta }, { replace: true });
         if (r) {
           await restampBook(book.id, abs, []);
@@ -332,6 +338,7 @@ export async function completePartial(
     refusing: new Set([manifest.source]),
     allowed: ctx.allowed,
     hunt: ctx.hunt,
+    admit: ctx.admit,
     replace: true,
     // Decide before `PartialHold.write()` replaces the canonical archive. The old write-then-restore
     // sequence had a crash window in which a worse copy could become permanent while the DB still

@@ -467,6 +467,37 @@ test('a stop request mid-series finishes the current chapter and takes no more',
   } finally { runtime.stopping = false; }
 });
 
+test('the main sweep stops an unmonitored series before its next source operation', { skip }, async () => {
+  // The sweep selected this row while monitored. Its listing operation simulates the person pressing
+  // Unmonitor; no queued chapter may then reach getPageUrls. Reintroduce either by omitting `unattended`
+  // in runUpdateAll or by trusting the sweep's initial row snapshot: pages becomes 1 and a file lands.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const source = 'upd-unmonitor';
+  let pages = 0;
+  registerAdapter({
+    id: source, name: source,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source, title: sid }; },
+    async listChapters() {
+      await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [S('unmonitor')]);
+      return [{ number: 1, title: 'Chapter 1', sourceId: 'u1' }];
+    },
+    async getPageUrls() { pages++; return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  } as any);
+  await mkSeries('unmonitor', source);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('unmonitor')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [source]);
+  await only(['unmonitor']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await runUpdateAll({ maxNew: 5 });
+  assert.equal(r.outcomes.paused, 1, 'the automatic run reports the deliberate pause');
+  assert.equal(r.added, 0);
+  assert.equal(pages, 0, 'no chapter source request began after Unmonitor');
+  assert.ok(!onDisk('unmonitor', 1));
+});
+
 
 /**
  * A source behind the Cloudflare solver gets a listing budget that fits a challenge.

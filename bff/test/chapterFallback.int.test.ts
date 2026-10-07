@@ -142,6 +142,30 @@ test('a pinned copy and the viewer age predicate both prevent alternate requests
   });
 });
 
+test('an unattended admission change stops before every next source operation', { skip }, async (t) => {
+  await t.test('before the chosen copy', async () => {
+    const out = await run(chapter(PRI, 'never-one', 30), [chapter(FOL, 'fol-one', 30)], {
+      admit: async () => false,
+      hunt: async () => { assert.fail('a paused chapter must not hunt'); },
+    }).result;
+    assert.deepEqual(out, { kind: 'skipped', why: 'paused' });
+    assert.deepEqual(asked, [], 'no page request crossed the admission check');
+  });
+
+  await t.test('between a failed chosen copy and its alternate', async () => {
+    failures.set(`${PRI}/pause-one/0`, 404);
+    let checks = 0, hunts = 0;
+    const out = await run(chapter(PRI, 'pause-one', 31), [chapter(FOL, 'fol-one', 31)], {
+      admit: async () => ++checks === 1,
+      hunt: async () => { hunts++; return chapter(NEW, 'new-one', 31); },
+    }).result;
+    assert.deepEqual(out, { kind: 'skipped', why: 'paused' });
+    assert.ok(asked.some((x) => x.startsWith(`${PRI}/pause-one/`)), 'the admitted chosen copy was asked');
+    assert.ok(!asked.some((x) => x.startsWith(`${FOL}/`)), 'the alternate was stopped at its own admission check');
+    assert.equal(hunts, 0, 'the hunt never started');
+  });
+});
+
 test('the best incomplete hold is written only after every non-refusing option is exhausted', { skip }, async () => {
   failures.set(`${PRI}/partial-five/4`, 404);
   let hunts = 0;

@@ -15,7 +15,7 @@ import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
 import { chooseReleases, copiesOf, releaseOrder } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
-import { copyToChapter, listingRows, replaceListing, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, listingRows, replaceListing, type ListingCopy } from './seriesListing';
 import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
@@ -224,6 +224,13 @@ const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
 const inside = new Map<string, number>();
 export function runsInside(seriesId: string): number { return inside.get(seriesId) ?? 0; }
 
+/** The last-responsible-moment guard shared by every unattended downloader. Missing/hidden rows fail closed. */
+export async function seriesIsMonitored(seriesId: string): Promise<boolean> {
+  const row = await one<{ auto_update: boolean }>(
+    `SELECT auto_update FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [seriesId]).catch(() => null);
+  return row?.auto_update === true;
+}
+
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
   inside.set(seriesId, runsInside(seriesId) + 1);
   try {
@@ -240,7 +247,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
   // Unmonitored (UpdateOpts.unattended): nothing searched for or downloaded by a run nobody started on this series.
-  if (opts.unattended && maxNew > 0 && s.auto_update === false) return nothing(s.title, 'paused');
+  if (opts.unattended && s.auto_update === false) return nothing(s.title, 'paused');
   // A renumber a crash interrupted is finished before anything here reads lib_books: its files are at their new
   // names and its rows at their old ones until then. One that cannot be finished keeps the series held. A journal
   // whose apply is still running (a check that starts during a confirmed renumber finds it on the row) is waited for
@@ -307,14 +314,22 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   let tagged: SourceChapter[] = [];
   let blocked = 0;
   let answered = 0;
+  let askedSource = false;
   // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
   let rawNumbering: SourceChapter[] | null = null;
   for (const f of followed) {
+    // The queue was built from monitored rows, but Unmonitor can be pressed while earlier series/sources run.
+    // Re-read immediately before every new listing request; after one source answered, stop rather than ask
+    // another and accurately report that this run did touch a source.
+    if (opts.unattended && !(await seriesIsMonitored(seriesId))) {
+      return { ...nothing(s.title, 'paused'), asked: askedSource };
+    }
     if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
     // building the list and asking it, and that is a source that did not answer, not a crash.
     const adapter = getSource(f.source);
     if (!adapter) continue;
+    askedSource = true;
     const list = await withTimeout(adapter.listChapters(f.ref), budgetFor(adapter, LIST_TIMEOUT)).catch((e) => {
       // #115: the sweep asks every followed source every night and used to keep what it learned to itself. A
       // throw is chapter-stage evidence (non-escalating: it never touches the cooldown); our own timeout is not.
@@ -562,6 +577,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   let partial = 0;
   let diskFull = false;
   let attempts = 0;
+  let paused = false;
   const landed: Landed[] = [];
   // A source that has refused once this run is not asked again, but the others still are: a rate-limited
   // primary must not stop the follower's chapters, which are the reason the follower was added. The loop
@@ -585,6 +601,11 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   for (const ch of queue) {
     if (attempts >= maxNew) break;
     if (runtime.stopping || opts.cancelled?.()) break; // between chapters, never mid-write
+    if (opts.unattended && !(await seriesIsMonitored(seriesId))) { paused = true; break; }
+    // A preference save can land after the listing/queue was built. Never let that stale chosen copy put a
+    // blocked group through the automatic path; an explicit versions pick is the sole exception, and never
+    // reaches updateSeries.
+    if (!(await automaticChapterAllowedFor(seriesId, ch))) continue;
     const via = ch.source ?? (s.source_id as string);
     attempts++;
     let out: FallbackOutcome;
@@ -597,9 +618,20 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       out = await downloadWithFallback({
         seriesId, title: s.title, folder: s.folder, meta,
         chapter: ch.source ? ch : { ...ch, source: via },
-        alternates: async () => (posting ? [] : copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch)),
+        alternates: async () => {
+          if (opts.unattended && !(await seriesIsMonitored(seriesId))) return [];
+          if (posting) return [];
+          const candidates = copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch);
+          const open: SourceChapter[] = [];
+          for (const c of candidates) if (await automaticChapterAllowedFor(seriesId, c)) open.push(c);
+          return open;
+        },
         refusing, allowed,
-        hunt: huntBudget ? async () => (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter : undefined,
+        hunt: huntBudget ? async () => {
+          if (opts.unattended && !(await seriesIsMonitored(seriesId))) return null;
+          return (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter;
+        } : undefined,
+        ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
         // third refusal. A refusal from some other source is not this copy's history.
         persistent: persistentVia.get(ch.number) === via,
@@ -645,7 +677,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
   // change between runs, and the file on disk does not change with it.
   await setBookMeta(s.folder, landed).catch(() => {});
-  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, switched, partial, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}), ...(renumber ? { renumber } : {}) };
+  return { title: s.title, added, available: releases.length, outcome: paused ? 'paused' : 'ok', failed, waiting, switched, partial, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}), ...(renumber ? { renumber } : {}) };
 }
 
 /**
@@ -764,7 +796,7 @@ export async function runUpdateAll(opts: {
       if (card) card.current = { id, title: titles.get(id) ?? '' };
       // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
       // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
@@ -810,15 +842,21 @@ export async function runUpdateAll(opts: {
       if (runtime.stopping) { stopped = 'shutdown'; break; }
       if (stopRequested(card)) { stopped = 'cancelled'; break; }
       if (spent >= sweepMax) { stopped = 'budget'; break; }
+      if (!(await seriesIsMonitored(b.series_id))) continue;
       spent++;
       try {
         const allowed = await sweepAllowedFor(await seriesIsAdult(b.series_id));
         const r = await completePartial(
           { ...b, number: Number(b.number) },
           {
-            alternates: () => listingAlternates(b.series_id, Number(b.number), b.source_id),
+            alternates: async () => (await seriesIsMonitored(b.series_id))
+              ? listingAlternates(b.series_id, Number(b.number), b.source_id)
+              : [],
             allowed,
-            hunt: async () => (await huntSource(b.series_id, Number(b.number), { allowed, budget: huntBudget })).chapter,
+            hunt: async () => (await seriesIsMonitored(b.series_id))
+              ? (await huntSource(b.series_id, Number(b.number), { allowed, budget: huntBudget })).chapter
+              : null,
+            admit: () => seriesIsMonitored(b.series_id),
           },
         );
         if (r === 'completed') completed++;
@@ -860,7 +898,8 @@ async function listingAlternates(seriesId: string, number: number, except: strin
     ...(s?.source_id ? [s.source_id] : []),
     ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
   ]);
-  return row.copies
+  const open = await automaticCopiesFor(seriesId, row.copies);
+  return open
     .filter((c) => c.source !== except && followed.has(c.source))
     .map((c) => copyToChapter(c, { number, title: row.title }));
 }

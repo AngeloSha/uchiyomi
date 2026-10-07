@@ -272,6 +272,25 @@ test('the completion pass applies its age predicate to the old copy and fallback
   assert.deepEqual((await row(8)).missing_pages, [4]);
 });
 
+test('the completion pass rechecks admission before asking the source', { skip }, async () => {
+  // The nightly query is only a snapshot: Unmonitor may be pressed after it selected this book. Reintroduce
+  // by dropping the `admit` check before getPageUrls in partial.ts: c14/3 appears in `asked` and the chapter
+  // is rewritten even though automatic work was paused before its first source operation.
+  const b = await partial(14);
+  const before = await readFile(abs(14));
+  let checks = 0;
+  failing.delete('c14/3');
+  const out = await completePartial(b, {
+    alternates: async () => [],
+    admit: async () => { checks++; return false; },
+  });
+  assert.equal(out, 'unchanged');
+  assert.equal(checks, 1, 'admission was read at the last responsible moment');
+  assert.deepEqual(asked, [], 'no source or page request was made');
+  assert.ok(before.equals(await readFile(abs(14))), 'the partial archive was not touched');
+  assert.deepEqual((await row(14)).missing_pages, [4]);
+});
+
 test('a worse alternate is rejected before it can replace the canonical partial', { skip }, async () => {
   // The canonical copy has one hole in ten; the alternate has two. The old completion path let fallback
   // write the worse file first and restored ours afterward, leaving a crash window with real-page loss.

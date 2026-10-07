@@ -16,11 +16,13 @@ let listingRows: typeof import('../src/lib/seriesListing')['listingRows'];
 let whyOf: typeof import('../src/lib/seriesListing')['whyOf'];
 let copyToChapter: typeof import('../src/lib/seriesListing')['copyToChapter'];
 let sameRelease: typeof import('../src/lib/seriesListing')['sameRelease'];
+let resolveListingRow: typeof import('../src/lib/seriesListing')['resolveListingRow'];
+let automaticCopies: typeof import('../src/lib/seriesListing')['automaticCopies'];
 let chooseReleases: typeof import('../src/lib/releases')['chooseReleases'];
 let releaseOrder: typeof import('../src/lib/releases')['releaseOrder'];
 let CHAPTER_RETRY_CAP: number;
 before(async () => {
-  ({ listingRows, whyOf, copyToChapter, sameRelease } = await import('../src/lib/seriesListing'));
+  ({ listingRows, whyOf, copyToChapter, sameRelease, resolveListingRow, automaticCopies } = await import('../src/lib/seriesListing'));
   ({ chooseReleases, releaseOrder } = await import('../src/lib/releases'));
   ({ CHAPTER_RETRY_CAP } = await import('../src/lib/updater'));
 });
@@ -140,6 +142,41 @@ test('a number the chooser is holding for the preferred group is held', () => {
   const rows = listingRows(tagged, releases, new Set(waiting), 'pri');
   assert.equal(rows[0].status, 'held');
   assert.equal(rows[0].scanlator, 'Group A', 'and the copy on offer today is still the row\'s copy');
+});
+
+test('a block reapply recomputes every chosen field and preserves the natural held state', () => {
+  const now = Date.now();
+  const fresh = new Date(now).toISOString();
+  const tagged = [
+    ch(9, { title: 'Bad title', scanlator: 'Bad', groups: ['Bad'], source: 'pri', pages: 10, publishedAt: fresh }),
+    ch(9, { title: 'Good title', scanlator: 'Good', groups: ['Good'], source: 'fol', pages: 12, publishedAt: fresh }),
+  ];
+  const [base] = listingRows(tagged, tagged.slice(0, 1), new Set(), 'pri');
+  const sourceRanked = resolveListingRow(base, noPrefs, { sourceRank: (source) => source === 'fol' ? 0 : 1 });
+  assert.equal(sourceRanked.sourceId, 'fol', 'the current source priority/follow order participates in the rebuild');
+  const blocked = resolveListingRow(base, { priority: ['Preferred'], blocked: ['Bad', 'Good'], patienceMs: 2 * 86_400_000 });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.unblockedStatus, 'held', 'lifting the block restores the chooser\'s wait');
+
+  const open = resolveListingRow(blocked, { priority: ['Good'], blocked: ['Bad'], patienceMs: 2 * 86_400_000 });
+  assert.equal(open.status, 'available');
+  assert.equal(open.sourceId, 'fol');
+  assert.equal(open.title, 'Good title');
+  assert.equal(open.scanlator, 'Good');
+  assert.equal(open.publishedAt, fresh);
+  assert.equal(open.chosen.sourceId, 'c/9/Good');
+  assert.equal(open.copies.length, 2, 'blocked copies remain stored for a later unblock');
+});
+
+test('automatic fallbacks drop blocked copies while an explicit picker can retain the original list', () => {
+  const copies = [
+    copy('pri', { groups: ['Blocked'] }),
+    copy('a', { groups: ['Open'] }),
+    copy('b', { groups: ['Blocked', 'Open'] }),
+  ];
+  const out = automaticCopies(copies, { priority: [], blocked: ['blocked'], patienceMs: 0 });
+  assert.deepEqual(out.map((c) => c.source), ['a', 'b'], 'joint releases survive when one contributing group is open');
+  assert.equal(copies.length, 3, 'the stored list stays intact for an explicit versions pick');
 });
 
 test('a copy an adapter tagged with nothing falls back to the series\' own source', () => {

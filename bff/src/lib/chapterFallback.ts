@@ -74,6 +74,11 @@ export interface FallbackInput {
    * the one the outcome names: an alternate that refused on the way is a site that said no too.
    */
   onAsked?: (source: string, err: unknown) => void;
+  /**
+   * Last-responsible-moment admission for unattended work. Checked before the chosen download, every
+   * alternate, and both the hunt and its download. Manual callers omit it and remain admitted.
+   */
+  admit?: () => Promise<boolean>;
 }
 
 export type FallbackOutcome =
@@ -83,7 +88,7 @@ export type FallbackOutcome =
    * copy's source is refusing this run and no other copy could be asked (`refusing`). The second is the
    * old loops' `continue`: the chapter was never asked, so it is not a failure and earns no ledger row.
    */
-  | { kind: 'skipped'; why: 'on_disk' | 'refusing' }
+  | { kind: 'skipped'; why: 'on_disk' | 'refusing' | 'paused' }
   | { kind: 'partial'; via: string; pages: number; missing: number[]; chapterUsed: SourceChapter; switched?: { from: string; why: string } }
   | { kind: 'failed'; via: string; err: any };
 
@@ -120,6 +125,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   const via = f.chapter.source ?? '';
   const n = f.chapter.number;
   const label = `"${f.title}" ch ${n}`;
+  const admitted = () => f.admit ? f.admit().catch(() => false) : Promise.resolve(true);
   if (!via) return { kind: 'failed', via, err: new Error(`${label}: the copy names no source`) };
 
   // The error of the CHOSEN copy: what the reason is worded from and what decides whether a hunt is
@@ -167,6 +173,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   // ── 1 + 2. the chosen copy ────────────────────────────────────────────────────────────────────────
   let asked = 0;
   if (!f.refusing.has(via) && !off) {
+    if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
     asked++;
     const r = await attempt(f.chapter, via, true);
     if (r === null) return { kind: 'skipped', why: 'on_disk' };
@@ -188,6 +195,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       if (!getSource(src)) continue;
       if (await isDisabled(src).catch(() => false)) continue;
       if (await blockedNow(src).catch(() => null)) continue;
+      if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
       tried++;
       asked++;
       const r = await attempt(alt, src);
@@ -205,10 +213,12 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
     // Reintroduce by dropping `|| f.persistent`: "a persistent refusal may hunt, and still never writes a
     // partial" in chapterFallback.int.test.ts counts zero hunts.
     if (f.hunt && first && (!isRefusal(first.err) || f.persistent)) {
+      if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
       const why = whyOf(first.err);
       const found = await f.hunt(why).catch((e) => { console.warn(`[download] ${label}: the source hunt failed: ${(e as Error)?.message || e}`); return null; });
       const src = found?.source ?? '';
       if (found && src && src !== via && !f.refusing.has(src) && (!f.allowed || f.allowed(src)) && getSource(src)) {
+        if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
         asked++;
         const r = await attempt(found, src);
         if (r === null) return { kind: 'skipped', why: 'on_disk' };

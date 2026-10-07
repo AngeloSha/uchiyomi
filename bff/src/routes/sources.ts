@@ -87,7 +87,7 @@ import { enqueueArchive, archiveBusy, archiveScanPending, archiveSeriesIds, arch
 import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
-import { copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, type ListingCopy } from '../lib/seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, type ListingCopy } from '../lib/seriesListing';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
@@ -523,7 +523,8 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     const alternatesOf = async (n: number): Promise<SourceChapter[]> => {
       const row = await one<{ title: string | null; copies: ListingCopy[] }>(
         'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, n]).catch(() => null);
-      return (row?.copies ?? []).filter((c) => followed.has(c.source)).map((c) => copyToChapter(c, { number: n, title: row!.title }));
+      const open = await automaticCopiesFor(seriesId, row?.copies ?? []);
+      return open.filter((c) => followed.has(c.source)).map((c) => copyToChapter(c, { number: n, title: row!.title }));
     };
 
     // Which other copies each chapter may come from (v0.55.4, #158): the same release on the series' other followed
@@ -549,7 +550,9 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         const row = rows.get(ch.number);
         const own = row?.copies?.find((c) => c.source === ch.source && c.sourceId === ch.sourceId);
         if (!row || !own || picked.has(ch.number)) continue;
-        const same = sameRelease(own, row.copies, { followed, langOf: declaredLang }).slice(1);
+        const open = await automaticCopiesFor(seriesId, row.copies);
+        if (!open.includes(own)) continue;
+        const same = sameRelease(own, open, { followed, langOf: declaredLang }).slice(1);
         if (same.length) copiesOf.set(ch, same.map((c) => copyToChapter(c, { number: ch.number, title: row.title })));
       }
     }
@@ -600,6 +603,14 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       settled.add(ch);
       let out;
       try {
+        // A detached job can outlive a scanlator-settings save. Recheck the selected copy immediately
+        // before the helper starts network work. Only a versions-list pick may deliberately override a
+        // block; if an automatic choice was blocked meanwhile, take the freshly ranked open copy instead.
+        if (!ch.pinned && !(await automaticChapterAllowedFor(seriesId, use))) {
+          const next = (await alternatesOf(ch.number))[0];
+          if (!next) { await settle(ch, false); return; }
+          use = next;
+        }
         /**
          * `meta` comes from OUR series row, never from the candidate.
          *

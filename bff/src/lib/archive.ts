@@ -48,8 +48,8 @@ import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { noteChapterFailure } from './chapterFailures';
 import { withOrigin } from './downloadActivity';
 import { busyFolders } from './bulkNewest';
-import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
-import { copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
+import { updateSeries, CHAPTER_RETRY_CAP, seriesIsMonitored, type Landed } from './updater';
+import { automaticCopiesFor, copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
 import { cleanSourceOrder } from './sourcePrefs';
 import { heldBooks } from './chapterCleanup';
 import { holds } from './chapterRanges';
@@ -738,10 +738,11 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
         // Already on disk -- landed before a restart, or by a download nobody scanned: not fetched again (the
         // downloader would skip it anyway, but only after the source's turn was spent). Scanned in shortly.
         if (await onDisk(r.folder, c.number)) { await noteUnscanned(r.series_id, r.folder, c.number, {}, now); continue; }
-        const copy = (c.copies ?? []).find((cp) => followed.includes(cp.source) && getSource(cp.source) && capOk(cp.source));
+        const open = await automaticCopiesFor(r.series_id, c.copies ?? []);
+        const copy = open.find((cp) => followed.includes(cp.source) && getSource(cp.source) && capOk(cp.source));
         if (!copy) continue;
         pick = { number: c.number, title: c.title, copy, publishedAt: c.publishedAt };
-        copies = c.copies ?? [];
+        copies = open;
         break;
       }
       if (!pick) {
@@ -791,6 +792,9 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
     // Reintroduce by dropping this: "it yields" in archive.int.test.ts starts the chapter of a series a Fetch is
     // already writing.
     if (busy(r.folder)) { wait(r, { why: 'series_busy', source: name }); continue; }
+    // The queue query is a snapshot. Unmonitor may be pressed while another series takes its turn; claim
+    // neither a source slot nor a folder for a row that is no longer automatic work.
+    if (!(await seriesIsMonitored(r.series_id))) continue;
 
     claimed.add(rateKeyOf(S));
     lastWaits.delete(r.series_id);
@@ -901,7 +905,7 @@ async function runListing(r: QueuedRow, S: string, set: ArchiveSettings, rand: (
   let placed = false;
   try {
     // maxNew 0: listed, persisted and stamped, nothing downloaded. Never a hunt: the archive does not go looking.
-    const res = await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false }));
+    const res = await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false, unattended: true }));
     if (res.outcome !== 'ok') {
       deps.log.warn(`the listing of "${r.title}" could not be read (${res.outcome})`);
     } else if (r.boundary != null) {
@@ -1032,6 +1036,7 @@ async function runChapter(
         refusing: new Set<string>(),
         allowed,
         hunt: undefined,
+        admit: () => seriesIsMonitored(r.series_id),
         onAsked: (src, err) => { asked.set(src, err); },
       })));
     } catch (e: any) {
@@ -1099,8 +1104,8 @@ async function runChapter(
     const now = clock();
     // The break that makes this look like a person: jittered, paid for by the chapter's own time, now and then
     // a long one. None after a chapter that was already on disk -- nothing was asked of the site.
-    const skippedOnDisk = out?.kind === 'skipped' && out.why === 'on_disk';
-    const brk = skippedOnDisk ? 0 : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
+    const skippedWithoutAsk = out?.kind === 'skipped' && (out.why === 'on_disk' || out.why === 'paused');
+    const brk = skippedWithoutAsk ? 0 : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
     const nextAt = diskFull ? now + DISK_WAIT_MS : now + brk;
     // One cycle on this source: from the end of its last chapter to the end of this one, less what was the window's
     // or the site's rather than the pace's (archivePlan.ts outsideCycleMs) -- the hours outside the window, a
@@ -1118,7 +1123,7 @@ async function runChapter(
     // Capped against what a chapter of this length really costs at this rate (expectedCycleMs, lane 2's arithmetic),
     // not the configured cycle: past the floor a chapter and its break outrun the hour's share, and a cap at
     // the share cut every real sample short.
-    const cycle = skippedOnDisk ? pace?.cycle_ms ?? null
+    const cycle = skippedWithoutAsk ? pace?.cycle_ms ?? null
       : ewmaCycle(pace?.cycle_ms ?? null, sample, expectedCycleMs({ perHour: set.perHour, chapterMs: now - t0, minBreakMs: minBreakMs() }));
     const reason = diskFull ? 'disk'
       : out?.kind === 'failed' ? String(out.err?.blockStatus ?? classify(out.err) ?? 'failed')
@@ -1213,7 +1218,8 @@ async function alternatesOf(seriesId: string, n: number, chosen: ListingCopy, fo
     const gate = gateDepth(key);
     return !resting.has(key) && !keyInFlight(key) && gate.active + gate.queued === 0 && !refusedLately(src);
   };
-  return (row?.copies ?? [])
+  const open = await automaticCopiesFor(seriesId, row?.copies ?? []);
+  return open
     .filter((c) => c.source !== chosen.source && followed.includes(c.source) && free(c.source))
     .map((c) => copyToChapter(c, { number: n, title: row!.title }));
 }
