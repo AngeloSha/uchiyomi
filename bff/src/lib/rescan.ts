@@ -69,11 +69,11 @@
  *   when exactly ONE live row anywhere qualifies, and that row is no other gone row's candidate and no fingerprint's
  *   twin: zero or two (a second copy, two folders unpacked from one archive at the same second) is no pair, and so is a
  *   file a scan saw beside the gone one (written in the same instant with the same name: it was there, it did not
- *   arrive). It counts for FOLLOW and for MERGE alike, asked again at Apply, and it is
- *   never a reason to mark anything: it only ever keeps a row. A renamed file has another name, so without a
- *   fingerprint it stays unpaired. Reintroduce by pairing on the name alone (drop the mtime): "a never-fingerprinted
- *   file is paired only when nothing else could be its file" in rescan.int.test.ts pairs the touched copy; by dropping
- *   the fallback: "the Zagor case, never fingerprinted" plans every chapter as gone.
+ *   arrive). It counts for FOLLOW and for MERGE alike, asked again at Apply, and it is never a reason to mark anything:
+ *   it only ever keeps a row. A renamed file has another name, so without a fingerprint it stays unpaired. Reintroduce
+ *   by pairing on the name alone (drop the mtime): "a never-fingerprinted file is paired only when nothing else could be
+ *   its file" in rescan.int.test.ts pairs the touched copy; by dropping the fallback: "the Zagor case, never
+ *   fingerprinted" plans every chapter as gone.
  *
  * ⚠️ A CHAPTER FOLLOWS ITS FILE (v0.55.7, #150). Kept was not enough: the old row stayed live with no file and the new
  *   row held the file with none of the history, so a renamed chapter showed twice on its series page. For a pair inside
