@@ -22,8 +22,14 @@ export function parseWhen(raw?: string | null): string | undefined {
     /\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b/.test(s) ||
     (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(s) && /\b\d{4}\b/.test(s));
   if (!looksAbsolute) return undefined;
-  // "Jul 01,2026 12:00" (Manganato) needs a space after the comma for Date.parse
-  const t = Date.parse(s.replace(/,(?=\S)/, ', '));
+  // "Jul 01,2026 12:00" (Manganato) needs a space after the comma for Date.parse. Sites that do not
+  // print a zone are calendar dates, not dates in the server's local zone: parsing them as local time and
+  // then calling toISOString() moves the displayed day backwards on servers east of UTC. ISO date-only
+  // strings are already UTC in JavaScript; make the other zone-less forms explicit as well.
+  const cleaned = s.replace(/,(?=\S)/, ', ');
+  const hasZone = /(?:\b(?:UTC|GMT)|Z|[+-]\d{2}:?\d{2})$/i.test(cleaned);
+  const isoDateOnly = /^\d{4}-\d{1,2}-\d{1,2}$/.test(cleaned);
+  const t = Date.parse(!hasZone && !isoDateOnly ? `${cleaned} UTC` : cleaned);
   if (!Number.isNaN(t) && t > Date.parse('1990-01-01') && t < Date.now() + 2 * 86_400_000) return new Date(t).toISOString();
   return undefined;
 }
