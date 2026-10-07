@@ -174,6 +174,42 @@ export async function altTitleRows(seriesId: string): Promise<AltTitleRow[]> {
   );
 }
 
+/**
+ * Every name each series goes by HERE (v0.55.7): its title, an admin's display title (Edit details), its other names
+ * -- and those of the other language editions of its work, one work under several names. What an online match must be
+ * called to be stored as this series' (lib/onlineMatch.ts namesMatch). The series' own title first, for a search to
+ * ask by; a series not there has none.
+ */
+export async function namesOfMany(ids: readonly string[], by: 'id' | 'folder' = 'id'): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!ids.length) return out;
+  const rows = await q<{ key: string; name: string }>(
+    `SELECT me.${by} AS key, x.name
+       FROM lib_series me
+       JOIN lib_series m ON m.id = me.id OR (me.work_id IS NOT NULL AND m.work_id = me.work_id AND m.merged_into IS NULL)
+       LEFT JOIN series_overrides o ON o.series_id = m.id
+      CROSS JOIN LATERAL (
+        VALUES (m.title, CASE WHEN m.id = me.id THEN 0 ELSE 3 END), (o.title, CASE WHEN m.id = me.id THEN 1 ELSE 3 END)
+        UNION ALL
+        SELECT a.title, CASE WHEN m.id = me.id THEN 2 ELSE 3 END
+          FROM series_alt_titles a WHERE a.series_id = m.id AND a.removed_at IS NULL
+      ) AS x(name, rank)
+      WHERE me.${by} = ANY($1::text[]) AND x.name IS NOT NULL AND btrim(x.name) <> ''
+      ORDER BY me.${by}, x.rank, x.name`, [[...ids]]);
+  for (const r of rows) {
+    const list = out.get(r.key) ?? [];
+    if (!list.includes(r.name)) list.push(r.name);
+    out.set(r.key, list);
+  }
+  return out;
+}
+
+/** namesOfMany for one series, by id or by folder (where an add has not learned the id yet); empty on any failure. */
+export async function namesOf(where: { id: string } | { folder: string }): Promise<string[]> {
+  const [key, by] = 'id' in where ? [where.id, 'id' as const] : [where.folder, 'folder' as const];
+  return (await namesOfMany([key], by).catch(() => new Map<string, string[]>())).get(key) ?? [];
+}
+
 /** The names a search may use, in altTitleRows' order; empty on any failure, so a search never fails over them. */
 export async function altTitlesFor(seriesId: string, limit?: number): Promise<string[]> {
   const rows = await altTitleRows(seriesId).catch(() => [] as AltTitleRow[]);

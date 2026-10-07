@@ -121,7 +121,7 @@ export const FILL_MAX_CHAPTERS = 300;
 export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
-import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, SEARCH_NAMES } from '../lib/altTitles';
+import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, namesOf, SEARCH_NAMES } from '../lib/altTitles';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
@@ -1202,6 +1202,33 @@ async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCt
   return held?.held ? 'later' : out;
 }
 
+/**
+ * AniList's art for a series an add just made or found, merged under what it already has: the banner it lacks, and the
+ * cover only when its source gave none. Kept only when AniList's entry is named as the series is (v0.55.7, #168,
+ * lib/onlineMatch.ts namesMatch) -- by every name the series goes by, its source's title and the other names its
+ * description listed (learned before this runs) -- and another work's answer is stored as the miss a 404 is. The same
+ * match's country is the weakest evidence of the reading direction and the type. Detached and best effort: an add
+ * neither waits for AniList nor fails over it. By folder where the add has not learned the id yet.
+ * Reintroduce by keeping AniList's answer unchecked: "an add keeps AniList's art only from an entry named as the
+ * series" in onlineMatch.int.test.ts finds the other work's banner stored.
+ */
+async function artByTitle(where: { id: string } | { folder: string }, title: string): Promise<void> {
+  try {
+    const names = await namesOf(where);
+    if (!names.includes(title)) names.unshift(title);
+    const a = await fetchAniListArt(title, names);
+    const merge = `ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`;
+    if ('id' in where) {
+      await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3) ${merge}`, [where.id, a.banner, a.cover]).catch(() => {});
+    } else {
+      await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $2, $3 FROM lib_series WHERE folder = $1 ${merge}`,
+        [where.folder, a.banner, a.cover]).catch(() => {});
+    }
+    await learnDirection(where, directionFromAniListMatch(names, a), 'anilist');
+    await learnTypeFromAniList(where, names, a);
+  } catch { /* AniList is best effort on an add */ }
+}
+
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
@@ -1495,14 +1522,7 @@ export async function addSeriesFromSource(opts: {
     }
     await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
     await learnTypeFromSource({ id }, series);
-    fetchAniListArt(title)
-      .then(async (a) => {
-        await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, a.banner, a.cover]).catch(() => {});
-        await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
-        await learnTypeFromAniList({ id }, title, a);
-      })
-      .catch(() => {});
+    void artByTitle({ id }, title);
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}), ...(linked ? { edition: linked } : {}) };
   }
 
@@ -1608,16 +1628,7 @@ export async function addSeriesFromSource(opts: {
       await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
-    fetchAniListArt(title)
-      .then(async (a) => {
-        await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]).catch(() => {});
-        // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
-        // this title (lib/directionSignals.ts directionFromAniListMatch).
-        await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
-        await learnTypeFromAniList({ folder }, title, a);
-      })
-      .catch(() => {});
+    void artByTitle({ folder }, title);
     return {
       ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId,
       ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}), ...(heldEdition ? { edition: heldEdition } : {}),
@@ -1750,16 +1761,7 @@ export async function addSeriesFromSource(opts: {
       await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
-    fetchAniListArt(title)
-      .then(async (a) => {
-        await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]).catch(() => {});
-        // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
-        // this title (lib/directionSignals.ts directionFromAniListMatch).
-        await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
-        await learnTypeFromAniList({ folder }, title, a);
-      })
-      .catch(() => {});
+    void artByTitle({ folder }, title);
     void (async () => {
       let failures = 0;
       // As in startDownloadJob: a failed add says what is still to fetch, when the loop stops and at the end.

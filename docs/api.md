@@ -2353,6 +2353,17 @@ source check.
 copy of itself); and since v0.53.0, with `style=banner`, what the series page shows: a real banner -- AniList's or an
 admin's -- sharp and uncropped (at most 1920 wide), and for a series without one the same ambient wash of its cover,
 which looks bad stretched sharp. `av=<n>` is the art version, a cache-buster.
+
+**Online matches carry the series' name** (since v0.55.7, [#168](https://github.com/AngeloSha/uchiyomi/issues/168)).
+The art a series is shown with when nobody chose any -- AniList's cover and banner, looked up by title the first time
+its backdrop is asked for, after an add, or by Admin → Art's backfill (with Kitsu's and MangaDex's) -- and the AniList
+entry it is linked to for tracker sync are kept only from an entry named as the series is: one of the entry's titles
+(romaji, English, native, a synonym; MangaDex's titles and alternative titles; Kitsu's) must EQUAL one of the series'
+names -- its title, an admin's display title, its other names (`GET /api/admin/series/:id/alt-titles`), and those of
+the other language editions of its work -- once case, accents, bracketed asides and punctuation are set aside. Never
+containment: a spin-off's name contains its parent's. An answer that is another work is stored as the miss a "no
+match" is, so it is not asked again on every view. `/img/series/:id/thumb` is an admin's cover, else the source's
+cover or a checked AniList one, else the series' first page.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

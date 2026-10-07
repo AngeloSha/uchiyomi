@@ -24,6 +24,7 @@ import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile } from '../lib/seriesArt';
+import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
 
@@ -359,13 +360,16 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
   let art = await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
   if (!art) {
     try {
-      let title = '';
+      // Every name the series goes by (lib/altTitles.ts namesOf): the search asks by its title, and the answer is kept
+      // only when it is one of them (lib/onlineMatch.ts). Another work's answer comes back as nulls and is stored as
+      // the miss a 404 is, so it is not asked again on every view (#168).
+      let names: string[] = [];
       try {
-        const lib = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
-        if (lib?.title) title = lib.title;
-        else { const s = await komga.series(id); title = s?.metadata?.title || s?.name || ''; }
+        names = await namesOf({ id });
+        if (!names.length) { const s = await komga.series(id); const t = s?.metadata?.title || s?.name; if (t) names = [t]; }
       } catch {}
-      const fetched = title ? await fetchAniListArt(title) : { banner: null, cover: null };
+      const title = names[0] ?? '';
+      const fetched = title ? await fetchAniListArt(title, names) : { banner: null, cover: null };
       await q(
         `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
          ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now()`,
@@ -375,8 +379,8 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
       if (fetched.mediaId) {
         await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
         // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
-        await learnDirection({ id }, directionFromAniListMatch(title, fetched as { country?: string | null; titles?: string[] }), 'anilist').catch(() => {});
-        await learnTypeFromAniList({ id }, title, fetched as { country?: string | null; titles?: string[] });
+        await learnDirection({ id }, directionFromAniListMatch(names, fetched), 'anilist').catch(() => {});
+        await learnTypeFromAniList({ id }, names, fetched);
       }
       art = fetched;
     } catch {
@@ -548,8 +552,9 @@ const thumbWidth = (req: FastifyRequest): number => {
   const w = Number((req.query as any)?.w);
   return w === 800 || w === 1600 ? w : 400;
 };
-// Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
-// page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
+// Series cover: an admin's (an upload or a link), else the real cover art (the source's, or AniList's when its entry is
+// named as the series is, cached in series_art.cover); fall back to the first page of chapter 1. Distinct cache
+// variants so it upgrades to the real cover once one is known.
 export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
   // The series-level art routes read lib_series and series_art by id, so they need the check that
   // bookFileAbs now carries for chapters. Without it a hidden series' cover still renders, which is

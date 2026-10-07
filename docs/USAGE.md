@@ -306,6 +306,22 @@ says how many are in hand. The chips:
   from a source puts the same series back, history and all. What each kind of delete does and does not
   erase is spelled out in section 12, *Where your data lives and how to delete for good*.
 
+### Cover and banner
+
+When nobody chose a picture, a series is shown with:
+
+- **its cover**: the cover of the source it was added from; else AniList's, when AniList's entry carries the series'
+  name; else its own first page.
+- **its banner**: AniList's (or its anime adaptation's) on the same condition; else one made from the series' own
+  pages (*New banner* in *Edit details* picks another).
+
+Since v0.55.7 ([#168](https://github.com/AngeloSha/uchiyomi/issues/168)) an online match counts only when one of the
+entry's names — its romaji, English or native title, or a synonym — is exactly one of the series' names: its title, the
+title you set in *Edit details*, its *Other names* (below), with case, accents, punctuation and bracketed asides set
+aside. A name that merely contains the series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
+The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
+**Admin → Content → Art** follows it too.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it
@@ -2536,6 +2552,10 @@ in place until you paste a new one. A service that is blocking or rate-limiting 
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
 Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its own row, and more than one can
 be connected at once; each syncs on its own.
+
+Uchiyomi finds each series' AniList entry by itself, from the same lookup its art comes from, and since v0.55.7 only
+an entry that carries the series' name (section 4, *Cover and banner*); a series it cannot match has no link, and
+importing your list (below) links every title on it to its own entry.
 
 **Bringing your list over.** The same connection reads in the other direction, once: on the import page
 (section 8, *Sources → Import a list*) the *From your tracker* box loads the account's manga list — the

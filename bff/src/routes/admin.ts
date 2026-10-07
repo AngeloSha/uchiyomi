@@ -30,7 +30,7 @@ import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { recordAltTitles } from '../lib/altTitles';
+import { namesOf, recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
@@ -87,7 +87,8 @@ import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } f
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { MANGADEX_LANGS, canonLang, mdLang, setUnstatedLang } from '../lib/lang';
 import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
-import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
+import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner, type AniListArt } from '../lib/anilist';
+import { namesMatch } from '../lib/onlineMatch';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
@@ -386,6 +387,59 @@ async function closeBatchIfSettled(batchId: string): Promise<ImportBatchRow | nu
       RETURNING *`,
     [batchId],
   ).catch(() => null);
+}
+
+/**
+ * The art backfill's hunt for one series (Admin → Art → Backfill missing banners): a banner, widest net first-hit-wins
+ * -- AniList manga (its banner, or its anime adaptation's, same query) → a harsher-cleaned retry → a direct AniList ANIME
+ * search → Kitsu's wide cover -- and a cover from MangaDex when AniList had none. What it found is stored under what
+ * the series has (an empty field is filled, never one an admin set: the route asks only for series without a banner
+ * override), and an AniList entry found is linked. Answers what it stored: 'banner', 'cover', or null for nothing.
+ *
+ * Every answer is kept only when it is named as the series is (v0.55.7, #168, lib/onlineMatch.ts namesMatch): each
+ * search answers with its best guess, and the harsher title -- cut at the first dash or colon -- asks for exactly the
+ * parent a spin-off is named after, so its answer must still be called what the series is called. MangaDex's FIRST
+ * hit was taken as it came. Reintroduce by keeping the first hit: "the backfill stores only what is named as the
+ * series" in onlineMatch.int.test.ts finds the other work's cover.
+ */
+export async function huntArt(t: { id: string; title: string }): Promise<'banner' | 'cover' | null> {
+  const names = await namesOf({ id: t.id });
+  if (!names.length) names.push(t.title);
+  const none: AniListArt = { banner: null, cover: null };
+  let art: AniListArt = await fetchAniListArt(t.title, names).catch(() => none);
+  const harsh = t.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim();
+  if (!art.banner && harsh && harsh !== t.title) {
+    const retry = await fetchAniListArt(harsh, names).catch(() => none);
+    // The entry linked below is whichever answer was this series (both were held to its names): the retry's art used to
+    // replace the first answer whole, and the link and the direction went with it.
+    art = { ...(art.mediaId ? art : retry), banner: retry.banner ?? art.banner, cover: art.cover ?? retry.cover };
+  }
+  if (!art.banner) art.banner = await fetchAnimeBanner(t.title, names).catch(() => null);
+  if (!art.banner) art.banner = await fetchKitsuBanner(t.title, names);
+  if (!art.banner && harsh && harsh !== t.title) art.banner = await fetchKitsuBanner(harsh, names);
+  if (!art.cover) {
+    try {
+      // The first hit NAMED as the series is, never simply the first hit: a search's first result for a title it does
+      // not carry is another work (lib/titleMatch.ts).
+      const mdSrc = getSource('mangadex');
+      const res = mdSrc ? await mdSrc.search(t.title) : [];
+      art.cover = (res ?? []).find((r) => r.coverUrl && namesMatch(names, [r.title]))?.coverUrl || null;
+    } catch { /* mangadex miss is fine */ }
+  }
+  if (!art.banner && !art.cover) return null;
+  await q(
+    `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+     ON CONFLICT (series_id) DO UPDATE SET
+       banner = COALESCE(EXCLUDED.banner, series_art.banner),
+       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
+    [t.id, art.banner, art.cover],
+  );
+  if (art.mediaId) {
+    await linkSeries(t.id, art.mediaId, art.mediaTitle ?? null);
+    await learnDirection({ id: t.id }, directionFromAniListMatch(names, art), 'anilist').catch(() => {});
+    await learnTypeFromAniList({ id: t.id }, names, art);
+  }
+  return art.banner ? 'banner' : 'cover';
 }
 
 /**
@@ -2741,10 +2795,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const s = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
     const cleaned = s.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim() || s.title;
+    // A person picks from these, so AniList's several answers are offered as they come; Kitsu's one banner is offered
+    // from an entry named as the series is, the rule it is stored by (lib/kitsu.ts).
+    const names = await namesOf({ id });
     const [anilist, anilistLoose, kitsu, md] = await Promise.all([
       fetchAniListCandidates(s.title).catch(() => []),
       cleaned !== s.title ? fetchAniListCandidates(cleaned).catch(() => []) : Promise.resolve([]),
-      fetchKitsuBanner(s.title).then((b) => (b ? [{ title: s.title, banner: b, cover: null as string | null }] : [])).catch(() => []),
+      fetchKitsuBanner(s.title, names.length ? names : [s.title]).then((b) => (b ? [{ title: s.title, banner: b, cover: null as string | null }] : [])).catch(() => []),
       (async () => {
         try {
           const mdSrc = getSource('mangadex');
@@ -2768,8 +2825,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { title: s.title, content: out };
   });
 
-  // Bulk backfill: re-hunt art for series missing a banner (or any art). AniList first (cleaned-title retry),
-  // MangaDex cover as a second source. Runs in the background; poll /api/admin/art/backfill/status.
+  // Bulk backfill: re-hunt art for series missing a banner (or any art), one at a time (huntArt above, every answer held
+  // to the series' names since v0.55.7). Runs in the background; poll /api/admin/art/backfill/status.
   app.post('/api/admin/art/backfill', async (req, reply) => {
     if (artJob?.running) return reply.code(409).send({ error: 'busy', message: 'A backfill is already running.' });
     const targets = await q<{ id: string; title: string }>(
@@ -2784,42 +2841,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('art.backfill_start', { userId: userIdOf(req), detail: { count: targets.length }, req });
     void (async () => {
       for (const t of targets) {
-        try {
-          // banner hunt, widest net first-hit-wins: AniList manga (banner or its anime adaptation's, same
-          // query) → harsher-cleaned retry → direct AniList ANIME search → Kitsu wide cover.
-          let art = await fetchAniListArt(t.title).catch(() => ({ banner: null as string | null, cover: null as string | null }));
-          const harsh = t.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim();
-          if (!art.banner && harsh && harsh !== t.title) {
-            const retry = await fetchAniListArt(harsh).catch(() => ({ banner: null, cover: null }));
-            art = { banner: retry.banner ?? art.banner, cover: art.cover ?? retry.cover };
-          }
-          if (!art.banner) art.banner = await fetchAnimeBanner(t.title).catch(() => null);
-          if (!art.banner) art.banner = await fetchKitsuBanner(t.title);
-          if (!art.banner && harsh && harsh !== t.title) art.banner = await fetchKitsuBanner(harsh);
-          if (!art.cover) {
-            try {
-              const mdSrc = getSource('mangadex');
-              const res = mdSrc ? await mdSrc.search(t.title) : [];
-              art.cover = res?.[0]?.coverUrl || null;
-            } catch { /* mangadex miss is fine */ }
-          }
-          if (art.banner || art.cover) {
-            await q(
-              `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-               ON CONFLICT (series_id) DO UPDATE SET
-                 banner = COALESCE(EXCLUDED.banner, series_art.banner),
-                 cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
-              [t.id, art.banner, art.cover],
-            );
-            if ((art as any).mediaId) {
-              await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
-              await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, art as any), 'anilist').catch(() => {});
-              await learnTypeFromAniList({ id: t.id }, t.title, art as any);
-            }
-            if (art.banner) job.banners++;
-            else job.covers++;
-          } else job.misses++;
-        } catch { job.misses++; }
+        const found = await huntArt(t).catch(() => null);
+        if (found === 'banner') job.banners++;
+        else if (found === 'cover') job.covers++;
+        else job.misses++;
         job.done++;
         await new Promise((r) => setTimeout(r, 2200)); // stay under AniList's ~30 req/min
       }
@@ -3372,11 +3397,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     void (async () => {
       for (const t of targets) {
         try {
-          const m = await fetchAniListArt(t.title);
+          // Only an entry named as the series is (v0.55.7, lib/onlineMatch.ts): the link is where progress is pushed.
+          const names = await namesOf({ id: t.id });
+          if (!names.length) names.push(t.title);
+          const m = await fetchAniListArt(t.title, names);
           if (m.mediaId) {
             await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null);
-            await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, m), 'anilist').catch(() => {});
-            await learnTypeFromAniList({ id: t.id }, t.title, m);
+            await learnDirection({ id: t.id }, directionFromAniListMatch(names, m), 'anilist').catch(() => {});
+            await learnTypeFromAniList({ id: t.id }, names, m);
             job.linked++;
           }
           else job.misses++;

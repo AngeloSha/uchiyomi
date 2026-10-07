@@ -8701,7 +8701,8 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
         image of up to 11 MB as a base64 data URL; the body may be up to about 14.7 MB to carry one (v0.53.0; 12 MB
         before, which refused pictures between 9 and 11 MB). `url` stores the address the art is fetched from, and
-        `reset` hands the art back to the automatic source.
+        `reset` hands the art back to the automatic source. Automatic art is kept from an online entry only when it is
+        named as the series is (v0.55.7).
       parameters:
         - name: id
           in: path

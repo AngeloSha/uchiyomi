@@ -3,6 +3,7 @@
 // `id` is the AniList media id — the anchor progress sync writes against, so it is captured here rather
 // than re-resolved later by another fuzzy title search.
 import { plainText } from './htmlText';
+import { namesMatch } from './onlineMatch';
 
 // `countryOfOrigin` rides along for the series' reading direction (lib/readingDirection.ts), with every title
 // the entry goes by so the direction is taken only from an entry that is visibly the series searched for
@@ -25,15 +26,28 @@ function clean(t: string): string {
     .trim();
 }
 
+/** What the art lookup found: the entry's art, id and names, or nulls for a miss. */
+export interface AniListArt {
+  banner: string | null;
+  cover: string | null;
+  mediaId?: number | null;
+  mediaTitle?: string | null;
+  country?: string | null;
+  titles?: string[];
+  /** The entry the search answered with when none of its names is the series' (v0.55.7): stored as a miss. */
+  refused?: { id: number | null; title: string | null };
+}
+
 /**
- * Returns { banner, cover } from AniList for a manga title.
- * Throws on transient network/5xx errors (so the caller doesn't cache a miss);
- * returns nulls on a genuine "no match".
+ * Returns { banner, cover } from AniList for a manga title, searched by `rawTitle` and kept only when the entry is the
+ * series: one of its names is one of `names`, the names the series goes by here (lib/onlineMatch.ts namesMatch).
+ * Throws on transient network/5xx errors (so the caller doesn't cache a miss); returns nulls on a genuine "no match",
+ * and on an answer that is another work -- `refused` says which -- so the caller stores that as a miss as well and
+ * does not ask again on every view (v0.55.7, #168: a comic with no online source took a manga's cover and banner, and
+ * the manga's AniList link). Reintroduce by returning the entry unchecked: "another work's answer is a miss" in
+ * onlineMatch.int.test.ts stores the manga's cover.
  */
-export async function fetchAniListArt(
-  rawTitle: string,
-  retry = 0,
-): Promise<{ banner: string | null; cover: string | null; mediaId?: number | null; mediaTitle?: string | null; country?: string | null; titles?: string[] }> {
+export async function fetchAniListArt(rawTitle: string, names: readonly string[], retry = 0): Promise<AniListArt> {
   const s = clean(rawTitle);
   if (!s) return { banner: null, cover: null };
   const r = await fetch('https://graphql.anilist.co', {
@@ -46,12 +60,15 @@ export async function fetchAniListArt(
   if (r.status === 429 && retry < 2) {
     const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
     await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchAniListArt(rawTitle, retry + 1);
+    return fetchAniListArt(rawTitle, names, retry + 1);
   }
   if (r.status === 404) return { banner: null, cover: null }; // no match -> cache the miss
   if (!r.ok) throw new Error(`anilist ${r.status}`); // transient -> don't cache
   const j: any = await r.json();
   const m = j?.data?.Media;
+  if (m && !namesMatch(names, titlesOf(m))) {
+    return { banner: null, cover: null, refused: { id: Number.isInteger(m.id) ? m.id : null, title: m.title?.english || m.title?.romaji || null } };
+  }
   // banner priority: the manga's own, else its anime adaptation's (same request, no extra rate cost)
   const relBanner = (m?.relations?.edges ?? [])
     .map((e: any) => e?.node)
@@ -103,10 +120,14 @@ export async function fetchAniListCountries(ids: number[]): Promise<Map<number, 
   return out;
 }
 
-const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATCH){bannerImage}}`;
+const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATCH){title{romaji english native}synonyms bannerImage}}`;
 
-/** Banner from a direct ANIME search — adapted titles often match the anime by name when the manga entry has no banner. */
-export async function fetchAnimeBanner(rawTitle: string, retry = 0): Promise<string | null> {
+/**
+ * Banner from a direct ANIME search — adapted titles often match the anime by name when the manga entry has no banner.
+ * Only from an anime named as the series is (`names`, lib/onlineMatch.ts namesMatch, v0.55.7): the search answers with
+ * its best guess whatever it was asked.
+ */
+export async function fetchAnimeBanner(rawTitle: string, names: readonly string[], retry = 0): Promise<string | null> {
   const s = clean(rawTitle);
   if (!s) return null;
   const r = await fetch('https://graphql.anilist.co', {
@@ -118,11 +139,12 @@ export async function fetchAnimeBanner(rawTitle: string, retry = 0): Promise<str
   if (r.status === 429 && retry < 2) {
     const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
     await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchAnimeBanner(rawTitle, retry + 1);
+    return fetchAnimeBanner(rawTitle, names, retry + 1);
   }
   if (!r.ok) return null;
   const j: any = await r.json();
-  return j?.data?.Media?.bannerImage ?? null;
+  const m = j?.data?.Media;
+  return m && namesMatch(names, titlesOf(m)) ? (m.bannerImage ?? null) : null;
 }
 
 const TRENDING = `query($page:Int){Page(page:$page,perPage:40){media(type:MANGA,countryOfOrigin:"KR",sort:TRENDING_DESC,isAdult:false){title{romaji english}coverImage{extraLarge large}bannerImage description(asHtml:false)genres averageScore chapters status}}}`;

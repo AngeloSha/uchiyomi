@@ -1,7 +1,12 @@
 // What each piece of evidence says about which way a series reads (#102). Pure, and importing only komgaDto's
-// constants (a module with no imports of its own), so the scanner and the source adapters can use it without
-// pulling in the database side, lib/readingDirection.ts -- which itself imports the MangaDex adapter.
+// constants and lib/onlineMatch.ts's title rule (modules with no imports of their own), so the scanner and the source
+// adapters can use it without pulling in the database side, lib/readingDirection.ts -- which itself imports the
+// MangaDex adapter.
 import { READING_DIRECTIONS, type ReadingDirection } from './komgaDto';
+import { namesMatch, titleKey } from './onlineMatch';
+
+// titleKey lived here until v0.55.7, when the same fold became the rule for every match stored by title.
+export { titleKey };
 
 export type { ReadingDirection };
 
@@ -46,31 +51,20 @@ export function directionFromCountry(country: string | null | undefined): Readin
 }
 
 /**
- * A title as a comparison key: accents, case, bracketed asides and punctuation set aside, any script kept.
- * ⚠️ Only the Latin combining block is stripped, then recomposed: dropping every mark after NFKD also dropped
- * Japanese voicing marks, so だ read as た (directionSignals.test.ts keeps a Japanese title whole).
- */
-export function titleKey(t: string | null | undefined): string {
-  return String(t ?? '').normalize('NFKD').replace(/[\u0300-\u036f]+/g, '').normalize('NFC').replace(/\([^)]*\)/g, '')
-    .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-}
-
-/**
  * AniList's country of origin -- but only from an entry that is visibly this series.
  *
  * The art lookup finds its entry with a title SEARCH (`sort: SEARCH_MATCH`), which answers with its best guess
  * whatever it was asked: a series called "No Direction" came back as "Dear Green: Hitomi no Ounowa", from Japan,
  * and read right to left. So a searched entry speaks for the direction only when one of its titles -- romaji,
- * English, native, or a synonym -- IS the series' title once case, accents and punctuation are set aside. A
- * true match that fails this costs nothing but the weakest signal; the source and the files still speak.
+ * English, native, or a synonym -- IS the series' title once case, accents and punctuation are set aside: the rule
+ * every match stored by title is held to since v0.55.7 (lib/onlineMatch.ts namesMatch). A true match that fails
+ * this costs nothing but the weakest signal; the source and the files still speak.
  * A link a person made (series_trackers.linked_by) is trusted as it stands: see detectDirections.
  */
 export function directionFromAniListMatch(
   seriesTitles: Array<string | null | undefined> | string,
   match: { country?: string | null; titles?: Array<string | null | undefined> | null } | null | undefined,
 ): ReadingDirection | null {
-  if (!match) return null;
-  const want = new Set((Array.isArray(seriesTitles) ? seriesTitles : [seriesTitles]).map(titleKey).filter(Boolean));
-  if (!(match.titles ?? []).some((t) => want.has(titleKey(t)))) return null;
+  if (!match || !namesMatch(seriesTitles, match.titles)) return null;
   return directionFromCountry(match.country);
 }
