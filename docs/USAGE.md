@@ -324,10 +324,11 @@ When nobody chose a picture, a series is shown with:
 - **its banner**: AniList's (or its anime adaptation's) on the same condition; else one made from the series' own
   pages (*New banner* in *Edit details* picks another).
 
-Since v0.55.7 ([#168](https://github.com/AngeloSha/uchiyomi/issues/168)) an online match counts only when one of the
+Since v0.55.7 ([#168](https://github.com/AngeloSha/uchiyomi/discussions/168)) an online match counts only when one of the
 entry's names — its romaji, English or native title, or a synonym — is exactly one of the series' names: its title, the
 title you set in *Edit details*, its *Other names* (below), with case, accents, punctuation and bracketed asides set
-aside. A name that merely contains the series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
+aside, and a leading *The*, *A* or *An* ignored when at least six letters remain. A name that merely contains the
+series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
 The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
 **Admin → Content → Art** follows it too. What was matched before v0.55.7 is checked again in the background
 (**Admin → Tasks → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
