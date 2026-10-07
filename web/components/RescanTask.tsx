@@ -17,8 +17,8 @@ import { bookCountText, relativeTime } from '@/lib/format';
 import { useReduceEffects } from '@/lib/effects';
 import { useToast } from '@/components/Toast';
 import {
-  applyRefusalText, exampleLine, fileName, followLine, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine, unmountedLine,
-  type RescanPlanView, type RescanStatus,
+  applyRefusalText, exampleLine, fileName, followLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine,
+  unmountedLine, type RescanPlanView, type RescanStatus,
 } from '@/lib/rescan';
 
 export const RESCAN_KEY = ['rescan-status'];
@@ -114,18 +114,22 @@ function Emptied({ plan }: { plan: RescanPlanView }) {
 function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: () => void; onApplied: () => void }) {
   const toast = useToast();
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  // v0.55.7: the series ticked to merge into the series their files went to.
+  const [merging, setMerging] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const numbers = plan.numbers ?? [];
+  const merges = plan.merges ?? [];
   const toggle = (id: string, on: boolean) => setTicked((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n; });
+  const toggleMerge = (id: string, on: boolean) => setMerging((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n; });
   // Files moved inside their series are something to do too (v0.55.7): their chapters follow them on Apply.
-  const nothing = plan.gone === 0 && !plan.follow && ticked.size === 0;
+  const nothing = plan.gone === 0 && !plan.follow && ticked.size === 0 && merging.size === 0;
   const apply = async () => {
     setBusy(true);
     setRefusal(null);
     try {
       const r = await api<{ ok?: boolean; error?: string; started?: boolean }>('/api/admin/tasks/rescan/apply', {
-        method: 'POST', json: { plan: plan.id, renumber: [...ticked] },
+        method: 'POST', json: { plan: plan.id, renumber: [...ticked], merge: [...merging] },
       });
       // A refusal is the panel's to say, beside the button it is about: a stale preview, or the job it would run beside.
       if (r?.ok === false) setRefusal(applyRefusalText(r.error));
@@ -150,6 +154,42 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
         </p>
       )}
       <Emptied plan={plan} />
+      {merges.length > 0 && (
+        // v0.55.7 (#150): a series whose every chapter file went into one other series, merged there only when ticked.
+        <div className="min-w-0 border-t border-ink-800/70 pt-3">
+        <fieldset className="min-w-0" data-rescan-merges>
+          <legend className="text-[12px] font-medium text-fog-200">{tr('Merge into the series their files went to (optional)')}</legend>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-fog-500">
+            {tr('Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.')}
+          </p>
+          {merges.length > 1 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" className="btn-key" onClick={() => setMerging(new Set(merges.map((m) => m.seriesId)))}>{tr('Select all')}</button>
+              <button type="button" className="btn-key" disabled={!merging.size} onClick={() => setMerging(new Set())}>{tr('Select none')}</button>
+            </div>
+          )}
+          <ul className="mt-2 max-h-80 space-y-1 overflow-y-auto overscroll-contain pe-1" data-lenis-prevent>
+            {merges.map((m) => (
+              <li key={m.seriesId}>
+                <label className="flex min-w-0 items-start gap-2.5 rounded-lg px-1 py-1.5 hover:bg-ink-800/40">
+                  <input type="checkbox" checked={merging.has(m.seriesId)} onChange={(e) => toggleMerge(m.seriesId, e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[rgb(var(--accent))]" data-rescan-merge={m.seriesId} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] text-fog-100 [overflow-wrap:anywhere]">{mergeLabel(m)}</span>
+                    <span className="block text-[11px] leading-snug text-fog-500">{bookCountText(m.chapters)}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {(plan.mergesTotal ?? merges.length) > merges.length && (
+            <p className="mt-1 text-[11px] text-fog-500">
+              {(plan.mergesTotal! - merges.length) === 1 ? tr('and 1 more') : tr('and {n} more', { n: plan.mergesTotal! - merges.length })}
+            </p>
+          )}
+        </fieldset>
+        </div>
+      )}
       {plan.movedList.length > 0 && (
         <details className="min-w-0 text-[12px]" data-rescan-moved>
           <summary className="cursor-pointer text-fog-400 hover:text-fog-200">{tr('Which ones were probably moved or renamed')}</summary>

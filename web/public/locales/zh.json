@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3294
+    "strings": 3303
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3297,5 +3297,14 @@
   "1 chapter now follows its moved or renamed file": "1 话现已跟随其被移动或改名的文件",
   "{n} chapters now follow their moved or renamed files": "{n} 话现已跟随其被移动或改名的文件",
   "1 moved file kept beside its old chapter: both have reading history": "1 个被移动的文件与其原章节并存保留：两者都有阅读记录",
-  "{n} moved files kept beside their old chapters: both have reading history": "{n} 个被移动的文件与其原章节并存保留：两者都有阅读记录"
+  "{n} moved files kept beside their old chapters: both have reading history": "{n} 个被移动的文件与其原章节并存保留：两者都有阅读记录",
+  "Merging series: {done} of {total}": "正在合并系列：{done} / {total}",
+  "Merging series…": "正在合并系列…",
+  "Merge into the series their files went to (optional)": "合并到其文件去往的系列（可选）",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "这些系列的每个章节文件现在都在另一个系列中。勾选一个即可把它合并过去：所有人的阅读记录、书签、收藏和评分都会随之转移，其章节会跟随各自的文件。不会动磁盘上的任何内容。",
+  "Merge “{from}” into “{into}”": "将“{from}”合并到“{into}”",
+  "1 series merged into the series its files went to": "已将 1 个系列合并到其文件去往的系列",
+  "{n} series merged into the series their files went to": "已将 {n} 个系列合并到其文件去往的系列",
+  "1 merge left alone: the series changed since the preview": "有 1 项合并未执行：该系列在预览后发生了变化",
+  "{n} merges left alone: the series changed since the preview": "有 {n} 项合并未执行：这些系列在预览后发生了变化"
 }

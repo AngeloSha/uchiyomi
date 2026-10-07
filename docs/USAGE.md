@@ -1974,8 +1974,15 @@ nothing left*.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
-  open one to *Remove* it, or to merge it with the series its files went to (a renamed folder becomes a new series
-  unless `LIBRARY_REMATCH` is on, see CONFIGURATION.md).
+  open one to *Remove* it.
+- **Merge into the series their files went to** (since v0.55.7, optional): when every chapter file of a series moved
+  into one other series — you unpacked *Zagor* into folders of 100 chapters, each became a series, and then you moved
+  them all into one *Zagor* folder — the preview offers *Merge “Zagor 1-100” into “Zagor”*. Tick the ones you want:
+  **Apply** merges each into the other series, with everyone's reading history, bookmarks, favourites, ratings and the
+  tracker link (when the other series has none), and its chapters follow their files as above, so each chapter shows
+  once. Apply checks each one again first — a series that got a file back, or one hidden, merged or being renumbered
+  since the preview, is left alone (*1 merge left alone: the series changed since the preview*). Nothing is merged
+  without its tick, and nothing on disk is touched.
 - A folder (`/library`, `/library-dl`) with no file behind any of its chapters, or with more than nine in ten gone,
   *looks unmounted*, and nothing under it is touched — the rule *Verify chapter files* follows. A file that could not
   be checked at all (a permission, a disk error) is never called gone.

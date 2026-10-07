@@ -73,6 +73,23 @@
  *   in rescan.int.test.ts finds the chapter twice; by dropping the history test: "a renamed file someone opened since
  *   the scan is kept beside its old chapter" finds that reader's bookmark pointing at nothing.
  *
+ * ⚠️ MERGE, AN OPT-IN FOR A SERIES WHOSE FILES ALL WENT INTO ONE OTHER (v0.55.7, #150). @Kedryn unpacked Zagor into
+ *   folders of 100 chapters, each indexed as a series, then moved them all into one folder: "Zagor" a new series, the
+ *   old ones with nothing left -- and the panel told him to merge them, which nothing in it could. A series with
+ *   nothing left whose every live chapter is a pair into ONE other series, which the merge route itself would merge it
+ *   into (lib/libraryAdmin.ts mergeRefusal) and neither in the middle of a renumber, is offered (`merges`), and merged
+ *   only if the admin ticks it. Apply asks again, with both series held: still no refusal, neither renumbering, every
+ *   live row of it still gone and still with a live twin in that series whose file is there -- else it is left alone
+ *   (`notMerged`). Then the tracker link is carried where the other series has none of its own (mergeSeries drops the
+ *   absorbed series' link, and the series its files went to is often one the scan just made, linked to nothing), the
+ *   series is merged (mergeSeries: every row, with everyone's progress, events, notes, bookmarks, favourites, ratings,
+ *   collections, read marks, tracker floor and other names), the merge is audited as the merge route audits it, and
+ *   its pairs -- inside one series now -- go to FOLLOW. Merged first and followed after: each step leaves a library that
+ *   holds together (a merge's duplicates are what Health's merge leaves), and a FOLLOW that fails is the next Rescan's.
+ *   Reintroduce by dropping the ask-again: "a merge whose series changed since the preview is left alone" in
+ *   rescan.int.test.ts merges into a hidden series; by merging every offer: "only a ticked merge is applied" merges
+ *   both.
+ *
  * ⚠️ APPLY LOOKS AGAIN, UNDER THE SCAN HOLD. Minutes can pass between the preview and the press: a file comes back,
  *   a renumber or a rename moves a row to another file, Verify or a cleanup marks one, a share is unmounted. So a
  *   planned row is marked only if it is still the row that was looked at and its file is still not there, the folder
@@ -125,6 +142,7 @@ import { tombstoneBooks } from './chapterCleanup';
 import { verifyState } from './verifyFiles';
 import { folderBusy, renumberRunning } from './numbering';
 import { busyFolders } from './bulkNewest';
+import { mergeRefusal, mergeSeries } from './libraryAdmin';
 import { runsInside } from './updater';
 import { logAudit } from './audit';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
@@ -148,7 +166,7 @@ export const PLAN_TTL_MS = 30 * 60_000;
 /** Example changes the opt-in shows per series. */
 const EXAMPLES = 3;
 
-export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'follow' | 'renumber';
+export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'merge' | 'follow' | 'renumber';
 
 /** A root the whole-root rules refused: no present file at all, or `missing` of the `of` rows looked at (the 90 % rule). */
 export interface Unmounted { root: string; missing?: number; of?: number }
@@ -157,6 +175,9 @@ export interface Unmounted { root: string; missing?: number; of?: number }
 export interface PlanRow { id: string; seriesId: string; file: string }
 /** A gone row of your own folder, and `to`, the live row now at its file (moved or renamed): same fingerprint. */
 export interface MovedPair extends PlanRow { to: PlanRow & { root: string } }
+
+/** A series every live chapter of which moved into ONE other series, `into`: offered for a merge there (MERGE). */
+export interface MergeOffer { seriesId: string; into: string; chapters: number }
 
 /** A series whose chapter numbers the newer file-name rules would change (the header's opt-in). */
 export interface NumberSeries {
@@ -194,8 +215,13 @@ export interface RescanPlan {
   follow: number;
   /** Rows in the download folder whose file is gone: Verify chapter files' to mark, counted here only. */
   downloads: number;
-  /** Series with a live row and every live row's file gone (marked, moved or in the download folder). */
-  emptied: Array<{ seriesId: string; chapters: number }>;
+  /**
+   * Series with a live row and every live row's file gone (marked, moved or in the download folder). `into`: the one
+   * series every one of its live chapters moved into, when they all went to one (v0.55.7).
+   */
+  emptied: Array<{ seriesId: string; chapters: number; into?: string }>;
+  /** Of `emptied`, those that may be merged into the series their files went to: the opt-in's ticks (MERGE). */
+  merges: MergeOffer[];
   /** Files present under the library folder at the preview, for Apply's look before it marks there. */
   samples: string[];
   /** The opt-in: every series the newer file-name rules would renumber. */
@@ -223,6 +249,9 @@ export interface RescanApplied {
   followed: number;
   /** Pairs kept as two chapters because the new row holds history of its own (FOLLOW): nothing was combined. */
   twins: number;
+  /** The merge opt-in: the ticked series merged into the series their files went to, and those asked again and refused. */
+  merged: number;
+  notMerged: number;
   /**
    * Series left alone because something was writing into them, or checking them, when Apply reached them (the header):
    * neither their planned rows nor the opt-in's numbers were touched -- the next Rescan has them.
@@ -418,15 +447,43 @@ export async function previewRescan(): Promise<RescanPlan | null> {
     const live = await q<{ id: string; n: number }>(
       `SELECT series_id AS id, count(*)::int AS n FROM lib_books WHERE series_id = ANY($1) AND pruned_at IS NULL GROUP BY series_id`,
       [[...goneBySeries.keys()]]);
-    for (const r of live) if ((goneBySeries.get(r.id) ?? 0) >= r.n) emptied.push({ seriesId: r.id, chapters: r.n });
+    const went = new Map<string, MovedPair[]>();
+    for (const m of moved) went.set(m.seriesId, [...(went.get(m.seriesId) ?? []), m]);
+    for (const r of live) {
+      if ((goneBySeries.get(r.id) ?? 0) < r.n) continue;
+      // Where its files went, when every live chapter of it moved into ONE other series (MERGE): said, and offered.
+      const pairs = went.get(r.id) ?? [];
+      const to = new Set(pairs.map((m) => m.to.seriesId));
+      const into = pairs.length === r.n && to.size === 1 && !to.has(r.id) ? pairs[0].to.seriesId : null;
+      emptied.push(into ? { seriesId: r.id, chapters: r.n, into } : { seriesId: r.id, chapters: r.n });
+    }
   }
+  const merges = await mergeOffers(emptied);
 
   const numbers = await numberChanges();
 
   return {
     id: randomUUID(), at: Date.now(), scannedAt, ms: Date.now() - t0, looked, unchecked, unmounted,
-    mark, moved, follow, downloads, emptied, samples, numbers, applied: false,
+    mark, moved, follow, downloads, emptied, merges, samples, numbers, applied: false,
   };
+}
+
+/**
+ * MERGE's offers (the header): of the series with nothing left whose files all went into one other series, those the
+ * merge route would merge there (mergeRefusal) with neither in the middle of a renumber.
+ */
+async function mergeOffers(emptied: RescanPlan['emptied']): Promise<MergeOffer[]> {
+  const wanted = emptied.filter((e): e is { seriesId: string; chapters: number; into: string } => !!e.into);
+  if (!wanted.length) return [];
+  const renumbering = new Set((await q<{ id: string }>(
+    'SELECT id FROM lib_series WHERE id = ANY($1) AND renumber_plan IS NOT NULL', [wanted.map((e) => e.into)])).map((r) => r.id));
+  const out: MergeOffer[] = [];
+  for (const e of wanted) {
+    if (renumbering.has(e.into) || renumberRunning(e.into) || renumberRunning(e.seriesId)) continue;
+    if (await mergeRefusal(e.seriesId, e.into)) continue;
+    out.push({ seriesId: e.seriesId, into: e.into, chapters: e.chapters });
+  }
+  return out;
 }
 
 /**
@@ -635,7 +692,7 @@ function clashing(): ApplyRefusal | null {
  * admin ticked in its opt-in, every one of them in the plan.
  */
 export function startApply(
-  input: { plan: string; renumber?: string[] },
+  input: { plan: string; renumber?: string[]; merge?: string[] },
   who: ApplyWho,
   opts: ApplyOpts = {},
 ): { ok: true; run: Promise<RescanApplied> } | { ok: false; error: ApplyRefusal } {
@@ -650,6 +707,10 @@ export function startApply(
   const listed = new Set(plan.numbers.map((n) => n.seriesId));
   const renumber = [...new Set(input.renumber ?? [])];
   if (renumber.some((id) => !listed.has(id))) return { ok: false, error: 'not_in_plan' };
+  // The same for a merge: only a series the preview offered, into the series it named.
+  const offered = new Set(plan.merges.map((m) => m.seriesId));
+  const merge = [...new Set(input.merge ?? [])];
+  if (merge.some((id) => !offered.has(id))) return { ok: false, error: 'not_in_plan' };
   const clash = clashing();
   if (clash) return { ok: false, error: clash };
   // Taken now, in the same turn as the checks: a second press is `busy`, and a plan is applied once whatever happens.
@@ -660,7 +721,7 @@ export function startApply(
   setPhase('mark', plan.mark.length);
   const run = (async () => {
     try {
-      const r = await applyPlan(plan, renumber, opts);
+      const r = await applyPlan(plan, renumber, merge, who, opts);
       rescanState.appliedAt = Date.now();
       rescanState.lastApplied = r;
       if (r.stopped) rescanState.error = 'stopped';
@@ -672,7 +733,8 @@ export function startApply(
       await logAudit('library.rescan', {
         userId: who.userId,
         detail: {
-          plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, followed: r.followed, twins: r.twins, busy: r.busy,
+          plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, followed: r.followed, twins: r.twins,
+          merged: r.merged, notMerged: r.notMerged, busy: r.busy,
           downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}),
         },
         req: who.req,
@@ -688,6 +750,8 @@ export function startApply(
       who.log?.info(`rescan: ${r.marked} chapter(s) marked as no longer on disk; ${r.back} back on disk and ${r.changed} changed since the preview, left alone`
         + (r.followed ? `; ${r.followed} chapter(s) now point at their moved or renamed file` : '')
         + (r.twins ? `; ${r.twins} moved file(s) kept beside their old chapter, both with reading history` : '')
+        + (r.merged ? `; ${r.merged} series merged into the series their files went to` : '')
+        + (r.notMerged ? `; ${r.notMerged} merge(s) left alone, the series changed since the preview` : '')
         + (r.busy ? `; ${r.busy} series with a download or a check running, left for the next rescan` : '')
         + (r.renumbered.series ? `; ${r.renumbered.chapters} chapter(s) of ${r.renumbered.series} series renumbered by the new file-name rules` : '')
         + (r.stopped ? ' (stopped for shutdown)' : ''));
@@ -719,14 +783,15 @@ async function stillMounted(root: string, samples: string[]): Promise<boolean> {
 /** Marked per statement: a shutdown is honoured between batches, and no statement names thousands of ids. */
 const MARK_BATCH = 500;
 
-async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts): Promise<RescanApplied> {
+async function applyPlan(plan: RescanPlan, renumber: string[], merge: string[], who: ApplyWho, opts: ApplyOpts): Promise<RescanApplied> {
   const t0 = Date.now();
   const out: RescanApplied = {
-    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, followed: 0, twins: 0, busy: 0,
-    downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
+    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, followed: 0, twins: 0, merged: 0, notMerged: 0,
+    busy: 0, downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
   };
   // The pairs inside one series: their chapters follow their files (FOLLOW, the header).
   const inSeries = plan.moved.filter((m) => m.to.seriesId === m.seriesId);
+  const offers = plan.merges.filter((m) => merge.includes(m.seriesId));
   // ⚠️ With every scan held off (the header): a scan between the look below and the mark could bring a row back, or
   // move it, and the mark would land on a chapter whose file is there -- and one between the opt-in's read and its
   // write would re-read a row by its old rule under the new one's number.
@@ -734,13 +799,16 @@ async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts):
   // start inside the Apply.
   await withScansHeld(async () => {
     // ⚠️ One writer per series (the header): every series this Apply may change, held -- or left alone, if it is taken.
-    const hold = await holdSeries([...plan.mark.map((m) => m.seriesId), ...inSeries.map((m) => m.seriesId), ...renumber]);
+    const hold = await holdSeries([
+      ...plan.mark.map((m) => m.seriesId), ...inSeries.map((m) => m.seriesId), ...offers.flatMap((o) => [o.seriesId, o.into]), ...renumber,
+    ]);
     try {
       out.busy = hold.busy.size;
       await opts.held?.();
       await markGone(plan, out, hold.busy);
       // Before the opt-in renumber, which reads each row's number again from its file -- the new one, by then.
       const pairs = inSeries.filter((m) => !hold.busy.has(m.seriesId));
+      if (offers.length && !out.stopped) pairs.push(...await mergeInto(plan, offers, out, hold.busy, who));
       if (pairs.length && !out.stopped) await followFiles(pairs, out);
       const free = renumber.filter((id) => !hold.busy.has(id));
       if (free.length && !out.stopped) {
@@ -823,6 +891,78 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
     for (const g of batch) touched.add(g.seriesId);
   }
   if (touched.size) await refreshSeries([...touched]);
+}
+
+/**
+ * MERGE (the header): each ticked offer asked again, then the tracker link carried, the series merged and audited, and
+ * its pairs -- now inside the series it merged into -- handed back for FOLLOW. Inside Apply's scan hold, both series
+ * held; an offer whose series is `busy` is left for the next Rescan (counted in `busy`).
+ */
+async function mergeInto(plan: RescanPlan, offers: MergeOffer[], out: RescanApplied, busy: ReadonlySet<string>, who: ApplyWho): Promise<MovedPair[]> {
+  setPhase('merge', offers.length);
+  const pairs: MovedPair[] = [];
+  const merged = new Set<string>();
+  for (const o of offers) {
+    if (runtime.stopping) { out.stopped = 'shutdown'; break; }
+    if (!busy.has(o.seriesId) && !busy.has(o.into)) {
+      const now = await stillMerges(o);
+      if (!now) out.notMerged++;
+      else {
+        // ⚠️ The tracker link: mergeSeries drops the absorbed series' (the header), and the series its files went to
+        // keeps its own where it has one, per provider.
+        await q(
+          `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, updated_at)
+           SELECT $2, provider, external_id, title, linked_by, updated_at FROM series_trackers WHERE series_id = $1
+           ON CONFLICT (series_id, provider) DO NOTHING`, [o.seriesId, o.into]);
+        const names = new Map((await q<{ id: string; title: string }>(
+          'SELECT id, title FROM lib_series WHERE id = ANY($1)', [[o.seriesId, o.into]])).map((r) => [r.id, r.title]));
+        const r = await mergeSeries(o.seriesId, o.into);
+        // As the merge route audits one (routes/admin.ts), with where it came from.
+        await logAudit('series.merge', {
+          userId: who.userId,
+          detail: { from: o.seriesId, fromTitle: names.get(o.seriesId) ?? '', into: o.into, intoTitle: names.get(o.into) ?? '', ...r, via: 'rescan', plan: plan.id },
+          req: who.req,
+        });
+        out.merged++;
+        merged.add(o.seriesId);
+        pairs.push(...now);
+      }
+    }
+    rescanState.done++;
+  }
+  // A series merged away has no longer "nothing left": it is gone into the other. The panel's result lists the rest.
+  if (merged.size) {
+    plan.emptied = plan.emptied.filter((e) => !merged.has(e.seriesId));
+    out.emptied = plan.emptied.length;
+  }
+  return pairs;
+}
+
+/**
+ * An offer asked again (MERGE): its pairs into the other series as they stand now, or null when it may no longer be
+ * merged -- refused by the merge route's checks (one of them hidden or merged away since, an edition of one work), one
+ * of them in the middle of a renumber, or a live row of it no longer gone, or without a live twin there whose file is.
+ */
+async function stillMerges(o: MergeOffer): Promise<MovedPair[] | null> {
+  if (await mergeRefusal(o.seriesId, o.into)) return null;
+  const renumbering = await q<{ id: string }>('SELECT id FROM lib_series WHERE id = ANY($1) AND renumber_plan IS NOT NULL', [[o.seriesId, o.into]]);
+  if (renumbering.length || renumberRunning(o.seriesId) || renumberRunning(o.into)) return null;
+  const live = await q<{ id: string; root: string; file: string; fingerprint: string | null }>(
+    'SELECT id, root, file, fingerprint FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [o.seriesId]);
+  if (!live.length || live.some((b) => b.root !== LIBRARY_ROOT || !b.fingerprint)) return null;
+  const twins = new Map((await q<{ fingerprint: string; id: string; root: string; file: string }>(
+    `SELECT DISTINCT ON (fingerprint) fingerprint, id, root, file FROM lib_books
+      WHERE series_id = $1 AND pruned_at IS NULL AND fingerprint = ANY($2::text[])
+      ORDER BY fingerprint, created_at DESC, id`,
+    [o.into, [...new Set(live.map((b) => b.fingerprint!))]])).map((r) => [r.fingerprint, r]));
+  const pairs: MovedPair[] = [];
+  for (const b of live) {
+    const t = twins.get(b.fingerprint!);
+    if (!t) return null;
+    pairs.push({ id: b.id, seriesId: o.into, file: b.file, to: { id: t.id, seriesId: o.into, file: t.file, root: t.root } });
+  }
+  const looks = await mapLimit(pairs, CONCURRENCY, async (p) => [await look(LIBRARY_ROOT, p.file), await look(p.to.root, p.to.file)]);
+  return looks.every(([was, now]) => was === 'gone' && now === 'present') ? pairs : null;
 }
 
 /** A chapter file's title as the scan writes it: its name without the archive's extension (lib/library.ts persistScan). */
@@ -1024,8 +1164,10 @@ export interface PlanView {
   emptied: number;
   /** How many series lose a chapter to Apply. */
   goneSeries: number;
-  emptiedList: Array<{ seriesId: string; chapters: number }>;
+  emptiedList: Array<{ seriesId: string; chapters: number; into?: string }>;
   movedList: Array<{ seriesId: string; file: string; to: { seriesId: string; file: string } }>;
+  /** The merge opt-in (v0.55.7): every series offered for a merge into the series its files went to. */
+  merges: MergeOffer[];
   /** The opt-in: every series the newer rules would renumber, and how many in all. */
   numbers: NumberSeries[];
   numbersTotal: number;
@@ -1039,6 +1181,7 @@ export function planView(p: RescanPlan, now = Date.now()): PlanView {
     goneSeries: new Set(p.mark.map((m) => m.seriesId)).size,
     emptiedList: p.emptied,
     movedList: p.moved.map((m) => ({ seriesId: m.seriesId, file: m.file, to: { seriesId: m.to.seriesId, file: m.to.file } })),
+    merges: p.merges,
     numbers: p.numbers,
     numbersTotal: p.numbers.length,
   };

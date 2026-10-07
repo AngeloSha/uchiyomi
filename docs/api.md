@@ -1825,15 +1825,18 @@ row's own file under the library and the download folder (never a hidden or merg
 detached like Verify — it answers `{ok: true, started: true}` or `{ok: false, error: 'busy'}`. `GET
 /api/admin/tasks/rescan/status` is the run, live, and the plan it ends with (polled every 2 s while one runs): `{running:
 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber' | null, done, of,
-startedAt, error, plan, last, lastRun}` (an Apply's phases since v0.55.7: `'mark' | 'follow' | 'renumber'`). Per root it
+startedAt, error, plan, last, lastRun}` (an Apply's phases since v0.55.7: `'mark' | 'merge' | 'follow' | 'renumber'`). Per root it
 applies Verify's whole-batch rule and 90 % rule (`plan.unmounted [{root, missing?, of?}]`); only ENOENT is a gone file
 (`plan.unchecked` counts the rest, left alone); a gone row in your own folder whose fingerprint matches a live row's is
 *moved or renamed* and kept (`plan.moved`, `movedList`), and `plan.follow` (v0.55.7) counts the pairs inside one series; the
 download folder's gone rows are only counted (`plan.downloads`, Verify's to mark); and `plan.emptied` / `emptiedList`
-are the series with every live chapter gone. `plan.numbers` is the opt-in: each series whose numbers the v0.55.2
+are the series with every live chapter gone (`emptiedList[].into {seriesId, title}`, v0.55.7: the one series every live
+chapter of it moved into, when they all went to one and the viewer may list it). `plan.merges [{seriesId, title, into:
+{seriesId, title}, chapters}]` / `mergesTotal` (v0.55.7) are the merge opt-in: those series, when the merge route itself
+would merge them there and neither is mid-renumber. `plan.numbers` is the opt-in: each series whose numbers the v0.55.2
 file-name rules would change, with `chapters`, `readers`, `overrides`, `tracked`, `up`, `down` and `examples` —
 posting-order and mid-renumber series left out. Lists name only series the viewer may list. `POST
-/api/admin/tasks/rescan/apply {plan, renumber?: seriesId[]}` applies it, detached, refused as `{ok: false, error}`
+/api/admin/tasks/rescan/apply {plan, renumber?: seriesId[], merge?: seriesId[]}` applies it, detached, refused as `{ok: false, error}`
 with `busy`, `no_plan`, `stale` (replaced, or older than 30 minutes), `applied`, `not_in_plan`, or the job it would
 run beside (`sweep_running`, `autofix_running`, `repair_running`, `verify_running`, `cleanup_running`,
 `scan_running`). A series a download is writing into or a check is reading as it reaches it (a Fetch and its lanes,
@@ -1847,12 +1850,17 @@ fingerprint, the old file still gone and the new one there) and, when the new ro
 progress, reading event, bookmark, note, offline copy, override, or page marked by hand), the old row takes the new
 file — root, file, mtime, size, fingerprint, its number and title read from the new name by its own rule — the new row
 is deleted and the cover moves with it: the chapter shows once, its id and history kept (`followed`); a new row that
-holds something is kept beside it (`twins`). Then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
+holds something is kept beside it (`twins`). Each series in `merge` (only ones `plan.merges` offered, else
+`not_in_plan`) is asked again — `mergeRefusal` still null, neither mid-renumber, every live row still gone with a live
+twin in the other series whose file is there, both held — else left alone (`notMerged`); then the tracker link is
+copied to the other series where it has none for that provider, the series is merged as `POST
+/api/admin/series/:id/merge` merges (audited `series.merge` with `via: 'rescan'` and the plan id), and its pairs follow
+as above (`merged`). Then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
 number set by hand and a `'missing'` row are kept), with nothing pushed to any tracker. It never erases a row, touches
 a file, marks the download folder, relabels a row already pruned, hides a series or changes a tracker floor, read
 mark, favourite or rating; the only row it deletes is a duplicate the scan made for a moved file, holding nothing. The
-result (`{marked, back, changed, moved, followed, twins, busy, downloads, emptied, unmounted, renumbered: {series,
-chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
+result (`{marked, back, changed, moved, followed, twins, merged, notMerged, busy, downloads, emptied, unmounted,
+renumbered: {series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
 `server_settings.rescan_last_run` / `rescan_last_result`; audit `library.rescan`, and `library.rescan_numbers` when
 the opt-in renumbered something. Never at boot or on a schedule.
 

@@ -143,7 +143,8 @@ beforeEach(async () => { if (DSN) await wipe(); });
 after(async () => {
   if (!DSN) return;
   await wipe().catch(() => {});
-  await q(`DELETE FROM audit_log WHERE event LIKE 'library.rescan%' OR (event = 'task.run' AND detail->>'task' = 'rescan')`).catch(() => {});
+  await q(`DELETE FROM audit_log WHERE event LIKE 'library.rescan%' OR (event = 'task.run' AND detail->>'task' = 'rescan')
+             OR (event = 'series.merge' AND detail->>'via' = 'rescan')`).catch(() => {});
   await q('UPDATE server_settings SET rescan_last_run = NULL, rescan_last_result = NULL WHERE id = 1').catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   await app?.close().catch(() => {});
@@ -809,6 +810,154 @@ test('an opt-in that fails part way changes no number', { skip }, async () => {
   await assert.rejects(r.run, /the disk went away/);
   assert.deepEqual(await numbersOf(comics.id), before, 'part of a failed renumber stayed');
   assert.equal(rescanState.lastApplied, null, 'a failed Apply left a result standing');
+});
+
+// ---- merge a series whose files all went into one other (v0.55.7) --------------------------------------------------
+
+/**
+ * Zagor as @Kedryn had it (#150): unpacked into two folders, each a series, fingerprinted, then every file moved into one
+ * folder "Zagor". Returns the two old series and their rows by file name; the next preview's scan makes Zagor.
+ */
+async function zagor(): Promise<{ s1: string; s2: string; rows: Map<string, string> }> {
+  for (const n of [1, 2]) await cbz(ROOT, `${SRC}/Zagor 1-2/Zagor 00${n}.cbz`);
+  for (const n of [3, 4]) await cbz(ROOT, `${SRC}/Zagor 3-4/Zagor 00${n}.cbz`);
+  await persistScan();
+  await runFingerprintBackfill();
+  const rows = new Map((await q<{ id: string; file: string }>(`SELECT id, file FROM lib_books WHERE file LIKE $1`, [`${SRC}/Zagor %`]))
+    .map((r) => [r.file.split('/').pop()!, r.id]));
+  await mkdir(join(ROOT, SRC, 'Zagor'), { recursive: true });
+  for (const [dir, ns] of [['Zagor 1-2', [1, 2]], ['Zagor 3-4', [3, 4]]] as const) {
+    for (const n of ns) await rename(join(ROOT, SRC, dir, `Zagor 00${n}.cbz`), join(ROOT, SRC, 'Zagor', `Zagor 00${n}.cbz`));
+    await rm(join(ROOT, SRC, dir), { recursive: true });
+  }
+  return { s1: await seriesOf(`${SRC}/Zagor 1-2`), s2: await seriesOf(`${SRC}/Zagor 3-4`), rows };
+}
+
+test('the Zagor case: two folders moved into one are offered as merges, and the ticked ones are merged with everyone\'s history', { skip }, async () => {
+  // Reintroduce by merging every offer (ignore `merge` in applyPlan): Zagor 3-4, not ticked, is merged too. Reintroduce
+  // by not handing the merged pairs to FOLLOW: Zagor lists every chapter twice. By dropping the link carry: Zagor has no
+  // tracker link.
+  await seed();
+  const { s1, s2, rows } = await zagor();
+  const uid = await aReader();
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, rows.get('Zagor 001.cbz'), s1]);
+  await q(`INSERT INTO favorites (user_id, series_id) VALUES ($1,$2)`, [uid, s1]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ($1,'anilist','rs-zagor')`, [s1]);
+  const call = (method: string, url: string, payload?: unknown) =>
+    app.inject({ method, url, headers: { authorization: adminTok }, ...(payload ? { payload } : {}) });
+  await call('POST', '/api/admin/tasks/rescan/run');
+  for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  const plan = (await call('GET', '/api/admin/tasks/rescan/status')).json().plan;
+  assert.deepEqual(plan.merges, [
+    { seriesId: s1, title: 'Zagor 1-2', into: { seriesId: zagorId, title: 'Zagor' }, chapters: 2 },
+    { seriesId: s2, title: 'Zagor 3-4', into: { seriesId: zagorId, title: 'Zagor' }, chapters: 2 },
+  ], JSON.stringify(plan));
+  assert.equal(plan.mergesTotal, 2);
+  assert.deepEqual(plan.emptiedList.map((e: any) => [e.title, e.into?.title]).sort(), [['Zagor 1-2', 'Zagor'], ['Zagor 3-4', 'Zagor']],
+    'a series with nothing left does not say where its files went');
+  assert.equal(plan.gone, 0, 'a moved chapter was planned as gone');
+
+  const started = (await call('POST', '/api/admin/tasks/rescan/apply', { plan: plan.id, merge: [s1] })).json();
+  assert.deepEqual(started, { ok: true, started: true });
+  for (let i = 0; i < 200 && rescanState.running; i++) await new Promise((r) => setTimeout(r, 25));
+  const r = rescanState.lastApplied;
+  // Zagor 1-2 is in Zagor: its chapters are the rows that hold their history, on the files, once each.
+  assert.equal((await q(`SELECT merged_into FROM lib_series WHERE id = $1`, [s1]))[0].merged_into, zagorId, 'the ticked series was not merged');
+  assert.equal((await q(`SELECT merged_into FROM lib_series WHERE id = $1`, [s2]))[0].merged_into, null, 'a series nobody ticked was merged');
+  assert.deepEqual(await titlesOf(zagorId), ['Zagor 001', 'Zagor 002', 'Zagor 003', 'Zagor 004'], 'Zagor lists a chapter twice');
+  for (const f of ['Zagor 001.cbz', 'Zagor 002.cbz']) {
+    assert.equal((await rowOf(ROOT, `${SRC}/Zagor/${f}`)).id, rows.get(f), `${f} is not the row that holds its history`);
+  }
+  assert.equal((await q(`SELECT series_id FROM read_progress WHERE user_id = $1`, [uid]))[0].series_id, zagorId, 'the reader\'s progress was left behind');
+  assert.equal((await q(`SELECT count(*)::int AS n FROM favorites WHERE user_id = $1 AND series_id = $2`, [uid, zagorId]))[0].n, 1, 'the favourite was left behind');
+  assert.deepEqual((await q(`SELECT external_id FROM series_trackers WHERE series_id = $1`, [zagorId])).map((x) => x.external_id), ['rs-zagor'],
+    'the tracker link went with the merged series');
+  const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'series.merge' AND detail->>'from' = $1`, [s1]);
+  assert.deepEqual([audit.length, audit[0]?.detail?.into, audit[0]?.detail?.via, audit[0]?.detail?.plan], [1, zagorId, 'rescan', plan.id], 'the merge is not in the Activity feed');
+  assert.deepEqual([r.merged, r.notMerged, r.followed], [1, 0, 2], JSON.stringify(r));
+  // The result lists only what has nothing left now: Zagor 1-2 is gone into Zagor.
+  const after = (await call('GET', '/api/admin/tasks/rescan/status')).json().plan;
+  assert.deepEqual(after.emptiedList.map((e: any) => e.title), ['Zagor 3-4']);
+  // The next scan keeps it so: Zagor's files on the rows they are on, Zagor 1-2's folder gone.
+  await persistScan();
+  assert.deepEqual(await titlesOf(zagorId), ['Zagor 001', 'Zagor 002', 'Zagor 003', 'Zagor 004']);
+});
+
+test('a merge is offered only for a series whose every chapter went into one other series', { skip }, async () => {
+  // Files split across two series, or one gone and one moved: the series is listed, and nothing is offered. Reintroduce
+  // by offering every series with a moved chapter (drop `pairs.length === r.n && to.size === 1` in previewRescan): Split
+  // and Half are offered.
+  for (const n of [1, 2]) await cbz(ROOT, `${SRC}/Split/Chapter ${n}.cbz`);
+  for (const n of [1, 2]) await cbz(ROOT, `${SRC}/Half/Part ${n}.cbz`);
+  await persistScan();
+  await runFingerprintBackfill();
+  for (const d of ['A', 'B', 'C']) await mkdir(join(ROOT, SRC, d), { recursive: true });
+  await rename(join(ROOT, SRC, 'Split', 'Chapter 1.cbz'), join(ROOT, SRC, 'A', 'Chapter 1.cbz'));
+  await rename(join(ROOT, SRC, 'Split', 'Chapter 2.cbz'), join(ROOT, SRC, 'B', 'Chapter 2.cbz'));
+  await rename(join(ROOT, SRC, 'Half', 'Part 1.cbz'), join(ROOT, SRC, 'C', 'Part 1.cbz'));
+  await rm(join(ROOT, SRC, 'Half', 'Part 2.cbz'));
+  for (const d of ['Split', 'Half']) await rm(join(ROOT, SRC, d), { recursive: true });
+  await cbz(ROOT, `${SRC}/Kept/Chapter 1.cbz`); // a file still there, so the folder is not "unmounted"
+  const plan = await previewRescan();
+  assert.deepEqual(plan.merges, [], JSON.stringify(plan.merges));
+  assert.deepEqual(plan.emptied.map((e: any) => [e.seriesId, e.into]).sort(),
+    [[await seriesOf(`${SRC}/Half`), undefined], [await seriesOf(`${SRC}/Split`), undefined]].sort());
+});
+
+test('a merge whose series changed since the preview is left alone, and an unoffered one is refused', { skip }, async () => {
+  // Apply asks again. Reintroduce by merging the offer as the preview saw it (drop stillMerges' refusal): the merge into
+  // a series hidden since is made.
+  await seed();
+  const { s1, s2 } = await zagor();
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  assert.equal(plan.merges.length, 2, 'precondition');
+  assert.deepEqual(startApply({ plan: plan.id, merge: [await seriesOf(`${SRC}/Kept`)] }, { userId: adminId }), { ok: false, error: 'not_in_plan' },
+    'a series the preview did not offer was let through');
+  // Zagor 3-4's folder has a chapter again: its rows are not all gone any more.
+  await cbz(ROOT, `${SRC}/Zagor 3-4/Zagor 009.cbz`);
+  await persistScan();
+  // And Zagor itself is hidden since the preview: nothing may be merged into it.
+  await q(`UPDATE lib_series SET deleted_at = now() WHERE id = $1`, [zagorId]);
+  const r = await (startApply({ plan: plan.id, merge: [s1, s2] }, { userId: adminId }) as any).run;
+  assert.deepEqual((await q(`SELECT id, merged_into FROM lib_series WHERE id = ANY($1) ORDER BY title`, [[s1, s2]])).map((x) => x.merged_into),
+    [null, null], 'a series was merged although it changed since the preview');
+  assert.deepEqual([r.merged, r.notMerged], [0, 2], JSON.stringify(r));
+});
+
+test('a merge whose target is being renumbered, or written into, waits; a twin with history of its own is kept', { skip }, async () => {
+  // Reintroduce by dropping the renumbering test in stillMerges: Zagor 1-2 is merged into a series mid-renumber.
+  const { busyFolders } = (await import('../src/lib/bulkNewest')) as any;
+  await seed();
+  const { s1, s2, rows } = await zagor();
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  // A renumber of Zagor began since the preview.
+  await q(`UPDATE lib_series SET renumber_plan = '{"v":1,"phase":"temp"}'::jsonb WHERE id = $1`, [zagorId]);
+  const r1 = await (startApply({ plan: plan.id, merge: [s1] }, { userId: adminId }) as any).run;
+  assert.equal((await q(`SELECT merged_into FROM lib_series WHERE id = $1`, [s1]))[0].merged_into, null, 'merged into a series mid-renumber');
+  assert.deepEqual([r1.merged, r1.notMerged], [0, 1], JSON.stringify(r1));
+  await q(`UPDATE lib_series SET renumber_plan = NULL WHERE id = $1`, [zagorId]);
+
+  // A download into Zagor as the next Apply reaches it: left for the next Rescan, counted busy.
+  const again = await preview();
+  busyFolders.add(`${SRC}/Zagor`);
+  try {
+    const r2 = await (startApply({ plan: again.id, merge: [s1, s2] }, { userId: adminId }) as any).run;
+    assert.deepEqual([r2.merged, r2.notMerged, r2.busy], [0, 0, 1], JSON.stringify(r2));
+  } finally { busyFolders.delete(`${SRC}/Zagor`); }
+
+  // Someone opened Zagor's copy of chapter 3 since the scan: Zagor 3-4 is merged, and that chapter is kept twice.
+  const third = await preview();
+  const copy = await rowOf(ROOT, `${SRC}/Zagor/Zagor 003.cbz`);
+  const uid = await aReader();
+  await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page) VALUES ($1,$2,$3,1)`, [uid, copy.id, zagorId]);
+  const r3 = await (startApply({ plan: third.id, merge: [s2] }, { userId: adminId }) as any).run;
+  assert.equal((await q(`SELECT merged_into FROM lib_series WHERE id = $1`, [s2]))[0].merged_into, zagorId);
+  assert.equal((await rowOf(ROOT, `${SRC}/Zagor/Zagor 004.cbz`)).id, rows.get('Zagor 004.cbz'));
+  assert.equal((await rowOf(ROOT, `${SRC}/Zagor/Zagor 003.cbz`)).id, copy.id, 'the copy with a bookmark on it was removed');
+  assert.deepEqual([r3.merged, r3.followed, r3.twins], [1, 1, 1], JSON.stringify(r3));
 });
 
 // ---- one writer per series ------------------------------------------------------------------------------------------

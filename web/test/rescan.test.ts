@@ -9,8 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  appliedLine, applyRefusalText, exampleLine, followLine, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine, unmountedLine,
-  type RescanStatus,
+  appliedLine, applyRefusalText, exampleLine, followLine, mergeLabel, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine,
+  unmountedLine, type RescanStatus,
 } from '../lib/rescan';
 import { taskResult } from '../lib/tasks';
 
@@ -47,6 +47,7 @@ test('a running rescan says its phase, and how far when there is a count', () =>
   assert.equal(s('mark', 9, 4, 'apply'), 'Applying: 4 of 4', 'done never runs past the total');
   assert.equal(s('follow', 2, 5, 'apply'), 'Pointing chapters at their moved files: 2 of 5');
   assert.equal(s('follow', 0, 0, 'apply'), 'Pointing chapters at their moved files…');
+  assert.equal(s('merge', 1, 2, 'apply'), 'Merging series: 1 of 2');
   assert.equal(s(null, 0, null, 'apply'), 'Applying…');
 });
 
@@ -99,6 +100,18 @@ test('files moved inside their series say their chapters follow them, and the Ap
   assert.doesNotMatch(appliedLine(r), /follow|beside/, 'a result from before v0.55.7 grew a clause');
 });
 
+test('a merge offer names both series, isolated, and the Apply line says what was merged and what was left alone', () => {
+  // v0.55.7 (#150), Zagor's folders moved into one. Reintroduce by dropping the notMerged clause from appliedLine: a merge
+  // the admin ticked that no longer held at Apply reads as done.
+  assert.equal(mergeLabel({ title: 'Zagor 1-100', into: { seriesId: 's2', title: 'Zagor' } }), 'Merge “\u2068Zagor 1-100\u2069” into “\u2068Zagor\u2069”');
+  const r = { ok: true as const, plan: 'p', marked: 0, back: 0, changed: 0, moved: 200, downloads: 0, emptied: 0, unmounted: [], ms: 40 };
+  assert.equal(appliedLine({ ...r, followed: 200, merged: 2 }),
+    '0 chapters marked as no longer on disk · 200 were probably moved or renamed (kept) · 200 chapters now follow their moved or renamed files · 2 series merged into the series their files went to');
+  assert.match(appliedLine({ ...r, merged: 1 }), / · 1 series merged into the series its files went to$/);
+  assert.match(appliedLine({ ...r, notMerged: 1 }), / · 1 merge left alone: the series changed since the preview$/);
+  assert.match(appliedLine({ ...r, notMerged: 3 }), / · 3 merges left alone: the series changed since the preview$/);
+});
+
 test('a refused Apply names the job it would run beside, and a stale preview asks to run it again', () => {
   // Reintroduce by answering every refusal "Already running": a sweep's clash reads as the rescan being stuck.
   assert.equal(applyRefusalText('sweep_running'), 'A chapter sweep is running — try again in a few minutes');
@@ -148,12 +161,16 @@ test('the Tasks row starts the preview, and the panel under it carries the plan,
     'a started preview does not wake the panel');
   const panel = code(read('components/RescanTask.tsx'));
   // The plan the admin saw, by id, and the series ticked in its opt-in: nothing else decides what Apply does.
-  assert.match(panel, /api<[^>]+>\('\/api\/admin\/tasks\/rescan\/apply', \{\s*method: 'POST', json: \{ plan: plan\.id, renumber: \[\.\.\.ticked\] \},/,
-    'Apply does not send the plan id and the ticked series');
+  assert.match(panel, /api<[^>]+>\('\/api\/admin\/tasks\/rescan\/apply', \{\s*method: 'POST', json: \{ plan: plan\.id, renumber: \[\.\.\.ticked\], merge: \[\.\.\.merging\] \},/,
+    'Apply does not send the plan id, the ticked series and the ticked merges');
   assert.match(panel, /disabled=\{busy \|\| nothing \|\| plan\.stale\}/, 'Apply can be pressed on a stale preview, or with nothing to do');
   // v0.55.7: files moved inside their series are something for Apply to do, though nothing is gone. Reintroduce by
   // dropping `!plan.follow`: a preview whose only finding is a renamed file can never be applied.
-  assert.match(panel, /const nothing = plan\.gone === 0 && !plan\.follow && /, 'a preview with only moved files cannot be applied');
+  assert.match(panel, /const nothing = plan\.gone === 0 && !plan\.follow && ticked\.size === 0 && merging\.size === 0;/,
+    'a preview with only moved files, or only a merge ticked, cannot be applied');
+  // The merge list scrolls in place too, and each box sends its series.
+  assert.match(panel, /data-rescan-merges/, 'the merge offers are not in the panel');
+  assert.match(panel, /onChange=\{\(e\) => toggleMerge\(m\.seriesId, e\.target\.checked\)\}/, 'a merge box does not tick its series');
   // Every series with nothing left is a link to its page: the rescan never hides one, so the admin decides there.
   assert.match(panel, /<Link href=\{`\/series\/\?id=\$\{encodeURIComponent\(e\.seriesId\)\}`\} dir="auto"/, 'a series with nothing left is not a link');
   // The opt-in's list scrolls in place, so it opts out of the smooth scroll like every inner scroller.

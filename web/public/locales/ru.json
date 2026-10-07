@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3294
+    "strings": 3303
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3297,5 +3297,14 @@
   "1 chapter now follows its moved or renamed file": "1 глава теперь следует за своим перемещённым или переименованным файлом",
   "{n} chapters now follow their moved or renamed files": "Глав, теперь следующих за своими перемещёнными или переименованными файлами: {n}",
   "1 moved file kept beside its old chapter: both have reading history": "1 перемещённый файл оставлен рядом со своей прежней главой: у обоих есть история чтения",
-  "{n} moved files kept beside their old chapters: both have reading history": "Перемещённых файлов, оставленных рядом с прежними главами: {n}. В каждой паре история чтения есть у обоих"
+  "{n} moved files kept beside their old chapters: both have reading history": "Перемещённых файлов, оставленных рядом с прежними главами: {n}. В каждой паре история чтения есть у обоих",
+  "Merging series: {done} of {total}": "Объединение серий: {done} из {total}",
+  "Merging series…": "Объединение серий…",
+  "Merge into the series their files went to (optional)": "Объединить с серией, куда ушли их файлы (по желанию)",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "Все файлы глав этих серий теперь в одной другой серии. Отметьте серию, чтобы объединить её с той: история чтения, закладки, избранное и оценки всех перейдут вместе с ней, а главы последуют за своими файлами. На диске ничего не трогается.",
+  "Merge “{from}” into “{into}”": "Объединить «{from}» с «{into}»",
+  "1 series merged into the series its files went to": "1 серия объединена с серией, куда ушли её файлы",
+  "{n} series merged into the series their files went to": "Серий, объединённых с серией, куда ушли их файлы: {n}",
+  "1 merge left alone: the series changed since the preview": "1 объединение не выполнено: серия изменилась после предпросмотра",
+  "{n} merges left alone: the series changed since the preview": "Объединений не выполнено: {n}, серии изменились после предпросмотра"
 }

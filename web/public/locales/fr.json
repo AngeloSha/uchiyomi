@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3294
+    "strings": 3303
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3297,5 +3297,14 @@
   "1 chapter now follows its moved or renamed file": "1 chapitre suit désormais son fichier déplacé ou renommé",
   "{n} chapters now follow their moved or renamed files": "{n} chapitres suivent désormais leurs fichiers déplacés ou renommés",
   "1 moved file kept beside its old chapter: both have reading history": "1 fichier déplacé conservé à côté de son ancien chapitre : les deux ont un historique de lecture",
-  "{n} moved files kept beside their old chapters: both have reading history": "{n} fichiers déplacés conservés à côté de leurs anciens chapitres : chaque fois, les deux ont un historique de lecture"
+  "{n} moved files kept beside their old chapters: both have reading history": "{n} fichiers déplacés conservés à côté de leurs anciens chapitres : chaque fois, les deux ont un historique de lecture",
+  "Merging series: {done} of {total}": "Fusion des séries : {done} sur {total}",
+  "Merging series…": "Fusion des séries…",
+  "Merge into the series their files went to (optional)": "Fusionner avec la série où sont partis leurs fichiers (facultatif)",
+  "Every chapter file of these series is now in one other series. Tick one to merge it there: everyone’s reading history, bookmarks, favourites and ratings go with it, and its chapters follow their files. Nothing on disk is touched.": "Chaque fichier de chapitre de ces séries est maintenant dans une seule autre série. Cochez-en une pour l’y fusionner : l’historique de lecture, les signets, les favoris et les notes de chacun la suivent, et ses chapitres suivent leurs fichiers. Rien n’est touché sur le disque.",
+  "Merge “{from}” into “{into}”": "Fusionner « {from} » dans « {into} »",
+  "1 series merged into the series its files went to": "1 série fusionnée dans la série où sont partis ses fichiers",
+  "{n} series merged into the series their files went to": "{n} séries fusionnées dans la série où sont partis leurs fichiers",
+  "1 merge left alone: the series changed since the preview": "1 fusion laissée de côté : la série a changé depuis l’aperçu",
+  "{n} merges left alone: the series changed since the preview": "{n} fusions laissées de côté : les séries ont changé depuis l’aperçu"
 }
