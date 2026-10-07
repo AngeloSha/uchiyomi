@@ -378,7 +378,7 @@ export async function deleteChapterFiles(
     }
     // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
     // do not exist.
-    await tombstoneBooks([t.id]);
+    await tombstoneBooks([t.id], 'deleted');
     applied++;
   }
   // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every

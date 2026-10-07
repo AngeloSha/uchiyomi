@@ -295,7 +295,10 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
       // are present, which is a series whose files were removed. Mark it anyway: the row was claiming bytes
       // that do not exist, and leaving it unmarked means re-examining it on every run for as long as the
       // install lives.
-      await tombstoneBooks([b.id]);
+      // The cleanup deliberately removed this owned file, just like the chapter/series Delete files
+      // actions. Keep that provenance so the chapter can be offered as an ID-bound restore and is never
+      // confused with Verify/Rescan evidence that bytes vanished outside an explicit delete.
+      await tombstoneBooks([b.id], 'deleted');
       deleted++;
     }
   }

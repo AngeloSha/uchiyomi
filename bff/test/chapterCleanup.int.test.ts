@@ -171,6 +171,7 @@ test('a chapter every reader finished, long enough ago, is deleted', { skip }, a
   await progress('cc-bob', IDS.two, true, 10);
   const r = await runCleanupOnce();
   assert.equal(r.deleted, 1);
+  assert.equal((await q('SELECT pruned_reason FROM lib_books WHERE id = $1', [IDS.two]))[0]?.pruned_reason, 'deleted');
   assert.equal(r.bytes, 100, 'the reclaimed bytes should be measured, not guessed');
   assert.equal(await exists(join(DL, FOLDER, 'ch2.cbz')), false);
   assert.equal(await exists(join(DL, FOLDER, 'ch3.cbz')), true, 'nothing else may go with it');

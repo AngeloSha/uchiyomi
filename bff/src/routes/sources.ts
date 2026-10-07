@@ -7,7 +7,7 @@ import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import { MANGADEX_GROUP } from '../lib/sources/mangadex';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
-import { sanitize, type DownloadInput } from '../lib/downloader';
+import { chapterFileRel, sanitize, type DownloadInput } from '../lib/downloader';
 import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
@@ -139,6 +139,8 @@ import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editi
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
 import { canonLang, sameLanguage } from '../lib/lang';
 import { searchByNames, takeHuntSlot, releaseHuntSlot } from '../lib/sourceHunt';
+import { allWritable } from '../lib/fsGuard';
+import { deliberatelyDeleted } from '../lib/deletedGhosts';
 
 interface Job {
   title: string; total: number; done: number;
@@ -2588,6 +2590,104 @@ export default async function sourceRoutes(app: FastifyInstance) {
       by: userIdOf(req),
     });
     return { ok: true, started: true, folder: s.folder, total };
+  });
+
+  /**
+   * Put back one chapter that Uchiyomi deliberately deleted.
+   *
+   * The book id is the capability boundary: it resolves through this viewer's normal series visibility,
+   * and the server derives the only permitted source chapter from the tombstone itself. No source id,
+   * chapter id, number or path supplied by a client is ever accepted. Only a canonical file previously
+   * written under DL_ROOT can land on the same row and retain everybody's reading progress. The stamped
+   * source copy is pinned so a blocklist may be overridden by this explicit act but fallback can never
+   * replace it with an arbitrary copy.
+   */
+  app.post('/api/books/:id/refetch', async (req, reply) => {
+    const parsed = z.object({ id: z.string().min(1).max(64) }).safeParse(req.params);
+    if (!parsed.success) return reply.code(404).send({ error: 'not_found' });
+
+    const p = new Params();
+    const rows = await q<{
+      id: string; series_id: string; root: string | null; file: string; number: number; number_end: number | null;
+      title: string | null; chapter_name: string | null; pruned_at: Date | null; pruned_reason: string | null;
+      source_id: string | null; source_chapter_id: string | null; series_source_id: string | null;
+      series_title: string; folder: string; summary: string | null; author: string | null; genres: string[];
+      web: string | null; status: string | null; numbering: string | null; numbering_pending: string | null;
+      renumber_plan: unknown;
+    }>(
+      `SELECT b.id, b.series_id, b.root, b.file, b.number, b.number_end, b.title, b.chapter_name,
+              b.pruned_at, b.pruned_reason, b.source_id, b.source_chapter_id,
+              s.source_id AS series_source_id, s.title AS series_title, s.folder, s.summary, s.author,
+              s.genres, s.web, s.status, s.numbering, s.numbering_pending, s.renumber_plan
+         FROM lib_books b
+         JOIN lib_series s ON s.id = b.series_id
+        WHERE b.id = ${p.add(parsed.data.id)} AND ${visible('s', vc(req), p)}`,
+      p.values,
+    ).catch(() => []);
+    const row = rows[0];
+    // Deliberately indistinguishable from an unknown id for a row outside this account's libraries or age
+    // boundary. The query also hides removed/merged series through visible().
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    const n = Number(row.number);
+    const canonical = row.root === DL_ROOT
+      && Number.isFinite(n)
+      && row.number_end == null
+      && row.file === chapterFileRel(row.folder, n)
+      && deliberatelyDeleted({ pruned: row.pruned_at != null, prunedReason: row.pruned_reason })
+      && !!row.source_id
+      && !!row.source_chapter_id;
+    if (!canonical) return reply.code(409).send({ error: 'not_refetchable' });
+
+    const src = getSource(row.source_id!);
+    // An age-capped account gets the same non-disclosing answer as for any other inaccessible row.
+    if (src && !sourceAllowedFor(src, vc(req).maxAgeRating)) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const followed = row.series_source_id === row.source_id || !!(await one<{ ok: number }>(
+      'SELECT 1 AS ok FROM series_sources WHERE series_id = $1 AND source_id = $2',
+      [row.series_id, row.source_id],
+    ).catch(() => null));
+    const unavailable = !src || !followed
+      || await isDisabled(row.source_id!).catch(() => true)
+      || !!(await blockedNow(row.source_id!).catch(() => true));
+    if (unavailable) return reply.code(409).send({ error: 'not_refetchable' });
+
+    if (jobBusy(row.folder)) return reply.code(409).send({ error: 'busy' });
+    if (renumberRefusal(row, row.source_id!)) return reply.code(409).send({ error: 'not_refetchable' });
+    const writable = await allWritable([DL_ROOT]);
+    if (!writable.ok) return reply.code(409).send({ error: 'not_refetchable', message: writable.reason, fix: writable.fix });
+
+    const chapter: SourceChapter & { pinned: true } = {
+      source: row.source_id!,
+      sourceId: row.source_chapter_id!,
+      number: n,
+      title: row.chapter_name ?? row.title ?? undefined,
+      pinned: true,
+    };
+    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = $2::real', [row.series_id, n]).catch(() => {});
+    await logAudit('book.refetch', {
+      userId: userIdOf(req),
+      detail: { bookId: row.id, seriesId: row.series_id, source: row.source_id, sourceId: row.source_chapter_id, number: n },
+      req,
+    });
+    const { total } = startDownloadJob({
+      origin: 'refetch',
+      folder: row.folder,
+      title: row.series_title,
+      seriesId: row.series_id,
+      chapters: [chapter],
+      meta: { series: row.series_title, summary: row.summary ?? undefined, author: row.author ?? undefined,
+        genres: row.genres, url: row.web ?? undefined, status: row.status ?? undefined },
+      // Redundant for a pinned job today, and intentional: if the downloader ever grows another recovery
+      // path it still cannot cross this member's age boundary.
+      allowed: (id) => {
+        const candidate = getSource(id);
+        return !!candidate && sourceAllowedFor(candidate, vc(req).maxAgeRating);
+      },
+      by: userIdOf(req),
+    });
+    return { ok: true, started: true, folder: row.folder, total };
   });
 
   /**
