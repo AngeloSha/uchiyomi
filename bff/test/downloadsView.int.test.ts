@@ -208,7 +208,13 @@ test('cards and activity go to who may see each series; a folder with no row yet
   }
   // And an add's first chapter, held in flight: its folder is not a series yet.
   gate = new Promise<void>((r) => { openGate = r; });
-  startDownloadJob({ folder: NEW, title: 'Brand New', seriesId: '', chapters: chapters('gated', SRC, 1), meta: { series: 'Brand New' }, by: ids.other });
+  startDownloadJob({
+    origin: 'add', folder: NEW, title: 'Brand New', seriesId: '', chapters: chapters('gated', SRC, 1),
+    meta: { series: 'Brand New' }, by: ids.other,
+    // A pre-row add has no followed-source row to re-read. The real Add path carries the same exact source
+    // capability from its authorised request; omitting it must fail closed rather than contact an arbitrary site.
+    sourceAllowedNow: async (candidate) => candidate.source === SRC,
+  });
   await until('the new add to be in flight', async () => (await jobsFor(who().admin)).activity.active.some((e: any) => e.folder === NEW));
 
   const w = who();

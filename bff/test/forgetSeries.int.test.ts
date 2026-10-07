@@ -57,6 +57,7 @@ const SERIES_TABLES = [
   'lib_books', 'read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads', 'favorites',
   'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers', 'series_overrides',
   'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress', 'listing_progress',
+  'admin_bulk_delete_items',
 ];
 const BOOK_TABLES = ['read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads', 'book_overrides', 'page_hashes'];
 
@@ -341,7 +342,8 @@ test('forget leaves zero rows for the series in every table and nothing else is 
   // The other series, and both members' rows on it, are exactly as they were.
   for (const t of SERIES_TABLES) {
     const want = ['lib_books', 'series_colors', 'series_art', 'series_trackers', 'series_overrides', 'series_sources',
-                  'series_listing', 'chapter_failures'].includes(t) ? 1 : t === 'notes' ? 4 : 2;
+                  'series_listing', 'chapter_failures'].includes(t) ? 1
+      : t === 'admin_bulk_delete_items' ? 0 : t === 'notes' ? 4 : 2;
     assert.equal(await rowsFor(t, 'series_id', [O]), want, `${t} lost rows belonging to another series`);
   }
   assert.equal(await rowsFor('book_overrides', 'book_id', ['b_fg_o1']), 1);
@@ -355,6 +357,32 @@ test('forget leaves zero rows for the series in every table and nothing else is 
   assert.equal(Number(statsBefore[0].series_touched), 2);
   assert.equal(Number(statsAfter[0].series_touched), 1, 'reading_stats still counts the forgotten series');
   assert.equal(Number(statsAfter[0].chapters_completed), Number(statsBefore[0].chapters_completed) - 1);
+});
+
+test('forget removes its terminal bulk-delete journal item but retains the parent run', { skip }, async () => {
+  await series(S, 'Journalled', { deleted: true });
+  await book('b_fg_1', S, 1, { pruned: 'deleted' });
+  const runId = '00000000-0000-4000-8000-000000005558';
+  await q(
+    `INSERT INTO admin_bulk_delete_runs (id, worker_id, status, finished_at, series_ids, total, done)
+     VALUES ($1, '00000000-0000-4000-8000-000000005559', 'done', now(), $2, 1, 1)`,
+    [runId, [S]],
+  );
+  await q(
+    `INSERT INTO admin_bulk_delete_items (run_id, series_id, book_id, root, file, position, state, bytes)
+     VALUES ($1, $2, 'b_fg_1', $3, $4, 0, 'applied', 12)`,
+    [runId, S, ROOT, `${SRC}/${S}/ch1.cbz`],
+  );
+  try {
+    const r = await admin.forgetSeries(S);
+    assert.equal(r.ok, true, r.ok ? '' : (r as any).message);
+    assert.equal((r as any).rowsByTable.admin_bulk_delete_items, 1);
+    assert.equal(await rowsFor('admin_bulk_delete_items', 'series_id', [S]), 0);
+    assert.equal((await q(`SELECT 1 FROM admin_bulk_delete_runs WHERE id = $1`, [runId])).length, 1,
+      'the terminal parent run remains as operation history');
+  } finally {
+    await q(`DELETE FROM admin_bulk_delete_runs WHERE id = $1`, [runId]);
+  }
 });
 
 test('forget of a series with no chapter rows at all still works', { skip }, async () => {

@@ -527,6 +527,9 @@ const SERIES_KEYED_TABLES = [
   'series_alt_titles',
   // v0.51.0: its automatic banner's seed and state (lib/autoHero.ts). Cascades too; named for the same count.
   'series_hero',
+  // v0.55.8: the durable bulk-delete intent journal deliberately has no series FK. Hard Forget removes its
+  // per-series items explicitly while the terminal parent run remains as operation-level history.
+  'admin_bulk_delete_items',
 ] as const;
 
 export interface ForgetRefusal {

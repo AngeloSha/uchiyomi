@@ -681,7 +681,10 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
           seriesId, title, folder, meta, chapter: use,
           alternates: () => alternatesOf(ch.number),
           refusing, allowed: input.allowed, hunt: undefined,
-          automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
+          // A pre-row helper job has no per-series release policy to re-read. It may bypass that missing decision
+          // only when its caller supplied an exact current-source capability; a blank id by itself stays closed.
+          automaticAllowed: async (candidate) => (!seriesId && !!input.sourceAllowedNow)
+            || await automaticChapterAllowedFor(seriesId, candidate),
           sourceAllowedNow: input.sourceAllowedNow ?? ((candidate) => seriesFollowsSource(seriesId, candidate.source ?? '')),
         });
       } catch (e: any) {
