@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3288
+    "strings": 3294
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3291,5 +3291,11 @@
   "Finishing": "Wird abgeschlossen",
   "Folder {done} of {total}": "Ordner {done} von {total}",
   "Cover colour at the edges": "Cover-Farbe an den Rändern",
-  "A soft wash of the cover’s colour across the top and bottom of the reader.": "Ein sanfter Schimmer in der Farbe des Covers am oberen und unteren Rand des Lesers."
+  "A soft wash of the cover’s colour across the top and bottom of the reader.": "Ein sanfter Schimmer in der Farbe des Covers am oberen und unteren Rand des Lesers.",
+  "Your order": "Deine Reihenfolge",
+  "Z–A": "Z–A",
+  "Last read": "Zuletzt gelesen",
+  "Latest chapter": "Neuestes Kapitel",
+  "Move earlier": "Nach vorn",
+  "Move later": "Nach hinten"
 }

@@ -4397,6 +4397,11 @@ paths:
       tags:
         - personal
       summary: One collection and its series.
+      description: >-
+        `{id, name, accent, sort_order, items}`: the series in the list's own order, enriched like every listing
+        (`yomi.unread` is the unread badge), a series hidden by the 18+ switch or an age cap left out. Since v0.55.7 (#164)
+        each item also carries `lastReadAt` (when the caller last read in it, their own progress only; null if never)
+        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts.
       operationId: getApiCollectionsId
       parameters:
         - name: id
@@ -4423,6 +4428,7 @@ paths:
       tags:
         - personal
       summary: Add a series to a collection.
+      description: At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them.
       operationId: postApiCollectionsIdItems
       parameters:
         - name: id
@@ -5189,6 +5195,11 @@ paths:
       tags:
         - personal
       summary: Save the caller's reader and app settings.
+      description: >-
+        Merged into the stored settings by top-level key, so an object value is replaced whole. Among the keys:
+        `reader` (the reader's defaults; since v0.55.7 with `coverEdges`, default true, the cover's colour at the
+        reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
+        each list is shown in; a list's own order is not stored).
       operationId: putApiSettings
       requestBody:
         required: false

@@ -27,8 +27,10 @@ export function useSeriesMenu(series: Series) {
   const href = `/series/?id=${encodeURIComponent(series.id)}`;
   const favourite = !!series.yomi?.favorite;
 
+  // ['collection']: a list's tiles carry the same badges since v0.55.7 (#164), and Mark all read from one of them must
+  // move its count there too, not only on the Library.
   const settle = () => {
-    for (const key of [['library'], ['home'], ['series', series.id], ['series-books', series.id]]) qc.invalidateQueries({ queryKey: key });
+    for (const key of [['library'], ['home'], ['collection'], ['series', series.id], ['series-books', series.id]]) qc.invalidateQueries({ queryKey: key });
   };
   // The Library's bulk routes, for a selection of one: the same permission checks, and the same answer shape.
   const bulk = async (path: string, extra: Record<string, unknown>, done: string) => {

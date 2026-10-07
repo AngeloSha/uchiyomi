@@ -97,6 +97,15 @@ filters currently show.
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
+**Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
+add series to it from a series page with **Add to collection**. A list shows its series with the Library's covers
+(since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
+the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
+the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**
+(the series whose newest chapter came most recently first). Each list remembers its own order, on your account, so it
+opens the same way on your other devices. **Edit** removes series from the list and moves them within your order with
+the arrows; a series added to a list goes to its end.
+
 **Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
 and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
 **Favourite**, **Mark all read** / **unread**, and for an admin **Check for new chapters**. Shift+right-click still
