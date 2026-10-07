@@ -8935,7 +8935,7 @@ paths:
         repair and scheduled enrichment for series currently in this library, without clearing existing metadata;
         explicit Admin Art, Relink, Check online matches, tracker and Discover actions remain available.
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:

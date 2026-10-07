@@ -132,6 +132,8 @@ test('every operation says what it does, where it belongs, what it answers, and 
   // package.json for a release and forgetting the yaml: the reference then claims to be an older API.
   const pkg = JSON.parse(readFileSync(join(REPO, 'bff', 'package.json'), 'utf8'));
   assert.equal(spec.info?.version, pkg.version, 'openapi.yaml info.version is not the package version');
+  assert.equal(spec.paths['/api/admin/libraries'].post.requestBody?.required, true,
+    'create-library rejects an absent body, but generated clients are told that its payload is optional');
 });
 
 test('the documentation server serves the UI and the spec', async () => {
