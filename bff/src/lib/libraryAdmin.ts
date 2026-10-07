@@ -304,6 +304,23 @@ export type DeletedChapters =
   | { applied: number; bytes: number; skipped: Array<{ id: string; reason: string }> }
   | { refused: { reason: string; fix?: string } };
 
+/** Durable progress hooks used by the detached bulk job. Direct/admin-autofix deletes do not need a journal. */
+export type ChapterDeleteJournalItem = {
+  id: string;
+  root: string;
+  file: string;
+  position: number;
+  bytes: number;
+};
+export type ChapterDeleteJournal = {
+  /** Must commit before the first unlink. */
+  beforeUnlink: (item: ChapterDeleteJournalItem) => Promise<void>;
+  /** Test scheduling and observability point: the file is gone but its row is not a tombstone yet. */
+  afterUnlink?: (item: ChapterDeleteJournalItem) => Promise<void>;
+  /** Commits the terminal disposition of every requested chapter. */
+  settled: (item: ChapterDeleteJournalItem & { outcome: 'applied' | 'skipped'; reason?: string }) => Promise<void>;
+};
+
 /**
  * Delete the files of chosen chapters of one series and keep their rows as tombstones, so reading history survives and
  * the updater's have-set still contains the number (the same reasoning as the cleanup's, on the column's note in
@@ -313,7 +330,13 @@ export type DeletedChapters =
  * touched, whoever asks. Audited as `series.chapters_delete`.
  */
 export async function deleteChapterFiles(
-  id: string, bookIds: readonly string[], o: { userId: string | null; req?: FastifyRequest; via?: 'autofix'; runId?: string },
+  id: string, bookIds: readonly string[], o: {
+    userId: string | null;
+    req?: FastifyRequest;
+    via?: 'autofix';
+    runId?: string;
+    journal?: ChapterDeleteJournal;
+  },
 ): Promise<DeletedChapters> {
   const row = await getSeriesRow(id);
   const ids = [...new Set(bookIds)];
@@ -328,24 +351,34 @@ export async function deleteChapterFiles(
     'SELECT DISTINCT book_id FROM bookmarks WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id));
 
   const skipped: Array<{ id: string; reason: string }> = [];
-  const todo: Array<{ id: string; abs: string }> = [];
+  const todo: Array<{ id: string; abs: string; rel: string; position: number }> = [];
   const root = resolve(DL_ROOT);
-  for (const bid of ids) {
+  const recordSkip = async (
+    bid: string, reason: string, position: number,
+    book?: { root: string | null; file: string }, bytes = 0,
+  ) => {
+    skipped.push({ id: bid, reason });
+    await o.journal?.settled({
+      id: bid, root: book?.root ?? '', file: book?.file ?? '', position, bytes, outcome: 'skipped', reason,
+    });
+  };
+  for (let position = 0; position < ids.length; position++) {
+    const bid = ids[position];
     const r = rows.get(bid);
-    if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
+    if (!r) { await recordSkip(bid, 'not_found', position); continue; }
     // Reintroduce by dropping this check: "delete removes the file, keeps the row and the progress, skips
     // the read library" in chapterActions.int.test.ts fails -- the read library's file is gone.
-    if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
-    if (r.pruned_at) { skipped.push({ id: bid, reason: 'already_pruned' }); continue; }
-    if (bookmarked.has(bid)) { skipped.push({ id: bid, reason: 'bookmarked' }); continue; }
+    if (r.root !== DL_ROOT) { await recordSkip(bid, 'not_owned', position, r); continue; }
+    if (r.pruned_at) { await recordSkip(bid, 'already_pruned', position, r); continue; }
+    if (bookmarked.has(bid)) { await recordSkip(bid, 'bookmarked', position, r); continue; }
     const abs = containedPath(DL_ROOT, r.file);
     // A path that escapes its root is refused, never "cleaned up" -- the health page can argue about it.
     // So is the root ITSELF: containedPath accepts it, the rm below is recursive, and a row whose file
     // resolves to `.` (a hand-edited row is the only way today) would take the whole download directory.
     // Reintroduce by dropping the `abs === root` half: "the download root itself is never a chapter" in
     // chapterActions.int.test.ts finds the directory gone.
-    if (!abs || abs === root) { skipped.push({ id: bid, reason: 'outside_root' }); continue; }
-    todo.push({ id: bid, abs });
+    if (!abs || abs === root) { await recordSkip(bid, 'outside_root', position, r); continue; }
+    todo.push({ id: bid, abs, rel: r.file, position });
   }
   if (todo.length) {
     const w = await allWritable([DL_ROOT]);
@@ -355,10 +388,18 @@ export async function deleteChapterFiles(
   let bytes = 0;
   for (const t of todo) {
     const st = await stat(t.abs).catch(() => null);
+    const item: ChapterDeleteJournalItem = {
+      id: t.id, root: DL_ROOT, file: t.rel, position: t.position, bytes: st?.size ?? 0,
+    };
     if (st) {
+      // This commit is the recovery boundary: after it, a new process knows this exact owned row/path may have been
+      // unlinked. If the process dies before tombstoneBooks, startup reconciles the intent against disk and the row.
+      await o.journal?.beforeUnlink(item);
       try { await rm(t.abs, { recursive: true, force: true }); }
-      catch { skipped.push({ id: t.id, reason: 'unlink_failed' }); continue; }
-      bytes += st.size;
+      catch {
+        await recordSkip(t.id, 'unlink_failed', t.position, { root: DL_ROOT, file: t.rel }, st.size);
+        continue;
+      }
       // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside the landed file,
       // which reapStaleTemp deliberately leaves alone) must not outlive a deliberate delete of the file:
       // at the next boot the reaper would see a bak with no original, put it back, and the chapter the
@@ -366,6 +407,7 @@ export async function deleteChapterFiles(
       // Reintroduce by dropping this rm: "a stray set-aside copy goes with the file" in
       // chapterActions.int.test.ts finds the bak still there.
       await rm(`${t.abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
+      await o.journal?.afterUnlink?.(item);
     } else if (!(await stat(dirname(t.abs)).catch(() => null))) {
       // ⚠️ The file is missing AND so is its folder: that is the volume not being there (an unmounted
       // share whose empty mount point passed the preflight), not a chapter somebody removed by hand.
@@ -373,13 +415,19 @@ export async function deleteChapterFiles(
       // throw away everything measured about it; the row is left as it is and the answer says why.
       // Reintroduce by dropping this branch: "a missing download folder is not a deleted chapter" in
       // chapterActions.int.test.ts finds pruned_at set.
-      skipped.push({ id: t.id, reason: 'unlink_failed' });
+      await recordSkip(t.id, 'unlink_failed', t.position, { root: DL_ROOT, file: t.rel });
       continue;
+    } else {
+      // The folder is mounted and the file is already absent. The intent still precedes the destructive database
+      // mark, so a crash during tombstoning has the same deterministic recovery path as a completed unlink.
+      await o.journal?.beforeUnlink(item);
     }
     // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
     // do not exist.
     await tombstoneBooks([t.id], 'deleted');
+    bytes += item.bytes;
     applied++;
+    await o.journal?.settled({ ...item, outcome: 'applied' });
   }
   // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every
   // thumbnail falls back to the cover chapter's first page, and a tombstone has none.
@@ -391,7 +439,11 @@ export async function deleteChapterFiles(
   }
   await logAudit('series.chapters_delete', {
     userId: o.userId,
-    detail: { id, title: row?.title ?? null, bookIds: ids, applied, bytes, ...(o.via ? { via: o.via, runId: o.runId } : {}) },
+    detail: {
+      id, title: row?.title ?? null, bookIds: ids, applied, bytes,
+      ...(o.via ? { via: o.via } : {}),
+      ...(o.runId ? { runId: o.runId } : {}),
+    },
     req: o.req,
   });
   return { applied, bytes, skipped };

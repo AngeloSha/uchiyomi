@@ -1,12 +1,17 @@
 import type { FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
-import { q } from './db';
+import { rm, stat } from 'fs/promises';
+import { dirname } from 'path';
+import { q, tx } from './db';
 import { DL_ROOT } from './library';
-import { deleteChapterFiles } from './libraryAdmin';
+import { deleteChapterFiles, type ChapterDeleteJournalItem } from './libraryAdmin';
 import { busyFolders } from './bulkNewest';
 import { runsInside } from './updater';
 import { logAudit } from './audit';
 import { runtime } from './runtime';
+import { realContainedPath } from './fsGuard';
+import { tombstoneBooks } from './chapterCleanup';
+import { REFETCH_BAK } from './fsAtomic';
 
 export type BulkDeleteStatus = 'running' | 'done' | 'cancelled' | 'failed' | 'interrupted';
 export type BulkDeleteSkip = 'not_found' | 'hidden' | 'merged' | 'busy' | 'nothing_to_delete' | 'refused' | 'cancelled';
@@ -33,6 +38,18 @@ export type BulkDeleteSummary = {
   failed: number;
   chapterSkips: Record<string, number>;
 };
+export type BulkDeleteCurrent = {
+  id: string;
+  title: string;
+  total: number;
+  processed: number;
+  chapters: number;
+  bytes: number;
+  kept: number;
+  paused: boolean;
+  chapterSkips: Record<string, number>;
+};
+type StoredCurrent = BulkDeleteCurrent & { baseKept: number };
 export type BulkDeleteRun = {
   id: string;
   status: BulkDeleteStatus;
@@ -44,11 +61,13 @@ export type BulkDeleteRun = {
   done: number;
   summary: BulkDeleteSummary;
   results: BulkDeleteResult[];
+  current: BulkDeleteCurrent | null;
   error: string | null;
 };
 
 type Row = {
   id: string;
+  started_by: string | null;
   started_at: Date | string;
   finished_at: Date | string | null;
   status: BulkDeleteStatus;
@@ -58,6 +77,7 @@ type Row = {
   done: number;
   summary: BulkDeleteSummary;
   results: BulkDeleteResult[];
+  current: StoredCurrent | null;
   error: string | null;
 };
 
@@ -70,6 +90,8 @@ let initialised: Promise<void> | null = null;
 type TestHooks = {
   afterClaim?: (series: { id: string; title: string; folder: string }) => Promise<void> | void;
   afterPause?: (series: { id: string; title: string; folder: string }) => Promise<void> | void;
+  /** Returning simulate_crash models process death after unlink and before the tombstone. */
+  afterUnlink?: (item: ChapterDeleteJournalItem & { seriesId: string; runId: string }) => Promise<'simulate_crash' | void> | 'simulate_crash' | void;
   afterSettled?: (result: BulkDeleteResult, done: number) => Promise<void> | void;
 };
 let testHooks: TestHooks = {};
@@ -78,6 +100,11 @@ let testHooks: TestHooks = {};
 export function setBulkChapterDeleteTestHooks(hooks: TestHooks): void { testHooks = hooks; }
 
 const iso = (v: Date | string | null): string | null => v == null ? null : new Date(v).toISOString();
+const publicCurrent = (v: StoredCurrent | null): BulkDeleteCurrent | null => {
+  if (!v) return null;
+  const { baseKept: _baseKept, ...current } = v;
+  return current;
+};
 const toRun = (r: Row): BulkDeleteRun => ({
   id: r.id,
   status: r.status,
@@ -89,24 +116,215 @@ const toRun = (r: Row): BulkDeleteRun => ({
   done: Number(r.done),
   summary: r.summary ?? EMPTY_SUMMARY(),
   results: r.results ?? [],
+  current: publicCurrent(r.current),
   error: r.error,
 });
 
+type JournalRow = {
+  run_id: string;
+  series_id: string;
+  book_id: string;
+  root: string;
+  file: string;
+  position: number;
+  state: 'intent' | 'applied' | 'skipped' | 'unresolved';
+  bytes: number;
+  reason: string | null;
+};
+
+async function settleJournal(
+  runId: string, bookId: string, state: Exclude<JournalRow['state'], 'intent'>, reason: string | null,
+): Promise<void> {
+  await q(
+    `UPDATE admin_bulk_delete_items
+        SET state = $3, reason = $4, updated_at = now()
+      WHERE run_id = $1 AND book_id = $2`,
+    [runId, bookId, state, reason],
+  );
+}
+
+/** Resolve one committed intent without ever deleting a file during recovery. */
+async function reconcileIntent(row: JournalRow): Promise<void> {
+  const books = await q<{
+    series_id: string; root: string | null; file: string; pruned_at: Date | string | null; pruned_reason: string | null;
+  }>('SELECT series_id, root, file, pruned_at, pruned_reason FROM lib_books WHERE id = $1', [row.book_id]);
+  const book = books[0];
+  if (!book) return settleJournal(row.run_id, row.book_id, 'skipped', 'interrupted_row_missing');
+  if (book.series_id !== row.series_id || book.root !== row.root || book.file !== row.file) {
+    return settleJournal(row.run_id, row.book_id, 'unresolved', 'interrupted_row_changed');
+  }
+  if (book.pruned_at) {
+    if (book.pruned_reason !== 'deleted') {
+      return settleJournal(row.run_id, row.book_id, 'unresolved', 'interrupted_reason_changed');
+    }
+    // Idempotently completes the derived-cache half if the old process died between tombstoneBooks' statements.
+    await tombstoneBooks([row.book_id], 'deleted');
+    return settleJournal(row.run_id, row.book_id, 'applied', null);
+  }
+  if (row.root !== DL_ROOT) return settleJournal(row.run_id, row.book_id, 'unresolved', 'not_owned');
+  const abs = await realContainedPath(row.root, row.file);
+  if (!abs) return settleJournal(row.run_id, row.book_id, 'unresolved', 'outside_root');
+  if (await stat(abs).catch(() => null)) {
+    // The intent committed but unlink never completed. Recovery never retries destructive filesystem work.
+    return settleJournal(row.run_id, row.book_id, 'skipped', 'interrupted_before_unlink');
+  }
+  if (!(await stat(dirname(abs)).catch(() => null))) {
+    // An unavailable mount is not proof of deletion. Keep the live row and make the uncertainty explicit.
+    return settleJournal(row.run_id, row.book_id, 'unresolved', 'interrupted_volume_unavailable');
+  }
+  // The ordinary delete removes this set-aside copy before tombstoning. A process can die in that tiny gap; leaving
+  // it here would let the stale-temp reaper resurrect the deleted bytes behind the recovered tombstone.
+  await rm(`${abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
+  await tombstoneBooks([row.book_id], 'deleted');
+  await settleJournal(row.run_id, row.book_id, 'applied', null);
+}
+
+const addResult = (summary: BulkDeleteSummary, result: BulkDeleteResult): void => {
+  summary.kept += result.kept;
+  chapterSkipCounts(summary.chapterSkips, result.chapterSkips);
+  if (result.outcome === 'applied') {
+    summary.applied++;
+    summary.chapters += result.chapters;
+    summary.bytes += result.bytes;
+    if (result.paused) summary.paused++;
+  } else if (result.outcome === 'failed') summary.failed++;
+  else summary.skipped++;
+};
+
+async function interruptedResult(runId: string, current: StoredCurrent): Promise<BulkDeleteResult> {
+  const rows = await q<JournalRow>(
+    `SELECT run_id, series_id, book_id, root, file, position, state, bytes, reason
+       FROM admin_bulk_delete_items WHERE run_id = $1 AND series_id = $2 ORDER BY position`,
+    [runId, current.id],
+  );
+  for (const row of rows) if (row.state === 'intent') await reconcileIntent(row);
+  const settled = await q<JournalRow>(
+    `SELECT run_id, series_id, book_id, root, file, position, state, bytes, reason
+       FROM admin_bulk_delete_items WHERE run_id = $1 AND series_id = $2 ORDER BY position`,
+    [runId, current.id],
+  );
+  const applied = settled.filter((r) => r.state === 'applied');
+  const notApplied = settled.filter((r) => r.state !== 'applied');
+  const chapterSkips: Record<string, number> = {};
+  for (const row of notApplied) {
+    const reason = row.reason ?? 'interrupted_unresolved';
+    chapterSkips[reason] = (chapterSkips[reason] ?? 0) + 1;
+  }
+  // Chapters the old worker had not reached have no journal row and are known to remain untouched.
+  const untouched = Math.max(0, current.total - settled.length);
+  const chapters = applied.length;
+  return {
+    id: current.id,
+    title: current.title,
+    outcome: chapters ? 'applied' : 'failed',
+    ...(chapters ? {} : { reason: 'failed' as const }),
+    message: 'The server stopped during this series. Completed chapter deletions were recovered; untouched chapters were kept.',
+    chapters,
+    bytes: applied.reduce((sum, row) => sum + Number(row.bytes), 0),
+    kept: current.baseKept + notApplied.length + untouched,
+    paused: current.paused,
+    chapterSkips,
+  };
+}
+
+async function recoveryAuditOnce(
+  event: string, userId: string | null, runId: string, seriesId: string, detail: Record<string, unknown>,
+): Promise<void> {
+  await q(
+    `INSERT INTO audit_log (user_id, event, detail)
+     SELECT $1::uuid, $2, $3::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM audit_log
+         WHERE event = $2 AND detail->>'runId' = $4 AND detail->>'id' = $5
+      )`,
+    [userId, event, JSON.stringify(detail), runId, seriesId],
+  );
+}
+
+/** Complete every durable side effect that normally follows the chapter loop; safe to repeat after another crash. */
+async function finalizeRecoveredSeries(
+  runId: string, result: BulkDeleteResult, pauseRequested: boolean, userId: string | null,
+): Promise<void> {
+  if (!result.chapters) return;
+  const applied = await q<{ book_id: string }>(
+    `SELECT book_id FROM admin_bulk_delete_items
+      WHERE run_id = $1 AND series_id = $2 AND state = 'applied' ORDER BY position`,
+    [runId, result.id],
+  );
+  await q(
+    `UPDATE lib_series SET cover_book_id = (
+       SELECT id FROM lib_books WHERE series_id = $1
+        ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
+     ) WHERE id = $1`, [result.id],
+  );
+  await recoveryAuditOnce('series.chapters_delete', userId, runId, result.id, {
+    id: result.id,
+    title: result.title ?? null,
+    bookIds: applied.map((row) => row.book_id),
+    applied: result.chapters,
+    bytes: result.bytes,
+    via: 'bulk_recovery',
+    runId,
+  });
+  if (pauseRequested) {
+    await q('UPDATE lib_series SET auto_update = false WHERE id = $1 AND auto_update', [result.id]);
+    result.paused = true;
+    await recoveryAuditOnce('series.settings', userId, runId, result.id, {
+      id: result.id,
+      title: result.title ?? null,
+      autoUpdate: false,
+      via: 'bulk_delete_recovery',
+      runId,
+    });
+  }
+}
+
 /**
- * A row still owned by another process cannot still have a worker after this process has booted. Closing it rather
- * than resuming is deliberate: file deletion and its tombstone are already atomic per chapter, while blindly
- * replaying an unknown in-flight unlink could make a destructive request surprising. The recorded partial result is
- * retained, and the admin may explicitly start another run for the remainder.
+ * A row owned by the previous process has no worker after boot. Before closing it, reconcile every durable unlink
+ * intent: an absent file in a still-mounted owned folder gets its tombstone, while a present/unsafe/unavailable path
+ * stays live. The partially processed series becomes a persisted terminal result; later selections remain untouched.
  */
 export async function closeInterruptedBulkChapterDeleteRuns(): Promise<number> {
-  const rows = await q<{ id: string }>(
-    `UPDATE admin_bulk_delete_runs
-        SET status = 'interrupted', finished_at = COALESCE(finished_at, now()), heartbeat_at = now(),
-            error = COALESCE(error, 'The server stopped before this run finished.')
-      WHERE status = 'running' AND worker_id <> $1::uuid
-      RETURNING id`, [WORKER_ID],
-  );
-  return rows.length;
+  // The run-row locks are held through filesystem inspection, tombstoning, pause and audit. SKIP LOCKED means two
+  // BFFs booting together cannot both reconcile one destructive run. If this process dies, the transaction releases
+  // the lock while idempotent journal/audit side effects remain, and the next boot safely tries the still-running row.
+  return tx(async (qq) => {
+    const stale = await qq<Row>(
+      `SELECT id, started_by, started_at, finished_at, status, cancel_requested, pause, total, done,
+              summary, results, current, error
+         FROM admin_bulk_delete_runs
+        WHERE status = 'running' AND worker_id <> $1::uuid
+        ORDER BY started_at FOR UPDATE SKIP LOCKED`,
+      [WORKER_ID],
+    );
+    let closed = 0;
+    for (const row of stale) {
+      const summary: BulkDeleteSummary = {
+        ...(row.summary ?? EMPTY_SUMMARY()),
+        chapterSkips: { ...(row.summary?.chapterSkips ?? {}) },
+      };
+      const results = [...(row.results ?? [])];
+      let done = Number(row.done);
+      if (row.current && !results.some((r) => r.id === row.current!.id)) {
+        const result = await interruptedResult(row.id, row.current);
+        await finalizeRecoveredSeries(row.id, result, !!row.pause, row.started_by);
+        results.push(result);
+        addResult(summary, result);
+        done = Math.min(Number(row.total), done + 1);
+      }
+      const changed = await qq<{ id: string }>(
+        `UPDATE admin_bulk_delete_runs
+            SET status = 'interrupted', done = $2, summary = $3::jsonb, results = $4::jsonb, current = NULL,
+                finished_at = COALESCE(finished_at, now()), heartbeat_at = now(),
+                error = COALESCE(error, 'The server stopped before this run finished.')
+          WHERE id = $1 AND status = 'running'
+          RETURNING id`,
+        [row.id, done, JSON.stringify(summary), JSON.stringify(results)],
+      );
+      closed += changed.length;
+    }
+    return closed;
+  });
 }
 
 /** Called while the admin plugin registers, after migrate() has made the table. */
@@ -117,7 +335,7 @@ export async function initialiseBulkChapterDeleteRuns(): Promise<void> {
 
 export async function readBulkChapterDeleteRun(id?: string): Promise<BulkDeleteRun | null> {
   const rows = await q<Row>(
-    `SELECT id, started_at, finished_at, status, cancel_requested, pause, total, done, summary, results, error
+    `SELECT id, started_by, started_at, finished_at, status, cancel_requested, pause, total, done, summary, results, current, error
        FROM admin_bulk_delete_runs
       WHERE ($1::text IS NULL OR id::text = $1)
       ORDER BY started_at DESC LIMIT 1`, [id ?? null],
@@ -145,6 +363,7 @@ type StartInput = {
 
 const errorText = (e: unknown) => ((e as Error)?.message || String(e)).slice(0, 500);
 const conflict = (e: unknown) => (e as { code?: string })?.code === '23505';
+class SimulatedWorkerExit extends Error {}
 
 /** Atomically records one run and detaches its worker. A database partial unique index is the final one-active guard. */
 export async function startBulkChapterDelete(input: StartInput): Promise<{ id: string; total: number } | null> {
@@ -182,10 +401,70 @@ async function cancelled(id: string): Promise<boolean> {
 async function persistProgress(id: string, done: number, summary: BulkDeleteSummary, results: BulkDeleteResult[]): Promise<void> {
   await q(
     `UPDATE admin_bulk_delete_runs
-        SET done = $2, summary = $3::jsonb, results = $4::jsonb, heartbeat_at = now()
+        SET done = $2, summary = $3::jsonb, results = $4::jsonb, current = NULL, heartbeat_at = now()
       WHERE id = $1 AND status = 'running'`,
     [id, done, JSON.stringify(summary), JSON.stringify(results)],
   );
+}
+
+async function persistCurrent(id: string, current: StoredCurrent): Promise<void> {
+  const rows = await q<{ id: string }>(
+    `UPDATE admin_bulk_delete_runs SET current = $2::jsonb, heartbeat_at = now()
+      WHERE id = $1 AND status = 'running' RETURNING id`,
+    [id, JSON.stringify(current)],
+  );
+  if (!rows.length) throw new Error('bulk delete run is no longer active');
+}
+
+async function journalIntent(runId: string, seriesId: string, item: ChapterDeleteJournalItem): Promise<void> {
+  await tx(async (qq) => {
+    await qq(
+      `INSERT INTO admin_bulk_delete_items
+         (run_id, series_id, book_id, root, file, position, state, bytes)
+       VALUES ($1,$2,$3,$4,$5,$6,'intent',$7)
+       ON CONFLICT (run_id, book_id) DO UPDATE
+         SET root = EXCLUDED.root, file = EXCLUDED.file, position = EXCLUDED.position,
+             state = 'intent', bytes = EXCLUDED.bytes, reason = NULL, updated_at = now()`,
+      [runId, seriesId, item.id, item.root, item.file, item.position, item.bytes],
+    );
+    await qq('UPDATE admin_bulk_delete_runs SET heartbeat_at = now() WHERE id = $1 AND status = \'running\'', [runId]);
+  });
+}
+
+async function journalSettled(
+  runId: string, seriesId: string, current: StoredCurrent,
+  item: ChapterDeleteJournalItem & { outcome: 'applied' | 'skipped'; reason?: string },
+): Promise<StoredCurrent> {
+  const next: StoredCurrent = {
+    ...current,
+    processed: current.processed + 1,
+    chapters: current.chapters + (item.outcome === 'applied' ? 1 : 0),
+    bytes: current.bytes + (item.outcome === 'applied' ? item.bytes : 0),
+    kept: current.kept + (item.outcome === 'skipped' ? 1 : 0),
+    chapterSkips: { ...current.chapterSkips },
+  };
+  if (item.outcome === 'skipped') {
+    const reason = item.reason ?? 'unknown';
+    next.chapterSkips[reason] = (next.chapterSkips[reason] ?? 0) + 1;
+  }
+  await tx(async (qq) => {
+    await qq(
+      `INSERT INTO admin_bulk_delete_items
+         (run_id, series_id, book_id, root, file, position, state, bytes, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (run_id, book_id) DO UPDATE
+         SET root = EXCLUDED.root, file = EXCLUDED.file, position = EXCLUDED.position,
+             state = EXCLUDED.state, bytes = EXCLUDED.bytes, reason = EXCLUDED.reason, updated_at = now()`,
+      [runId, seriesId, item.id, item.root, item.file, item.position, item.outcome, item.bytes, item.reason ?? null],
+    );
+    const changed = await qq<{ id: string }>(
+      `UPDATE admin_bulk_delete_runs SET current = $2::jsonb, heartbeat_at = now()
+        WHERE id = $1 AND status = 'running' RETURNING id`,
+      [runId, JSON.stringify(next)],
+    );
+    if (!changed.length) throw new Error('bulk delete run is no longer active');
+  });
+  return next;
 }
 
 async function finish(
@@ -195,7 +474,7 @@ async function finish(
   await q(
     `UPDATE admin_bulk_delete_runs
         SET status = $2, done = $3, summary = $4::jsonb, results = $5::jsonb, error = $6,
-            finished_at = now(), heartbeat_at = now()
+            current = NULL, finished_at = now(), heartbeat_at = now()
       WHERE id = $1 AND status = 'running'`,
     [id, status, done, JSON.stringify(summary), JSON.stringify(results), error],
   );
@@ -242,7 +521,27 @@ async function processSeries(runId: string, seriesId: string, input: StartInput)
     const baseKept = live.length - todo.length; // cover plus every hand-managed/non-download-root chapter
     if (!todo.length) return skipped(seriesId, 'nothing_to_delete', series.title, undefined, baseKept);
 
-    const deleted = await deleteChapterFiles(seriesId, todo, { userId: input.userId, req: input.req });
+    let current: StoredCurrent = {
+      id: seriesId, title: series.title, total: todo.length, processed: 0, chapters: 0, bytes: 0,
+      kept: baseKept, baseKept, paused: false, chapterSkips: {},
+    };
+    // Persist the series snapshot before deleteChapterFiles can reach any filesystem operation. Each callback below
+    // then atomically advances its chapter journal and this progress snapshot.
+    await persistCurrent(runId, current);
+    const deleted = await deleteChapterFiles(seriesId, todo, {
+      userId: input.userId,
+      req: input.req,
+      runId,
+      journal: {
+        beforeUnlink: (item) => journalIntent(runId, seriesId, item),
+        afterUnlink: async (item) => {
+          if ((await testHooks.afterUnlink?.({ ...item, seriesId, runId })) === 'simulate_crash') {
+            throw new SimulatedWorkerExit('simulated process exit after unlink');
+          }
+        },
+        settled: async (item) => { current = await journalSettled(runId, seriesId, current, item); },
+      },
+    });
     if ('refused' in deleted) {
       return skipped(seriesId, 'refused', series.title, deleted.refused.reason, baseKept + todo.length);
     }
@@ -251,7 +550,14 @@ async function processSeries(runId: string, seriesId: string, input: StartInput)
     // The pause and its audit happen while this worker still owns the folder. Otherwise a sweep can refetch the files
     // after unlinking and before auto_update becomes false.
     if (input.pause && deleted.applied > 0) {
-      await q('UPDATE lib_series SET auto_update = false WHERE id = $1 AND auto_update', [seriesId]);
+      current = { ...current, paused: true };
+      await tx(async (qq) => {
+        await qq('UPDATE lib_series SET auto_update = false WHERE id = $1 AND auto_update', [seriesId]);
+        await qq(
+          'UPDATE admin_bulk_delete_runs SET current = $2::jsonb, heartbeat_at = now() WHERE id = $1 AND status = \'running\'',
+          [runId, JSON.stringify(current)],
+        );
+      });
       await logAudit('series.settings', {
         userId: input.userId,
         detail: { id: seriesId, title: series.title, autoUpdate: false, via: 'bulk_delete', runId },
@@ -298,22 +604,36 @@ async function run(id: string, input: StartInput): Promise<void> {
       try {
         result = await processSeries(id, input.ids[index], input);
       } catch (e) {
-        result = {
-          id: input.ids[index], outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0, bytes: 0,
-          kept: 0, paused: false, chapterSkips: {},
-        };
+        // Test-only exact crash point: leave the row and intent exactly as a dead process would. The next boot owns
+        // reconciliation. No production path can construct this signal.
+        if (e instanceof SimulatedWorkerExit) return;
+        // A live-process failure after unlink gets the same deterministic reconciliation immediately, rather than
+        // clearing `current` and leaving an unknown live row until another restart.
+        const rows = await q<{ current: StoredCurrent | null }>(
+          'SELECT current FROM admin_bulk_delete_runs WHERE id = $1 AND status = \'running\'', [id],
+        ).catch(() => []);
+        if (rows[0]?.current) {
+          try {
+            result = await interruptedResult(id, rows[0].current);
+            await finalizeRecoveredSeries(id, result, input.pause, input.userId);
+            result.message = `${result.message} Worker error: ${errorText(e)}`;
+          } catch (recoveryError) {
+            result = {
+              id: input.ids[index], outcome: 'failed', reason: 'failed',
+              message: `${errorText(e)}; recovery failed: ${errorText(recoveryError)}`,
+              chapters: 0, bytes: 0, kept: 0, paused: false, chapterSkips: {},
+            };
+          }
+        } else {
+          result = {
+            id: input.ids[index], outcome: 'failed', reason: 'failed', message: errorText(e), chapters: 0, bytes: 0,
+            kept: 0, paused: false, chapterSkips: {},
+          };
+        }
       }
       results.push(result);
       done++;
-      summary.kept += result.kept;
-      chapterSkipCounts(summary.chapterSkips, result.chapterSkips);
-      if (result.outcome === 'applied') {
-        summary.applied++;
-        summary.chapters += result.chapters;
-        summary.bytes += result.bytes;
-        if (result.paused) summary.paused++;
-      } else if (result.outcome === 'failed') summary.failed++;
-      else summary.skipped++;
+      addResult(summary, result);
       await persistProgress(id, done, summary, results);
       await testHooks.afterSettled?.(result, done);
     }

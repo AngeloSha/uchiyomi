@@ -1608,8 +1608,30 @@ CREATE TABLE IF NOT EXISTS admin_bulk_delete_runs (
   done             int NOT NULL DEFAULT 0,
   summary          jsonb NOT NULL DEFAULT '{"applied":0,"chapters":0,"bytes":0,"kept":0,"paused":0,"skipped":0,"failed":0,"chapterSkips":{}}'::jsonb,
   results          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  current          jsonb,
   error            text
 );
+-- A v0.55.8 prerelease may already have created the run table without chapter-level crash state.
+ALTER TABLE admin_bulk_delete_runs ADD COLUMN IF NOT EXISTS current jsonb;
+-- Intent is committed before unlink. A new process can therefore distinguish "never reached this chapter" from
+-- "may have unlinked it", inspect the exact owned path, and finish the tombstone before closing the run. Applied and
+-- skipped rows remain with the run as its destructive-operation journal and disappear with the bounded run history.
+CREATE TABLE IF NOT EXISTS admin_bulk_delete_items (
+  run_id       uuid NOT NULL REFERENCES admin_bulk_delete_runs(id) ON DELETE CASCADE,
+  series_id    text NOT NULL,
+  book_id      text NOT NULL,
+  root         text NOT NULL,
+  file         text NOT NULL,
+  position     int NOT NULL,
+  state        text NOT NULL CHECK (state IN ('intent', 'applied', 'skipped', 'unresolved')),
+  bytes        bigint NOT NULL DEFAULT 0,
+  reason       text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (run_id, book_id)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_bulk_delete_items_state
+  ON admin_bulk_delete_items (run_id, state, position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_bulk_delete_one_running
   ON admin_bulk_delete_runs ((true)) WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS idx_admin_bulk_delete_started ON admin_bulk_delete_runs (started_at DESC);

@@ -38,6 +38,18 @@ export interface BulkChapterDeleteSummary {
   chapterSkips: Record<string, number>;
 }
 
+export interface BulkChapterDeleteCurrent {
+  id: string;
+  title: string;
+  total: number;
+  processed: number;
+  chapters: number;
+  bytes: number;
+  kept: number;
+  paused: boolean;
+  chapterSkips: Record<string, number>;
+}
+
 export interface BulkChapterDeleteRun {
   id: string;
   status: BulkChapterDeleteStatus;
@@ -49,6 +61,8 @@ export interface BulkChapterDeleteRun {
   done: number;
   summary: BulkChapterDeleteSummary;
   results: BulkChapterDeleteResult[];
+  /** Chapter-granular durable progress for the series currently being processed. */
+  current?: BulkChapterDeleteCurrent | null;
   error: string | null;
 }
 
@@ -88,6 +102,7 @@ export function startedBulkChapterDeleteRun(id: string, total: number, pause: bo
     done: 0,
     summary: { applied: 0, chapters: 0, bytes: 0, kept: 0, paused: 0, skipped: 0, failed: 0, chapterSkips: {} },
     results: [],
+    current: null,
     error: null,
   };
 }
