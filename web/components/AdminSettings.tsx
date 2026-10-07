@@ -51,6 +51,11 @@ export function AdminSettings() {
   const save: Save = async (body) => {
     await api('/api/admin/settings', { method: 'PATCH', json: body });
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
+    // A blocklist save hides, or shows again, every series' chapters only blocked groups released (bff
+    // reapplyBlocklist): any series page already cached refetches its rows, its versions and its groups.
+    if (body.scanlatorPrefs !== undefined) {
+      for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
+    }
   };
   if (!data) {
     return (
@@ -596,6 +601,12 @@ function HousekeepingSection({ data, save: patch }: { data: any; save: Save }) {
             help={tr('List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.')}
             onChange={(next) => patch({ komgaGhostChapters: next })} />
         )}
+        {/* Display only (bff lib/deletedGhosts.ts): a deleted chapter keeps its row, its progress and its place; it is
+            drawn as a chapter not here yet instead of "Deleted from the server". A file Verify found missing is not one:
+            the sweep fetches those back, and they keep their own look. */}
+        <SwitchRow label={tr('Show deleted chapters as ghosts')} on={!!data.deleted_as_ghosts}
+          help={tr('A chapter whose file was deleted is shown like a chapter not downloaded yet, with Fetch to bring it back, instead of as a deleted chapter. Reading history is kept. Mihon lists it as “not downloaded”.')}
+          onChange={(next) => patch({ deletedAsGhosts: next })} />
       </Section>
       {confirm && (
         <ConfirmDialog

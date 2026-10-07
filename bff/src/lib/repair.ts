@@ -745,7 +745,8 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     if (!wide || await canAsk(row.source_id)) wanted.push(row.series_id);
   }
   const rows = await q<{ id: string; folder: string; title: string }>(
-    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')}`, [wanted],
+    // Not an unmonitored series (auto_update off): its rows are reset like any other, but nothing is fetched for it.
+    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND s.auto_update AND ${visibleToAll('s')}`, [wanted],
   ).catch(() => []);
   const folders = new Map(rows.map((s) => [s.id, s.folder]));
   const titles = new Map(rows.map((s) => [s.id, s.title]));
@@ -765,7 +766,7 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     busyFolders.add(folder);
     try {
       // Never hunting for "Fix all": its search budget belongs to the gaps step, which runs after this one.
-      const up = await updateSeries(id, 10, { hunt: wide ? false : budget, cancelled });
+      const up = await updateSeries(id, 10, { hunt: wide ? false : budget, cancelled, unattended: true });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -806,7 +807,7 @@ async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Pro
   r.failures.reset = reset.length;
   const ids = [...new Set(reset.map((x) => x.series_id))];
   const rows = await q<{ id: string; folder: string; title: string }>(
-    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')} ORDER BY s.title`, [ids],
+    `SELECT s.id, s.folder, s.title FROM lib_series s WHERE s.id = ANY($1) AND s.auto_update AND ${visibleToAll('s')} ORDER BY s.title`, [ids],
   ).catch(() => []);
   planned('failures', rows.length);
   let series = 0, added = 0, failed = 0;
@@ -818,7 +819,7 @@ async function failuresDriven(r: RepairResult, pending: Dated[], log?: Log): Pro
     series++;
     busyFolders.add(s.folder);
     try {
-      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled, ...restingOpt() });
+      const up = await updateSeries(s.id, AUTOFIX_RECHECK_CHAPTERS, { hunt: false, cancelled, unattended: true, ...restingOpt() });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -903,6 +904,8 @@ async function whyNotShort(bookId: string): Promise<string> {
  * silently re-opening chapters people had closed.
  */
 async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: number }, notes: Notes, log?: Log): Promise<RepairResult['stopped']> {
+  // An unmonitored series (auto_update off) is left out of the unattended pass; a Fix pressed on one of its chapters
+  // (`opts.bookId`) is a person asking, and still runs.
   // ⚠️ `b.file = <folder>/Chapter <n>.cbz` is chapterFileRel (lib/downloader.ts) written in SQL, which is
   // safe only because `b.number = floor(b.number)` is in the same WHERE: the cast to int is exact for a
   // whole number and nothing else. A file under any other name is somebody's own copy, not ours.
@@ -913,7 +916,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number)
         AND b.pruned_at IS NULL AND b.short_confirmed_at IS NULL AND b.missing_pages IS NULL
         AND b.root = $1 AND b.file = s.folder || '/Chapter ' || (b.number::int)::text || '.cbz'
-        ${opts.bookId ? 'AND b.id = $3' : ''}
+        ${opts.bookId ? 'AND b.id = $3' : 'AND s.auto_update'}
       ORDER BY b.mtime DESC LIMIT $2`,
     opts.bookId ? [DL_ROOT, REPAIR_SHORT_MAX, opts.bookId] : [DL_ROOT, opts.autofix ? UNCAPPED : REPAIR_SHORT_MAX],
   );
@@ -1675,7 +1678,8 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
       // below an active archive's boundary" in repair.int.test.ts fetches nothing.
       const up = await updateSeries(s.id, opts.autofix ? AUTOFIX_GAP_CHAPTERS : REPAIR_GAP_CHAPTERS, {
-        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId, ...restingOpt(),
+        // Fill now (`opts.seriesId`) is a person asking for this series; the nightly and Fix everything are not.
+        hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId, unattended: !opts.seriesId, ...restingOpt(),
       });
       const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
       // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the

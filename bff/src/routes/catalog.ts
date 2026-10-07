@@ -27,6 +27,7 @@ import { numberingSummary } from '../lib/numbering';
 import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { ghostsEnabled } from '../lib/komgaGhosts';
+import { deletedAsGhostsOn } from '../lib/deletedGhosts';
 import { groupStats, type StatCopy } from '../lib/groupStats';
 import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
@@ -675,12 +676,16 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const archiveBoundary = f?.archive_boundary == null ? null : Number(f.archive_boundary);
     // How the series is numbered and why (#116): the series page's notice. Every viewer who can open the series
     // reads it -- it explains the numbers they see; the controls beside it are the admin's.
-    const [listing, numbering, archive] = await Promise.all([
+    // `deletedAsGhosts` (lib/deletedGhosts.ts): the admin's "Show deleted chapters as ghosts", for every viewer -- the
+    // page draws a deliberately deleted chapter as a ghost row from it. Here rather than in the series' admin block,
+    // which only an admin is sent.
+    const [listing, numbering, archive, deletedAsGhosts] = await Promise.all([
       listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) }),
       numberingSummary(id),
       archiveSummaryFor(id, userIdOf(req)).catch(() => null),
+      deletedAsGhostsOn(),
     ]);
-    return { ...listing, numbering, archive };
+    return { ...listing, numbering, archive, deletedAsGhosts };
   });
 
   /**

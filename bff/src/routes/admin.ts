@@ -20,7 +20,7 @@ import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
-import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
+import { runUpdateAll, updateSeries, runSweep, runsInside } from '../lib/updater';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
@@ -71,7 +71,7 @@ import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
-import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
+import { copyToChapter, reapplyBlocklist, seriesListingGroups, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
@@ -596,7 +596,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
-    + 'mangadex_langs, unstated_lang, hide_notice_types, '
+    + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
@@ -706,6 +706,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
       /**
+       * Deleted chapters shown as ghosts (lib/deletedGhosts.ts): a chapter whose file was deleted on purpose is drawn as
+       * a ghost row on the series page and listed "not downloaded" to Mihon. Display only; off by default.
+       */
+      deletedAsGhosts: z.boolean().optional(),
+      /**
        * What the 18+ switch hides besides 18+ libraries: genres to treat as adult, and sources to treat
        * as adult whatever their extension says. Both are surfacing preferences -- nothing here changes
        * who may open a series, and an individual title can be exempted from the genre rule on its own
@@ -779,7 +784,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
-    if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
+    if (b.scanlatorPrefs !== undefined) {
+      const before = (await one<{ p: { blocked?: string[] } | null }>('SELECT scanlator_prefs AS p FROM server_settings WHERE id = 1').catch(() => null))?.p?.blocked ?? [];
+      await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
+      // The groups blocked or unblocked by this save, applied to the stored listing of every series that lists them
+      // (lib/seriesListing.ts reapplyBlocklist): hidden, or shown again, on the next request rather than the next check.
+      const after = b.scanlatorPrefs.blocked ?? [];
+      const key = (g: string) => normGroup(g);
+      const was = new Set(before.map(key)), now = new Set(after.map(key));
+      const moved = [...before.filter((g) => !now.has(key(g))), ...after.filter((g) => !was.has(key(g)))];
+      if (moved.length) {
+        await seriesListingGroups(moved).then((ids) => reapplyBlocklist(ids))
+          .catch((e) => console.warn(`[prefs] reapplying the blocklist failed: ${(e as Error)?.message || e}`));
+      }
+    }
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
     if (b.repairEnabled !== undefined) await q('UPDATE server_settings SET repair_enabled = $1, updated_at = now() WHERE id = 1', [b.repairEnabled]);
@@ -788,6 +806,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
     if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
+    if (b.deletedAsGhosts !== undefined) await q('UPDATE server_settings SET deleted_as_ghosts = $1, updated_at = now() WHERE id = 1', [b.deletedAsGhosts]);
     // Sanitised here as well as in visibility.ts: what is stored should be what is enforced, so a
     // name that could never match is rejected at the door rather than sitting in the settings page
     // looking as though it does something.
@@ -1431,6 +1450,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
         [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
+      // A block or unblock takes effect on the stored listing now, not at the next check (lib/seriesListing.ts
+      // reapplyBlocklist): the page's next request hides, or shows again, the chapters only blocked groups released.
+      await reapplyBlocklist([id]).catch((e) => console.warn(`[prefs] reapplying the blocklist to ${id} failed: ${(e as Error)?.message || e}`));
     }
     if (b.data.sourcePrefs !== undefined) {
       // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one
@@ -1822,6 +1844,101 @@ export default async function adminRoutes(app: FastifyInstance) {
       await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
     }
     return { ok: true, hidden, skipped };
+  });
+
+  /**
+   * Monitor / Unmonitor over a selection: `lib_series.auto_update`, the series' "Auto-update new chapters" (PATCH
+   * /api/admin/series/:id `autoUpdate`), for many at once. Unmonitored, a series gets no new chapter searched for or
+   * downloaded by anything unattended -- the sweep, the nightly repair, Fix everything, the slow archive
+   * (UpdateOpts.unattended in lib/updater.ts) -- while Check now, Fetch and Fill now on the series still work. Nothing
+   * else changes: its chapters, its sources and its listing stay. A series that is gone, hidden or merged away is
+   * skipped with why; one already in the asked state is counted as applied. One `series.settings` audit row per series,
+   * as the single route writes it.
+   */
+  app.post('/api/admin/series/bulk/auto-update', async (req, reply) => {
+    const b = z.object({
+      seriesIds: z.array(z.string().min(1).max(64)).min(1).max(500),
+      autoUpdate: z.boolean(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series, and monitored or not?' });
+    const ids = [...new Set(b.data.seriesIds)];
+    const rows = await q<{ id: string; title: string; deleted_at: string | null; merged_into: string | null }>(
+      'SELECT id, title, deleted_at, merged_into FROM lib_series WHERE id = ANY($1)', [ids]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const skipped: Array<{ id: string; reason: 'not_found' | 'hidden' | 'merged' }> = [];
+    const todo: Array<{ id: string; title: string }> = [];
+    for (const id of ids) {
+      const r = byId.get(id);
+      if (!r) skipped.push({ id, reason: 'not_found' });
+      else if (r.merged_into) skipped.push({ id, reason: 'merged' });
+      else if (r.deleted_at) skipped.push({ id, reason: 'hidden' });
+      else todo.push({ id, title: r.title });
+    }
+    if (todo.length) {
+      await q('UPDATE lib_series SET auto_update = $2 WHERE id = ANY($1)', [todo.map((t) => t.id), b.data.autoUpdate]);
+      for (const t of todo) {
+        await logAudit('series.settings', { userId: userIdOf(req), detail: { id: t.id, title: t.title, autoUpdate: b.data.autoUpdate, via: 'bulk' }, req });
+      }
+    }
+    return { ok: true, applied: todo.length, autoUpdate: b.data.autoUpdate, skipped };
+  });
+
+  /**
+   * Delete the downloaded chapters of every series in a selection: the series page's Remove chapters
+   * (lib/libraryAdmin.ts deleteChapterFiles), once per series, over all of its chapters but one. Its rules, whoever asks:
+   * only files in the download folder (a library you built by hand is never touched), a bookmarked chapter is skipped,
+   * the rows stay as tombstones so reading history survives and Fetch again brings a chapter back.
+   *
+   * ⚠️ NOT Delete files (POST /api/admin/series/:id/delete-files), which takes the whole folder from every root, the read
+   * library's included, and stays behind its per-title typed confirm -- a bulk of THAT is what PR #53 was refused for.
+   *
+   * The cover chapter stays (the series' `cover_book_id`, else its lowest live chapter): every thumbnail and a tile with
+   * no art of its own fall back to its first page, and a tombstone has none. A series a download, a repair or a check is
+   * inside right now is skipped as `busy`: a file deleted under a writer comes back, or half does. `pause` (default true)
+   * also unmonitors each series it acted on, so the sweep does not fetch the newest chapters straight back.
+   */
+  app.post('/api/admin/series/bulk/chapters/delete', async (req, reply) => {
+    const b = z.object({
+      seriesIds: z.array(z.string().min(1).max(64)).min(1).max(500),
+      pause: z.boolean().optional(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series?' });
+    const pause = b.data.pause !== false;
+    const ids = [...new Set(b.data.seriesIds)];
+    const rows = await q<{ id: string; title: string; folder: string; deleted_at: string | null; merged_into: string | null; cover_book_id: string | null }>(
+      'SELECT id, title, folder, deleted_at, merged_into, cover_book_id FROM lib_series WHERE id = ANY($1)', [ids]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    type Skip = { id: string; reason: 'not_found' | 'merged' | 'busy' | 'nothing_to_delete' | 'refused'; message?: string };
+    const skipped: Skip[] = [];
+    let series = 0, chapters = 0, bytes = 0, kept = 0;
+    const paused: string[] = [];
+    for (const id of ids) {
+      const s = byId.get(id);
+      if (!s) { skipped.push({ id, reason: 'not_found' }); continue; }
+      if (s.merged_into) { skipped.push({ id, reason: 'merged' }); continue; }
+      if (jobBusy(s.folder) || runsInside(id) > 0) { skipped.push({ id, reason: 'busy' }); continue; }
+      const live = await q<{ id: string }>(
+        `SELECT id FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND root = $2
+          ORDER BY number ASC, file ASC`, [id, DL_ROOT]);
+      // The cover chapter: the series' own, while it is live and here; else the lowest live downloaded chapter.
+      const cover = live.some((r) => r.id === s.cover_book_id) ? s.cover_book_id : live[0]?.id ?? null;
+      const todo = live.map((r) => r.id).filter((x) => x !== cover);
+      if (!todo.length) { skipped.push({ id, reason: 'nothing_to_delete' }); continue; }
+      const r = await deleteChapterFiles(id, todo, { userId: userIdOf(req), req });
+      if ('refused' in r) { skipped.push({ id, reason: 'refused', message: r.refused.reason }); continue; }
+      if (cover) kept++;
+      if (r.applied) series++;
+      chapters += r.applied;
+      bytes += r.bytes;
+      if (pause && r.applied) paused.push(id);
+    }
+    if (paused.length) {
+      await q('UPDATE lib_series SET auto_update = false WHERE id = ANY($1) AND auto_update', [paused]);
+      for (const id of paused) {
+        await logAudit('series.settings', { userId: userIdOf(req), detail: { id, title: byId.get(id)?.title ?? null, autoUpdate: false, via: 'bulk_delete' }, req });
+      }
+    }
+    return { ok: true, applied: series, chapters, bytes, kept, paused: paused.length, skipped };
   });
 
   app.post('/api/admin/series/:id/restore', async (req, reply) => {

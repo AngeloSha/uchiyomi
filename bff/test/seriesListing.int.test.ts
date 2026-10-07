@@ -186,15 +186,16 @@ test('the listing route returns only what this library lacks, with the reason', 
     assert.ok(!(3 in why) && !(4 in why), `3 and 4 are here: ${JSON.stringify(why)}`);
   });
   await t.test('each ghost carries its reason', () => {
-    assert.deepEqual(why, { 1: 'floor', 2: 'floor', 5: 'held', 6: 'failed', 7: 'blocked' });
+    // 7 only a blocked group released: not shown at all (lib/seriesListing.ts reapplyBlocklist), though still listed.
+    assert.deepEqual(why, { 1: 'floor', 2: 'floor', 5: 'held', 6: 'failed' });
   });
-  await t.test('a failed chapter says how many tries, a blocked one who released it', () => {
+  await t.test('a failed chapter says how many tries; a blocked-only one stays in the listing, unshown', async () => {
     const six = j.content.find((g: any) => g.number === 6);
     assert.equal(six.attempts, CHAPTER_RETRY_CAP);
-    const seven = j.content.find((g: any) => g.number === 7);
+    const seven = (await rows()).find((x: any) => Number(x.number) === 7);
+    assert.equal(seven.status, 'blocked');
     assert.deepEqual(seven.groups, ['Blocked Group']);
-    assert.equal(seven.sourceId, FOL);
-    assert.equal(seven.sourceName, `${FOL} name`, 'the adapter\'s display name, as the sources line shows it');
+    assert.equal(seven.source_id, FOL);
     assert.equal(j.content.find((g: any) => g.number === 5).scanlator, 'Group A', 'the copy on offer today');
   });
   await t.test('and says how old the answer is', () => {
@@ -216,7 +217,7 @@ test('when no source answered the previous listing stands', { skip }, async () =
   }
   assert.equal((await rows()).length, 7, 'the previous listing stands: stale beats empty');
   const j = (await listing(adminTok)).json();
-  assert.equal(j.content.length, 5, 'and the page still has its ghosts');
+  assert.equal(j.content.length, 4, 'and the page still has its ghosts (7, blocked-only, is not shown)');
 });
 
 /**
@@ -236,7 +237,7 @@ test('a source that answered with nothing leaves the previous listing standing',
     empty.clear();
   }
   assert.equal((await rows()).length, 7, 'the previous listing stands: an empty answer is no answer');
-  assert.equal((await listing(adminTok)).json().content.length, 5, 'and the page still has its ghosts');
+  assert.equal((await listing(adminTok)).json().content.length, 4, 'and the page still has its ghosts (7, blocked-only, is not shown)');
 });
 
 /**
@@ -268,7 +269,7 @@ test('a tombstone is not a ghost', { skip }, async () => {
   try {
     const j = (await listing(adminTok)).json();
     assert.ok(!j.content.some((g: any) => g.number === 6), `6 has a row, so it is not a ghost: ${JSON.stringify(j.content.map((g: any) => g.number))}`);
-    assert.equal(j.content.length, 4);
+    assert.equal(j.content.length, 3, '1, 2 and 5: 7 is blocked-only and not shown');
   } finally {
     await q(`DELETE FROM lib_books WHERE id = 'b_lst_6'`);
   }

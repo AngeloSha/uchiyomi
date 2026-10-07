@@ -9,6 +9,7 @@ import { bytes } from '@/lib/format';
 import { readShownOnce } from '@/lib/shownOnce';
 import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
 import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
+import { showAllChaptersOn } from '@/lib/showAllChapters';
 import { contextMenusOn, setContextMenusOn } from '@/lib/contextMenus';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
@@ -128,6 +129,15 @@ function AppearanceSection() {
     try { await api('/api/settings', { method: 'PUT', json: { reduceEffects: next } }); }
     catch (e) { setSettings({ reduceEffects: prev }); throw e; }
   };
+  // Show all chapters at once (lib/showAllChapters.ts): on the account like Reduce effects, so every device the
+  // reader signs in on opens the whole list; optimistic, and put back when the server refuses.
+  const showAllChapters = showAllChaptersOn(user?.settings);
+  const saveShowAllChapters = async (next: boolean) => {
+    const prev = showAllChapters;
+    setSettings({ showAllChapters: next });
+    try { await api('/api/settings', { method: 'PUT', json: { showAllChapters: next } }); }
+    catch (e) { setSettings({ showAllChapters: prev }); throw e; }
+  };
 
   // ⚠️ Read at render time, not held in state. I18nProvider remounts its entire subtree on a language change,
   // so tapping a chip while a once-only secret is on screen -- the OPDS password, a fresh API token, the 2FA
@@ -195,6 +205,10 @@ function AppearanceSection() {
       <SwitchRow label={tr('Compact chapter list')}
         help={tr('On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.')}
         on={compactList} onChange={(next) => { setCompactChaptersOn(next); setCompactList(next); }} />
+
+      <SwitchRow label={tr('Show all chapters at once')}
+        help={tr('A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.')}
+        on={showAllChapters} onChange={saveShowAllChapters} />
 
       {/* Written to the server so it follows you to another device, and mirrored to localStorage so the login
           screen -- which nobody is signed in to -- is already translated. The note about machine assistance

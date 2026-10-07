@@ -89,7 +89,7 @@ export function wholesHeld(books: ReadonlyArray<Pick<Book, 'number' | 'numberEnd
  * run row stays ABOVE its ghosts in both directions: it is the heading of that stretch, and a heading under
  * its own rows is a footer.
  */
-export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll: boolean, expandedRuns: ReadonlySet<number> = new Set()): Row[] {
+export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll: boolean, expandedRuns: { has(n: number): boolean } = new Set<number>()): Row[] {
   // Reintroduce `new Set(books.map((b) => b.number))`: "a range file's numbers are no ghost rows" in
   // chapterRows.test.ts finds 2 to 6 listed grey under `Batman 01-07`.
   const have = heldBy(books);
@@ -113,6 +113,10 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
   }
   for (const r of runs) if (expandedRuns.has(r.from)) { r.open = true; rest = rest.concat(r.ghosts); }
 
+  // A deleted chapter drawn as a ghost (ghostOfDeleted) was a row before the switch and stays one: it is never folded
+  // behind "Show all", or turning the switch on would take a library's read-and-deleted chapters off the page.
+  const pinned = rest.filter((g) => g.why === 'deleted');
+  rest = rest.filter((g) => g.why !== 'deleted');
   let hidden = 0;
   if (!showAll && rest.length > GHOST_CAP) {
     // Nearest the top of what is on disk first; at equal distance the higher number, since a reader moves
@@ -122,6 +126,7 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
     hidden = rest.length - GHOST_CAP;
     rest = ranked.slice(0, GHOST_CAP);
   }
+  rest = rest.concat(pinned);
   const kept = new Set(rest);
 
   // One block per row, and one per run: the run's own ghost rows (those that survived the cap) travel
@@ -154,7 +159,7 @@ export function mergeRows(books: Book[], ghosts: Ghost[], asc: boolean, showAll:
 
 // Declared through `keys()` because they reach `tr()` through whyLabel's return value, which the string
 // extractor cannot see (lib/i18n.ts says why that has shipped untranslated labels three times).
-const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it', 'another split of a chapter you have', 'another site’s split of this chapter', 'another split', 'another site’s split');
+const WHY_LABELS = keys('not here yet', 'waiting for {g} · {n} days left', 'waiting for a preferred group', 'failed {n} times', 'only a blocked group has it', 'another split of a chapter you have', 'another site’s split of this chapter', 'another split', 'another site’s split', 'deleted');
 
 /**
  * The ghost row's caption: the string key and its arguments, for `tr(key, args)`. Null for `floor` and
@@ -189,6 +194,7 @@ export function whyLabel(
     case 'covered': return o.wholeHere === false
       ? { key: WHY_LABELS[8], args: {}, full: { key: WHY_LABELS[6], args: {} } }
       : { key: WHY_LABELS[7], args: {}, full: { key: WHY_LABELS[5], args: {} } };
+    case 'deleted': return { key: WHY_LABELS[9], args: {} };
     default: return null;
   }
 }
@@ -199,7 +205,7 @@ export function whyLabel(
  * chapter that IS here is not a chapter behind. Reintroduce by dropping the `covered` test: "another site's split"
  * in chapterRows.test.ts counts it.
  */
-export const countsAsBehind = (g: Pick<Ghost, 'why'>): boolean => g.why !== 'floor' && g.why !== 'archive' && g.why !== 'covered';
+export const countsAsBehind = (g: Pick<Ghost, 'why'>): boolean => g.why !== 'floor' && g.why !== 'archive' && g.why !== 'covered' && g.why !== 'deleted';
 
 // Declared through `keys()` for the same reason as WHY_LABELS: they reach `tr()` through runLabel's return.
 const RUN_LABELS = keys('Ch. {a}–{b} · {n} older chapters not here yet', 'Ch. {n} · 1 older chapter not here yet');
@@ -295,4 +301,34 @@ export function prunedWords(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>):
   return b.prunedReason === 'deleted' && b.owned === false
     ? { full: tr('File no longer on disk'), short: tr('No file') }
     : { full: tr('Deleted from the server'), short: tr('Deleted') };
+}
+
+/**
+ * Was this chapter's file deleted ON PURPOSE -- the cleanup, Remove chapters, Delete files? The server's rule (bff
+ * lib/deletedGhosts.ts deliberatelyDeleted): not a file Verify found missing (the sweep fetches those back), and not a
+ * chapter of a library built by hand that Rescan everything found gone ("File no longer on disk": nothing deleted it).
+ */
+export function deliberatelyDeleted(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): boolean {
+  if (!b.pruned) return false;
+  if (b.prunedReason === 'missing') return false;
+  return !(b.prunedReason === 'deleted' && b.owned === false);
+}
+
+/**
+ * A deleted chapter as a ghost row, for the admin's "Show deleted chapters as ghosts" (Listing.deletedAsGhosts): its
+ * number, name, date and group, why `deleted`, and the reader's tick from its own progress -- a tombstone's history
+ * is on its row, and the ghost row's Mark read/unread writes there too (bff lib/listingProgress markNumbers).
+ */
+export function ghostOfDeleted(b: Book): Ghost {
+  return {
+    number: b.number,
+    title: b.chapterName ?? null,
+    publishedAt: b.metadata?.releaseDate ?? null,
+    scanlator: b.scanlator ?? null,
+    groups: b.scanlator ? [b.scanlator] : [],
+    sourceId: b.sourceId ?? '',
+    sourceName: '',
+    why: 'deleted',
+    ...(b.readProgress?.completed ? { read: true } : {}),
+  };
 }

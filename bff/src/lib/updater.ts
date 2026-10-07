@@ -45,7 +45,8 @@ export type UpdateOutcome =
   | 'blocked'       // the source is inside a back-off window
   | 'source_error'  // threw or timed out: the one that used to look like good news
   | 'renumber_pending' // held until an admin confirms a renumber (lib/numbering.ts): nothing listed, nothing fetched
-  | 'off';          // v0.54.0: every source it follows is switched off, so none was asked (not a failure: a choice)
+  | 'off'           // v0.54.0: every source it follows is switched off, so none was asked (not a failure: a choice)
+  | 'paused';       // an unattended run (UpdateOpts.unattended) on a series that is not monitored: nothing asked or fetched
 
 /**
  * The same bound the add path uses (routes/sources.ts). Unbounded, one hung site held the whole sweep -- the
@@ -194,6 +195,14 @@ export interface UpdateOpts {
    * 429, and 28 chapters failed again inside four minutes. Their chapters are the sweep's once the site is ready.
    */
   resting?: (sourceId: string) => boolean;
+  /**
+   * A run nobody asked for on this series: a repair step, Fix everything, a retry of failed chapters. Such a run leaves
+   * an unmonitored series alone (`lib_series.auto_update` off, "Unmonitor" in the library's select bar): it answers
+   * `paused` before asking any source, so no new chapter is searched for or downloaded. A listing-only run (maxNew 0)
+   * downloads nothing and still goes ahead. Absent for everything a person starts on the series itself -- Check now,
+   * Fetch, Fetch again, Fill now -- which an unmonitored series still answers.
+   */
+  unattended?: boolean;
 }
 
 /**
@@ -227,9 +236,11 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
 }
 
 async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): Promise<UpdateResult> {
-  let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,
+  let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,auto_update,
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
+  // Unmonitored (UpdateOpts.unattended): nothing searched for or downloaded by a run nobody started on this series.
+  if (opts.unattended && maxNew > 0 && s.auto_update === false) return nothing(s.title, 'paused');
   // A renumber a crash interrupted is finished before anything here reads lib_books: its files are at their new
   // names and its rows at their old ones until then. One that cannot be finished keeps the series held. A journal
   // whose apply is still running (a check that starts during a confirmed renumber finds it on the row) is waited for
@@ -719,7 +730,7 @@ export async function runUpdateAll(opts: {
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget, a parked source or a hold (below) left unvisited: not a failure, and not nothing either.
-  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, threw: 0, skipped: 0 };
+  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, paused: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 
@@ -791,6 +802,8 @@ export async function runUpdateAll(opts: {
       `SELECT b.id, b.series_id, b.root, b.file, b.number, b.missing_pages, b.source_id
          FROM lib_books b JOIN lib_series s ON s.id = b.series_id
         WHERE b.missing_pages IS NOT NULL AND b.pruned_at IS NULL AND b.root = $1 AND ${visibleToAll('s')}
+          -- An unmonitored series (auto_update off) gets nothing unattended, its missing pages included.
+          AND s.auto_update
         ORDER BY b.updated_at ASC LIMIT $2`, [DL_ROOT, PARTIAL_COMPLETE_MAX],
     ).catch(() => []);
     for (const b of partials) {

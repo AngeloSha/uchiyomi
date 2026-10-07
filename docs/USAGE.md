@@ -222,6 +222,10 @@ genres, description, and the **chapter list**.
   page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
   page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
   is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
+- **Show all chapters at once** (**Profile → Settings → Appearance**, off by default, saved to your account so
+  every device you sign in on follows it): the whole list on one page, with no pager. Every grey row is shown
+  too — no *Show all {n}* row — and the runs of older chapters start unfolded; *Hide* on one still folds it for
+  as long as you are on the page.
 - **Right-click a chapter** (or press and hold it on a touchscreen, or Shift+F10 on the keyboard) for the same
   menu its ⋯ button opens: mark it read or unread, mark everything before it read, its versions, and for an
   admin its number and title (since v0.48.0).
@@ -287,6 +291,18 @@ says how many are in hand. The chips:
 - **Find other sources** (since v0.49.1) — admins only, behind **More**. It searches the other sources for every
   selected series and follows the ones whose title and chapter numbers match (section 4, *Find other sources*); the
   message says where to watch it, *Library → Downloads*.
+- **Monitor** and **Unmonitor** — admins only, behind **More**. They switch each selected series' *Auto-update
+  new chapters* (**Edit details → New chapters**) on or off. An unmonitored series gets no new chapter searched
+  for or downloaded by anything that runs by itself: the hourly check, its pass over chapters saved with pages
+  missing, the nightly repair, *Fix everything* and the slow archive (whose queue entry waits where it is until
+  the series is monitored again). *Check now*, *Fetch*, *Fetch again* and *Fill now* on the series still work.
+- **Delete chapters** — admins only, behind **More**. It deletes the chapters Uchiyomi downloaded for every
+  selected series, as the series page's *Remove chapters* would, except each series' cover chapter, so the
+  tiles keep their covers. Files in a library you built by hand and bookmarked chapters are left alone, the
+  chapters stay listed with everyone's reading history, and *Fetch again* brings one back. **Also stop updates
+  for these series**, ticked by default, unmonitors them too — otherwise the next check downloads their newest
+  chapters again. A series a download is running for is skipped and counted. This is not *Delete files*, which
+  takes a series' whole folder and stays a per-title step on **Content → Library**.
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
@@ -426,9 +442,12 @@ own row, each tap saved at once. A preferred group's
 copy is taken first whenever it exists; a blocked group's copy is never taken while another copy exists. A
 joint release belongs to every group listed on it: it counts as the preferred group's when any of them is
 preferred, and it is blocked only when *all* of them are. A chapter that only blocked groups have released
-is never fetched on its own — its grey row is still listed, and counted in the line's *{n} not here yet*,
-so you know it exists — until someone else releases it; unblock the group if you would rather have their
-copy than none.
+— one group, or several that are all blocked — is **not shown** and never downloaded: it leaves the chapter
+list, the *{n} not here yet* count and the list Mihon and your trackers read the moment you tap **Block**, with
+no check needed, and nothing fetches it (the hourly check, the slow archive, *Fetch*). A chapter an unblocked
+group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
+just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
+Settings → Scanlators**. A chapter already downloaded from a group you block stays on the shelf.
 
 **Patience** is how long a new chapter waits for a preferred group before the best available copy is
 fetched instead. The default is 2 days, which is roughly how far behind the second group on a popular
@@ -852,10 +871,8 @@ hold. Each grey row's caption says why it is not here:
 - **failed {n} times**, in amber — the download was attempted and gave up; the updater will not try again on
   its own. *Fetch* resets that and tries once more. Admins see the last error at the top of the chapter's
   sheet.
-- **only a blocked group has it · {group}** — every copy on offer is from a blocked group. It is shown so you
-  know it exists; unblock the group if you would rather have their copy than none. The row has no cloud
-  icon and the selection bar's *Fetch* skips it; **Fetch** on the copy itself, in the chapter's sheet, does
-  take it.
+- **only a blocked group has it · {group}** — no longer shown: a chapter only blocked groups released leaves the
+  list as soon as the group is blocked (see *Sources & translations* above), and comes back when it is unblocked.
 - **another split · {group} · via {source}** (since v0.50.0; the row's tooltip says *another split of a chapter you
   have*) — a followed site splits or numbers this chapter's parts differently, and the chapter is already here
   the other way: its 78.1 … 78.9 beside the 78 you have as one file. The updater leaves it alone and it is not
@@ -2123,6 +2140,16 @@ placeholder page, because viewing a page would mark the chapter read. A series y
 as *Completed* — a chapter that can never be read is listed, not counted as unread. Only the Mihon extension
 sees these rows: the app, OPDS and offline reading list what is on disk exactly as before, and turning the
 switch off puts the list back at once.
+
+**Show deleted chapters as ghosts** (**Admin → Settings → Library housekeeping**, off by default) changes how a
+chapter whose file was deleted on purpose looks — by the cleanup above, *Remove chapters*, *Delete chapters* or
+*Delete files*. Instead of a row marked *Deleted from the server*, the series page shows it like a chapter not
+downloaded yet: a grey row saying *deleted*, with its read tick, **Mark read / unread** and ☁ **Fetch** to bring
+it back; Mihon lists it as *not downloaded*, as the switch above would. Nothing else moves: the chapter keeps its
+place, everyone's reading history and its counts, and it is still not downloaded again by itself. A chapter whose
+file *Verify chapter files* found missing is not one of these — the hourly check fetches those back — and keeps its
+own look, as does a file gone from a library you built by hand (*File no longer on disk*). A copy saved on your
+device keeps the row a chapter you can open.
 
 Since v0.43.0 the missing chapters can be marked read on the series page (section 4, *Marking chapters you
 don't have as read*), and with this switch on the marks reach Mihon:

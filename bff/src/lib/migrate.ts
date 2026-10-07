@@ -1497,6 +1497,12 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_last_result jso
 -- longer the one it read: on @Kedryn's Unraid every scan opened the first archive of every folder. NULL = read it at the
 -- next scan. v0.55.6 never names it: its scans read every folder, as they always did.
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS info_read text;
+
+-- Deleted chapters shown as ghosts (lib/deletedGhosts.ts): with it on, a chapter whose file was deleted on purpose -- a
+-- tombstone whose pruned_reason is not 'missing' -- is drawn on the series page as a ghost row and listed to Mihon as
+-- "not downloaded", instead of as a deleted chapter. Display only: the updater, the counts and progress read the
+-- tombstone as before. Off by default; an older build boots on this schema and never names it.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS deleted_as_ghosts boolean NOT NULL DEFAULT false;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
