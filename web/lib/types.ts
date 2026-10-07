@@ -273,11 +273,11 @@ export interface Book {
    */
   pruned?: boolean;
   /**
-   * Why a pruned chapter's file is gone (v0.55.4): 'deleted' by Delete files or by Rescan everything, 'missing' by
-   * Verify chapter files, null for the read-chapter cleanup, a chapter's own delete or an older mark. Null or absent
-   * while the chapter has its file, and from a server before v0.55.4. The row's chip is worded by it (prunedLabel).
+   * Why a pruned chapter's file is gone: 'deleted' by a deliberate delete, 'missing' by Verify chapter files,
+   * 'rescan_missing' when Rescan found somebody's own file absent, and null for the read cleanup, a chapter's own
+   * delete or an older mark. Null or absent while the chapter has its file. The row's chip is worded by it.
    */
-  prunedReason?: 'deleted' | 'missing' | null;
+  prunedReason?: 'deleted' | 'missing' | 'rescan_missing' | null;
   /**
    * The file lives under the downloads root, i.e. Uchiyomi fetched it and can fetch it again. Only these
    * may be deleted from the server or fetched again: a chapter in a library somebody assembled by hand is
@@ -312,7 +312,11 @@ export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'ar
 
 /** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
 export interface Ghost {
+  /** A deliberate tombstone keeps its original identity; absent for a source-only listing row. */
+  bookId?: string;
   number: number;
+  /** End of a deleted range chapter. Source-only listing rows are one number. */
+  numberEnd?: number | null;
   title: string | null;
   publishedAt: string | null;
   /** The group of the copy the scanlator rules would take. Null when the source did not say. */
@@ -322,6 +326,8 @@ export interface Ghost {
   sourceId: string;
   sourceName: string;
   why: GhostWhy;
+  /** True only for an existing lib_books tombstone rendered with the ghost treatment. */
+  deleted?: true;
   attempts?: number;
   /** The downloader's last error text. Admins only; absent for everyone else. */
   reason?: string;

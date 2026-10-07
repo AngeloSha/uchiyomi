@@ -163,7 +163,7 @@ export async function dueCountCached(days: number): Promise<number> {
  * admin's Delete files passes 'deleted', the verify task passes 'missing'. Only 'missing' changes what the
  * updater does -- see heldBooks below.
  */
-export type PrunedReason = 'deleted' | 'missing';
+export type PrunedReason = 'deleted' | 'missing' | 'rescan_missing';
 
 export async function tombstoneBooks(ids: string[], reason: PrunedReason | null = null): Promise<void> {
   if (!ids.length) return;

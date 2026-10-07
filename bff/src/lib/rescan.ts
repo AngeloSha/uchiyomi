@@ -976,8 +976,9 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
   for (let i = 0; i < todo.length; i += MARK_BATCH) {
     if (runtime.stopping) { out.stopped = 'shutdown'; break; }
     const batch = todo.slice(i, i + MARK_BATCH);
-    // 'deleted': held, as Delete files' mark -- the sweep never fetches these back (chapterCleanup.ts heldBooks).
-    await tombstoneBooks(batch.map((g) => g.id), 'deleted');
+    // Distinct from an intentional delete.  Both are held from the sweep, but only `deleted` is eligible for
+    // the admin's deleted-as-ghost display; this one still belongs to a hand-built folder and may reappear.
+    await tombstoneBooks(batch.map((g) => g.id), 'rescan_missing');
     out.marked += batch.length;
     for (const g of batch) touched.add(g.seriesId);
   }

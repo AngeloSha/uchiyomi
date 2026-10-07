@@ -278,9 +278,9 @@ export function chaptersLeft(jobs: { total: number; done: number }[]): number {
 
 /**
  * The words on a tombstone's chip, by why its file is gone (Book.prunedReason, v0.55.4). A chapter in a library you
- * built by hand that Rescan everything found gone -- `deleted`, and not one this server downloaded -- says "File no
- * longer on disk": nothing deleted it, the file simply is not there, and a file put back is picked up by the next
- * scan. Every other tombstone keeps "Deleted from the server", as before. Null for a chapter with its file.
+ * built by hand that Rescan everything found gone -- `rescan_missing` -- says "File no longer on disk": nothing
+ * deleted it, the file simply is not there, and a file put back is picked up by the next scan. Every other tombstone
+ * keeps "Deleted from the server", as before. Null for a chapter with its file.
  * Reintroduce one wording for every tombstone: "a chapter whose file went from your own folder says so" in
  * chapterRows.test.ts reads "Deleted from the server".
  */
@@ -298,7 +298,7 @@ export function prunedLabel(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>):
  */
 export function prunedWords(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): { full: string; short: string } | null {
   if (!b.pruned) return null;
-  return b.prunedReason === 'deleted' && b.owned === false
+  return b.prunedReason === 'rescan_missing'
     ? { full: tr('File no longer on disk'), short: tr('No file') }
     : { full: tr('Deleted from the server'), short: tr('Deleted') };
 }
@@ -310,8 +310,7 @@ export function prunedWords(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>):
  */
 export function deliberatelyDeleted(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): boolean {
   if (!b.pruned) return false;
-  if (b.prunedReason === 'missing') return false;
-  return !(b.prunedReason === 'deleted' && b.owned === false);
+  return b.prunedReason !== 'missing' && b.prunedReason !== 'rescan_missing';
 }
 
 /**
@@ -321,7 +320,9 @@ export function deliberatelyDeleted(b: Pick<Book, 'pruned' | 'prunedReason' | 'o
  */
 export function ghostOfDeleted(b: Book): Ghost {
   return {
+    bookId: b.id,
     number: b.number,
+    numberEnd: b.numberEnd ?? null,
     title: b.chapterName ?? null,
     publishedAt: b.metadata?.releaseDate ?? null,
     scanlator: b.scanlator ?? null,
@@ -329,6 +330,7 @@ export function ghostOfDeleted(b: Book): Ghost {
     sourceId: b.sourceId ?? '',
     sourceName: '',
     why: 'deleted',
+    deleted: true,
     ...(b.readProgress?.completed ? { read: true } : {}),
   };
 }

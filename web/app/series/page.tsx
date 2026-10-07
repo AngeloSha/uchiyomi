@@ -582,7 +582,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   const title = ghost.title?.trim() || '';
   const showTitle = !!title && !/^(ch(apter)?\.?\s*)?[\d.]+$/i.test(title);
   return (
-    <div id={`ch-${ghost.number}`} className="border-b border-ink-800/70">
+    <div id={`ch-${ghost.bookId ?? ghost.number}`} className="border-b border-ink-800/70">
     {/* The dimming is the opener's and the date's, not the row's: the fetch button at the end of the line
         is a live control, and a child cannot undo its parent's opacity. */}
     <div className={rowClass(!!compact)} {...menuBind}>
@@ -599,7 +599,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           <p className={`truncate text-sm ${read ? 'text-fog-500' : 'text-fog-300'}`}>
             {/* Compact hides the box, and its tick's label with it: say it once for screen readers. */}
             {compact && read && !selectable && <span className="sr-only hidden lg:pointer-fine:inline">{tr('Read · not on the server')} </span>}
-            {chapterLabel({ number: ghost.number })}
+            {chapterLabel({ number: ghost.number, numberEnd: ghost.numberEnd })}
             {showTitle && <span className="text-fog-500"> · {title}</span>}
           </p>
           {/* "waiting for Asura Scans · 2 days left" already names the group; the group part is for the
@@ -723,7 +723,7 @@ function SeriesInner() {
   // changes shape, so a selection can never outlive the rows it was made from.
   const [selecting, setSelecting] = useState(false);
   const [pickedBooks, setPickedBooks] = useState<Set<string>>(new Set());
-  const [pickedGhosts, setPickedGhosts] = useState<Set<number>>(new Set());
+  const [pickedGhosts, setPickedGhosts] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
   const [confirming, setConfirming] = useState<null | 'delete' | 'refetch'>(null);
   const [started, setStarted] = useState<StartedJob | null>(null);
@@ -1089,8 +1089,17 @@ function SeriesInner() {
     qc.invalidateQueries({ queryKey: ['home'] });
     return ok;
   };
-  const markGhost = async (number: number, completed: boolean) => {
-    if (await markGhosts([number], completed)) toast(completed ? tr('Marked read') : tr('Marked unread'), 'success');
+  const markGhost = async (ghost: Ghost, completed: boolean) => {
+    // A deliberate tombstone still has its original book row and progress. Keep duplicate chapter numbers
+    // distinct by writing through that stable id; source-only ghosts have no book and keep the number route.
+    if (ghost.bookId) {
+      const book = allBooks.find((b) => b.id === ghost.bookId);
+      if (!book) return;
+      await setRead([book], completed);
+      toast(completed ? tr('Marked read') : tr('Marked unread'), 'success');
+      return;
+    }
+    if (await markGhosts([ghost.number], completed)) toast(completed ? tr('Marked read') : tr('Marked unread'), 'success');
   };
   const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
     if (mode === 'previous') {
@@ -1162,8 +1171,9 @@ function SeriesInner() {
   // ---- select mode -------------------------------------------------------------------------------
   const togglePickBook = (bookId: string) =>
     setPickedBooks((p) => { const n = new Set(p); n.has(bookId) ? n.delete(bookId) : n.add(bookId); return n; });
-  const togglePickGhost = (number: number) =>
-    setPickedGhosts((p) => { const n = new Set(p); n.has(number) ? n.delete(number) : n.add(number); return n; });
+  const ghostKey = (g: Ghost) => g.bookId ? `book:${g.bookId}` : `number:${g.number}`;
+  const togglePickGhost = (ghost: Ghost) =>
+    setPickedGhosts((p) => { const n = new Set(p); const k = ghostKey(ghost); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleGhosts = () => {
     const next = !showGhosts;
     setShowGhosts(next);
@@ -1175,7 +1185,7 @@ function SeriesInner() {
   // toolbar's "{n} selected" is the number of rows the person can see ticked. The pick itself survives in
   // its set, and comes back when the filter is widened again.
   const pickedBookList = useMemo(() => filteredBooks.filter((b) => pickedBooks.has(b.id)), [filteredBooks, pickedBooks]);
-  const pickedGhostList = useMemo(() => filteredGhosts.filter((g) => pickedGhosts.has(g.number)), [filteredGhosts, pickedGhosts]);
+  const pickedGhostList = useMemo(() => filteredGhosts.filter((g) => pickedGhosts.has(ghostKey(g))), [filteredGhosts, pickedGhosts]);
   // Each action's eligible subset. A button acts on its subset, never on the whole selection, and is
   // disabled when the subset is empty -- so picking three chapters and a ghost never makes Fetch try the
   // chapters. Mark read / Mark unread are the two that take BOTH kinds since #69 (bulkMark).
@@ -1207,8 +1217,10 @@ function SeriesInner() {
   const bulkMark = async (completed: boolean) => {
     setActing(true);
     const n = pickedBookList.length + pickedGhostList.length;
-    if (pickedBookList.length) await setRead(pickedBookList, completed);
-    const ok = pickedGhostList.length ? await markGhosts(pickedGhostList.map((g) => g.number), completed) : true;
+    const tombstones = pickedGhostList.flatMap((g) => g.bookId ? allBooks.filter((b) => b.id === g.bookId) : []);
+    if (pickedBookList.length || tombstones.length) await setRead([...pickedBookList, ...tombstones], completed);
+    const listed = pickedGhostList.filter((g) => !g.bookId);
+    const ok = listed.length ? await markGhosts(listed.map((g) => g.number), completed) : true;
     if (ok) toast(completed ? tr('Marked {n} read', { n }) : tr('Marked {n} unread', { n }), 'success');
     setActing(false);
     leaveSelect();
@@ -1238,10 +1250,37 @@ function SeriesInner() {
     setActing(false);
     setConfirming(null);
   };
-  const bulkFetch = () => startJob('/api/sources/fetch', { seriesId: id, numbers: fetchable.map((g) => g.number) });
+  const bulkFetch = async () => {
+    const listed = fetchable.filter((g) => !g.bookId).map((g) => g.number);
+    const deleted = fetchable.flatMap((g) => g.bookId ? [g.bookId] : []);
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [
+      ...(listed.length ? [{ path: '/api/sources/fetch', body: { seriesId: id, numbers: listed } }] : []),
+      ...deleted.map((bookId) => ({ path: `/api/books/${bookId}/refetch`, body: {} })),
+    ];
+    if (!requests.length) return;
+    setActing(true);
+    try {
+      for (const [i, request] of requests.entries()) {
+        const res = await api<{ folder: string; total: number }>(request.path, { method: 'POST', json: request.body });
+        setStarted({ folder: res.folder, at: Date.now() });
+        void kickDownloads(qc);
+        if (i === 0) {
+          toast(fetchingToast(fetchable.length), 'info', { busy: true });
+          invalidateChapters();
+          leaveSelect();
+        }
+        if (i < requests.length - 1) {
+          const ended = await awaitJob(res.folder);
+          if (ended?.status === 'error') throw new Error(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'));
+        }
+      }
+    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    setActing(false);
+  };
   // The fetch icon on one ghost row: the bar's Fetch for a list of one, same request, same toast, same
   // polling -- so a chapter arrives the same way whether it was picked alone or with twenty others.
   const fetchOne = (number: number) => startJob('/api/sources/fetch', { seriesId: id, numbers: [number] });
+  const fetchDeleted = (bookId: string) => startJob(`/api/books/${bookId}/refetch`, {});
   /**
    * Poll the shared jobs key until the job for `folder` is no longer downloading; the job as last seen, or
    * null when the list no longer has it (over and aged out -- or, past the same five seconds `jobDone`
@@ -1601,7 +1640,7 @@ function SeriesInner() {
           {/* The group filter and the ghost switch live in a sheet; the count of active choices is a tiny
               badge on the chip, not ` · {n}` text, which is what pushed the row past 358 px. Rendered only
               when there is something to filter by. */}
-          {(groupNames.length > 0 || ghosts.length > 0) && (
+          {(groupNames.length > 0 || ghosts.length > 0 || deletedGhosts.length > 0) && (
             <button onClick={() => setFilterOpen(true)} aria-haspopup="dialog" className={`chip relative text-xs ${activeFilters > 0 ? 'chip-active' : ''}`}>
               {tr('Filter')}
               {activeFilters > 0 && (
@@ -1638,14 +1677,16 @@ function SeriesInner() {
           }
           if (r.kind === 'ghost') {
             return (
-              <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} compact={compact} sourceNames={sourceNames} primarySource={primarySource}
+              <GhostRow key={`g:${r.ghost.bookId ?? r.ghost.number}`} ghost={r.ghost} compact={compact} sourceNames={sourceNames} primarySource={primarySource}
                 wholeHere={haveWholes.has(Math.floor(r.ghost.number))}
-                selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)}
+                selectable={selecting} selected={pickedGhosts.has(ghostKey(r.ghost))} onToggle={() => togglePickGhost(r.ghost)}
                 onOpen={() => setChapterSheet({ number: r.ghost.number, ghost: r.ghost })}
                 // Same audience and same exclusion as the bar's Fetch (`fetchable`): a row only blocked
                 // groups released cannot be fetched while the block stands, so it gets no button.
-                onFetch={canDownload(user) && r.ghost.why !== 'blocked' ? () => fetchOne(r.ghost.number) : undefined}
-                onMark={(completed) => markGhost(r.ghost.number, completed)} />
+                onFetch={canDownload(user) && r.ghost.why !== 'blocked'
+                  ? () => r.ghost.bookId ? fetchDeleted(r.ghost.bookId) : fetchOne(r.ghost.number)
+                  : undefined}
+                onMark={(completed) => markGhost(r.ghost, completed)} />
             );
           }
           if (r.kind === 'run') {
@@ -1831,7 +1872,7 @@ function SeriesInner() {
       )}
       {explaining && <SourcesExplainer onClose={() => { setExplaining(false); setSourcesOpen(true); }} />}
       {filterOpen && (
-        <ChapterFilterSheet groupNames={groupNames} group={group} onGroup={setGroup} hasGhosts={ghosts.length > 0}
+        <ChapterFilterSheet groupNames={groupNames} group={group} onGroup={setGroup} hasGhosts={ghosts.length > 0 || deletedGhosts.length > 0}
           showGhosts={showGhosts} onToggleGhosts={toggleGhosts} onClose={() => setFilterOpen(false)} />
       )}
       {chapterSheet && (
@@ -1844,7 +1885,13 @@ function SeriesInner() {
           // followed by "none of those chapters can be fetched again". `!== false`, not `=== true`: `owned`
           // is absent on a server older than the field, and absent is not "no".
           mayReplace={!!chapterSheet.book && isAdmin && chapterSheet.book.owned !== false}
-          onFetch={(copy) => { const n = chapterSheet.number; setChapterSheet(null); void (copy ? pickGhost(n, copy) : fetchOne(n)); }}
+          onFetch={(copy) => {
+            const { number: n, ghost } = chapterSheet;
+            setChapterSheet(null);
+            // A deliberate tombstone may only use the canonical owned copy stored on the book. Ignore
+            // alternate copies shown by the versions sheet; the member restore endpoint enforces it too.
+            void (ghost?.bookId ? fetchDeleted(ghost.bookId) : copy ? pickGhost(n, copy) : fetchOne(n));
+          }}
           // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
           // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
