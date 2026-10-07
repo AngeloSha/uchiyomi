@@ -39,7 +39,9 @@ export function bookCountText(n: number, volumes = false): string {
 
 export function chapterLabel(b: { metadata?: { number?: string; title?: string }; number?: number; name?: string }): string {
   const n = b.metadata?.number ?? (b.number != null ? String(b.number) : '');
-  if (n) return isVolumeName(b.name || b.metadata?.title) ? `Vol. ${n}` : `Ch. ${n}`;
+  // Through tr() (v0.55.7): "Ch. 12" was English on every chapter row, in the reader's list and on the edition chips,
+  // in a file that has said "الفصل {n}" for "Ch. {n}" since the gap ranges.
+  if (n) return isVolumeName(b.name || b.metadata?.title) ? tr('Vol. {n}', { n }) : tr('Ch. {n}', { n });
   return b.name || '';
 }
 

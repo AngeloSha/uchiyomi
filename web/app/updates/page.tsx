@@ -23,7 +23,7 @@ export default function UpdatesPage() {
 
   const markAll = async () => {
     await api('/api/updates/seen', { method: 'POST' });
-    toast('All caught up', 'success');
+    toast(tr('All caught up'), 'success');
     qc.invalidateQueries({ queryKey: ['home'] });
     refetch();
   };
@@ -46,9 +46,9 @@ export default function UpdatesPage() {
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
         </div>
       ) : items.length === 0 ? (
-        <EmptyState art={ART.emptyUpdates} title="You're all caught up"
-          sub="Favorite some series and new chapters will appear here as Uchiyomi downloads them."
-          cta={{ href: '/library', label: 'Browse library' }} />
+        <EmptyState art={ART.emptyUpdates} title={tr('You’re all caught up')}
+          sub={tr('Favorite some series and new chapters will appear here as Uchiyomi downloads them.')}
+          cta={{ href: '/library', label: tr('Browse library') }} />
       ) : (
         <div className="space-y-3 px-4 pt-3 lg:mx-auto lg:max-w-2xl lg:px-0">
           {items.map(({ series, newCount, latestAt }) => (
@@ -59,7 +59,7 @@ export default function UpdatesPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-fog-100">{series.metadata?.title || series.name}</p>
                 <p className="mt-0.5 text-xs text-accent">
-                  +{newCount} new chapter{newCount > 1 ? 's' : ''}
+                  {newCount === 1 ? tr('+1 new chapter') : tr('+{n} new chapters', { n: newCount })}
                   {latestAt && <span className="text-fog-500"> · {relativeTime(latestAt)}</span>}
                 </p>
               </div>

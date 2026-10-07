@@ -98,7 +98,7 @@ function SearchInner() {
             </p>
           ) : (
             <>
-              <p className="mb-3 text-xs text-fog-500">{data?.totalElements} results</p>
+              <p className="mb-3 text-xs text-fog-500">{data?.totalElements === 1 ? tr('1 result') : tr('{n} results', { n: data?.totalElements ?? 0 })}</p>
               <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10">
                 {data?.content.map((s, i) => <SeriesTile key={s.id} series={s} eager={i < 12} />)}
               </div>

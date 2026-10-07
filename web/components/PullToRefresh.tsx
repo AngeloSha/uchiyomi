@@ -1,5 +1,6 @@
 'use client';
 import { useRef, useState, ReactNode } from 'react';
+import { t as tr } from '@/lib/i18n';
 
 const THRESHOLD = 70;
 
@@ -41,7 +42,7 @@ export function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promis
       <div style={{ height: dist }} className="flex items-center justify-center overflow-hidden text-fog-500 transition-[height] duration-200">
         {dist > 0 && (
           <span className={`text-xs ${busy ? 'animate-pulse-soft text-accent' : ''}`}>
-            {busy ? 'Refreshing…' : dist >= THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}
+            {busy ? tr('Refreshing…') : dist >= THRESHOLD ? tr('Release to refresh') : tr('Pull to refresh')}
           </span>
         )}
       </div>

@@ -159,8 +159,8 @@ function LibraryInner() {
     try {
       const r = await api<{ seriesId: string | null }>('/api/random');
       if (r.seriesId) router.push(`/series/?id=${r.seriesId}`);
-      else toast('Nothing to pick from yet', 'error');
-    } catch { toast('Could not pick a series', 'error'); }
+      else toast(tr('Nothing to pick from yet'), 'error');
+    } catch { toast(tr('Could not pick a series'), 'error'); }
   };
 
   const onRefresh = async () => {
@@ -183,10 +183,15 @@ function LibraryInner() {
       const r = await api<{ applied: number; skipped: { id: string }[] }>(path, {
         json: { seriesIds: [...picked], ...extra },
       });
-      // Say what was skipped rather than silently applying to fewer than were selected.
-      toast(r.skipped.length ? `${r.applied} updated, ${r.skipped.length} no longer exist` : `${r.applied} updated`, 'success');
+      // Say what was skipped rather than silently applying to fewer than were selected. Each count its own pair of
+      // keys, and its own words: "1 no longer exist" was English, and wrong English, in every language, and the
+      // Tasks line's "{n} updated" counts extensions.
+      const updated = r.applied === 1 ? tr('1 series updated') : tr('{n} series updated', { n: r.applied });
+      const gone = r.skipped.length === 1 ? tr('1 is no longer in the library')
+        : tr('{n} are no longer in the library', { n: r.skipped.length });
+      toast(r.skipped.length ? `${updated} · ${gone}` : updated, 'success');
       settle();
-    } catch { toast('Could not apply that', 'error'); }
+    } catch { toast(tr('Could not apply that'), 'error'); }
     setActing(false);
   };
 

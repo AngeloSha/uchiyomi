@@ -16,6 +16,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
@@ -87,7 +88,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
       <div role="dialog" aria-modal="true" aria-label={tr('Add to collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         {isLoading ? (
           <div className="skeleton h-24 rounded-xl" />
@@ -156,7 +157,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
     setRefusal(null);
     try {
       await api(`/api/admin/series/${id}/rename-folder`, { method: 'POST', json: { folder: next.trim() } });
-      toast('Folder renamed', 'success');
+      toast(tr('Folder renamed'), 'success');
       onSaved();
       onClose();
     } catch (e: any) {
@@ -165,19 +166,19 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         const b = JSON.parse(e?.body || '{}');
         if (b.message || b.fix) { setRefusal({ message: b.message, fix: b.fix }); shown = true; }
       } catch {}
-      if (!shown) toast(msgOf(e, 'Could not rename the folder'), 'error');
+      if (!shown) toast(msgOf(e, tr('Could not rename the folder')), 'error');
     }
     setBusy(false);
   };
 
   const changed = next.trim() !== folder.trim() && next.trim().length > 0;
+  const [currentlyBefore, currentlyAfter] = tr('Currently: {folder}').split('{folder}');
 
   return (
-    <Modal title={`Rename the folder for \u201c${title}\u201d`} onClose={onClose}>
+    <Modal title={tr('Rename the folder for “{title}”', { title: `\u2068${title}\u2069` })} onClose={onClose}>
       <div className="space-y-3">
         <p className="text-xs text-fog-500">
-          This moves the folder on disk. Chapter ids and everyone&rsquo;s reading progress stay exactly as
-          they are, so nothing is marked unread and nothing is re-downloaded.
+          {tr('This moves the folder on disk. Chapter ids and everyone’s reading progress stay exactly as they are, so nothing is marked unread and nothing is re-downloaded.')}
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-fog-500">{tr('Folder, relative to your library root')}</span>
@@ -188,7 +189,9 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
             className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 font-mono text-sm text-fog-100 outline-hidden focus:border-accent/60"
           />
         </label>
-        <p className="text-[11px] text-fog-600">{tr('Currently')}<span className="font-mono">{folder}</span></p>
+        {/* One sentence split around the folder, which is set in mono: `tr('Currently')` glued to it read
+            "Currentlymanga/Solo Leveling" in every language. */}
+        <p className="text-[11px] text-fog-600">{currentlyBefore}<span dir="ltr" className="font-mono">{folder}</span>{currentlyAfter}</p>
 
         {refusal && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
@@ -200,7 +203,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="chip text-xs">{tr('Cancel')}</button>
           <button onClick={save} disabled={busy || !changed} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
-            {busy ? 'Renaming\u2026' : 'Rename folder'}
+            {busy ? tr('Renaming…') : tr('Rename folder')}
           </button>
         </div>
       </div>
@@ -218,7 +221,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
 
   const save = async (reset = false) => {
     const n = reset ? null : Number(number);
-    if (!reset && !Number.isFinite(n)) { toast('Chapter number must be a number', 'error'); return; }
+    if (!reset && !Number.isFinite(n)) { toast(tr('Chapter number must be a number'), 'error'); return; }
     setBusy(true);
     try {
       const r = await api<{ affectedUsers: number }>(`/api/admin/books/${book.id}/meta`, {
@@ -238,7 +241,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
       <div role="dialog" aria-modal="true" aria-label={tr('Edit chapter')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapter number')}</label>
         <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
@@ -246,9 +249,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         {completed && (
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
-            You have finished this chapter. Changing its number changes what gets reported to a connected
-            tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps
-            the higher one until an admin imports your list again under Admin → Import (From your tracker).
+            {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin → Import (From your tracker).')}
           </p>
         )}
         <div className="mt-4 flex gap-2">
@@ -472,7 +473,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
           </p>
           <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedWords(book)} missing={book.missingPages?.length} />
           {state === 'reading' && rp && (
-            <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
+            <p className="text-[11px] text-accent">{tr('page {page}/{pages}', { page: rp.page, pages: book.media.pagesCount })}</p>
           )}
         </div>
       </button>
@@ -1426,10 +1427,10 @@ function SeriesInner() {
     setBusyAdmin(true);
     try {
       await api(`/api/admin/series/${id}`, { method: 'DELETE' });
-      toast('Series removed from the library', 'success');
+      toast(tr('Series removed from the library'), 'success');
       router.push('/library');
     } catch (e) {
-      toast(msgOf(e, 'Could not remove it'), 'error');
+      toast(msgOf(e, tr('Could not remove it')), 'error');
     }
     setBusyAdmin(false);
   };
@@ -1531,8 +1532,8 @@ function SeriesInner() {
   );
 
   const metaBits: ReactNode[] = [
-    author ? <span className="text-fog-300">by {author}</span> : null,
-    meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
+    author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
+    meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
@@ -1752,7 +1753,7 @@ function SeriesInner() {
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
           {(meta?.status || rating) && (
             <div className="mb-2 flex items-center gap-2">
-              {meta?.status && <span className="chip text-[11px] capitalize">{meta.status.toLowerCase()}</span>}
+              {meta?.status && <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>}
               {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
             </div>
           )}
@@ -1843,7 +1844,7 @@ function SeriesInner() {
           title={tr('Remove from library?')}
           danger
           busy={busyAdmin}
-          confirmLabel="Remove"
+          confirmLabel={tr('Remove')}
           confirmText={series.name}
           body={
             <>
@@ -1851,8 +1852,8 @@ function SeriesInner() {
               {editions && series.lang && (
                 <p className="mb-2">{tr('This removes the {language} edition. The other editions stay.', { language: languageName(series.lang) })}</p>
               )}
-              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
-              <p className="mt-2">Everyone&rsquo;s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin &rarr; Library, or just add it again.</p>
+              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong>{' '}{tr('The chapters stay exactly where they are on disk, and nothing in your library folder is touched.')}</p>
+              <p className="mt-2">{tr('Everyone’s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin → Library, or just add it again.')}</p>
             </>
           }
           onConfirm={doDelete}

@@ -289,7 +289,7 @@ function ReaderInner() {
         try {
           const local = await listSeriesDownloads(first.seriesId);
           if (alive && local.length) {
-            setChapterRefs(local.map((c) => ({ id: c.bookId, label: c.title || `Chapter ${c.number}` })));
+            setChapterRefs(local.map((c) => ({ id: c.bookId, label: c.title || tr('Chapter {n}', { n: c.number }) })));
             setRefsFrom('offline');
           }
         } catch {}
@@ -1060,7 +1060,7 @@ function ReaderInner() {
   const titleBlock = (
     <>
       <p className="flex items-center gap-1 text-sm font-medium text-white transition group-hover:text-accent">
-        <span className="truncate">{activeChapter?.seriesTitle || 'Reading'}</span>
+        <span className="truncate">{activeChapter?.seriesTitle || tr('Reading')}</span>
         {seriesHref && <IcChevronRight width={14} height={14} className="shrink-0 text-fog-500 transition group-hover:text-accent" />}
       </p>
       <p className="truncate text-[11px] text-fog-400">{activeChapter?.title}</p>
@@ -1117,7 +1117,7 @@ function ReaderInner() {
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">
         {offlineEnd ? tr('End of your downloads') : tr('You finished')}
       </p>
-      <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || 'this series'}</h2>
+      <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || tr('This series')}</h2>
       {offlineEnd && (
         <p className="mx-auto mt-2 max-w-sm text-sm text-fog-400">
           {tr('This is the last chapter you have offline. Reconnect to keep reading.')}
@@ -1173,7 +1173,7 @@ function ReaderInner() {
                   <div style={{ height: DIVIDER_H }} className="flex items-center justify-center gap-3 text-xs text-fog-500">
                     <span className="h-px w-8 bg-ink-700" />
                     <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-600">{tr('Up Next')}</span>
-                    <span className="text-fog-400">{chapters[p.ci]?.title || 'Next chapter'}</span>
+                    <span className="text-fog-400">{chapters[p.ci]?.title || tr('Next chapter')}</span>
                     <span className="h-px w-8 bg-ink-700" />
                   </div>
                 )}
@@ -1208,7 +1208,7 @@ function ReaderInner() {
                       </span>
                     </button>
                   ) : activeSet.has(i) && srcFor(i) ? (
-                    <ReaderImg src={srcFor(i)!} alt={`Page ${p.number}`} className="block h-full w-full object-cover" />
+                    <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="block h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs text-ink-600">{p.number}</div>
                   )}
@@ -1262,13 +1262,13 @@ function ReaderInner() {
                     return (
                       <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                         style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-                        <ReaderImg src={srcFor(i)!} alt={`Page ${p.number}`} className="max-h-full object-contain" />
+                        <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" />
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
                   }
                   return (
-                    <ReaderImg key={p.key} src={srcFor(i)!} alt={`Page ${p.number}`}
+                    <ReaderImg key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
                       className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} />
                   );
@@ -1310,7 +1310,8 @@ function ReaderInner() {
                   near-miss lands on the header's transparent gradient and does nothing at all, which is the
                   same dead tap being complained about. active:opacity-80 because touch has no hover. */}
               {seriesHref ? (
-                <Link href={seriesHref} aria-label={`Open ${activeChapter?.seriesTitle || 'this'} series page`}
+                <Link href={seriesHref} aria-label={activeChapter?.seriesTitle
+                  ? tr('Open the series page for {title}', { title: `\u2068${activeChapter.seriesTitle}\u2069` }) : tr('Open the series page')}
                   className="group min-w-0 flex-1 transition active:opacity-80">
                   {titleBlock}
                 </Link>
@@ -1325,7 +1326,7 @@ function ReaderInner() {
                   <IcGrid width={18} height={18} />
                 </button>
               )}
-              <button onClick={toggleBookmark} aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+              <button onClick={toggleBookmark} aria-label={bookmarked ? tr('Remove bookmark') : tr('Bookmark this page')}
                 aria-pressed={bookmarked}
                 className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 backdrop-blur ${bookmarked ? 'text-accent' : 'text-white'}`}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill={bookmarked ? 'currentColor' : 'none'}

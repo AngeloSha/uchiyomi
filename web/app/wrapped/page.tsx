@@ -9,7 +9,7 @@ import { Wordmark } from '@/components/Brand';
 import { IcChevronLeft } from '@/components/icons';
 import { Heatmap } from '@/components/charts/Heatmap';
 import { Bars } from '@/components/charts/Bars';
-import { t as tr } from '@/lib/i18n';
+import { keys, t as tr } from '@/lib/i18n';
 
 function CountUp({ to }: { to: number }) {
   const [n, setN] = useState(0);
@@ -39,8 +39,19 @@ interface Wrapped {
   byDow?: number[];
   busiestDow: number;
 }
-const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// Through keys(): both places that show a day say `tr(DOW[i])`, which a scan for inline tr() cannot see, so the
+// days were English in every language.
+const DOW = keys('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday');
 const MON = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+
+/**
+ * The line under the year's big number, which counts chapters: its noun agrees with that number ("1 chapter"), and
+ * the series it names are counted in pairs. It was "chapters across 1 series" in English in every language.
+ */
+const acrossText = (chapters: number, series: number): string =>
+  chapters === 1 ? tr('chapter')
+  : series === 1 ? tr('chapters across 1 series')
+  : tr('chapters across {n} series', { n: series });
 
 export default function WrappedPage() {
   // Static export: any page reading search params needs a Suspense boundary or `next build` fails.
@@ -72,6 +83,9 @@ function Wrapped() {
   for (let y = thisYear; y >= Math.max(1970, Math.min(firstYear, thisYear)); y--) years.push(y);
 
   const maxM = Math.max(1, ...(data?.byMonth ?? [0]));
+  // One sentence split around the day, which is set brighter: `tr('Your power day was')` glued to it read
+  // "Your power day wasTuesday", and a language that puts the day first could not.
+  const [dayBefore, dayAfter] = tr('Your power day was {day}').split('{day}');
 
   return (
     <div className="min-h-screen-d">
@@ -79,7 +93,7 @@ function Wrapped() {
         <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100">
           <IcChevronLeft width={22} height={22} />
         </button>
-        <h1 className="font-display text-2xl font-bold">Wrapped {year}</h1>
+        <h1 className="font-display text-2xl font-bold">{tr('Wrapped {year}', { year: String(year) })}</h1>
       </header>
 
       {years.length > 1 && (
@@ -105,9 +119,9 @@ function Wrapped() {
           <Wordmark className="text-xl" />
           <p className="mt-6 text-sm text-fog-300">{year === thisYear ? tr('This year you read') : tr('In {y} you read', { y: String(year) })}</p>
           <p className="font-brand text-7xl font-bold text-accent drop-shadow-[0_2px_24px_rgba(124,92,255,0.4)]"><CountUp to={data?.chapters ?? 0} /></p>
-          <p className="text-lg text-fog-100">chapters across {data?.series ?? 0} series</p>
+          <p className="text-lg text-fog-100">{acrossText(data?.chapters ?? 0, data?.series ?? 0)}</p>
           {data != null && data.chapters > 0 && (
-            <p className="mt-4 text-sm text-fog-300">{tr('Your power day was')}<span className="text-fog-100">{DOW[data.busiestDow]}</span></p>
+            <p className="mt-4 text-sm text-fog-300">{dayBefore}<span className="text-fog-100">{tr(DOW[data.busiestDow])}</span>{dayAfter}</p>
           )}
         </div>
       </div>
@@ -153,7 +167,7 @@ function Wrapped() {
               <Link key={s.id} href={`/series/?id=${s.id}`} className="flex items-center gap-3 px-4 py-3">
                 <span className="w-5 font-display text-lg font-bold text-accent">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-sm text-fog-100">{s.title}</span>
-                <span className="text-xs text-fog-500">{s.count} ch</span>
+                <span className="text-xs text-fog-500">{tr('{n} ch', { n: s.count })}</span>
               </Link>
             ))}
           </div>

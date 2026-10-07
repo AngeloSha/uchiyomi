@@ -23,7 +23,7 @@ import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/Re
 import { RESCAN_KEY, RescanPanel } from '@/components/RescanTask';
 import { ActionStatus } from '@/components/ActionList';
 import { RepairRunProvider } from '@/lib/useRepairRun';
-import { FindRunProvider } from '@/lib/useFindRun';
+import { FindRunProvider, codeOf } from '@/lib/useFindRun';
 import { FindRunCard } from '@/components/FindSources';
 import { checkTitle } from '@/lib/healthCopy';
 import { checkNote, checkSummary, itemDetail, itemTitle } from '@/lib/said';
@@ -46,6 +46,9 @@ import { useLayer } from '@/lib/layers';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
 import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
 import { useSectionArrival } from '@/lib/useSectionArrival';
+
+/** A name or a title inside a sentence, isolated: in Arabic a Latin one otherwise takes the sentence's order. */
+const iso = (s: string): string => `\u2068${s}\u2069`;
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -454,6 +457,9 @@ function TabTile({ label, value, sub, onClick }: { label: string; value: string;
   );
 }
 
+/** An account's role, in the reader's words. "Admin" is the console's own name (the rail's head), so the role is its own key. */
+const roleText = (role: string): string => (role === 'admin' ? tr('Administrator') : tr('Member'));
+
 /**
  * The household.
  *
@@ -484,16 +490,17 @@ function Members() {
     e.preventDefault();
     if (!username.trim() || !password || busy) return;
     setBusy(true);
-    try { await api('/api/admin/users', { json: { username: username.trim(), password, displayName: displayName.trim() || undefined, role } }); toast(`Created @${username.trim()}`, 'success'); setUsername(''); setPassword(''); setDisplayName(''); setRole('user'); inval(); }
-    catch (e: any) { toast(e instanceof ApiError && e.status === 409 ? 'Username taken' : msgOf(e, 'Could not create account'), 'error'); }
+    try { await api('/api/admin/users', { json: { username: username.trim(), password, displayName: displayName.trim() || undefined, role } }); toast(tr('Account {name} created', { name: iso(`@${username.trim()}`) }), 'success'); setUsername(''); setPassword(''); setDisplayName(''); setRole('user'); inval(); }
+    catch (e: any) { toast(e instanceof ApiError && e.status === 409 ? tr('Username taken') : msgOf(e, tr('Could not create account')), 'error'); }
     setBusy(false);
   };
-  const patch = async (u: any, body: any, ok: string) => { try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: body }); toast(ok, 'success'); inval(); } catch (e: any) { toast(msgOf(e, 'Could not update'), 'error'); } };
+  const patch = async (u: any, body: any, ok: string) => { try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: body }); toast(ok, 'success'); inval(); } catch (e: any) { toast(msgOf(e, tr('Could not update')), 'error'); } };
   const closeReset = () => { setResetting(null); setPw(''); };
   const del = async (u: any) => {
     setDeletingBusy(true);
-    try { await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast('Deleted', 'success'); setDeleting(null); inval(); }
-    catch { toast('Could not delete (last admin?)', 'error'); }
+    try { await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast(tr('Account removed'), 'success'); setDeleting(null); inval(); }
+    // The server refuses the last admin by its code alone (bff routes/admin.ts): say that one, and only that one.
+    catch (e) { toast(codeOf(e) === 'last_admin' ? tr('The last admin cannot be removed') : tr('Could not remove that account'), 'error'); }
     setDeletingBusy(false);
   };
 
@@ -505,9 +512,9 @@ function Members() {
           <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className="field" />
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className="field" />
           <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={tr('password (min 8)')} className="field" />
-          <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{r}</button>)}</div>
+          <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{roleText(r)}</button>)}</div>
         </div>
-        <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? 'Creating…' : 'Create account'}</button>
+        <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
       </form>
 
       {(data?.content ?? []).map((u: any) => {
@@ -526,14 +533,16 @@ function Members() {
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-red-300"><IcTrash width={16} height={16} /></button>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-fog-500">{u.role === 'admin' ? 'Admin' : 'Member'}{self ? ' · you' : ''}{u.disabled ? ' · disabled' : ''}{u.totp_enabled ? ' · 2FA' : ''}</p>
+            <p className="mt-2 text-[11px] text-fog-500">
+              {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null].filter(Boolean).join(' · ')}
+            </p>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               <button onClick={() => setResetting(u)} className="chip text-xs">{tr('Reset')}</button>
               {!self && (
                 <>
-                  <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} className="chip text-xs">{u.role === 'admin' ? 'Make member' : 'Make admin'}</button>
-                  <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? 'Enabled' : 'Disabled')} className="chip text-xs">{u.disabled ? 'Enable' : 'Disable'}</button>
-                  <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, 'Permission updated')} className="chip text-xs">{canDl ? 'Deny downloads' : 'Allow downloads'}</button>
+                  <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="chip text-xs">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>
+                  <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? tr('Account enabled') : tr('Account disabled'))} className="chip text-xs">{u.disabled ? tr('Enable') : tr('Disable')}</button>
+                  <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="chip text-xs">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess user={u} onSaved={inval} />}
@@ -553,7 +562,7 @@ function Members() {
           <div className="mt-4 flex gap-2">
             <button onClick={closeReset} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
             <button disabled={pw.length < 8}
-              onClick={() => { patch(resetting, { password: pw }, 'Password reset · sessions revoked'); closeReset(); }}
+              onClick={() => { patch(resetting, { password: pw }, tr('Password reset · sessions revoked')); closeReset(); }}
               className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Update password')}</button>
           </div>
         </Modal>
@@ -579,6 +588,26 @@ function Members() {
 interface ArtRow { id: string; title: string; books_count: number; has_banner: boolean; has_cover: boolean; override_banner: boolean; override_cover: boolean; first_page?: boolean; override_v: number | null }
 interface ArtCandidate { origin: string; title: string; banner: string | null; cover: string | null }
 
+/**
+ * What a gallery tile's art is, under its title: a series whose art is its own first page (chosen, or nothing else
+ * found), art set by hand, a banner found, or a cover and no banner. In the reader's words since v0.55.7.
+ */
+const artCaption = (r: ArtRow): string =>
+  r.first_page ? tr('first-page art')
+  : r.override_banner || r.override_cover ? tr('custom art')
+  : r.has_banner ? tr('banner ✓')
+  : r.has_cover ? tr('cover only')
+  : tr('first-page art');
+
+/** The last backfill's outcome, each count in its pair of keys: "+1 banners" was English in every language. */
+const backfillLine = (job: { banners: number; covers: number; misses: number }): string => tr('Last run: {result}', {
+  result: [
+    job.banners === 1 ? tr('1 banner found') : tr('{n} banners found', { n: job.banners }),
+    job.covers === 1 ? tr('1 cover found') : tr('{n} covers found', { n: job.covers }),
+    job.misses === 1 ? tr('1 not found') : tr('{n} not found', { n: job.misses }),
+  ].join(' · '),
+});
+
 function ArtReview() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -600,9 +629,10 @@ function ArtReview() {
   const startBackfill = async () => {
     try {
       const r = await api<{ total: number }>('/api/admin/art/backfill', { method: 'POST' });
-      toast(`Hunting art for ${r.total} series…`, 'success', { busy: true });
+      toast(r.total === 1 ? tr('Hunting art for 1 series…') : tr('Hunting art for {n} series…', { n: r.total }), 'success', { busy: true });
       qc.invalidateQueries({ queryKey: ['admin-art-backfill'] });
-    } catch (e: any) { toast(msgOf(e, 'Backfill already running?'), 'error'); }
+    // A second backfill is refused by code with an English sentence (bff routes/admin.ts): say it in the reader's words.
+    } catch (e: any) { toast(codeOf(e) === 'busy' ? tr('A backfill is already running.') : msgOf(e, tr('Could not start the backfill')), 'error'); }
   };
   const job = bf?.job;
   return (
@@ -610,19 +640,17 @@ function ArtReview() {
       <div className="card grad-border full p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-display text-lg font-semibold">Cover &amp; banner health</h2>
-            <p className="text-xs text-fog-500">Backfill re-hunts AniList + MangaDex for missing art. Click a series to pick art by hand.</p>
+            <h2 className="font-display text-lg font-semibold">{tr('Cover & banner health')}</h2>
+            <p className="text-xs text-fog-500">{tr('Backfill re-hunts AniList + MangaDex for missing art. Click a series to pick art by hand.')}</p>
           </div>
           <button onClick={startBackfill} disabled={!!job?.running} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
-            {job?.running ? `Backfilling ${job.done}/${job.total}…` : 'Backfill missing banners'}
+            {job?.running ? tr('Backfilling {done} of {total}…', { done: job.done, total: job.total }) : tr('Backfill missing banners')}
           </button>
         </div>
-        {job && !job.running && (
-          <p className="mt-2 text-xs text-fog-400">Last run: +{job.banners} banners, +{job.covers} covers, {job.misses} not found.</p>
-        )}
+        {job && !job.running && <p className="mt-2 text-xs text-fog-400">{backfillLine(job)}</p>}
       </div>
       <div className="hide-scrollbar full flex gap-1.5 overflow-x-auto pb-1">
-        {([['nobanner', 'Missing banner'], ['nocover', 'Missing cover'], ['fixed', 'Overridden'], ['all', 'All']] as const).map(([k, label]) => (
+        {([['nobanner', tr('Missing banner')], ['nocover', tr('Missing cover')], ['fixed', tr('Overridden')], ['all', tr('All')]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setFilter(k)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${filter === k ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'}`}>
             {label}{k !== 'all' ? ` (${(data?.content ?? []).filter((r) => (k === 'nobanner' ? !r.has_banner && !r.override_banner : k === 'nocover' ? !r.has_cover && !r.override_cover : r.override_banner || r.override_cover)).length})` : ''}
           </button>
@@ -635,16 +663,14 @@ function ArtReview() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {/* As the series page shows it (v0.53.0): a banner sharp, a stand-in cover blurred -- the art being judged. */}
               <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?style=banner&rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
-              {!r.has_banner && !r.override_banner && <span className="absolute end-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white">NO BANNER</span>}
+              {!r.has_banner && !r.override_banner && <span className="absolute end-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">{tr('No banner')}</span>}
             </div>
             <div className="flex items-center gap-2 p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${img.seriesThumb(r.id)}&rv=${bust[r.id] || 0}`} alt="" className="h-12 w-8 shrink-0 rounded object-cover" loading="lazy" />
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-fog-100">{r.title}</p>
-                <p className="text-[10px] text-fog-500">
-                  {r.first_page ? 'first-page art' : (r.override_banner || r.override_cover) ? 'custom art' : r.has_banner ? 'banner ✓' : r.has_cover ? 'cover only' : 'first-page art'}
-                </p>
+                <p className="text-[10px] text-fog-500">{artCaption(r)}</p>
               </div>
             </div>
           </button>
@@ -700,7 +726,7 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
       <div role="dialog" aria-modal="true" aria-label={row.title} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
-          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         <div className="mb-3 flex flex-wrap gap-2">
           <button data-art-first-page onClick={() => firstPage()} disabled={busy || row.first_page} className="btn-key">{tr('Use the first page')}</button>
@@ -908,7 +934,7 @@ function Sessions() {
   const toast = useToast();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions') });
-  const revoke = async (id: string) => { await api(`/api/admin/sessions/${id}`, { method: 'DELETE' }); toast('Revoked', 'success'); qc.invalidateQueries({ queryKey: ['admin-sessions'] }); };
+  const revoke = async (id: string) => { await api(`/api/admin/sessions/${id}`, { method: 'DELETE' }); toast(tr('Session revoked'), 'success'); qc.invalidateQueries({ queryKey: ['admin-sessions'] }); };
   return (
     <div className="board">
       <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
@@ -1011,16 +1037,16 @@ function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
     setBusy(true);
     try {
       await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { maxAgeRating: next } });
-      toast(next === null ? 'No age limit' : `Limited to ${next}+ and below`, 'success');
+      toast(next === null ? tr('No age limit') : tr('Limited to {age}+ and below', { age: next }), 'success');
       onSaved();
-    } catch (e) { toast(msgOf(e, 'Could not change that'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
     setBusy(false);
   };
 
   return (
     <>
       <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${cap !== null ? 'chip-active' : ''}`}>
-        {cap === null ? 'Any age rating' : `${cap}+ and below`}
+        {cap === null ? tr('Any age rating') : tr('{age}+ and below', { age: cap })}
       </button>
       {open && (
         <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
@@ -1040,9 +1066,11 @@ function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
               ))}
             </div>
           )}
-          <p className="mt-2 text-[11px] text-fog-500">{tr('Series with')}<strong className="text-fog-300">no rating stay visible</strong>. Most libraries carry
-            no ratings at all, so hiding them would empty this account rather than filter it. Rate a series
-            from its own page to have a limit apply to it.
+          {/* Two sentences, the first in bold: `tr('Series with')` glued to an English "no rating stay visible" read
+              "Series withno rating" in English and half English in every other language. */}
+          <p className="mt-2 text-[11px] text-fog-500">
+            <strong className="text-fog-300">{tr('Series with no rating stay visible.')}</strong>{' '}
+            {tr('Most libraries carry no ratings at all, so hiding them would empty this account rather than filter it. Rate a series from its own page to have a limit apply to it.')}
           </p>
         </div>
       )}
@@ -1066,9 +1094,9 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
     setBusy(true);
     try {
       await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { libraries: next } });
-      toast(next ? `Limited to ${next.length} librar${next.length === 1 ? 'y' : 'ies'}` : 'All libraries', 'success');
+      toast(!next ? tr('All libraries') : next.length === 1 ? tr('Limited to 1 library') : tr('Limited to {n} libraries', { n: next.length }), 'success');
       onSaved();
-    } catch (e) { toast(msgOf(e, 'Could not change that'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
     setBusy(false);
   };
 
@@ -1081,12 +1109,12 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
   return (
     <>
       <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${granted ? 'chip-active' : ''}`}>
-        {granted ? `${granted.length} librar${granted.length === 1 ? 'y' : 'ies'}` : 'All libraries'}
+        {!granted ? tr('All libraries') : granted.length === 1 ? tr('1 library') : tr('{n} libraries', { n: granted.length })}
       </button>
       {open && (
         <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
-            <span className="text-fog-200">{tr('All libraries')}<span className="ms-1 text-fog-500">(including any added later)</span></span>
+            <span className="text-fog-200">{tr('All libraries')}<span className="ms-1 text-fog-500">{tr('(including any added later)')}</span></span>
             <input type="checkbox" checked={!granted} disabled={busy}
               onChange={(e) => save(e.target.checked ? null : libs.map((l) => l.id))}
               className="size-4 shrink-0 accent-accent" />
@@ -1523,7 +1551,7 @@ function LibraryPanel() {
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
     } catch (e: any) {
       // A refusal carries the actual reason and, for a permissions problem, the exact fix.
-      let msg = msgOf(e, 'Could not delete the files');
+      let msg = msgOf(e, tr('Could not delete the files'));
       try { const b = JSON.parse(e?.body || '{}'); if (b.fix) msg = `${b.message} ${b.fix}`; } catch {}
       toast(msg, 'error');
     }
@@ -1566,9 +1594,9 @@ function LibraryPanel() {
     setBusy(r.id);
     try {
       await api(`/api/admin/series/${r.id}/restore`, { method: 'POST' });
-      toast(`\u201c${r.title}\u201d is back in the library`, 'success');
+      toast(tr('“{title}” is back in the library', { title: iso(r.title) }), 'success');
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
-    } catch (e) { toast(msgOf(e, 'Could not restore it'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not restore it')), 'error'); }
     setBusy(null);
   };
 
@@ -1577,21 +1605,23 @@ function LibraryPanel() {
       <LibrariesSection />
       {purge && (
         <ConfirmDialog
-          title={`Delete the files for "${purge.title}"?`}
+          title={tr('Delete the files for “{title}”?', { title: iso(purge.title) })}
           body={
             <>
               {/* `live_books`, not books_count: the scan wrote books_count before anything was pruned, and a
                   series with two files left and three tombstones would be told "this deletes 5". */}
-              <p><strong className="text-fog-100">This deletes {purge.live_books} chapter file(s) from your
-                disk.</strong>{tr('It cannot be undone from here.')}</p>
-              <p className="mt-2">Everyone&rsquo;s reading progress and history are kept, so the record of
-                having read it survives even though the files do not.</p>
+              <p>
+                <strong className="text-fog-100">{purge.live_books === 1 ? tr('This deletes 1 chapter file from your disk.')
+                  : tr('This deletes {n} chapter files from your disk.', { n: purge.live_books })}</strong>{' '}
+                {tr('It cannot be undone from here.')}
+              </p>
+              <p className="mt-2">{tr('Everyone’s reading progress and history are kept, so the record of having read it survives even though the files do not.')}</p>
               {/* The path is LTR text whatever the UI direction: unmarked, Arabic moved its leading slash
                   to the far end ("library-dl/mangadex/gone-for-good/"). */}
               <p className="mt-2 text-fog-500">{tr('Folder')}: <span dir="ltr">{purge.folder}</span></p>
             </>
           }
-          confirmLabel="Delete files"
+          confirmLabel={tr('Delete files')}
           confirmText={purge.title}
           danger
           busy={purging}

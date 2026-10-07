@@ -1,7 +1,8 @@
 // When a group's activity is a picture and when it is a sentence, and what colour its dot is.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activityStatus, seriesFinished, weeksOf } from '../lib/activity';
+import { activityStatus, seriesFinished, statusText, weeksOf } from '../lib/activity';
+import { setActiveDict } from '../lib/i18n';
 import type { Cadence } from '../lib/types';
 
 const c = (over: Partial<Cadence> = {}): Cadence => ({ kind: 'weekly', intervalDays: 7, daysSince: 3, quiet: false, ...over });
@@ -34,4 +35,21 @@ test('the strip is drawn only when the server sent twelve weeks with something i
   assert.equal(weeksOf({ weeks: Array(12).fill(false) }), null);
   const w = Array(12).fill(false); w[11] = true; w[4] = true;
   assert.deepEqual(weeksOf({ weeks: w }), w);
+});
+
+test("a series' status is said in the reader's language, a source's own words as they came", () => {
+  // The series page and the home hero printed `status.toLowerCase()`: "ongoing" in every language (v0.55.7). The four
+  // the Library filters by, and the synonyms the server folds into them for Komga, are said through their keys.
+  // Reintroduce `return status.toLowerCase()` for all of them: "is English" fails.
+  setActiveDict({ Ongoing: 'Laufend', Completed: 'Abgeschlossen', Hiatus: 'Pausiert', Cancelled: 'Abgebrochen' });
+  try {
+    assert.equal(statusText('ONGOING'), 'Laufend', 'ONGOING is English');
+    assert.equal(statusText('Ongoing'), 'Laufend');
+    assert.equal(statusText('ENDED'), 'Abgeschlossen', 'ENDED is English');
+    assert.equal(statusText('completed'), 'Abgeschlossen');
+    assert.equal(statusText('On hiatus'), 'Pausiert');
+    assert.equal(statusText('ABANDONED'), 'Abgebrochen');
+    assert.equal(statusText('Dropped'), 'Abgebrochen');
+    assert.equal(statusText('Season 2 airing'), 'season 2 airing', "a source's own words are not kept");
+  } finally { setActiveDict({}); }
 });

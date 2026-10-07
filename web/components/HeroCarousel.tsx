@@ -10,6 +10,7 @@ import { backdropSources } from '@/lib/art';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
 import { t as tr } from '@/lib/i18n';
+import { statusText } from '@/lib/activity';
 
 function FavButton({ series }: { series: Series }) {
   const qc = useQueryClient();
@@ -86,11 +87,11 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
             <img src={img.seriesThumb(cur.id, undefined, 800)} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
           </Link>
           <div className="max-w-xl">
-            <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-fog-100 backdrop-blur">★ Daily pick</span>
+            <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
             <h1 className="font-brand text-3xl font-bold leading-[1.05] text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.6)] lg:text-6xl">{cur.metadata?.title || cur.name}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
-              {cur.metadata?.status && <span className="capitalize text-fog-200">{cur.metadata.status.toLowerCase()}</span>}
-              <span>· {cur.booksCount} ch</span>
+              {cur.metadata?.status && <span className="capitalize text-fog-200">{statusText(cur.metadata.status)}</span>}
+              <span>· {tr('{n} ch', { n: cur.booksCount })}</span>
               {(cur.metadata?.genres ?? []).slice(0, 3).map((g) => <span key={g} className="capitalize">· {g}</span>)}
             </div>
             {summary && <p className="mt-3 line-clamp-2 max-w-lg text-sm text-fog-300 lg:line-clamp-3">{summary}</p>}
@@ -105,7 +106,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
       {/* dots */}
       <div className="absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 gap-2">
         {slides.map((_, k) => (
-          <button key={k} aria-label={`Slide ${k + 1}`} onClick={() => setI(k)} className="grid place-items-center py-1">
+          <button key={k} aria-label={tr('Slide {n}', { n: k + 1 })} onClick={() => setI(k)} className="grid place-items-center py-1">
             <span className={`h-2 rounded-full transition-all ${k === i ? 'w-7 bg-accent' : 'w-2 bg-white/35'}`} />
           </button>
         ))}

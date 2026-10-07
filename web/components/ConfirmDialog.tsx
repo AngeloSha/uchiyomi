@@ -87,7 +87,7 @@ export function Modal({
 export function ConfirmDialog({
   title,
   body,
-  confirmLabel = 'Confirm',
+  confirmLabel = tr('Confirm'),
   confirmText,
   danger,
   busy,
