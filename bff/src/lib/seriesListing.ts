@@ -527,6 +527,25 @@ export async function automaticChapterAllowedFor(
 }
 
 /**
+ * Whether a source is still one of this series' owned copies now (primary or followed).
+ *
+ * Listing rows and detached jobs may outlive an unfollow. Every ordinary automatic/manual version download
+ * re-reads this at its outbound boundary; a stale listing is evidence of what once existed, not permission to
+ * contact a source the series no longer follows. Tombstone restore deliberately uses its stricter stored-book
+ * identity instead, because an old canonical deletion can outlive a follow.
+ */
+export async function seriesFollowsSource(seriesId: string, sourceId: string): Promise<boolean> {
+  if (!seriesId || !sourceId) return false;
+  return !!(await one<{ ok: number }>(
+    `SELECT 1 AS ok FROM lib_series s
+      WHERE s.id = $1 AND (s.source_id = $2 OR EXISTS (
+        SELECT 1 FROM series_sources ss WHERE ss.series_id = s.id AND ss.source_id = $2
+      ))`,
+    [seriesId, sourceId],
+  ));
+}
+
+/**
  * Apply the blocklist AS IT STANDS NOW to the stored listing, without asking any source.
  *
  * A number whose every copy is from a blocked group is `blocked`: never shown on the series page or to Mihon, and never

@@ -365,6 +365,24 @@ test('the nightly completion pass re-reads auto-update between the page list and
   }
 });
 
+test('a source authorization change during partial assembly stops the atomic replacement', { skip }, async () => {
+  await q('UPDATE lib_books SET missing_pages = NULL WHERE series_id = $1', [S]);
+  const b = await partial(23, 'Open Team');
+  failing.delete('c23/3');
+  const before = await readFile(abs(23));
+  let sourceChecks = 0;
+  const out = await completePartial(b, {
+    alternates: async () => [],
+    // getPageUrls and fetchPages are admitted. The next call is deliberately at writeAtomic, after the
+    // old ZIP has been read and the replacement assembled: model an unfollow landing during that work.
+    sourceAllowedNow: async () => ++sourceChecks < 3,
+  });
+  assert.equal(out, 'unchanged');
+  assert.equal(sourceChecks, 3, 'source authority was not re-read at the actual write boundary');
+  assert.ok(before.equals(await readFile(abs(23))), 'the archive was replaced after source authority changed');
+  assert.deepEqual((await row(23)).missing_pages, [4]);
+});
+
 test('a worse alternate is rejected before it can replace the canonical partial', { skip }, async () => {
   // The canonical copy has one hole in ten; the alternate has two. The old completion path let fallback
   // write the worse file first and restored ours afterward, leaving a crash window with real-page loss.

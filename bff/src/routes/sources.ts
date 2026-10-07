@@ -87,7 +87,7 @@ import { enqueueArchive, archiveBusy, archiveScanPending, archiveSeriesIds, arch
 import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
-import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, type ListingCopy } from '../lib/seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, seriesFollowsSource, type ListingCopy } from '../lib/seriesListing';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
@@ -99,9 +99,10 @@ import {
 import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
-import { automaticAniListAllowed } from '../lib/anilistPolicy';
-import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
-import { learnTypeFromSource, learnTypeFromAniList } from '../lib/seriesType';
+import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPolicy';
+import { learnDirection, learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
+import { learnTypeFromSource, learnTypeFromAniListWith } from '../lib/seriesType';
+import { linkSeriesWith } from '../lib/trackers';
 import { noticeListed } from '../lib/noticeChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
@@ -335,6 +336,8 @@ export interface DownloadJobInput {
    * their behalf. Absent = every source (the admin's routes; admins are unrestricted by construction).
    */
   allowed?: (source: string) => boolean;
+  /** Current authority for the exact source copy, re-read inside its source gate. Pins do not bypass this. */
+  sourceAllowedNow?: (chapter: SourceChapter) => Promise<boolean>;
   /**
    * Called once per chapter with whether it landed: right after its attempt, or at the end of the job for
    * a chapter the job never reached (a full disk, a refusing source, a shutdown). The refetch route uses it
@@ -679,6 +682,7 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
           alternates: () => alternatesOf(ch.number),
           refusing, allowed: input.allowed, hunt: undefined,
           automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
+          sourceAllowedNow: input.sourceAllowedNow ?? ((candidate) => seriesFollowsSource(seriesId, candidate.source ?? '')),
         });
       } catch (e: any) {
         const j = jobs.get(folder);
@@ -1300,20 +1304,19 @@ async function artByTitle(where: { id: string } | { folder: string }, title: str
     // A move can also happen while AniList is answering.  Its response must not mutate art, links, type or direction
     // for a series whose new destination has opted out meanwhile.
     if (!(await automaticAniListAllowed(where))) return;
-    // A source cover can have created the row while automatic lookups were disabled.  Completing the lookup later
-    // fills only what is missing, but marks the online attempt complete so a title miss is not retried on every view.
-    const merge = `ON CONFLICT (series_id) DO UPDATE SET
-      banner = COALESCE(series_art.banner, EXCLUDED.banner),
-      cover = COALESCE(series_art.cover, EXCLUDED.cover),
-      fetched_at = now(), checked_at = now()`;
-    if ('id' in where) {
-      await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now()) ${merge}`, [where.id, a.banner, a.cover]).catch(() => {});
-    } else {
-      await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) SELECT id, $2, $3, now() FROM lib_series WHERE folder = $1 ${merge}`,
-        [where.folder, a.banner, a.cover]).catch(() => {});
-    }
-    await learnDirection(where, directionFromAniListMatch(names, a), 'anilist');
-    await learnTypeFromAniList(where, names, a);
+    // A source cover can have created the row while automatic lookups were disabled. Completing the lookup later
+    // fills only what is missing. The series/library locks make the final privacy decision and all derived DML one
+    // atomic act: a move or opt-out cannot slip between the last check and art/link/type/direction writes.
+    await withAniListMutation(where, 'automatic', async (qq, seriesId) => {
+      await qq(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
+        ON CONFLICT (series_id) DO UPDATE SET
+          banner = COALESCE(series_art.banner, EXCLUDED.banner),
+          cover = COALESCE(series_art.cover, EXCLUDED.cover),
+          fetched_at = now(), checked_at = now()`, [seriesId, a.banner, a.cover]);
+      if (a.mediaId) await linkSeriesWith(qq, seriesId, a.mediaId, a.mediaTitle ?? null);
+      await learnDirectionWith(qq, { id: seriesId }, directionFromAniListMatch(names, a), 'anilist');
+      await learnTypeFromAniListWith(qq, { id: seriesId }, names, a);
+    });
   } catch { /* AniList is best effort on an add */ }
 }
 
@@ -1754,6 +1757,9 @@ export async function addSeriesFromSource(opts: {
       seriesId: existing?.id ?? '', title, folder, meta,
       chapter: { ...chapter, source: source! },
       alternates: async () => [], refusing, allowed: opts.sourceAllowed, hunt: undefined,
+      // The add request names this source and the adapter supplied these chapter ids. A brand-new series has
+      // no follow row yet, so its current authority is this exact one-source selection rather than a DB follow.
+      sourceAllowedNow: async (candidate) => candidate.source === source,
     });
     let firstPages = 0; let blockReason: string | null = null; let diskFull: string | null = null;
     // Found already on disk: part of the result, so checked against the library at the end like what landed.
@@ -2665,6 +2671,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
           const candidate = getSource(id);
           return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
         },
+        sourceAllowedNow: async (candidate) => candidate.source === source
+          && picked.some((chapter) => chapter.sourceId === candidate.sourceId && chapter.number === candidate.number),
         by: userIdOf(req),
       }, claim);
       return { ok: true, started: true, folder: s.folder, total };
@@ -2727,11 +2735,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (src && !sourceAllowedFor(src, vc(req).maxAgeRating)) {
       return reply.code(404).send({ error: 'not_found' });
     }
-    const followed = row.series_source_id === row.source_id || !!(await one<{ ok: number }>(
-      'SELECT 1 AS ok FROM series_sources WHERE series_id = $1 AND source_id = $2',
-      [row.series_id, row.source_id],
-    ).catch(() => null));
-    const unavailable = !src || !followed
+    const unavailable = !src
       || await isDisabled(row.source_id!).catch(() => true)
       || !!(await blockedNow(row.source_id!).catch(() => true));
     if (unavailable) return reply.code(409).send({ error: 'not_refetchable' });
@@ -2743,6 +2747,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
     const claim = claimDownloadJob(row.folder, row.series_id);
     if (!claim) return reply.code(409).send({ error: 'busy' });
+    const restoreUserId = userIdOf(req);
+    const restoreRole = roleOf(req);
     const chapter: SourceChapter & { pinned: true } = {
       source: row.source_id!,
       sourceId: row.source_chapter_id!,
@@ -2777,7 +2783,36 @@ export default async function sourceRoutes(app: FastifyInstance) {
           const candidate = getSource(id);
           return !!candidate && sourceAllowedFor(candidate, vc(req).maxAgeRating);
         },
-        by: userIdOf(req),
+        // A deliberate tombstone is its own source capability even when that old source is no longer
+        // followed. Re-read the exact book identity, visibility and canonical target inside the source gate;
+        // changing any of them while the detached job waits refuses the request without fallback.
+        sourceAllowedNow: async (candidate) => {
+          if (candidate.source !== row.source_id || candidate.sourceId !== row.source_chapter_id || candidate.number !== n) return false;
+          const currentCtx = await viewCtxFor(restoreUserId, restoreRole).catch(() => null);
+          if (!currentCtx) return false;
+          const nowParams = new Params();
+          const current = (await q<{
+            id: string; series_id: string; root: string | null; file: string; number: number; number_end: number | null;
+            pruned_at: Date | null; pruned_reason: string | null; source_id: string | null; source_chapter_id: string | null;
+            folder: string;
+          }>(
+            `SELECT b.id, b.series_id, b.root, b.file, b.number, b.number_end, b.pruned_at, b.pruned_reason,
+                    b.source_id, b.source_chapter_id, s.folder
+               FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+              WHERE b.id = ${nowParams.add(row.id)} AND ${visible('s', currentCtx, nowParams)}`,
+            nowParams.values,
+          ).catch(() => []))[0];
+          if (!current || current.series_id !== row.series_id || current.root !== DL_ROOT
+              || Number(current.number) !== n || current.number_end != null
+              || current.source_id !== row.source_id || current.source_chapter_id !== row.source_chapter_id
+              || current.file !== chapterFileRel(current.folder, n)
+              || !deliberatelyDeleted({ pruned: current.pruned_at != null, prunedReason: current.pruned_reason })) return false;
+          const currentPath = await realContainedPath(DL_ROOT, current.file);
+          const currentSource = getSource(current.source_id!);
+          return !!currentPath && currentPath === safePath && !!currentSource
+            && sourceAllowedFor(currentSource, currentCtx.maxAgeRating);
+        },
+        by: restoreUserId,
       }, claim);
       return { ok: true, started: true, folder: row.folder, total };
     } finally {

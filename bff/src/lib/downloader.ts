@@ -104,12 +104,35 @@ export interface PartialHold {
   missing: number[]; // 0-based indices that will be placeholders
   expected: number; // pages the file will contain, placeholders included
   pages: number; // real pages held
-  write(): Promise<{ file: string; pages: number; missing: number[] }>;
+  write(preflight?: DownloadPreflight): Promise<{ file: string; pages: number; missing: number[] }>;
   /**
    * The caller will not write it: its entry in the downloads view ends now, as not kept (lib/downloadActivity.ts
    * holdPartial sets this). A no-op once written.
    */
   drop?(): void;
+}
+
+/** Why a queued automatic download was no longer allowed when its source slot finally opened. */
+export type DownloadPreflightReason = 'paused' | 'policy' | 'source' | 'disabled' | 'cooldown';
+/**
+ * Last-responsible-moment admission.  Returning a reason refuses the operation without blaming the source.
+ * It is deliberately asynchronous: current follows, preferences and unattended state all live in the database.
+ */
+export type DownloadPreflight = () => Promise<DownloadPreflightReason | null>;
+
+export class DownloadPreflightError extends Error {
+  readonly reason: DownloadPreflightReason;
+  constructor(reason: DownloadPreflightReason) {
+    super(`download no longer allowed (${reason})`);
+    this.name = 'DownloadPreflightError';
+    this.reason = reason;
+  }
+}
+
+/** Shared by downloadChapter and the completion pass's direct page/partial-write paths. */
+export async function assertDownloadPreflight(preflight?: DownloadPreflight): Promise<void> {
+  const reason = await preflight?.().catch(() => 'source' as const);
+  if (reason) throw new DownloadPreflightError(reason);
 }
 
 /** What `downloadChapter` throws when pages are missing. `blockStatus` only when the SOURCE is at fault. */
@@ -293,7 +316,10 @@ export const underGate = <T>(sourceId: string, fn: () => Promise<T>): Promise<T>
  * stale. Throws a ChapterShortfall when pages are missing, `{ diskFull }` when the library disk is at its
  * floor, and whatever getPageUrls threw.
  */
-export async function downloadChapter(input: DownloadInput, opts: { replace?: boolean } = {}): Promise<{ file: string; pages: number } | null> {
+export async function downloadChapter(
+  input: DownloadInput,
+  opts: { replace?: boolean; preflight?: DownloadPreflight } = {},
+): Promise<{ file: string; pages: number } | null> {
   const src = getSource(input.sourceId);
   if (!src) throw new Error(`unknown source ${input.sourceId}`);
 
@@ -323,10 +349,21 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
     number: input.chapter.number, source: input.sourceId,
   });
   try {
-    const r = await underGate(input.sourceId, () => { startedDownload(act); return fetchChapter(src, input, rel); });
+    const r = await underGate(input.sourceId, async () => {
+      // The queue can be minutes deep. Re-read every mutable admission decision only after its slot opens,
+      // directly beside the first source operation, so an unfollow/disable/cooldown/pause that lands while
+      // waiting wins the race and the source is never contacted.
+      await assertDownloadPreflight(opts.preflight);
+      startedDownload(act);
+      return fetchChapter(src, input, rel);
+    });
     endDownload(act, { status: 'done', pages: r.pages });
     return r;
   } catch (e) {
+    if (e instanceof DownloadPreflightError) {
+      endDownload(act, 'skipped');
+      throw e;
+    }
     const hold = (e as Partial<ChapterShortfall>)?.partial;
     if (hold) holdPartial(act, hold);
     else endDownload(act, { status: 'failed', reason: String((e as Error)?.message || e).slice(0, 160) });
@@ -758,7 +795,7 @@ function holdFor(
   };
   return {
     missing, expected: total, pages: held,
-    write: () => written ??= (async () => {
+    write: (preflight) => written ??= (async () => {
       const zip = new AdmZip();
       let first: { width: number; height: number } | null = null;
       for (let i = 0; i < total; i++) {
@@ -787,6 +824,9 @@ function holdFor(
       if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
       await mkdir(dirname(abs), { recursive: true });
       if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
+      // Placeholder generation and ZIP assembly are asynchronous. Policy can change during either, so the
+      // delayed write gets its own final guard at the actual atomic replacement boundary.
+      await assertDownloadPreflight(preflight);
       await writeAtomic(abs, zip.toBuffer());
       return { file: rel, pages: total, missing };
     })(),

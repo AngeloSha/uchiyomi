@@ -191,15 +191,15 @@ export function restoreFinished(entries: ReadonlyArray<Omit<ActivityEntry, 'id' 
  * neither ends the same way after HOLD_MS.
  */
 export function holdPartial(id: number, hold: {
-  missing: number[]; write: () => Promise<{ pages: number; missing: number[] }>; drop?: () => void;
+  missing: number[]; write: (preflight?: import('./downloader').DownloadPreflight) => Promise<{ pages: number; missing: number[] }>; drop?: () => void;
 }): void {
   const x = live.get(id);
   if (!x) return;
   x.heldAt = Date.now();
   Object.assign(x, reasonOf([say('activity.arrived', { n: hold.missing.length })]));
   const write = hold.write.bind(hold);
-  hold.write = async () => {
-    const w = await write();
+  hold.write = async (preflight) => {
+    const w = await write(preflight);
     endDownload(id, { status: 'partial', pages: w.pages, ...reasonOf([say('activity.saved', { n: w.missing.length })]) });
     return w;
   };

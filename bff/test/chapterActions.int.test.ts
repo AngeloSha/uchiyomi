@@ -753,6 +753,59 @@ test('a member can restore only the deliberate tombstone by its stored canonical
     assert.equal((await q('SELECT page FROM read_progress WHERE user_id = $1 AND book_id = $2', [adminId, B.one]))[0]?.page, 1);
   });
 
+  await t.test('its exact historical source remains refetchable after that source is no longer followed', async () => {
+    const removedAgain = await del([B.one]);
+    assert.equal(removedAgain.statusCode, 200, removedAgain.body);
+    await q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [S, SRC]);
+    await q('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [S, FOL, 'fol-1']);
+    pageCalls.length = 0;
+    try {
+      const r = await refetchBook(B.one);
+      assert.equal(r.statusCode, 200, r.body);
+      const job = await jobDone();
+      assert.equal(job?.status, 'done', JSON.stringify(job));
+      assert.deepEqual(pageCalls, ['c/1/Group A'], 'restore used only the tombstone\'s canonical source identity');
+      assert.equal((await row(B.one)).pruned_at, null);
+    } finally {
+      await q('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [S, SRC, 'act-1']);
+    }
+  });
+
+  await t.test('a changed tombstone identity while queued is refused at the source-slot boundary', async () => {
+    const removedAgain = await del([B.one]);
+    assert.equal(removedAgain.statusCode, 200, removedAgain.body);
+    const { underGate } = await import('../src/lib/downloader');
+    let entered = 0;
+    let ready!: () => void;
+    let release!: () => void;
+    const both = new Promise<void>((r) => { ready = r; });
+    const held = new Promise<void>((r) => { release = r; });
+    const occupy = () => underGate(SRC, async () => { if (++entered === 2) ready(); await held; });
+    const holders = [occupy(), occupy()];
+    await both;
+    pageCalls.length = 0;
+    try {
+      const started = await refetchBook(B.one);
+      assert.equal(started.statusCode, 200, started.body);
+      await q('UPDATE lib_books SET source_chapter_id = $2 WHERE id = $1', [B.one, 'c/1/replaced-identity']);
+      release();
+      await Promise.all(holders);
+      const job = await jobDone();
+      assert.notEqual(job?.status, 'downloading', JSON.stringify(job));
+      assert.deepEqual(pageCalls, [], 'the stale stored chapter identity reached the source');
+      assert.equal(existsSync(join(DL, FOLDER, 'Chapter 1.cbz')), false, 'a changed tombstone was restored anyway');
+      assert.ok((await row(B.one)).pruned_at, 'the refused tombstone was resurrected');
+    } finally {
+      release();
+      await Promise.allSettled(holders);
+      await q('UPDATE lib_books SET source_chapter_id = $2 WHERE id = $1', [B.one, 'c/1/Group A']);
+      if ((await row(B.one)).pruned_at) {
+        const restore = await refetchBook(B.one);
+        if (restore.statusCode === 200) await jobDone();
+      }
+    }
+  });
+
   await t.test('two simultaneous restores reserve one folder and start only one writer', async () => {
     const removedAgain = await del([B.one]);
     assert.equal(removedAgain.statusCode, 200, removedAgain.body);

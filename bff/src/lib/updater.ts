@@ -15,7 +15,7 @@ import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
 import { chooseReleases, copiesOf, releaseOrder } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
-import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, listingRows, replaceListing, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, listingRows, replaceListing, seriesFollowsSource, type ListingCopy } from './seriesListing';
 import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
@@ -611,6 +611,14 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const adult = queue.length > 0 && maxNew > 0 ? await seriesIsAdult(seriesId) : false;
   const sweepRule = await sweepAllowedFor(adult);
   const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
+  const sourceAllowedNow = async (candidate: SourceChapter): Promise<boolean> => {
+    const id = candidate.source ?? '';
+    if (!id || !(await seriesFollowsSource(seriesId, id))) return false;
+    // Library adult state and the server's automatic-source policy can change while a chapter waits on its
+    // source gate. Rebuild the rule at that boundary; the closure above remains only a cheap early filter.
+    const current = await sweepAllowedFor(await seriesIsAdult(seriesId));
+    return current(id) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
+  };
   // No hunt under posting order: a source found for the purpose numbers these posts its own way.
   const huntBudget = opts.hunt === false || opts.newestOnly || posting ? null : (opts.hunt ?? { left: HUNT_MAX_PER_SWEEP });
   const meta = { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status };
@@ -654,6 +662,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
         } : undefined,
         ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
         automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
+        sourceAllowedNow,
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
         // third refusal. A refusal from some other source is not this copy's history.
         persistent: persistentVia.get(ch.number) === via,
@@ -883,6 +892,12 @@ export async function runUpdateAll(opts: {
             admit: () => seriesIsMonitored(b.series_id),
             // An old partial is not a user pin. Re-read the blocklist before each operation on its original copy.
             automaticAllowed: (chapter) => automaticChapterAllowedFor(b.series_id, chapter),
+            sourceAllowedNow: async (chapter) => {
+              const id = chapter.source ?? '';
+              if (!id || !(await seriesFollowsSource(b.series_id, id))) return false;
+              const current = await sweepAllowedFor(await seriesIsAdult(b.series_id));
+              return current(id);
+            },
           },
         );
         if (r === 'completed') completed++;

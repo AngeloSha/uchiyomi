@@ -53,12 +53,12 @@ import { haveNumbers } from './libraryNumbers';
 import { archiveHoles, type ArchiveHoles } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
 import { restampBook } from './partial';
-import { chapterFileRel, downloadChapter, type DownloadInput } from './downloader';
+import { chapterFileRel, downloadChapter, DownloadPreflightError, type DownloadInput, type DownloadPreflight } from './downloader';
 import { getSource, withTimeout, type SourceChapter } from './sources';
 import { budgetFor } from './sources/budget';
 import { resetSolverSessions, solverPing } from './sources/flaresolverr';
 import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
-import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, seriesFollowsSource, type ListingCopy } from './seriesListing';
 import { groupsOf, normGroup, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
@@ -1033,6 +1033,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           if (await blockedNow(sourceId).catch(() => null)) return null;
           if (unattended && !(await seriesIsMonitored(seriesId))) return null;
           if (!(await automaticChapterAllowedFor(seriesId, chapter))) return null;
+          // Everything above is a cheap filter. Re-read follow, blocklist, unattended state and health in one
+          // last check immediately beside the outbound page-list call; a preference/unfollow race must not
+          // become an "asked but silent" source either.
+          if (await repairCopyPreflight(seriesId, chapter, unattended)()) return null;
           asked++;
           try {
             // Nothing is reported to source_health from here. A page list asked on our own initiative must
@@ -1144,13 +1148,18 @@ async function replaceShort(
     series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
     genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
   };
+  const preflight = repairCopyPreflight(book.series_id, chapter, unattended);
   let missing: number[] = [];
   try {
     if (unattended && !(await seriesIsMonitored(book.series_id))) return 'paused';
     if (!(await automaticChapterAllowedFor(book.series_id, chapter))) return false;
-    const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
+    const landed = await downloadChapter(
+      { sourceId: via, seriesFolder: book.folder, chapter, meta },
+      { replace: true, preflight },
+    );
     if (!landed) return false;
   } catch (e: any) {
+    if (e instanceof DownloadPreflightError) return e.reason === 'paused' ? 'paused' : false;
     if (e?.diskFull) return 'disk';
     const hold = e?.partial;
     // A refusal (403/429) is the site saying no, and a chapter saved from a refusal would be a shorter
@@ -1163,7 +1172,16 @@ async function replaceShort(
       return false;
     }
     if (!(await automaticChapterAllowedFor(book.series_id, chapter))) { hold.drop?.(); return false; }
-    await hold.write();
+    try {
+      // A shortfall may itself put the source into cooldown. That must stop the next request, but it must
+      // not discard the already-downloaded, useful partial; re-check every write-time authority except the
+      // health consequence of this same request.
+      await hold.write(repairCopyPreflight(book.series_id, chapter, unattended, true));
+    } catch (writeError) {
+      hold.drop?.();
+      if (writeError instanceof DownloadPreflightError) return writeError.reason === 'paused' ? 'paused' : false;
+      throw writeError;
+    }
     missing = hold.missing;
   }
   // restampBook is the only writer of `pages` on the REPLACE path: the count that decided to download
@@ -1356,6 +1374,12 @@ async function pageCount(
   if (seriesId && !(await seriesIsMonitored(seriesId))) return null;
   if (seriesId && !(await automaticChapterAllowedFor(seriesId, chapter))) return null;
   try {
+    if (seriesId) {
+      // The checks above are early filters. This one sits beside getPageUrls so an unfollow, block or
+      // auto-update toggle during the earlier awaits wins before the source sees the request.
+      const reason = await repairCopyPreflight(seriesId, chapter, true)();
+      if (reason) return null;
+    }
     const urls = await withTimeout(src.getPageUrls(chapter.sourceId), budgetFor(src, SHORT_PAGES_MS));
     return urls.length || null;
   } catch {
@@ -1372,18 +1396,23 @@ async function replaceWithGroup(
     series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
     genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
   };
+  const preflight = repairCopyPreflight(book.series_id, chapter, true);
   try {
     if (!(await seriesIsMonitored(book.series_id))) return 'paused';
     if (!(await automaticChapterAllowedFor(book.series_id, chapter))) return false;
     // writeAtomic underneath: the file on disk is untouched until the new one is entirely there. A copy
     // that arrives short is offered as a hold (e.partial) and REFUSED here -- a partial is a downgrade.
-    const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
+    const landed = await downloadChapter(
+      { sourceId: via, seriesFolder: book.folder, chapter, meta },
+      { replace: true, preflight },
+    );
     if (!landed) return false;
   } catch (e: any) {
     // Refused, so its entry in the downloads ends now, as not kept: left open it waited out downloadActivity's
     // HOLD_MS as a download still running (the v0.49.0 fix in downloadWithFallback, missed here). Reintroduce by
     // dropping it: "a short copy the upgrade refuses" in groupUpgrade.int.test.ts finds it active.
     e?.partial?.drop?.();
+    if (e instanceof DownloadPreflightError) return e.reason === 'paused' ? 'paused' : false;
     if (e?.diskFull) return 'disk';
     return false;
   }
@@ -1409,6 +1438,26 @@ async function replaceWithGroup(
   notes.upgraded.push(`${book.title} ch ${book.number} (${book.scanlator} -> ${group})`);
   log?.info(`repair: "${book.title}" ch ${book.number}: ${book.scanlator} -> ${group} from ${via}`);
   return true;
+}
+
+/** Current unattended authority for one repair copy, evaluated inside the downloader's source gate. */
+function repairCopyPreflight(
+  seriesId: string,
+  chapter: SourceChapter,
+  requireMonitored: boolean,
+  writing = false,
+): DownloadPreflight {
+  return async () => {
+    if (requireMonitored && !(await seriesIsMonitored(seriesId))) return 'paused';
+    const sourceId = chapter.source ?? '';
+    if (!sourceId || !getSource(sourceId) || !(await seriesFollowsSource(seriesId, sourceId))) return 'source';
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    if (!allowed(sourceId)) return 'source';
+    if (!(await automaticChapterAllowedFor(seriesId, chapter))) return 'policy';
+    if (await isDisabled(sourceId).catch(() => true)) return 'disabled';
+    if (!writing && await blockedNow(sourceId).then(Boolean, () => true)) return 'cooldown';
+    return null;
+  };
 }
 
 /**

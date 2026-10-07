@@ -49,7 +49,7 @@ import { noteChapterFailure } from './chapterFailures';
 import { withOrigin } from './downloadActivity';
 import { busyFolders } from './bulkNewest';
 import { updateSeries, CHAPTER_RETRY_CAP, seriesIsMonitored, type Landed } from './updater';
-import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, sameRelease, seriesFollowsSource, type ListingCopy } from './seriesListing';
 import { cleanSourceOrder } from './sourcePrefs';
 import { heldBooks } from './chapterCleanup';
 import { holds } from './chapterRanges';
@@ -1046,6 +1046,12 @@ async function runChapter(
         hunt: undefined,
         admit: () => seriesIsMonitored(r.series_id),
         automaticAllowed: (candidate) => automaticChapterAllowedFor(r.series_id, candidate),
+        sourceAllowedNow: async (candidate) => {
+          const id = candidate.source ?? '';
+          if (!id || !(await seriesFollowsSource(r.series_id, id))) return false;
+          const current = await sweepAllowedFor(await seriesIsAdult(r.series_id));
+          return current(id) && capOk(id);
+        },
         onAsked: (src, err) => { asked.set(src, err); },
       })));
     } catch (e: any) {

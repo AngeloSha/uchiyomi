@@ -20,6 +20,7 @@ if (DSN) {
   process.env.LIBRARY_BACKEND = 'owned';
   process.env.DL_ROOT = ROOT;
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
+  process.env.DOWNLOAD_CONCURRENCY = '2';
   process.env.DOWNLOAD_PAGE_GAP_MS = '0';
   process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0';
   process.env.MIN_FREE_GB = '0';
@@ -156,7 +157,8 @@ test('an unattended admission change stops before every next source operation', 
     failures.set(`${PRI}/pause-one/0`, 404);
     let checks = 0, hunts = 0;
     const out = await run(chapter(PRI, 'pause-one', 31), [chapter(FOL, 'fol-one', 31)], {
-      admit: async () => ++checks === 1,
+      // First at the cheap outer filter, then inside the source gate. Pause before the alternate's filter.
+      admit: async () => ++checks <= 2,
       hunt: async () => { hunts++; return chapter(NEW, 'new-one', 31); },
     }).result;
     assert.deepEqual(out, { kind: 'skipped', why: 'paused' });
@@ -241,6 +243,77 @@ test('current automatic copy rules are re-read at every request and partial-writ
     assert.deepEqual([out.kind, out.via], ['landed', PRI]);
     assert.equal(checks, 0, 'a person-picked copy was passed through automatic policy');
   });
+
+  await reset();
+  await t.test('a pin never overrides current source authorization', async () => {
+    const out = await run(chapter(PRI, 'pin-source-one', 37, true), [chapter(FOL, 'fol-one', 37)], {
+      sourceAllowedNow: async () => false,
+    }).result;
+    assert.deepEqual(out, { kind: 'skipped', why: 'refusing' });
+    assert.deepEqual(asked, [], 'the unauthorised pinned copy was contacted');
+  });
+});
+
+test('the source-slot preflight sees an unfollow, disable, and cooldown that land while queued', { skip }, async (t) => {
+  const { underGate } = await import('../src/lib/downloader');
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  const { seriesFollowsSource } = await import('../src/lib/seriesListing');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+
+  const queuedRace = async (n: number, mutate: () => Promise<void>, extra: Record<string, unknown> = {}) => {
+    let entered = 0;
+    let ready!: () => void;
+    let release!: () => void;
+    const both = new Promise<void>((r) => { ready = r; });
+    const held = new Promise<void>((r) => { release = r; });
+    const occupy = () => underGate(PRI, async () => { if (++entered === 2) ready(); await held; });
+    const holders = [occupy(), occupy()];
+    await both;
+    const result = run(chapter(PRI, `queued-${n}-one`, n), [chapter(FOL, `queued-alt-${n}-one`, n)], extra).result;
+    // beginDownload happens before the source gate. Seeing it queued proves the outer filters have run and
+    // the operation is waiting precisely at the boundary under test.
+    for (let i = 0; i < 100 && !listActivity().active.some((x) => x.folder === 'Fallback Tale' && x.number === n); i++) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    assert.ok(listActivity().active.some((x) => x.folder === 'Fallback Tale' && x.number === n), 'download reached the held source gate');
+    await mutate();
+    release();
+    try { return await result; } finally { await Promise.all(holders); }
+  };
+
+  await t.test('unfollow', async () => {
+    const lib = 'fallback-race-lib', series = 'fallback-race-series';
+    await q(`INSERT INTO libraries (id, name, path) VALUES ($1, 'Fallback race', $1) ON CONFLICT (id) DO NOTHING`, [lib]);
+    await q('DELETE FROM lib_series WHERE id = $1', [series]);
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+             VALUES ($1, 'T!fallback', 'Fallback race', $2, 0, $3, $4, 'fol-series')`, [series, 'Fallback Race', lib, FOL]);
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'pri-series')`, [series, PRI]);
+    try {
+      const out = await queuedRace(38, () => q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [series, PRI]).then(() => {}), {
+        sourceAllowedNow: (c: any) => seriesFollowsSource(series, c.source ?? ''),
+      });
+      assert.deepEqual([out.kind, out.via], ['landed', FOL]);
+      assert.equal(asked.some((x) => x.startsWith(`${PRI}/queued-38-one/`)), false, 'unfollowed source was contacted after its slot opened');
+    } finally {
+      await q('DELETE FROM lib_series WHERE id = $1', [series]);
+    }
+  });
+
+  await t.test('disabled', async () => {
+    const out = await queuedRace(39, () => setDisabled(PRI, true));
+    assert.deepEqual([out.kind, out.via], ['landed', FOL]);
+    assert.equal(asked.some((x) => x.startsWith(`${PRI}/queued-39-one/`)), false, 'disabled source was contacted after its slot opened');
+    await setDisabled(PRI, false);
+  });
+
+  await t.test('cooldown', async () => {
+    const out = await queuedRace(40, () => q(
+      `INSERT INTO source_health (source_id, status, blocked_until, updated_at) VALUES ($1, 'rate_limited', now() + interval '10 minutes', now())
+       ON CONFLICT (source_id) DO UPDATE SET status = EXCLUDED.status, blocked_until = EXCLUDED.blocked_until, updated_at = now()`, [PRI],
+    ).then(() => {}));
+    assert.deepEqual([out.kind, out.via], ['landed', FOL]);
+    assert.equal(asked.some((x) => x.startsWith(`${PRI}/queued-40-one/`)), false, 'cooling source was contacted after its slot opened');
+  });
 });
 
 test('the best incomplete hold is written only after every non-refusing option is exhausted', { skip }, async () => {
@@ -315,6 +388,10 @@ test('a copy that was not kept leaves the downloads at once', { skip }, async ()
   assert.deepEqual(ended?.reasonSaid, [{ code: 'activity.arrived', params: { n: 1 } }, { code: 'activity.notKept' }]);
 
   // Two copies short by a page each: the first is written, and the other leaves the downloads too.
+  // The first premise above legitimately put PRI into a cooldown. This is a separate chapter scenario, so
+  // clear that state rather than accidentally testing the new fresh-cooldown gate instead of two holds.
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[PRI, FOL]]);
+  clearPace();
   failures.set(`${PRI}/drop-two/4`, 404);
   failures.set(`${FOL}/fol-two/3`, 404);
   const two = await run(chapter(PRI, 'drop-two', 12), [chapter(FOL, 'fol-two', 12)]).result;
