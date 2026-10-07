@@ -124,14 +124,16 @@ export async function matchesWalk(ctx) {
     check(`matches: "${NIGHT}", AniList's own entry for it, stores its cover and banner`,
       /\/media\/manga\/banner\/970002-walk\.png\|.*\/media\/manga\/cover\/large\/bx970002-walk\.png$/.test(nightArt), nightArt);
     check(`matches: and its AniList link, automatic and checked`, link(night.id) === '970002|true|true', link(night.id));
-    await visit(`/series/?id=${morgan.id}`, 3000);
-    await shot('matches-1280-1-first-page');
 
     for (const [w, l] of PASSES) {
       const t = tag(w, l);
       console.log(`\n  matches @${w}${l === 'ar' ? ' ar' : ''}`);
       if (l !== lang()) await setLang(l);
       await page.setViewport({ width: w, height: w < 1024 ? 844 : 900 });
+      // Morgan Lost as a reader meets it: its own first page for a cover, its pages for a backdrop.
+      await visit(`/series/?id=${morgan.id}`, 3000);
+      check(`matches @${t}: the series page has no sideways scroll`, await noSideScroll());
+      await shot(`matches-${t}-1-first-page`);
       await visit(`/series/?id=${night.id}`, 3500);
       check(`matches @${t}: Edit details opens`, await openEditor());
       // An earlier pass left the first page chosen: Reset to automatic takes it back first.
