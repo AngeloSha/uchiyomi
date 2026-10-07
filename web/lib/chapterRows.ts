@@ -279,6 +279,20 @@ export function chaptersLeft(jobs: { total: number; done: number }[]): number {
  * chapterRows.test.ts reads "Deleted from the server".
  */
 export function prunedLabel(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): string | null {
+  return prunedWords(b)?.full ?? null;
+}
+
+/**
+ * The tombstone's words, whole and short (v0.55.7). `full` is prunedLabel's sentence; `short` is what the tag says
+ * where the chapter list is a grid (lg up): a row there with a full date leaves its caption 51-68 px, which no
+ * sentence fits, and the tag would wrap it to three lines on every tombstone -- and with the read-chapter cleanup on,
+ * most older chapters are tombstones. So a word or two there, with the sentence as the hover title and for screen
+ * readers; the list below lg has the room for the sentence. Reintroduce one wording: chapterRows.test.ts "the short
+ * words still tell the two apart" fails.
+ */
+export function prunedWords(b: Pick<Book, 'pruned' | 'prunedReason' | 'owned'>): { full: string; short: string } | null {
   if (!b.pruned) return null;
-  return b.prunedReason === 'deleted' && b.owned === false ? tr('File no longer on disk') : tr('Deleted from the server');
+  return b.prunedReason === 'deleted' && b.owned === false
+    ? { full: tr('File no longer on disk'), short: tr('No file') }
+    : { full: tr('Deleted from the server'), short: tr('Deleted') };
 }

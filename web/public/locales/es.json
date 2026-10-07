@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3315
+    "strings": 3327
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3318,5 +3318,17 @@
   "{n} merges left alone: the series changed since the preview": "{n} fusiones se dejaron sin hacer: las series cambiaron desde la vista previa",
   "Nothing is hidden or removed. Open one to remove it.": "No se oculta ni se quita nada. Abre una para quitarla.",
   "Nothing is hidden or removed. Open one to remove it, or merge it below into the series its files went to.": "No se oculta ni se quita nada. Abre una para quitarla, o fusiónala más abajo con la serie a la que fueron sus archivos.",
-  "Its files are now in “{title}”": "Sus archivos están ahora en «{title}»"
+  "Its files are now in “{title}”": "Sus archivos están ahora en «{title}»",
+  "Cover colour at the edges": "Color de la portada en los bordes",
+  "A soft wash of the cover’s colour across the top and bottom of the reader.": "Un velo suave del color de la portada en la parte superior e inferior del lector.",
+  "Your order": "Tu orden",
+  "Z–A": "Z–A",
+  "Last read": "Última lectura",
+  "Latest chapter": "Capítulo más reciente",
+  "Move earlier": "Mover antes",
+  "Move later": "Mover después",
+  "+1 chapter vs the current pick": "+1 capítulo respecto a la elección actual",
+  "1 fewer chapter than the current pick": "1 capítulo menos que la elección actual",
+  "No file": "Sin archivo",
+  "Deleted": "Eliminado"
 }

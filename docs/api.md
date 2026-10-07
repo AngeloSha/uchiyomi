@@ -1332,6 +1332,20 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+**Lists** (collections; the app's *Lists*). `GET /api/collections/:id` answers `{id, name, accent, sort_order, items}`:
+the list's series in its own order (`position`, which `PUT /api/collections/:id/items {seriesIds}` rewrites; since
+v0.55.7 `POST /api/collections/:id/items` adds a series at the end, as the bulk add does), each enriched like every
+listing — `yomi.unread` is the cover's unread badge, against the caller's own progress — and a series hidden by the
+18+ switch or an age cap left out. Since v0.55.7 ([#164](https://github.com/AngeloSha/uchiyomi/discussions/164)) each
+item also carries `lastReadAt`, when the caller last read in the series (their own progress only; null if never), and
+`latestChapterAt`, when its newest chapter arrived (the newest chapter file's time, as the Library's *Updated* sort
+uses; null without a chapter), for the list's sorts. The web app sorts a list itself, a list being one request: the
+list's own order (the default), A–Z, Z–A, last read, most unread and latest chapter, ties kept in the list's order.
+The order chosen for each list is kept in the caller's settings, `PUT /api/settings {listSorts: {"<list id>": "az" |
+"za" | "read" | "unread" | "latest"}}` — the whole map, since the settings merge top-level keys; the list's own order
+is not stored. The reader's defaults are the settings' `reader` object, and since v0.55.7 (#170) it carries
+`coverEdges` (default `true`): `false` takes the cover's colour off the reader's top and bottom edges.
+
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
 drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below

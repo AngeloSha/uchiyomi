@@ -97,6 +97,15 @@ filters currently show.
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
+**Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
+add series to it from a series page with **Add to collection**. A list shows its series with the Library's covers
+(since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
+the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
+the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**
+(the series whose newest chapter came most recently first). Each list remembers its own order, on your account, so it
+opens the same way on your other devices. **Edit** removes series from the list and moves them within your order with
+the arrows; a series added to a list goes to its end.
+
 **Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
 and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
 **Favourite**, **Mark all read** / **unread**, and for an admin **Check for new chapters**. Shift+right-click still
@@ -1084,7 +1093,9 @@ folder is in *Edit details* (**Folder on the server**), with a Copy beside each 
 An admin can free the space a chapter takes without losing the record of it. **Remove** in the select bar,
 confirmed with **Delete from server**, removes the file and keeps everything else: the chapter row, marked
 *Deleted from the server*, everyone's reading progress on it, and every count — the series' unread number does
-not move, and nothing is pushed to AniList. If the chapter was the one the series' cover came from, the cover
+not move, and nothing is pushed to AniList. (Where the chapter list is a grid, on a wide screen, the mark says just
+*Deleted* — or *No file* for *File no longer on disk* — and the whole sentence shows when you point at the row;
+since v0.55.7 the mark is never cut off.) If the chapter was the one the series' cover came from, the cover
 moves to the lowest chapter that still has a file. It is the same tombstone the scheduled cleanup in section 8
 leaves, and it has the same two rules: **only a chapter downloaded by Uchiyomi** — one in its own downloads
 folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, because the bookmark names a page
@@ -1120,6 +1131,12 @@ you keep scrolling through a series without interruption.
 - **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
   never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
 - **Themes:** AMOLED black, sepia, or gray, from the reader settings.
+- **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
+  so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
+  the reader's settings sheet or under Profile → Settings → Reading (since v0.55.7,
+  [#170](https://github.com/AngeloSha/uchiyomi/discussions/170)). It is one setting for every title, saved to your
+  account. The top and bottom bars' dark shading now also runs past the screen edge, so no strip of page shows
+  while they spring into place.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a
   desktop `[` / `]` step to the previous/next chapter as well.
@@ -1153,10 +1170,10 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
-**Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
-brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
-*Saved* beside the row. The reader's own sheet still changes them for the session you are in, and a series
-you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
+**Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
+page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
+change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,
+and a series you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
 new-chapter alerts are on the same tab.
 
 **A default per source.** A source is usually one format: a webtoon site wants the continuous vertical scroll,
