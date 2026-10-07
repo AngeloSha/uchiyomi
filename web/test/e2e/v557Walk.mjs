@@ -393,6 +393,11 @@ export async function readerEdgesWalk(ctx) {
   const shot = async (name, p = page) => { await sleep(700); await ctx.shot(name, p); };
   const { call, say, setLang, visit, noSideScroll, seriesNamed, lang } = kit(ctx);
   const edges = (p = page) => p.evaluate(() => [...document.querySelectorAll('[data-cover-edge]')].map((e) => e.getAttribute('data-cover-edge')).sort().join(','));
+  const waitForReaderPage = async (p = page) => {
+    const prefix = say('Page {n}', { n: '' });
+    const ready = await waitFor(() => p.evaluate((x) => [...document.images].some((img) => img.alt.startsWith(x)), prefix), 20_000, 300);
+    if (!ready) throw new Error(`the reader did not paint a page whose translated label starts with ${JSON.stringify(prefix)}`);
+  };
   /** The switch named `label` (under `scope`): 'true' / 'false', or null when there is none; `press` clicks it. */
   const switchOf = (label, scope = 'body', press = false) => page.evaluate((l, sc, pr) => {
     const e = [...(document.querySelector(sc)?.querySelectorAll('[role="switch"]') ?? [])].find((x) => x.getAttribute('aria-label') === l);
@@ -412,7 +417,7 @@ export async function readerEdgesWalk(ctx) {
     console.log(`         cover colour ${JSON.stringify(color)}`);
     const reader = async () => {
       await visit(`/reader/?book=${encodeURIComponent(first.id)}`, 4000);
-      await waitFor(() => page.$('img[alt^="Page"]'), 20_000, 300);
+      await waitForReaderPage();
     };
     for (const [w, l] of PASSES) {
       const t = tag(w, l);
@@ -472,7 +477,7 @@ export async function readerEdgesWalk(ctx) {
         });
         await p.setViewport({ width: 390, height: H, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
         await p.goto(`${ctx.base}/reader/?book=${encodeURIComponent(first.id)}`, { waitUntil: 'networkidle2', timeout: 60_000 });
-        await waitFor(() => p.$('img[alt^="Page"]'), 20_000, 300);
+        await waitForReaderPage(p);
         await p.addStyleTag({ content: 'div.fixed.inset-0 { background: #fff !important; }'
           + ' div.fixed.inset-0 *:not(header):not(footer):not(header *):not(footer *) { background: transparent !important; }'
           + ' div.fixed.inset-0 img { opacity: 0 !important; }'
