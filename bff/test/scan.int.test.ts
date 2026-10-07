@@ -192,6 +192,36 @@ test('persistScan: re-downloading a chapter in place keeps the same book id', { 
   assert.equal(bookAfter.id, bookBefore.id, 'a re-download changed the book id');
 });
 
+test('persistScan: a file whose mtime moved is fingerprinted again; one that did not keeps its fingerprint', { skip }, async () => {
+  // v0.55.7 (#150): the fingerprint is of the bytes. A file replaced by hand -- or one the backfill read while it was
+  // still being unpacked, stamped unreadable for good -- kept the old one, and Rescan everything could never pair it
+  // after a move. Reintroduce by dropping the four fingerprint CASEs from persistScan's upsert: the scan after the
+  // replacement leaves the old fingerprint on the row.
+  const { runFingerprintBackfill } = await import('../src/lib/fingerprintJob');
+  const { utimes } = await import('fs/promises');
+  const src = 'T!fpmt';
+  const file = chapter(ROOT_A, src, 'Replaced', 'Chapter 1.cbz');
+  await writeCbz(file, { series: 'Replaced', pages: 1 });
+  await persistScan();
+  await runFingerprintBackfill();
+  const row = async () => (await q<{ fingerprint: string | null; fp_kind: string | null; fp_at: string | null; size: string | null }>(
+    `SELECT fingerprint, fp_kind, fp_at, size FROM lib_books WHERE root = $1 AND file = $2`, [ROOT_A, `${src}/Replaced/Chapter 1.cbz`]))[0];
+  const first = await row();
+  assert.ok(first.fingerprint && first.fp_at && first.size, `precondition: fingerprinted ${JSON.stringify(first)}`);
+
+  await persistScan();
+  assert.deepEqual(await row(), first, 'a scan that found the same file cleared its fingerprint');
+
+  await writeCbz(file, { series: 'Replaced', pages: 3, pixel: 'other-bytes' });
+  const later = new Date(Date.now() + 5_000);
+  await utimes(file, later, later);
+  await persistScan();
+  assert.deepEqual(await row(), { fingerprint: null, fp_kind: null, fp_at: null, size: null }, 'the old fingerprint stayed on a file whose mtime moved');
+  await runFingerprintBackfill();
+  const again = await row();
+  assert.ok(again.fingerprint && again.fingerprint !== first.fingerprint, 'the replaced file was not read again');
+});
+
 test('persistScan: TODAY renaming a folder orphans the series — this is the bug being fixed', { skip }, async () => {
   const src = 'T!rename';
   await writeCbz(chapter(ROOT_A, src, 'Old Name', 'Chapter 1.cbz'), { series: 'Old Name' });

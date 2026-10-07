@@ -806,6 +806,15 @@ export function persistScan(): Promise<ScanResult> {
 let hold: Promise<void> | null = null;
 
 /**
+ * Told after a scan that left chapter rows with no fingerprint attempt (v0.55.7, #150): files it met for the first
+ * time, and files whose mtime moved -- the scan clears their old fingerprint. lib/fingerprintJob.ts arms a pass a few
+ * minutes on, so a file is fingerprinted while it is still where it was found: a file moved before that cannot be told
+ * from a gone one (Rescan everything, LIBRARY_REMATCH). A hook, because fingerprintJob.ts reads this module.
+ */
+const unprintedHooks: Array<(n: number) => void> = [];
+export function onUnprintedFiles(fn: (n: number) => void): void { unprintedHooks.push(fn); }
+
+/**
  * Run `fn` with no library scan in flight: wait out the one running, and keep the next from starting until
  * `fn` settles. A renumber (lib/numbering.ts) renames a series' files and then updates their rows in place;
  * a scan between the two would read `Chapter 20.cbz` as a new book -- a second row and a new id -- or meet
@@ -839,6 +848,8 @@ async function scanOnce(): Promise<ScanResult> {
   scansStarted++;
   const t0 = Date.now();
   let nBooks = 0;
+  /** Rows the folders' upserts left with no fingerprint attempt: the hook above. */
+  let unprinted = 0;
   const skipped: ScanSkip[] = [];
   let skippedTotal = 0;
   let removed = 0;
@@ -1027,13 +1038,28 @@ async function scanOnce(): Promise<ScanResult> {
           // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
           //
           // name_rule is written by the INSERT alone: a row keeps the rule it was born with (see NEW FILES ONLY above).
-          await qq(
-            `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end) VALUES ${tuples.join(',')}
-             ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number, number_end=EXCLUDED.number_end,
-               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
-               short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
+          //
+          // The fingerprint goes with the mtime too (v0.55.7, #150), as restampBook (lib/partial.ts) clears it for a
+          // file it rewrote: it is a hash of the bytes, and a file whose mtime moved is other bytes -- a chapter
+          // replaced by hand, or one the backfill read while it was still being unpacked and stamped as unreadable
+          // (fp_at is never retried) or as half a chapter. Kept, Rescan everything could never pair the file once it
+          // moved. Cleared, the next pass reads it again; the count below arms that pass. Reintroduce by dropping the
+          // four CASEs: "a file whose mtime moved is fingerprinted again" in scan.int.test.ts reads the old fingerprint.
+          const [up] = await qq<{ unprinted: number }>(
+            `WITH up AS (
+               INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end) VALUES ${tuples.join(',')}
+               ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number, number_end=EXCLUDED.number_end,
+                 title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
+                 short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END,
+                 fingerprint = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fingerprint END,
+                 fp_kind = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_kind END,
+                 fp_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_at END,
+                 size = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.size END
+               RETURNING fp_at)
+             SELECT count(*) FILTER (WHERE fp_at IS NULL)::int AS unprinted FROM up`,
             params,
           );
+          unprinted += up?.unprinted ?? 0;
 
           // Set the cover AFTER the books exist. It used to be computed by hashing the first chapter's path,
           // which only worked while ids were a pure function of the path -- now it would dangle, and a
@@ -1077,6 +1103,8 @@ async function scanOnce(): Promise<ScanResult> {
   // read-chapter cleanup delete what the sweep just fetched. Best effort, like the ledger above: a scan must
   // never fail over it, and the marks keep until the next scan.
   await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
+  // Files with no fingerprint yet: read them while they are where the scan found them (the hook's note).
+  if (unprinted) for (const fn of unprintedHooks) { try { fn(unprinted); } catch { /* a timer is not worth a scan */ } }
   const ms = Date.now() - t0;
   const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
   const meeting = walks.find((w) => w.met !== undefined);
