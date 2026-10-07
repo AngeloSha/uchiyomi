@@ -58,7 +58,7 @@ import { getSource, withTimeout, type SourceChapter } from './sources';
 import { budgetFor } from './sources/budget';
 import { resetSolverSessions, solverPing } from './sources/flaresolverr';
 import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
-import { automaticCopiesFor, copyToChapter, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, type ListingCopy } from './seriesListing';
 import { groupsOf, normGroup, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
@@ -1015,17 +1015,19 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
          */
         let asked = 0;
         /** A page count, or null when the source was not asked or did not answer -- which ends any proof. */
-        const ask = async (sourceId: string, chapterSourceId: string): Promise<number | null> => {
+        const ask = async (chapter: SourceChapter): Promise<number | null> => {
+          const sourceId = chapter.source ?? '';
           const src = getSource(sourceId);
           if (!src || !allowed(sourceId)) return null;
           if (await isDisabled(sourceId).catch(() => false)) return null;
           if (await blockedNow(sourceId).catch(() => null)) return null;
           if (unattended && !(await seriesIsMonitored(seriesId))) return null;
+          if (!(await automaticChapterAllowedFor(seriesId, chapter))) return null;
           asked++;
           try {
             // Nothing is reported to source_health from here. A page list asked on our own initiative must
             // never be what puts a source into a cooldown: the sweep's own failures are that signal.
-            const urls = await withTimeout(src.getPageUrls(chapterSourceId), budgetFor(src, SHORT_PAGES_MS));
+            const urls = await withTimeout(src.getPageUrls(chapter.sourceId), budgetFor(src, SHORT_PAGES_MS));
             // ⚠️ An EMPTY list is silence, not an answer of "zero pages". No site serves a zero-page
             // chapter, but every HTML engine returns [] rather than throwing when what it parsed was not
             // the reader page at all -- a Cloudflare interstitial, a moved domain's 404, a theme change
@@ -1043,7 +1045,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         for (const c of copies) {
           const chapter = copyToChapter(c, { number: book.number, title: listing?.title ?? null });
           at('asking', c.source);
-          const n = await ask(c.source, c.sourceId);
+          const n = await ask(chapter);
           if (n === null) { silent = true; continue; }
           answered++;
           if (n > best) { best = n; bestChapter = chapter; }
@@ -1067,7 +1069,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           if (h.followed) notes.followed.push(`${book.title} -> ${h.followed.source}`);
           if (h.chapter?.source) {
             at('asking', h.chapter.source);
-            const n = await ask(h.chapter.source, h.chapter.sourceId);
+            const n = await ask(h.chapter);
             if (n === null) silent = true;
             else { answered++; if (n > best) { best = n; bestChapter = h.chapter; } }
           }
@@ -1135,6 +1137,7 @@ async function replaceShort(
   let missing: number[] = [];
   try {
     if (unattended && !(await seriesIsMonitored(book.series_id))) return 'paused';
+    if (!(await automaticChapterAllowedFor(book.series_id, chapter))) return false;
     const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
     if (!landed) return false;
   } catch (e: any) {
@@ -1149,6 +1152,7 @@ async function replaceShort(
       hold?.drop?.();
       return false;
     }
+    if (!(await automaticChapterAllowedFor(book.series_id, chapter))) { hold.drop?.(); return false; }
     await hold.write();
     missing = hold.missing;
   }
@@ -1303,7 +1307,7 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
         const copy = listing && betterCopy(book, open, await prefsFor(book), followed);
         if (!copy || !allowed(copy.source)) { r.groups.left++; continue; }
         const chapter = copyToChapter(copy, { number: book.number, title: listing!.title });
-        const count = await pageCount(copy.source, copy.sourceId, allowed, seriesId);
+        const count = await pageCount(chapter, allowed, seriesId);
         // ⚠️ Decided BEFORE the download: never a shorter copy, and silence is not a yes.
         // Reintroduce by dropping the page test: "a shorter copy never replaces a longer one" in
         // groupUpgrade.int.test.ts finds the notice written over the chapter.
@@ -1331,15 +1335,17 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
  * puts a source into a cooldown. An EMPTY list is silence, not zero pages (see stepShort).
  */
 async function pageCount(
-  sourceId: string, chapterSourceId: string, allowed: (s: string) => boolean, seriesId?: string,
+  chapter: SourceChapter, allowed: (s: string) => boolean, seriesId?: string,
 ): Promise<number | null> {
+  const sourceId = chapter.source ?? '';
   const src = getSource(sourceId);
   if (!src || !allowed(sourceId)) return null;
   if (await isDisabled(sourceId).catch(() => false)) return null;
   if (await blockedNow(sourceId).catch(() => null)) return null;
   if (seriesId && !(await seriesIsMonitored(seriesId))) return null;
+  if (seriesId && !(await automaticChapterAllowedFor(seriesId, chapter))) return null;
   try {
-    const urls = await withTimeout(src.getPageUrls(chapterSourceId), budgetFor(src, SHORT_PAGES_MS));
+    const urls = await withTimeout(src.getPageUrls(chapter.sourceId), budgetFor(src, SHORT_PAGES_MS));
     return urls.length || null;
   } catch {
     return null;
@@ -1357,6 +1363,7 @@ async function replaceWithGroup(
   };
   try {
     if (!(await seriesIsMonitored(book.series_id))) return 'paused';
+    if (!(await automaticChapterAllowedFor(book.series_id, chapter))) return false;
     // writeAtomic underneath: the file on disk is untouched until the new one is entirely there. A copy
     // that arrives short is offered as a hold (e.partial) and REFUSED here -- a partial is a downgrade.
     const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });

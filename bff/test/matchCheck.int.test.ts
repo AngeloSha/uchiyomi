@@ -50,7 +50,7 @@ const TITLE: Record<string, string> = {
 };
 const USER = 'mc-reader';
 
-let q: any, app: any, adminAuth: Record<string, string> = {}, userId = '';
+let q: any, pool: any, app: any, adminAuth: Record<string, string> = {}, userId = '';
 const realFetch = globalThis.fetch;
 /** Every id AniList was asked about, request by request; and MangaDex's. */
 const alAsked: number[][] = [];
@@ -84,7 +84,7 @@ const log = { info() {}, warn() {} };
 
 before(async () => {
   if (!DSN) return;
-  ({ q } = await import('../src/lib/db'));
+  ({ q, pool } = await import('../src/lib/db'));
   await (await import('../src/lib/migrate')).migrate();
   const ids = Object.values(S);
   for (const t of ['series_trackers', 'series_art', 'series_alt_titles', 'tracker_progress', 'series_sources']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ids]);
@@ -222,6 +222,47 @@ test('background matching sends nothing for an opted-out library, while explicit
   assert.ok(manual.art.checked >= 2, 'the manual pass did not check both opted-out art fields');
   assert.ok((await linkOf(S.private))?.checked_at);
   assert.ok((await artOf(S.private))?.checked_at);
+});
+
+test('a move to an opted-out library while a background check is assembling names sends no stored ids', { skip }, async () => {
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  // Start eligible, with both providers represented.  Holding series_alt_titles stops namesOfMany after the initial
+  // candidate snapshot, giving the move a deterministic window before either outbound id set is formed.
+  await q(`UPDATE libraries SET anilist_lookup = true WHERE id = 'mc-private'`);
+  await q(`UPDATE lib_series SET library_id = 'mc-private' WHERE id = $1`, [S.private]);
+  await q(`DELETE FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`, [S.private]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','507','Zzz Mc Private')`, [S.private]);
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1,$2,$3,NULL)
+           ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, checked_at = NULL`,
+    [S.private, banner(507), mdCover(UUID_OTHER)]);
+
+  const blocker = await pool.connect();
+  await blocker.query('BEGIN');
+  await blocker.query('LOCK TABLE series_alt_titles IN ACCESS EXCLUSIVE MODE');
+  const before = { al: alAsked.length, md: mdAsked.length };
+  const running = checkMatches(log);
+  try {
+    let waiting = false;
+    for (let i = 0; i < 200 && !waiting; i++) {
+      const rows = await q(`SELECT 1 FROM pg_stat_activity
+        WHERE datname = current_database() AND state = 'active' AND wait_event_type = 'Lock'
+          AND query ILIKE '%series_alt_titles%' AND pid <> pg_backend_pid()`);
+      waiting = rows.length > 0;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(waiting, true, 'the match check did not reach the controlled policy-race boundary');
+    await q(`UPDATE libraries SET anilist_lookup = false WHERE id = 'mc-private'`);
+  } finally {
+    await blocker.query('COMMIT');
+    blocker.release();
+  }
+  const result = await running;
+  assert.equal(alAsked.length, before.al, 'the stale snapshot sent an AniList id after the series opted out');
+  assert.equal(mdAsked.length, before.md, 'the stale snapshot sent a MangaDex id after the series opted out');
+  assert.deepEqual(result.links, { checked: 0, removed: 0 });
+  assert.deepEqual(result.art, { checked: 0, cleared: 0 });
+  assert.equal((await linkOf(S.private))?.checked_at, null, 'the skipped link was stamped');
+  assert.equal((await artOf(S.private))?.checked_at, null, 'the skipped art was stamped');
 });
 
 test('a service that does not answer decides nothing; the next run takes up what is left', { skip }, async () => {

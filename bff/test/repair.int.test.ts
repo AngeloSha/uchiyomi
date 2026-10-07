@@ -79,6 +79,8 @@ let pageCalls: string[] = [];
 let searches: string[] = [];
 /** A page list that waits: `reached` fires when it is asked, and it answers once `open` resolves. */
 let pageGate: { id: string; reached: () => void; open: Promise<void> } | null = null;
+/** Scanlator attached to one stub listing copy (used by blocklist race regressions). */
+const scanlatorFor = new Map<string, string>();
 /** Whether the stub solver says it is ready. */
 let solverReady = true;
 let solver: Server | null = null;
@@ -100,7 +102,7 @@ const adapter = (id: string) => ({
     const title = sid.split('::')[1] ?? '';
     const out: Array<{ sourceId: string; number: number; title: string; scanlator?: string }> = [];
     for (const n of catalog.get(id)!.get(title) ?? []) {
-      out.push({ sourceId: cid(id, title, n), number: n, title: `Chapter ${n}` });
+      out.push({ sourceId: cid(id, title, n), number: n, title: `Chapter ${n}`, scanlator: scanlatorFor.get(cid(id, title, n)) });
       // A re-upload by a second group on the SAME site: two copies of one number under one source, which
       // is what `series_listing.copies` holds live and what the short step must not mistake for two sources.
       if (twoGroups.has(cid(id, title, n))) {
@@ -202,6 +204,7 @@ function resetCatalog(): void {
   twoGroups.clear();
   missingPage.clear();
   droppedPage.clear();
+  scanlatorFor.clear();
 }
 
 before(async () => {
@@ -432,6 +435,39 @@ test('a follower with more pages replaces a short chapter, and everyone keeps th
   assert.equal(a?.readers, 1, 'and how many people had a position in it');
   await q('DELETE FROM read_progress WHERE book_id = $1', [id]);
   await q('DELETE FROM users WHERE id = $1', [user]);
+});
+
+test('blocking a longer copy while its page count is in flight stops the short-chapter replacement', { skip }, async () => {
+  const id = await shortBook(16);
+  const group = 'Zz Repair Race Group';
+  scanlatorFor.set(cid(B, T.short, 16), group);
+  pagesFor.set(cid(A, T.short, 16), 2);
+  pagesFor.set(cid(B, T.short, 16), 12);
+  const beforePrefs = (await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0]?.scanlator_prefs;
+  await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+    [JSON.stringify({ priority: [group], blocked: [], patienceDays: 0 })]);
+  let reached!: () => void;
+  const atGate = new Promise<void>((resolve) => { reached = resolve; });
+  let open!: () => void;
+  pageGate = { id: cid(B, T.short, 16), reached, open: new Promise<void>((resolve) => { open = resolve; }) };
+  const running = runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  try {
+    await atGate;
+    await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+      [JSON.stringify({ priority: [group], blocked: [group], patienceDays: 0 })]);
+  } finally {
+    open();
+    pageGate = null;
+  }
+  try {
+    const r = await running;
+    assert.equal(r.short.replaced, 0);
+    assert.equal((await book(id)).pages, 2, 'the newly blocked copy replaced the chapter');
+    assert.equal(pageCalls.filter((c) => c === cid(B, T.short, 16)).length, 1,
+      'the newly blocked copy was contacted again for the replacement download');
+  } finally {
+    await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1', [JSON.stringify(beforePrefs)]);
+  }
 });
 
 test('a shorter copy never replaces what is already on disk', { skip }, async () => {

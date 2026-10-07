@@ -631,6 +631,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
           seriesId, title, folder, meta, chapter: use,
           alternates: () => alternatesOf(ch.number),
           refusing, allowed: input.allowed, hunt: undefined,
+          automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
         });
       } catch (e: any) {
         const j = jobs.get(folder);
@@ -1237,8 +1238,19 @@ async function artByTitle(where: { id: string } | { folder: string }, title: str
     if (!(await automaticAniListAllowed(where))) return;
     const names = await namesOf(where);
     if (!names.includes(title)) names.unshift(title);
+    // Resolving names can await the database while the series is moved.  The destination's privacy choice at the
+    // actual outbound boundary wins over the earlier eligibility read.
+    if (!(await automaticAniListAllowed(where))) return;
     const a = await fetchAniListArt(title, names);
-    const merge = `ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`;
+    // A move can also happen while AniList is answering.  Its response must not mutate art, links, type or direction
+    // for a series whose new destination has opted out meanwhile.
+    if (!(await automaticAniListAllowed(where))) return;
+    // A source cover can have created the row while automatic lookups were disabled.  Completing the lookup later
+    // fills only what is missing, but marks the online attempt complete so a title miss is not retried on every view.
+    const merge = `ON CONFLICT (series_id) DO UPDATE SET
+      banner = COALESCE(series_art.banner, EXCLUDED.banner),
+      cover = COALESCE(series_art.cover, EXCLUDED.cover),
+      fetched_at = now(), checked_at = now()`;
     if ('id' in where) {
       await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now()) ${merge}`, [where.id, a.banner, a.cover]).catch(() => {});
     } else {
@@ -1541,7 +1553,7 @@ export async function addSeriesFromSource(opts: {
     // started here holds nothing found by title unchecked -- the source's cover, then AniList's answer held to the
     // series' names (lib/onlineMatch.ts) -- while a row that was already there keeps its own mark.
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover, checked_at) VALUES ($1, $2, now())
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) VALUES ($1, $2, NULL)
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
     }
     await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
@@ -1649,7 +1661,7 @@ export async function addSeriesFromSource(opts: {
       }
     }
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, now() FROM lib_series WHERE folder = $2
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, NULL FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     void artByTitle({ folder }, title);
@@ -1782,7 +1794,7 @@ export async function addSeriesFromSource(opts: {
       judgeAlsoFollow(folder, seriesId, opts);
     }
     if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, now() FROM lib_series WHERE folder = $2
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, NULL FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     void artByTitle({ folder }, title);

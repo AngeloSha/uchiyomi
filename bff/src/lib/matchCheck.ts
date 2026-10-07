@@ -67,7 +67,22 @@ export const matchCheckState: MatchCheckState = { running: false, startedAt: nul
 const AUDIT_NAMED = 50;
 
 type Field = 'banner' | 'cover';
-interface Judged { seriesId: string; field: Field; url: string; anilist?: AniListMedia; mangadex?: string; anilistAllowed: boolean }
+interface Judged { seriesId: string; field: Field; url: string; anilist?: AniListMedia; mangadex?: string }
+
+/**
+ * The candidate reads at the top of a background run are not a privacy grant: a series can move libraries while
+ * names are being assembled.  Re-read its destination immediately before each outbound batch (and again before
+ * applying the answer).  Explicit Admin “Run now” is manual and deliberately includes every library.
+ */
+async function currentlyAllowed(ids: readonly string[], all: boolean): Promise<Set<string>> {
+  const unique = [...new Set(ids)];
+  if (all) return new Set(unique);
+  if (!unique.length) return new Set();
+  const rows = await q<{ id: string }>(
+    `SELECT s.id FROM lib_series s JOIN libraries l ON l.id = s.library_id
+      WHERE s.id = ANY($1::text[]) AND l.anilist_lookup`, [unique]);
+  return new Set(rows.map((r) => r.id));
+}
 
 /**
  * Hold every unchecked match to the title check -- every automatic one, checked or not, with `all` (Run now). Writes
@@ -90,7 +105,7 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
             l.anilist_lookup
        FROM series_art a JOIN lib_series s ON s.id = a.series_id
        JOIN libraries l ON l.id = s.library_id
-      WHERE ($1 OR a.checked_at IS NULL)
+      WHERE ($1 OR l.anilist_lookup) AND ($1 OR a.checked_at IS NULL)
       ORDER BY a.series_id`, [all]);
 
   const fields: Judged[] = [];
@@ -102,14 +117,18 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       const url = a[field];
       if (!url) continue;
       const anilist = aniListMediaOf(url);
-      if (anilist) { fields.push({ seriesId: a.series_id, field, url, anilist, anilistAllowed: all || a.anilist_lookup }); continue; }
+      if (anilist) { fields.push({ seriesId: a.series_id, field, url, anilist }); continue; }
       const mangadex = mangaDexIdOf(url);
-      if (mangadex && !own.has(mangadex)) fields.push({ seriesId: a.series_id, field, url, mangadex, anilistAllowed: true });
+      if (mangadex && !own.has(mangadex)) fields.push({ seriesId: a.series_id, field, url, mangadex });
     }
     if (fields.length === before) nothingByTitle.push(a.series_id);
   }
   // A row holding nothing found by title -- a source's cover, a miss -- is checked as it stands.
-  if (nothingByTitle.length) await q('UPDATE series_art SET checked_at = now() WHERE series_id = ANY($1::text[])', [nothingByTitle]);
+  if (nothingByTitle.length) await q(
+    `UPDATE series_art a SET checked_at = now()
+       FROM lib_series s JOIN libraries l ON l.id = s.library_id
+      WHERE a.series_id = ANY($1::text[]) AND s.id = a.series_id AND ($2 OR l.anilist_lookup)`,
+    [nothingByTitle, all]);
   if (!links.length && !fields.length) {
     out.ms = Date.now() - t0;
     return out;
@@ -120,13 +139,21 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
 
   // AniList, by id: every linked entry and every entry a stored picture came from. An adaptation's banner whose anime
   // is not named as the series is judged by the manga it is related to as well, so those are asked in a second round.
-  const alIds = [...new Set([...links.map((l) => Number(l.external_id)), ...fields.flatMap((f) => (f.anilist && f.anilistAllowed ? [f.anilist.id] : []))])];
+  const alCandidates = [...new Set([...links.map((l) => l.series_id), ...fields.filter((f) => f.anilist).map((f) => f.seriesId)])];
+  let allowed = await currentlyAllowed(alCandidates, all);
+  let activeLinks = links.filter((l) => allowed.has(l.series_id));
+  let anilistFields = fields.filter((f) => f.anilist && allowed.has(f.seriesId));
+  const alIds = [...new Set([...activeLinks.map((l) => Number(l.external_id)), ...anilistFields.map((f) => f.anilist!.id)])];
   let entries: Map<number, AniListEntry> | null = null;
   if (alIds.length) {
     try {
       entries = await fetchAniListEntries(alIds);
       const related = new Set<number>();
-      for (const f of fields) {
+      // A move can happen while the first AniList request is in flight.  Related ids are a separate outbound set,
+      // so take the same last-boundary policy snapshot for it rather than carrying the earlier grant forward.
+      allowed = await currentlyAllowed(anilistFields.map((f) => f.seriesId), all);
+      anilistFields = anilistFields.filter((f) => allowed.has(f.seriesId));
+      for (const f of anilistFields) {
         const e = f.anilist?.type === 'ANIME' ? entries.get(f.anilist.id) : undefined;
         if (!e || namesMatch(namesOfSeries(f.seriesId), e.titles)) continue;
         for (const r of e.related) if (r.type === 'MANGA' && !entries.has(r.id)) related.add(r.id);
@@ -138,7 +165,10 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       out.stopped = 'unavailable';
     }
   }
-  const mdIds = [...new Set(fields.flatMap((f) => (f.mangadex ? [f.mangadex] : [])))];
+  let mangadexFields = fields.filter((f) => f.mangadex);
+  allowed = await currentlyAllowed(mangadexFields.map((f) => f.seriesId), all);
+  mangadexFields = mangadexFields.filter((f) => allowed.has(f.seriesId));
+  const mdIds = [...new Set(mangadexFields.map((f) => f.mangadex!))];
   let md: Map<string, string[]> | null = null;
   if (mdIds.length) {
     try {
@@ -153,7 +183,9 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
 
   // The links. A verdict is written only where AniList answered at all.
   if (entries) {
-    for (const l of links) {
+    allowed = await currentlyAllowed(activeLinks.map((l) => l.series_id), all);
+    activeLinks = activeLinks.filter((l) => allowed.has(l.series_id));
+    for (const l of activeLinks) {
       const id = Number(l.external_id);
       const e = entries.get(id);
       const mine = namesOfSeries(l.series_id);
@@ -182,8 +214,11 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
 
   // The pictures, a row at a time: a field is cleared only while it still holds the URL that was judged, and the row is
   // stamped only once every field on it has a verdict.
+  allowed = await currentlyAllowed([...anilistFields, ...mangadexFields].map((f) => f.seriesId), all);
   const bySeries = new Map<string, Judged[]>();
-  for (const f of fields) bySeries.set(f.seriesId, [...(bySeries.get(f.seriesId) ?? []), f]);
+  for (const f of [...anilistFields, ...mangadexFields]) {
+    if (allowed.has(f.seriesId)) bySeries.set(f.seriesId, [...(bySeries.get(f.seriesId) ?? []), f]);
+  }
   for (const [seriesId, list] of bySeries) {
     const mine = namesOfSeries(seriesId);
     const clear: Partial<Record<Field, string>> = {};
@@ -192,8 +227,6 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       let titles: string[] | undefined;
       let related: AniListEntry['related'] = [];
       if (f.anilist) {
-        // Keep the row unchecked: enabling the library later makes the next background pass take it up.
-        if (!f.anilistAllowed) { pending = true; continue; }
         if (!entries) { pending = true; continue; }
         const e = entries.get(f.anilist.id);
         titles = e?.titles;

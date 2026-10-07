@@ -79,6 +79,11 @@ export interface FallbackInput {
    * alternate, and both the hunt and its download. Manual callers omit it and remain admitted.
    */
   admit?: () => Promise<boolean>;
+  /**
+   * Re-read the current series/source/scanlator rules immediately before every automatic copy is contacted and
+   * before a partial hold is written.  Only a chapter explicitly pinned by a person bypasses this predicate.
+   */
+  automaticAllowed?: (chapter: SourceChapter) => Promise<boolean>;
 }
 
 export type FallbackOutcome =
@@ -126,6 +131,9 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   const n = f.chapter.number;
   const label = `"${f.title}" ch ${n}`;
   const admitted = () => f.admit ? f.admit().catch(() => false) : Promise.resolve(true);
+  const automaticallyAllowed = (chapter: SourceChapter): Promise<boolean> => f.chapter.pinned
+    ? Promise.resolve(true)
+    : f.automaticAllowed ? f.automaticAllowed(chapter).catch(() => false) : Promise.resolve(true);
   if (!via) return { kind: 'failed', via, err: new Error(`${label}: the copy names no source`) };
 
   // The error of the CHOSEN copy: what the reason is worded from and what decides whether a hunt is
@@ -136,8 +144,13 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   let last = null as { via: string; err: any } | null;
   // The hold with the fewest missing pages across every copy asked. Kept, not written, until the end.
   let best = null as { hold: PartialHold; via: string; chapter: SourceChapter } | null;
+  let asked = 0;
 
-  const attempt = async (ch: SourceChapter, src: string, chosen = false): Promise<{ file: string; pages: number } | null | 'failed'> => {
+  const attempt = async (ch: SourceChapter, src: string, chosen = false): Promise<{ file: string; pages: number } | null | 'failed' | 'blocked'> => {
+    // This is deliberately inside the attempt, after every earlier await and directly beside the network/write call.
+    // A preference save that lands while alternates or a hunt are being assembled therefore wins this race.
+    if (!(await automaticallyAllowed(ch))) return 'blocked';
+    asked++;
     let done: { file: string; pages: number } | null;
     try {
       done = await downloadChapter({ sourceId: src, seriesFolder: f.folder, chapter: ch, meta: f.meta }, { replace: f.replace });
@@ -171,13 +184,11 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   );
 
   // ── 1 + 2. the chosen copy ────────────────────────────────────────────────────────────────────────
-  let asked = 0;
   if (!f.refusing.has(via) && !off) {
     if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
-    asked++;
     const r = await attempt(f.chapter, via, true);
     if (r === null) return { kind: 'skipped', why: 'on_disk' };
-    if (r !== 'failed') return { kind: 'landed', via, pages: r.pages, chapterUsed: f.chapter };
+    if (r !== 'failed' && r !== 'blocked') return { kind: 'landed', via, pages: r.pages, chapterUsed: f.chapter };
   }
 
   // ── 3. the same number from another followed source ───────────────────────────────────────────────
@@ -196,9 +207,9 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       if (await isDisabled(src).catch(() => false)) continue;
       if (await blockedNow(src).catch(() => null)) continue;
       if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
-      tried++;
-      asked++;
       const r = await attempt(alt, src);
+      if (r === 'blocked') continue;
+      tried++;
       if (r === 'failed') continue;
       if (r === null) return { kind: 'skipped', why: 'on_disk' };
       tookFrom(src, []);
@@ -222,10 +233,9 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       const src = found?.source ?? '';
       if (found && src && src !== via && !f.refusing.has(src) && (!f.allowed || f.allowed(src)) && getSource(src)) {
         if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
-        asked++;
         const r = await attempt(found, src);
         if (r === null) return { kind: 'skipped', why: 'on_disk' };
-        if (r !== 'failed') {
+        if (r !== 'failed' && r !== 'blocked') {
           tookFrom(src, []);
           return { kind: 'landed', via: src, pages: r.pages, chapterUsed: found, switched: switched() };
         }
@@ -237,7 +247,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
   // Written here and nowhere else: the downloader offers a hold, it never writes one (partialChapter.test.ts
   // pins that), and this is the point at which everything that could have served the chapter whole has
   // been asked. The hold with the fewest holes wins, whichever source it came from.
-  if (best && (!f.acceptPartial || f.acceptPartial(best.hold, best.via))) {
+  if (best && (!f.acceptPartial || f.acceptPartial(best.hold, best.via)) && await automaticallyAllowed(best.chapter)) {
     const w = await best.hold.write();
     if (best.via !== via) tookFrom(best.via, w.missing);
     else console.warn(`[download] ${label}: saved with ${w.missing.length} page${w.missing.length === 1 ? '' : 's'} missing from ${via}`);

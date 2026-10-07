@@ -34,7 +34,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const AdmZip = require('adm-zip');
 
 const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', privacy: 'Zzz Om Private', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B' };
-const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit' | 'addPrivate', string> = {} as any;
+const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit' | 'addPrivate' | 'addMoving', string> = {} as any;
 const ADMIN = 'om-admin';
 // The art hosts: a literal public address, so the cover proxy's SSRF guard needs no DNS to let the fake answer.
 const RED = 'https://1.1.1.1/om/red.png';
@@ -47,6 +47,8 @@ let adminAuth: Record<string, string> = {}, adminCookie = '';
 const png: Record<'red' | 'blue' | 'green', Buffer> = {} as any;
 /** Every AniList search, by what it asked. */
 const asked: string[] = [];
+/** Runs after a fake AniList request has started but before its answer returns. */
+let duringAniList: ((title: string) => Promise<void>) | null = null;
 
 /** What AniList answers a title search with: the manga "Sasaki to Miyano" for the comic, the entry itself for the rest. */
 function aniListAnswer(s: string): unknown {
@@ -54,7 +56,9 @@ function aniListAnswer(s: string): unknown {
     id: 9001, title: { romaji: 'Sasaki to Miyano', english: 'Zzz Om Sasaki to Miyano', native: '佐々木と宮野' }, synonyms: [],
     countryOfOrigin: 'JP', coverImage: { extraLarge: MANGA_COVER }, bannerImage: MANGA_BANNER, relations: { edges: [] },
   };
-  if (s === 'Zzz Om Sasaki to Miyano' || s === 'Zzz Om Add Hit') return { ...sasaki, title: { ...sasaki.title, english: s } };
+  if (s === 'Zzz Om Sasaki to Miyano' || s === 'Zzz Om Add Hit' || s === 'Zzz Om Add Private' || s === 'Zzz Om Add Moving') {
+    return { ...sasaki, title: { ...sasaki.title, english: s } };
+  }
   // SEARCH_MATCH's best guess for a title AniList does not have: somebody else's manga.
   if (s.startsWith('Zzz Om')) return { ...sasaki, id: 9002, title: { romaji: 'Sasaki to Miyano', english: 'Sasaki and Miyano', native: null } };
   return null;
@@ -67,6 +71,7 @@ function fakeNetwork() {
       const body = JSON.parse(String(init?.body ?? '{}'));
       const s = String(body?.variables?.s ?? '');
       asked.push(s);
+      await duringAniList?.(s);
       if (/type:ANIME/.test(body.query)) {
         return Response.json({ data: { Media: s.startsWith('Zzz Om') ? { title: { romaji: 'Sasaki and Miyano: Graduation' }, synonyms: [], bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/77-x.jpg' } : null } });
       }
@@ -286,35 +291,76 @@ test("an add keeps AniList's art only from an entry named as the series", { skip
   const privateArt = await art(ID.addPrivate);
   assert.equal(privateArt?.cover, RED, "the privacy switch removed the source's own cover");
   assert.equal(privateArt?.banner, null, 'automatic AniList art was stored for an opted-out add');
+
+  // The add starts in an enabled destination, then moves while AniList is answering.  The in-flight answer must not
+  // write art/link/type/direction under the stale permission; its source cover is preserved for a later re-enable.
+  registerAdapter(adapter('om-moving', 'Zzz Om Add Moving') as any);
+  duringAniList = async (title) => {
+    if (title !== 'Zzz Om Add Moving') return;
+    const row = (await q(`SELECT id FROM lib_series WHERE source_id = 'om-moving'`))[0];
+    if (row) await q(`UPDATE lib_series SET library_id = 'om-add-private' WHERE id = $1`, [row.id]);
+    duringAniList = null;
+  };
+  const moving = await addSeriesFromSource({ source: 'om-moving', sourceId: 'om-moving-1', wait: true });
+  assert.equal(moving.ok, true, moving.message);
+  ID.addMoving = (await q(`SELECT id FROM lib_series WHERE source_id = 'om-moving'`))[0].id;
+  for (let i = 0; i < 100 && duringAniList; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal((await q(`SELECT library_id FROM lib_series WHERE id = $1`, [ID.addMoving]))[0].library_id, 'om-add-private');
+  assert.deepEqual(await art(ID.addMoving), { banner: null, cover: RED, checked_at: null },
+    'an in-flight implicit add lookup mutated or completed art after the destination opted out');
+  assert.equal(await link(ID.addMoving), null, 'an in-flight implicit add lookup linked the opted-out series');
 });
 
-test('a library opt-out makes a lazy view send no title and store no miss; enabling or moving applies immediately', { skip }, async () => {
-  await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('om-no-anilist','Private metadata','Zzz Om Private',false)
-           ON CONFLICT (id) DO UPDATE SET anilist_lookup = false`);
+test('a source cover added while opted out stays private, then gains missing online art after enabling without being replaced', { skip }, async () => {
   await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('om-yes-anilist','Online metadata','Zzz Om Online',true)
            ON CONFLICT (id) DO UPDATE SET anilist_lookup = true`);
-  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.privacy]);
-  await q(`DELETE FROM series_art WHERE series_id = $1`, [ID.privacy]);
+  // Seeded by the preceding real add, exactly as production leaves it: its source cover exists, no online lookup was
+  // made, and the row remains eligible.  Deleting this row would miss the regression -- any row used to suppress the
+  // lazy title lookup forever.
+  const seeded = await art(ID.addPrivate);
+  assert.equal(seeded?.cover, RED, 'the opted-out add did not retain its source cover');
+  assert.equal(seeded?.banner, null);
+  assert.equal(seeded?.checked_at, null, 'the skipped online lookup was cached as complete');
   const before = asked.length;
-  const hidden = await img(`/img/series/${ID.privacy}/backdrop`);
+  const hidden = await img(`/img/series/${ID.addPrivate}/backdrop`);
   assert.equal(hidden.statusCode, 200, hidden.body.slice(0, 160));
   assert.equal(asked.length, before, 'a lazy backdrop sent the private library title to AniList');
-  assert.equal(await art(ID.privacy), null, 'opting out stored a negative result, so enabling later would not look up');
+  assert.deepEqual(await art(ID.addPrivate), seeded, 'the private view changed the source art or cached a miss');
 
-  // The current library decides at request time. Moving to an enabled library must make the
-  // same absent art row eligible without a restart or cache clear.
-  await q(`UPDATE lib_series SET library_id = 'om-yes-anilist' WHERE id = $1`, [ID.privacy]);
-  assert.equal((await img(`/img/series/${ID.privacy}/backdrop`)).statusCode, 200);
-  assert.ok(asked.slice(before).includes(FOLDERS.privacy), 'moving to an enabled library did not permit the lookup');
-  const stored = await art(ID.privacy);
+  // The current destination decides at request time.  Moving to an enabled library must enrich the same cover-only
+  // row without a restart, cache clear, or destructive replacement of the cover supplied by its source.
+  await q(`UPDATE lib_series SET library_id = 'om-yes-anilist' WHERE id = $1`, [ID.addPrivate]);
+  assert.equal((await img(`/img/series/${ID.addPrivate}/backdrop`)).statusCode, 200);
+  assert.ok(asked.slice(before).includes('Zzz Om Add Private'), 'moving to an enabled library did not permit the lookup');
+  const stored = await art(ID.addPrivate);
+  assert.equal(stored?.banner, MANGA_BANNER, 'the missing online banner was not filled');
+  assert.equal(stored?.cover, RED, "the source's cover was overwritten by online art");
   assert.ok(stored?.checked_at, 'the enabled lookup did not store its verdict');
 
   // Turning it back off preserves data already found or checked; the switch is not destructive.
-  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.privacy]);
+  await q(`UPDATE lib_series SET library_id = 'om-add-private' WHERE id = $1`, [ID.addPrivate]);
   const after = asked.length;
-  assert.equal((await img(`/img/series/${ID.privacy}/backdrop`)).statusCode, 200);
+  assert.equal((await img(`/img/series/${ID.addPrivate}/backdrop`)).statusCode, 200);
   assert.equal(asked.length, after, 'existing art triggered another automatic title lookup while disabled');
-  assert.deepEqual(await art(ID.privacy), stored, 'opting out cleared existing art or its check state');
+  assert.deepEqual(await art(ID.addPrivate), stored, 'opting out cleared existing art or its check state');
+});
+
+test('a lazy lookup whose series moves to an opted-out library while AniList answers applies no response', { skip }, async () => {
+  await q(`UPDATE lib_series SET library_id = 'om-yes-anilist' WHERE id = $1`, [ID.privacy]);
+  await q(`DELETE FROM series_art WHERE series_id = $1`, [ID.privacy]);
+  await q(`DELETE FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`, [ID.privacy]);
+  let moved = false;
+  duringAniList = async (title) => {
+    if (title !== FOLDERS.privacy) return;
+    moved = true;
+    duringAniList = null;
+    await q(`UPDATE lib_series SET library_id = 'om-add-private' WHERE id = $1`, [ID.privacy]);
+  };
+  assert.equal((await img(`/img/series/${ID.privacy}/backdrop`)).statusCode, 200);
+  assert.equal(moved, true, 'the test did not move the series during the lookup');
+  assert.equal(await art(ID.privacy), null, 'the stale AniList response was cached after the destination opted out');
+  assert.equal(await link(ID.privacy), null, 'the stale AniList response linked the opted-out series');
 });
 
 test('the backfill stores only what is named as the series: AniList, the anime search, Kitsu and MangaDex alike', { skip }, async () => {
@@ -332,7 +378,7 @@ test('the backfill stores only what is named as the series: AniList, the anime s
   } as any);
   // AniList answers another work for both the title and the harsher one; the anime search a sequel; Kitsu a spin-off.
   // This is an explicit Admin → Art action, so the privacy switch must not make it inert.
-  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.hunt]);
+  await q(`UPDATE lib_series SET library_id = 'om-add-private' WHERE id = $1`, [ID.hunt]);
   const beforeAniList = asked.length;
   const found = await huntArt({ id: ID.hunt, title: FOLDERS.hunt });
   assert.ok(asked.length > beforeAniList, 'an explicit manual art search was blocked by the automatic-lookup switch');

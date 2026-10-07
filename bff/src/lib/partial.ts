@@ -270,6 +270,8 @@ export async function completePartial(
       const got = await underGate(src.id, () => fetchPages(src, urls!, missing, { chapterSourceId: manifest.chapterSourceId, retry: false }));
       const filled = missing.filter((i) => got.page[i]);
       if (filled.length) {
+        if (!(await admitted())) return result;
+        if (!(await automaticallyAllowed(chapter))) return result;
         const still = missing.filter((i) => !got.page[i]);
         // Merge by index name: the placeholder entry for a filled index goes, the real page takes its slot
         // (possibly under another extension), every other entry keeps its bytes exactly.
@@ -325,6 +327,7 @@ export async function completePartial(
         if (e?.diskFull) throw e;
         const hold = e?.partial;
         if (hold && hold.missing.length < missing.length) {
+          if (!(await admitted()) || !(await automaticallyAllowed(chapter))) { hold.drop?.(); return result; }
           await hold.write();
           await restampBook(book.id, abs, hold.missing);
           console.warn(`${label}: re-sliced on ${src.id} (${manifest.expected} → ${urls.length} pages), saved with ${hold.missing.length} missing`);
@@ -357,6 +360,7 @@ export async function completePartial(
     allowed: ctx.allowed,
     hunt: ctx.hunt,
     admit: ctx.admit,
+    automaticAllowed: ctx.automaticAllowed,
     replace: true,
     // Decide before `PartialHold.write()` replaces the canonical archive. The old write-then-restore
     // sequence had a crash window in which a worse copy could become permanent while the DB still

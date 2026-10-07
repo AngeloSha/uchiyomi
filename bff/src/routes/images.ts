@@ -362,13 +362,15 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
   // here, and the banner made from its pages -- and nothing online is looked up or shown for it. Reintroduce by reading
   // series_art for it: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds the stored
   // banner's variant.
-  let art: { banner: string | null; cover: string | null } | null = ovr?.cover === FIRST_PAGE
-    ? { banner: null, cover: null }
-    : await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
-  if (!art) {
+  let art: { banner: string | null; cover: string | null; checked_at: Date | null } | null = ovr?.cover === FIRST_PAGE
+    ? { banner: null, cover: null, checked_at: new Date() }
+    : await one<{ banner: string | null; cover: string | null; checked_at: Date | null }>('SELECT banner, cover, checked_at FROM series_art WHERE series_id = $1', [id]);
+  // An opted-out add may still have its source cover.  That row is deliberately unchecked: once its current library
+  // allows automatic enrichment, look up the missing online banner without replacing the source's own cover.
+  if (!art || (!art.banner && !art.checked_at)) {
     // A disabled library makes no implicit title request and, importantly, stores no miss.  If the admin
     // enables lookups later this same absent row is eligible immediately; existing art remains visible.
-    if (!(await automaticAniListAllowed({ id }))) art = { banner: null, cover: null };
+    if (!(await automaticAniListAllowed({ id }))) art ??= { banner: null, cover: null, checked_at: null };
     else {
       try {
         // Every name the series goes by (lib/altTitles.ts namesOf): the search asks by its title, and the answer is kept
@@ -380,11 +382,24 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
           if (!names.length) { const s = await komga.series(id); const t = s?.metadata?.title || s?.name; if (t) names = [t]; }
         } catch {}
         const title = names[0] ?? '';
+        // Names are a database read and the library can change while it is in flight.  Re-read at the actual title
+        // boundary; if the series moved into an opted-out destination, preserve its existing/source art and cache no
+        // miss.  Re-read once more after the network answer before any art/link/type/direction mutation.
+        if (title && !(await automaticAniListAllowed({ id }))) {
+          throw new Error('automatic AniList lookup disabled');
+        }
         const fetched = title ? await fetchAniListArt(title, names) : { banner: null, cover: null };
+        if (title && !(await automaticAniListAllowed({ id }))) {
+          throw new Error('automatic AniList lookup disabled');
+        }
         // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
-        await q(
+        const stored = await q<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
           `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
-           ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now(), checked_at = now()`,
+           ON CONFLICT (series_id) DO UPDATE SET
+             banner = COALESCE(series_art.banner, EXCLUDED.banner),
+             cover = COALESCE(series_art.cover, EXCLUDED.cover),
+             fetched_at = now(), checked_at = now()
+           RETURNING banner, cover, checked_at`,
           [id, fetched.banner, fetched.cover],
         );
         // the same match also anchors tracker sync — record it while we have it
@@ -394,9 +409,9 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
           await learnDirection({ id }, directionFromAniListMatch(names, fetched), 'anilist').catch(() => {});
           await learnTypeFromAniList({ id }, names, fetched);
         }
-        art = fetched;
+        art = stored[0] ?? { banner: art?.banner ?? fetched.banner, cover: art?.cover ?? fetched.cover, checked_at: new Date() };
       } catch {
-        art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
+        art ??= { banner: null, cover: null, checked_at: null }; // transient AniList error: don't cache; fall back this view
       }
     }
   }

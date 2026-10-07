@@ -49,7 +49,7 @@ import { noteChapterFailure } from './chapterFailures';
 import { withOrigin } from './downloadActivity';
 import { busyFolders } from './bulkNewest';
 import { updateSeries, CHAPTER_RETRY_CAP, seriesIsMonitored, type Landed } from './updater';
-import { automaticCopiesFor, copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
+import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, sameRelease, type ListingCopy } from './seriesListing';
 import { cleanSourceOrder } from './sourcePrefs';
 import { heldBooks } from './chapterCleanup';
 import { holds } from './chapterRanges';
@@ -120,10 +120,14 @@ let clock: () => number = () => Date.now();
 /** Tests only: replace the clock, so a break can be waited out without waiting. `null` restores it. */
 export function setArchiveClock(fn: (() => number) | null): void { clock = fn ?? (() => Date.now()); }
 /**
- * Test seam: `afterLanding` is awaited in runChapter between a chapter's landing and its count -- the moment the
- * downloads view already lists what landed, and the count has not yet said whether it was the series' first.
+ * Test seams: `beforeDownload` holds the boundary between a queue pick and its final policy read; `afterLanding` is
+ * awaited between a chapter's landing and its count -- the moment the downloads view already lists what landed, and
+ * the count has not yet said whether it was the series' first.
  */
-export const archiveHooks: { afterLanding?: (seriesId: string, number: number) => void | Promise<void> } = {};
+export const archiveHooks: {
+  beforeDownload?: (seriesId: string, number: number) => void | Promise<void>;
+  afterLanding?: (seriesId: string, number: number) => void | Promise<void>;
+} = {};
 
 /** A chapter (or a listing refresh) in flight, by the source it is on. One per source. */
 interface Flight { seriesId: string; number: number | null; folder: string; source: string; startedAt: number }
@@ -1027,6 +1031,7 @@ async function runChapter(
     const allowed = (src: string) => sweepRule(src) && capOk(src);
     const meta = { series: r.title, summary: r.summary ?? undefined, author: r.author ?? undefined, genres: r.genres ?? undefined, url: r.web ?? undefined, status: r.status ?? undefined };
     try {
+      await archiveHooks.beforeDownload?.(r.series_id, n);
       out = await withOrigin('archive', r.added_by, () => withSlowPace({ pageGapMs: pageGapRange(), rand }, () => downloadWithFallback({
         seriesId: r.series_id, title: r.title, folder: r.folder, meta,
         chapter: copyToChapter(pick.copy, { number: n, title: pick.title }),
@@ -1037,6 +1042,7 @@ async function runChapter(
         allowed,
         hunt: undefined,
         admit: () => seriesIsMonitored(r.series_id),
+        automaticAllowed: (candidate) => automaticChapterAllowedFor(r.series_id, candidate),
         onAsked: (src, err) => { asked.set(src, err); },
       })));
     } catch (e: any) {

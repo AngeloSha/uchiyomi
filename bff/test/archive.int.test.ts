@@ -1448,6 +1448,41 @@ test('a series rotates to a site that is not resting, and never to another group
   assert.equal(t5.waits[g.id]?.why, 'break');
 });
 
+test('a group blocked after the archive picked it is refused at the final download boundary', { skip }, async () => {
+  const group = 'Zz Archive Race Group';
+  scanlated.set('blockrace-ref', group);
+  const saved = (await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0]?.scanlator_prefs;
+  await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+    [JSON.stringify({ priority: [group], blocked: [], patienceDays: 0 })]);
+  const s = await series('blockrace', A, [1]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  let reached!: () => void;
+  const atBoundary = new Promise<void>((resolve) => { reached = resolve; });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  arch.archiveHooks.beforeDownload = async (id, number) => {
+    if (id !== s.id || number !== 1) return;
+    reached();
+    await held;
+  };
+  try {
+    const report = await tick();
+    assert.deepEqual(startedOn(report, s.id), [`${A}:1`], 'the archive did not pick the stale allowed copy');
+    await atBoundary;
+    await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+      [JSON.stringify({ priority: [group], blocked: [group], patienceDays: 0 })]);
+    release();
+    await arch.archiveIdle();
+    assert.ok(!asked.includes('blockrace-ref/c1'), 'the newly blocked archive copy reached its source');
+    assert.equal(existsSync(join(DL, s.folder, 'Chapter 1.cbz')), false, 'the newly blocked archive copy was written');
+  } finally {
+    release();
+    arch.archiveHooks.beforeDownload = undefined;
+    await arch.archiveIdle();
+    await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1', [JSON.stringify(saved)]);
+  }
+});
+
 test('two sources on one image server are one site to the archive: one chapter at a time, one rest (v0.55.4)', { skip }, async () => {
   // Natomanga and Mangakakalot share a CDN. Joined under one rate key (lib/pace.ts notePageHosts, which needs PUBLIC
   // hosts: `.invalid` joins nothing), a look used to start a series on each in the same breath -- the gate that would

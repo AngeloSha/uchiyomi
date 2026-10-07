@@ -635,6 +635,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
           })).chapter;
         } : undefined,
         ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
+        automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
         // third refusal. A refusal from some other source is not this copy's history.
         persistent: persistentVia.get(ch.number) === via,

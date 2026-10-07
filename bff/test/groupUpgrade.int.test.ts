@@ -55,6 +55,8 @@ const followerPages = new Map<number, number>();
 const brokenImages = new Set<number>();
 /** FOLLOWER `number/page` images that answer 404 alone: the copy arrives nearly whole, offered as a hold. */
 const brokenPages = new Set<string>();
+/** Deterministic preference-race seam: runs after the page-count request, before the replacement starts. */
+let afterPageList: ((source: string, number: number) => Promise<void>) | null = null;
 
 function source(id: string, group: string) {
   return {
@@ -74,6 +76,7 @@ function source(id: string, group: string) {
       const n = Number(chId.split('-c').pop());
       asked.push(`${id}:${n}`);
       const count = id === FOLLOWER ? (followerPages.get(n) ?? 5) : 5;
+      await afterPageList?.(id, n);
       return Array.from({ length: count }, (_, i) => `https://example.invalid/${id}/${n}/${i}.png`);
     },
     async latest() { return []; },
@@ -141,6 +144,9 @@ beforeEach(async () => {
   followerPages.clear();
   brokenImages.clear();
   brokenPages.clear();
+  afterPageList = null;
+  await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+    [JSON.stringify({ priority: [GOOD], blocked: [], patienceDays: 0 })]);
   await switchOn(false);
   await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[PRIMARY, FOLLOWER]]);
   // The step looks at the whole library, so an earlier test's series would be the one it swaps.
@@ -216,6 +222,25 @@ test('never a shorter copy: a one-page notice from the right group does not repl
   assert.equal((await row('short', 1)).scanlator, OTHER);
   assert.equal(r.groups.replaced, 0);
   assert.ok(asked.includes(`${FOLLOWER}:1`), 'the copy was never asked, so the check above proves nothing');
+});
+
+test('blocking the chosen group after its page count stops the replacement before its next source operation', { skip }, async () => {
+  await switchOn(true);
+  await series('blockrace');
+  await q('UPDATE lib_books SET scanlator = $2 WHERE series_id = $1 AND number <> 1', [S('blockrace'), GOOD]);
+  let changed = false;
+  afterPageList = async (source, number) => {
+    if (changed || source !== FOLLOWER || number !== 1) return;
+    changed = true;
+    await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
+      [JSON.stringify({ priority: [GOOD], blocked: [GOOD], patienceDays: 0 })]);
+  };
+  const r = await run();
+  assert.equal(changed, true, 'the test never reached the preference race boundary');
+  assert.equal(r.groups.replaced, 0);
+  assert.deepEqual(asked, [`${FOLLOWER}:1`], 'the now-blocked copy was contacted again for its download');
+  assert.deepEqual(readFileSync(fileOf('blockrace', 1)), HELD, 'the blocked group replaced the held file');
+  assert.equal((await row('blockrace', 1)).scanlator, OTHER);
 });
 
 test('only files Uchiyomi downloaded, never a hand-picked chapter, never a file of unknown group', { skip }, async () => {

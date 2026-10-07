@@ -180,6 +180,69 @@ test('an unattended admission change stops before every next source operation', 
   });
 });
 
+test('current automatic copy rules are re-read at every request and partial-write boundary; an explicit pin bypasses them', { skip }, async (t) => {
+  const reset = async () => {
+    failures.clear();
+    asked.length = 0;
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[PRI, FOL, NEW]]);
+  };
+
+  await t.test('a stale chosen copy is skipped and an allowed alternate lands', async () => {
+    const checked: string[] = [];
+    const chosen = { ...chapter(PRI, 'stale-five', 33), scanlator: 'Blocked Team' };
+    const alternate = { ...chapter(FOL, 'open-five', 33), scanlator: 'Open Team' };
+    const out = await run(chosen, [alternate], {
+      automaticAllowed: async (c: any) => { checked.push(c.source); return c.scanlator !== 'Blocked Team'; },
+    }).result;
+    assert.deepEqual([out.kind, out.via], ['landed', FOL]);
+    assert.deepEqual(checked, [PRI, FOL], 'each candidate was checked beside its own attempt');
+    assert.equal(asked.some((x) => x.startsWith(`${PRI}/`)), false, 'the newly blocked chosen copy was contacted');
+  });
+
+  await reset();
+  await t.test('a block saved after the chosen failure stops the alternate and hunted copy independently', async () => {
+    failures.set(`${PRI}/race-five/4`, 404);
+    const allowed = new Set([PRI, FOL, NEW]);
+    let hunts = 0;
+    const out = await run(
+      { ...chapter(PRI, 'race-five', 34), scanlator: 'First Team' },
+      [{ ...chapter(FOL, 'race-alt-one', 34), scanlator: 'Blocked Alternate' }],
+      {
+        automaticAllowed: async (c: any) => allowed.has(c.source),
+        onAsked: (source: string, err: unknown) => { if (source === PRI && err) allowed.clear(); },
+        hunt: async () => { hunts++; return { ...chapter(NEW, 'race-new-one', 34), scanlator: 'Blocked Hunt' }; },
+      },
+    ).result;
+    assert.equal(out.kind, 'failed');
+    assert.equal(hunts, 1, 'the ordinary failure still reached the hunt decision');
+    assert.ok(asked.some((x) => x.startsWith(`${PRI}/race-five/`)), 'the initially allowed chosen copy was not asked');
+    assert.ok(!asked.some((x) => x.startsWith(`${FOL}/`) || x.startsWith(`${NEW}/`)),
+      'an alternate or hunted copy crossed its last-moment rule check');
+  });
+
+  await reset();
+  await t.test('a partial is not written after its group becomes blocked during the download', async () => {
+    failures.set(`${PRI}/hold-five/4`, 404);
+    let checks = 0;
+    const out = await run({ ...chapter(PRI, 'hold-five', 35), scanlator: 'Soon Blocked' }, [], {
+      automaticAllowed: async () => ++checks === 1,
+    }).result;
+    assert.equal(out.kind, 'failed');
+    assert.equal(checks, 2, 'the held copy was checked again at its write boundary');
+    assert.equal(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 35.cbz')), false, 'the blocked partial was written');
+  });
+
+  await reset();
+  await t.test('an explicitly pinned copy remains the sole override', async () => {
+    let checks = 0;
+    const out = await run({ ...chapter(PRI, 'pin-five', 36, true), scanlator: 'Blocked Team' }, [], {
+      automaticAllowed: async () => { checks++; return false; },
+    }).result;
+    assert.deepEqual([out.kind, out.via], ['landed', PRI]);
+    assert.equal(checks, 0, 'a person-picked copy was passed through automatic policy');
+  });
+});
+
 test('the best incomplete hold is written only after every non-refusing option is exhausted', { skip }, async () => {
   failures.set(`${PRI}/partial-five/4`, 404);
   let hunts = 0;
