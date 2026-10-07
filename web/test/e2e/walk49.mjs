@@ -218,7 +218,8 @@ const check = (name, ok, detail = '') => {
 const waitFor = async (fn, ms = 10_000, step = 150) => {
   const end = Date.now() + ms;
   for (;;) {
-    const v = await fn().catch(() => null);
+    let v = null;
+    try { v = await fn(); } catch {}
     if (v || Date.now() > end) return v;
     await sleep(step);
   }
