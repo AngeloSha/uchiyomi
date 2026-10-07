@@ -1842,7 +1842,12 @@ detached like Verify — it answers `{ok: true, started: true}` or `{ok: false, 
 startedAt, error, plan, last, lastRun}` (an Apply's phases since v0.55.7: `'mark' | 'merge' | 'follow' | 'renumber'`). Per root it
 applies Verify's whole-batch rule and 90 % rule (`plan.unmounted [{root, missing?, of?}]`); only ENOENT is a gone file
 (`plan.unchecked` counts the rest, left alone); a gone row in your own folder whose fingerprint matches a live row's is
-*moved or renamed* and kept (`plan.moved`, `movedList`), and `plan.follow` (v0.55.7) counts the pairs inside one series; the
+*moved or renamed* and kept (`plan.moved`, `movedList`) -- and since v0.55.7 one never fingerprinted pairs with the ONE
+live row anywhere with the same file name in another folder, exactly the same stored mtime and, when both rows know it,
+the same size, first seen by a scan after the one that last saw the gone row (`created_at` > its `updated_at`; since
+v0.55.7 a scan stamps a new row's `created_at` with its own start) -- zero or two such rows, or a row another gone row
+or a fingerprint twin would claim too, is no pair; the pair is used for `follow` and `merges` alike and never to mark a
+row -- and `plan.follow` (v0.55.7) counts the pairs inside one series; the
 download folder's gone rows are only counted (`plan.downloads`, Verify's to mark); and `plan.emptied` / `emptiedList`
 are the series with every live chapter gone (`emptiedList[].into {seriesId, title}`, v0.55.7: the one series every live
 chapter of it moved into, when they all went to one and the viewer may list it). `plan.merges [{seriesId, title, into:
@@ -1861,14 +1866,17 @@ it (`skipped`, unstamped, so the next sweep takes it first). Under `withScansHel
 gone, no live fingerprint twin, the library folder still holding a file the preview saw) and marked pruned with
 `pruned_reason = 'deleted'` — held, so the sweep never fetches it back — and the covers and counts of the series it
 touched are recomputed. Since v0.55.7 every pair inside one series is asked again too (both rows unchanged, one
-fingerprint, the old file still gone and the new one there) and, when the new row holds nothing of anyone's (no
+fingerprint -- or, for a row never fingerprinted, still the one live row with its name and time -- the old file still
+gone and the new one there) and, when the new row holds nothing of anyone's (no
 progress, reading event, bookmark, note, offline copy, override, or page marked by hand), the old row takes the new
 file — root, file, mtime, size, fingerprint, its number and title read from the new name by its own rule — the new row
 is deleted and the cover moves with it: the chapter shows once, its id and history kept (`followed`); a new row that
 holds something is kept beside it (`twins`). Each series in `merge` (only ones `plan.merges` offered, else
 `not_in_plan`) is asked again — `mergeRefusal` still null, neither mid-renumber, every live row still gone with a live
 twin in the other series whose file is there, both held — else left alone (`notMerged`); then the tracker link is
-copied to the other series where it has none for that provider, the series is merged as `POST
+copied to the other series where it has none for that provider (never over one it has; a person's link as it is, an
+automatic one keeping `checked_at` only when every name the absorbed series goes by is one the other will go by and
+Check online matches is not running, else unchecked for that check to judge), the series is merged as `POST
 /api/admin/series/:id/merge` merges (audited `series.merge` with `via: 'rescan'` and the plan id), and its pairs follow
 as above (`merged`). Then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
 number set by hand and a `'missing'` row are kept), with nothing pushed to any tracker. It never erases a row, touches

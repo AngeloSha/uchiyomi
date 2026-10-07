@@ -793,12 +793,16 @@ test('migrate: v0.55.7 marks no match as checked that was stored before it, and 
   // would read as checked, never to be looked at. v0.55.6 boots on this schema and INSERTs without naming it: its rows
   // are unchecked too. Reintroduce `DEFAULT now()` on either column: the declared default reads now(), and "a v0.55.6
   // row reads as checked" fails.
+  // The same block's #150 piece (the integration folded both lanes' into one): lib_series.info_read, the file a scan last
+  // read a series' ComicInfo from, nullable with no default -- NULL is "read it at the next scan", which is what a series
+  // v0.55.6 adds after a rollback must be. Reintroduce a default: "a v0.55.6 series reads as read" fails.
   const cols = await q<{ table_name: string; column_name: string; data_type: string; column_default: string | null; is_nullable: string }>(
     `SELECT table_name, column_name, data_type, column_default, is_nullable FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name IN ('series_trackers', 'series_art', 'server_settings')
-        AND column_name IN ('checked_at', 'match_check_last_run', 'match_check_last_result')
+      WHERE table_schema = 'public' AND table_name IN ('series_trackers', 'series_art', 'server_settings', 'lib_series')
+        AND column_name IN ('checked_at', 'match_check_last_run', 'match_check_last_result', 'info_read')
       ORDER BY table_name, column_name`);
   assert.deepEqual(cols.map((c) => [c.table_name, c.column_name, c.data_type, c.column_default, c.is_nullable]), [
+    ['lib_series', 'info_read', 'text', null, 'YES'],
     ['series_art', 'checked_at', 'timestamp with time zone', null, 'YES'],
     ['series_trackers', 'checked_at', 'timestamp with time zone', null, 'YES'],
     ['server_settings', 'match_check_last_result', 'jsonb', null, 'YES'],
@@ -812,8 +816,10 @@ test('migrate: v0.55.7 marks no match as checked that was stored before it, and 
       await c.query(`INSERT INTO series_art (series_id, banner, cover) VALUES ('t-match', NULL, 'https://example.org/c.jpg')`);
       await c.query(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by) VALUES ('t-match', 'anilist', '1', 'T', NULL)`);
       const { rows } = await c.query(`SELECT (SELECT checked_at FROM series_art WHERE series_id = 't-match') AS art,
-                                             (SELECT checked_at FROM series_trackers WHERE series_id = 't-match') AS link`);
+                                             (SELECT checked_at FROM series_trackers WHERE series_id = 't-match') AS link,
+                                             (SELECT info_read FROM lib_series WHERE id = 't-match') AS info`);
       assert.deepEqual([rows[0].art, rows[0].link], [null, null], 'a v0.55.6 row reads as checked');
+      assert.equal(rows[0].info, null, 'a v0.55.6 series reads as read');
     } finally {
       await c.query('ROLLBACK');
     }

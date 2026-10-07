@@ -1459,7 +1459,8 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS number_end real;
 -- looked in chapter rows and, while a notice switch is on, leaves out the hidden notices among the rows that came
 -- (lib/enrich.ts newSinceSeen) -- which it can only tell apart by when they came. Taken by number, a file collected
 -- late below the series' top (a 01-07 omnibus beside a hidden 44.5) was the notice, and swallowed. The scan's
--- INSERT takes the default and its ON CONFLICT never names the column, so a row keeps the time it first came. Rows
+-- ON CONFLICT never names the column, so a row keeps the time it first came; since v0.55.7 its INSERT names it, with
+-- the time the scan began (lib/library.ts firstSeen: Rescan everything tells two scans apart by it). Rows
 -- from before this release all carry the time of the upgrade and tie, ordered by number as before. v0.55.1 boots on
 -- this schema: it never names the column, and its INSERTs take the default.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();

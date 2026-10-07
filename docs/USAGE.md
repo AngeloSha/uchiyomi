@@ -2016,7 +2016,15 @@ nothing left*.
   series is left as it is.
 - **Fingerprints** are what tell a moved file from a gone one, and a file can only be recognised after a move if it was
   fingerprinted before it. Since v0.55.7 that happens a few minutes after a scan finds a new file (and every six hours,
-  as before), so if you reorganise files you have only just added, give it those few minutes after the scan first.
+  as before), so if you reorganise files you have only just added, give it those few minutes after the scan first. A
+  chapter that was never fingerprinted is recognised by its file instead: moving a file keeps its name, its time and
+  its size, so a file of the same name in another folder, with exactly the same time (and size, when both are known),
+  that turned up after the chapter's own file was last seen, counts as the moved file — but only when no other file
+  anywhere could be it. Two copies with the same name and time, a file that was already there beside it (two folders
+  unpacked at the same moment), or a file renamed as well as moved, are not guessed at: the chapter is listed as gone,
+  as before.
+  Admin → Tasks → **Fingerprint library files** says what its last pass did, including files left for the next pass
+  because they were still being written.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
@@ -2025,9 +2033,11 @@ nothing left*.
 - **Merge into the series their files went to** (since v0.55.7, optional): when every chapter file of a series moved
   into one other series — you unpacked *Zagor* into folders of 100 chapters, each became a series, and then you moved
   them all into one *Zagor* folder — the preview offers *Merge “Zagor 1-100” into “Zagor”*. Tick the ones you want:
-  **Apply** merges each into the other series, with everyone's reading history, bookmarks, favourites, ratings and the
-  tracker link (when the other series has none), and its chapters follow their files as above, so each chapter shows
-  once. Apply checks each one again first — a series that got a file back, or one hidden, merged or being renumbered
+  **Apply** merges each into the other series, with everyone's reading history, bookmarks, favourites, ratings, lists
+  and the tracker link (when the other series has none), and its chapters follow their files as above, so each chapter
+  shows once. A list that held the old series holds the other one, once. An AniList link found automatically goes
+  across as *Check online matches* would judge it there: it counts as checked only when the other series goes by every
+  name the old one did, otherwise the check looks at it again (and until then *Duplicate series* does not group by it). Apply checks each one again first — a series that got a file back, or one hidden, merged or being renumbered
   since the preview, is left alone (*1 merge left alone: the series changed since the preview*). Nothing is merged
   without its tick, and nothing on disk is touched.
 - A folder (`/library`, `/library-dl`) with no file behind any of its chapters, or with more than nine in ten gone,

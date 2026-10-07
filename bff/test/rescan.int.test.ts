@@ -12,7 +12,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile, rename, chmod, readdir, readFile } from 'fs/promises';
+import { mkdir, rm, writeFile, rename, chmod, readdir, readFile, utimes } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -817,12 +817,13 @@ test('an opt-in that fails part way changes no number', { skip }, async () => {
 /**
  * Zagor as @Kedryn had it (#150): unpacked into two folders, each a series, fingerprinted, then every file moved into one
  * folder "Zagor". Returns the two old series and their rows by file name; the next preview's scan makes Zagor.
+ * `fingerprinted: false`: as his rows most likely were -- never read before the move (the v0.55.7 integration's case).
  */
-async function zagor(): Promise<{ s1: string; s2: string; rows: Map<string, string> }> {
+async function zagor(o: { fingerprinted?: boolean } = {}): Promise<{ s1: string; s2: string; rows: Map<string, string> }> {
   for (const n of [1, 2]) await cbz(ROOT, `${SRC}/Zagor 1-2/Zagor 00${n}.cbz`);
   for (const n of [3, 4]) await cbz(ROOT, `${SRC}/Zagor 3-4/Zagor 00${n}.cbz`);
   await persistScan();
-  await runFingerprintBackfill();
+  if (o.fingerprinted !== false) await runFingerprintBackfill();
   const rows = new Map((await q<{ id: string; file: string }>(`SELECT id, file FROM lib_books WHERE file LIKE $1`, [`${SRC}/Zagor %`]))
     .map((r) => [r.file.split('/').pop()!, r.id]));
   await mkdir(join(ROOT, SRC, 'Zagor'), { recursive: true });
@@ -1020,4 +1021,193 @@ test('a series being downloaded into is left alone at Apply, and every other one
   const again = await preview();
   const out2 = await (startApply({ plan: again.id, renumber: [comics.id] }, { userId: adminId }) as any).run;
   assert.deepEqual([out2.busy, out2.marked, out2.renumbered.series], [0, 1, 1], JSON.stringify(out2));
+});
+
+// ---- the v0.55.7 integration: a row never fingerprinted, and the tracker link a merge carries ------------------------
+
+test('the Zagor case, never fingerprinted: the files are paired by name and time, offered as merges, and the chapters follow', { skip }, async () => {
+  // The owner's decision for #150: @Kedryn's Zagor rows were most likely never fingerprinted before he moved the files,
+  // so no fingerprint could pair them. `mv` keeps a file's name, time and size. Reintroduce by dropping the fallback
+  // (nameTwins in pairMoved): every chapter is planned as gone and nothing is offered. By dropping it from stillMerges or
+  // followFiles: nothing is merged, or Zagor lists every chapter twice.
+  await seed();
+  const { s1, s2, rows } = await zagor({ fingerprinted: false });
+  const printed = await q<{ n: number }>(`SELECT count(*)::int AS n FROM lib_books WHERE id = ANY($1) AND fingerprint IS NOT NULL`, [[...rows.values()]]);
+  assert.equal(printed[0].n, 0, 'precondition: the old rows were never fingerprinted');
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  assert.deepEqual(plan.mark, [], 'a moved chapter never fingerprinted was planned as gone');
+  assert.deepEqual(plan.moved.map((m: any) => [m.file.split('/').pop(), m.to.file, m.to.seriesId, m.by]).sort(),
+    ['Zagor 001.cbz', 'Zagor 002.cbz', 'Zagor 003.cbz', 'Zagor 004.cbz'].map((f) => [f, `${SRC}/Zagor/${f}`, zagorId, 'name']));
+  assert.deepEqual(plan.merges.map((m: any) => [m.seriesId, m.into, m.chapters]).sort(), [[s1, zagorId, 2], [s2, zagorId, 2]].sort());
+  const r = await (startApply({ plan: plan.id, merge: [s1, s2] }, { userId: adminId }) as any).run;
+  assert.deepEqual([r.merged, r.notMerged, r.followed, r.twins, r.marked], [2, 0, 4, 0, 0], JSON.stringify(r));
+  assert.deepEqual(await titlesOf(zagorId), ['Zagor 001', 'Zagor 002', 'Zagor 003', 'Zagor 004'], 'Zagor lists a chapter twice');
+  for (const [f, id] of rows) assert.equal((await rowOf(ROOT, `${SRC}/Zagor/${f}`)).id, id, `${f} is not the row that holds its history`);
+});
+
+test('a never-fingerprinted file is paired only when nothing else could be its file, and the fallback never marks a row', { skip }, async () => {
+  // The negatives of the fallback (lib/rescan.ts nameTwins): a second live copy with the same name and time; a file whose
+  // time changed; a file renamed in place; two gone rows that would both be one live file; a file of the same name and
+  // time that a scan saw beside the gone one (two folders unpacked at the same instant: it did not arrive, it was there).
+  // Each is no pair, and Apply marks them as it marks any gone file -- while the one clean move beside them is kept.
+  // Reintroduce by pairing on the name alone (drop `b.mtime = x.mtime`): the touched file is paired. By dropping the
+  // one-candidate rule: Ep 1 is paired with one of its two copies. By dropping the one-claimant rule: both Ep 5 rows pair
+  // with one file. By dropping `b.created_at > x.seen` (or a scan stamping new rows with now(), lib/library.ts): Twin A's
+  // deleted Ep 6 is paired with Twin B's.
+  await seed();
+  const T0 = 1_700_000_000; // seconds: every file's own time, set by hand so two files can share one
+  const files: Array<[string, number]> = [
+    ['Solo/Ep 1.cbz', T0 + 1], ['Solo/Ep 2.cbz', T0 + 2], ['Solo/Ep 3.cbz', T0 + 3], ['Solo/Ep 4.cbz', T0 + 4],
+    ['Solo/Ep 5.cbz', T0 + 5], ['Duo/Ep 5.cbz', T0 + 5], ['Twin A/Ep 6.cbz', T0 + 6], ['Twin B/Ep 6.cbz', T0 + 6],
+  ];
+  for (const [f, t] of files) { await cbz(ROOT, `${SRC}/${f}`); await utimes(join(ROOT, SRC, f), t, t); }
+  await persistScan();
+  const id = async (f: string) => (await rowOf(ROOT, `${SRC}/${f}`)).id;
+  const ids = Object.fromEntries(await Promise.all(files.map(async ([f]) => [f, await id(f)] as const)));
+  for (const d of ['Elsewhere', 'Copy', 'Moved']) await mkdir(join(ROOT, SRC, d), { recursive: true });
+  const at = (f: string) => join(ROOT, SRC, f);
+  // Ep 1 moved, and a copy of it -- same name, same time -- in a third folder: two files it could be.
+  await rename(at('Solo/Ep 1.cbz'), at('Elsewhere/Ep 1.cbz'));
+  await writeFile(at('Copy/Ep 1.cbz'), await readFile(at('Elsewhere/Ep 1.cbz')));
+  await utimes(at('Copy/Ep 1.cbz'), T0 + 1, T0 + 1);
+  // Ep 2 moved, then touched.
+  await rename(at('Solo/Ep 2.cbz'), at('Moved/Ep 2.cbz'));
+  await utimes(at('Moved/Ep 2.cbz'), T0 + 200, T0 + 200);
+  // Ep 3 renamed in place: another name.
+  await rename(at('Solo/Ep 3.cbz'), at('Solo/Episode 3.cbz'));
+  // Ep 4 moved, cleanly: the one pair.
+  await rename(at('Solo/Ep 4.cbz'), at('Moved/Ep 4.cbz'));
+  // Two Ep 5s with one time, and only one of them moved: one file both gone rows could be.
+  await rename(at('Solo/Ep 5.cbz'), at('Moved/Ep 5.cbz'));
+  await rm(at('Duo/Ep 5.cbz'));
+  // Twin A's Ep 6 deleted; Twin B's, with its name and time, was scanned beside it all along.
+  await rm(at('Twin A/Ep 6.cbz'));
+  const plan = await preview();
+  assert.deepEqual(plan.moved.map((m: any) => [m.id, m.to.file, m.by]), [[ids['Solo/Ep 4.cbz'], `${SRC}/Moved/Ep 4.cbz`, 'name']],
+    JSON.stringify(plan.moved));
+  const planned = new Set(plan.mark.map((m: any) => m.id));
+  for (const f of ['Solo/Ep 1.cbz', 'Solo/Ep 2.cbz', 'Solo/Ep 3.cbz', 'Solo/Ep 5.cbz', 'Duo/Ep 5.cbz', 'Twin A/Ep 6.cbz']) {
+    assert.ok(planned.has(ids[f]), `${f} was paired although something else could be its file`);
+  }
+  const r = await apply(plan);
+  assert.equal(r.marked, 6, JSON.stringify(r));
+  assert.equal((await prunedOf(ROOT, `${SRC}/Solo/Ep 4.cbz`)).at, null, 'the clean move was marked');
+});
+
+test('a never-fingerprinted file that turns up in another folder after the preview is kept at Apply, not marked', { skip }, async () => {
+  // Apply asks the fallback again before it marks, as it asks the fingerprints (markGone). Reintroduce by dropping the
+  // name pairing there: the late file's row is marked "deleted" while its file is on disk under another folder.
+  await seed();
+  await cbz(ROOT, `${SRC}/Late/Ch 1.cbz`);
+  await persistScan();
+  const row = await rowOf(ROOT, `${SRC}/Late/Ch 1.cbz`);
+  const aside = join(TMP, 'aside.cbz');
+  await rename(join(ROOT, SRC, 'Late', 'Ch 1.cbz'), aside);
+  const plan = await preview();
+  assert.ok(plan.mark.some((m: any) => m.id === row.id), 'precondition: the file is planned as gone');
+  await mkdir(join(ROOT, SRC, 'Later'), { recursive: true });
+  await rename(aside, join(ROOT, SRC, 'Later', 'Ch 1.cbz'));
+  await persistScan();
+  const r = await apply(plan);
+  assert.equal((await prunedOf(ROOT, `${SRC}/Late/Ch 1.cbz`)).at, null, 'a row whose file is on disk under another folder was marked');
+  assert.ok(r.moved >= 1, JSON.stringify(r));
+});
+
+test('a merge carries the tracker link as the online-match check would judge it, and the recheck may verify it', { skip }, async () => {
+  // The v0.55.7 integration (lanes A x B). A person's link goes as it is; an automatic one keeps its checked_at only where
+  // every name the absorbed series goes by is one the other will go by -- else it goes unchecked, for the recheck
+  // (lib/matchCheck.ts) to hold to the names the series has now; and nothing is carried over a link the other series
+  // has. Reintroduce by carrying checked_at as it is: Zagor 3-4's AniList link lands checked, and the recheck never looks
+  // at it. By replacing on conflict: Zagor's own checked link is replaced by an unchecked one.
+  const { checkMatches } = (await import('../src/lib/matchCheck')) as any;
+  await seed();
+  const { s1, s2 } = await zagor();
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  const uid = await aReader();
+  // Zagor goes by Zagor 1-2's name too (an other name); not by Zagor 3-4's.
+  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1, 'zagor12', 'Zagor 1-2', 'admin')`, [zagorId]);
+  const link = (series: string, provider: string, ext: string, o: { checked?: boolean; by?: string } = {}) =>
+    q(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, checked_at) VALUES ($1,$2,$3,'x',$4,$5)`,
+      [series, provider, ext, o.by ?? null, o.checked ? new Date('2026-10-01T00:00:00Z') : null]);
+  await link(zagorId, 'p-over', 'rs-t-over', { checked: true });
+  await link(s1, 'p-carry', 'rs-s1-carry', { checked: true });
+  await link(s1, 'p-over', 'rs-s1-over');
+  await link(s2, 'anilist', '977002', { checked: true });
+  await link(s2, 'p-person', 'rs-s2-person', { checked: true, by: uid });
+  const r = await (startApply({ plan: plan.id, merge: [s1, s2] }, { userId: adminId }) as any).run;
+  assert.equal(r.merged, 2, JSON.stringify(r));
+  const got = Object.fromEntries((await q<{ provider: string; external_id: string; linked_by: string | null; checked_at: Date | null }>(
+    `SELECT provider, external_id, linked_by, checked_at FROM series_trackers WHERE series_id = $1`, [zagorId]))
+    .map((t) => [t.provider, [t.external_id, t.linked_by, t.checked_at ? t.checked_at.toISOString() : null]]));
+  const checked = '2026-10-01T00:00:00.000Z';
+  assert.deepEqual(got, {
+    'p-over': ['rs-t-over', null, checked],
+    'p-carry': ['rs-s1-carry', null, checked],
+    anilist: ['977002', null, null],
+    'p-person': ['rs-s2-person', uid, checked],
+  });
+  // The recheck takes the carried AniList link up, and holds it to the names Zagor goes by: an entry named "Zagor 3-4" is
+  // another work's to Zagor (its title went nowhere with the merge), so the link goes.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const url = new URL(String(input?.url ?? input));
+    if (url.host !== 'graphql.anilist.co') throw new Error(`unexpected request in a test: ${url}`);
+    const ids: number[] = JSON.parse(String(init?.body ?? '{}'))?.variables?.ids ?? [];
+    return Response.json({ data: { Page: { media: ids.filter((i) => i === 977002).map((i) => ({
+      id: i, type: 'MANGA', title: { romaji: 'Zagor 3-4', english: null, native: null }, synonyms: [], relations: { edges: [] } })) } } });
+  }) as typeof fetch;
+  try {
+    const m = await checkMatches({ info() {}, warn() {} });
+    assert.deepEqual(m.links, { checked: 1, removed: 1 }, JSON.stringify(m));
+  } finally { globalThis.fetch = realFetch; }
+  assert.deepEqual((await q(`SELECT provider FROM series_trackers WHERE series_id = $1 ORDER BY provider`, [zagorId])).map((t) => t.provider),
+    ['p-carry', 'p-over', 'p-person']);
+  await q(`DELETE FROM series_trackers WHERE series_id = ANY($1)`, [[zagorId, s1, s2]]);
+  await q(`DELETE FROM audit_log WHERE event = 'library.match_check'`).catch(() => {});
+});
+
+test('a link carried while the online-match check runs goes unchecked', { skip }, async () => {
+  // The check may be judging that very link against the old names (lib/matchCheck.ts): carried as checked, its verdict
+  // would land on nothing and the link would stand unjudged. Reintroduce by dropping `!matchCheckState.running`: the
+  // link keeps its checked_at.
+  const { matchCheckState } = (await import('../src/lib/matchCheck')) as any;
+  await seed();
+  const { s1 } = await zagor();
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1, 'zagor12', 'Zagor 1-2', 'admin')`, [zagorId]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1, 'p-race', 'rs-race', 'x', now())`, [s1]);
+  matchCheckState.running = true;
+  try {
+    const r = await (startApply({ plan: plan.id, merge: [s1] }, { userId: adminId }) as any).run;
+    assert.equal(r.merged, 1, JSON.stringify(r));
+  } finally { matchCheckState.running = false; }
+  const t = await q<{ checked_at: Date | null }>(`SELECT checked_at FROM series_trackers WHERE series_id = $1 AND provider = 'p-race'`, [zagorId]);
+  assert.deepEqual(t.map((x) => x.checked_at), [null], 'a link carried during a match check kept its checked_at');
+  await q(`DELETE FROM series_trackers WHERE series_id = ANY($1)`, [[zagorId, s1]]);
+});
+
+test('a list that held a series merged by Rescan everything holds the series it went into, once', { skip }, async () => {
+  // The v0.55.7 integration (lanes B x C): lists go with a merge (lib/libraryAdmin.ts mergeSeries), so a list shows the
+  // survivor -- once, where it held both -- and its unread badge and sort read the survivor's rows. Pinned for the
+  // rescan's merge: reintroduce by dropping the collection_items move from mergeSeries and the list keeps a series
+  // merged away, which the list's page no longer shows at all.
+  await seed();
+  const { s1, s2 } = await zagor();
+  const plan = await preview();
+  const zagorId = await seriesOf(`${SRC}/Zagor`);
+  const uid = await aReader();
+  const [both, one] = (await q<{ id: string }>(
+    `INSERT INTO collections (user_id, name) VALUES ($1, 'Both'), ($1, 'One') RETURNING id`, [uid])).map((c) => c.id);
+  await q(`INSERT INTO collection_items (collection_id, series_id, position) VALUES ($1,$2,0), ($1,$3,1), ($1,$4,2), ($5,$2,0)`,
+    [both, s1, zagorId, s2, one]);
+  const r = await (startApply({ plan: plan.id, merge: [s1, s2] }, { userId: adminId }) as any).run;
+  assert.equal(r.merged, 2, JSON.stringify(r));
+  const items = async (c: string) => (await q<{ series_id: string }>(
+    `SELECT series_id FROM collection_items WHERE collection_id = $1 ORDER BY position, series_id`, [c])).map((x) => x.series_id);
+  assert.deepEqual(await items(both), [zagorId], 'the list that held all three holds Zagor, once');
+  assert.deepEqual(await items(one), [zagorId], 'the list that held Zagor 1-2 holds Zagor');
+  await q(`DELETE FROM collections WHERE id = ANY($1)`, [[both, one]]);
 });

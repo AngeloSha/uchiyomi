@@ -869,6 +869,15 @@ async function scanOnce(): Promise<ScanResult> {
   progress.phase = 'walking';
   scansStarted++;
   const t0 = Date.now();
+  /**
+   * A new row's created_at: when this SCAN began, not the moment its folder's turn came (v0.55.7 integration). Every row
+   * a scan finds present gets its updated_at during the scan, so "first seen after the other was last seen" --
+   * created_at > updated_at -- is then true only across two scans, never for two files one scan saw side by side. Rescan
+   * everything's pairing of a row never fingerprinted rests on it (lib/rescan.ts nameTwins): a file that was there beside
+   * the gone one is not where it went. Reintroduce now(): "a never-fingerprinted file is paired only when nothing else
+   * could be its file" in rescan.int.test.ts pairs a file with one that was scanned beside it.
+   */
+  const firstSeen = new Date(t0);
   let nBooks = 0;
   /** Rows the folders' upserts left with no fingerprint attempt: the hook above. */
   let unprinted = 0;
@@ -1057,9 +1066,9 @@ async function scanOnce(): Promise<ScanResult> {
             // A range (`Batman 01-07`) is one file and seven chapters: its end rides in number_end, and rule 1 knows none.
             const read = numberByRule(f, rule);
             const b = params.length;
-            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10})`);
+            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11})`);
             params.push(newBookId(), id, srcName, rel, read.number, f.replace(/\.(cbz|cbr|zip|rar|pdf|epub)$/i, ''),
-              st ? Math.floor(st.mtimeMs) : 0, root, rule, read.end);
+              st ? Math.floor(st.mtimeMs) : 0, root, rule, read.end, firstSeen);
             nBooks++;
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
@@ -1091,7 +1100,7 @@ async function scanOnce(): Promise<ScanResult> {
           // four CASEs: "a file whose mtime moved is fingerprinted again" in scan.int.test.ts reads the old fingerprint.
           const [up] = await qq<{ unprinted: number }>(
             `WITH up AS (
-               INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end) VALUES ${tuples.join(',')}
+               INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end, created_at) VALUES ${tuples.join(',')}
                ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number, number_end=EXCLUDED.number_end,
                  title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
                  short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END,

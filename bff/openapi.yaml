@@ -6555,7 +6555,11 @@ paths:
         never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
         behind any of its rows, or more than 90 % of them gone: looks unmounted, and nothing under it is
         planned), gone (rows in your own library folder whose file is gone), moved (gone rows whose file is
-        another live row's now, by fingerprint: renamed or moved, kept), follow (v0.55.7: of those, the pairs
+        another live row's now, by fingerprint: renamed or moved, kept -- and since v0.55.7 a row never
+        fingerprinted, by the ONE live row anywhere with its file name in another folder, exactly its stored
+        mtime and, when both know it, its size, first seen by a scan after the one that last saw the gone row;
+        zero or two such rows, or one another gone row or a fingerprint twin claims too, is no pair, and such a
+        pair never marks a row), follow (v0.55.7: of those, the pairs
         inside one series, whose chapters Apply points at the new file), downloads (rows in the download
         folder whose file is gone: Verify chapter files' to mark, counted only), emptied (series with every
         live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title, into?: {seriesId, title}}]
@@ -6610,8 +6614,9 @@ paths:
         library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
         'deleted'` (held: the sweep never fetches it back), and the cover and books_count of every series it
         touched are recomputed. Since v0.55.7 each pair of the plan inside ONE series (a file moved or renamed
-        within its series) is asked again too -- both rows unchanged, one fingerprint, the old file still gone and
-        the new one there -- and, when the new row holds nothing of anyone's (no reading progress, reading event,
+        within its series) is asked again too -- both rows unchanged, one fingerprint (or, for a row never
+        fingerprinted, still the one live row with its name and time), the old file still gone and the new one
+        there -- and, when the new row holds nothing of anyone's (no reading progress, reading event,
         bookmark, note, offline copy, number or title set by hand, or page marked by hand; asked with both rows
         locked), the old row takes the new file (root, file, mtime, size, fingerprint; its number and title read
         from the new name by its own name_rule), the new row is deleted and a cover on it moves to the old row:
@@ -6620,7 +6625,9 @@ paths:
         `changed`. Each series in `merge` (v0.55.7) is asked again with both series held -- the merge route's
         checks (mergeRefusal) still pass, neither is mid-renumber, every live row of it is still gone and has a live
         twin in the other series whose file is there -- else it is left alone (`notMerged`); then its tracker link is
-        copied to the other series for each provider that has none, it is merged exactly as POST
+        copied to the other series for each provider that has none (a person's link as it is; an automatic one
+        keeps checked_at only when every name the absorbed series goes by is one the other will go by and the
+        online-match check is not running, else it goes unchecked for that check), it is merged exactly as POST
         /api/admin/series/{id}/merge merges (every row and everyone's history, favourites, ratings, collections,
         read marks and tracker floor; audited `series.merge` with via 'rescan' and the plan id), and its pairs
         follow as above (`merged`).
