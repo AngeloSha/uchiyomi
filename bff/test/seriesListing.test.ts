@@ -225,6 +225,29 @@ test('copies that name no group match only each other, in one language, with pag
     'a no-group copy was taken for a named group\'s release');
 });
 
+test('a placeholder where the group goes is no group: two "Unofficial" copies are held to their page counts', () => {
+  // v0.55.7 (#158). Aggregators label every chapter "Unofficial" or "Unknown". Reintroduce by keeping the placeholders
+  // as group names (keysOf without PLACEHOLDER_GROUPS): "two Unofficial copies with other page counts are other
+  // releases" takes b's 18 pages, paired by the label alone.
+  // As the listing stores them: `groups` already split from the site's label (listingRows, groupsOf).
+  const chosen = copy('pri', { groups: ['Unofficial'], scanlator: 'Unofficial', pages: 20 });
+  const copies = [
+    chosen,
+    copy('a', { groups: ['unofficial'], scanlator: 'unofficial', pages: 20 }), // the same label, spelt another way, and the pages agree
+    copy('b', { groups: ['Unofficial'], scanlator: 'Unofficial', pages: 18 }), // the same label, and another release by its pages
+    copy('c', { pages: 20 }), // no label at all: no group either
+    copy('d', { groups: ['N/A'], scanlator: 'N/A', pages: null }), // a count nobody knows contradicts nothing
+    copy('e', { groups: ['Group A'], pages: 20 }), // a real group is never the no-group release
+  ];
+  const out = sameRelease(chosen, copies, { followed: FOLLOWED }).map((c) => c.source);
+  assert.ok(!out.includes('b'), 'two Unofficial copies with other page counts are other releases');
+  assert.ok(!out.includes('e'), 'a named group was taken for the no-group release');
+  assert.deepEqual(out, ['pri', 'a', 'c', 'd'], 'a placeholder label is no group: it pairs with copies naming none when the pages agree');
+  // A real group beside a placeholder is that group's release, and "Unknown" never makes it another.
+  assert.deepEqual(sameRelease(copy('pri', { groups: ['Group A', 'Unknown'] }), [copy('a', { groups: ['Group A'] }), copy('b', { groups: ['No Group'] })],
+    { followed: FOLLOWED }).map((c) => c.source), ['pri', 'a'], 'the placeholder beside a real group changed which release it is');
+});
+
 test('a copy that names no language takes its source\'s, and an external link is never a release', () => {
   // MangaDex says which language each chapter is in; an aggregator says nothing, and its source declares one.
   // Reintroduce by dropping `langOf`: "a Spanish site's copy of an English chapter" is taken.

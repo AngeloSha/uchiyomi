@@ -624,7 +624,8 @@ full speed before one that is slowed, and up to three chapters at once, one per 
 series side by side. Two sites whose pages come from one image server count as one. A site that is switched off,
 cooling down, refusing or above your age limit is skipped, and nothing moves for a version you picked by name, for a
 series with its own source order (*Preferring one source*) or for one numbered by posting order. The download card
-counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below).
+counts them as one job. The slow archive takes turns the same way (*Fetching a whole series slowly*, below). A label
+that stands where a group's name goes ("Unofficial", "Unknown") names no group (v0.55.7).
 
 If at least four pages in five arrived after an ordinary page failure, the chapter is kept with a numbered
 placeholder at every missing position rather than thrown away. Its row says how many pages are missing. The
@@ -725,7 +726,9 @@ sites at once; the series queued on one site take turns, so ten of them share it
 **One release on several sites.** Since v0.55.4 ([#158](https://github.com/AngeloSha/uchiyomi/discussions/158)), a
 series that follows more than one source takes its chapters from them in turn when they carry the same release: the
 same scanlation group, or — on sites that name no group, as most aggregators don't — no group, the same language and
-the same page count wherever both say. While one site is in its break the next chapter comes from another, the one that
+the same page count wherever both say. Since v0.55.7 a label that stands where a group goes ("Unofficial", "Unknown",
+"No group", "None", "N/A") counts as no group, so two sites that both say "Unofficial" are paired by their page counts,
+never by the label alone. While one site is in its break the next chapter comes from another, the one that
 was asked longest ago, so a series on two such sites is archived about twice as fast while each site still sees only
 its own pace. Two sites whose pages come from one image server (Natomanga and Mangakakalot share one) count as one site:
 one chapter at a time between them, and a break or a refusal on either holds both. It never takes another group's copy
