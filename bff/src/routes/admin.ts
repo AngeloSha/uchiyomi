@@ -787,21 +787,31 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
-    if (b.scanlatorPrefs !== undefined) {
+    const nextGlobalSources = b.sourcePrefs === undefined
+      ? undefined
+      : { priority: cleanSourceOrder(b.sourcePrefs.priority) };
+    if (b.scanlatorPrefs !== undefined || nextGlobalSources !== undefined) {
       try {
         await tx(async (qq) => {
           // Global saves take the settings row first, then every affected series in stable id order inside
           // reapplyBlocklistInTransaction. A listing refresh takes each series row then its advisory lock, so the
           // two paths cannot publish a choice calculated from the preferences the save just replaced.
           await qq('SELECT id FROM server_settings WHERE id = 1 FOR UPDATE');
-          await qq('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
-            [JSON.stringify(b.scanlatorPrefs)]);
+          if (b.scanlatorPrefs !== undefined) {
+            await qq('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+              [JSON.stringify(b.scanlatorPrefs)]);
+          }
+          if (nextGlobalSources !== undefined) {
+            await qq('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+              [JSON.stringify(nextGlobalSources)]);
+          }
           await reapplyBlocklistInTransaction(qq);
         });
       } catch (e) {
         console.warn(`[prefs] applying the global blocklist failed: ${(e as Error)?.message || e}`);
         return reply.code(503).send({ error: 'blocklist_apply_failed' });
       }
+      if (nextGlobalSources !== undefined) invalidateSourcePrefs();
     }
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
@@ -831,11 +841,6 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
       // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.
       if (!b.borrowNames) await clearBorrowedNames('following-server').catch(() => 0);
-    }
-    if (b.sourcePrefs !== undefined) {
-      await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
-        [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
-      invalidateSourcePrefs();
     }
     if (b.mangadexLangs !== undefined) {
       const before = mangadexLangs();
@@ -1451,28 +1456,35 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET auto_update = $2 WHERE id = $1', [id, b.data.autoUpdate]);
       detail.autoUpdate = b.data.autoUpdate;
     }
-    if (b.data.scanlatorPrefs !== undefined) {
+    const nextSeriesSources = b.data.sourcePrefs === undefined
+      ? undefined
+      : b.data.sourcePrefs === null ? null : cleanSourceOrder(b.data.sourcePrefs.priority);
+    if (b.data.scanlatorPrefs !== undefined || nextSeriesSources !== undefined) {
       try {
         await tx(async (qq) => {
           // The UPDATE takes the series row first; the helper then takes its transaction advisory lock and re-reads
           // the effective settings before replacing every denormalised chosen field. Preference and listing commit
           // together, or neither does.
-          await qq('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
-            [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
+          if (b.data.scanlatorPrefs !== undefined) {
+            await qq('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
+              [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
+          }
+          if (nextSeriesSources !== undefined) {
+            // An empty order is stored as NULL: both mean "the server's order applies", and one spelling is
+            // what the series page reads back as "Server default".
+            await qq('UPDATE lib_series SET source_prefs = $2::jsonb WHERE id = $1',
+              [id, nextSeriesSources?.length ? JSON.stringify({ priority: nextSeriesSources }) : null]);
+          }
           await reapplyBlocklistInTransaction(qq, [id]);
         });
       } catch (e) {
         console.warn(`[prefs] applying the blocklist to ${id} failed: ${(e as Error)?.message || e}`);
         return reply.code(503).send({ error: 'blocklist_apply_failed' });
       }
-      detail.scanlatorPrefs = b.data.scanlatorPrefs;
-    }
-    if (b.data.sourcePrefs !== undefined) {
-      // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one
-      // spelling of that is what the series page reads back to show "Server default".
-      const order = b.data.sourcePrefs === null ? [] : cleanSourceOrder(b.data.sourcePrefs.priority);
-      await q('UPDATE lib_series SET source_prefs = $2::jsonb WHERE id = $1', [id, order.length ? JSON.stringify({ priority: order }) : null]);
-      detail.sourcePrefs = order.length ? { priority: order } : null;
+      if (b.data.scanlatorPrefs !== undefined) detail.scanlatorPrefs = b.data.scanlatorPrefs;
+      if (nextSeriesSources !== undefined) {
+        detail.sourcePrefs = nextSeriesSources?.length ? { priority: nextSeriesSources } : null;
+      }
     }
     if (b.data.borrowNames !== undefined) {
       await q('UPDATE lib_series SET borrow_names = $2 WHERE id = $1', [id, b.data.borrowNames]);

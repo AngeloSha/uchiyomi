@@ -25,7 +25,7 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_blk', S = 's_blk', OTHER = 's_blk_other', ADMIN = 'blk-admin', SRC = 'blk-src';
-let q: any, app: any, tok: string, apiKey: string, savedPrefs: unknown, savedGhosts: boolean | undefined;
+let q: any, app: any, tok: string, apiKey: string, savedPrefs: unknown, savedSourcePrefs: unknown, savedGhosts: boolean | undefined;
 
 const copy = (n: number, groups: string[]) => ({
   sourceId: `c/${n}/${groups.join('+') || 'none'}`, source: SRC, groups, scanlator: groups.join(' & ') || null,
@@ -49,8 +49,8 @@ before(async () => {
   const cookie = (await import('@fastify/cookie')).default;
   const rateLimit = (await import('@fastify/rate-limit')).default;
   await migrate();
-  const st = (await q('SELECT scanlator_prefs, komga_ghost_chapters FROM server_settings WHERE id = 1'))[0];
-  savedPrefs = st?.scanlator_prefs; savedGhosts = st?.komga_ghost_chapters;
+  const st = (await q('SELECT scanlator_prefs, source_prefs, komga_ghost_chapters FROM server_settings WHERE id = 1'))[0];
+  savedPrefs = st?.scanlator_prefs; savedSourcePrefs = st?.source_prefs; savedGhosts = st?.komga_ghost_chapters;
   await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":[],"blocked":[],"patienceDays":2}'::jsonb, komga_ghost_chapters = true WHERE id = 1`);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Blk',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S, OTHER]]);
@@ -83,7 +83,8 @@ after(async () => {
   if (TMP) rmSync(TMP, { recursive: true, force: true });
   if (!DSN) return;
   await app?.close();
-  await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, komga_ghost_chapters = $2 WHERE id = 1', [JSON.stringify(savedPrefs ?? {}), savedGhosts ?? false]).catch(() => {});
+  await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, source_prefs = $2::jsonb, komga_ghost_chapters = $3 WHERE id = 1',
+    [JSON.stringify(savedPrefs ?? {}), JSON.stringify(savedSourcePrefs ?? {}), savedGhosts ?? false]).catch(() => {});
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S, OTHER]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
@@ -98,7 +99,9 @@ const patchSeries = (blocked: string[]) => app.inject({
   method: 'PATCH', url: `/api/admin/series/${S}`, headers: { authorization: tok },
   payload: { scanlatorPrefs: { priority: [], blocked, patienceDays: null } },
 });
-const row = async (n: number, id = S) => (await q('SELECT status, chosen, source_id, scanlator FROM series_listing WHERE series_id = $1 AND number = $2::real', [id, n]))[0];
+const row = async (n: number, id = S) => (await q(
+  'SELECT status, chosen, source_id, scanlator, title, published_at FROM series_listing WHERE series_id = $1 AND number = $2::real', [id, n],
+))[0];
 
 test('blocking a group hides its only-copy chapters at once, and keeps the ones another group also released', { skip }, async () => {
   assert.deepEqual(await shown(), [1, 2, 3, 4, 5, 6], 'PREMISE: nothing is blocked');
@@ -144,6 +147,64 @@ test('a block in the Scanlators settings applies to every series, and so does li
   assert.equal((await set([])).statusCode, 200);
   assert.deepEqual(await shown(S), [1, 2, 3, 4, 5, 6]);
   assert.deepEqual(await shown(OTHER), [1, 2, 3, 4, 5, 6]);
+});
+
+test('source priority and scanlator preferences commit together before every listing is rebuilt', { skip }, async () => {
+  const A = 'blk-source-a', B = 'blk-source-b', n = 9;
+  const a = { ...copy(n, ['Good']), source: A, sourceId: 'a/9', title: 'From source A', publishedAt: '2026-01-01T00:00:00Z' };
+  const b = { ...copy(n, ['Good']), source: B, sourceId: 'b/9', title: 'From source B', publishedAt: '2026-02-02T00:00:00Z' };
+  const insert = (id: string) => q(`INSERT INTO series_listing
+      (series_id, number, title, published_at, scanlator, groups, source_id, chosen, status, copies, unblocked_status)
+    VALUES ($1,$2,$3,$4::timestamptz,'Good',ARRAY['Good'],$5,$6::jsonb,'available',$7::jsonb,'available')`,
+  [id, n, a.title, a.publishedAt, A, JSON.stringify({ ...a, number: n }), JSON.stringify([a, b])]);
+  const picked = async (id: string) => {
+    const r = await row(n, id);
+    return [r.source_id, r.chosen?.source, r.title, new Date(r.published_at).toISOString()];
+  };
+  await insert(S);
+  await insert(OTHER);
+  try {
+    const own = await app.inject({
+      method: 'PATCH', url: `/api/admin/series/${S}`, headers: { authorization: tok },
+      payload: {
+        scanlatorPrefs: { priority: [], blocked: [], patienceDays: null },
+        sourcePrefs: { priority: [B, A] },
+      },
+    });
+    assert.equal(own.statusCode, 200, own.body);
+    assert.deepEqual(await picked(S), [B, B, b.title, new Date(b.publishedAt).toISOString()],
+      'the combined per-series save rebuilt from the old source order');
+    assert.deepEqual((await picked(OTHER)).slice(0, 2), [A, A], 'a per-series order changed another series');
+
+    const global = await app.inject({
+      method: 'PATCH', url: '/api/admin/settings', headers: { authorization: tok },
+      payload: {
+        scanlatorPrefs: { priority: [], blocked: [], patienceDays: 2 },
+        sourcePrefs: { priority: [B, A] },
+      },
+    });
+    assert.equal(global.statusCode, 200, global.body);
+    assert.deepEqual(await picked(OTHER), [B, B, b.title, new Date(b.publishedAt).toISOString()],
+      'the combined global save rebuilt from the old source order');
+
+    const globalSourceOnly = await app.inject({
+      method: 'PATCH', url: '/api/admin/settings', headers: { authorization: tok },
+      payload: { sourcePrefs: { priority: [A, B] } },
+    });
+    assert.equal(globalSourceOnly.statusCode, 200, globalSourceOnly.body);
+    assert.deepEqual((await picked(OTHER)).slice(0, 2), [A, A], 'a source-only global save left the old chosen copy');
+
+    const ownSourceOnly = await app.inject({
+      method: 'PATCH', url: `/api/admin/series/${S}`, headers: { authorization: tok },
+      payload: { sourcePrefs: { priority: [A, B] } },
+    });
+    assert.equal(ownSourceOnly.statusCode, 200, ownSourceOnly.body);
+    assert.deepEqual((await picked(S)).slice(0, 2), [A, A], 'a source-only series save left the old chosen copy');
+  } finally {
+    await q('DELETE FROM series_listing WHERE series_id = ANY($1) AND number = $2', [[S, OTHER], n]).catch(() => {});
+    await q('UPDATE lib_series SET source_prefs = NULL WHERE id = $1', [S]).catch(() => {});
+    await q(`UPDATE server_settings SET source_prefs = '{"priority":[]}'::jsonb WHERE id = 1`).catch(() => {});
+  }
 });
 
 test('unblocking restores held and covered rather than flattening either to available', { skip }, async () => {
@@ -198,25 +259,34 @@ test('a stale listing replacement racing a newer preference save cannot put bloc
 test('a failed listing reapply rolls back both preference routes and returns a retryable error', { skip }, async () => {
   const globalBefore = (await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0].scanlator_prefs;
   const seriesBefore = (await q('SELECT scanlator_prefs FROM lib_series WHERE id = $1', [S]))[0].scanlator_prefs;
+  const globalSourcesBefore = (await q('SELECT source_prefs FROM server_settings WHERE id = 1'))[0].source_prefs;
+  const seriesSourcesBefore = (await q('SELECT source_prefs FROM lib_series WHERE id = $1', [S]))[0].source_prefs;
   await q(`CREATE OR REPLACE FUNCTION test_blocklist_reapply_failure() RETURNS trigger LANGUAGE plpgsql AS $fn$
            BEGIN RAISE EXCEPTION 'forced blocklist reapply failure'; END $fn$`);
   await q(`CREATE TRIGGER test_blocklist_reapply_failure
              BEFORE UPDATE ON series_listing FOR EACH ROW EXECUTE FUNCTION test_blocklist_reapply_failure()`);
   try {
-    const own = await patchSeries(['Bad']);
+    const own = await app.inject({
+      method: 'PATCH', url: `/api/admin/series/${S}`, headers: { authorization: tok },
+      payload: { scanlatorPrefs: { priority: [], blocked: ['Bad'], patienceDays: null }, sourcePrefs: { priority: ['new-source'] } },
+    });
     assert.equal(own.statusCode, 503, own.body);
     assert.equal(own.json().error, 'blocklist_apply_failed');
     assert.deepEqual((await q('SELECT scanlator_prefs FROM lib_series WHERE id = $1', [S]))[0].scanlator_prefs, seriesBefore,
       'the per-series preference committed without its listing');
+    assert.deepEqual((await q('SELECT source_prefs FROM lib_series WHERE id = $1', [S]))[0].source_prefs, seriesSourcesBefore,
+      'the per-series source preference committed without its listing');
 
     const global = await app.inject({
       method: 'PATCH', url: '/api/admin/settings', headers: { authorization: tok },
-      payload: { scanlatorPrefs: { priority: [], blocked: ['Bad'], patienceDays: 2 } },
+      payload: { scanlatorPrefs: { priority: [], blocked: ['Bad'], patienceDays: 2 }, sourcePrefs: { priority: ['new-source'] } },
     });
     assert.equal(global.statusCode, 503, global.body);
     assert.equal(global.json().error, 'blocklist_apply_failed');
     assert.deepEqual((await q('SELECT scanlator_prefs FROM server_settings WHERE id = 1'))[0].scanlator_prefs, globalBefore,
       'the global preference committed without its listings');
+    assert.deepEqual((await q('SELECT source_prefs FROM server_settings WHERE id = 1'))[0].source_prefs, globalSourcesBefore,
+      'the global source preference committed without its listings');
   } finally {
     await q('DROP TRIGGER IF EXISTS test_blocklist_reapply_failure ON series_listing').catch(() => {});
     await q('DROP FUNCTION IF EXISTS test_blocklist_reapply_failure()').catch(() => {});
