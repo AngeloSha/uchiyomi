@@ -1091,6 +1091,12 @@ you keep scrolling through a series without interruption.
 - **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
   never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
 - **Themes:** AMOLED black, sepia, or gray, from the reader settings.
+- **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
+  so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
+  the reader's settings sheet or under Profile → Settings → Reading (since v0.55.7,
+  [#170](https://github.com/AngeloSha/uchiyomi/discussions/170)). It is one setting for every title, saved to your
+  account. The top and bottom bars' dark shading now also runs past the screen edge, so no strip of page shows
+  while they spring into place.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a
   desktop `[` / `]` step to the previous/next chapter as well.
@@ -1124,10 +1130,10 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
-**Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
-brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
-*Saved* beside the row. The reader's own sheet still changes them for the session you are in, and a series
-you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
+**Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
+page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
+change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,
+and a series you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
 new-chapter alerts are on the same tab.
 
 **A default per source.** A source is usually one format: a webtoon site wants the continuous vertical scroll,

@@ -270,6 +270,11 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
       <Choice label={tr('Theme')} value={prefs.theme}
         options={[{ value: 'amoled', label: tr('AMOLED') }, { value: 'sepia', label: tr('Sepia') }, { value: 'gray', label: tr('Gray') }]}
         onChange={(theme) => set({ theme })} />
+      {/* #170. On by default, because it is the reader's look; this is how someone who wants the page's own edges
+          gets them (a gold cover laid a yellow band over every white page). Through `set`, the one writer. */}
+      <SwitchRow label={tr('Cover colour at the edges')}
+        help={tr('A soft wash of the cover’s colour across the top and bottom of the reader.')}
+        on={prefs.coverEdges} onChange={(coverEdges) => set({ coverEdges })} />
       {prefs.mode === 'paged' && (
         <Choice label={tr('Pages per view')} value={prefs.spread ? 'double' : 'single'}
           options={[{ value: 'single', label: tr('Single') }, { value: 'double', label: tr('Double spread') }]}

@@ -43,6 +43,14 @@ export interface ReaderPrefs {
    * Always derived in `normalise`, never read for behaviour. See the note there.
    */
   skipJunk: boolean;
+  /**
+   * The cover's colour washed across the top and bottom of the reader (#170). On by default: it is part of the
+   * reader's look, and the look is switched off only by the person reading, never for them (the rule #71 set). Off
+   * removes both bands, so a gold cover no longer lays a yellow edge over a white page. One setting for every title:
+   * it is not a title's look (LOOK_KEYS), so the reader's sheet changes the default, as Profile → Settings → Reading
+   * does. Stored settings without the key pick up the default through the spread in `migratePrefs`.
+   */
+  coverEdges: boolean;
 }
 
 export const DEFAULT_PREFS: ReaderPrefs = {
@@ -56,6 +64,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   theme: 'amoled',
   spread: false,
   pagedDirection: 'series',
+  coverEdges: true,
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -97,6 +106,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   const p = { ...DEFAULT_PREFS, ...r };
   if (!chosen) p.junkPages = r.skipJunk === false ? 'show' : DEFAULT_PREFS.junkPages;
   if (!PAGED_DIRECTIONS.includes(p.pagedDirection)) p.pagedDirection = DEFAULT_PREFS.pagedDirection;
+  // Only a real `false` turns the edges off: anything else out of storage keeps the default look.
+  if (typeof p.coverEdges !== 'boolean') p.coverEdges = DEFAULT_PREFS.coverEdges;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

@@ -1145,9 +1145,15 @@ function ReaderInner() {
   return (
     <div className="fixed inset-0 z-40 bg-ink-950">
       <div className="pointer-events-none absolute inset-0 z-30 bg-black" style={{ opacity: 1 - prefs.brightness }} />
-      {/* ambient cover wash framing the reader */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-36" style={{ background: 'linear-gradient(to bottom, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-36" style={{ background: 'linear-gradient(to top, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />
+      {/* Ambient cover wash framing the reader: the look, by default. Its switch (Cover colour at the edges, #170)
+          removes the two bands outright rather than their colour, because with no colour they are still a 16 %
+          black band over the page. */}
+      {prefs.coverEdges && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-36" style={{ background: 'linear-gradient(to bottom, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-36" style={{ background: 'linear-gradient(to top, rgb(var(--cover, 0 0 0) / 0.16), transparent)' }} />
+        </>
+      )}
 
       {/* PAGES */}
       {/* ⚠️ overflow-anchor is off below because `tops` -- computed in JS and never measured back from the
@@ -1284,11 +1290,17 @@ function ReaderInner() {
       )}
 
       {/* CHROME */}
+      {/* ⚠️ Each bar's dark pane runs on past the screen edge (the `before:` above the top bar, the `after:` below the
+          bottom one). The bars come in on framer's default spring for `y`, which overshoots by about 8 px around 170 ms,
+          and the gradient moved with them: for that moment the page showed through between the screen edge and the
+          bar, unshaded, with a hard line where the bar began (#170). The pane is off screen at rest, so the look is
+          unchanged, and the spring stays. Reintroduce by dropping either pane: effects.test.ts "the reader's bars
+          leave no gap at the screen edge while they bounce in" fails. */}
       <AnimatePresence>
         {chrome && (
           <>
             <motion.header initial={{ y: -64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -64, opacity: 0 }}
-              className="absolute inset-x-0 top-0 z-40 flex items-center gap-2 bg-linear-to-b from-black/90 via-black/55 to-transparent px-3 pb-8 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.55rem))]">
+              className="absolute inset-x-0 top-0 z-40 flex items-center gap-2 bg-linear-to-b from-black/90 via-black/55 to-transparent px-3 pb-8 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.55rem))] before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-16 before:bg-black/90">
               <button onClick={back} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
                 <IcChevronLeft width={22} height={22} />
               </button>
@@ -1327,7 +1339,7 @@ function ReaderInner() {
             </motion.header>
 
             <motion.footer initial={{ y: 64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 64, opacity: 0 }}
-              className="absolute inset-x-0 bottom-0 z-40 bg-linear-to-t from-black/90 via-black/55 to-transparent px-4 pt-10 pb-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))]">
+              className="absolute inset-x-0 bottom-0 z-40 bg-linear-to-t from-black/90 via-black/55 to-transparent px-4 pt-10 pb-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))] after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-16 after:bg-black/90">
               {/* In paged mode the bar follows the TRACK, both ways: on a right-to-left read the previous chapter
                   is on the right, next on the left, and the slider fills from the right, so dragging it moves the
                   way the pages do. On a left-to-right read it is stated LTR rather than inherited -- under the
