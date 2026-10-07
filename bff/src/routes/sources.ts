@@ -609,7 +609,10 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         // A detached job can outlive a scanlator-settings save. Recheck the selected copy immediately
         // before the helper starts network work. Only a versions-list pick may deliberately override a
         // block; if an automatic choice was blocked meanwhile, take the freshly ranked open copy instead.
-        if (!ch.pinned && !(await automaticChapterAllowedFor(seriesId, use))) {
+        // A brand-new add has no series id (persistScan mints its row after chapter one lands), so there is no
+        // per-series decision to re-read yet. Treating that missing decision as a block drops the first chapter
+        // before downloadChapter can start it. Existing series still re-read the effective blocklist here.
+        if (seriesId && !ch.pinned && !(await automaticChapterAllowedFor(seriesId, use))) {
           const next = (await alternatesOf(ch.number))[0];
           if (!next) { await settle(ch, false); return; }
           use = next;
