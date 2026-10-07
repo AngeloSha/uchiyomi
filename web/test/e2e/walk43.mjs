@@ -358,6 +358,29 @@ try {
   const blurred = await page.evaluate(() => [...document.querySelectorAll('*')]
     .filter((el) => { const b = getComputedStyle(el).backdropFilter; return b && b !== 'none'; }).length);
   check(blurred === 0, 'no element on the library computes a backdrop blur', `${blurred} element(s) still blur under the switch`);
+
+  // #174: this must be a Next Link click, not visit()/page.goto(). With AnimatePresence in wait mode and a
+  // zero-duration exit, the address changed but the incoming keyed page could stay hidden forever. Exercise both
+  // directions through whichever real nav is visible at this viewport, and require the new wrapper to be painted.
+  const clientHop = async (href, heading) => {
+    const clicked = await page.evaluate((to) => {
+      const link = [...document.querySelectorAll(`a[href="${to}"]`)]
+        .find((a) => a.getClientRects().length > 0 && a.getAttribute('aria-disabled') !== 'true');
+      link?.click();
+      return !!link;
+    }, href);
+    check(clicked, `Reduce effects: the visible ${heading} in-app link exists`);
+    const painted = await waitFor(() => page.evaluate((to, text) => {
+      const wrapper = document.querySelector('main > div');
+      const title = [...document.querySelectorAll('main h1')].find((h) => h.getClientRects().length > 0);
+      return location.pathname.startsWith(to) && title?.textContent?.trim() === text
+        && !!wrapper && wrapper.getClientRects().length > 0 && Number(getComputedStyle(wrapper).opacity) > 0.99;
+    }, href, heading), 10_000, 100);
+    check(!!painted, `Reduce effects: client navigation paints ${heading}`,
+      `after clicking ${href}: ${await page.evaluate(() => `${location.pathname} · ${document.querySelector('main h1')?.textContent?.trim() || 'no heading'} · opacity ${getComputedStyle(document.querySelector('main > div') || document.body).opacity}`)}`);
+  };
+  await clientHop('/collections', 'Collections');
+  await clientHop('/library', 'Library');
   await shot('library-reduce-effects');
 
   // A reload with the device copy GONE: the class has to come back from the account, and not one frame of

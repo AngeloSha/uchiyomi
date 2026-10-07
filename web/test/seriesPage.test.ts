@@ -215,7 +215,7 @@ test('a grey row the reader marked reads as read, stays grey, and carries Mark r
   assert.match(row, /border border-dashed border-ink-600/, 'the thumb stays dashed: still not on the server');
   assert.match(row, /\{onMark && !selectable && \(/, 'the menu hides in select mode');
   assert.match(row, /onMark\(!read\)/, 'the one action toggles');
-  assert.match(page, /onMark=\{\(completed\) => markGhost\(r\.ghost\.number, completed\)\}/, 'the page hands every grey row the action');
+  assert.match(page, /onMark=\{\(completed\) => markGhost\(r\.ghost, completed\)\}/, 'the page hands every grey row the action and its stable identity');
 });
 
 test('select mode marks the grey rows too, through their own route in chunks of its cap', () => {
@@ -224,8 +224,12 @@ test('select mode marks the grey rows too, through their own route in chunks of 
   // enabling the two chips on `pickedBookList.length` again: "enabled with only grey rows picked" fails.
   const page = code(read('app/series/page.tsx'));
   const bulk = fn(page, 'bulkMark');
-  assert.match(bulk, /await markGhosts\(pickedGhostList\.map\(\(g\) => g\.number\), completed\)/, 'the picked grey rows are marked');
-  assert.match(bulk, /await setRead\(pickedBookList, completed\)/, 'and the picked chapters, as before');
+  assert.match(bulk, /const tombstones = pickedGhostList\.flatMap\(\(g\) => g\.bookId \? allBooks\.filter\(\(b\) => b\.id === g\.bookId\) : \[\]\)/,
+    'deleted ghosts resolve to their own book rows, including duplicates on one number');
+  assert.match(bulk, /await setRead\(\[\.\.\.pickedBookList, \.\.\.tombstones\], completed\)/,
+    'picked chapters and deliberate tombstones keep book progress');
+  assert.match(bulk, /const listed = pickedGhostList\.filter\(\(g\) => !g\.bookId\);\s*const ok = listed\.length \? await markGhosts\(listed\.map\(\(g\) => g\.number\), completed\) : true/,
+    'source-only grey rows use the by-number route');
   assert.match(page, /disabled=\{acting \|\| !pickedCount\} onClick=\{\(\) => bulkMark\(true\)\}/, 'Mark read is enabled with only grey rows picked');
   assert.match(page, /disabled=\{acting \|\| !pickedCount\} onClick=\{\(\) => bulkMark\(false\)\}/, 'Mark unread is enabled with only grey rows picked');
   const marks = fn(page, 'markGhosts');
