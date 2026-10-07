@@ -355,8 +355,8 @@ test('Apply marks your own folder\'s gone chapters and nothing else: no row eras
   assert.equal(r.marked, 1, JSON.stringify(r));
   assert.equal(r.downloads, 1);
   assert.equal((await allRows()).length, before, 'a row was erased');
-  assert.deepEqual(await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`).then((p) => [!!p.at, p.reason]), [true, 'deleted'],
-    'the gone chapter is not marked held, as Delete files marks a file it removed');
+  assert.deepEqual(await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`).then((p) => [!!p.at, p.reason]), [true, 'rescan_missing'],
+    'the gone chapter records that Rescan found its filesystem entry absent');
   assert.equal((await prunedOf(DL, `${SRC}/Fetched/Chapter 2.cbz`)).at, null, 'the download folder\'s row was marked: that is Verify\'s');
   for (const n of [1, 2]) {
     assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter ${n}.cbz`)).at, null);
@@ -620,7 +620,7 @@ test('a chapter Rescan everything marked says why on the book, so the series pag
   const ctx = { userId: null, libraryIds: null, maxAgeRating: null };
   const books = (await owned.seriesBooks(ctx, await seriesOf(`${SRC}/Kept`), 0, 50)).content;
   const by = (n: number) => books.find((b: any) => b.name === `Chapter ${n}`);
-  assert.deepEqual([by(3)?.pruned, by(3)?.prunedReason, by(3)?.owned], [true, 'deleted', false], JSON.stringify(by(3)));
+  assert.deepEqual([by(3)?.pruned, by(3)?.prunedReason, by(3)?.owned], [true, 'rescan_missing', false], JSON.stringify(by(3)));
   assert.deepEqual([by(1)?.pruned, by(1)?.prunedReason], [false, null], 'a chapter with its file has no reason');
 });
 
@@ -1008,7 +1008,7 @@ test('a series being downloaded into is left alone at Apply, and every other one
     assert.deepEqual([out.busy, out.marked, out.back, out.changed], [2, 1, 0, 0], JSON.stringify(out));
     assert.deepEqual(out.renumbered, { series: 0, chapters: 0 }, 'a series being downloaded into was renumbered');
     assert.equal((await prunedOf(ROOT, `${kept}/Chapter 3.cbz`)).at, null, 'a chapter of a series being downloaded into was marked');
-    assert.equal((await prunedOf(ROOT, `${gone}/Chapter 1.cbz`)).reason, 'deleted', 'a free series was not marked');
+    assert.equal((await prunedOf(ROOT, `${gone}/Chapter 1.cbz`)).reason, 'rescan_missing', 'a free series was not marked');
     assert.deepEqual(await numbersOf(comics.id), before, 'a series being downloaded into was renumbered');
     assert.equal(during, true, 'a Fetch could start in a series the Apply was changing');
     assert.equal(busyFolders.has(gone), false, 'the Apply kept its hold on Gone after it was done');
