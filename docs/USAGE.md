@@ -1947,7 +1947,7 @@ Three tasks on **Admin → Tasks** look at your chapter files, and each does one
 
 | | What it does | What it never does |
 |---|---|---|
-| **Library scan** | Adds every chapter file it finds and updates the ones it knows. A file that comes back after it was marked gone is picked up again, on the same row. | Remove anything: a chapter whose file is gone stays listed as it was. |
+| **Library scan** | Adds every chapter file it finds and updates the ones it knows. A file that comes back after it was marked gone is picked up again, on the same row. Since v0.55.7 it reads a series' details (ComicInfo) from its first chapter file only when that file changed since the scan before, so a rescan of a large library on a slow share opens far fewer files. | Remove anything: a chapter whose file is gone stays listed as it was. |
 | **Verify chapter files** | After a database restored without its files (section 12): marks the chapters Uchiyomi *downloaded* whose file is gone, so the next sweep downloads them again onto the same rows. | Mark a chapter in a library you built by hand; it only counts those. |
 | **Rescan everything** (since v0.55.4) | For a library you built by hand: finds the chapters whose file is gone from your own folders, shows you first, and marks them *File no longer on disk* when you press **Apply**. | Erase a chapter, touch a file, hide a series, or change what anyone has read. |
 

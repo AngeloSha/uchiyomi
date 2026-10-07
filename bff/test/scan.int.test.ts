@@ -93,6 +93,46 @@ const oneSeries = async (folder: string) =>
 const booksOf = async (seriesId: string) =>
   q(`SELECT id, file, root, number, title FROM lib_books WHERE series_id = $1 ORDER BY file`, [seriesId]);
 
+// First in the file, so the library holds only its own folders: it counts every first archive a scan opens.
+test('persistScan: a rescan opens no first archive it has read already, and one that changed is read and written again', { skip }, async () => {
+  // v0.55.7 (#150): every scan opened the first archive of every folder for its ComicInfo -- on @Kedryn's Unraid share,
+  // one spun-up disk read per folder, to write the same values again. Reintroduce by always reading (drop the
+  // info_read test in persistScan): the second scan opens all four.
+  const { comicInfoReads } = await import('../src/lib/library');
+  const { utimes } = await import('fs/promises');
+  const src = 'T!info';
+  for (const t of ['Alpha', 'Beta']) for (const n of [1, 2]) await writeCbz(chapter(ROOT_A, src, t, `Chapter ${n}.cbz`), { series: `${t} Series` });
+  // A chapter that is a folder of images is read every time: a tagger can rewrite its ComicInfo.xml in place.
+  const loose = join(seriesDir(ROOT_A, src, 'Gamma'), 'Chapter 1');
+  await mkdir(loose, { recursive: true });
+  await writeFile(join(loose, '001.jpg'), Buffer.from('page'));
+  await writeFile(join(loose, 'ComicInfo.xml'), '<ComicInfo><Series>Gamma Series</Series></ComicInfo>');
+  // And a first archive that cannot be read is tried again by every scan, as it always was.
+  await mkdir(seriesDir(ROOT_A, src, 'Delta'), { recursive: true });
+  await writeFile(chapter(ROOT_A, src, 'Delta', 'Chapter 1.cbz'), Buffer.from('not a zip'));
+  const reads = async () => { const n = comicInfoReads(); await persistScan(); return comicInfoReads() - n; };
+  const title = async (t: string) => (await oneSeries(`${src}/${t}`))?.title;
+
+  assert.equal(await reads(), 4, 'precondition: a first scan reads every folder');
+  assert.equal(await title('Alpha'), 'Alpha Series');
+  assert.equal(await reads(), 2, 'a rescan opened a first archive it had read already');
+  assert.deepEqual([await title('Alpha'), await title('Beta'), await title('Gamma'), await title('Delta')],
+    ['Alpha Series', 'Beta Series', 'Gamma Series', 'Delta']);
+
+  // Alpha's first file replaced by a retagged one: read, and the series written from it, as every scan did.
+  const a1 = chapter(ROOT_A, src, 'Alpha', 'Chapter 1.cbz');
+  await writeCbz(a1, { series: 'Alpha Retagged', genre: 'Comedy' });
+  const later = new Date(Date.now() + 5_000);
+  await utimes(a1, later, later);
+  assert.equal(await reads(), 3, 'a first archive that changed was not read again');
+  const alpha = await oneSeries(`${src}/Alpha`);
+  assert.deepEqual([alpha.title, alpha.genres], ['Alpha Retagged', ['Comedy']], 'the retagged file was not written to the series');
+  // A new first chapter is another file: read.
+  await writeCbz(chapter(ROOT_A, src, 'Beta', 'Chapter 0.cbz'), { series: 'Beta From Zero' });
+  assert.equal(await reads(), 3, 'a new first chapter was not read');
+  assert.equal(await title('Beta'), 'Beta From Zero');
+});
+
 test('persistScan: a fresh scan creates the series and its chapters', { skip }, async () => {
   const src = 'T!fresh';
   await writeCbz(chapter(ROOT_A, src, 'Solo Leveling', 'Chapter 1.cbz'), { series: 'Solo Leveling', number: 1 });

@@ -1476,6 +1476,12 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hide_notice_short_only bool
 -- boots on this schema and never names them.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS rescan_last_result jsonb;
+
+-- v0.55.7 (#150): the file a scan last read a series' ComicInfo from -- its first chapter archive -- as JSON [how it was
+-- read, path, mtime ms, size] (lib/library.ts infoReadOf). A scan opens that archive again only when the file is no
+-- longer the one it read: on @Kedryn's Unraid every scan opened the first archive of every folder. NULL = read it at the
+-- next scan. Nullable: v0.55.6 boots on this schema and never names it -- its scans read every folder, as they always did.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS info_read text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
