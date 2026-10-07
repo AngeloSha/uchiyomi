@@ -6532,7 +6532,7 @@ paths:
         the library, then looks for every live chapter row's own file under the library folder and the download
         folder -- never a hidden or merged series', nor one in the middle of a renumber -- and keeps a plan in
         memory. Answers {running: 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' (a
-        preview) | 'mark' | 'renumber' (an Apply) | null, done, of (rows or files of the phase, null while scanning
+        preview) | 'mark' | 'follow' (v0.55.7) | 'renumber' (an Apply) | null, done, of (rows or files of the phase, null while scanning
         or reading names), startedAt, error: 'failed' |
         'stopped' | null (how the last preview or Apply ended when it did not end well), plan, last (the last
         Apply's result, below, this process's or the one server_settings kept), lastRun (epoch ms or null)}.
@@ -6542,7 +6542,8 @@ paths:
         never "not there" -- left alone), unmounted [{root, missing?, of?}] (a folder with no file present
         behind any of its rows, or more than 90 % of them gone: looks unmounted, and nothing under it is
         planned), gone (rows in your own library folder whose file is gone), moved (gone rows whose file is
-        another live row's now, by fingerprint: renamed or moved, kept), downloads (rows in the download
+        another live row's now, by fingerprint: renamed or moved, kept), follow (v0.55.7: of those, the pairs
+        inside one series, whose chapters Apply points at the new file), downloads (rows in the download
         folder whose file is gone: Verify chapter files' to mark, counted only), emptied (series with every
         live chapter's file gone), goneSeries, emptiedList [{seriesId, chapters, title}], movedList [{seriesId,
         title, file, to: {seriesId, title, file}}], numbers, numbersTotal}. The lists hold at most 200 entries
@@ -6555,8 +6556,9 @@ paths:
         how many a tracker would be told higher, or lower -- which the tracker floor refuses), examples [{file,
         from, to}] (at most 3, numbers as text: "2" -> "5", "1" -> "1–7")}]. A series numbered by posting order,
         or in the middle of a renumber, is never listed; a row Verify marked 'missing' is never read again.
-        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, busy, downloads,
-        emptied, unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'}.
+        `last` is null or {ok, plan (the preview it applied), marked, back, changed, moved, followed, twins, busy,
+        downloads, emptied, unmounted [{root}], renumbered {series, chapters}, ms, stopped?: 'shutdown'} (followed
+        and twins since v0.55.7).
       security:
         - bearer: []
       responses:
@@ -6588,7 +6590,15 @@ paths:
         merged nor being renumbered, its file still not there, and no live row with its fingerprint -- and the
         library folder must still hold a file the preview saw; then it is marked pruned with `pruned_reason =
         'deleted'` (held: the sweep never fetches it back), and the cover and books_count of every series it
-        touched are recomputed. It never erases a row, touches a file on disk, marks a row in the download folder
+        touched are recomputed. Since v0.55.7 each pair of the plan inside ONE series (a file moved or renamed
+        within its series) is asked again too -- both rows unchanged, one fingerprint, the old file still gone and
+        the new one there -- and, when the new row holds nothing of anyone's (no reading progress, reading event,
+        bookmark, note, offline copy, number or title set by hand, or page marked by hand; asked with both rows
+        locked), the old row takes the new file (root, file, mtime, size, fingerprint; its number and title read
+        from the new name by its own name_rule), the new row is deleted and a cover on it moves to the old row:
+        the chapter shows once, with its id and everyone's history (`followed`). A new row that holds something is
+        kept beside the old one (`twins`); a pair whose old file came back is `back`, one changed since the preview
+        `changed`. It never erases a row with anything on it, touches a file on disk, marks a row in the download folder
         (Verify chapter files' to mark), relabels a row already pruned, hides or forgets a series, or changes a
         tracker floor, read mark, favourite or rating. A file that comes back is picked up on the same row by the
         next scan. Then, in the same hold and in ONE transaction, the series in `renumber` (the opt-in) are read
@@ -6598,7 +6608,7 @@ paths:
         preview is left alone. Nothing is pushed to any tracker: the next chapter a reader finishes sends its
         number as usual. The result lands on the status route's `last` and on GET /api/admin/tasks as the
         `rescan` entry's lastResult, persisted in server_settings.rescan_last_run / rescan_last_result. Audit:
-        `library.rescan` {plan, marked, back, changed, moved, busy, downloads, emptied, unmounted, ms}, and
+        `library.rescan` {plan, marked, back, changed, moved, followed, twins, busy, downloads, emptied, unmounted, ms}, and
         `library.rescan_numbers` {plan, series, chapters, ids} when the opt-in renumbered something.
       requestBody:
         required: true

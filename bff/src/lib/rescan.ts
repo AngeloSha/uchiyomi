@@ -60,6 +60,19 @@
  *   first, at most PAIR_MAX per preview. Reintroduce by planning every gone row: "a moved or renamed file is paired
  *   before anything is planned" finds the renamed chapter's old row in the plan.
  *
+ * ⚠️ A CHAPTER FOLLOWS ITS FILE (v0.55.7, #150). Kept was not enough: the old row stayed live with no file and the new
+ *   row held the file with none of the history, so a renamed chapter showed twice on its series page. For a pair inside
+ *   one series, Apply points the OLD row -- its id, and with it everyone's progress, bookmarks, notes and events -- at
+ *   the new file (where it is and what was measured of it: root, file, mtime, size, the fingerprint; its number and
+ *   title read from the new name by its own rule, as the next scan would), and the new row goes. Only when the new row
+ *   holds NOTHING of anyone's: no progress, events, bookmark, note, offline copy, number or title set by hand, nor a
+ *   page marked by hand -- a person who opened it in the minutes since the scan made it keeps both rows, counted
+ *   (`twins`). Never the other way round: a row with history is never removed. It needs no tick: it keeps every row
+ *   that holds anything and only ever puts history back on the file. A pair across two series is left as it was,
+ *   unless the whole series merges (below). Reintroduce by skipping followFiles: "a chapter follows its renamed file"
+ *   in rescan.int.test.ts finds the chapter twice; by dropping the history test: "a renamed file someone opened since
+ *   the scan is kept beside its old chapter" finds that reader's bookmark pointing at nothing.
+ *
  * ⚠️ APPLY LOOKS AGAIN, UNDER THE SCAN HOLD. Minutes can pass between the preview and the press: a file comes back,
  *   a renumber or a rename moves a row to another file, Verify or a cleanup marks one, a share is unmounted. So a
  *   planned row is marked only if it is still the row that was looked at and its file is still not there, the folder
@@ -135,13 +148,15 @@ export const PLAN_TTL_MS = 30 * 60_000;
 /** Example changes the opt-in shows per series. */
 const EXAMPLES = 3;
 
-export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber';
+export type RescanPhase = 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'follow' | 'renumber';
 
 /** A root the whole-root rules refused: no present file at all, or `missing` of the `of` rows looked at (the 90 % rule). */
 export interface Unmounted { root: string; missing?: number; of?: number }
 
 /** A chapter row the plan is about: its id, its series and the file it named when it was looked at. */
 export interface PlanRow { id: string; seriesId: string; file: string }
+/** A gone row of your own folder, and `to`, the live row now at its file (moved or renamed): same fingerprint. */
+export interface MovedPair extends PlanRow { to: PlanRow & { root: string } }
 
 /** A series whose chapter numbers the newer file-name rules would change (the header's opt-in). */
 export interface NumberSeries {
@@ -174,7 +189,9 @@ export interface RescanPlan {
   /** Rows in your own library folder whose file is gone, with no live twin: what Apply marks. */
   mark: PlanRow[];
   /** Gone rows in your own folder whose file is another live row's now: kept, never marked. `to` is that row. */
-  moved: Array<PlanRow & { to: PlanRow }>;
+  moved: MovedPair[];
+  /** Of `moved`, the pairs inside one series: Apply points the old row at the new file (FOLLOW, the header). */
+  follow: number;
   /** Rows in the download folder whose file is gone: Verify chapter files' to mark, counted here only. */
   downloads: number;
   /** Series with a live row and every live row's file gone (marked, moved or in the download folder). */
@@ -202,6 +219,10 @@ export interface RescanApplied {
   changed: number;
   /** Gone rows kept because their file is another live row's: the preview's pairs, and any found at Apply. */
   moved: number;
+  /** Of those, chapters now pointing at their moved or renamed file: the old row kept, the new one gone (FOLLOW). */
+  followed: number;
+  /** Pairs kept as two chapters because the new row holds history of its own (FOLLOW): nothing was combined. */
+  twins: number;
   /**
    * Series left alone because something was writing into them, or checking them, when Apply reached them (the header):
    * neither their planned rows nor the opt-in's numbers were touched -- the next Rescan has them.
@@ -389,6 +410,7 @@ export async function previewRescan(): Promise<RescanPlan | null> {
   if (runtime.stopping) return null;
   const movedIds = new Set(moved.map((m) => m.id));
   const mark = own.filter((g) => !movedIds.has(g.id)).map(({ id, seriesId, file }) => ({ id, seriesId, file }));
+  const follow = moved.filter((m) => m.to.seriesId === m.seriesId).length;
 
   // A series with nothing left: every live row it has is gone, whichever way. Listed for the admin, never hidden.
   const emptied: RescanPlan['emptied'] = [];
@@ -403,7 +425,7 @@ export async function previewRescan(): Promise<RescanPlan | null> {
 
   return {
     id: randomUUID(), at: Date.now(), scannedAt, ms: Date.now() - t0, looked, unchecked, unmounted,
-    mark, moved, downloads, emptied, samples, numbers, applied: false,
+    mark, moved, follow, downloads, emptied, samples, numbers, applied: false,
   };
 }
 
@@ -508,7 +530,7 @@ async function numberChanges(): Promise<NumberSeries[]> {
  * to another folder. The live rows that were never fingerprinted are fingerprinted first, newest first -- the scan
  * that just ran made the new row, and the background backfill has not reached it.
  */
-async function pairMoved(own: Gone[], goneIds: Set<string>, roots: string[]): Promise<RescanPlan['moved']> {
+async function pairMoved(own: Gone[], goneIds: Set<string>, roots: string[]): Promise<MovedPair[]> {
   if (!own.some((g) => g.fingerprint)) return [];
   const ids = [...goneIds];
   const todo = await q<{ id: string; root: string; file: string }>(
@@ -522,15 +544,15 @@ async function pairMoved(own: Gone[], goneIds: Set<string>, roots: string[]): Pr
     await fingerprintOne(b).catch(() => false);
     rescanState.done++;
   });
-  const twins = new Map((await q<{ fingerprint: string; id: string; series_id: string; file: string }>(
-    `SELECT DISTINCT ON (b.fingerprint) b.fingerprint, b.id, b.series_id, b.file FROM lib_books b
+  const twins = new Map((await q<{ fingerprint: string; id: string; series_id: string; file: string; root: string }>(
+    `SELECT DISTINCT ON (b.fingerprint) b.fingerprint, b.id, b.series_id, b.file, b.root FROM lib_books b
       WHERE b.pruned_at IS NULL AND b.fingerprint = ANY($1::text[]) AND NOT (b.id = ANY($2::text[]))
       ORDER BY b.fingerprint, b.created_at DESC, b.id`,
     [[...new Set(own.map((g) => g.fingerprint).filter((f): f is string => !!f))], ids])).map((r) => [r.fingerprint, r]));
-  const out: RescanPlan['moved'] = [];
+  const out: MovedPair[] = [];
   for (const g of own) {
     const t = g.fingerprint ? twins.get(g.fingerprint) : undefined;
-    if (t) out.push({ id: g.id, seriesId: g.seriesId, file: g.file, to: { id: t.id, seriesId: t.series_id, file: t.file } });
+    if (t) out.push({ id: g.id, seriesId: g.seriesId, file: g.file, to: { id: t.id, seriesId: t.series_id, file: t.file, root: t.root } });
   }
   return out;
 }
@@ -556,7 +578,8 @@ export function startRescan(log?: Log): Promise<RescanPlan | null> | false {
       if (!plan) rescanState.error = 'stopped';
       else {
         log?.info(`rescan: ${plan.looked} chapter file(s) looked for; ${plan.mark.length} gone from the library folder, `
-          + `${plan.moved.length} moved or renamed, ${plan.downloads} gone from the download folder, ${plan.emptied.length} series with nothing left`);
+          + `${plan.moved.length} moved or renamed (${plan.follow} inside their own series), ${plan.downloads} gone from the download folder, `
+          + `${plan.emptied.length} series with nothing left`);
         for (const u of plan.unmounted) log?.warn(`rescan: ${u.root}: no file (or almost none) behind its chapter rows -- is the volume mounted? Nothing under it is planned`);
       }
       return plan;
@@ -648,7 +671,10 @@ export function startApply(
       // A library-wide change, so the Activity feed says who made it and what it did.
       await logAudit('library.rescan', {
         userId: who.userId,
-        detail: { plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, busy: r.busy, downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}) },
+        detail: {
+          plan: r.plan, marked: r.marked, back: r.back, changed: r.changed, moved: r.moved, followed: r.followed, twins: r.twins, busy: r.busy,
+          downloads: r.downloads, emptied: r.emptied, unmounted: r.unmounted, ms: r.ms, ...(r.stopped ? { stopped: r.stopped } : {}),
+        },
         req: who.req,
       });
       // The opt-in, an entry of its own: chapter numbers are what a tracker is told, and the feed must say who changed
@@ -660,6 +686,8 @@ export function startApply(
       }
       scheduleHealthSummaryRefresh();
       who.log?.info(`rescan: ${r.marked} chapter(s) marked as no longer on disk; ${r.back} back on disk and ${r.changed} changed since the preview, left alone`
+        + (r.followed ? `; ${r.followed} chapter(s) now point at their moved or renamed file` : '')
+        + (r.twins ? `; ${r.twins} moved file(s) kept beside their old chapter, both with reading history` : '')
         + (r.busy ? `; ${r.busy} series with a download or a check running, left for the next rescan` : '')
         + (r.renumbered.series ? `; ${r.renumbered.chapters} chapter(s) of ${r.renumbered.series} series renumbered by the new file-name rules` : '')
         + (r.stopped ? ' (stopped for shutdown)' : ''));
@@ -694,9 +722,11 @@ const MARK_BATCH = 500;
 async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts): Promise<RescanApplied> {
   const t0 = Date.now();
   const out: RescanApplied = {
-    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, busy: 0,
+    ok: true, plan: plan.id, marked: 0, back: 0, changed: 0, moved: plan.moved.length, followed: 0, twins: 0, busy: 0,
     downloads: plan.downloads, emptied: plan.emptied.length, unmounted: [], renumbered: { series: 0, chapters: 0 }, ms: 0,
   };
+  // The pairs inside one series: their chapters follow their files (FOLLOW, the header).
+  const inSeries = plan.moved.filter((m) => m.to.seriesId === m.seriesId);
   // ⚠️ With every scan held off (the header): a scan between the look below and the mark could bring a row back, or
   // move it, and the mark would land on a chapter whose file is there -- and one between the opt-in's read and its
   // write would re-read a row by its old rule under the new one's number.
@@ -704,11 +734,14 @@ async function applyPlan(plan: RescanPlan, renumber: string[], opts: ApplyOpts):
   // start inside the Apply.
   await withScansHeld(async () => {
     // ⚠️ One writer per series (the header): every series this Apply may change, held -- or left alone, if it is taken.
-    const hold = await holdSeries([...plan.mark.map((m) => m.seriesId), ...renumber]);
+    const hold = await holdSeries([...plan.mark.map((m) => m.seriesId), ...inSeries.map((m) => m.seriesId), ...renumber]);
     try {
       out.busy = hold.busy.size;
       await opts.held?.();
       await markGone(plan, out, hold.busy);
+      // Before the opt-in renumber, which reads each row's number again from its file -- the new one, by then.
+      const pairs = inSeries.filter((m) => !hold.busy.has(m.seriesId));
+      if (pairs.length && !out.stopped) await followFiles(pairs, out);
       const free = renumber.filter((id) => !hold.busy.has(id));
       if (free.length && !out.stopped) {
         setPhase('renumber', free.length);
@@ -792,6 +825,124 @@ async function markGone(plan: RescanPlan, out: RescanApplied, busy: ReadonlySet<
   if (touched.size) await refreshSeries([...touched]);
 }
 
+/** A chapter file's title as the scan writes it: its name without the archive's extension (lib/library.ts persistScan). */
+const EXT = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
+
+/**
+ * Anything of anyone's on a chapter row (FOLLOW, the header): reading progress, reading events, a bookmark, a note, an
+ * offline copy, a number or title set by hand, a page marked by hand. Page hashes the nightly job measured are not --
+ * they are of the same bytes as the old row's, and go with the row (ON DELETE CASCADE).
+ */
+const HOLDS = `SELECT book_id AS id FROM read_progress WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM reading_events WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM bookmarks WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM notes WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM offline_downloads WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM book_overrides WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM page_hashes WHERE book_id = ANY($1) AND override IS NOT NULL`;
+
+interface PairRow {
+  id: string; series_id: string; root: string; file: string; pruned_at: string | null; fingerprint: string | null;
+  name_rule: number; looked: boolean;
+}
+
+/**
+ * FOLLOW (the header): each pair asked again -- both rows still what the preview saw, in one series still looked at,
+ * one fingerprint, the old file still not there and the new one there -- then, per batch, in ONE transaction with both
+ * rows locked: a new row that holds anything of anyone's is kept beside the old one (`twins`); otherwise the series'
+ * cover moves to the old row (the same chapter), the new row goes, and the old row takes the new file. Inside Apply's
+ * scan hold, its series held. A pair whose old file is back is `back` (two copies now, both kept); one that changed
+ * since the preview is `changed`.
+ */
+async function followFiles(pairs: MovedPair[], out: RescanApplied): Promise<void> {
+  // One new row for one old row: two old rows of one file (a chapter kept twice) cannot both take it.
+  const takenN = new Set<string>();
+  const takenO = new Set<string>();
+  const todo = pairs.filter((p) => {
+    if (takenN.has(p.to.id) || takenO.has(p.id)) return false;
+    takenN.add(p.to.id);
+    takenO.add(p.id);
+    return true;
+  });
+  setPhase('follow', pairs.length);
+  rescanState.done += pairs.length - todo.length;
+  const touched = new Set<string>();
+  for (let i = 0; i < todo.length; i += MARK_BATCH) {
+    if (runtime.stopping) { out.stopped = 'shutdown'; break; }
+    const batch = todo.slice(i, i + MARK_BATCH);
+    const rows = new Map((await q<PairRow>(
+      `SELECT b.id, b.series_id, b.root, b.file, b.pruned_at, b.fingerprint, b.name_rule, (${visibleToAll('s')} AND s.renumber_plan IS NULL) AS looked
+         FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = ANY($1)`,
+      [batch.flatMap((p) => [p.id, p.to.id])])).map((r) => [r.id, r]));
+    const ok: Array<{ o: PairRow; n: PairRow }> = [];
+    await mapLimit(batch, CONCURRENCY, async (p) => {
+      const o = rows.get(p.id);
+      const n = rows.get(p.to.id);
+      // ⚠️ Still the pair that was looked at: neither row pruned or moved since, both in one series still looked at,
+      // and one fingerprint -- the only evidence that the new file is the old chapter.
+      if (!o || !n || o.pruned_at || n.pruned_at || o.file !== p.file || o.root !== LIBRARY_ROOT || n.file !== p.to.file
+        || n.root !== p.to.root || o.series_id !== n.series_id || !o.looked || renumberRunning(o.series_id)
+        || !o.fingerprint || o.fingerprint !== n.fingerprint) { out.changed++; return; }
+      const [was, now] = await Promise.all([look(LIBRARY_ROOT, o.file), look(n.root, n.file)]);
+      if (was === 'present') out.back++;
+      else if (was !== 'gone' || now !== 'present') out.changed++;
+      else ok.push({ o, n });
+    });
+    rescanState.done += batch.length;
+    if (!ok.length) continue;
+    await tx(async (qq) => {
+      // Both rows locked: a progress write on the new row waits for this transaction (its foreign key), and then finds
+      // the row gone -- never a row removed under a reader's fresh progress.
+      const locked = new Map((await qq<{ id: string; series_id: string; file: string; pruned_at: string | null }>(
+        'SELECT id, series_id, file, pruned_at FROM lib_books WHERE id = ANY($1) ORDER BY id FOR UPDATE',
+        [ok.flatMap(({ o, n }) => [o.id, n.id])])).map((r) => [r.id, r]));
+      // ⚠️ The new row must hold nothing of anyone's (HOLDS): asked inside the lock. Reintroduce by dropping this:
+      // "a renamed file someone opened since the scan is kept beside its old chapter" finds their bookmark on nothing.
+      const holding = new Set((await qq<{ id: string }>(HOLDS, [ok.map(({ n }) => n.id)])).map((r) => r.id));
+      const go: Array<{ o: PairRow; n: PairRow }> = [];
+      for (const pr of ok) {
+        const lo = locked.get(pr.o.id);
+        const ln = locked.get(pr.n.id);
+        if (!lo || !ln || lo.pruned_at || ln.pruned_at || lo.file !== pr.o.file || ln.file !== pr.n.file || lo.series_id !== ln.series_id) out.changed++;
+        else if (holding.has(pr.n.id)) out.twins++;
+        else go.push(pr);
+      }
+      if (!go.length) return;
+      const oIds = go.map(({ o }) => o.id);
+      const nIds = go.map(({ n }) => n.id);
+      // The old row's number and title, read from the new name by the old row's own rule, as the next scan reads it: a
+      // row keeps the rule it was born with (lib/naming.ts), and the opt-in renumber is how a series moves to rule 2.
+      const reads = go.map(({ o, n }) => {
+        const name = n.file.split('/').pop() || n.file;
+        const r = numberByRule(name, Number(o.name_rule));
+        return { number: r.number, end: r.end, title: name.replace(EXT, '') };
+      });
+      // The cover first: the same chapter, on the same file, under the id that stays -- never a moment without one.
+      await qq(
+        `UPDATE lib_series s SET cover_book_id = v.o FROM unnest($1::text[], $2::text[]) AS v(n, o) WHERE s.cover_book_id = v.n`,
+        [nIds, oIds]);
+      // What was measured of the file comes from the new row while it is still there; pages and page sizes only where
+      // the old row has none -- one fingerprint is one entry table, so the old row's are as true.
+      await qq(
+        `UPDATE lib_books b SET mtime = n.mtime, size = n.size, fingerprint = n.fingerprint, fp_kind = n.fp_kind, fp_at = n.fp_at,
+                source = n.source, pages = CASE WHEN b.pages > 0 THEN b.pages ELSE n.pages END, page_dims = COALESCE(b.page_dims, n.page_dims),
+                number = v.num, number_end = v.num_end, title = v.title, updated_at = now()
+           FROM unnest($1::text[], $2::text[], $3::real[], $4::real[], $5::text[]) AS v(o, n, num, num_end, title)
+           JOIN lib_books n ON n.id = v.n
+          WHERE b.id = v.o`,
+        [oIds, nIds, reads.map((r) => r.number), reads.map((r) => r.end), reads.map((r) => r.title)]);
+      // Then the new rows go -- their computed page hashes with them (CASCADE) -- and their (root, file) is free.
+      await qq('DELETE FROM lib_books WHERE id = ANY($1)', [nIds]);
+      await qq(
+        `UPDATE lib_books b SET root = v.root, file = v.file FROM unnest($1::text[], $2::text[], $3::text[]) AS v(id, root, file) WHERE b.id = v.id`,
+        [oIds, go.map(({ n }) => n.root), go.map(({ n }) => n.file)]);
+      out.followed += go.length;
+      for (const { o } of go) touched.add(o.series_id);
+    });
+  }
+  if (touched.size) await refreshSeries([...touched]);
+}
+
 /**
  * The opt-in's write (the header): the ticked series' rows read again by rule 2 -- name_rule, number and number_end
  * -- in ONE transaction, inside Apply's scan hold, and nothing told to any tracker. Each series is taken as it stands
@@ -867,6 +1018,8 @@ export interface PlanView {
   /** The headline's four counts: gone from your folders, moved or renamed, in the download folder, series emptied. */
   gone: number;
   moved: number;
+  /** Of `moved`, the pairs inside one series, whose chapters Apply points at their new file (FOLLOW). */
+  follow: number;
   downloads: number;
   emptied: number;
   /** How many series lose a chapter to Apply. */
@@ -882,7 +1035,7 @@ export function planView(p: RescanPlan, now = Date.now()): PlanView {
   return {
     id: p.id, at: p.at, scannedAt: p.scannedAt, ms: p.ms, stale: now - p.at > PLAN_TTL_MS, applied: p.applied,
     looked: p.looked, unchecked: p.unchecked, unmounted: p.unmounted,
-    gone: p.mark.length, moved: p.moved.length, downloads: p.downloads, emptied: p.emptied.length,
+    gone: p.mark.length, moved: p.moved.length, follow: p.follow, downloads: p.downloads, emptied: p.emptied.length,
     goneSeries: new Set(p.mark.map((m) => m.seriesId)).size,
     emptiedList: p.emptied,
     movedList: p.moved.map((m) => ({ seriesId: m.seriesId, file: m.file, to: { seriesId: m.to.seriesId, file: m.to.file } })),

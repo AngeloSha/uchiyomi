@@ -408,6 +408,110 @@ test('a file paired since the preview is kept, not marked', { skip }, async () =
   assert.equal((await prunedOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`)).at, null, 'a moved file was marked as gone');
 });
 
+// ---- a chapter follows its file (v0.55.7) --------------------------------------------------------------------------
+
+/** A reader with an account of their own, for the history a chapter carries. */
+const aReader = async () => (await q<{ id: string }>(
+  `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'user','x','password') RETURNING id`, [READER]))[0].id;
+const titlesOf = async (series: string) => {
+  const { owned } = (await import('../src/lib/ownedCatalog')) as any;
+  const books = (await owned.seriesBooks({ userId: null, libraryIds: null, maxAgeRating: null }, series, 0, 50)).content;
+  return books.map((b: any) => b.name).sort();
+};
+
+test('a chapter follows its renamed file: one row, its own id and everyone\'s history, on the new file', { skip }, async () => {
+  // The v0.55.4 known issue "renamed files show twice": the old row stayed live with no file, the new row held the
+  // file and none of the history. Reintroduce by skipping followFiles in applyPlan: Kept lists chapter 3 twice and the
+  // reader's progress is on the row with no file.
+  await seed();
+  await runFingerprintBackfill();
+  const kept = await seriesOf(`${SRC}/Kept`);
+  const three = await rowOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  const two = await rowOf(ROOT, `${SRC}/Kept/Chapter 2.cbz`);
+  const uid = await aReader();
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, three.id, kept]);
+  await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page) VALUES ($1,$2,$3,1)`, [uid, three.id, kept]);
+  await rename(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'), join(ROOT, SRC, 'Kept', 'Chapter 3 - The End.cbz'));
+  // And one moved out into a folder of its own, a series of its own: a pair across two series is left as it was.
+  await mkdir(join(ROOT, SRC, 'Elsewhere'), { recursive: true });
+  await rename(join(ROOT, SRC, 'Kept', 'Chapter 2.cbz'), join(ROOT, SRC, 'Elsewhere', 'Chapter 2.cbz'));
+
+  const plan = await preview();
+  assert.deepEqual([plan.moved.length, plan.follow, plan.mark.length], [2, 1, 0], JSON.stringify(plan));
+  const fresh = await rowOf(ROOT, `${SRC}/Kept/Chapter 3 - The End.cbz`);
+  assert.deepEqual(await titlesOf(kept), ['Chapter 1', 'Chapter 2', 'Chapter 3', 'Chapter 3 - The End'], 'precondition: the rename shows twice');
+
+  const r = await apply(plan);
+  assert.deepEqual(await titlesOf(kept), ['Chapter 1', 'Chapter 2', 'Chapter 3 - The End'], 'the renamed chapter still shows twice');
+  const now = await rowOf(ROOT, `${SRC}/Kept/Chapter 3 - The End.cbz`);
+  assert.equal(now.id, three.id, 'the chapter at the new file is not the row that holds its history');
+  assert.equal((await q(`SELECT 1 FROM lib_books WHERE id = $1`, [fresh.id])).length, 0, 'the duplicate row was kept');
+  assert.deepEqual((await q(`SELECT book_id, completed FROM read_progress WHERE user_id = $1`, [uid])).map((x) => [x.book_id, x.completed]),
+    [[three.id, true]], 'the reader\'s progress did not follow the chapter');
+  assert.deepEqual([r.followed, r.twins, r.marked, r.moved], [1, 0, 0, 2], JSON.stringify(r));
+  const s = (await q(`SELECT books_count, cover_book_id FROM lib_series WHERE id = $1`, [kept]))[0];
+  assert.equal(s.books_count, 3, 'the count still has the duplicate');
+  // The pair across two series: both rows as they were.
+  assert.equal((await rowOf(ROOT, `${SRC}/Kept/Chapter 2.cbz`)).id, two.id);
+  assert.ok((await rowOf(ROOT, `${SRC}/Elsewhere/Chapter 2.cbz`)).id !== two.id);
+  // The next scan finds the file on the row that took it: no new row, nothing marked.
+  await persistScan();
+  assert.equal((await rowOf(ROOT, `${SRC}/Kept/Chapter 3 - The End.cbz`)).id, three.id);
+  assert.equal((await q(`SELECT count(*)::int AS n FROM lib_books WHERE series_id = $1`, [kept]))[0].n, 3);
+});
+
+test('a renamed file someone opened since the scan is kept beside its old chapter, both with their history', { skip }, async () => {
+  // A row that holds anything of anyone's is never removed. Reintroduce by dropping the HOLDS test in followFiles: the
+  // new row goes, and the reader's bookmark and reading event point at nothing.
+  await seed();
+  await runFingerprintBackfill();
+  const kept = await seriesOf(`${SRC}/Kept`);
+  const one = await rowOf(ROOT, `${SRC}/Kept/Chapter 1.cbz`);
+  await rename(join(ROOT, SRC, 'Kept', 'Chapter 1.cbz'), join(ROOT, SRC, 'Kept', 'Chapter 01.cbz'));
+  const plan = await preview();
+  const fresh = await rowOf(ROOT, `${SRC}/Kept/Chapter 01.cbz`);
+  // "Chapter 01" sorts before "Chapter 1": the new row is the series' cover now.
+  assert.equal((await q(`SELECT cover_book_id FROM lib_series WHERE id = $1`, [kept]))[0].cover_book_id, fresh.id, 'precondition');
+  const uid = await aReader();
+  await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page) VALUES ($1,$2,$3,1)`, [uid, fresh.id, kept]);
+  await q(`INSERT INTO reading_events (user_id, series_id, book_id, page) VALUES ($1,$2,$3,1)`, [uid, kept, fresh.id]);
+
+  const r = await apply(plan);
+  assert.equal((await q(`SELECT 1 FROM lib_books WHERE id = $1`, [fresh.id])).length, 1, 'the new row with a reader\'s bookmark on it was removed');
+  assert.equal((await q(`SELECT 1 FROM lib_books WHERE id = $1 AND file = $2`, [one.id, `${SRC}/Kept/Chapter 1.cbz`])).length, 1,
+    'the old row was moved onto a file another row holds');
+  assert.equal((await q(`SELECT count(*)::int AS n FROM bookmarks b JOIN lib_books x ON x.id = b.book_id WHERE b.user_id = $1`, [uid]))[0].n, 1);
+  assert.deepEqual([r.followed, r.twins], [0, 1], JSON.stringify(r));
+});
+
+test('a renamed chapter that was the cover stays the cover, and Apply asks each pair again', { skip }, async () => {
+  // The cover moves to the old row, the same chapter on the same file. Between the preview and the press, an old file
+  // came back (two copies now: both kept) and a new file was renamed again (not the file the preview paired).
+  // Reintroduce by following the pairs as the preview saw them (drop the looks in followFiles): chapter 2's old row is
+  // pointed at a file that is not there.
+  await seed();
+  await runFingerprintBackfill();
+  const kept = await seriesOf(`${SRC}/Kept`);
+  const one = await rowOf(ROOT, `${SRC}/Kept/Chapter 1.cbz`);
+  const two = await rowOf(ROOT, `${SRC}/Kept/Chapter 2.cbz`);
+  const three = await rowOf(ROOT, `${SRC}/Kept/Chapter 3.cbz`);
+  for (const n of [1, 2, 3]) await rename(join(ROOT, SRC, 'Kept', `Chapter ${n}.cbz`), join(ROOT, SRC, 'Kept', `Chapter 0${n}.cbz`));
+  const plan = await preview();
+  assert.equal(plan.follow, 3, JSON.stringify(plan));
+  const r = await apply(plan, {
+    held: async () => {
+      await writeFile(join(ROOT, SRC, 'Kept', 'Chapter 3.cbz'), await readFile(join(ROOT, SRC, 'Kept', 'Chapter 03.cbz')));
+      await rename(join(ROOT, SRC, 'Kept', 'Chapter 02.cbz'), join(ROOT, SRC, 'Kept', 'Chapter 002.cbz'));
+    },
+  });
+  const fileOf = async (id: string) => (await q(`SELECT file FROM lib_books WHERE id = $1`, [id]))[0]?.file;
+  assert.equal(await fileOf(two.id), `${SRC}/Kept/Chapter 2.cbz`, 'a pair whose new file moved on since the preview was followed');
+  assert.equal(await fileOf(three.id), `${SRC}/Kept/Chapter 3.cbz`, 'a pair whose old file came back was followed');
+  assert.equal(await fileOf(one.id), `${SRC}/Kept/Chapter 01.cbz`);
+  assert.equal((await q(`SELECT cover_book_id FROM lib_series WHERE id = $1`, [kept]))[0].cover_book_id, one.id, 'the cover is not the chapter it was');
+  assert.deepEqual([r.followed, r.back, r.changed], [1, 1, 1], JSON.stringify(r));
+});
+
 test('Apply is refused for a stale preview, an applied one, and beside another job', { skip }, async () => {
   // Reintroduce by dropping a line of clashing() (lib/rescan.ts): its job is let through below.
   await seed();

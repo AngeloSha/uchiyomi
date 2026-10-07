@@ -17,7 +17,7 @@ import { bookCountText, relativeTime } from '@/lib/format';
 import { useReduceEffects } from '@/lib/effects';
 import { useToast } from '@/components/Toast';
 import {
-  applyRefusalText, exampleLine, fileName, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine, unmountedLine,
+  applyRefusalText, exampleLine, fileName, followLine, numbersLine, planHeadline, progressLine, rescanView, uncheckedLine, unmountedLine,
   type RescanPlanView, type RescanStatus,
 } from '@/lib/rescan';
 
@@ -118,7 +118,8 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
   const [refusal, setRefusal] = useState<string | null>(null);
   const numbers = plan.numbers ?? [];
   const toggle = (id: string, on: boolean) => setTicked((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n; });
-  const nothing = plan.gone === 0 && ticked.size === 0;
+  // Files moved inside their series are something to do too (v0.55.7): their chapters follow them on Apply.
+  const nothing = plan.gone === 0 && !plan.follow && ticked.size === 0;
   const apply = async () => {
     setBusy(true);
     setRefusal(null);
@@ -142,6 +143,7 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
       ))}
       <p className="text-[13px] leading-snug text-fog-100" data-rescan-headline>{planHeadline(plan)}</p>
       {plan.unchecked > 0 && <p className="text-[12px] text-fog-400">{uncheckedLine(plan.unchecked)}</p>}
+      {(plan.follow ?? 0) > 0 && <p className="text-[12px] leading-snug text-fog-300" data-rescan-follow>{followLine(plan.follow!)}</p>}
       {plan.gone > 0 && (
         <p className="text-[11px] leading-relaxed text-fog-500">
           {tr('Apply marks them “File no longer on disk”. Nothing is erased and no file is touched: everyone’s reading history stays, and a file that comes back is picked up again by the next scan.')}

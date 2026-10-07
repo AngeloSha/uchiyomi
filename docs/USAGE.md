@@ -1961,8 +1961,16 @@ nothing left*.
   disk* (never *Deleted from the server*: nothing deleted it), and everyone's progress, bookmarks and notes stay on it;
   the sweep does not fetch it back. Put the file back and the next scan picks it up again on the same row.
 - **Moved or renamed (kept)**: a file renamed in place, or moved into another folder, is a new chapter to the scanner,
-  and its old row looks gone. When the old file's fingerprint matches a file that is there, the old row is kept as it
-  is — the reading history is on it — and listed under *Which ones were probably moved or renamed*.
+  and its old row looks gone. When the old file's fingerprint matches a file that is there, the old row is kept — the
+  reading history is on it — and listed under *Which ones were probably moved or renamed*. Since v0.55.7, when both are
+  in the same series, **Apply** points the old chapter at the new file and removes the copy the scan made, so the
+  chapter shows once, with everyone's progress, bookmarks and notes (*3 files were moved or renamed within their series:
+  on Apply their chapters follow them, reading history kept*). A new copy someone has already opened is never removed:
+  both are kept (*1 moved file kept beside its old chapter: both have reading history*). A file moved into another
+  series is left as it is.
+- **Fingerprints** are what tell a moved file from a gone one, and a file can only be recognised after a move if it was
+  fingerprinted before it. Since v0.55.7 that happens a few minutes after a scan finds a new file (and every six hours,
+  as before), so if you reorganise files you have only just added, give it those few minutes after the scan first.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:

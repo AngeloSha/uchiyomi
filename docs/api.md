@@ -1825,9 +1825,10 @@ row's own file under the library and the download folder (never a hidden or merg
 detached like Verify — it answers `{ok: true, started: true}` or `{ok: false, error: 'busy'}`. `GET
 /api/admin/tasks/rescan/status` is the run, live, and the plan it ends with (polled every 2 s while one runs): `{running:
 'preview' | 'apply' | null, phase: 'scan' | 'look' | 'pair' | 'numbers' | 'mark' | 'renumber' | null, done, of,
-startedAt, error, plan, last, lastRun}`. Per root it applies Verify's whole-batch rule and 90 % rule (`plan.unmounted
-[{root, missing?, of?}]`); only ENOENT is a gone file (`plan.unchecked` counts the rest, left alone); a gone row in
-your own folder whose fingerprint matches a live row's is *moved or renamed* and kept (`plan.moved`, `movedList`); the
+startedAt, error, plan, last, lastRun}` (an Apply's phases since v0.55.7: `'mark' | 'follow' | 'renumber'`). Per root it
+applies Verify's whole-batch rule and 90 % rule (`plan.unmounted [{root, missing?, of?}]`); only ENOENT is a gone file
+(`plan.unchecked` counts the rest, left alone); a gone row in your own folder whose fingerprint matches a live row's is
+*moved or renamed* and kept (`plan.moved`, `movedList`), and `plan.follow` (v0.55.7) counts the pairs inside one series; the
 download folder's gone rows are only counted (`plan.downloads`, Verify's to mark); and `plan.emptied` / `emptiedList`
 are the series with every live chapter gone. `plan.numbers` is the opt-in: each series whose numbers the v0.55.2
 file-name rules would change, with `chapters`, `readers`, `overrides`, `tracked`, `up`, `down` and `examples` —
@@ -1841,11 +1842,17 @@ and every other series it changes is held busy until it is done, so no Fetch (40
 newest starts in it meanwhile. Under `withScansHeld` each planned row is checked again (same id and file, still live, file still
 gone, no live fingerprint twin, the library folder still holding a file the preview saw) and marked pruned with
 `pruned_reason = 'deleted'` — held, so the sweep never fetches it back — and the covers and counts of the series it
-touched are recomputed; then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
+touched are recomputed. Since v0.55.7 every pair inside one series is asked again too (both rows unchanged, one
+fingerprint, the old file still gone and the new one there) and, when the new row holds nothing of anyone's (no
+progress, reading event, bookmark, note, offline copy, override, or page marked by hand), the old row takes the new
+file — root, file, mtime, size, fingerprint, its number and title read from the new name by its own rule — the new row
+is deleted and the cover moves with it: the chapter shows once, its id and history kept (`followed`); a new row that
+holds something is kept beside it (`twins`). Then the ticked series are renumbered in one transaction (name_rule 2, number, number_end; a
 number set by hand and a `'missing'` row are kept), with nothing pushed to any tracker. It never erases a row, touches
 a file, marks the download folder, relabels a row already pruned, hides a series or changes a tracker floor, read
-mark, favourite or rating. The result (`{marked, back, changed, moved, busy, downloads, emptied, unmounted,
-renumbered: {series, chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
+mark, favourite or rating; the only row it deletes is a duplicate the scan made for a moved file, holding nothing. The
+result (`{marked, back, changed, moved, followed, twins, busy, downloads, emptied, unmounted, renumbered: {series,
+chapters}, ms, stopped?}`) is the `rescan` entry of `GET /api/admin/tasks`, persisted in
 `server_settings.rescan_last_run` / `rescan_last_result`; audit `library.rescan`, and `library.rescan_numbers` when
 the opt-in renumbered something. Never at boot or on a schedule.
 
