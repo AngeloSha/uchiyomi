@@ -468,12 +468,13 @@ test('a carrier card cannot be dismissed while its judgement runs: DELETE answer
 test('when the judgement itself throws, every candidate reads not_tried rather than the card reading done with nothing', { skip }, async () => {
   // lib/autoFollow.ts answers every failure of a candidate's own as a value; a rejection of the whole
   // judgement is the one path that would leave `done: true, results: []`, which the dialog prints as
-  // nothing at all. Faked the way visibilityFailsClosed does: the column the judgement reads for the
-  // series' preferences is taken away for a moment, which is a genuine query failure on the genuine
-  // path -- the add itself never reads it. Reintroduce by dropping the `refusals(...)` line from
+  // nothing at all. Faked the way visibilityFailsClosed does: `work_id`, which the judgement's language
+  // read needs, is taken away for a moment. This add is not an edition and does not read it itself.
+  // (`scanlator_prefs` used to be the fault point, but transactional listing replacement now correctly
+  // re-reads it before writing the primary listing.) Reintroduce by dropping the `refusals(...)` line from
   // judgeAlsoFollow's catch: the card finishes with no results.
   const before = { rich: asks[RICH] ?? 0, third: asks[THIRD] ?? 0 };
-  await q('ALTER TABLE lib_series RENAME COLUMN scanlator_prefs TO scanlator_prefs__hidden');
+  await q('ALTER TABLE lib_series RENAME COLUMN work_id TO work_id__hidden');
   let id = '', folder = '';
   try {
     ({ id, folder } = await addNothing(PRIMARY, [{ source: RICH, sourceId: 'r-1' }, { source: THIRD, sourceId: '3-1' }]));
@@ -481,7 +482,7 @@ test('when the judgement itself throws, every candidate reads not_tried rather t
     assert.deepEqual(card.autoFollow.results.map((r: any) => [r.source, r.name, r.followed, r.why, r.coverage]),
       [[RICH, 'Rich Source', false, 'not_tried', null], [THIRD, 'Third Source', false, 'not_tried', null]], JSON.stringify(card.autoFollow));
   } finally {
-    await q('ALTER TABLE lib_series RENAME COLUMN scanlator_prefs__hidden TO scanlator_prefs');
+    await q('ALTER TABLE lib_series RENAME COLUMN work_id__hidden TO work_id');
   }
   assert.deepEqual([asks[RICH] ?? 0, asks[THIRD] ?? 0], [before.rich, before.third], 'no source was asked, which is what not_tried says');
   assert.equal((await followers(id)).length, 0);
