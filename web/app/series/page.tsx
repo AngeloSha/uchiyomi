@@ -21,7 +21,7 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedLabel, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
@@ -264,8 +264,8 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
  * The muted caption under a chapter's label: who translated it, `via {source}` when the copy came from a
  * source other than the series' own, and `{n} versions` when the number has more than one copy on offer.
  * Plain text, one line, truncating -- the bordered pills this replaces put three boxes of text on every row,
- * which at 390 px was more chrome than chapter. `Deleted from the server` stays a small chip before it: a
- * tombstone is a state, not a caption.
+ * which at 390 px was more chrome than chapter. `Deleted from the server` stays a small tag before it: a
+ * tombstone is a state, not a caption (and since v0.55.7 its words wrap rather than being cut; see below).
  *
  * ⚠️ `{n} versions` is TEXT, never a button. This caption sits inside the row's opener, which is itself a
  * <button>, and a button inside a button is invalid DOM that browsers un-nest unpredictably (the v0.33 strip
@@ -277,8 +277,8 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   via?: string | null;
   versions?: number;
   tone?: string;
-  /** A tombstone's chip, in its words (lib/chapterRows.ts prunedLabel); null for a chapter with its file. */
-  pruned?: string | null;
+  /** A tombstone's tag, in its words, whole and short (lib/chapterRows.ts prunedWords); null for a chapter with its file. */
+  pruned?: { full: string; short: string } | null;
   /**
    * A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). `full`
    * is the sentence a short reason stands for ("another split" for "another split of a chapter you have"): the title
@@ -313,18 +313,43 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   if (via) { const t = tr('via {source}', { source: via }); parts.push(<span key="via">{t}</span>); plain.push(t); }
   if (versions && versions >= 2) { const t = tr('{n} versions', { n: versions }); parts.push(<span key="v">{t}</span>); plain.push(t); }
   if (!parts.length && !pruned && !short) return null;
-  const title = [...(pruned ? [pruned] : []), ...(short ? [short] : []), ...plain].join(' · ');
+  const title = [...(pruned ? [pruned.full] : []), ...(short ? [short] : []), ...plain].join(' · ');
+  if (pruned) {
+    const caption = parts.map((n, i) => (
+      <span key={i}>
+        {i > 0 && <span aria-hidden className="text-ink-600"> · </span>}
+        {n}
+      </span>
+    ));
+    return (
+      // A tombstone's words are read whole, wherever the row is (v0.55.7). As a chip in the one truncating line below,
+      // "File no longer on disk" came out "File no lo…" in the three-column grid at 1280, where a row with a full
+      // date leaves this caption 51-68 px. So the words are a tag of their own: the sentence below lg, a word or two
+      // in the grid (prunedWords says why) with the sentence as the title and for a screen reader, and it takes the
+      // line's width and wraps inside it when even that does not fit -- squared, as the chapter sheet's tags are, so
+      // a second line reads as one box. The group's caption follows, on the same line when both fit, and ends in an
+      // ellipsis as before (one shrinking part, never a row of shrink-0 ones that would run under the date).
+      <div className={`mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] ${tone}`} title={title}>
+        {/* Shown even when a copy is saved on this device -- it is still gone from the server, and "yours is the
+            last one" is exactly what somebody wants to know before clearing downloads. One wording for every
+            tombstone the server deleted: the same mark is left by an admin's Delete from server as by the scheduled
+            cleanup, and the row cannot tell which, so "to free space" blamed a job that is off on most installs. A
+            file Rescan everything found gone from a library built by hand has words of its own (prunedLabel,
+            v0.55.4): nothing deleted it. */}
+        <span data-tombstone className="max-w-full break-words rounded-[4px] border border-ink-700 px-1 text-[10px] leading-4 text-fog-600">
+          <span aria-hidden="true" className="lg:hidden">{pruned.full}</span>
+          <span aria-hidden="true" className="hidden lg:inline">{pruned.short}</span>
+          <span className="sr-only">{pruned.full}</span>
+        </span>
+        {short && <span className="max-w-full truncate rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
+        {parts.length > 0 && <span className="min-w-12 flex-1 basis-0 truncate">{caption}</span>}
+      </div>
+    );
+  }
   return (
     // One block that truncates as a whole (inline children, no flex): a flex row of shrink-0 parts would
     // run under the date at the end of the row instead of ending in an ellipsis.
     <p className={`mt-0.5 truncate text-[11px] ${tone}`} title={title}>
-      {/* Shown even when a copy is saved on this device -- it is still gone from the server, and "yours is
-          the last one" is exactly what somebody wants to know before clearing downloads. One wording for
-          every tombstone the server deleted: the same mark is left by an admin's Delete from server as by the
-          scheduled cleanup, and the row cannot tell which, so "to free space" blamed a job that is off on most
-          installs. A file Rescan everything found gone from a library built by hand has words of its own
-          (prunedLabel, v0.55.4): nothing deleted it. */}
-      {pruned && <span className="me-1 rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{pruned}</span>}
       {/* Before the group, as a chip and not a caption part: "3 pages missing · Asura Scans" would read as
           the group's fault. The count is the file's -- the reader shows the caption on exactly those pages. */}
       {short && <span className="me-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
@@ -445,7 +470,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
             {/* The chapter's own name, when the source gave one that is not just the number again. */}
             {chapterName(book) && <span className="text-fog-500"> · {chapterName(book)}</span>}
           </p>
-          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedLabel(book)} missing={book.missingPages?.length} />
+          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedWords(book)} missing={book.missingPages?.length} />
           {state === 'reading' && rp && (
             <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
           )}

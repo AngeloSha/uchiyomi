@@ -1064,7 +1064,9 @@ folder is in *Edit details* (**Folder on the server**), with a Copy beside each 
 An admin can free the space a chapter takes without losing the record of it. **Remove** in the select bar,
 confirmed with **Delete from server**, removes the file and keeps everything else: the chapter row, marked
 *Deleted from the server*, everyone's reading progress on it, and every count — the series' unread number does
-not move, and nothing is pushed to AniList. If the chapter was the one the series' cover came from, the cover
+not move, and nothing is pushed to AniList. (Where the chapter list is a grid, on a wide screen, the mark says just
+*Deleted* — or *No file* for *File no longer on disk* — and the whole sentence shows when you point at the row;
+since v0.55.7 the mark is never cut off.) If the chapter was the one the series' cover came from, the cover
 moves to the lowest chapter that still has a file. It is the same tombstone the scheduled cleanup in section 8
 leaves, and it has the same two rules: **only a chapter downloaded by Uchiyomi** — one in its own downloads
 folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, because the bookmark names a page

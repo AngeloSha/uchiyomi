@@ -251,6 +251,9 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   // v0.52.0, the last of AGREEING_UNPAIRED: one chapter is "the" chapter, not "all 1".
   'Delete the downloaded chapter of “{title}”?': 'Delete all {n} downloaded chapters of “{title}”?',
   'Delete the downloaded chapter on this device?': 'Delete all {n} downloaded chapters on this device?',
+  // v0.55.7, the import sheet's count against the current pick: "fewer" stands between the count and its noun, so
+  // the matcher does not ask for this pair by itself, and it left SHIPPED_UNPAIRED with its "+1 chapter" sibling.
+  '1 fewer chapter than the current pick': '{n} fewer chapters than the current pick',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
@@ -274,7 +277,7 @@ const NOT_PAIRED: Record<string, string> = {
  * ("{n} chapters saved" with "1 chapter saved with pages missing"); they are as old as the rest.
  */
 const SHIPPED_UNPAIRED = [
-  '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
+  'All {n} chapters are already in your library', 'Best {n} days',
   'Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.',
   'File {n} series',
   'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
@@ -288,10 +291,10 @@ const SHIPPED_UNPAIRED = [
   'failed {n} times',
   '{n} titles matched', '{n} chapters listed', '{n} chapters listed · none fetched yet',
   '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.',
-  'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
+  'Fetch {n} chapters again?',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 32;
+const SHIPPED_UNPAIRED_MAX = 30;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`
