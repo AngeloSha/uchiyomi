@@ -1,11 +1,11 @@
 'use client';
-import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
 import { IcSearch, IcSparkle, IcPlus, IcImport } from '@/components/icons';
@@ -34,6 +34,16 @@ import { ServerDownloadsView } from '@/components/ServerDownloadsView';
 import { EmptyState } from '@/components/EmptyState';
 import { LibraryStart } from '@/components/LibraryStart';
 import { ART } from '@/lib/art';
+import { BulkChapterDeleteRunDialog } from '@/components/BulkChapterDeleteRun';
+import {
+  BULK_CHAPTER_DELETE_POLL_MS,
+  bulkChapterDeleteFinished,
+  forgetBulkChapterDeleteRun,
+  rememberBulkChapterDeleteRun,
+  rememberedBulkChapterDeleteRun,
+  startedBulkChapterDeleteRun,
+  type BulkChapterDeleteRun,
+} from '@/lib/bulkChapterDelete';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
 function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
@@ -95,6 +105,12 @@ function LibraryInner() {
   // Delete chapters (the admin's, a row of More): its confirm, and whether the selection is also unmonitored.
   const [deletingChapters, setDeletingChapters] = useState(false);
   const [alsoPause, setAlsoPause] = useState(true);
+  // The server owns this destructive run once POST answers 202. Keep following it independently of the
+  // confirmation/select state: closing the progress window or reloading must never make an active deletion
+  // look safe to submit again.
+  const [deleteRun, setDeleteRun] = useState<BulkChapterDeleteRun | null>(null);
+  const [deleteRunOpen, setDeleteRunOpen] = useState(false);
+  const [deleteCancelling, setDeleteCancelling] = useState(false);
   // The phone's overflow for the two admin actions (see the bar below).
   const [more, setMore] = useState(false);
   // v0.51.0: Find other sources asks first whether to follow automatically or review first.
@@ -162,6 +178,60 @@ function LibraryInner() {
 
   const qc = useQueryClient();
   const toast = useToast();
+
+  const attachDeleteRun = useCallback((run: BulkChapterDeleteRun, open = true) => {
+    rememberBulkChapterDeleteRun(run.id);
+    setDeleteRun(run);
+    if (open) setDeleteRunOpen(true);
+  }, []);
+
+  // Rejoin the exact run this browser started. If the POST response itself was lost before its id could be
+  // stored, the no-id GET is also useful: only an ACTIVE latest run is adopted here, never yesterday's result.
+  useEffect(() => {
+    if (!isAdmin || authStatus !== 'authed') return;
+    let alive = true;
+    const remembered = rememberedBulkChapterDeleteRun();
+    const path = remembered
+      ? `/api/admin/series/bulk/chapters/delete?runId=${encodeURIComponent(remembered)}`
+      : '/api/admin/series/bulk/chapters/delete';
+    void api<{ run: BulkChapterDeleteRun | null }>(path).then(({ run }) => {
+      if (!alive || !run || (!remembered && run.status !== 'running')) return;
+      attachDeleteRun(run);
+    }).catch((e) => {
+      if (remembered && e instanceof ApiError && (e.status === 400 || e.status === 404)) {
+        forgetBulkChapterDeleteRun(remembered);
+      }
+    });
+    return () => { alive = false; };
+  }, [attachDeleteRun, authStatus, isAdmin]);
+
+  // A missed status read is not a failed deletion. The persisted server run stays authoritative and this
+  // poll keeps retrying, including while its dialog is closed. Completion refreshes both Library and Home.
+  useEffect(() => {
+    if (!deleteRun || deleteRun.status !== 'running') return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      let again = true;
+      try {
+        const response = await api<{ run: BulkChapterDeleteRun | null }>(
+          `/api/admin/series/bulk/chapters/delete?runId=${encodeURIComponent(deleteRun.id)}`,
+        );
+        if (!alive || !response.run) return;
+        setDeleteRun(response.run);
+        again = response.run.status === 'running';
+        if (!again) {
+          qc.invalidateQueries({ queryKey: ['library'] });
+          qc.invalidateQueries({ queryKey: ['home'] });
+        }
+      } catch {
+        // Network/proxy failures leave the durable job running; retry instead of offering a duplicate POST.
+      }
+      if (alive && again) timer = setTimeout(poll, BULK_CHAPTER_DELETE_POLL_MS);
+    };
+    timer = setTimeout(poll, 50);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [deleteRun?.id, deleteRun?.status, qc]);
 
   /**
    * One series, at random.
@@ -309,29 +379,62 @@ function LibraryInner() {
   };
 
   /**
-   * Delete the downloaded chapters of the selection (bff POST /api/admin/series/bulk/chapters/delete): the series
-   * page's Remove chapters over every chapter of each series but its cover chapter. ⚠️ Download folder only, never
-   * Delete files: a library built by hand, a bookmarked chapter and the rows with everyone's history are all kept, and
-   * Fetch again brings a chapter back. "Also stop updates", on by default, unmonitors them too -- or the next check
-   * fetches the newest chapters straight back. Nothing deleted keeps the selection, in error tone, as Remove does.
+   * Start the durable chapter cleanup. POST only CLAIMS a persisted server run; GET follows it. That split matters for
+   * a large selection: a reverse proxy can time out, the browser can reload, or this progress window can be closed
+   * without turning an unknown destructive request into a tempting second attempt. If even the 202 response is lost,
+   * the latest run is adopted only when its time and total match this submission.
    */
   const deleteChaptersSelected = async () => {
     setActing(true);
+    const began = Date.now();
+    const total = new Set(picked).size;
     try {
-      const r = await api<{ ok: true; applied: number; chapters: number; paused: number; skipped: { id: string; reason: string }[] }>(
-        '/api/admin/series/bulk/chapters/delete', { json: { seriesIds: [...picked], pause: alsoPause } });
+      const r = await api<{ ok: true; runId: string; total: number }>(
+        '/api/admin/series/bulk/chapters/delete', {
+          method: 'POST',
+          json: { seriesIds: [...picked], pause: alsoPause },
+        });
+      attachDeleteRun(startedBulkChapterDeleteRun(r.runId, r.total, alsoPause));
       setDeletingChapters(false);
-      if (r.chapters === 0) {
-        toast(r.skipped.length === 1 ? tr('Nothing deleted · 1 skipped') : tr('Nothing deleted · {n} skipped', { n: r.skipped.length }), 'error');
-      } else {
-        const parts = [r.chapters === 1 ? tr('Deleted 1 chapter') : tr('Deleted {n} chapters', { n: r.chapters })];
-        if (r.paused) parts.push(r.paused === 1 ? tr('Unmonitored 1 series') : tr('Unmonitored {n} series', { n: r.paused }));
-        if (r.skipped.length) parts.push(r.skipped.length === 1 ? tr('1 skipped') : tr('{n} skipped', { n: r.skipped.length }));
-        toast(parts.join(' · '), 'success');
+      settle();
+    } catch (e) {
+      // A 502/504 can hide a successful 202. Read the just-created row before saying the start failed; matching both
+      // its total and its start window keeps an older cleanup from being mistaken for this one.
+      const recovered = await api<{ run: BulkChapterDeleteRun | null }>(
+        '/api/admin/series/bulk/chapters/delete',
+      ).then((r) => r.run, () => null);
+      const startedAt = recovered ? Date.parse(recovered.startedAt) : 0;
+      if (recovered && recovered.total === total && startedAt >= began - 15_000) {
+        attachDeleteRun(recovered);
+        setDeletingChapters(false);
         settle();
+      } else {
+        toast(msgOf(e, tr('Could not start the cleanup')), 'error');
       }
-    } catch (e) { toast(msgOf(e, tr('Could not delete those chapters')), 'error'); }
+    }
     setActing(false);
+  };
+
+  const cancelDeleteRun = async () => {
+    if (!deleteRun || deleteRun.status !== 'running' || deleteRun.cancelRequested) return;
+    setDeleteCancelling(true);
+    try {
+      await api('/api/admin/series/bulk/chapters/delete/cancel', {
+        method: 'POST', json: { runId: deleteRun.id },
+      });
+      setDeleteRun((run) => run?.id === deleteRun.id ? { ...run, cancelRequested: true } : run);
+    } catch (e) {
+      toast(msgOf(e, tr('Could not stop the cleanup')), 'error');
+    }
+    setDeleteCancelling(false);
+  };
+
+  const closeDeleteRun = () => {
+    setDeleteRunOpen(false);
+    if (deleteRun && bulkChapterDeleteFinished(deleteRun)) {
+      forgetBulkChapterDeleteRun(deleteRun.id);
+      setDeleteRun(null);
+    }
   };
 
   /**
@@ -518,6 +621,29 @@ function LibraryInner() {
         </>}
       </header>
 
+      {/* Closing the detail window never loses the server-owned job. This small, persistent row is its way back; the
+          id also survives a full reload in localStorage and is checked against the persisted admin run. */}
+      {deleteRun && !deleteRunOpen && (
+        <div className="px-4 pt-3 lg:px-0">
+          <button type="button" onClick={() => setDeleteRunOpen(true)} data-open-bulk-delete-run
+            className="flex w-full items-center gap-3 rounded-xl border border-ink-700 bg-ink-900/45 px-3 py-2 text-start hover:border-ink-600">
+            <ProgressRing progress={deleteRun.total ? deleteRun.done / deleteRun.total : 0} size="row"
+              label={tr('Delete chapters')} valueText={tr('{done} of {total}', { done: deleteRun.done, total: deleteRun.total })} />
+            <span className="min-w-0 flex-1 text-sm text-fog-200">
+              {tr('Delete chapters')} <span className="text-fog-500">·</span>{' '}
+              {deleteRun.status === 'running'
+                ? (deleteRun.cancelRequested ? tr('Stopping…') : tr('Running'))
+                : deleteRun.status === 'done' ? tr('Done')
+                  : deleteRun.status === 'cancelled' ? tr('Cancelled')
+                    : deleteRun.status === 'interrupted' ? tr('Interrupted') : tr('Failed')}
+            </span>
+            <span className="shrink-0 text-xs tabular-nums text-fog-400" dir="ltr">
+              {tr('{done} of {total}', { done: deleteRun.done, total: deleteRun.total })}
+            </span>
+          </button>
+        </div>
+      )}
+
       {!series && <ServerDownloadsView focusFolder={params.get('folder')} />}
 
       {/* `data-library-grid` is a test hook, not a style. layout.mjs measures fill as the span between the
@@ -663,6 +789,7 @@ function LibraryInner() {
             <>
               <p>{tr('Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay. Files in a library you built by hand, and bookmarked chapters, are left alone.')}</p>
               <p className="mt-2">{tr('The chapters stay listed and everyone keeps their reading history. Fetch again on the series page brings a chapter back.')}</p>
+              <p className="mt-2 font-medium text-amber-300">{tr('Deleting a chapter being read can lose its reading position.')}</p>
               <label className="mt-3 flex items-start gap-2 text-sm text-fog-200">
                 <input type="checkbox" className="mt-0.5" checked={alsoPause} onChange={(e) => setAlsoPause(e.target.checked)} data-also-pause />
                 <span>
@@ -674,6 +801,14 @@ function LibraryInner() {
           }
           onConfirm={deleteChaptersSelected}
           onClose={() => setDeletingChapters(false)}
+        />
+      )}
+      {deleteRun && deleteRunOpen && (
+        <BulkChapterDeleteRunDialog
+          run={deleteRun}
+          cancelling={deleteCancelling}
+          onCancel={() => { void cancelDeleteRun(); }}
+          onClose={closeDeleteRun}
         />
       )}
       {moving && (

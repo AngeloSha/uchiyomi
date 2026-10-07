@@ -258,7 +258,7 @@ test('the select bar removes by hiding, never by deleting files', () => {
   assert.match(src, /Remove \{n\} series from the library\?/, 'the dialog title no longer carries the count');
 });
 
-test('Delete chapters deletes downloads only, through the chapters route, never Delete files', () => {
+test('Delete chapters starts and follows one durable download-only cleanup, never Delete files', () => {
   // The one file-deleting action the bar has, and deliberately NOT PR #53's: it posts to the bulk form of the series
   // page's Remove chapters (bff lib/libraryAdmin.ts deleteChapterFiles), which touches the download folder only, skips
   // bookmarked chapters, keeps every row with everyone's history and keeps each series' cover chapter -- never to
@@ -266,12 +266,28 @@ test('Delete chapters deletes downloads only, through the chapters route, never 
   // allow-list below fails; drop the sentence about hand-built libraries: the dialog no longer says what it spares.
   const src = code(read('app/library/page.tsx'));
   const deleting = [...src.matchAll(/'(\/api\/[^']*delete[^']*)'/g)].map((m) => m[1]);
-  assert.deepEqual(deleting, ['/api/admin/series/bulk/chapters/delete'], 'the bar reaches a deleting route other than the chapters one');
+  assert.deepEqual([...new Set(deleting)], [
+    '/api/admin/series/bulk/chapters/delete',
+    '/api/admin/series/bulk/chapters/delete/cancel',
+  ], 'the bar reaches a deleting route other than the durable chapters job');
   assert.match(src, /tr\('Every chapter Uchiyomi downloaded is deleted from the server, except each series’ cover chapter, so the covers stay\. Files in a library you built by hand, and bookmarked chapters, are left alone\.'\)/,
     'the dialog lost the sentence that says what it spares');
+  assert.match(src, /tr\('Deleting a chapter being read can lose its reading position\.'\)/,
+    'the dialog no longer warns that deleting the chapter someone is reading can lose their place');
   assert.match(src, /pause: alsoPause/, 'the dialog\'s "Also stop updates" is not sent');
   assert.match(src, /const \[alsoPause, setAlsoPause\] = useState\(true\)/, '"Also stop updates" is not on by default');
   assert.match(src, /setMore\(false\); setAlsoPause\(true\); setDeletingChapters\(true\)/, 'Delete chapters opens its dialog under the sheet');
+
+  // The request does not wait on every unlink. A 202 run id is remembered, GET is polled, and cancel asks the
+  // worker to stop BETWEEN series. Reintroduce the old synchronous response and a proxy timeout once again leaves
+  // the admin unsure whether retrying will delete twice.
+  assert.match(src, /api<\{ ok: true; runId: string; total: number \}>\(/, 'POST no longer accepts the durable run id');
+  assert.match(src, /startedBulkChapterDeleteRun\(r\.runId, r\.total, alsoPause\)/, 'the 202 response is not attached');
+  assert.match(src, /api<\{ run: BulkChapterDeleteRun \| null \}>\(/, 'the page no longer polls/rejoins the status route');
+  assert.match(src, /rememberedBulkChapterDeleteRun\(\)/, 'a reload cannot rejoin the run it started');
+  assert.match(src, /recovered\.total === total && startedAt >= began - 15_000/, 'a lost POST response is not recovered safely');
+  assert.match(src, /'\/api\/admin\/series\/bulk\/chapters\/delete\/cancel'/, 'the progress dialog cannot request cancellation');
+  assert.match(src, /<BulkChapterDeleteRunDialog/, 'the terminal per-series results are not shown');
 });
 
 test('Monitor and Unmonitor are rows of More that set auto-update for the selection', () => {
