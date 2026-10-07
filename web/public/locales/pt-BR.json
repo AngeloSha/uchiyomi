@@ -178,6 +178,8 @@
   "End of your downloads": "Fim dos seus downloads",
   "Enter the 6-digit code from your authenticator app, or a recovery code.": "Digite o código de 6 dígitos do seu app autenticador, ou um código de recuperação.",
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "Tudo nesta biblioteca herda isso. Uma série específica ainda pode ter outra classificação na própria página.",
+  "Look up art and metadata on AniList automatically": "Buscar automaticamente imagens e metadados no AniList",
+  "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "Quando desativado, as buscas automáticas não enviam os títulos desta biblioteca ao AniList. As imagens e correspondências existentes permanecem, e ações manuais do AniList ainda podem se conectar.",
   "Everything looks healthy": "Está tudo certo",
   "Expired": "Expirado",
   "Extensions": "Extensões",

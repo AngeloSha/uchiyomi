@@ -67,7 +67,7 @@ export const matchCheckState: MatchCheckState = { running: false, startedAt: nul
 const AUDIT_NAMED = 50;
 
 type Field = 'banner' | 'cover';
-interface Judged { seriesId: string; field: Field; url: string; anilist?: AniListMedia; mangadex?: string }
+interface Judged { seriesId: string; field: Field; url: string; anilist?: AniListMedia; mangadex?: string; anilistAllowed: boolean }
 
 /**
  * Hold every unchecked match to the title check -- every automatic one, checked or not, with `all` (Run now). Writes
@@ -79,13 +79,17 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
   const out: MatchCheckResult = { matches: 0, removed: 0, links: { checked: 0, removed: 0 }, art: { checked: 0, cleared: 0 }, unanswered: 0, ms: 0 };
   const links = await q<{ series_id: string; external_id: string }>(
     `SELECT t.series_id, t.external_id FROM series_trackers t JOIN lib_series s ON s.id = t.series_id
-      WHERE t.provider = 'anilist' AND t.linked_by IS NULL AND t.external_id ~ '^[0-9]{1,10}$' AND ($1 OR t.checked_at IS NULL)
+       JOIN libraries l ON l.id = s.library_id
+      WHERE ($1 OR l.anilist_lookup) AND t.provider = 'anilist' AND t.linked_by IS NULL
+        AND t.external_id ~ '^[0-9]{1,10}$' AND ($1 OR t.checked_at IS NULL)
       ORDER BY t.series_id`, [all]);
   // `own`: the ids the series has on its sources, main and followed -- a MangaDex cover of one of them is the source's.
-  const arts = await q<{ series_id: string; banner: string | null; cover: string | null; own: string[] }>(
+  const arts = await q<{ series_id: string; banner: string | null; cover: string | null; own: string[]; anilist_lookup: boolean }>(
     `SELECT a.series_id, a.banner, a.cover,
-            array_remove(ARRAY[s.source_series_id] || ARRAY(SELECT ss.source_series_id FROM series_sources ss WHERE ss.series_id = s.id), NULL) AS own
+            array_remove(ARRAY[s.source_series_id] || ARRAY(SELECT ss.source_series_id FROM series_sources ss WHERE ss.series_id = s.id), NULL) AS own,
+            l.anilist_lookup
        FROM series_art a JOIN lib_series s ON s.id = a.series_id
+       JOIN libraries l ON l.id = s.library_id
       WHERE ($1 OR a.checked_at IS NULL)
       ORDER BY a.series_id`, [all]);
 
@@ -98,9 +102,9 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       const url = a[field];
       if (!url) continue;
       const anilist = aniListMediaOf(url);
-      if (anilist) { fields.push({ seriesId: a.series_id, field, url, anilist }); continue; }
+      if (anilist) { fields.push({ seriesId: a.series_id, field, url, anilist, anilistAllowed: all || a.anilist_lookup }); continue; }
       const mangadex = mangaDexIdOf(url);
-      if (mangadex && !own.has(mangadex)) fields.push({ seriesId: a.series_id, field, url, mangadex });
+      if (mangadex && !own.has(mangadex)) fields.push({ seriesId: a.series_id, field, url, mangadex, anilistAllowed: true });
     }
     if (fields.length === before) nothingByTitle.push(a.series_id);
   }
@@ -116,7 +120,7 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
 
   // AniList, by id: every linked entry and every entry a stored picture came from. An adaptation's banner whose anime
   // is not named as the series is judged by the manga it is related to as well, so those are asked in a second round.
-  const alIds = [...new Set([...links.map((l) => Number(l.external_id)), ...fields.flatMap((f) => (f.anilist ? [f.anilist.id] : []))])];
+  const alIds = [...new Set([...links.map((l) => Number(l.external_id)), ...fields.flatMap((f) => (f.anilist && f.anilistAllowed ? [f.anilist.id] : []))])];
   let entries: Map<number, AniListEntry> | null = null;
   if (alIds.length) {
     try {
@@ -188,6 +192,8 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       let titles: string[] | undefined;
       let related: AniListEntry['related'] = [];
       if (f.anilist) {
+        // Keep the row unchecked: enabling the library later makes the next background pass take it up.
+        if (!f.anilistAllowed) { pending = true; continue; }
         if (!entries) { pending = true; continue; }
         const e = entries.get(f.anilist.id);
         titles = e?.titles;

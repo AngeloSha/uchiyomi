@@ -178,6 +178,8 @@
   "End of your downloads": "ダウンロード済みはここまで",
   "Enter the 6-digit code from your authenticator app, or a recovery code.": "認証アプリの6桁のコード、またはリカバリーコードを入力してください。",
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "このライブラリ内のすべてが引き継ぎます。個別のシリーズは自分のページで別のレーティングにできます。",
+  "Look up art and metadata on AniList automatically": "AniList で画像とメタデータを自動検索する",
+  "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "オフにすると、自動検索ではこのライブラリのタイトルを AniList に送信しません。既存の画像と照合結果は保持され、手動の AniList 操作では引き続き接続できます。",
   "Everything looks healthy": "問題は見つかりません",
   "Expired": "期限切れ",
   "Extensions": "拡張機能",

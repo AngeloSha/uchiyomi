@@ -178,6 +178,8 @@
   "End of your downloads": "Конец загруженного",
   "Enter the 6-digit code from your authenticator app, or a recovery code.": "Введите код из 6 цифр из приложения-аутентификатора или код восстановления.",
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "Всё в этой библиотеке наследует его. Отдельной серии всё равно можно задать другой рейтинг на её собственной странице.",
+  "Look up art and metadata on AniList automatically": "Автоматически искать иллюстрации и метаданные в AniList",
+  "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "Если выключено, автоматический поиск не отправляет названия из этой библиотеки в AniList. Существующие иллюстрации и совпадения сохраняются, а ручные действия AniList по-прежнему могут подключаться.",
   "Everything looks healthy": "Всё в порядке",
   "Expired": "Истёк",
   "Extensions": "Расширения",

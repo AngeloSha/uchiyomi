@@ -48,7 +48,7 @@ const MISS_SRC = 'dir-miss';       // ...and one whose AniList search answers wi
 const MD_TITLE = 'Zzz Dir Source Says';
 const AL_TITLE = 'Zzz Dir Anilist Says';
 const MISS_TITLE = 'Zzz Dir Wrong Match';
-const RAW = ['s_dir_r1', 's_dir_r2', 's_dir_r3', 's_dir_r4', 's_dir_r5', 's_dir_r6', 's_dir_r7', 's_dir_r8', 's_dir_r9', 's_dir_r10', 's_dir_r11', 's_dir_rank'];
+const RAW = ['s_dir_r1', 's_dir_r2', 's_dir_r3', 's_dir_r4', 's_dir_r5', 's_dir_r6', 's_dir_r7', 's_dir_r8', 's_dir_r9', 's_dir_r10', 's_dir_r11', 's_dir_r12', 's_dir_r13', 's_dir_rank'];
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 const realFetch = globalThis.fetch;
@@ -134,6 +134,7 @@ test('reading directions: detected, ranked, overridable, and reported everywhere
     await q('DELETE FROM series_art WHERE series_id = ANY($1)', [ids]).catch(() => {});
     await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ids]).catch(() => {});
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [ids]).catch(() => {});
+    await q(`DELETE FROM libraries WHERE id = 'dir-private'`).catch(() => {});
     await q('DELETE FROM users WHERE username = ANY($1)', [[ADMIN, MEMBER]]).catch(() => {});
     await setDisabled('mangadex', false).catch(() => {});
     await q(`DELETE FROM source_health WHERE source_id = 'mangadex' AND NOT disabled`).catch(() => {});
@@ -312,8 +313,13 @@ test('reading directions: detected, ranked, overridable, and reported everywhere
       await seed('s_dir_r9');                                   // linked automatically to an entry for some other title
       await seed('s_dir_r10');                                  // the same, but a person made the link: trusted
       await seed('s_dir_r11', { src: 'mangadex-es-419', sid: uuid(11) });                         // MangaDex in Spanish: ko
+      await seed('s_dir_r12');                                  // AniList link, but its library has opted out
+      await seed('s_dir_r13', { src: 'mangadex', sid: uuid(13) }); // unmonitored: no unattended lookup at all
+      await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('dir-private','Private metadata','Zzz Dir T/s_dir_r12',false)`);
+      await q(`UPDATE lib_series SET library_id = 'dir-private' WHERE id = 's_dir_r12'`);
+      await q(`UPDATE lib_series SET auto_update = false WHERE id = 's_dir_r13'`);
       for (const [sid, media, by] of [['s_dir_r6', '4242', null], ['s_dir_r7', '4343', null], ['s_dir_r8', '4444', null],
-        ['s_dir_r9', '4545', null], ['s_dir_r10', '4646', admin]]) {
+        ['s_dir_r9', '4545', null], ['s_dir_r10', '4646', admin], ['s_dir_r12', '4747', null]]) {
         await q(`INSERT INTO series_trackers (series_id, provider, external_id, linked_by) VALUES ($1,'anilist',$2,$3)`, [sid, media, by]);
       }
       const asked = { md: [] as string[], al: [] as number[] };
@@ -325,6 +331,7 @@ test('reading directions: detected, ranked, overridable, and reported everywhere
         4444: { country: 'JP', titles: ['zzz dir s-dir-r8'] },
         4545: { country: 'JP', titles: ['Dear Green: Hitomi no Ounowa'] },
         4646: { country: 'JP', titles: ['Dear Green: Hitomi no Ounowa'] },
+        4747: { country: 'JP', titles: ['Zzz Dir s_dir_r12'] },
       };
       dir.setDirectionLookups({
         async mangadex(ids) { asked.md.push(...ids); return new Map(ids.filter((i) => langs[i]).map((i) => [i, langs[i]])); },
@@ -349,14 +356,22 @@ test('reading directions: detected, ranked, overridable, and reported everywhere
       // v0.52.0: every MangaDex language is the same title id on the same API. Reintroduce by matching only
       // source_id = 'mangadex' in detectDirections: r11 is never asked and reads [null, null].
       assert.deepEqual(await got('s_dir_r11'), ['WEBTOON', 'source'], 'a series from MangaDex in another language was not asked');
+      assert.deepEqual(await got('s_dir_r12'), [null, null], 'an opted-out library received AniList enrichment');
+      assert.deepEqual(await got('s_dir_r13'), [null, null], 'an unmonitored series received background enrichment');
       assert.ok(!asked.md.includes(uuid(4)), 'a series ComicInfo had placed was asked about');
       assert.ok(!asked.md.includes('not-a-uuid'), 'a non-MangaDex id went into the query string');
       assert.ok(!asked.al.includes(4343), 'AniList was asked about a series MangaDex had just placed');
+      assert.ok(!asked.al.includes(4747), 'AniList was sent an id from an opted-out library');
+      assert.ok(!asked.md.includes(uuid(13)), 'MangaDex was asked about an unmonitored series');
       assert.ok(r.directions.learned >= 6, `learned ${r.directions.learned}`);
 
-      // A second night finds nothing new to write.
+      // Enabling later makes the still-unknown row eligible; opting out did not stamp a negative result.
+      await q(`UPDATE libraries SET anilist_lookup = true WHERE id = 'dir-private'`);
       const again = await repairLibrary(undefined, { only: ['directions'], userId: null });
-      assert.equal(again.directions.learned, 0, 'an unchanged answer was written again');
+      assert.equal(again.directions.learned, 1, 'enabling the library did not take up its deferred AniList enrichment');
+      assert.deepEqual(await got('s_dir_r12'), ['RIGHT_TO_LEFT', 'anilist']);
+      const settled = await repairLibrary(undefined, { only: ['directions'], userId: null });
+      assert.equal(settled.directions.learned, 0, 'an unchanged answer was written again');
     });
 
     await t.test('MangaDex failing, or switched off, costs its own signal and nothing else', async () => {

@@ -990,6 +990,8 @@ interface LibraryRow {
   /** Every folder it holds, the first (`path`) first (v0.55.1, #148). The default library's is empty. */
   paths?: string[];
   age_rating: number | null;
+  /** Automatic, implicit title/id lookups may contact AniList for series currently filed here. */
+  anilist_lookup: boolean;
   /** How many of its series were placed here by hand rather than by the folder rule. */
   pinned: number;
   /** Who can open it. Includes members with no restriction at all, who see every library. */
@@ -1219,6 +1221,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
   const [paths, setPaths] = useState<string[]>(editing ? foldersOf(editing) : start.paths);
   const [typed, setTyped] = useState('');
   const [age, setAge] = useState<string>(editing?.age_rating == null ? '' : String(editing.age_rating));
+  const [anilistLookup, setAniListLookup] = useState(editing?.anilist_lookup ?? true);
   const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const isLib = editing?.id === 'lib';
@@ -1263,7 +1266,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
     try {
       const ageRating = age === '' ? null : Number(age);
       if (editing) {
-        const body: Record<string, unknown> = { name: name.trim(), ageRating };
+        const body: Record<string, unknown> = { name: name.trim(), ageRating, anilistLookup };
         if (!isLib && !unchanged) body.paths = folders;
         await api(`/api/admin/libraries/${editing.id}`, { method: 'PATCH', json: body });
         toast(tr('Saved'), 'success');
@@ -1271,7 +1274,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
         // One request. This used to POST the library and then PATCH the rating separately, and skip the
         // PATCH entirely when the rating was null -- so a failed second call created an unrated library
         // under a "Created" toast, which is the one outcome nobody would check for.
-        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), paths: folders, ageRating } });
+        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), paths: folders, ageRating, anilistLookup } });
         toast(tr('Created'), 'success');
       }
       onSaved();
@@ -1334,6 +1337,17 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
         <p className="mt-1 text-[11px] text-fog-600">
           {tr('Everything in this library inherits it. A single series can still be rated differently from its own page.')}
         </p>
+
+        <label className="mt-3 flex max-w-md cursor-pointer items-start justify-between gap-4 rounded-lg border border-ink-700 bg-ink-900/40 p-3">
+          <span className="min-w-0">
+            <span className="block text-xs font-medium text-fog-200">{tr('Look up art and metadata on AniList automatically')}</span>
+            <span className="mt-1 block text-[11px] leading-relaxed text-fog-500">
+              {tr("When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.")}
+            </span>
+          </span>
+          <input type="checkbox" checked={anilistLookup} onChange={(e) => setAniListLookup(e.target.checked)}
+            className="mt-0.5 size-4 shrink-0 accent-accent" data-library-anilist-lookup />
+        </label>
 
         {preview && (
           <p className="mt-3 text-[11px] leading-relaxed text-fog-500" data-library-preview={preview.series}>

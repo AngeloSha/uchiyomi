@@ -33,7 +33,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
 
-const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B' };
+const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', privacy: 'Zzz Om Private', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B' };
 const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit', string> = {} as any;
 const ADMIN = 'om-admin';
 // The art hosts: a literal public address, so the cover proxy's SSRF guard needs no DNS to let the fake answer.
@@ -139,6 +139,7 @@ after(async () => {
   for (const t of ['series_trackers', 'series_art', 'series_overrides', 'series_colors']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ids()]);
   await q(`DELETE FROM lib_books WHERE series_id = ANY($1)`, [ids()]);
   await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids()]);
+  await q(`DELETE FROM libraries WHERE id IN ('om-no-anilist','om-yes-anilist')`).catch(() => {});
   await q(`DELETE FROM users WHERE username = $1`, [ADMIN]);
   await rm(ROOT, { recursive: true, force: true });
   await (await import('../src/lib/db')).pool.end();
@@ -266,6 +267,35 @@ test("an add keeps AniList's art only from an entry named as the series", { skip
   assert.equal(miss?.cover, RED, "the source's cover is the series' cover");
 });
 
+test('a library opt-out makes a lazy view send no title and store no miss; enabling or moving applies immediately', { skip }, async () => {
+  await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('om-no-anilist','Private metadata','Zzz Om Private',false)
+           ON CONFLICT (id) DO UPDATE SET anilist_lookup = false`);
+  await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('om-yes-anilist','Online metadata','Zzz Om Online',true)
+           ON CONFLICT (id) DO UPDATE SET anilist_lookup = true`);
+  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.privacy]);
+  await q(`DELETE FROM series_art WHERE series_id = $1`, [ID.privacy]);
+  const before = asked.length;
+  const hidden = await img(`/img/series/${ID.privacy}/backdrop`);
+  assert.equal(hidden.statusCode, 200, hidden.body.slice(0, 160));
+  assert.equal(asked.length, before, 'a lazy backdrop sent the private library title to AniList');
+  assert.equal(await art(ID.privacy), null, 'opting out stored a negative result, so enabling later would not look up');
+
+  // The current library decides at request time. Moving to an enabled library must make the
+  // same absent art row eligible without a restart or cache clear.
+  await q(`UPDATE lib_series SET library_id = 'om-yes-anilist' WHERE id = $1`, [ID.privacy]);
+  assert.equal((await img(`/img/series/${ID.privacy}/backdrop`)).statusCode, 200);
+  assert.ok(asked.slice(before).includes(FOLDERS.privacy), 'moving to an enabled library did not permit the lookup');
+  const stored = await art(ID.privacy);
+  assert.ok(stored?.checked_at, 'the enabled lookup did not store its verdict');
+
+  // Turning it back off preserves data already found or checked; the switch is not destructive.
+  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.privacy]);
+  const after = asked.length;
+  assert.equal((await img(`/img/series/${ID.privacy}/backdrop`)).statusCode, 200);
+  assert.equal(asked.length, after, 'existing art triggered another automatic title lookup while disabled');
+  assert.deepEqual(await art(ID.privacy), stored, 'opting out cleared existing art or its check state');
+});
+
 test('the backfill stores only what is named as the series: AniList, the anime search, Kitsu and MangaDex alike', { skip }, async () => {
   const { registerAdapter } = await import('../src/lib/sources');
   const { huntArt } = await import('../src/routes/admin');
@@ -280,7 +310,11 @@ test('the backfill stores only what is named as the series: AniList, the anime s
     async getSeries() { return null; }, async listChapters() { return []; }, async getPageUrls() { return []; }, async latest() { return []; },
   } as any);
   // AniList answers another work for both the title and the harsher one; the anime search a sequel; Kitsu a spin-off.
+  // This is an explicit Admin → Art action, so the privacy switch must not make it inert.
+  await q(`UPDATE lib_series SET library_id = 'om-no-anilist' WHERE id = $1`, [ID.hunt]);
+  const beforeAniList = asked.length;
   const found = await huntArt({ id: ID.hunt, title: FOLDERS.hunt });
+  assert.ok(asked.length > beforeAniList, 'an explicit manual art search was blocked by the automatic-lookup switch');
   const a = await art(ID.hunt);
   assert.equal(a?.banner ?? null, null, 'a banner that is not the series\' was stored');
   // Reintroduce by keeping MangaDex's first hit: the spin-off's cover is stored.

@@ -7,6 +7,7 @@ import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromAniList } from '../lib/seriesType';
+import { automaticAniListAllowed } from '../lib/anilistPolicy';
 import { noticeBook, noticeShown } from '../lib/noticeChapters';
 import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
@@ -365,33 +366,38 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
     ? { banner: null, cover: null }
     : await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
   if (!art) {
-    try {
-      // Every name the series goes by (lib/altTitles.ts namesOf): the search asks by its title, and the answer is kept
-      // only when it is one of them (lib/onlineMatch.ts). Another work's answer comes back as nulls and is stored as
-      // the miss a 404 is, so it is not asked again on every view (#168).
-      let names: string[] = [];
+    // A disabled library makes no implicit title request and, importantly, stores no miss.  If the admin
+    // enables lookups later this same absent row is eligible immediately; existing art remains visible.
+    if (!(await automaticAniListAllowed({ id }))) art = { banner: null, cover: null };
+    else {
       try {
-        names = await namesOf({ id });
-        if (!names.length) { const s = await komga.series(id); const t = s?.metadata?.title || s?.name; if (t) names = [t]; }
-      } catch {}
-      const title = names[0] ?? '';
-      const fetched = title ? await fetchAniListArt(title, names) : { banner: null, cover: null };
-      // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
-      await q(
-        `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
-         ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now(), checked_at = now()`,
-        [id, fetched.banner, fetched.cover],
-      );
-      // the same match also anchors tracker sync — record it while we have it
-      if (fetched.mediaId) {
-        await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
-        // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
-        await learnDirection({ id }, directionFromAniListMatch(names, fetched), 'anilist').catch(() => {});
-        await learnTypeFromAniList({ id }, names, fetched);
+        // Every name the series goes by (lib/altTitles.ts namesOf): the search asks by its title, and the answer is kept
+        // only when it is one of them (lib/onlineMatch.ts). Another work's answer comes back as nulls and is stored as
+        // the miss a 404 is, so it is not asked again on every view (#168).
+        let names: string[] = [];
+        try {
+          names = await namesOf({ id });
+          if (!names.length) { const s = await komga.series(id); const t = s?.metadata?.title || s?.name; if (t) names = [t]; }
+        } catch {}
+        const title = names[0] ?? '';
+        const fetched = title ? await fetchAniListArt(title, names) : { banner: null, cover: null };
+        // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
+        await q(
+          `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
+           ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now(), checked_at = now()`,
+          [id, fetched.banner, fetched.cover],
+        );
+        // the same match also anchors tracker sync — record it while we have it
+        if (fetched.mediaId) {
+          await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
+          // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
+          await learnDirection({ id }, directionFromAniListMatch(names, fetched), 'anilist').catch(() => {});
+          await learnTypeFromAniList({ id }, names, fetched);
+        }
+        art = fetched;
+      } catch {
+        art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
       }
-      art = fetched;
-    } catch {
-      art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
     }
   }
   // v0.51.0: a series someone looks at with no banner of its own -- one just added, or one the daily warm-up has not

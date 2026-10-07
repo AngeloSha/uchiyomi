@@ -178,6 +178,8 @@
   "End of your downloads": "已下载内容到此为止",
   "Enter the 6-digit code from your authenticator app, or a recovery code.": "请输入验证器应用中的 6 位验证码，或一个恢复码。",
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "该库中的所有内容都会继承它。单个系列仍可在自己的页面上设置不同的分级。",
+  "Look up art and metadata on AniList automatically": "自动在 AniList 上查找图片和元数据",
+  "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "关闭后，自动查找不会将此库中的标题发送到 AniList。现有图片和匹配结果会保留，手动 AniList 操作仍可连接。",
   "Everything looks healthy": "一切正常",
   "Expired": "已过期",
   "Extensions": "扩展",

@@ -178,6 +178,8 @@
   "End of your downloads": "نهاية التنزيلات",
   "Enter the 6-digit code from your authenticator app, or a recovery code.": "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة، أو رمز استرداد.",
   "Everything in this library inherits it. A single series can still be rated differently from its own page.": "يرث كل ما في هذه المكتبة هذا التصنيف. ويمكن مع ذلك تصنيف سلسلة بعينها بشكل مختلف من صفحتها.",
+  "Look up art and metadata on AniList automatically": "البحث تلقائيًا في AniList عن الرسومات والبيانات الوصفية",
+  "When off, automatic lookups do not send this library's titles to AniList. Existing art and matches stay, and manual AniList actions can still connect.": "عند إيقافه، لن ترسل عمليات البحث التلقائية عناوين هذه المكتبة إلى AniList. تبقى الرسومات والمطابقات الحالية، ويظل بإمكان إجراءات AniList اليدوية الاتصال به.",
   "Everything looks healthy": "كل شيء على ما يُرام",
   "Expired": "منتهي الصلاحية",
   "Extensions": "الإضافات",

@@ -31,6 +31,7 @@ const ENTRIES: Record<number, { type: 'MANGA' | 'ANIME'; title: Record<string, s
   504: { type: 'MANGA', title: { romaji: null, english: 'Zzz Mc Edition' } },
   505: { type: 'MANGA', title: { romaji: 'Somebody Else Entirely' } },
   506: { type: 'MANGA', title: { romaji: 'Yet Another Work' } },
+  507: { type: 'MANGA', title: { romaji: 'Zzz Mc Private' } },
   701: { type: 'ANIME', title: { romaji: 'Zzz Mc Anime Banner: The Movie' }, related: [{ id: 702, type: 'MANGA' }] },
   702: { type: 'MANGA', title: { english: 'Zzz Mc Anime Banner' } },
   703: { type: 'ANIME', title: { romaji: 'Other Anime' }, related: [{ id: 704, type: 'MANGA' }] },
@@ -40,12 +41,12 @@ const ENTRIES: Record<number, { type: 'MANGA' | 'ANIME'; title: Record<string, s
 const S = {
   wrong: 's_mc_wrong', druid: 's_mc_druid', alt: 's_mc_alt', edEs: 's_mc_ed_es', edEn: 's_mc_ed_en', human: 's_mc_human',
   gone: 's_mc_gone', anime: 's_mc_anime', wrongAnime: 's_mc_wrong_anime', md: 's_mc_md', ownMd: 's_mc_own_md', src: 's_mc_src',
-  later: 's_mc_later',
+  later: 's_mc_later', private: 's_mc_private',
 };
 const TITLE: Record<string, string> = {
   wrong: 'Zzz Mc Morgan Lost', druid: 'Zzz Mc Seoul Station Druid', alt: 'Zzz Mc Scanned Name', edEs: 'Zzz Mc Edicion', edEn: 'Zzz Mc Edition',
   human: 'Zzz Mc Human', gone: 'Zzz Mc Gone Entry', anime: 'Zzz Mc Anime Banner', wrongAnime: 'Zzz Mc Wrong Anime', md: 'Zzz Mc MangaDex Cover',
-  ownMd: 'Zzz Mc Own MangaDex', src: 'Zzz Mc Source Cover', later: 'Zzz Mc Later',
+  ownMd: 'Zzz Mc Own MangaDex', src: 'Zzz Mc Source Cover', later: 'Zzz Mc Later', private: 'Zzz Mc Private',
 };
 const USER = 'mc-reader';
 
@@ -89,6 +90,7 @@ before(async () => {
   for (const t of ['series_trackers', 'series_art', 'series_alt_titles', 'tracker_progress', 'series_sources']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ids]);
   await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
   await q(`DELETE FROM users WHERE username IN ($1, 'mc-admin')`, [USER]);
+  await q(`DELETE FROM libraries WHERE id = 'mc-private'`).catch(() => {});
   userId = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x','user','password') RETURNING id`, [USER]))[0].id;
   const adminId = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ('mc-admin','mc-admin','x','admin','password') RETURNING id`))[0].id;
   for (const [k, id] of Object.entries(S)) {
@@ -134,6 +136,7 @@ after(async () => {
   for (const t of ['series_trackers', 'series_art', 'series_alt_titles', 'tracker_progress', 'series_sources']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ids]);
   await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
   await q(`DELETE FROM users WHERE username IN ($1, 'mc-admin')`, [USER]);
+  await q(`DELETE FROM libraries WHERE id = 'mc-private'`).catch(() => {});
   await q(`DELETE FROM audit_log WHERE event = 'library.match_check'`);
   await (await import('../src/lib/db')).pool.end();
 });
@@ -196,6 +199,29 @@ test('a second pass asks nothing: every verdict was written as it was reached', 
   const r = await checkMatches(log);
   assert.deepEqual([alAsked.length, mdAsked.length], before, 'a checked match was asked about again');
   assert.equal(r.matches, 0);
+});
+
+test('background matching sends nothing for an opted-out library, while explicit Run now remains available', { skip }, async () => {
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  await q(`INSERT INTO libraries (id, name, path, anilist_lookup) VALUES ('mc-private','Private metadata','T!mc/private',false)`);
+  await q(`UPDATE lib_series SET library_id = 'mc-private' WHERE id = $1`, [S.private]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','507','Zzz Mc Private')`, [S.private]);
+  await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1,$2,$3)`, [S.private, banner(507), cover(507)]);
+
+  const before = alAsked.length;
+  const automatic = await checkMatches(log);
+  assert.equal(alAsked.length, before, 'the scheduled pass sent a stored id from an opted-out library');
+  assert.deepEqual(automatic.links, { checked: 0, removed: 0 });
+  assert.deepEqual(automatic.art, { checked: 0, cleared: 0 });
+  assert.equal((await linkOf(S.private))?.checked_at, null, 'the skipped link was stamped and cannot run after enabling');
+  assert.equal((await artOf(S.private))?.checked_at, null, 'the skipped art was stamped and cannot run after enabling');
+
+  const manual = await checkMatches(log, { all: true });
+  assert.ok(alAsked.slice(before).flat().includes(507), 'the explicit Admin action was blocked by the automatic switch');
+  assert.equal(manual.links.checked, 1);
+  assert.equal(manual.art.checked, 2);
+  assert.ok((await linkOf(S.private))?.checked_at);
+  assert.ok((await artOf(S.private))?.checked_at);
 });
 
 test('a service that does not answer decides nothing; the next run takes up what is left', { skip }, async () => {
