@@ -40,16 +40,28 @@ const tapText = (page, text, root = null) => page.evaluate((wanted, selector) =>
   el?.click();
   return !!el;
 }, text, root);
-const cardButton = (page, name, which = 'toggle') => page.evaluate((title, action) => {
-  const card = [...document.querySelectorAll('div.card')].find((node) =>
-    [...node.querySelectorAll('p')].some((p) => p.textContent?.trim() === title));
-  if (!card) return false;
-  const button = action === 'toggle'
-    ? card.querySelector('button[aria-pressed]')
-    : [...card.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === action);
-  button?.click();
-  return !!button;
-}, name, which);
+const cardButton = async (page, name, which = 'toggle') => {
+  const ready = await page.waitForFunction((title, action) => {
+    const card = [...document.querySelectorAll('div.card')].find((node) =>
+      [...node.querySelectorAll('p')].some((p) => p.textContent?.trim() === title));
+    const button = action === 'toggle'
+      ? card?.querySelector('button[aria-pressed]')
+      : [...(card?.querySelectorAll('button') ?? [])].find((b) => b.getAttribute('aria-label') === action);
+    return !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+  }, { timeout: 8000, polling: 50 }, name, which).then(async (handle) => {
+    await handle.dispose(); return true;
+  }, () => false);
+  if (!ready) return false;
+  return page.evaluate((title, action) => {
+    const card = [...document.querySelectorAll('div.card')].find((node) =>
+      [...node.querySelectorAll('p')].some((p) => p.textContent?.trim() === title));
+    const button = action === 'toggle'
+      ? card?.querySelector('button[aria-pressed]')
+      : [...(card?.querySelectorAll('button') ?? [])].find((b) => b.getAttribute('aria-label') === action);
+    if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return false;
+    button.click(); return true;
+  }, name, which);
+};
 
 // ── saved Library sort ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -179,24 +191,25 @@ export async function homeListsWalk(ctx) {
       && await waitCardLabel(empty.name, say('Show on Home')));
 
   // Turning the three legacy picks off writes []: explicit zero, not a return to legacy fallback.
-  await cardButton(page, alpha.name); await waitIds([beta.id, gamma.id]);
-  await cardButton(page, beta.name); await waitIds([gamma.id]);
-  await cardButton(page, gamma.name); await waitIds([]);
-  check('homelists: removing every selected list stores an explicit empty array', JSON.stringify(await homeIds()) === '[]');
+  const removedAll = await cardButton(page, alpha.name) && !!(await waitIds([beta.id, gamma.id]))
+    && await cardButton(page, beta.name) && !!(await waitIds([gamma.id]))
+    && await cardButton(page, gamma.name) && !!(await waitIds([]));
+  check('homelists: removing every selected list stores an explicit empty array',
+    removedAll && JSON.stringify(await homeIds()) === '[]');
   await visit('/', 3500);
   check('homelists: explicit zero renders no list rail', (await railNames()).length === 0, JSON.stringify(await railNames()));
 
   // Empty takes a real slot. Three is the ceiling and the fourth press says why without changing the setting.
   await visit('/collections', 2500);
-  await cardButton(page, beta.name); await waitIds([beta.id]);
-  await cardButton(page, empty.name); await waitIds([beta.id, empty.id]);
-  await cardButton(page, alpha.name); await waitIds([beta.id, empty.id, alpha.id]);
+  const selectedThree = await cardButton(page, beta.name) && !!(await waitIds([beta.id]))
+    && await cardButton(page, empty.name) && !!(await waitIds([beta.id, empty.id]))
+    && await cardButton(page, alpha.name) && !!(await waitIds([beta.id, empty.id, alpha.id]));
   const fourth = await cardButton(page, delta.name);
   await sleep(500);
   const ceiling = await page.evaluate((text) => [...document.querySelectorAll('[data-notices] *')]
     .some((el) => el.textContent?.trim() === text), say('Choose up to 3 lists for Home'));
   check('homelists: a fourth list is refused with an explanatory message',
-    fourth && ceiling && JSON.stringify(await homeIds()) === JSON.stringify([beta.id, empty.id, alpha.id]),
+    selectedThree && fourth && ceiling && JSON.stringify(await homeIds()) === JSON.stringify([beta.id, empty.id, alpha.id]),
     JSON.stringify(await homeIds()));
 
   const earlier = await cardButton(page, empty.name, say('Move earlier'));
@@ -217,14 +230,14 @@ export async function homeListsWalk(ctx) {
 
   // Make a selected id stale, then make one ordinary edit. The edit writes only the still-owned order.
   await visit('/collections', 2500);
-  await cardButton(page, alpha.name); await waitIds([empty.id, beta.id]);
-  await cardButton(page, delta.name); await waitIds([empty.id, beta.id, delta.id]);
+  const replacedThird = await cardButton(page, alpha.name) && !!(await waitIds([empty.id, beta.id]))
+    && await cardButton(page, delta.name) && !!(await waitIds([empty.id, beta.id, delta.id]));
   await call(`/api/collections/${delta.id}`, { method: 'DELETE' });
   await visit('/collections', 2500);
   const staleHidden = !(await page.evaluate((name) => [...document.querySelectorAll('div.card p')].some((p) => p.textContent?.trim() === name), delta.name));
   const later = await cardButton(page, empty.name, say('Move later'));
   check('homelists: a deleted selected id is ignored, then removed by the next edit',
-    staleHidden && later && !!(await waitIds([beta.id, empty.id])), JSON.stringify(await homeIds()));
+    replacedThird && staleHidden && later && !!(await waitIds([beta.id, empty.id])), JSON.stringify(await homeIds()));
 
   // The settled two-list state at phone width and RTL: controls remain accessible, physical start mirrors, Home keeps order.
   for (const [width, language] of [[390, 'en'], [390, 'ar']]) {
