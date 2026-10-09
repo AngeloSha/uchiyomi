@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.55.9 — 2026-10-09
+
+**New chapters download again for a series whose own source is an extension marked 18+.**
+
+### Downloads from a series' own 18+-marked source
+
+- **The bug (v0.55.8):**
+  - A series that isn't rated 18+ but follows a source marked adult had its new chapters listed but never downloaded, by the
+    update check or the slow archive. This is common with manhwa extensions, which mark their whole site.
+  - Nothing was logged, so the series quietly fell behind. Downloading by hand still worked.
+  - Found and fixed by **@TIGamingTV** ([#177](https://github.com/AngeloSha/uchiyomi/pull/177)).
+- **Now:** the copy a series takes from its own source answers to the series following that source, as before v0.55.8. The
+  adult rule still keeps everything else away from a series that isn't 18+: other sources' copies, and new sources found
+  for a missing chapter.
+- **The same for three older jobs:**
+  - completing a chapter saved with missing pages;
+  - replacing a chapter that came in too short;
+  - upgrading a chapter to your preferred group's version.
+
+  These now also use a series' own source when it is marked adult. Before, those chapters stayed as they were.
+
+### Upgrading
+
+- **Database:** no change. v0.55.8 runs on the same database, so going back is one line of your compose file.
+
 ## v0.55.8 — 2026-10-08
 
 **Your Library sort is now a default, up to three Lists can live on Home, and each library can opt out of automatic
