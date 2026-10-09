@@ -9,6 +9,7 @@
 //
 //   TEST_DATABASE_URL=postgres://test:test@127.0.0.1:5432/uchiyomi_test node test/run-shards.mjs
 //   TEST_SHARDS=3 (default) sets how many files run at once. Extra arguments narrow the files: a substring each.
+//   TEST_TIMEOUT_MS (5 min) fails one test that runs longer; TEST_FILE_TIMEOUT_MS (10 min) stops a whole file.
 //
 // The output of a file is printed in one piece when it ends, so parallel files never interleave. The exit code is 1
 // when any file failed (or could not run), and the summary at the end names them.
@@ -71,18 +72,36 @@ async function freshDb(k) {
   }
 }
 
+// A file that never ends used to hold its worker until the job's own limit (90 minutes) and print nothing at all: its
+// output is kept until it ends. v0.56.0's PR lost two CI runs that way to chapterFallback.int, which takes about a
+// minute. Now one test is failed after TEST_TIMEOUT_MS (node's --test-timeout, so the file goes on and says which), and
+// a file still running after TEST_FILE_TIMEOUT_MS is stopped with everything under it and printed as it stood.
+const testLimitMs = Number(process.env.TEST_TIMEOUT_MS) || 5 * 60_000;
+const fileLimitMs = Number(process.env.TEST_FILE_TIMEOUT_MS) || 10 * 60_000;
+
 function runFile(f, k) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', join('test', f)], {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', `--test-timeout=${testLimitMs}`, join('test', f)], {
       cwd: bff,
       env: { ...process.env, TEST_DATABASE_URL: dbUrl(k) },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Its own process group, so a stop reaches the test process `node --test` starts under it too.
+      detached: true,
     });
     const out = [];
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => out.push(d));
-    child.on('close', (code, signal) => resolve({ f, code: code ?? 1, signal, ms: Date.now() - started, text: Buffer.concat(out).toString() }));
+    let timedOut = false;
+    const limit = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+    }, fileLimitMs);
+    child.on('close', (code, signal) => {
+      clearTimeout(limit);
+      const note = timedOut ? `\nrun-shards: ${f} was still running after ${fileLimitMs / 60_000} min and was stopped; its output so far is above\n` : '';
+      resolve({ f, code: timedOut ? 1 : code ?? 1, signal, ms: Date.now() - started, text: Buffer.concat(out).toString() + note });
+    });
   });
 }
 
