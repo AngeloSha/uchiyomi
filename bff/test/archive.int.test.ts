@@ -1601,6 +1601,17 @@ test('never onto an adult source: not on a clean series, and not past the enqueu
   }
 });
 
+test('a clean series archives from the adult source it follows itself', { skip }, async () => {
+  // The adult rule keeps the archive from reaching an adult site on a clean series' behalf (above). The chosen copy on
+  // a site the series follows is not reached on its behalf: v0.55.8's preflight held it to that rule as well, and such a
+  // series archived nothing. Reintroduce by dropping `chosenVia` in runChapter: nothing lands.
+  const s = await series('nsfwown', NSFW, [1, 2]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.deepEqual(startedOn(await tick({ rand: () => 0.99 }), s.id), [`${NSFW}:1`]);
+  await arch.archiveIdle();
+  assert.deepEqual(onDiskNums(s.folder), [1], 'chapter one landed from the series\' own adult source');
+});
+
 test('a series with its own source order never rotates (v0.55.4)', { skip }, async () => {
   // "Take this series from that site" is an explicit preference: the archive keeps to it. Reintroduce by dropping the
   // `rotates` check in tickOnce: the second chapter comes from C.

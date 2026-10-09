@@ -606,17 +606,26 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const refusing = new Set<string>();
   // Which sources the sweep may reach on this series' behalf, for the alternates and the hunt: never an
   // adult source on a clean series (lib/sourceHunt.ts sweepAllowedFor), and never past the viewer's own
-  // cap when a viewer drove the run. The chosen copy itself is not gated -- a person followed that source.
+  // cap when a viewer drove the run. The chosen copy itself is not held to the adult rule -- a person followed
+  // that source -- only to the viewer's cap and the rest (`chosenVia` below).
+  // ⚠️ v0.55.8 checked the chosen copy against the adult rule at the download's preflight: every new chapter of a
+  // clean series on an extension marked NSFW was listed and never fetched (asked by nobody, so not even a failure),
+  // while a manual download still worked. Reintroduce by dropping `chosenVia`: "the sweep downloads a clean series'
+  // new chapters from the adult source it follows" in updater.int.test.ts lands nothing.
   // Asked only when there is something to download: a listing refresh (maxNew 0) costs no extra query.
   const adult = queue.length > 0 && maxNew > 0 ? await seriesIsAdult(seriesId) : false;
   const sweepRule = await sweepAllowedFor(adult);
   const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
-  const sourceAllowedNow = async (candidate: SourceChapter): Promise<boolean> => {
+  // Per chapter, for the fallback helper: its chosen copy's source passes the adult rule. The helper never takes an
+  // alternate or a hunted copy from that same source, so this opens the chosen copy and nothing else.
+  const allowedBeside = (chosenVia: string) => (id: string) =>
+    (id === chosenVia || sweepRule(id)) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
+  const sourceAllowedNowBeside = (chosenVia: string) => async (candidate: SourceChapter): Promise<boolean> => {
     const id = candidate.source ?? '';
     if (!id || !(await seriesFollowsSource(seriesId, id))) return false;
     // Library adult state and the server's automatic-source policy can change while a chapter waits on its
     // source gate. Rebuild the rule at that boundary; the closure above remains only a cheap early filter.
-    const current = await sweepAllowedFor(await seriesIsAdult(seriesId));
+    const current = id === chosenVia ? () => true : await sweepAllowedFor(await seriesIsAdult(seriesId));
     return current(id) && (opts.sourceAllowed?.(id) ?? true) && !opts.resting?.(id);
   };
   // No hunt under posting order: a source found for the purpose numbers these posts its own way.
@@ -652,7 +661,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
           for (const c of candidates) if (await automaticChapterAllowedFor(seriesId, c)) open.push(c);
           return open;
         },
-        refusing, allowed,
+        refusing, allowed: allowedBeside(via),
         hunt: huntBudget ? async () => {
           if (opts.unattended && !(await seriesIsMonitored(seriesId))) return null;
           return (await huntSource(seriesId, ch.number, {
@@ -662,7 +671,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
         } : undefined,
         ...(opts.unattended ? { admit: () => seriesIsMonitored(seriesId) } : {}),
         automaticAllowed: (candidate) => automaticChapterAllowedFor(seriesId, candidate),
-        sourceAllowedNow,
+        sourceAllowedNow: sourceAllowedNowBeside(via),
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
         // third refusal. A refusal from some other source is not this copy's history.
         persistent: persistentVia.get(ch.number) === via,

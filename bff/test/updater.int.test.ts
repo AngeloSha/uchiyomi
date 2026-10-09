@@ -498,6 +498,39 @@ test('the main sweep stops an unmonitored series before its next source operatio
   assert.ok(!onDisk('unmonitor', 1));
 });
 
+test('the sweep downloads a clean series\' new chapters from the adult source it follows', { skip }, async () => {
+  // The sweep's adult rule (sourceHunt sweepAllowedFor) is for sources reached ON a series' behalf: alternates and
+  // the hunt. The chosen copy is on a source the series already follows, and a person followed it. v0.55.8 held the
+  // chosen copy to that rule too, at the download's preflight: every new chapter of a clean series on an extension
+  // marked NSFW was listed and never fetched, while a manual download (the admin's cap) still worked.
+  // Reintroduce by passing the sweep's `allowed` for the chosen copy: nothing lands and pages stays 0.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const source = 'upd-nsfw-main';
+  let pages = 0;
+  registerAdapter({
+    id: source, name: source, isNsfw: true,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source, title: sid }; },
+    async listChapters() { return [1, 2].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `n${n}` })); },
+    async getPageUrls() { pages++; return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  } as any);
+  await mkSeries('nsfwmain', source);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('nsfwmain')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [source]);
+  await only(['nsfwmain']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.equal(r.outcomes.ok, 1);
+    assert.equal(r.added, 2, 'both new chapters were downloaded');
+    assert.equal(pages, 2);
+    assert.ok(onDisk('nsfwmain', 1) && onDisk('nsfwmain', 2));
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = $1', [source]).catch(() => {});
+  }
+});
+
 
 /**
  * A source behind the Cloudflare solver gets a listing budget that fits a challenge.

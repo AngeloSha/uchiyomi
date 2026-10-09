@@ -1030,8 +1030,13 @@ async function runChapter(
     // Reintroduce by marking it only once it is counted (drop this line): "listed in the downloads once the library
     // holds it" in archive.int.test.ts finds it listed between its landing and its count.
     if (first && gen === generation) firstInFlight.add(key);
+    // The sweep's adult rule is for the alternates. The picked copy is on a source the series follows (or a rotation
+    // tickOnce already held to that rule), so it answers to the enqueuer's cap alone, as it did before v0.55.8's
+    // preflight checked `allowed` on it too and a clean series on an NSFW-marked extension archived nothing. The
+    // helper never takes an alternate from the picked copy's own source, so this opens that copy and nothing else.
     const sweepRule = await sweepAllowedFor(await seriesIsAdult(r.series_id));
-    const allowed = (src: string) => sweepRule(src) && capOk(src);
+    const chosenVia = pick.copy.source;
+    const allowed = (src: string) => (src === chosenVia || sweepRule(src)) && capOk(src);
     const meta = { series: r.title, summary: r.summary ?? undefined, author: r.author ?? undefined, genres: r.genres ?? undefined, url: r.web ?? undefined, status: r.status ?? undefined };
     try {
       await archiveHooks.beforeDownload?.(r.series_id, n);
@@ -1049,7 +1054,7 @@ async function runChapter(
         sourceAllowedNow: async (candidate) => {
           const id = candidate.source ?? '';
           if (!id || !(await seriesFollowsSource(r.series_id, id))) return false;
-          const current = await sweepAllowedFor(await seriesIsAdult(r.series_id));
+          const current = id === chosenVia ? () => true : await sweepAllowedFor(await seriesIsAdult(r.series_id));
           return current(id) && capOk(id);
         },
         onAsked: (src, err) => { asked.set(src, err); },
