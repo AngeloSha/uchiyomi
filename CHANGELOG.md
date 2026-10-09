@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.55.11 — 2026-10-09
+
+**The desktop app no longer freezes on an error box when you quit it.**
+
+### Desktop app
+- **The bug (since v0.55.7):**
+  - Quitting could show "A JavaScript error occurred in the main process" and stop there. The built-in database had not
+    shut down yet.
+  - The cause: the app's server sometimes wrote its last log line after it had stopped, and the log file was already
+    closed by then.
+  - It hit about one quit in five on Windows. The newer Electron in v0.55.7 started delivering that late line, where the
+    old one dropped it.
+- **Now:** each log stays open until its background process has finished writing, so quitting is clean.
+- **v0.55.10's desktop downloads** were held back by this bug: the Windows check caught it on every attempt. This release
+  has them.
+
+### Under the hood
+- An error in the desktop app's main process now fails its automated checks at once, with the error's stack. Before, the
+  checks waited ten minutes for an app frozen on that box.
+
+### Upgrading
+- **Database:** no change. The server only changes its version number.
+
 ## v0.55.10 — 2026-10-09
 
 **Safari no longer races through a right-to-left series near the end of a volume and marks the skipped volumes read.
