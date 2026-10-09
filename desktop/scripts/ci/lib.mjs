@@ -261,8 +261,18 @@ export function smokeDigest(s) {
     shellDump: c.shellDump ? { bytes: c.shellDump.bytes, usersTable: c.shellDump.hasUsersTable, tables: c.shellDump.tables } : null,
     listen: c.listen ? { exposedBeyondLoopback: c.listen.exposedBeyondLoopback } : null,
     stop: s.result?.stop, fallback: s.result?.fallback, staleRecovery: s.result?.staleRecovery,
-    timeline: s.result?.timeline, error: s.result?.error?.slice(0, 1500) || (s.result ? undefined : s.out.slice(-1500)),
+    timeline: s.result?.timeline,
+    // The smoke's own error; else the first uncaught exception or unhandled rejection of its main process, each of
+    // which fails it (main.js, src/uncaught.js) -- so every row that prints `error` names it; else, when the app wrote
+    // no result at all, the tail of its output.
+    error: s.result?.error?.slice(0, 1500) || uncaughtLines(s.result)?.[0] || (s.result ? undefined : s.out.slice(-1500)),
+    uncaught: uncaughtLines(s.result),
   };
+}
+
+/** A smoke result's uncaught exceptions and unhandled rejections, one line each; undefined when there is no result. */
+function uncaughtLines(r) {
+  return r?.uncaught?.map((u) => `${u.kind}: ${u.stack}`.slice(0, 1500));
 }
 
 /** Serve one file on loopback (the engine pack for --engine-pack-url). @returns {Promise<{ url: string, close: () => void }>} */
