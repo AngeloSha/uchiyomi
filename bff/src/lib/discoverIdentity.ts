@@ -91,6 +91,8 @@ export function workForKey(k: string): string | null {
 // ---- what the library holds ----------------------------------------------------------------------------------------
 
 const INDEX_TTL_MS = 60_000;
+/** An other name (not the series' own title) counts as the series' only when its key is at least this long. */
+const MIN_OTHER_NAME_KEY = 8;
 let indexVersion = 0;
 let indexCache: { at: number; version: number; built: Promise<LibraryIndex> } | null = null;
 
@@ -143,9 +145,22 @@ async function buildIndex(): Promise<LibraryIndex> {
     if (f.source_series_id) add(byPair, pairKey(f.source_id, f.source_series_id), held.get(f.series_id));
     if (f.title) add(byName, nameKey(f.title), held.get(f.series_id));
   }
-  // Every other name: the admin's display title, the other names, the names of its language editions.
+  // The admin's display title, whatever its length: a person chose it.
+  const shown = await q<{ series_id: string; title: string }>(
+    `SELECT o.series_id, o.title FROM series_overrides o JOIN lib_series s ON s.id = o.series_id AND ${visibleToAll('s')}
+      WHERE o.title IS NOT NULL AND btrim(o.title) <> ''`,
+  );
+  for (const o of shown) add(byName, nameKey(o.title), held.get(o.series_id));
+  // Every other name (lib/altTitles.ts namesOfMany: the other names and the language editions' titles), when it is long
+  // enough to say which work it is. Most other names are read out of a source's description, and the reading splits on
+  // punctuation: run over the owner's library, "…Through All Realms - Makes Sense, Right?" left "Right?" as a name of its
+  // own -- which an unrelated anthology is called, so Discover would have read it as held. Reintroduce by keeping every
+  // name: "a short other name holds nothing" in discoverIdentity.int.test.ts reads the anthology as held.
   for (const [id, names] of await namesOfMany(series.map((s) => s.id))) {
-    for (const n of names) add(byName, nameKey(n), held.get(id));
+    for (const n of names) {
+      const k = nameKey(n);
+      if (k.length >= MIN_OTHER_NAME_KEY) add(byName, k, held.get(id));
+    }
   }
   // Its AniList entry, when a person linked it or the title check confirmed the link (lib/matchCheck.ts) -- the rule
   // Health's Duplicate series reads by (lib/health.ts duplicateSeries): an unchecked automatic link may be another work.
@@ -347,8 +362,46 @@ export async function resolveName(k: string, title: string): Promise<void> {
   await store(k, null, 'none', []);
 }
 
+/** Which id a work keeps when two services named it: AniList's, then MangaDex's, then MangaUpdates'. */
+const RANK: Record<string, number> = { 'al:': 0, 'md:': 1, 'mu:': 2 };
+const rank = (w: string) => RANK[w.slice(0, 3)] ?? 9;
+/** Names at least this long (as keys) may join two services' ids into one work: long enough to say which work it is. */
+const MIN_JOIN_KEY = 8;
+
+/**
+ * The id an answer's work goes by, once what is already known is weighed: when the answer's names are already placed
+ * with another service's id for the work, the two are one work, kept under the better-ranked id, and every name placed
+ * under the other is moved to it. Run over the owner's library before release: "Regressing As The Bastard Of The Sword
+ * Clan" was AniList's, "Regressed life of the Sword Clan's Ignoble Reincarnator" only MangaUpdates' (whose ids name no
+ * AniList entry) -- two cards for one series until MangaUpdates' answer, which lists both names, joined them. Never
+ * when the names point at two ids of one service (two AniList entries): that is two works sharing a name, and nothing is
+ * joined. Reintroduce by keeping each answer's own id: "two services' answers for one work become one" in
+ * discoverIdentity.int.test.ts reads two works.
+ */
+async function joined(work: string, k: string, names: readonly string[]): Promise<string> {
+  const others = new Set<string>();
+  for (const key of [k, ...names.map(nameKey)]) {
+    if (key.length < MIN_JOIN_KEY) continue;
+    const w = workForKey(key);
+    if (w && w !== work && !w.startsWith('n:')) others.add(w);
+  }
+  if (!others.size) return work;
+  const all = [work, ...others];
+  const perService = new Map<string, Set<string>>();
+  for (const w of all) perService.set(w.slice(0, 3), new Set([...(perService.get(w.slice(0, 3)) ?? []), w]));
+  if ([...perService.values()].some((ids) => ids.size > 1)) return work;
+  const keep = all.slice().sort((a, b) => rank(a) - rank(b))[0];
+  const moved = all.filter((w) => w !== keep);
+  if (moved.length) {
+    await q('UPDATE title_works SET work = $1 WHERE work = ANY($2::text[])', [keep, moved]);
+    for (const kn of known.values()) if (kn.work && moved.includes(kn.work)) kn.work = keep;
+  }
+  return keep;
+}
+
 /** A name's answer, kept; then every other name the answer gave, placed with the same work. */
-async function store(k: string, work: string | null, via: string, names: readonly string[]): Promise<void> {
+async function store(k: string, answer: string | null, via: string, names: readonly string[]): Promise<void> {
+  const work = answer ? await joined(answer, k, names) : null;
   await q(
     `INSERT INTO title_works (key, work, via, checked_at) VALUES ($1, $2, $3, now())
      ON CONFLICT (key) DO UPDATE SET work = EXCLUDED.work, via = EXCLUDED.via, checked_at = now()`,

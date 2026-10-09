@@ -42,6 +42,7 @@ const LISTS: Record<string, Array<{ sourceId: string; title: string }>> = {
     { sourceId: 'a-solo', title: 'Solo Leveling' },
     { sourceId: 'a-new', title: 'Brand New Tale' },
     { sourceId: 'a-onb', title: 'Followed Work On B' },
+    { sourceId: 'a-right', title: 'Right?' },
   ],
   [B]: [
     { sourceId: 'b-held2', title: 'Held Tale Other Name' },
@@ -131,7 +132,8 @@ before(async () => {
              ($1, 'Fake di-a', 'Held Tale', 'Fake di-a/Held Tale', $4, 'a-held', 'en'),
              ($2, 'Fake di-a', 'Followed Work', 'Fake di-a/Followed Work', $4, 'a-followed', 'en'),
              ($3, 'Fake di-a', 'Linked Work', 'Fake di-a/Linked Work', $4, 'a-linked', 'en')`, [HELD, FOLLOWED, LINKED, A]);
-  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1, 'heldtaleothername', 'Held Tale Other Name', 'admin')`, [HELD]);
+  await q(`INSERT INTO series_alt_titles (series_id, norm, title, origin) VALUES ($1, 'heldtaleothername', 'Held Tale Other Name', 'admin'),
+             ($1, 'right', 'Right?', 'description')`, [HELD]);
   await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1, $2, 'b-follow', 'Followed Work On B')`, [FOLLOWED, B]);
   await q(`INSERT INTO series_trackers (series_id, provider, external_id, linked_by) VALUES ($1, 'anilist', '777', $2)`, [LINKED, admin]);
 
@@ -188,6 +190,9 @@ test('held by its source series, by another name, by a followed source and by it
   assert.equal(a.get('a-onb').owned, true, 'the name a followed source gives it, on another source');
   assert.equal(b.get('b-linked').owned, true, 'the work its AniList link says, under a name the library never used');
   assert.equal(a.get('a-new').owned, false);
+  // A short other name holds nothing: a description's reading split "…Makes Sense, Right?" into "Right?", an anthology's
+  // name. Reintroduce by keeping every other name in libraryIndex: true.
+  assert.equal(a.get('a-right').owned, false, 'a short other name holds nothing');
   assert.equal(a.get('a-new').work, 'n:brandnewtale', 'an unknown work is its name');
   assert.equal(a.get('a-held').work, b.get('b-held2').work, 'two names of one held series fold as one card');
   // The per-language answer the search's ribbon reads is unchanged beside it.
@@ -235,6 +240,41 @@ test('a name is asked of AniList, then MangaDex, then MangaUpdates, and only an 
   assert.equal(rows.get('nobodyknowsthis')?.work, null, 'asked of all three and no one knew it: stored as unknown');
   assert.deepEqual(asked.filter((x) => x.endsWith('Brand New Tale')), ['anilist:Brand New Tale', 'mangadex:Brand New Tale'],
     'AniList first; MangaUpdates never asked once MangaDex knew it');
+});
+
+test("two services' answers for one work become one, whichever is asked first", { skip }, async () => {
+  // The owner's Sword Clan series: one name on AniList, the other only on MangaUpdates, whose answer lists both.
+  const anilist = { anilist: [{ id: 183855, title: { english: 'Regressing As The Bastard Of The Sword Clan' }, synonyms: [] }] };
+  const mu = {
+    mu: [{ record: { series_id: 99, title: 'Regressed Life of the Ignoble Reincarnator' }, hit_title: 'Regressed Life of the Ignoble Reincarnator' }],
+    muSeries: { 99: { series_id: 99, associated: [{ title: 'Regressing As The Bastard Of The Sword Clan' }] } },
+  };
+  script = { 'Regressing As The Bastard Of The Sword Clan': anilist, 'Regressed Life of the Ignoble Reincarnator': mu };
+  await di.resolveName('regressingasthebastardoftheswordclan', 'Regressing As The Bastard Of The Sword Clan');
+  await di.resolveName('regressedlifeoftheignoblereincarnator', 'Regressed Life of the Ignoble Reincarnator');
+  // Reintroduce by storing each answer's own id (drop `joined`): the second reads mu:99, a card of its own.
+  assert.equal(di.workForKey('regressedlifeoftheignoblereincarnator'), 'al:183855', 'MangaUpdates joins the AniList work');
+  assert.equal((await q(`SELECT count(*)::int AS n FROM title_works WHERE work = 'mu:99'`))[0].n, 0, 'nothing left under the other id');
+
+  // The other order: MangaUpdates first places the AniList name under mu:, so it is never asked -- still one work.
+  await q('DELETE FROM title_works');
+  di.resetDiscoverIdentity();
+  di._setDiscoverPacing(0);
+  await di.resolveName('regressedlifeoftheignoblereincarnator', 'Regressed Life of the Ignoble Reincarnator');
+  assert.equal(di.workForKey('regressingasthebastardoftheswordclan'), di.workForKey('regressedlifeoftheignoblereincarnator'));
+
+  // Two AniList entries sharing a long name are two works: nothing is joined.
+  await q('DELETE FROM title_works');
+  di.resetDiscoverIdentity();
+  di._setDiscoverPacing(0);
+  script = {
+    'First Shared Work': { anilist: [{ id: 1, title: { english: 'First Shared Work' }, synonyms: ['A Very Shared Name'] }] },
+    'Second Shared Work': { anilist: [{ id: 2, title: { english: 'Second Shared Work' }, synonyms: ['A Very Shared Name'] }] },
+  };
+  await di.resolveName('firstsharedwork', 'First Shared Work');
+  await di.resolveName('secondsharedwork', 'Second Shared Work');
+  assert.equal(di.workForKey('firstsharedwork'), 'al:1');
+  assert.equal(di.workForKey('secondsharedwork'), 'al:2', 'two AniList entries are never joined');
 });
 
 test('a service that fails is not a miss: nothing is stored and the name is asked again', { skip }, async () => {
