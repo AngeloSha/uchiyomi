@@ -79,7 +79,17 @@ export function runAsync(cmd, args, { timeoutMs = 15 * 60_000, env, cwd } = {}) 
     c.stderr.on('data', (b) => { if (out.length < 1e6) out += b; });
     const t = setTimeout(() => c.kill(), timeoutMs);
     c.on('error', (e) => { clearTimeout(t); resolve({ code: null, out: out + String(e), ms: Date.now() - t0 }); });
-    c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, ms: Date.now() - t0 }); });
+    c.on('exit', (code) => {
+      clearTimeout(t);
+      // ⚠️ The pipes are not ours to wait for once the child has exited. The app's postgres.exe, started through
+      // pg_ctl, inherits every inheritable handle -- these two pipes included -- and outlives an app that was killed
+      // before its ordered stop, so the pipes never see EOF and would keep THIS script alive after its last line:
+      // smoke.mjs (release run 37964433491, attempt 2) recorded its FAIL at 10:00, then sat 25 minutes until the
+      // step was cancelled.
+      c.stdout.unref();
+      c.stderr.unref();
+      resolve({ code, out, ms: Date.now() - t0 });
+    });
   });
 }
 
