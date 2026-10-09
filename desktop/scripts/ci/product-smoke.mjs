@@ -40,7 +40,7 @@ const fails = [];
 const check = (name, ok, detail) => {
   results[name] = { ok, detail };
   if (!ok) fails.push(name);
-  console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 1500)}`);
+  console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail ?? null).slice(0, 1500)}`);
 };
 
 const fixture = readJson(join(OUT, 'engine-fixture.json'));
@@ -315,7 +315,7 @@ async function serverMode() {
   const check = (name, ok, detail) => {
     results[name] = { ok, detail };
     if (!ok) fails.push(name);
-    console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 1500)}`);
+    console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail ?? null).slice(0, 1500)}`);
   };
   const root = tmpRoot('server-mode');
   let srv = null;
