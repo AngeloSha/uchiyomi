@@ -1295,7 +1295,7 @@ again.
     source's icon (MangaDex once, whatever its languages).
   - Uchiyomi learns which names belong together by asking AniList, then MangaDex, then MangaUpdates once per name, in
     the background. It also uses every name your library knows a series by, and the other names a source's own page
-    lists. A card can fold into another a few seconds after the wall appears.
+    lists. A card can fold into another within a minute or so of the wall appearing, as answers come in.
   - *Newest*, *Popular* and *Trending* leave out everything your library already holds, in any language. That covers
     a series held under another name, followed on another source, or linked to the same AniList entry. Search still
     shows those, marked **✓ In library**.
