@@ -309,6 +309,10 @@ async function drain(): Promise<void> {
       if (!(await lookupsOn())) { queue.clear(); return; }
       const [k, title] = queue.entries().next().value as [string, string];
       queue.delete(k);
+      // Placed while it waited -- another name's answer listed it ("Solo Leveling" answered places "Only I Level Up") --
+      // so it is never asked about. Reintroduce by asking every queued name: "a name placed while it waited is not asked
+      // about" in discoverIdentity.int.test.ts finds AniList asked twice.
+      if (known.get(k)?.work) continue;
       asking.add(k);
       try {
         await resolveName(k, title);

@@ -277,6 +277,16 @@ test("two services' answers for one work become one, whichever is asked first", 
   assert.equal(di.workForKey('secondsharedwork'), 'al:2', 'two AniList entries are never joined');
 });
 
+test('a name placed while it waited is not asked about', { skip }, async () => {
+  script = { 'Queued First Name': { anilist: [{ id: 31, title: { english: 'Queued First Name' }, synonyms: ['Queued Second Name'] }] } };
+  await di.libraryIndex();
+  di.noteTitles(['Queued First Name', 'Queued Second Name']);
+  for (let i = 0; i < 100 && !di.workForKey('queuedsecondname'); i++) await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(di.workForKey('queuedsecondname'), 'al:31', 'placed by the first name\'s answer');
+  assert.deepEqual(asked.filter((x) => x.startsWith('anilist:')), ['anilist:Queued First Name'], 'the second name was never asked about');
+});
+
 test('a service that fails is not a miss: nothing is stored and the name is asked again', { skip }, async () => {
   script = { 'Shaky Name': { fail: 'anilist' } };
   await assert.rejects(di.resolveName('shakyname', 'Shaky Name'));
