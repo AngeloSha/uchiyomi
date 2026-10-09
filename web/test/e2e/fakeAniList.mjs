@@ -44,6 +44,13 @@ const ENTRIES = [
       synonyms: [], countryOfOrigin: 'JP', type: 'MANGA' },
   },
   {
+    // v0.56.0 (v560Walk.mjs): one series two fake sources name differently. AniList knows both names, so Discover shows
+    // one card carrying both sources once the name lookups have answered.
+    asked: ['disc solo leveling', 'disc only i level up'],
+    media: { id: 970003, title: { romaji: 'Disc Na Honjaman', english: 'Disc Solo Leveling', native: null },
+      synonyms: ['Disc Only I Level Up'], countryOfOrigin: 'KR', type: 'MANGA' },
+  },
+  {
     asked: ['walk nightfall'],
     media: { id: 970002, title: { romaji: 'Walk Nightfall', english: 'Walk Nightfall', native: null },
       synonyms: ['Nightfall (Walk)'], countryOfOrigin: 'KR', type: 'MANGA' },
@@ -86,6 +93,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'image/png', 'content-length': PNG.length });
       return res.end(PNG);
     }
+    // v0.56.0: MangaDex and MangaUpdates, as the rig points them here (up.sh): they know none of the walk's titles.
+    if (url.pathname.startsWith('/md/')) { log.push({ kind: 'mangadex', status: 200, s: url.searchParams.get('title') }); return sendJson(res, 200, { data: [] }); }
+    if (url.pathname.startsWith('/mu/')) { log.push({ kind: 'mangaupdates', status: 200 }); return sendJson(res, 200, { results: [] }); }
     if (req.method !== 'POST') return sendJson(res, 405, { errors: [{ message: 'POST only', status: 405 }] });
     const { query = '', variables = {} } = await bodyOf(req);
     const q = String(query);
@@ -95,6 +105,12 @@ const server = http.createServer(async (req, res) => {
       return answer('ids', 200, { data: { Page: { media: ids.map(byId).filter(Boolean).map(asListed) } } }, { ids });
     }
     if (/TRENDING_DESC/.test(q)) return answer('trending', 200, { data: { Page: { media: [] } } });
+    // v0.56.0: Discover's identity lookup (bff lib/anilist.ts WORKS), told apart by its novel filter: the entry, with its id
+    // and every name, for the app to keep only when one of them IS the name it asked about.
+    if (/format_not_in/.test(q)) {
+      const m = bySearch(variables.s);
+      return answer('works', 200, { data: { Page: { media: m ? [{ id: m.id, title: m.title, synonyms: m.synonyms }] : [] } } }, { s: variables.s });
+    }
     if (/Page\(/.test(q) && /search:\$s/.test(q)) {
       const m = bySearch(variables.s);
       return answer('candidates', 200, { data: { Page: { media: m ? [{ title: m.title, coverImage: { extraLarge: picture('cover', m.id) }, bannerImage: picture('banner', m.id) }] : [] } } }, { s: variables.s });

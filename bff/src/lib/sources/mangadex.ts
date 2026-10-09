@@ -9,7 +9,11 @@ import { SourceAdapter, SourceSeries, SourceChapter } from './types';
 import { directionFromLanguage } from '../directionSignals';
 import { canonLang, langLabel, mdLang } from '../lang';
 
-const API = 'https://api.mangadex.org';
+/**
+ * Where MangaDex's API is: MANGADEX_API_URL moves it (v0.56.0), a test knob like ANILIST_API_URL -- the browser walk points it
+ * at a fake, so Discover's name lookups never ask the real MangaDex about a walk's made-up titles. Unset, MangaDex's own.
+ */
+const API = (process.env.MANGADEX_API_URL || 'https://api.mangadex.org').replace(/\/+$/, '');
 const HEADERS = { 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)' };
 const RATINGS = ['safe', 'suggestive', 'erotica'].map((r) => `contentRating[]=${r}`).join('&');
 

@@ -131,6 +131,14 @@ const OWNER = [
   ...(EXTRA.has('v551') && NAME === 'fake-c' ? [{ sourceId: 'limit-walk', title: 'Limit Walk', first: 1, last: 12 }, { sourceId: 'moved-walk', title: 'Moved Walk', first: 1, last: 12 }] : []),
   ...(EXTRA.has('v551') && NAME === 'fake-d' ? [{ sourceId: 'moved-walk', title: 'Moved Walk', first: 1, last: 12 }, { sourceId: 'fix-search', title: 'Fix Search', first: 1, last: 12 }] : []),
 ];
+// ⚠️ v0.56.0 (`--extra v56`, on BOTH fakes): v560Walk.mjs's Discover. One series the two fakes name differently (the fake
+// AniList knows both names), and one the walk adds to the library and then expects to be gone from the wall.
+const DISCOVER = EXTRA.has('v56')
+  ? [
+    NAME === 'fake-a' ? { sourceId: 'disc-solo', title: 'Disc Solo Leveling', first: 1, last: 12 } : { sourceId: 'disc-only', title: 'Disc Only I Level Up', first: 1, last: 12 },
+    { sourceId: 'disc-held', title: 'Disc Held Tale', first: 1, last: 12 },
+  ]
+  : [];
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
@@ -141,6 +149,7 @@ const SERIES = [
   ...SWAPS,
   ...FIXES,
   ...OWNER,
+  ...DISCOVER,
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 

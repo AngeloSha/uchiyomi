@@ -142,7 +142,9 @@ if [ "$SOLVERS" = "1" ]; then
 else
   CLOUDFLARE_B="no"
 fi
-if [ "$ANILIST" = "1" ]; then APP_ENV+=(-e "ANILIST_API_URL=http://$ANILIST_C:$ANILIST_PORT/"); fi
+# v0.56.0: Discover's name lookups ask MangaDex and MangaUpdates after AniList; the fake answers both with nothing, so a
+# walk never asks the real ones about its made-up titles.
+if [ "$ANILIST" = "1" ]; then APP_ENV+=(-e "ANILIST_API_URL=http://$ANILIST_C:$ANILIST_PORT/" -e "MANGADEX_API_URL=http://$ANILIST_C:$ANILIST_PORT/md" -e "MANGAUPDATES_API_URL=http://$ANILIST_C:$ANILIST_PORT/mu"); fi
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT}$([ "$OWNER" = "1" ] && echo ", fake-c/fake-d on :$FAKE_C_PORT/:$FAKE_D_PORT")$([ "$SOLVERS" = "1" ] && echo ", solvers on :$SOLVER_MAIN_PORT/:$SOLVER_BACKUP_PORT")$([ "$ANILIST" = "1" ] && echo ", fake AniList on :$ANILIST_PORT") (library $LIB, data $DATA)"; return; }

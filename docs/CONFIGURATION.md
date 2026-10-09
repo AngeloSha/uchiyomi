@@ -106,7 +106,8 @@ one card and one you already have stays out of the browsing views. Each name is 
 AniList first, then MangaDex (`api.mangadex.org`), then MangaUpdates (`api.mangaupdates.com`), and the answer is
 kept. These carry your server's IP address and the title shown in Discover, nothing about your library. Switch them
 off with **Match Discover titles online** under Admin → Settings; cards then fold by their names alone.
-`MANGAUPDATES_API_URL` is a test knob like the ones below (default `https://api.mangaupdates.com/v1`).
+`MANGADEX_API_URL` and `MANGAUPDATES_API_URL` are test knobs like the ones below (defaults `https://api.mangadex.org`
+and `https://api.mangaupdates.com/v1`); `MANGADEX_API_URL` moves every MangaDex request, the MangaDex sources' included.
 
 `ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL` are **test knobs**: they point an adapter at a
 stand-in server instead of the real service (the defaults are `https://graphql.anilist.co`,
