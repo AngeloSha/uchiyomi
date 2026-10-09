@@ -210,6 +210,7 @@ the scheduled source check also read the source's slow streak, so `diagnosis.cod
 (*This source answers, but takes longer than the time it is given.*; before v0.49.1 *…but more slowly than it is
 given.*) from both, not only from Discover's health view;
 its `fix` names the configured `SOURCE_LATEST_TIMEOUT_MS` budget in seconds (*longer than 8s*).
+Since v0.55.10 a streak counts there only while its last over-budget answer is under a day old.
 Since v0.49.1 `diagnosis.code` can be `site_offline` (*The site says it is offline (its own page)*; fix *Wait for
 the site to come back, or find other sources for its series.*): a site engine (Madara, Manganato) that finds
 nothing on a page checks whether the page is the site's own offline or maintenance notice -- small (under 8 KB),

@@ -14,7 +14,7 @@ import { env } from '../env';
 import type { SourceAdapter } from './sources/types';
 import { smokeTest, probeBase, buildProbe, type SmokeResult } from './sourceProbe';
 import { diagnose, currentError, type Diagnosis, type DiagnosisCode, type Probe } from './sourceDiagnosis';
-import { recordLive, type SourceHealth } from './sourceHealth';
+import { recordLive, slowStreakNow, type SourceHealth } from './sourceHealth';
 import { liveStagesPatch, type Stage } from './sourceEvidence';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 
@@ -66,7 +66,8 @@ export async function checkSourceLive(src: SourceAdapter, opts: { by: 'test' | '
       lastOkAt: h?.last_ok_at ?? null,
       emptyStreak: h?.empty_streak ?? 0,
       blockedUntil: h?.blocked_until ?? null,
-      slowStreak: h?.slow_streak ?? 0,
+      // While somebody is still running into it: a streak nobody has added to in a day is history (v0.55.10).
+      slowStreak: slowStreakNow(h),
       // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number.
       budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
       disabled: !!h?.disabled,

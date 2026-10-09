@@ -105,7 +105,7 @@ import { learnTypeFromSource, learnTypeFromAniListWith } from '../lib/seriesType
 import { linkSeriesWith } from '../lib/trackers';
 import { noticeListed } from '../lib/noticeChapters';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage, slowStreakNow } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import {
   gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
@@ -2254,13 +2254,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
       content: show.map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
-        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT || (h?.slow_streak ?? 0) >= EMPTY_SUSPECT;
+        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT || slowStreakNow(h, now) >= EMPTY_SUSPECT;
         const d = (blocked || suspect) && h
           ? diagnose({
               status: h.status, lastError: h.last_error, consecutive: h.consecutive,
               lastOkAt: h.last_ok_at, emptyStreak: h.empty_streak ?? 0,
               blockedUntil: h.blocked_until, disabled: !!h.disabled,
-              slowStreak: h.slow_streak ?? 0, budgetMs: LATEST_TIMEOUT,
+              slowStreak: slowStreakNow(h, now), budgetMs: LATEST_TIMEOUT,
             })
           : null;
         return {

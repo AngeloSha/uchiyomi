@@ -31,7 +31,9 @@ import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
-import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
+import { slowStreakNow } from './sourceHealth';
+import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
+import { longStrip, type PageDim } from './longStrip';
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
 import { applyIgnores, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
@@ -701,22 +703,54 @@ async function numberingCheck(): Promise<HealthCheck | null> {
   };
 }
 
-/** Whole-numbered chapters that turned out to be one or two images: almost always a failed download. */
+/** The most chapters one report reads page sizes from: the rest are measured by the next report (the cache keeps them). */
+const MEASURE_PER_REPORT = 100;
+
+/**
+ * A short chapter's page sizes: the reader's cache (lib_books.page_dims, lib/ownedCatalog.ts bookPages), else read from
+ * the file and cached the same way, so the next report and the reader open nothing. Null for a file that cannot be read,
+ * or past this report's share of reads (`budget`): a chapter not measured stays a finding.
+ */
+async function measured(
+  r: { id: string; root: string | null; file: string; page_dims: PageDim[] | null }, budget: { left: number },
+): Promise<PageDim[] | null> {
+  if (Array.isArray(r.page_dims) && r.page_dims.length) return r.page_dims;
+  if (budget.left <= 0) return null;
+  budget.left--;
+  const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => []);
+  if (!dims.length) return null;
+  // Only an empty cache: the reader may have written the same thing meanwhile.
+  await q('UPDATE lib_books SET page_dims = $1 WHERE id = $2 AND page_dims IS NULL', [JSON.stringify(dims), r.id]).catch(() => {});
+  return dims;
+}
+
+/**
+ * Whole-numbered chapters that turned out to be one or two images: almost always a failed download.
+ *
+ * Not a chapter stitched into one or two long strips (v0.55.10, lib/longStrip.ts): on the live server 6 of the 20 were,
+ * Eleceed 215 two 689 × 54,000 strips among them, and a file in the read library is never the repair's to look at, so
+ * they stayed findings until somebody pressed "It's fine" on each. Reintroduce by dropping the `longStrip` test: "a
+ * chapter stitched into long strips is not short" in health.int.test.ts finds it listed.
+ */
 async function shortChapters(): Promise<HealthCheck> {
   // Decimal chapters are excluded on purpose: ".5" entries are usually author notices, legitimately 1 page.
   // A tombstone is excluded too -- those bytes are gone on purpose (or already reported as missing by the
   // verify task), and a page count taken before they went says nothing about anything anybody can fix.
-  const rows = await q<{
+  const found = await q<{
     id: string; series_id: string; title: string; folder: string; number: number; pages: number;
     root: string | null; file: string; short_confirmed_at: string | null; missing_pages: number[] | null;
     short_result: { at?: string; why?: string; asked?: number; answered?: number; best?: number; hunt?: string; by?: string | null } | null;
+    page_dims: PageDim[] | null;
   }>(
     `SELECT b.id, b.series_id, ls.title, ls.folder, b.number::float8 AS number, b.pages, b.root, b.file,
-            b.short_confirmed_at, b.missing_pages, b.short_result
+            b.short_confirmed_at, b.missing_pages, b.short_result, b.page_dims
        FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ${visibleToAll('ls')}
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number) AND b.pruned_at IS NULL
       ORDER BY ls.title, b.number`,
   );
+  const budget = { left: MEASURE_PER_REPORT };
+  const rows: typeof found = [];
+  for (const r of found) if (!longStrip(await measured(r, budget))) rows.push(r);
   const item = (r: typeof rows[number]): HealthItem => {
     // "Fix" replaces the file, so it is offered ONLY for a file this server downloaded and named itself:
     // the download root, under exactly the name chapterFileRel writes. Somebody's own copy in the read
@@ -1148,7 +1182,9 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
   // that made the page cry wolf are exactly what the streak rule filters out.
   const unused = (r: typeof rows[number]) =>
     !r.disabled && r.series === 0 && !(r.blocked_until && new Date(r.blocked_until).getTime() > now);
-  const traffic = (r: typeof rows[number]) => r.status !== 'ok' || r.empty_streak >= 3 || r.slow_streak >= 3;
+  // A slow streak counts while somebody is still running into it (lib/sourceHealth.ts slowStreakNow, v0.55.10): one
+  // evening's slow searches held the card amber for six days of fast answers.
+  const traffic = (r: typeof rows[number]) => r.status !== 'ok' || r.empty_streak >= 3 || slowStreakNow(r, now) >= 3;
   const WEEK = 7 * DAY_MS;
   const items: Array<HealthItem & { members?: string[] }> = [];
   for (const row of rows) {
@@ -1196,7 +1232,7 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
       {
         status: r.status as any, lastError: currentError(r), consecutive: r.consecutive,
         lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0, blockedUntil: r.blocked_until, disabled: r.disabled,
-        slowStreak: r.slow_streak ?? 0, budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
+        slowStreak: slowStreakNow(r, now), budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
       },
       // The confirmed failure is live evidence of the most specific kind: its stage and its own error.
       lead && !r.disabled ? { adapterOk: false, failure: { stage: lead.stage, kind: lead.kind, error: lead.error } } : undefined,

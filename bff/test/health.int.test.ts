@@ -11,6 +11,9 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -952,6 +955,89 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
     assert.match(c.note, /Counted nightly by the repair task/, 'the note no longer says only opened chapters count');
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_SHORT]);
+  }
+});
+
+const S_STRIP = 's_health_strip';
+
+/**
+ * A chapter stitched into one or two long strips is a whole chapter (v0.55.10, lib/longStrip.ts): on the live server 6 of
+ * the 20 "short" chapters were, Eleceed 215 two 689 x 54,000 strips among them, and a file in the read library is never
+ * the repair's to look at, so each stayed a finding until somebody pressed "It's fine". Measured from the file once, into
+ * the reader's cache. Reintroduce by dropping the `longStrip` test in shortChapters(): chapter 1 is listed.
+ */
+test('a chapter stitched into long strips is not short', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const sharp = (await import('sharp')).default;
+  const AdmZip = require('adm-zip');
+  await migrate();
+  const root = mkdtempSync(join(tmpdir(), 'uchi-strip-'));
+  const cbz = async (file: string, pages: Array<[number, number]>) => {
+    const z = new AdmZip();
+    for (const [i, [width, height]] of pages.entries()) {
+      z.addFile(`${String(i + 1).padStart(3, '0')}.png`, await sharp({ create: { width, height, channels: 3, background: '#777' } }).png().toBuffer());
+    }
+    mkdirSync(join(root, S_STRIP), { recursive: true });
+    writeFileSync(join(root, file), z.toBuffer());
+  };
+  await q('DELETE FROM lib_series WHERE id = $1', [S_STRIP]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Strip Fixture',$1)`, [S_STRIP]);
+  const book = (n: number, pages: number) =>
+    q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages, root) VALUES ($1,$2,'test',$3,$4,$5,$6,$7)`,
+      [`b_${S_STRIP}_${n}`, S_STRIP, `${S_STRIP}/Ch ${n}.cbz`, `Chapter ${n}`, n, pages, root]);
+  // Two strips 7 widths tall each, 14 together; a credits banner wider than tall; a notice 5.4 widths tall.
+  await cbz(`${S_STRIP}/Ch 1.cbz`, [[10, 70], [10, 70]]);
+  await cbz(`${S_STRIP}/Ch 2.cbz`, [[76, 44]]);
+  await cbz(`${S_STRIP}/Ch 3.cbz`, [[20, 108]]);
+  await book(1, 2);
+  await book(2, 1);
+  await book(3, 1);
+  await book(4, 1); // its file is gone: nothing to measure
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'short-chapters');
+    const listed = (n: number) => c.items.some((i: any) => i.bookId === `b_${S_STRIP}_${n}`);
+    assert.equal(listed(1), false, 'two long strips are a whole chapter');
+    assert.ok(listed(2), 'a banner wider than tall is what a failed download leaves');
+    assert.ok(listed(3), 'and so is a notice five widths tall');
+    assert.ok(listed(4), 'a chapter that cannot be measured stays a finding');
+    const [cached] = await q<{ page_dims: Array<{ width: number; height: number }> }>(
+      'SELECT page_dims FROM lib_books WHERE id = $1', [`b_${S_STRIP}_1`]);
+    assert.deepEqual(cached.page_dims.map((d) => [d.width, d.height]), [[10, 70], [10, 70]], "measured once, into the reader's cache");
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_STRIP]);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * "It keeps taking longer than 15 s" is about browsing today (v0.55.10, lib/sourceHealth.ts slowStreakNow): one evening's
+ * slow searches through a busy solver held four sources on the card for six days of fast answers. Reintroduce by reading
+ * `slow_streak` as stored in sourceTrouble(): the six-day-old streak is listed.
+ */
+test('a slow streak nobody has added to in a day is no finding', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const SRC = 'hs-slow-stale', S = 's_health_slow_stale';
+  await q('DELETE FROM lib_series WHERE id = $1', [S]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, source_id) VALUES ($1,'test','Slow Fixture',$1,$2)`, [S, SRC]);
+  await q(`INSERT INTO source_health (source_id, slow_streak, last_slow_at, last_error)
+           VALUES ($1, 5, now() - interval '6 days', 'timeout after 15000ms')`, [SRC]);
+  try {
+    const row = async () => (await runHealthChecks()).checks.find((x: any) => x.id === 'sources').items.find((i: any) => i.sourceId === SRC);
+    assert.equal(await row(), undefined, 'six days on, a slow streak says nothing about the next search');
+    await q(`UPDATE source_health SET last_slow_at = now() - interval '1 hour' WHERE source_id = $1`, [SRC]);
+    const fresh = await row();
+    assert.ok(fresh, 'while somebody is still running into it, it is listed');
+    assert.equal(fresh.state, 'slow');
+    assert.notEqual(fresh.info, true, 'and it is a finding: a series uses the source');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S]);
+    await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
   }
 });
 

@@ -20,7 +20,7 @@ import type { SourceAdapter, SourceSeries } from './sources/types';
 import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
-import { classify, noteStage, reportFail, reportSlow, type SourceHealth } from './sourceHealth';
+import { classify, noteStage, reportFail, reportSlow, reportTimely, type SourceHealth } from './sourceHealth';
 import { canonLang } from './lang';
 
 /** An env knob: a finite number at or above `min`, else the default. An empty string is unset. */
@@ -169,8 +169,11 @@ function cancelEntry(entry: Entry): void {
   wake(entry);
 }
 
-/** Ask one source, under a slot, and write what it said into the entry. Never throws: the state is the report. */
-async function askOne(entry: Entry, src: SourceAdapter, term: string): Promise<void> {
+/**
+ * Ask one source, under a slot, and write what it said into the entry. Never throws: the state is the report. `slow`:
+ * the health read this search made shows the source on a slow streak, which an answer inside the budget ends.
+ */
+async function askOne(entry: Entry, src: SourceAdapter, term: string, slow = false): Promise<void> {
   const cell = entry.per.get(src.id)!;
   const lane = laneFor(src);
   if (!(await lane.take(entry))) return;
@@ -185,6 +188,10 @@ async function askOne(entry: Entry, src: SourceAdapter, term: string): Promise<v
     Object.assign(cell, { state: items.length ? 'ok' : 'empty', items, ms: Date.now() - t0, settledAt: Date.now() });
     // #115: a search that found something is evidence the search stage works (non-escalating, throttled).
     if (items.length) void noteStage(src.id, 'search', 'ok');
+    // v0.55.10: in time, found or not, so a slow streak ends here (lib/sourceHealth.ts reportTimely) -- asked only of a
+    // source on one, since for every other source the write would change nothing. Reintroduce by dropping it: "a search
+    // answered in time ends the slow streak" in searchAll.int.test.ts reads the streak still counting.
+    if (slow) void reportTimely(src.id);
   } catch (e) {
     // Two different facts, recorded two different ways, exactly as the newest listing records them (see
     // routes/sources.ts latestPage): outrunning OUR budget is counted and at worst earns a short fixed
@@ -260,7 +267,7 @@ export async function searchAll(
     if (h?.disabled) { skipped.set(id, 'disabled'); continue; }
     if (h?.blocked_until && new Date(h.blocked_until).getTime() > callStart) { skipped.set(id, 'cooldown'); continue; }
     entry.per.set(id, { state: 'pending', items: [] });
-    void askOne(entry, byId.get(id)!, term);
+    void askOne(entry, byId.get(id)!, term, (h?.slow_streak ?? 0) > 0);
   }
 
   // Wait for the earliest of: everything mine settled, my own wait, or the grace after the first source

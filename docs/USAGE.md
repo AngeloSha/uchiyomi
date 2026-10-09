@@ -1682,6 +1682,10 @@ numbers that can't be real, series waiting for a renumbering review, any source 
 extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
 v0.49.1 the page says the server's findings in your language, with dates and times in your own time zone.
 
+Since v0.55.10 a chapter stitched into one or two long strips (its images together at least ten times as tall as they
+are wide) is a whole chapter, not a short one: Health measures such a chapter's pages once, as the reader does, and
+leaves it off the short-chapter card. A placeholder, an ad or a credits banner is still listed.
+
 Since v0.41.0 every finding also carries the key that fixes it, and most of them fix themselves overnight
 without you pressing anything. Since v0.48.3:
 
@@ -2998,7 +3002,9 @@ anything. Running the engine yourself? That works too, or set both on that conta
 **A source says it answers, but takes longer than the time it is given.** The source is up but keeps taking longer
 than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button
 and the daily source check report this too, not only Discover's health view. Raise the budget if the wait is
-acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.
+acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part. Since v0.55.10 the
+streak ends with the next answer in time, a Discover search's included, and Health stops listing a source a day after
+anybody last waited on it.
 
 **Scrolling stutters, or moving between pages feels slow, on this computer.** Turn on **Profile → Settings →
 Appearance → Reduce effects** (since v0.43.0). It is the performance mode, and off by default, because the
