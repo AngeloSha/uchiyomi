@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3539
+    "strings": 3541
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3542,5 +3542,7 @@
   "This cleanup keeps running if you close this window or reload the page.": "Esta limpeza continua em execução se você fechar esta janela ou recarregar a página.",
   "Results": "Resultados",
   "Updates stopped": "Atualizações interrompidas",
-  "Home {n}": "Início {n}"
+  "Home {n}": "Início {n}",
+  "Match Discover titles online": "Identificar online os títulos em Descobrir",
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "Ativado por padrão. Os títulos mostrados em Descobrir são consultados no AniList, no MangaDex e no MangaUpdates, uma vez em cada um e em segundo plano, para que uma série que várias fontes chamam por nomes diferentes apareça como um só cartão e uma que você já tem continue oculta. Desativado, só os próprios nomes são comparados e nada é enviado a lugar nenhum."
 }

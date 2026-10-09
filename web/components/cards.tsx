@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { img } from '@/lib/api';
 import { Book, Series } from '@/lib/types';
 import { chapterLabel, languageName, progressOf, relativeTime } from '@/lib/format';
@@ -10,6 +10,7 @@ import { coverTriplet } from '@/lib/theme';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay, IcPlus, IcWifiOff } from './icons';
 import { SourceIcon } from './SourcePicker';
+import { iconStack, type StackSource } from '@/lib/sourceGroups';
 import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { effectsReduced } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
@@ -275,10 +276,15 @@ export interface SourceItem {
   libraryLangs?: string[];
   /** The language the source declares, null when it says nothing (v0.52.0): the add dialog's language chip. */
   lang?: string | null;
-  /** >1 when the same title was found on several sources. */
-  providerCount?: number;
   /** A search result known to be 18+ (v0.55.4, #158): the small "18+" mark on its cover. */
   rating?: 'adult' | 'safe';
+  /**
+   * Which work this is (v0.56.0): `lib:<seriesId>`, `al:` / `mu:` / `md:` an online service's id, or `n:<name>` while
+   * the server has not placed the name. The wall folds by it (lib/wall.ts). Absent from an older server.
+   */
+  work?: string;
+  /** The library holds this work in any language (v0.56.0): the wall does not show it; search does, with its marks. */
+  owned?: boolean;
 }
 
 /**
@@ -291,19 +297,23 @@ export interface SourceItem {
  * Chrome is `SeriesTile`'s, deliberately, so the things you own and the things you could own read as one
  * system rather than as two grids that happen to be adjacent.
  */
-export function SourceCard({ item, sourceName, onAdd, eager }: {
+export function SourceCard({ item, providers, onAdd, eager }: {
   item: SourceItem;
   /**
-   * Shown as the source's favicon in a corner box, because a wall merged from several sources otherwise
-   * hides where a title came from. The name itself is the hover title only: as a text chip it was the
-   * loudest thing on the wall -- a dozen "MangaDex" labels over artwork -- and the add dialog names the
-   * source in words before anything is fetched.
+   * Every place the card can be added from (v0.56.0), drawn as up to three overlapping favicons in a corner box and a
+   * "+2" for the rest -- one per extension (`iconStack`), so MangaDex's languages are one icon. A wall merged from
+   * several sources otherwise hides where a title came from, and the stack says it without a word over the artwork:
+   * as a text chip a source's name was the loudest thing on the wall -- a dozen "MangaDex" labels over artwork -- and
+   * so was the "3 sources" badge this replaced. The names are the box's tooltip, and the card's description to a
+   * screen reader; the add dialog names each source in words before anything is fetched.
    */
-  sourceName?: string;
+  providers?: StackSource[];
   onAdd: () => void;
   eager?: boolean;
 }) {
   const owned = !!item.inLibrary;
+  const stack = providers?.length ? iconStack(providers) : null;
+  const stackId = useId();
   // An owned title opens its entry in the library; adding it again would only say "already there".
   const rootCls = 'group block w-full text-start disabled:cursor-default';
   const body = (
@@ -314,32 +324,36 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
           fallbackSrc={item.coverUrl || undefined}
           className="h-full w-full" imgClassName="transition-transform duration-500 group-hover:scale-[1.07]" />
 
-        {sourceName && (
-          <span title={sourceName} className="absolute end-1.5 top-1.5 z-10 grid place-items-center rounded-md bg-ink-950/80 p-1 backdrop-blur">
-            <SourceIcon id={item.source} name={sourceName} size={16} />
+        {/* The icons overlap the way the source chip's do (SourcePicker), each ringed in the box's own ground so the
+            overlap reads. One box, one row: with "+2" it is about 60 px on a 110-px phone tile. The "+2" is isolated left to
+            right like the 18+ mark below, or an Arabic line reads it "2+". */}
+        {stack && (
+          <span id={stackId} role="img" aria-label={stack.names} title={stack.names} data-source-stack={stack.icons.length + stack.more}
+            className="absolute end-1.5 top-1.5 z-10 flex items-center gap-1 rounded-md bg-ink-950/80 p-1 backdrop-blur">
+            <span className="inline-flex items-center">
+              {stack.icons.map((s, i) => (
+                <span key={s.id} className={`inline-flex ${i > 0 ? '-ms-1.5' : ''}`}>
+                  <SourceIcon id={s.id} name={s.name} size={16} ring="ring-1 ring-ink-950" />
+                </span>
+              ))}
+            </span>
+            {stack.more > 0 && <bdi dir="ltr" className="pe-0.5 text-[10px] font-semibold tabular-nums text-fog-200">+{stack.more}</bdi>}
           </span>
         )}
         {/* Known to be 18+ (v0.55.4, #158): a search for one title answers with whatever the sources hold, and an 18+ one
-            says so before it is opened. Below the source's icon when the wall shows one. The text is isolated left to
-            right, so the "+" stays where the translation puts it in an Arabic line -- on the text, not on the box: the
-            box's `end` would follow its own direction and land under the sources box at the other corner. */}
+            says so before it is opened. Below the source icons. The text is isolated left to right, so the "+" stays
+            where the translation puts it in an Arabic line -- on the text, not on the box: the box's `end` would follow
+            its own direction and land at the other corner, away from the icons it sits under. */}
         {item.rating === 'adult' && (
           <span data-rating-mark
-            className={`absolute end-1.5 ${sourceName ? 'top-9' : 'top-1.5'} z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-red-300 backdrop-blur`}>
+            className={`absolute end-1.5 ${stack ? 'top-9' : 'top-1.5'} z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-red-300 backdrop-blur`}>
             <bdi dir="ltr">{tr('18+')}</bdi>
-          </span>
-        )}
-        {/* A bare "3" in a corner said nothing; the word makes it the fact it is: the same title on three
-            sources, and the add dialog will offer the choice. */}
-        {(item.providerCount ?? 0) > 1 && !owned && (
-          <span className="absolute start-1.5 top-1.5 z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-accent backdrop-blur">
-            {tr('{n} sources', { n: item.providerCount ?? 0 })}
           </span>
         )}
 
         {/* Held in another language (v0.52.0): the card stays addable -- a new edition -- and says which language is
-            here, in the bottom-start corner the provider count's box mirrors. Codes, never names: "EN · ES" fits a
-            110-px tile. */}
+            here, in the bottom-start corner, across from the add button. Codes, never names: "EN · ES" fits a 110-px
+            tile. */}
         {!owned && !!item.libraryLangs?.length && (
           <span data-library-langs className="absolute bottom-1.5 start-1.5 z-10 max-w-[70%] truncate rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-fog-200 backdrop-blur">
             {tr('{langs} in library', { langs: item.libraryLangs.map(codeLabel).join(' · ') })}
@@ -363,7 +377,10 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
       </p>
     </>
   );
+  // The sources are the card's description: the name says what pressing it does, and a button's own content is not
+  // read out (its children are presentational), so a role="img" inside it needs pointing at to be heard at all.
+  const described = stack ? stackId : undefined;
   return owned && item.librarySeriesId
-    ? <Link href={`/series/?id=${encodeURIComponent(item.librarySeriesId)}`} aria-label={item.title} className={rootCls}>{body}</Link>
-    : <button type="button" onClick={onAdd} disabled={owned} aria-label={owned ? item.title : tr('Add to library')} className={rootCls}>{body}</button>;
+    ? <Link href={`/series/?id=${encodeURIComponent(item.librarySeriesId)}`} aria-label={item.title} aria-describedby={described} className={rootCls}>{body}</Link>
+    : <button type="button" onClick={onAdd} disabled={owned} aria-label={owned ? item.title : tr('Add to library')} aria-describedby={described} className={rootCls}>{body}</button>;
 }

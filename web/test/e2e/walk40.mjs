@@ -140,10 +140,8 @@ try {
   const progress = await page.$eval('[data-search-progress]', (el) => el.textContent || '').catch(() => '');
   check(/fake-b/.test(progress), 'progress names fake-b while it is pending', `progress line while fake-b was slow: ${JSON.stringify(progress)}`);
   const orderBefore = await cardTitles();
-  const folded = await waitFor(async () => {
-    const text = await bodyText();
-    return /2 sources/.test(text) && !(await page.$('[data-search-progress]'));
-  }, 10_000);
+  // Two icons on the card since v0.56.0, where a "2 sources" badge said it before.
+  const folded = await waitFor(async () => !!(await page.$('[data-source-stack="2"]')) && !(await page.$('[data-search-progress]')), 10_000);
   check(!!folded, 'fake-b folded into the existing card', 'late fake-b result did not fold in');
   const orderAfter = await cardTitles();
   check(orderBefore.every((title, i) => orderAfter[i] === title), 'late results did not reorder the wall', `order moved: ${orderBefore.join(' | ')} -> ${orderAfter.join(' | ')}`);
