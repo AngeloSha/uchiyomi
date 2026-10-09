@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.56.0 — 2026-10-10
+
+**Discover shows each series once, with every source that has it, and leaves out what you already have.**
+
+### One card per series
+
+- **Before:**
+  - Discover only merged two sources' copies of a series when their names matched letter for letter, after setting
+    aside case and punctuation.
+  - So "Solo Leveling (Webtoon)", "The Player Who Can't Level Up" against "Player Who Can't Level Up", "Pokémon" against
+    "Pokemon", and every completely different translation showed as separate cards.
+  - Titles in Korean or Japanese script dropped out of search entirely.
+- **Now:**
+  - Names are compared with accents, a "(…)" aside and a leading "The" set aside, in any script.
+  - Uchiyomi also asks which series a name is: AniList first, then MangaDex, then MangaUpdates, once per name, in the
+    background. It keeps every other name the answer lists, so "Solo Leveling" and "Only I Level Up" become one card.
+  - It also uses every name your library knows a series by, and the other names a source's own page lists.
+  - A card can fold into another within a minute or so of the wall appearing, as answers come in.
+- **The card shows each source's icon,** up to three plus "+N", instead of "{n} sources". MangaDex shows once, whatever
+  its languages.
+- **Only exact names count,** never "contains", so a spin-off like "Tokyo Ghoul:re" stays its own card.
+
+### Nothing you already have, while browsing
+
+- **Newest, Popular and Trending leave out every series your library holds,** in any language. Before, they were dimmed
+  with an *In library* ribbon.
+- **A series counts as held** when Discover's copy is:
+  - the very series on the very site you added or follow it from (still found after a site moves to a new address);
+  - any name it goes by, including what a followed source calls it;
+  - the same AniList entry.
+- **Search still shows them,** marked **✓ In library**, so searching for something you have finds it.
+- **Adding a series you already hold under another name** now asks first, as adding one with the same title always did.
+
+### Settings and privacy
+
+- **Admin → Settings → Match Discover titles online** switches the lookups off. Cards then fold by their names alone,
+  and nothing is sent anywhere.
+- **What the lookups send:** the title shown in Discover, and your server's address. Nothing about your library.
+
+### Upgrading
+
+- **Database:** additive only.
+  - a new table `title_works`;
+  - `server_settings.discover_lookups` (on by default);
+  - two indexes.
+
+  v0.55.11 runs on the same database, so going back is one line of your compose file.
+- **For scripts** ([api.md](docs/api.md)):
+  - Discover's items and cards carry `work` and `owned`.
+  - New: `GET /api/discover/works`.
+  - `MANGAUPDATES_API_URL` is a new test knob.
+
 ## v0.55.11 — 2026-10-09
 
 **The desktop app no longer freezes on an error box when you quit it.**
