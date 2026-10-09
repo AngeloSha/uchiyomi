@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.55.10 — 2026-10-09
+
+**Safari no longer races through a right-to-left series near the end of a volume and marks the skipped volumes read.
+Health stops calling long-strip chapters short, and stops listing a source as slow days after it last was.**
+
+### Reader: the end of a volume in Safari
+
+- **The bug:**
+  - In paged mode, reading right to left, the reader adds the next volume four pages before the end of the current one.
+  - Safari, on iPhone, iPad and Mac, then jumped to the same spot near the end of the new volume. That added the next
+    volume, and so on to the last one.
+  - Every volume it went past was marked read, and the change was sent to your trackers.
+  - Right to left is the default for Japanese series since v0.48.0. Chrome and Firefox were never affected.
+  - Reported by **@elydan** ([#180](https://github.com/AngeloSha/uchiyomi/issues/180)): on volume 5, Safari jumped to the
+    end of volume 8.
+- **Now:** the page you are on stays put when the next volume, the *Up Next* card or a loading error is added, and each
+  page turn moves exactly one page.
+- **If it happened to you:** mark the skipped volumes unread on the series page, and check your tracker's progress for that
+  series.
+
+### Health
+
+- **Short chapters:**
+  - A chapter whose one or two images together are at least ten times as tall as they are wide is a complete chapter
+    stitched into long strips, so it is no longer listed as short.
+  - Health measures those pages once, the way the reader does.
+  - Placeholders, ads and credits banners are still listed.
+  - On the maintainer's library this cleared 6 of 20 findings. Eleceed 215, for example, is two strips each about 54,000
+    pixels tall.
+- **Slow sources:**
+  - A Discover search that took too long counted toward a source being "slow", but a search that answered in time never
+    reset that count.
+  - So one evening of slow searches kept four working sources on the Health card for six days.
+  - A search that answers in time now resets the count. Health, the *Test* button and Discover's source list ignore slowness
+    nobody has run into for a day.
+
+### Smaller
+
+- **Dependencies:** fast-jwt 6.3.4.
+
+### Upgrading
+
+- **Database:** no change. v0.55.9 runs on the same database, so going back is one line of your compose file.
+- **For scripts:** `diagnosis.code` `too_slow` now comes only from slowness seen in the last day.
+
 ## v0.55.9 — 2026-10-09
 
 **New chapters download again for a series whose own source is an extension marked 18+.**
