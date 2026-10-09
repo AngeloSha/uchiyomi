@@ -794,6 +794,11 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Borrow chapter names from other sources')}
         help={tr('Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.')}
         on={data.borrow_names === true} onChange={(next) => save({ borrowNames: next })} />
+      {/* v0.56.0: Discover's names looked up on AniList, MangaDex and MangaUpdates, beside the other row that sends titles
+          off the server. ON by default, which `!== false` reads as: a server that does not send the key yet looks them up. */}
+      <SwitchRow label={tr('Match Discover titles online')}
+        help={tr('On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.')}
+        on={data.discover_lookups !== false} onChange={(next) => save({ discoverLookups: next })} />
       <SwitchRow label={tr('Upgrade chapters to a preferred group')}
         help={tr('Off by default. Once a night, a chapter you already have from another group is replaced when a group you rank higher releases it on a source the series follows — only files Uchiyomi downloaded itself, never with a copy that has fewer pages, never a chapter someone picked a version for by hand, and at most ten a night unless the server is told otherwise. Reading progress is kept.')}
         on={data.group_upgrade === true} onChange={(next) => save({ groupUpgrade: next })} />

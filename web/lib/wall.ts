@@ -1,14 +1,22 @@
-// One card per title on the Discover wall, the way search-all already groups server-side.
+// One card per work on the Discover wall, the way search-all already groups server-side.
 //
 // The wall is six sources' newest lists flattened in arrival order, and popular titles are on most of
 // them, so the same series sat on the wall three or four times under slightly different spellings (issue
-// #36). Search never had this problem: `/api/sources/search-all` folds its hits by normalised title into one
-// card carrying every provider, and the card's badge says how many. The wall gets the same fold here, in
-// the client, because its rows arrive one source at a time and nothing already on screen may move -- so the
-// first source to land a title keeps the card, and later sources only join its provider list.
+// #36). Search never had this problem: `/api/sources/search-all` folds its hits into one card carrying every
+// provider. The wall gets the same fold here, in the client, because its rows arrive one source at a time and
+// nothing already on screen may move -- so the first source to land a title keeps the card, and later sources
+// only join its provider list.
+//
+// Since v0.56.0 the fold is by WORK rather than by spelling. The server names each row's work -- `lib:` a series the
+// library holds, `al:` / `mu:` / `md:` what AniList, MangaUpdates or MangaDex say the name is, `n:` a name it has not
+// placed yet -- so two sources that title one series differently make one card once a service says so. And the wall
+// hides every work the library holds, in any language: the owner's call, browsing is for what you do not have yet.
+// Search keeps those, under its "In library" ribbon. A name the server had not placed when it answered is asked about
+// again while the page is open (lib/useLiveWorks.ts); `applyWorks` lays the answers over the rows as they came.
 //
 // Split out of the page so it can be tested without a browser, like sourceGroups.ts.
 import { normTitle } from './normTitle';
+import type { SrcState } from './sourceGroups';
 import type { SourceItem } from '../components/cards';
 import type { Provider } from '../components/AddSeriesDialog';
 
@@ -18,34 +26,50 @@ export type WallProvider = Provider;
 export type WallItem = SourceItem;
 
 /**
- * Fold `items` to one card per title.
+ * Which work a row or a search group is: the server's `work`, or -- from an older server, which sends none -- the
+ * normalised title the wall folded by before v0.56.0. '' for a title that normalises to nothing and has no work.
+ */
+export const workKey = (it: { work?: string; title: string }): string => it.work || normTitle(it.title);
+
+/**
+ * Whether the wall shows a row at all (v0.56.0): never one whose work the library holds in any language, nor one added
+ * on this visit. `added` is keyed by work, like everything else here.
+ */
+export const shownOnWall = (it: { work?: string; title: string; owned?: boolean }, added: ReadonlySet<string>): boolean =>
+  !it.owned && !added.has(workKey(it));
+
+/**
+ * Fold `items` to one card per work, leaving out what the wall does not show (`shownOnWall`).
  *
- * - keyed by normTitle(title); a row that normalises to nothing (all punctuation, or empty) is passed through
+ * - keyed by workKey(); a row with no key (an older server's title that normalises to nothing) is passed through
  *   untouched rather than folded with every other such row
- * - the first arrival keeps the card, its `source:sourceId` key and its title, so nothing on screen reflows
+ * - the first arrival keeps the card, its `source:sourceId` key and its title, so nothing on screen reflows as sources
+ *   land. Only an answer about a work moves a card: into the earlier card of its work, or off the wall.
  * - `inLibrary` is AND-ed (v0.52.0, #72): the server says it per source, in that source's language, so a card is
- *   owned only when every provider's language is held -- an English Blue Lock in the library and a Spanish
- *   provider on the wall make a card that is still addable, as a new edition. It was OR-ed: owned on any source
- *   was owned, and the Spanish provider was folded under an "In library" card that opened the English series.
+ *   held only when every provider's language is held. It was OR-ed: held on any source was held, and a Spanish
+ *   provider was folded under an "In library" card that opened the English series.
  * - `libraryLangs` is the union of what the rows say the library holds the title in; `librarySeriesId` the first
  * - `coverUrl` comes from the first row that has one, as on the server
- * - one provider per source, in arrival order; `providerCount` is that list's length, which is what lights
- *   the badge on the card
+ * - one provider per source, in arrival order
  *
- * `groups` is what open() hands to the add dialog, keyed the same way search stores its groups -- and
- *   ordered by `rankOf`, not arrival, because the dialog labels its first provider "preferred": the fastest
- *   source to answer is not the one the page ranks first, and search-all orders its providers the same way.
+ * `groups` is what the card's icons and open() read, keyed by work the way search's groups are -- and ordered by
+ *   `rankOf`, not arrival, because the add dialog labels its first provider "preferred": the fastest source to
+ *   answer is not the one the page ranks first, and search-all orders its providers the same way.
  */
-export function foldByTitle(
+export function foldByWork(
   items: WallItem[],
   nameOf: (source: string) => string | undefined,
   rankOf: (source: string) => number = () => 0,
+  added: ReadonlySet<string> = new Set(),
 ): { items: WallItem[]; groups: Record<string, WallProvider[]> } {
   const out: WallItem[] = [];
   const groups: Record<string, WallProvider[]> = {};
   const slot = new Map<string, number>();
   for (const it of items) {
-    const key = normTitle(it.title);
+    // Held in some language, or added on this visit: not a card at all, rather than a dimmed one to scroll past.
+    // Reintroduce by dropping this line: "an owned row is on the wall" in wall.test.ts fails.
+    if (!shownOnWall(it, added)) continue;
+    const key = workKey(it);
     if (!key) { out.push(it); continue; }
     const provider: WallProvider = {
       source: it.source, name: nameOf(it.source) ?? it.source, sourceId: it.sourceId, title: it.title, coverUrl: it.coverUrl,
@@ -55,7 +79,7 @@ export function foldByTitle(
     if (i === undefined) {
       slot.set(key, out.length);
       groups[key] = [provider];
-      out.push({ ...it, providerCount: 1 });
+      out.push(it);
       continue;
     }
     const providers = groups[key];
@@ -76,8 +100,92 @@ export function foldByTitle(
       ...(langs.length ? { libraryLangs: langs } : {}),
       librarySeriesId: card.librarySeriesId || it.librarySeriesId,
       coverUrl: card.coverUrl || it.coverUrl,
-      providerCount: providers.length,
     };
   }
   return { items: out, groups };
+}
+
+/**
+ * How many of a listing's settled sources the wall counts as empty: the page asks one more source for each.
+ *
+ * By what the wall SHOWS (v0.56.0): a source that answered with nothing or failed, and one whose whole answer the wall
+ * hides -- every row a work the library holds, or one added on this visit. Folding into another source's card is
+ * showing: that row's source is on the card. `states` are the listing's `[key, state]` pairs, `rows` its rows by the
+ * same keys, read through the server's later answers.
+ */
+export function emptiedCount(states: Array<[string, SrcState]>, rows: Readonly<Record<string, WallItem[]>>, added: ReadonlySet<string>): number {
+  return states.filter(([k, v]) => v === 'empty' || v === 'blocked' || !(rows[k] ?? []).some((it) => shownOnWall(it, added))).length;
+}
+
+/** What GET /api/discover/works says a key is now (v0.56.0): its current work, and whether the library holds it. */
+export interface WorkNow { work: string; owned: boolean }
+
+/**
+ * The rows with what the server has said about their works since they came (v0.56.0): an `n:` name it has placed since
+ * comes back as `al:…`, or as `lib:…` and owned, and the row takes the answer's work and `owned` -- so the fold puts it
+ * on the card that work already has, or the wall drops it. Rows with no new answer are the same objects; a changed one
+ * is a new object, never a write into the row the page holds in state.
+ */
+export function applyWorks<T extends { work?: string; owned?: boolean }>(rows: T[], works: Readonly<Record<string, WorkNow>>): T[] {
+  return rows.map((it) => {
+    const now = it.work ? works[it.work] : undefined;
+    return now && (now.work !== it.work || now.owned !== !!it.owned) ? { ...it, work: now.work, owned: now.owned } : it;
+  });
+}
+
+/**
+ * The works added on this visit, with what the server has placed each as since (v0.56.0): a card added while its name
+ * was `n:…` is still the card that was added once the answers make it `al:…`.
+ */
+export function followWorks(keys: ReadonlySet<string>, works: Readonly<Record<string, WorkNow>>): Set<string> {
+  const out = new Set(keys);
+  for (const k of keys) if (works[k]) out.add(works[k].work);
+  return out;
+}
+
+/** The works the server had not placed when it answered (`n:…`), each once: what the page asks about again. */
+export function unknownWorks(rows: Array<{ work?: string }>): string[] {
+  return [...new Set(rows.map((it) => it.work ?? '').filter((w) => w.startsWith('n:')))];
+}
+
+/** What a merge reads of search-all's groups (the Discover page's SearchGroup). */
+interface GroupLike {
+  title: string; coverUrl?: string; inLibrary?: boolean; librarySeriesId?: string; libraryLangs?: string[];
+  rating?: 'adult' | 'safe'; work?: string; owned?: boolean; providers: Array<{ source: string }>;
+}
+
+/**
+ * Search's groups, one per work (v0.56.0).
+ *
+ * The server merges its groups by work as it answers, so this changes nothing until a name it had not placed is placed
+ * while the results are on screen and two groups turn out to be one work. They merge the way the wall's fold merges
+ * rows: the first keeps its place, title and cover; the other's providers join it, one per source; held only when both
+ * are (the per-language rule), the library's languages the union, owned when either is, 18+ when either is.
+ */
+export function mergeGroups<G extends GroupLike>(groups: G[]): G[] {
+  const out: G[] = [];
+  const slot = new Map<string, number>();
+  for (const g of groups) {
+    const key = workKey(g);
+    const i = key ? slot.get(key) : undefined;
+    if (i === undefined) {
+      if (key) slot.set(key, out.length);
+      out.push(g);
+      continue;
+    }
+    const card = out[i];
+    const langs = [...new Set([...(card.libraryLangs ?? []), ...(g.libraryLangs ?? [])])];
+    const rating = card.rating === 'adult' || g.rating === 'adult' ? 'adult' : card.rating ?? g.rating;
+    out[i] = {
+      ...card,
+      providers: [...card.providers, ...g.providers.filter((p) => !card.providers.some((q) => q.source === p.source))],
+      inLibrary: !!card.inLibrary && !!g.inLibrary,
+      ...(langs.length ? { libraryLangs: langs } : {}),
+      librarySeriesId: card.librarySeriesId || g.librarySeriesId,
+      coverUrl: card.coverUrl || g.coverUrl,
+      owned: !!card.owned || !!g.owned,
+      ...(rating ? { rating } : {}),
+    } as G;
+  }
+  return out;
 }

@@ -15,9 +15,10 @@ import { SourceCard, SourceItem } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
-import { aloneEmpty, budgetForMode, type ListMode } from '@/lib/sourceGroups';
+import { aloneEmpty, budgetForMode, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
-import { foldByTitle, type WallProvider } from '@/lib/wall';
+import { applyWorks, emptiedCount, foldByWork, followWorks, mergeGroups, unknownWorks, workKey, type WallProvider } from '@/lib/wall';
+import { useLiveWorks } from '@/lib/useLiveWorks';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
@@ -28,11 +29,14 @@ import { useServerDownloads } from '@/lib/useServerDownloads';
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
  * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
  * (#158) `rating` says what the card is known to be -- 18+ when any provider's result is -- and is absent when nothing
- * says (most extensions name no genres in a search).
+ * says (most extensions name no genres in a search). Since v0.56.0 `work` is which work the group is -- the server
+ * merges its groups by it, so their providers' titles may differ -- and `owned` whether the library holds it in any
+ * language; both absent from an older server.
  */
 interface SearchGroup {
   title: string; coverUrl?: string; inLibrary?: boolean; librarySeriesId?: string; libraryLangs?: string[]; updatedAt?: string;
   rating?: 'adult' | 'safe';
+  work?: string; owned?: boolean;
   providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string; lang?: string | null; inLibrary?: boolean; rating?: 'adult' | 'safe' }[];
 }
 /** What a search shows (v0.55.4): everything, everything not known to be 18+, or only what is. */
@@ -145,7 +149,12 @@ export default function DiscoverPage() {
   const [order, setOrder] = useState<string[]>([]);
   const [states, setStates] = useState<Record<string, SrcState>>({});
   const [seed, setSeed] = useState<AddSeed | null>(null);
+  /**
+   * What this visit added, by work (v0.56.0; by title before): off the wall at once, and "In library" in a search, with
+   * no refetch. `fromKey` is the work of the card the open dialog came from -- null from the hero, which has none.
+   */
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const fromKey = useRef<string | null>(null);
 
   // Every source that can answer this listing, best first. A source that cannot answer the chosen listing is
   // not in the pool at all, the same way one without `latest` has never been. Popular is universal among
@@ -183,7 +192,17 @@ export default function DiscoverPage() {
     [listMode],
   );
 
-  const emptied = mine(states).filter(([, v]) => v === 'empty' || v === 'blocked').length;
+  // What the server has placed since it answered (v0.56.0). The names it had not (`n:…`) are asked about again while
+  // the wall is on screen (lib/useLiveWorks.ts), and every source's rows are read through the answers: a card joins
+  // the one its work already has, and one the library turns out to hold leaves the wall. An add follows its work.
+  const wallKeys = useMemo(() => unknownWorks(mine(byId).flatMap(([, list]) => list)), [byId, mine]);
+  const wallWorks = useLiveWorks(wallKeys, mayAdd && mode === 'newest');
+  const rows = useMemo(() => Object.fromEntries(mine(byId).map(([k, list]) => [k, applyWorks(list, wallWorks)])), [byId, mine, wallWorks]);
+  const wallAdded = useMemo(() => followWorks(added, wallWorks), [added, wallWorks]);
+
+  // Counted by what the wall SHOWS (v0.56.0): a source whose whole page the library already holds puts nothing on it,
+  // and earns its replacement like one that answered with nothing.
+  const emptied = emptiedCount(mine(states), rows, wallAdded);
   const budget = useMemo(
     () => ranked.slice(0, Math.min(ranked.length, 10, 6 + emptied)),
     [ranked, emptied],
@@ -257,9 +276,16 @@ export default function DiscoverPage() {
   useEffect(() => {
     if (adultOn && ratingAsked !== 'safe' && searchQ.data?.rating === 'safe') setCapped(true);
   }, [adultOn, ratingAsked, searchQ.data]);
-  // The grouped hits as wall rows, under today's mapping: the first provider's ids are the card's, the badge
-  // counts every provider. Derived, so a poll's answer replaces the rows without anything being cleared.
-  const searchHits = useMemo<SourceItem[]>(() => (searchQ.data?.content ?? []).flatMap((g) => {
+  // The search's own unplaced names, asked about while its results are on screen, as the wall's are (v0.56.0).
+  const searchKeys = useMemo(() => unknownWorks(searchQ.data?.content ?? []), [searchQ.data]);
+  const searchWorks = useLiveWorks(searchKeys, mayAdd && mode === 'search');
+  const searchAdded = useMemo(() => followWorks(added, searchWorks), [added, searchWorks]);
+  // The answer's groups read through what the server has placed since, one per work: two it could not tell apart when
+  // it answered are one card once it can (lib/wall.ts mergeGroups). Owned ones stay -- search shows what you have, with
+  // its ribbon. Derived, so a poll's answer replaces them without anything being cleared.
+  const searchGroups = useMemo(() => mergeGroups(applyWorks(searchQ.data?.content ?? [], searchWorks)), [searchQ.data, searchWorks]);
+  // The grouped hits as wall rows, under today's mapping: the first provider's ids are the card's.
+  const searchHits = useMemo<SourceItem[]>(() => searchGroups.flatMap((g) => {
     // With a source chosen the server has already asked only that one, so this is belt-and-braces: keep
     // the card only if that source is among its providers, and let that provider be the card's own, so
     // tapping it opens the source being browsed rather than whichever the fold happened to rank first.
@@ -268,21 +294,20 @@ export default function DiscoverPage() {
     return [{
       source: pick.source ?? '', sourceId: pick.sourceId ?? g.title,
       title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
-      inLibrary: g.inLibrary, librarySeriesId: g.librarySeriesId, providerCount: g.providers.length,
+      inLibrary: g.inLibrary, librarySeriesId: g.librarySeriesId,
+      ...(g.work ? { work: g.work } : {}),
       ...(g.libraryLangs ? { libraryLangs: g.libraryLangs } : {}), ...(pick.lang !== undefined ? { lang: pick.lang } : {}),
       ...(g.rating === 'adult' ? { rating: 'adult' as const } : {}),
     }];
-  }), [searchQ.data, selected]);
-  const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
-  // What each search stored, keyed the way the wall's own fold is, so open() offers the providers of a hit
-  // the same way it offers the providers of a folded card. Written from the answer, never from state.
-  useEffect(() => {
-    // Replace the submitted term's provider map rather than accumulating past searches. Two different
-    // searches can fold to the same normalised title; retaining the old entry would let a freshly painted
-    // card briefly open the previous search's providers before this answer added its own.
-    groupsRef.current = {};
-    (searchQ.data?.content ?? []).forEach((g) => { groupsRef.current[normTitle(g.title)] = g.providers; });
-  }, [searchQ.data]);
+  }), [searchGroups, selected]);
+  // Each hit's providers, keyed by work the way the wall's fold keys its own (by title until v0.56.0): what a card's
+  // icons draw and what open() offers. A memo of the answer, where open() alone once read a ref an effect filled: the
+  // icons read it while rendering, and there a ref is one answer behind.
+  const searchProviders = useMemo(() => {
+    const by: Record<string, WallProvider[]> = {};
+    for (const g of searchGroups) { const k = workKey(g); if (k) by[k] = g.providers; }
+    return by;
+  }, [searchGroups]);
   // How many sources the search is still waiting on, from the latest answer; zero in every other mode and
   // on an older server that does not report it.
   const stillAsking = mode === 'search' ? (searchQ.data?.pending ?? 0) : 0;
@@ -306,8 +331,8 @@ export default function DiscoverPage() {
   }, [mode, searchQ.data]);
 
   const wall = useMemo(() => {
-    // Search arrives already folded: the server grouped it and the effect above stored the groups in groupsRef.
-    if (mode === 'search') return { items: searchHits, groups: {} as Record<string, WallProvider[]> };
+    // Search arrives already folded: the server grouped it, and searchGroups merges what it has placed since.
+    if (mode === 'search') return { items: searchHits, groups: searchProviders };
     const seen = new Set<string>();
     const out: SourceItem[] = [];
     // Strict arrival order. Interleaving by rank would push already-read tiles down as a slow source lands.
@@ -316,18 +341,27 @@ export default function DiscoverPage() {
       // Filtering is display-only: everything stays loaded, this just decides what is shown. That is why
       // tapping a chip is instant and why it cannot strand the wall the way restarting it used to.
       if (selected && key !== `${listMode}:${selected}`) continue;
-      for (const it of byId[key] ?? []) {
+      for (const it of rows[key] ?? []) {
         const k = `${it.source}:${it.sourceId}`;
         if (seen.has(k)) continue;
         seen.add(k);
         out.push(it);
       }
     }
-    // Then one card per title, the way search already is. Folding AFTER the flatten keeps the arrival order:
-    // the first source to land a title keeps the card, later ones only join its provider list, so the
-    // badge lights and the add dialog offers a choice without anything on screen moving.
-    return foldByTitle(out, nameOf, rankOf);
-  }, [mode, listMode, selected, searchHits, order, byId, nameOf, rankOf]);
+    // Then one card per work, the way search already is, without what the library holds or this visit added.
+    // Folding AFTER the flatten keeps the arrival order: the first source to land a work keeps the card, later
+    // ones only join its provider list, so its icons grow and the add dialog offers a choice without anything
+    // on screen moving.
+    return foldByWork(out, nameOf, rankOf, wallAdded);
+  }, [mode, listMode, selected, searchHits, searchProviders, order, rows, nameOf, rankOf, wallAdded]);
+  // What this visit added, in the keys of the view on screen: each view follows the works through its own answers.
+  const shownAdded = mode === 'search' ? searchAdded : wallAdded;
+  // Each card's icons: every provider behind it, with the extension it came out of, so MangaDex's languages are one
+  // icon (lib/sourceGroups.ts iconStack). A row the fold passed through untouched is its one source.
+  const extOf = useMemo(() => new Map<string, SrcExtension | null>(sources.map((s) => [s.id, s.extension ?? null])), [sources]);
+  const stackOf = (it: SourceItem): StackSource[] =>
+    (wall.groups[workKey(it)] ?? [{ source: it.source, name: nameOf(it.source) ?? it.source }])
+      .map((p) => ({ source: p.source, name: p.name, extension: extOf.get(p.source) ?? null }));
 
   // Skeleton tiles: in search mode only until the FIRST answer (or a failure) -- after that the wall shows
   // what has landed and the progress line says what has not, so a skeleton would sit beside real tiles and
@@ -360,14 +394,15 @@ export default function DiscoverPage() {
   const backToNewest = () => { setQ(''); setMode('newest'); };
 
   const open = (it: SourceItem) => {
-    const key = normTitle(it.title);
+    const key = workKey(it);
     // Only a card held in every provider's language is done with (v0.52.0): one held in another language opens the
     // dialog, which offers the new language as an edition and says which the library has.
-    if (it.inLibrary || added.has(key)) return;
+    if (it.inLibrary || shownAdded.has(key)) return;
     // What the library holds of this title, for the dialog's "In your library in English" and its edition block.
     const library = it.librarySeriesId && it.libraryLangs?.length ? { seriesId: it.librarySeriesId, langs: it.libraryLangs } : undefined;
-    // The wall's own fold first, then what the last search stored: both are keyed the same way.
-    const providers = wall.groups[key] ?? groupsRef.current[key];
+    // Every provider behind the card: the wall's fold, or the search's groups -- both keyed by work.
+    const providers = wall.groups[key];
+    fromKey.current = key || null;
     if (providers?.length) setSeed({ kind: 'group', title: it.title, providers, ...(library ? { library } : {}) });
     else {
       setSeed({
@@ -607,9 +642,10 @@ export default function DiscoverPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10">
+        {/* Every card names its sources, one of them or five, in Newest, Popular and search alike (v0.56.0). */}
         {wall.items.map((it, i) => (
-          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || added.has(normTitle(it.title)) }}
-            sourceName={mode === 'newest' && order.length > 1 ? nameOf(it.source) : undefined}
+          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || shownAdded.has(workKey(it)) }}
+            providers={stackOf(it)}
             onAdd={() => open(it)} eager={i < 12} />
         ))}
         {Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
@@ -665,9 +701,13 @@ export default function DiscoverPage() {
           // Following a source is an admin act, like the manual follow route and the sheet's ×: a member
           // who may add must not be able to follow two sources they could never unfollow.
           mayFollow={isAdmin}
-          onClose={() => setSeed(null)}
+          onClose={() => { fromKey.current = null; setSeed(null); }}
           onAdded={(r) => {
-            setAdded((prev) => new Set(prev).add(normTitle(r.title)));
+            // The card the dialog came from, by its work: off the wall, "In library" in a search. From the hero there is
+            // no card, and every card under the added title goes, as the title flipped them before v0.56.0.
+            const title = normTitle(r.title);
+            const keys = fromKey.current ? [fromKey.current] : title ? wall.items.filter((c) => normTitle(c.title) === title).map(workKey) : [];
+            setAdded((prev) => new Set([...prev, ...keys.filter(Boolean)]));
             qc.invalidateQueries({ queryKey: ['source-jobs'] });
           }}
         />

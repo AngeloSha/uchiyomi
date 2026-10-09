@@ -130,21 +130,26 @@ test('the progress line names who is still being asked, three names then a count
 });
 
 test('the wall pins still hold, and the hits are derived from the answer', () => {
-  // wall.test.ts pins `return foldByTitle(out, nameOf, rankOf);` and `wall.groups[key] ??
-  // groupsRef.current[key]` byte for byte; both survive the rebuild, and the hits and the groups are now
-  // DERIVED from the answer (a memo and an effect on `searchQ.data`) rather than set by a handler, so a
-  // poll's answer replaces the rows without anything being cleared first. With a source chosen, a hit keeps
-  // only if that source is among its providers, and that provider is the card's own, so tapping it opens the
-  // source being browsed rather than whichever one the fold ranked first. Reintroduce by filling groupsRef
-  // inside the queryFn: "groups are not filled from the answer" fails; by going back to `providers[0]`
-  // regardless of the filter: "a hit's provider ignores the chosen source" fails.
+  // wall.test.ts pins `return foldByWork(out, nameOf, rankOf, wallAdded);` and `const providers =
+  // wall.groups[key];` byte for byte, and the hits and their providers are DERIVED from the answer (memos on
+  // `searchQ.data`, through `searchGroups`) rather than set by a handler, so a poll's answer replaces the rows
+  // without anything being cleared first. With a source chosen, a hit keeps only if that source is among its
+  // providers, and that provider is the card's own, so tapping it opens the source being browsed rather than
+  // whichever one the fold ranked first. The providers were a ref an effect filled until v0.56.0, keyed by title;
+  // they are a memo keyed by work now, since every card's icons read them while rendering and a ref is one answer
+  // behind there. Reintroduce by deriving the hits from `searchQ.data?.content` directly (skipping the merge):
+  // "the hits are not derived from the merged groups" fails; by going back to `providers[0]` regardless of the
+  // filter: "a hit's provider ignores the chosen source" fails; by keying the providers on normTitle(g.title):
+  // "providers are not keyed by work" fails.
   const src = read(PAGE);
-  assert.match(src, /return foldByTitle\(out, nameOf, rankOf\);/, 'the wall is not folded');
-  assert.match(src, /wall\.groups\[key\] \?\? groupsRef\.current\[key\]/, "open() does not read the wall's groups");
-  assert.match(code(src), /const searchHits = useMemo<SourceItem\[\]>\(\(\) => \(searchQ\.data\?\.content \?\? \[\]\)\.flatMap\(/, 'the hits are not derived from the answer');
+  assert.match(src, /return foldByWork\(out, nameOf, rankOf, wallAdded\);/, 'the wall is not folded');
+  assert.match(src, /const providers = wall\.groups\[key\];/, "open() does not read the wall's groups");
+  assert.match(code(src), /const searchHits = useMemo<SourceItem\[\]>\(\(\) => searchGroups\.flatMap\(/, 'the hits are not derived from the merged groups');
   assert.match(code(src), /const pick = selected \? g\.providers\.find\(\(p\) => p\.source === selected\) : g\.providers\[0\];/, "a hit's provider ignores the chosen source");
-  assert.match(code(src), /\}\), \[searchQ\.data, selected\]\);/, 'the hits are not re-derived when the chosen source changes');
-  assert.match(code(src), /useEffect\(\(\) => \{\s*groupsRef\.current = \{\};\s*\(searchQ\.data\?\.content \?\? \[\]\)\.forEach\(\(g\) => \{ groupsRef\.current\[normTitle\(g\.title\)\] = g\.providers; \}\);\s*\}, \[searchQ\.data\]\);/, 'groups are not replaced from the latest answer');
+  assert.match(code(src), /\}\), \[searchGroups, selected\]\);/, 'the hits are not re-derived when the chosen source changes');
+  assert.match(code(src), /const searchProviders = useMemo\(\(\) => \{\s*const by: Record<string, WallProvider\[\]> = \{\};\s*for \(const g of searchGroups\) \{ const k = workKey\(g\); if \(k\) by\[k\] = g\.providers; \}\s*return by;\s*\}, \[searchGroups\]\);/,
+    'providers are not keyed by work, or not derived from the latest answer');
+  assert.doesNotMatch(code(src), /groupsRef/, 'a ref of search providers is back: the icons would read it one answer behind');
 });
 
 test('the 18+ filter: three chips in search mode, sent and keyed, and an 18+ mark on what is 18+ (v0.55.4)', () => {
