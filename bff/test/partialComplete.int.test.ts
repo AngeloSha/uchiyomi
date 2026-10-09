@@ -327,6 +327,37 @@ test('the nightly completion pass treats the original partial as automatic, not 
   }
 });
 
+test("a clean series' partial is completed from the adult source it follows (v0.55.9)", { skip }, async () => {
+  // As #177's chosen copy: the adult rule is for the sources reached on a clean series' behalf. The partial's own copy
+  // is on the source the series follows, and the completion pass refused it, so a clean series on an extension
+  // marked NSFW never had its holes filled. Reintroduce by passing the adult rule as `allowed` in updater.ts's
+  // completion pass: nothing is completed and the hole stays.
+  const n = 30;
+  await q('UPDATE lib_books SET missing_pages = NULL WHERE series_id = $1', [S]);
+  await q('UPDATE lib_series SET auto_update = true, source_id = $2 WHERE id = $1', [S, ADULT_SRC]);
+  try {
+    failing.add(`c${n}/3`);
+    const err = await downloadChapter({ sourceId: ADULT_SRC, seriesFolder: FOLDER, chapter: { sourceId: `c${n}`, number: n }, meta: { series: 'Partial Complete' } })
+      .then(() => null, (e: any) => e);
+    assert.deepEqual(err?.partial?.missing, [3], 'PREMISE: the hold is offered');
+    const w = await err.partial.write();
+    await persistScan();
+    await setBookMeta(FOLDER, [{ number: n, source: ADULT_SRC, missing: w.missing.map((i: number) => i + 1) }]);
+    assert.equal((await row(n)).source_id, ADULT_SRC, 'PREMISE: the partial came from the adult source the series follows');
+    asked = [];
+    pageLists = [];
+    clearPace();
+    await q('DELETE FROM source_health WHERE source_id = $1', [ADULT_SRC]);
+    failing.delete(`c${n}/3`);
+    const r = await runUpdateAll({ maxNew: 5, sweepMax: 5 });
+    assert.equal(r.completed, 1, "the partial was completed from the series' own adult source");
+    assert.equal((await row(n)).missing_pages, null);
+    assert.deepEqual(asked, [`c${n}/3`], 'only the hole was asked for');
+  } finally {
+    await q('UPDATE lib_series SET source_id = $2 WHERE id = $1', [S, SRC]);
+  }
+});
+
 test('a newly blocked original partial is skipped in favour of an allowed alternate', { skip }, async () => {
   const b = await partial(22, 'Blocked Team');
   failing.delete('c22/3');

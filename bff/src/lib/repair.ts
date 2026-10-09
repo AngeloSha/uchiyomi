@@ -1028,7 +1028,9 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         const ask = async (chapter: SourceChapter): Promise<number | null> => {
           const sourceId = chapter.source ?? '';
           const src = getSource(sourceId);
-          if (!src || !allowed(sourceId)) return null;
+          // The chapter's own source answers to the follow, not to the adult rule (v0.55.9, as #177's chosen copy):
+          // a clean series on an extension marked NSFW had a short chapter nobody would ever ask about again.
+          if (!src || !(sourceId === book.source_id ? !resting(sourceId) : allowed(sourceId))) return null;
           if (await isDisabled(sourceId).catch(() => false)) return null;
           if (await blockedNow(sourceId).catch(() => null)) return null;
           if (unattended && !(await seriesIsMonitored(seriesId))) return null;
@@ -1036,7 +1038,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           // Everything above is a cheap filter. Re-read follow, blocklist, unattended state and health in one
           // last check immediately beside the outbound page-list call; a preference/unfollow race must not
           // become an "asked but silent" source either.
-          if (await repairCopyPreflight(seriesId, chapter, unattended)()) return null;
+          if (await repairCopyPreflight(seriesId, chapter, unattended, false, book.source_id)()) return null;
           asked++;
           try {
             // Nothing is reported to source_health from here. A page list asked on our own initiative must
@@ -1148,7 +1150,7 @@ async function replaceShort(
     series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
     genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
   };
-  const preflight = repairCopyPreflight(book.series_id, chapter, unattended);
+  const preflight = repairCopyPreflight(book.series_id, chapter, unattended, false, book.source_id);
   let missing: number[] = [];
   try {
     if (unattended && !(await seriesIsMonitored(book.series_id))) return 'paused';
@@ -1176,7 +1178,7 @@ async function replaceShort(
       // A shortfall may itself put the source into cooldown. That must stop the next request, but it must
       // not discard the already-downloaded, useful partial; re-check every write-time authority except the
       // health consequence of this same request.
-      await hold.write(repairCopyPreflight(book.series_id, chapter, unattended, true));
+      await hold.write(repairCopyPreflight(book.series_id, chapter, unattended, true, book.source_id));
     } catch (writeError) {
       hold.drop?.();
       if (writeError instanceof DownloadPreflightError) return writeError.reason === 'paused' ? 'paused' : false;
@@ -1334,9 +1336,11 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
         prefsOf.delete(seriesId);
         const open = listing ? await automaticCopiesFor(seriesId, listing.copies) : [];
         const copy = listing && betterCopy(book, open, await prefsFor(book), followed);
-        if (!copy || !allowed(copy.source)) { r.groups.left++; continue; }
+        // The preferred group's copy is the copy the sweep would choose, on a source the series follows (betterCopy
+        // takes `followed`): as #177's chosen copy it answers to the follow, not to the adult rule (v0.55.9).
+        if (!copy) { r.groups.left++; continue; }
         const chapter = copyToChapter(copy, { number: book.number, title: listing!.title });
-        const count = await pageCount(chapter, allowed, seriesId);
+        const count = await pageCount(chapter, (s) => s === copy.source || allowed(s), seriesId, copy.source);
         // ⚠️ Decided BEFORE the download: never a shorter copy, and silence is not a yes.
         // Reintroduce by dropping the page test: "a shorter copy never replaces a longer one" in
         // groupUpgrade.int.test.ts finds the notice written over the chapter.
@@ -1364,7 +1368,7 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
  * puts a source into a cooldown. An EMPTY list is silence, not zero pages (see stepShort).
  */
 async function pageCount(
-  chapter: SourceChapter, allowed: (s: string) => boolean, seriesId?: string,
+  chapter: SourceChapter, allowed: (s: string) => boolean, seriesId?: string, own: string | null = null,
 ): Promise<number | null> {
   const sourceId = chapter.source ?? '';
   const src = getSource(sourceId);
@@ -1377,7 +1381,7 @@ async function pageCount(
     if (seriesId) {
       // The checks above are early filters. This one sits beside getPageUrls so an unfollow, block or
       // auto-update toggle during the earlier awaits wins before the source sees the request.
-      const reason = await repairCopyPreflight(seriesId, chapter, true)();
+      const reason = await repairCopyPreflight(seriesId, chapter, true, false, own)();
       if (reason) return null;
     }
     const urls = await withTimeout(src.getPageUrls(chapter.sourceId), budgetFor(src, SHORT_PAGES_MS));
@@ -1396,7 +1400,7 @@ async function replaceWithGroup(
     series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
     genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
   };
-  const preflight = repairCopyPreflight(book.series_id, chapter, true);
+  const preflight = repairCopyPreflight(book.series_id, chapter, true, false, via);
   try {
     if (!(await seriesIsMonitored(book.series_id))) return 'paused';
     if (!(await automaticChapterAllowedFor(book.series_id, chapter))) return false;
@@ -1446,13 +1450,20 @@ function repairCopyPreflight(
   chapter: SourceChapter,
   requireMonitored: boolean,
   writing = false,
+  own: string | null = null,
 ): DownloadPreflight {
   return async () => {
     if (requireMonitored && !(await seriesIsMonitored(seriesId))) return 'paused';
     const sourceId = chapter.source ?? '';
     if (!sourceId || !getSource(sourceId) || !(await seriesFollowsSource(seriesId, sourceId))) return 'source';
-    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
-    if (!allowed(sourceId)) return 'source';
+    // `own`: the source the chapter came from (the short step) or the group step's chosen copy -- a source the series
+    // follows, held to that and not to the adult rule (v0.55.9, as #177's chosen copy). Every other copy is one
+    // reached on the series' behalf, and keeps the rule. Reintroduce by checking it whatever `own` is: "a clean
+    // series' short chapter is replaced from the adult source it follows" in repair.int.test.ts keeps the short file.
+    if (sourceId !== own) {
+      const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+      if (!allowed(sourceId)) return 'source';
+    }
     if (!(await automaticChapterAllowedFor(seriesId, chapter))) return 'policy';
     if (await isDisabled(sourceId).catch(() => true)) return 'disabled';
     if (!writing && await blockedNow(sourceId).then(Boolean, () => true)) return 'cooldown';

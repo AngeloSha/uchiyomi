@@ -885,7 +885,15 @@ export async function runUpdateAll(opts: {
       if (!(await seriesIsMonitored(b.series_id))) continue;
       spent++;
       try {
-        const allowed = await sweepAllowedFor(await seriesIsAdult(b.series_id));
+        const adultRule = await sweepAllowedFor(await seriesIsAdult(b.series_id));
+        // The partial's own copy is on the source the series took the chapter from: as the sweep's chosen copy
+        // (#177), it is held to the adult rule no more than a person who follows that source is. The rule stays
+        // for what is reached on the series' behalf -- the alternates (listingAlternates leaves the own source
+        // out) and the hunt. Before, a clean series on an extension marked NSFW never had its holes filled.
+        // Reintroduce by passing adultRule as `allowed`: "a clean series' partial is completed from the adult
+        // source it follows" in partialComplete.int.test.ts leaves the hole.
+        const own = b.source_id ?? '';
+        const allowed = (id: string) => (own !== '' && id === own) || adultRule(id);
         const r = await completePartial(
           { ...b, number: Number(b.number) },
           {
@@ -895,7 +903,7 @@ export async function runUpdateAll(opts: {
             allowed,
             hunt: async () => (await seriesIsMonitored(b.series_id))
               ? (await huntSource(b.series_id, Number(b.number), {
-                allowed, budget: huntBudget, admit: () => seriesIsMonitored(b.series_id),
+                allowed: adultRule, budget: huntBudget, admit: () => seriesIsMonitored(b.series_id),
               })).chapter
               : null,
             admit: () => seriesIsMonitored(b.series_id),
@@ -904,7 +912,7 @@ export async function runUpdateAll(opts: {
             sourceAllowedNow: async (chapter) => {
               const id = chapter.source ?? '';
               if (!id || !(await seriesFollowsSource(b.series_id, id))) return false;
-              const current = await sweepAllowedFor(await seriesIsAdult(b.series_id));
+              const current = id === own ? () => true : await sweepAllowedFor(await seriesIsAdult(b.series_id));
               return current(id);
             },
           },

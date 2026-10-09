@@ -437,6 +437,33 @@ test('a follower with more pages replaces a short chapter, and everyone keeps th
   await q('DELETE FROM users WHERE id = $1', [user]);
 });
 
+test("a clean series' short chapter is replaced from the adult source it follows (v0.55.9)", { skip }, async () => {
+  // The short step asks the chapter's own source first. On a clean series whose own source is an extension marked
+  // NSFW, the adult rule -- which is for sources reached on the series' behalf, #177's chosen copy -- refused it, and
+  // the short chapter stayed short. rp-a is that source here, marked NSFW for this test; nothing else lists the number.
+  // Reintroduce by holding `own` to the adult rule in repairCopyPreflight (or dropping the ask's own-source branch):
+  // the chapter keeps its two pages.
+  // Marked on the registered adapter itself: registerAdapter ignores an id it already holds, so a second
+  // registration marked NSFW would leave rp-a as it was and this test would pass whatever the rule.
+  const { getSource } = await import('../src/lib/sources');
+  const own = getSource(A) as any;
+  const was = own.isNsfw;
+  own.isNsfw = true;
+  try {
+    assert.equal(getSource(A)?.isNsfw, true, 'PREMISE: rp-a is marked NSFW');
+    const n = 27;
+    const id = `b_short_${n}`;
+    await seedBook(id, SHORT, T.short, n, { pages: 2, src: A, mtime: 1000 + n });
+    listsShort([A], n);
+    pagesFor.set(cid(A, T.short, n), 12);
+    const r = await runRepair(undefined, { only: ['short'], userId: null });
+    assert.ok(r.short.replaced >= 1, `nothing was replaced: ${JSON.stringify(r.short)}`);
+    assert.equal((await book(id)).pages, 12, "the short chapter was replaced from the series' own adult source");
+  } finally {
+    own.isNsfw = was;
+  }
+});
+
 test('blocking a longer copy while its page count is in flight stops the short-chapter replacement', { skip }, async () => {
   const id = await shortBook(16);
   const group = 'Zz Repair Race Group';

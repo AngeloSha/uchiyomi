@@ -210,6 +210,26 @@ test("on: a chapter from another group is replaced by the preferred group's copy
   assert.ok(!asked.some((a) => a.startsWith(FOLLOWER)), 'an upgraded chapter was looked at again');
 });
 
+test("the preferred group's copy on an adult source the series follows still upgrades a clean series (v0.55.9)", { skip }, async () => {
+  // The group step's copy is the one the sweep would choose, on a source the series follows: as #177's chosen copy it
+  // answers to the follow, not to the adult rule. gu-follower is marked NSFW for this test. Reintroduce by keeping
+  // `allowed(copy.source)` in stepGroups (or holding `own` to the adult rule in repairCopyPreflight): nothing is replaced.
+  // Marked on the registered adapter itself: registerAdapter ignores an id it already holds.
+  const { getSource } = await import('../src/lib/sources');
+  const follower = getSource(FOLLOWER) as any;
+  const was = follower.isNsfw;
+  follower.isNsfw = true;
+  try {
+    assert.equal(getSource(FOLLOWER)?.isNsfw, true, 'PREMISE: gu-follower is marked NSFW');
+    await switchOn(true);
+    await series('nsfwfollow');
+    const r = await run();
+    assert.equal(r.groups.replaced, 3, JSON.stringify(r.groups));
+  } finally {
+    follower.isNsfw = was;
+  }
+});
+
 test('never a shorter copy: a one-page notice from the right group does not replace a chapter', { skip }, async () => {
   await switchOn(true);
   followerPages.set(1, 1);
