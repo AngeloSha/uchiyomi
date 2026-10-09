@@ -397,29 +397,41 @@ const shows = (want: RatingFilter, r: Rating | undefined): boolean => (want === 
  * own flag says so (v0.55.5, Judged), which the card weighs less.
  */
 export interface Provider { source: string; name: string; sourceId: string; coverUrl?: string; title: string; lang: string | null; rating?: Rating }
-/** `rating` (v0.55.4; weighed by cardRating since v0.55.5): 18+, safe, or absent when nothing says. */
-export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[]; rating?: Rating }
+/**
+ * `rating` (v0.55.4; weighed by cardRating since v0.55.5): 18+, safe, or absent when nothing says. `work` (v0.56.0): the
+ * key the card was folded by, when the caller gave one (groupByTitle's keyOf).
+ */
+export interface TitleGroup { title: string; coverUrl?: string; updatedAt?: string; providers: Provider[]; rating?: Rating; work?: string }
 export interface SourceRail { source: string; name: string; lang: string | null; results: Array<SourceSeries & { name: string; rating?: Rating }> }
 
 /**
- * One card per normalised title carrying every provider that has it; most providers first, at most `max`.
+ * One card per normalised title (or per `keyOf`, v0.56.0) carrying every provider that has it; most providers first, at
+ * most `max`.
  *
  * With `rated`, each provider and card says what it is known to be, and the cards the viewer does not want are left out
  * BEFORE the cap: filtered after it, "18+ only" was what happened to be among the thirty, often nothing. A card's rating
  * is cardRating's: 18+ when any provider is known to be by the title, or when only self-declared adult sites carry it.
  * Reintroduce the filter after the slice: "filtered before the cap" in searchAll.int.test.ts finds fewer cards.
  */
-export function groupByTitle(per: SearchAnswer['per'], order: SourceAdapter[], max = 30, rated?: Rated): TitleGroup[] {
+export function groupByTitle(
+  per: SearchAnswer['per'], order: SourceAdapter[], max = 30, rated?: Rated, keyOf?: (item: SourceSeries, src: SourceAdapter) => string,
+): TitleGroup[] {
   const groups = new Map<string, TitleGroup>();
   // Each card's providers as ratingOf judged them, `flagged` kept apart: what is answered folds it into `adult`.
   const judged = new Map<TitleGroup, Array<Judged | undefined>>();
   for (const src of order) {
     for (const r of per.get(src.id)?.items ?? []) {
       if (!r.sourceId || !r.title) continue;
-      const key = normTerm(r.title);
+      // v0.56.0: the caller's key -- Discover's work (lib/discoverIdentity.ts workOf), under which two sites naming one series
+      // differently are one card -- else the normalised title, as every caller before it. A work key is never empty, so a
+      // title in another script is a card of its own, where the ASCII key dropped it.
+      const key = keyOf ? keyOf(r, src) : normTerm(r.title);
       if (!key) continue;
       let g = groups.get(key);
-      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [] }; groups.set(key, g); judged.set(g, []); }
+      if (!g) {
+        g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [], ...(keyOf ? { work: key } : {}) };
+        groups.set(key, g); judged.set(g, []);
+      }
       if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
       if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
       if (!g.providers.some((p) => p.source === r.source)) {

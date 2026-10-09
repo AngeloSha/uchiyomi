@@ -14,6 +14,7 @@ import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
 import { followGuard, seriesLanguage } from '../lib/seriesLang';
 import { searchAll, groupByTitle, bySource, ratingOf, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
+import type { SourceSeries as DiscoverItem } from '../lib/sources/types';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 
@@ -123,7 +124,8 @@ export const FILL_MAX_CHAPTERS = 300;
 export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
-import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, namesOf, SEARCH_NAMES } from '../lib/altTitles';
+import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, namesOf, parseAltTitles, SEARCH_NAMES } from '../lib/altTitles';
+import { currentWork, heldFor, learnPageNames, libraryChanged, libraryIndex, noIndex, noteTitles, pendingOf, workOf, type Held, type LibraryIndex } from '../lib/discoverIdentity';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
@@ -850,30 +852,33 @@ import { cleanGenres } from '../lib/genres';
 export type { MatchConfidence };
 
 /**
- * Which of these titles the library already has, and in which languages.
- *
- * Was `SELECT s.title FROM lib_series` -- every row, every column value in memory, once per source per wall
- * paint, and again per page as you scroll. Six sources on a 214-series library is six full scans to answer a
- * question about twenty-four titles. Returns the entry's id too, so a card for an owned title can open it. The normalisation matches `norm()` and the duplicate check in
- * `addSeriesFromSource`, which has always compared this way.
- *
- * v0.52.0 (#72): every series holding the title, with the language each is in (lib/seriesLang.ts effectiveLang),
- * because "owned" is now "owned in this source's language" (`owned` below): an English Blue Lock no longer folds a
- * Spanish provider under an "In library" card that opens the English series -- what blocked p3t3t3.
+ * Which library series a Discover item is (v0.56.0, lib/discoverIdentity.ts heldFor): its very source series, then any
+ * name the series goes by -- each followed source's own name for it included -- then the work its name is known to be.
+ * Before, only the library's own title was compared, by an ASCII-only key: a series followed on a site that spells it
+ * differently, held under another name, or named in another script, read as not held. Every series holding it, with the
+ * language each is in, so `owned` below can answer for this source's language. On the server, not the viewer: whether
+ * adding this would be a second copy is a property of the server (the add route's duplicate check reads it the same way).
  */
-const NORM_SQL = "lower(regexp_replace(s.title, '[^a-zA-Z0-9]', '', 'g'))";
-interface Held { id: string; lang: string }
-async function inLibrary(titles: Array<string | undefined>): Promise<Map<string, Held[]>> {
-  const keys = [...new Set(titles.map((t) => norm(t || '')).filter(Boolean))];
-  if (!keys.length) return new Map();
-  const rows = await q<{ k: string; id: string; lang: string | null; source_id: string | null }>(
-    `SELECT ${NORM_SQL} AS k, s.id, s.lang, s.source_id FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1) ORDER BY s.id`,
-    [keys],
-  ).catch(() => []);
-  // Two series can share a normalised title; the first by id is the entry the card opens.
-  const out = new Map<string, Held[]>();
-  for (const r of rows) out.set(r.k, [...(out.get(r.k) ?? []), { id: r.id, lang: effectiveLang(r.lang, r.source_id) }]);
-  return out;
+function heldOf(idx: LibraryIndex, item: { title: string; sourceId: string }, source: string): Held[] {
+  return heldFor(idx, { source, sourceId: item.sourceId, title: item.title });
+}
+
+/** One series per id, in the order found: a card's providers may point at the same series more than once. */
+const uniqueHeld = (all: Held[]): Held[] => all.filter((h, i) => all.findIndex((x) => x.id === h.id) === i);
+
+/**
+ * One source's items as Discover answers them (v0.56.0): each with what its card says about the library for this
+ * source's language (`owned` below), the work its card folds by (`work`), and whether the library holds that work in ANY
+ * language (`owned`: browsing leaves those out, search marks them). Names nobody has looked up yet are queued for the
+ * online lookups, which never hold this answer up. A library that cannot be read is an empty one, as it always was here.
+ */
+async function decorate<T extends { title: string; sourceId: string }>(items: T[], source: string) {
+  const idx = await libraryIndex().catch(() => noIndex());
+  noteTitles(items.map((r) => r.title));
+  return items.map((r) => {
+    const held = heldOf(idx, r, source);
+    return { ...r, ...owned(held, source), work: workOf(idx, { source, sourceId: r.sourceId, title: r.title }, held), owned: held.length > 0 };
+  });
 }
 
 /**
@@ -984,6 +989,9 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     // Only names not stored yet: one an admin removed stays removed (its tombstone is the row already there).
     // Detached and never throwing: a lookup must not wait on, or fail over, a ledger of names.
     if (series?.summary) void learnFromMainSource(src.id, sourceId, series.summary);
+    // v0.56.0: the other names the page lists join the work its title is (lib/discoverIdentity.ts), so a Discover card
+    // under any of them folds with the card under the title. Detached, never throwing, like the line above.
+    if (series?.summary && series.title) void learnPageNames(series.title, parseAltTitles(series.summary)).catch(() => {});
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
     // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
     // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before
@@ -1486,11 +1494,25 @@ export async function addSeriesFromSource(opts: {
     // dialog can offer "Open it" -- and precisely because the row may be one the caller cannot see, the
     // route gates the id on `seriesVisible` before it answers. The title and the source were always
     // answered here and are unchanged.
-    const dup = await one<{ id: string; title: string; source: string }>(
+    let dup = await one<{ id: string; title: string; source: string }>(
       `SELECT id, title, source FROM lib_series
         WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2
           AND ${visibleToAll('lib_series')} LIMIT 1`,
       [norm(title), folder]);
+    if (!dup) {
+      // v0.56.0: the same work under another name, or this very source series already followed by a series under another
+      // title (lib/discoverIdentity.ts heldFor). Only the same title, by the ASCII key, was a duplicate before, so an add
+      // from a site that names the series differently made a second copy of it. Reintroduce by dropping this: "a series
+      // you hold under another name is a duplicate" in discoverIdentity.int.test.ts adds the second copy.
+      const idx = await libraryIndex().catch(() => null);
+      const ids = idx ? heldFor(idx, { source: source!, sourceId: sourceId!, title }).map((h) => h.id) : [];
+      if (ids.length) {
+        dup = await one<{ id: string; title: string; source: string }>(
+          `SELECT id, title, source FROM lib_series
+            WHERE id = ANY($1::text[]) AND folder <> $2 AND ${visibleToAll('lib_series')} ORDER BY id LIMIT 1`,
+          [ids, folder]);
+      }
+    }
     if (dup) {
       // The same title in a language the library does not hold it in is a new edition, not a second copy (v0.52.0):
       // the answer carries the offer, which the route passes on only to a viewer who may open `of`. A source in
@@ -2323,8 +2345,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
-    const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
+    return { content: await decorate(results, src.id) };
   });
 
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
@@ -3135,17 +3156,23 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // wants but hides which specific source a manual pick would come from.
     if (groupBy === 'source') {
       const rails = bySource(ans.per, order, rated);
-      const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
-      return {
-        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), g.source) })) })),
-        ...rest,
-      };
+      return { content: await Promise.all(rails.map(async (g) => ({ ...g, results: await decorate(g.results, g.source) }))), ...rest };
     }
 
-    // group by normalized title → one card that carries every provider offering it (preferred order preserved)
-    const groups = groupByTitle(ans.per, order, 30, rated);
-    const have = await inLibrary(groups.map((g) => g.title));
-    return { content: groups.map((g) => ownedGroup(g, have.get(norm(g.title)))), ...rest };
+    // One card per WORK (v0.56.0, lib/discoverIdentity.ts): the work the library holds, else the one the name is known to
+    // be, else the name by nameKey -- so two sites naming one series differently are one card, carrying both. `owned`:
+    // the library holds the work in any language; the providers still say for their own language (ownedGroup).
+    const idx = await libraryIndex().catch(() => noIndex());
+    noteTitles([...ans.per.values()].flatMap((c) => c.items.map((r) => r.title)));
+    const keyOf = (r: DiscoverItem) => workOf(idx, { source: r.source, sourceId: r.sourceId, title: r.title });
+    const groups = groupByTitle(ans.per, order, 30, rated, keyOf);
+    return {
+      content: groups.map((g) => {
+        const held = uniqueHeld(g.providers.flatMap((p) => heldFor(idx, { source: p.source, sourceId: p.sourceId, title: p.title })));
+        return { ...ownedGroup(g, held.length ? held : undefined), owned: held.length > 0 };
+      }),
+      ...rest,
+    };
   });
 
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.
@@ -3170,12 +3197,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // better than a blank one. blocked_until expires on its own, so the source heals without intervention.
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p);
-      const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, ...owned(had.get(norm(r.title)), src.id) })) };
+      return { content: await decorate(stale, src.id) };
     }
     const results = await latestPage(src, p);
-    const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
+    return { content: await decorate(results, src.id) };
   });
 
   /**
@@ -3197,12 +3222,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
     if (await blockedNow(source!).catch(() => null)) {
       const stale = cachedLatest(src.id, p, 'popular');
-      const had = await inLibrary(stale.map((r) => r.title));
-      return { content: stale.map((r) => ({ ...r, ...owned(had.get(norm(r.title)), src.id) })) };
+      return { content: await decorate(stale, src.id) };
     }
     const results = await latestPage(src, p, 'popular');
-    const have = await inLibrary(results.map((r) => r.title));
-    return { content: results.map((r) => ({ ...r, ...owned(have.get(norm(r.title)), src.id) })) };
+    return { content: await decorate(results, src.id) };
   });
 
   /**
@@ -3382,16 +3405,35 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // No per-user filter here on purpose: `isAdult:false` is an argument to the AniList query, so adult
     // titles never arrive, and the cache is shared for six hours -- filtering it per viewer would pin one
     // capped account's view for everyone.
-    const have = await inLibrary(trendingCache.items.map((t) => t.title));
+    const idx = await libraryIndex().catch(() => noIndex());
     // Deduped by normalised title, not raw: the hero and its dots are keyed by title, so two spellings of
     // the same series would collide on a React key and swap art under the reader. Rare on one page, less so
-    // across two.
+    // across two. Left out when the library holds it (v0.56.0): by any name the library knows it by, or by its
+    // AniList entry -- before, only by the library's own title.
     const seen = new Set<string>();
     const out = trendingCache.items.filter((t) => {
       const k = norm(t.title);
-      return !have.has(k) && !seen.has(k) && (seen.add(k), true);
+      const held = heldFor(idx, { source: '', sourceId: '', title: t.title }).length > 0
+        || (t.id != null && (idx.byWork.get(`al:${t.id}`)?.length ?? 0) > 0);
+      return !held && !seen.has(k) && (seen.add(k), true);
     });
     return { content: out.slice(0, TREND_KEEP) };
+  });
+
+  /**
+   * What the page's work keys are now (v0.56.0, lib/discoverIdentity.ts currentWork). Discover's wall and search ask again
+   * while names are being looked up, so cards fold and the ones the library holds leave the wall without a reload. Up to
+   * 200 keys, comma-separated (a key never holds a comma); one the server knows nothing new about comes back as it was.
+   * `pending`: how many of them are still being looked up -- the page stops asking at 0. Reintroduce by answering every key
+   * as it was: "an n: key placed with a work since comes back as that work" in discoverIdentity.int.test.ts reads n:.
+   */
+  app.get('/api/discover/works', async (req) => {
+    const raw = String((req.query as { keys?: string }).keys ?? '');
+    const keys = [...new Set(raw.split(',').map((k) => k.trim()).filter(Boolean))].slice(0, 200);
+    const idx = await libraryIndex().catch(() => noIndex());
+    const works: Record<string, { work: string; owned: boolean }> = {};
+    for (const key of keys) works[key] = currentWork(idx, key);
+    return { works, pending: pendingOf(keys) };
   });
 
   // Find a title across all providers (Aqua first) → the best match per provider that carries it.
@@ -3422,8 +3464,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Each provider says its language and whether the library holds its title in it (v0.52.0), as a Discover card
     // does: the add dialog marks the held ones and offers the others as a new edition.
     const hits = found.filter((f): f is NonNullable<typeof f> => !!f);
-    const have = await inLibrary(hits.map((f) => f.title));
-    return { content: hits.map((f) => ({ ...f, ...owned(have.get(norm(f.title)), f.source) })) };
+    const idx = await libraryIndex().catch(() => noIndex());
+    return { content: hits.map((f) => ({ ...f, ...owned(heldOf(idx, f, f.source), f.source) })) };
   });
 
   /**
@@ -3630,6 +3672,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const edition = r.edition && 'of' in r.edition && seen ? r.edition : undefined;
       return reply.code(r.status).send({ error: r.error, message: r.message, existing, status: r.blockStatus, ...(edition ? { edition } : {}) });
     }
+    // Discover's next answers read the library afresh (v0.56.0): the card just added leaves the wall at once.
+    libraryChanged();
     // Audited here rather than after the download, so a slow or failing download does not delay the record
     // of who asked for it. What actually landed is the job's business.
     logAudit('download.add', { userId: (req as any).user?.sub, detail: { title: r.title, source, chapters: r.chapters }, req });

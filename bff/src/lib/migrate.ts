@@ -1635,6 +1635,22 @@ CREATE INDEX IF NOT EXISTS idx_admin_bulk_delete_items_state
 CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_bulk_delete_one_running
   ON admin_bulk_delete_runs ((true)) WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS idx_admin_bulk_delete_started ON admin_bulk_delete_runs (started_at DESC);
+
+-- v0.56.0: Discover shows one card per work and leaves out what the library holds (lib/discoverIdentity.ts). title_works
+-- is which work a NAME is, keyed by its nameKey (lib/onlineMatch.ts): asked of AniList, MangaDex and MangaUpdates once,
+-- in the background, and kept with every other name the answer gave. work is NULL when every service was asked and
+-- none knew the name (asked again after 30 days). server_settings.discover_lookups is Admin -> Settings "Match Discover
+-- titles online": off, nothing is sent anywhere. The two indexes find a library series by the source series a Discover
+-- item is. All additive: v0.55.11 boots on this schema and ignores it.
+CREATE TABLE IF NOT EXISTS title_works (
+  key        text PRIMARY KEY,
+  work       text,
+  via        text NOT NULL,
+  checked_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS discover_lookups boolean NOT NULL DEFAULT true;
+CREATE INDEX IF NOT EXISTS lib_series_source_pair_idx ON lib_series (source_id, source_series_id);
+CREATE INDEX IF NOT EXISTS series_sources_source_pair_idx ON series_sources (source_id, source_series_id);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

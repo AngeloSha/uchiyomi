@@ -460,6 +460,26 @@ source and cached server-side for ten minutes per source and page, with concurre
 collapsed into one outbound fetch. A source that times out is recorded against its health and earns a
 cooldown, so it stops being picked first.
 
+Since v0.56.0 every item of `latest`, `popular` and `search` (and every card of `search-all`) carries:
+
+* `work`: the key a client folds cards by. `lib:<id>` when the library holds the work, `al:<id>` / `md:<id>` /
+  `mu:<id>` when AniList, MangaDex or MangaUpdates said which work the name is, else `n:<key>` (the name, folded).
+  It is never empty: a name that folds to nothing is `s:<source>:<sourceId>`.
+* `owned`: the library holds the work in any language, by the source series it came from or follows, any name it
+  goes by (a followed source's own name included), or its AniList link. The app leaves these out of Newest,
+  Popular and Trending, and marks them in search.
+
+`inLibrary`, `librarySeriesId`, `libraryLangs` and `lang` keep their per-language meaning.
+
+`search-all` folds its cards by `work`, so one card may carry providers whose titles differ.
+
+`GET /api/discover/works?keys=<k1>,<k2>,...` takes up to 200 work keys and answers what each is now:
+`{works: {<key>: {work, owned}}, pending}`. An `n:` key whose name has been placed with a work since comes back as
+that work. `pending` is how many of the keys are still being looked up.
+
+Admin settings carry `discover_lookups` (`PATCH` takes `discoverLookups`). It is Admin → Settings *Match Discover
+titles online*.
+
 Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
 and **409** `duplicate` if a series with the same title came from a *different* source — retry with
 `"force": true` to add the second copy anyway.
@@ -1166,6 +1186,7 @@ GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
+GET    /api/discover/works
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
 GET    /api/sources/archive       POST   /api/sources/archive

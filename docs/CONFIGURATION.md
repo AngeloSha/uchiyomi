@@ -101,6 +101,13 @@ is off, clears none of the art, links, type or direction it already learned, and
 policy when a series moves. Explicit Admin Art, Relink, Check online matches, tracker import/sync and Discover actions
 remain available and can contact AniList because they are actions you asked for, rather than background enrichment.
 
+Since v0.56.0, Discover asks which work each title it shows is, so that a series several sources name differently is
+one card and one you already have stays out of the browsing views. Each name is asked once, in the background:
+AniList first, then MangaDex (`api.mangadex.org`), then MangaUpdates (`api.mangaupdates.com`), and the answer is
+kept. These carry your server's IP address and the title shown in Discover, nothing about your library. Switch them
+off with **Match Discover titles online** under Admin → Settings; cards then fold by their names alone.
+`MANGAUPDATES_API_URL` is a test knob like the ones below (default `https://api.mangaupdates.com/v1`).
+
 `ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL` are **test knobs**: they point an adapter at a
 stand-in server instead of the real service (the defaults are `https://graphql.anilist.co`,
 `https://api.myanimelist.net/v2` and `https://kitsu.app/api/edge`). They exist so the browser tests can

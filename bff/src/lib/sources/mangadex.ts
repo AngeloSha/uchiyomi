@@ -169,6 +169,30 @@ export async function mangadexOriginalLanguages(ids: string[]): Promise<Map<stri
   return out;
 }
 
+/** A MangaDex entry as Discover's identity lookup needs it (lib/discoverIdentity.ts): every name, and its AniList link. */
+export interface MangaDexWork { id: string; names: string[]; al: string | null }
+
+/**
+ * The entries a name may be, by MangaDex's title search (which also searches alternative titles): up to five, each with
+ * every name it goes by and the AniList id it links to, for the caller to keep only one that IS the name. Through the
+ * shared limiter like every MangaDex request; a failure throws, so the caller asks again later rather than storing a miss.
+ */
+export async function searchMangaDexWorks(title: string): Promise<MangaDexWork[]> {
+  const s = title.trim();
+  if (!s) return [];
+  const j = await mdGet(`${API}/manga?title=${encodeURIComponent(s)}&limit=5&${RATINGS}&contentRating[]=pornographic`);
+  const out: MangaDexWork[] = [];
+  for (const m of j?.data || []) {
+    if (typeof m?.id !== 'string') continue;
+    const a = m.attributes || {};
+    const names = [...Object.values(a.title || {}), ...((a.altTitles || []) as any[]).flatMap((t) => Object.values(t || {}))]
+      .filter((n): n is string => typeof n === 'string' && !!n.trim());
+    const al = a.links && /^\d+$/.test(String(a.links.al ?? '')) ? String(a.links.al) : null;
+    out.push({ id: m.id.toLowerCase(), names, al });
+  }
+  return out;
+}
+
 /**
  * Every name of many titles at once -- each language's title and every alternative title -- for the recheck of a
  * cover the art backfill took from a MangaDex search before the title check existed (v0.55.7, lib/matchCheck.ts).

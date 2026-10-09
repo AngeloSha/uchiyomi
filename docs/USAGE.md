@@ -1290,6 +1290,16 @@ again.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
   source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+- **One card per series, nothing you have (v0.56.0):**
+  - A series several sources carry is one card under any of the names they give it. The card's corner shows each
+    source's icon (MangaDex once, whatever its languages).
+  - Uchiyomi learns which names belong together by asking AniList, then MangaDex, then MangaUpdates once per name, in
+    the background. It also uses every name your library knows a series by, and the other names a source's own page
+    lists. A card can fold into another a few seconds after the wall appears.
+  - *Newest*, *Popular* and *Trending* leave out everything your library already holds, in any language. That covers
+    a series held under another name, followed on another source, or linked to the same AniList entry. Search still
+    shows those, marked **✓ In library**.
+  - Admin → Settings → *Match Discover titles online* switches the lookups off; cards then fold by their names alone.
 - **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
   **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
   results by what is known of each. A result is 18+ when its provider is ticked in **Admin → Settings → 18+ filter**,

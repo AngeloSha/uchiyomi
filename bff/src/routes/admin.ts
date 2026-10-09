@@ -57,6 +57,7 @@ import { writePreflight } from '../lib/fsGuard';
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
+import { lookupsChanged } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
@@ -614,7 +615,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
@@ -754,6 +755,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       borrowNames: z.boolean().optional(),
       /**
+       * Discover's online name lookups (v0.56.0, lib/discoverIdentity.ts): AniList, MangaDex and MangaUpdates are asked,
+       * once per name, which work a title shown in Discover is. On by default; off, nothing is sent anywhere and cards
+       * fold by their names alone.
+       */
+      discoverLookups: z.boolean().optional(),
+      /**
        * MangaDex in other languages (v0.52.0, #123): the languages besides English that are on, replaced whole, as
        * app codes from lib/lang.ts MANGADEX_LANGS ("es-419", "pt-BR"; MangaDex's own "es-la" is read as es-419).
        * Applied live: each language turned on becomes its own source, each turned off goes. English is always on,
@@ -853,6 +860,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     // not whenever that window happens to lapse.
     if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
     if (b.groupUpgrade !== undefined) await q('UPDATE server_settings SET group_upgrade = $1, updated_at = now() WHERE id = 1', [b.groupUpgrade]);
+    if (b.discoverLookups !== undefined) {
+      await q('UPDATE server_settings SET discover_lookups = $1, updated_at = now() WHERE id = 1', [b.discoverLookups]);
+      lookupsChanged();
+    }
     if (b.borrowNames !== undefined) {
       await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
       // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.

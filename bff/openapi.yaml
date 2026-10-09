@@ -3503,6 +3503,26 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/discover/works:
+    get:
+      tags:
+        - sources
+      summary: What Discover's work keys are now, while names are being looked up (v0.56.0).
+      operationId: getApiDiscoverWorks
+      security:
+        - bearer: []
+      parameters:
+        - name: keys
+          in: query
+          required: false
+          description: Up to 200 work keys, comma-separated.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
   /api/sources/find:
     get:
       tags:

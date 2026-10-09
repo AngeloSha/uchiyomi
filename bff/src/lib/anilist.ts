@@ -195,7 +195,7 @@ export async function fetchAnimeBanner(rawTitle: string, names: readonly string[
   return m && namesMatch(names, titlesOf(m)) ? (m.bannerImage ?? null) : null;
 }
 
-const TRENDING = `query($page:Int){Page(page:$page,perPage:40){media(type:MANGA,countryOfOrigin:"KR",sort:TRENDING_DESC,isAdult:false){title{romaji english}coverImage{extraLarge large}bannerImage description(asHtml:false)genres averageScore chapters status}}}`;
+const TRENDING = `query($page:Int){Page(page:$page,perPage:40){media(type:MANGA,countryOfOrigin:"KR",sort:TRENDING_DESC,isAdult:false){id title{romaji english}coverImage{extraLarge large}bannerImage description(asHtml:false)genres averageScore chapters status}}}`;
 
 const CANDIDATES = `query($s:String){Page(perPage:5){media(search:$s,type:MANGA,sort:SEARCH_MATCH){title{romaji english}coverImage{extraLarge}bannerImage}}}`;
 
@@ -228,7 +228,40 @@ export async function fetchAniListCandidates(rawTitle: string, retry = 0): Promi
     .filter((c) => c.title && (c.banner || c.cover));
 }
 
+const WORKS = `query($s:String){Page(perPage:5){media(search:$s,type:MANGA,format_not_in:[NOVEL],sort:SEARCH_MATCH){id title{romaji english native}synonyms}}}`;
+
+/** An AniList entry as Discover's identity lookup needs it (lib/discoverIdentity.ts): its id and every name it goes by. */
+export interface AniListWork { id: number; titles: string[] }
+
+/**
+ * The entries a name may be, by AniList's own search: up to five, each with its titles and synonyms, for the caller to
+ * keep only one that IS the name (namesMatch). Empty for no answer. Throws on a transient failure -- a network error, a
+ * 5xx, a 429 still answered after two waits -- so the caller asks again later rather than storing a miss.
+ */
+export async function searchAniListWorks(rawTitle: string, retry = 0): Promise<AniListWork[]> {
+  const s = clean(rawTitle);
+  if (!s) return [];
+  const r = await fetch(ANILIST, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ query: WORKS, variables: { s } }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (r.status === 429 && retry < 2) {
+    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
+    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
+    return searchAniListWorks(rawTitle, retry + 1);
+  }
+  if (r.status === 404) return [];
+  if (!r.ok) throw Object.assign(new Error(`anilist ${r.status}`), { status: r.status });
+  const j: any = await r.json();
+  const media: any[] = j?.data?.Page?.media ?? [];
+  return media.filter((m) => typeof m?.id === 'number').map((m) => ({ id: m.id as number, titles: titlesOf(m) }));
+}
+
 export interface TrendingItem {
+  /** The AniList entry (v0.56.0): Discover hides a trending title the library holds by its AniList link as well as its name. */
+  id: number | null;
   title: string;
   cover: string | null;
   banner: string | null;
@@ -257,6 +290,7 @@ export async function fetchTrendingManhwa(page = 1, retry = 0): Promise<Trending
   const media: any[] = j?.data?.Page?.media ?? [];
   return media
     .map((m) => ({
+      id: typeof m.id === 'number' ? m.id : null,
       title: m.title?.english || m.title?.romaji || '',
       // `large` (~230px) is plenty for the rail cards and lighter than extraLarge; loaded direct from AniList's CDN.
       cover: m.coverImage?.large || m.coverImage?.extraLarge || null,

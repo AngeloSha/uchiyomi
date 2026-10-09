@@ -22,6 +22,7 @@ import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
 import { scheduleMatchCheck } from './lib/matchCheck';
+import { startTitleWorks } from './lib/discoverIdentity';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -343,6 +344,12 @@ async function main() {
    * grouped -- or merged by Fix everything -- on a link this has not looked at yet.
    */
   scheduleMatchCheck(app.log);
+
+  /**
+   * Discover's name lookups (v0.56.0, lib/discoverIdentity.ts): the known names load, and the asking -- AniList, MangaDex,
+   * MangaUpdates, once per name, paced -- runs whenever Discover shows a name nobody has asked about yet.
+   */
+  startTitleWorks(app.log);
 
   /**
    * The opt-in install count.
