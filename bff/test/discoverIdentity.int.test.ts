@@ -75,6 +75,7 @@ let q: any, app: any, di: typeof import('../src/lib/discoverIdentity');
 const H: Record<string, string> = {};
 const call = (method: string, url: string, payload?: unknown) =>
   app.inject({ method, url, headers: H, ...(payload === undefined ? {} : { payload }) });
+const quiet = { info() {}, warn() {} };
 
 before(async () => {
   if (!DSN) return;
@@ -158,6 +159,8 @@ beforeEach(async () => {
   await q('UPDATE server_settings SET discover_lookups = true WHERE id = 1');
   di.resetDiscoverIdentity();
   di._setDiscoverPacing(0);
+  // As server.ts does: the asking runs only once started.
+  di.startTitleWorks(quiet);
   script = {};
   asked.length = 0;
 });
@@ -302,6 +305,26 @@ test('switched off, no name leaves the server', { skip }, async () => {
   // Reintroduce by dropping the setting check in drain/noteTitles: AniList is asked about every name on the wall.
   assert.deepEqual(asked, [], 'nothing asked');
   assert.equal((await q('SELECT count(*)::int AS n FROM title_works'))[0].n, 0);
+});
+
+test('nothing is asked until the server starts the asking', { skip }, async () => {
+  // A process that never started it -- every other bff test file, a script that builds the routes alone -- sends no
+  // title anywhere, and has nothing in flight to outlive its tests by.
+  di.resetDiscoverIdentity();
+  const wall = await latest(A);
+  await new Promise((r) => setTimeout(r, 300));
+  // Reintroduce by queueing before the start (drop `!started` in noteTitles): AniList is asked about the wall's names.
+  assert.deepEqual(asked, [], 'nothing asked');
+  const keys = [...wall.values()].map((x: any) => x.work);
+  assert.equal(di.pendingOf(keys), 0, 'and nothing reads as waiting');
+  // Started, as server.ts does: the wall's new names are asked about.
+  di.startTitleWorks(quiet);
+  await latest(A);
+  // Every name falls through to MangaUpdates (about a second each, its own pacing): wait for the wall to be done.
+  for (let i = 0; i < 500 && !(asked.includes('anilist:Brand New Tale') && di.pendingOf(keys) === 0); i++) {
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  assert.ok(asked.includes('anilist:Brand New Tale'), `started, a new name is asked about (asked: ${asked.join(', ')})`);
 });
 
 test('an n: key placed with a work since comes back as that work, and a held one as held', { skip }, async () => {

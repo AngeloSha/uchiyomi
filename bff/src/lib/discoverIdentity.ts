@@ -249,6 +249,7 @@ const queue = new Map<string, string>(); // name key -> the name to ask with, ol
 const asking = new Set<string>();
 const failures = new Map<string, number>();
 let draining = false;
+let started = false;
 let anilistNext = 0;
 let anilistGapMs = ANILIST_GAP_MS;
 let logger: Log | null = null;
@@ -267,10 +268,10 @@ export function lookupsChanged(): void { setting = null; }
 /**
  * Discover's names: those nobody has asked about yet (or no service knew, a month ago) wait to be asked, oldest first,
  * and the asking wakes. Never blocks: a response answers with what is known now, and the page asks again later
- * (GET /api/discover/works).
+ * (GET /api/discover/works). Nothing waits before the server starts the asking (startTitleWorks).
  */
 export function noteTitles(titles: Iterable<string | null | undefined>): void {
-  if (setting && !setting.on) return;
+  if (!started || (setting && !setting.on)) return;
   const now = Date.now();
   for (const t of titles) {
     const k = nameKey(t);
@@ -294,9 +295,17 @@ export function pendingOf(keys: readonly string[]): number {
   return n;
 }
 
-/** Start the asking with a logger (server.ts). It also starts by itself on the first noted name. */
+/**
+ * Start the asking, with a logger (server.ts, before it listens). Until then no name waits and none is asked about: a
+ * test, or a script, that builds the routes on their own never sends a title anywhere. Before this, every bff test file
+ * that opened Discover asked the real AniList, MangaDex and MangaUpdates about its made-up titles, and its process lived
+ * on until they had answered: about a minute a file, and CI's Tests job ran past 50 minutes, against 29 before.
+ * Reintroduce by queueing before the start: "nothing is asked until the server starts the asking" in
+ * discoverIdentity.int.test.ts finds AniList asked.
+ */
 export function startTitleWorks(log: Log): void {
   logger = log;
+  started = true;
   void worksReady().catch((e) => log.warn(`discover: the known names did not load: ${(e as Error)?.message || e}`));
 }
 
@@ -451,8 +460,9 @@ export async function learnPageNames(title: string, names: readonly string[]): P
 /** Tests only: the spacing between AniList questions; `null` puts back the real one. */
 export function _setDiscoverPacing(ms: number | null): void { anilistGapMs = ms ?? ANILIST_GAP_MS; }
 
-/** Tests only: forget what this process learned, so each case starts from the table. */
+/** Tests only: forget what this process learned, so each case starts from the table -- and the start (startTitleWorks). */
 export function resetDiscoverIdentity(): void {
+  started = false;
   known.clear();
   loaded = null;
   queue.clear();
