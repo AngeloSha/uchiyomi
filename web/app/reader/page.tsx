@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { pairSlides } from '@/lib/readerSpread';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -171,6 +171,8 @@ function ReaderInner() {
   const lastSent = useRef('');
   const blobUrls = useRef<Map<string, string>>(new Map());
   const appending = useRef(false);
+  /** Where the paged track stood just before the next chapter or a closing card was added to it, and when (#180). */
+  const appendAnchor = useRef<{ left: number; at: number } | null>(null);
   const noMore = useRef(false);
   const tap = useRef<{ x: number; y: number; t: number } | null>(null);
   const lastTapAt = useRef(0);
@@ -408,6 +410,26 @@ function ReaderInner() {
     [flat, prefs.mode, prefs.spread],
   );
 
+  // ⚠️ #180: Safari (WebKit, on iOS and macOS alike) keeps a snapped track's place as the index of its snap point
+  // counted from the LEFT edge, and a right-to-left track grows leftwards. So every slide added at its end -- the next
+  // chapter, the Up Next card -- moved the reader that many pages on, to the same distance from the new end: four
+  // pages before the end of a volume it landed four pages before the end of the next one, which added the one after,
+  // and so on to the last volume, each volume it crossed marked read. Chrome keeps the place (untilStill covers its
+  // in-flight scroll). So the track is put back exactly where it stood before the append, in the same task as the DOM
+  // change, before anything paints or scrolls. Measured in Playwright's WebKit: a still track on slide 9 of 12, twelve
+  // slides added, stood on slide 21; with this it stays on 9, and the next page turn moves one. A browser behaviour,
+  // so no unit test can hold it: the guard is test/e2e/walk180.mjs, which runs the reader in WebKit.
+  // Only the render the append caused: an anchor that render never came for (the chapter was there already) is dropped
+  // rather than applied to some later change of the slides.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const held = appendAnchor.current;
+    appendAnchor.current = null;
+    if (!el || !held || prefs.mode !== 'paged' || Date.now() - held.at > 1000) return;
+    if (Math.abs(el.scrollLeft - held.left) >= 1) el.scrollLeft = held.left;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides, ended, failed]);
+
   // ---- measure column width (× zoom) ----
   useEffect(() => {
     const measure = () => {
@@ -584,10 +606,13 @@ function ReaderInner() {
       if (!chapterRefs.length) { noMore.current = true; appending.current = false; return; }
       const idx = chapterRefs.findIndex((c) => c.id === last?.id);
       const next = idx >= 0 ? chapterRefs[idx + 1] : null;
-      if (!next) { noMore.current = true; await untilStill(lastMoved, rtlTrack); setEnded(true); appending.current = false; return; }
+      // #180: where the track stands now, for the layout effect after `slides` to put it back.
+      const hold = () => { appendAnchor.current = scrollRef.current ? { left: scrollRef.current.scrollLeft, at: Date.now() } : null; };
+      if (!next) { noMore.current = true; await untilStill(lastMoved, rtlTrack); hold(); setEnded(true); appending.current = false; return; }
       const ch = await loadChapter(next.id);
       const outcome = chapterOutcome(ch);
       await untilStill(lastMoved, rtlTrack);
+      hold();
       if (outcome === 'ok') setChapters((cs) => (cs.some((c) => c.id === ch!.id) ? cs : [...cs, ch!]));
       // There IS a next chapter -- chapterRefs says so -- and it would not load. Claiming the series is
       // finished here is how a corrupt file or a dropped connection came to read as an ending.

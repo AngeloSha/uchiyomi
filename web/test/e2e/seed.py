@@ -167,8 +167,28 @@ def rtl(root: str) -> None:
     print(f'  seeded {manga} and {plain}')
 
 
+def cascade(root: str) -> None:
+    """The #180 walk's library (walk180.mjs): a right-to-left series long enough for appends to chain.
+
+    Only on request (`seed.py <root> --cascade`). Four twelve-page chapters, each page different, whose ComicInfo says
+    `<Manga>YesAndRightToLeft</Manga>`: four pages before the end of one the reader appends the next, and in Safari
+    every append used to carry the reader to the same distance from the new end, which appended the next.
+    """
+    series = os.path.join(root, 'Test Source', 'Cascade Right To Left')
+    os.makedirs(series, exist_ok=True)
+    for ch in (1, 2, 3, 4):
+        with zipfile.ZipFile(os.path.join(series, f'Chapter {ch:03d}.cbz'), 'w') as z:
+            for i in range(1, 13):
+                z.writestr(f'{i:03d}.png', bands(300, 450, 1800 + ch * 100 + i))
+            z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Cascade Right To Left</Series>'
+                       f'<Number>{ch}</Number><Manga>YesAndRightToLeft</Manga></ComicInfo>')
+    print(f'  seeded {series}')
+
+
 if __name__ == '__main__':
     if '--rtl' in sys.argv[2:]:
         rtl(sys.argv[1])
+    elif '--cascade' in sys.argv[2:]:
+        cascade(sys.argv[1])
     else:
         main(sys.argv[1])
