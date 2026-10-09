@@ -14,6 +14,7 @@ import { cpSync, existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } fr
 import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { WIN, appExe, record, smoke, smokeDigest, tmpRoot, launch, waitHealthy, snapshot, hardKill, isAlive, runSync, sleep, OUT, APP_EXTRA, readJson, serveFile } from './lib.mjs';
+import { fallbackRow, fallbackPrivateRow } from './s2-rows.mjs';
 
 const exe = appExe();
 const only = process.env.S2_ONLY ? process.env.S2_ONLY.split(',') : null;
@@ -107,17 +108,11 @@ if (WIN && want('ii')) {
       try { cpSync(join(bRoot, 'logs', f), join(OUT, `s2-ii-${f}`)); } catch { /* not written */ }
     }
   }
-  const engineOk = !served || b.engine?.pass === true;
-  const bOkRun = b.ok && b.bffBackup?.pass && engineOk;
   let acl = '';
   if (b.fallback?.base) acl = runSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [b.fallback.base]).out.trim().slice(0, 800);
-  // The cluster left %LOCALAPPDATA% (private to this user) for %ProgramData% (readable by every local user by
-  // inheritance), so the lock-down is part of the pass condition, not a nicety.
-  const aclPrivate = !!acl && !/BUILTIN\\Users|Everyone|Authenticated Users/i.test(acl);
-  const bOk = bOkRun && aclPrivate;
-  record('S2-ii-nonascii-fallback', bOk ? 'PASS' : 'FAIL',
-    `binaries+data under "${base}", USERPROFILE+TEMP under "${profile}", fallback ON: ${bOkRun ? 'works' : 'FAILS'}, fallback dir private to this user: ${aclPrivate}; cluster at ${b.fallback?.base || '(no fallback used)'} (binaries copied: ${b.fallback?.copied}); bff backup ${b.bffBackup?.files?.['db.sql.gz']} B into the non-ASCII BACKUP_DIR; extension engine: ${served ? (engineOk ? `installed and answering (${(b.engine?.states || []).join(' -> ')})` : `FAILED ${JSON.stringify(b.engine).slice(0, 300)}`) : 'no fixture'}; 8.3 short path "${shortName}" (${eightDot3}); app copy ${copyMs} ms`,
-    { base, shortName, eightDot3, acl, aclPrivate, smoke: b });
+  // s2-rows.mjs: every field of the digest read safely -- a smoke that froze and was killed is a FAIL row, not a crash.
+  const fb = fallbackRow({ b, served: !!served, acl, base, profile, shortName, eightDot3, copyMs });
+  record('S2-ii-nonascii-fallback', fb.verdict, fb.summary, { base, shortName, eightDot3, acl, aclPrivate: fb.aclPrivate, smoke: b });
 
   // d) the fallback folder is never one the app did not make (postgres.js claimFallback). Two starts:
   //    - the same data again: the folder state.json recorded is READ BACK as private (Get-Acl's SDDL) and reused;
@@ -141,9 +136,8 @@ if (WIN && want('ii')) {
   } finally {
     rmSync(pub, { recursive: true, force: true });
   }
-  record('S2-ii-fallback-private', named && reused && refused ? 'PASS' : 'FAIL',
-    `fallback named Uchiyomi-<16 hex> directly under %ProgramData%: ${named}; a second start re-verified and reused it: ${reused}${again && !reused ? ` (${(again.error || JSON.stringify(again.fallback)).slice(0, 300)})` : ''}; a recorded folder other accounts can open was refused: ${refused}${refused ? '' : ` (${dErr.slice(0, 400)})`}`,
-    { fallback: b.fallback, again, publicFolder: pub, refusal: dErr.slice(0, 1500) });
+  const fp = fallbackPrivateRow({ named, reused, refused, again, dErr });
+  record('S2-ii-fallback-private', fp.verdict, fp.summary, { fallback: b.fallback, again, publicFolder: pub, refusal: dErr.slice(0, 1500) });
 
   // c) which part of the path matters: ASCII binaries, non-ASCII DATA only, fallback off -- once with characters
   //    the Windows-1252 code page has (Jösé) and once with ones it does not (名前).

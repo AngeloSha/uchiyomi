@@ -21,6 +21,7 @@ const { Postgres, isAlive, nonAscii, newFallbackName, isFallbackName, claimFallb
 const { ensurePort, canBind } = require('./ports');
 const { bffEnv } = require('./env');
 const { Engine } = require('./engine');
+const { logChildOutput } = require('./childlog');
 const state = require('./state');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -216,7 +217,6 @@ class Supervisor extends EventEmitter {
   forkBff() {
     const bffDir = path.join(this.o.resources, 'bff');
     const main = path.join(bffDir, 'dist', 'server.js');
-    const out = fs.createWriteStream(path.join(this.L.logs, 'bff.log'), { flags: 'a' });
     this.mark('bffFork');
     const child = this.o.utilityProcess.fork(path.join(__dirname, 'bff-entry.cjs'), [main], {
       env: this.env(),
@@ -224,8 +224,8 @@ class Supervisor extends EventEmitter {
       stdio: 'pipe',
       serviceName: 'Uchiyomi server',
     });
-    child.stdout?.on('data', (b) => out.write(b));
-    child.stderr?.on('data', (b) => out.write(b));
+    // Its last lines can arrive after 'exit' (childlog.js: ending the file on 'exit' froze the shell).
+    logChildOutput(path.join(this.L.logs, 'bff.log'), child);
     child.once('spawn', () => this.log.info('bff: spawned', { pid: child.pid }));
     this.bffPort = 0;
     child.on('message', (m) => {
@@ -235,7 +235,6 @@ class Supervisor extends EventEmitter {
       }
     });
     child.once('exit', (code) => {
-      out.end();
       const expected = this.stopping || this.cycling;
       this.log[expected ? 'info' : 'warn'](`bff: exited with ${code}`);
       this.emit('bff-exit', code);

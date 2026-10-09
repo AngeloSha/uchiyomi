@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -16,8 +17,8 @@ const { CONTRACT } = require('../src/env.js');
 
 const quiet = { info() {}, warn() {}, error() {} };
 
-function fakes(order, { installed = false, silentPort = false } = {}) {
-  const opts = { silentPort };
+function fakes(order, { installed = false, silentPort = false, lateOutput = false } = {}) {
+  const opts = { silentPort, lateOutput };
   const pg = {
     port: 0, password: '', binDir: '/pg/bin', pgdata: '/pg/data',
     prepare: async () => { order.push('pg.prepare'); return { fallback: null }; },
@@ -40,12 +41,20 @@ function fakes(order, { installed = false, silentPort = false } = {}) {
   const utilityProcess = {
     fork: (_entry, _args, o) => {
       order.push('bff.fork');
-      const child = Object.assign(new EventEmitter(), { pid: 4242, stdout: null, stderr: null, env: o.env, messages: [] });
+      const out = opts.lateOutput ? { stdout: new PassThrough(), stderr: new PassThrough() } : { stdout: null, stderr: null };
+      const child = Object.assign(new EventEmitter(), { pid: 4242, ...out, env: o.env, messages: [] });
       const srv = http.createServer((req, res) => { res.writeHead(200); res.end('{"ok":true}'); });
       // Like bff-entry.cjs: our own child says which port it bound -- unless the test plays a squatted port.
       srv.once('listening', () => { if (!opts.silentPort) child.emit('message', { type: 'listening', port: srv.address().port, address: '127.0.0.1' }); });
       srv.listen(Number(o.env.PORT), '127.0.0.1');
-      child.postMessage = (m) => { child.messages.push(m); order.push(`bff.message:${JSON.stringify(m)}`); srv.close(() => setImmediate(() => child.emit('exit', 0))); };
+      // lateOutput: like Electron 44.5.1's utilityProcess, the line the bff wrote last is delivered after 'exit'.
+      const exit = () => {
+        child.stdout?.write('{"msg":"SIGTERM: finishing the current chapter, then stopping"}\n');
+        child.emit('exit', 0);
+        child.stdout?.end('{"reqId":"req-4","msg":"request completed"}\n');
+        child.stderr?.end();
+      };
+      child.postMessage = (m) => { child.messages.push(m); order.push(`bff.message:${JSON.stringify(m)}`); srv.close(() => setImmediate(exit)); };
       child.kill = () => { srv.close(() => child.emit('exit', 1)); };
       setImmediate(() => child.emit('spawn'));
       forks.push(child);
@@ -98,6 +107,33 @@ test('start order, the env the bff gets, and the ordered stop', async () => {
     assert.equal(after.mainPid, undefined);
     assert.equal(after.uiPort, st.uiPort);
     assert.equal(await sup.stop('again'), r, 'a second stop joins the first');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("the bff's last line, delivered after its 'exit', lands in bff.log -- and does not take the shell down", async () => {
+  // The S2-ii hang (v0.55.8 PR, v0.55.9 and v0.55.10 release runs): bff.log was ended on 'exit' while the bff's
+  // SIGTERM line was still being written, then its last line arrived (Electron 44.5.1 delivers it; 44.4.5 dropped
+  // it). That write after end was an uncaught exception -> Electron's modal error box -> the stop never finished.
+  // Reintroduce by ending the file on 'exit' in forkBff: an uncaught ERR_STREAM_WRITE_AFTER_END fails this test.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uchi-sup-'));
+  const order = [];
+  const f = fakes(order, { lateOutput: true });
+  const sup = make(tmp, f);
+  try {
+    await sup.start();
+    const r = await sup.stop('test');
+    assert.equal(r.bff, 'exited:0');
+    assert.deepEqual(order.slice(-4), ['bff.message:{"type":"shutdown"}', 'engine.stop', 'solver.close', 'pg.stop'], 'the ordered stop did not finish');
+    const file = path.join(sup.L.logs, 'bff.log');
+    let log = '';
+    for (let i = 0; i < 100 && !/request completed/.test(log); i++) {
+      await new Promise((res) => setTimeout(res, 20));
+      log = fs.readFileSync(file, 'utf8');
+    }
+    assert.match(log, /SIGTERM: finishing/);
+    assert.match(log, /request completed/, "the bff's last line was lost");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -37,6 +37,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const archive = require('./archive');
+const { logChildOutput } = require('./childlog');
 
 const WIN = process.platform === 'win32';
 const nonAscii = (s) => /[^\x20-\x7e]/.test(s);
@@ -371,19 +372,17 @@ class Engine extends EventEmitter {
     const l = buildLaunch({ runtimeDir: this.runtimeDir, rootDir: this.rootDir, tmpDir: this.tmpDir, port, fsUrl: this.o.solverUrl(), user, pass });
     this.set({ state: 'starting' });
     const t0 = Date.now();
-    const out = fs.createWriteStream(this.logFile, { flags: 'a' });
     const child = spawn(l.cmd, l.args, { cwd: l.cwd, env: l.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
-    // Always drain both pipes: an unread pipe fills and blocks the JVM's logging threads.
-    child.stdout?.on('data', (b) => out.write(b));
-    child.stderr?.on('data', (b) => out.write(b));
+    // Always drain both pipes: an unread pipe fills and blocks the JVM's logging threads. The shutdown hooks'
+    // lines can arrive after 'exit' (childlog.js: ending the file on 'exit' froze the shell).
+    const out = logChildOutput(this.logFile, child);
     child.stdin?.on('error', () => { /* EPIPE once the JVM has gone: expected */ });
     let exited = false;
     let ready = false;
     const exit = new Promise((resolve) => child.once('exit', (code, signal) => { exited = true; resolve({ code, signal }); }));
     child.once('error', (e) => { out.write(`\n[spawn error] ${e.message}\n`); });
     child.once('exit', (code, signal) => {
-      out.end();
       if (this.child === child) this.child = null;
       // Before it was ever ready, the waiter below owns the failure (and says so to whoever called start()).
       if (this.stopping || !ready) return;

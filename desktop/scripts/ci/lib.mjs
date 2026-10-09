@@ -243,7 +243,9 @@ export async function smoke(exe, root, extra = [], { timeoutMs = 10 * 60_000, en
 export function smokeDigest(s) {
   const c = s.result?.checks || {};
   return {
-    exit: s.exit, ok: !!s.result?.ok, ms: s.ms,
+    // wroteResult false = the app never wrote its result (it crashed, or froze until smoke()'s timeout killed it):
+    // every field below is then missing, and `error` is the tail of its output.
+    exit: s.exit, ok: !!s.result?.ok, ms: s.ms, wroteResult: !!s.result,
     healthz: c.healthz?.status, desktop: c.desktopMode?.desktop, signIn: c.signIn, solver: c.solver?.msg, engine: c.engine, restore: c.restore,
     bffBackup: c.bffBackup ? { pass: c.bffBackup.pass, files: c.bffBackup.files, tables: c.bffBackup.tables, error: c.bffBackup.error || c.bffBackup.task?.lastResult?.error } : null,
     shellDump: c.shellDump ? { bytes: c.shellDump.bytes, usersTable: c.shellDump.hasUsersTable, tables: c.shellDump.tables } : null,
