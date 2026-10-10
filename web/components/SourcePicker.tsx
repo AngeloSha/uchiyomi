@@ -75,12 +75,11 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
   settled: number;
   total: number;
   /**
-   * The number the chip says: every source that can answer this listing, not `sources.length`. The budget
-   * the parent passes as `sources` starts at six and widens by one for every source that answers with
-   * nothing, so a count taken from it would tick upward while the wall loads -- a number that changes by
-   * itself reads as a bug. Nor the parent's ranked list, which is capped at twelve: "12 sources" over a
-   * 14-source install was the first thing a reviewer read off the chip. The sheet still lists only the
-   * sources actually being asked, and its footer says "Asking {n} of {m}" so the two surfaces agree.
+   * The number the chip says: every source that can answer this listing. Since v0.58.0 the parent asks every one
+   * of them, so it is `sources.length` too -- but it is said from the pool, as it was when the parent asked a budget
+   * of six widening to ten (a count that ticks upward by itself reads as a bug) out of a ranked list capped at
+   * twelve ("12 sources" over a 14-source install was the first thing a reviewer read off the chip). The sheet lists
+   * every source asked, and its footer says whether that is all of them.
    */
   count: number;
   /** The source being shown alone, or null for all of them. */
@@ -89,7 +88,6 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
   mode: ListMode;
   onMode: (m: ListMode) => void;
 }) {
-  const shown = sources.slice(0, 12);
   // The parent namespaces its bookkeeping by listing mode, so a bare id finds nothing here. Getting this
   // wrong is silent: every row would simply read as "not asked yet" and sit permanently dimmed.
   const stateOf = (id: string): SrcState => states[`${mode}:${id}`] ?? 'idle';
@@ -97,7 +95,7 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
   // amber; the sentences themselves live in the sheet, and the full story in Admin. Counted by the DOT the
   // sheet lights, not by whether a sentence exists: the two used to differ (a failure without a server note
   // had the dot and no sentence), so the chip said "2 with issues" over three amber rows.
-  const troubled = shown.filter((s) => noteFor(s, stateOf(s.id)).dot === 'warn').length;
+  const troubled = sources.filter((s) => noteFor(s, stateOf(s.id)).dot === 'warn').length;
   // `selected` always names a budgeted source (the parent clears it on a mode change and the budget only
   // grows), but the × must stay reachable even if it ever did not, or the wall could not be un-filtered.
   const current = selected ? sources.find((s) => s.id === selected) ?? { id: selected, name: selected } : null;
@@ -138,12 +136,12 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
               ×
             </button>
           </span>
-        ) : shown.length > 0 && (
+        ) : sources.length > 0 && (
           <button type="button" onClick={() => setSheet('list')} aria-haspopup="dialog" className="chip text-xs">
             {/* Three favicons stacked, the way the group avatars stack on a series page: recognisable as
                 "several", without naming any. The ring is the chip's own ground so the overlap reads. */}
             <span className="inline-flex items-center">
-              {shown.slice(0, 3).map((s, i) => (
+              {sources.slice(0, 3).map((s, i) => (
                 <span key={s.id} className={`inline-flex ${i > 0 ? '-ms-1.5' : ''}`}>
                   <SourceIcon id={s.id} name={s.name} size={16} ring="ring-1 ring-ink-900" />
                 </span>
@@ -163,7 +161,7 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
       )}
 
       {sheet === 'list' && (
-        <SourceListSheet sources={shown} total={count} stateOf={stateOf} selected={selected} onSelect={onSelect}
+        <SourceListSheet sources={sources} total={count} stateOf={stateOf} selected={selected} onSelect={onSelect}
           onExplain={() => setSheet('explainer')} onClose={() => setSheet(null)} />
       )}
       {sheet === 'explainer' && <SourcesExplainer onClose={() => setSheet('list')} />}
@@ -191,8 +189,11 @@ export function SourceLatest({ source, listMode, page, enabled, onSettled }: {
   listMode: ListMode;
   page: number;
   enabled: boolean;
-  /** The key is namespaced by listing mode; the parent stores everything under it. */
-  onSettled: (key: string, items: any[], ok: boolean) => void;
+  /**
+   * The key is namespaced by listing mode; the parent stores everything under it. `page` is the page answered: the
+   * parent's gate counts the page being fetched (v0.58.0), so page 2 asks four at a time as page 1 does.
+   */
+  onSettled: (key: string, items: any[], ok: boolean, page: number) => void;
 }) {
   const { data, isError, isSuccess } = useQuery({
     // The mode is part of the key here for the same reason it is part of the server's cache key: without
@@ -212,8 +213,8 @@ export function SourceLatest({ source, listMode, page, enabled, onSettled }: {
     retry: false,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
-    // Inherited `true` means a tab left open on Discover re-fires six live scrapes the moment you come back
-    // to it, and the wall goes blank while they run. Nothing here changes in the seconds you were away.
+    // Inherited `true` means a tab left open on Discover re-fires a live scrape per source the moment you come
+    // back to it, and the wall goes blank while they run. Nothing here changes in the seconds you were away.
     refetchOnWindowFocus: false,
   });
 
@@ -221,9 +222,9 @@ export function SourceLatest({ source, listMode, page, enabled, onSettled }: {
   // answered instantly from cache must still release the concurrency gate or the wall stalls behind it.
   useEffect(() => {
     const key = `${listMode}:${source.id}`;
-    if (isSuccess) onSettled(key, data?.content ?? [], true);
-    else if (isError) onSettled(key, [], false);
-  }, [isSuccess, isError, data, source.id, listMode, onSettled]);
+    if (isSuccess) onSettled(key, data?.content ?? [], true, page);
+    else if (isError) onSettled(key, [], false, page);
+  }, [isSuccess, isError, data, source.id, listMode, page, onSettled]);
 
   return null;
 }

@@ -19,6 +19,7 @@ import { Avatar } from '@/components/Avatar';
 import { Lockup } from '@/components/Brand';
 import { LibraryStart } from '@/components/LibraryStart';
 import { t as tr } from '@/lib/i18n';
+import { sortValue } from '@/lib/sortValue';
 
 interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
 
@@ -227,6 +228,18 @@ export default function HomePage() {
           </Rail>
         )}
       </section>
+
+      {/* Most popular in your library (v0.58.0): the viewer's series by AniList popularity, each saying AniList's score.
+          Only with something in it -- a server older than v0.58.0 sends no `popular`, and a library with no AniList
+          numbers yet has nothing to rank -- so it never shows an empty rail or a skeleton that turns into nothing. */}
+      {(data?.popular?.length ?? 0) > 0 && (
+        <section className="pt-8">
+          <SectionTitle action={<Link href="/library?sort=popular" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Most popular in your library')}</SectionTitle>
+          <Rail>
+            {data!.popular!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
+          </Rail>
+        </section>
+      )}
 
       {/* Trending across accounts — Netflix-style Top 10 with big rank numerals */}
       {(trending?.content?.length ?? 0) > 0 && (

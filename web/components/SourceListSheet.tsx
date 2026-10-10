@@ -1,6 +1,7 @@
 'use client';
-// The list behind Discover's one source chip: every source the wall is asking, in the wall's own order, with
-// the health the chips used to wear as a ring and the server's one-line reason under the name.
+// The list behind Discover's one source chip: every source the wall is asking (every one it has, since v0.58.0), in
+// the wall's own order, with the health the chips used to wear as a ring and the server's one-line reason under the
+// name.
 //
 // This replaced a wall of up to twelve chips plus two note lines sitting above the covers -- more words than
 // the covers they introduced, and every chip a decision nobody had asked to make. One chip now says how many
@@ -30,10 +31,10 @@ export function SourceListSheet({ sources, total, stateOf, selected, onSelect, o
   /** In the picker's order, which is the wall's order. */
   sources: Src[];
   /**
-   * How many sources could answer this listing -- the chip's number. The rows here are only the ones being
-   * asked (six, widening to ten as sources answer empty), so with the chip saying "14 sources" and the sheet
-   * listing nine, the footer has to say "Asking 9 of 14" or the reader is left to reconcile two numbers
-   * that both look like "how many sources".
+   * How many sources could answer this listing -- the chip's number. Since v0.58.0 the wall asks every one of them,
+   * so the rows are all of them and the footer says so; when the rows were the ones being asked out of more (six,
+   * widening to ten), the footer said "Asking 9 of 14", or the reader was left to reconcile two numbers that both
+   * looked like "how many sources". It still says that, should the rows ever be fewer again.
    */
   total: number;
   stateOf: (id: string) => SrcState;
@@ -56,10 +57,10 @@ export function SourceListSheet({ sources, total, stateOf, selected, onSelect, o
       }
       footer={
         <p className="text-[11px] text-fog-500">
-          {/* A small install asks every source it has; "Asking 4 of 4" would be a puzzle, not a fact. */}
+          {/* Every source is asked (v0.58.0), and the footer says so: "Asking 29 of 29" would be a puzzle, not a fact. */}
           {sources.length < total
             ? tr('Asking {n} of {m} · tap a source to browse it alone', { n: sources.length, m: total })
-            : tr('Tap a source to browse it alone.')}
+            : tr('Asking every source · tap one to browse it alone')}
         </p>
       }
     >

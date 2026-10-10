@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3547
+    "strings": 3561
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3550,5 +3550,19 @@
   "1 duplicate copy removed": "Удалена 1 дублирующая копия",
   "{n} duplicate copies removed": "Удалено дублирующих копий: {n}",
   "1 chapter kept twice: bookmarked in the other copy": "1 глава осталась в двух копиях: в другой копии есть закладка",
-  "{n} chapters kept twice: bookmarked in the other copy": "Глав осталось в двух копиях: {n} — в другой копии есть закладка"
+  "{n} chapters kept twice: bookmarked in the other copy": "Глав осталось в двух копиях: {n} — в другой копии есть закладка",
+  "Most popular": "Самое популярное",
+  "Top rated": "Высоко оценённое",
+  "My rating": "Моя оценка",
+  "Most chapters": "Больше глав",
+  "Recently read": "Недавно прочитанное",
+  "{count} on AniList": "{count} на AniList",
+  "{score}% on AniList": "{score} % на AniList",
+  "Read {when}": "Читали {when}",
+  "Most popular in your library": "Самое популярное в вашей библиотеке",
+  "AniList {score}% · {count}": "AniList {score} % · {count}",
+  "AniList {score}%": "AniList {score} %",
+  "Average score on AniList, and how many people there have it on a list": "Средняя оценка на AniList и сколько человек добавили её там в список",
+  "Still loading": "Ещё загружаются",
+  "Asking every source · tap one to browse it alone": "Опрашиваем все источники · нажмите на источник, чтобы просматривать только его"
 }

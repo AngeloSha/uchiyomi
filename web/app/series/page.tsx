@@ -50,6 +50,7 @@ import { NumberingSheet } from '@/components/NumberingSheet';
 import type { PlanMode } from '@/lib/numbering';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
 import { editionChipLabels } from '@/lib/editions';
+import { anilistLine } from '@/lib/sortValue';
 import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
@@ -847,6 +848,10 @@ function SeriesInner() {
   useEffect(() => {
     if (series?.yomi) { setFav(series.yomi.favorite); setRating(series.yomi.rating); }
   }, [series]);
+  // v0.58.0: AniList's word on the series, "AniList 84% · 312K", shown beside the reader's own stars wherever those are
+  // (the stars, the meta line, the desktop banner's chips) -- never instead of them. '' without a checked AniList link.
+  const anilist = anilistLine(series?.yomi?.anilist);
+  const anilistHint = tr('Average score on AniList, and how many people there have it on a list');
 
   useEffect(() => {
     listDownloads().then((d) => setDownloaded(new Set(d.filter((c) => c.seriesId === id).map((c) => c.bookId))));
@@ -1557,6 +1562,10 @@ function SeriesInner() {
         <StarRating value={rating} onSet={setStars} />
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : tr('Rate this')}</span>
       </div>
+      {/* Under the reader's "4/5", at its end: theirs, then AniList's. */}
+      {anilist && (
+        <p data-anilist-rating title={anilistHint} className="-mt-1 text-end text-[11px] tabular-nums text-fog-500">{anilist}</p>
+      )}
       {canDownload(user) && (series?.booksCount ?? 0) >= 3 && (
         <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></svg>{tr('Find missing chapters')}</button>
@@ -1596,6 +1605,7 @@ function SeriesInner() {
     // yet"), with the source and the groups beside it, and one line saying it is enough.
     updatedAt ? <>{tr('Updated {ago}', { ago: relativeTime(updatedAt) })}</> : null,
     rating ? <span className="text-accent">★ {rating}/5</span> : null,
+    anilist ? <span data-anilist-meta title={anilistHint} className="whitespace-nowrap">{anilist}</span> : null,
   ].filter(Boolean);
   const Meta = (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-400 lg:text-sm">
@@ -1811,10 +1821,11 @@ function SeriesInner() {
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
-          {(meta?.status || rating) && (
+          {(meta?.status || rating || anilist) && (
             <div className="mb-2 flex items-center gap-2">
               {meta?.status && <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>}
               {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
+              {anilist ? <span data-anilist-chip className="chip text-[11px] tabular-nums">{anilist}</span> : null}
             </div>
           )}
           <h1 dir="auto" className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>

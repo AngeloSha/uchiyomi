@@ -91,7 +91,8 @@ export type SrcState = 'ok' | 'empty' | 'idle' | 'blocked';
 /**
  * Which sources to actually fetch, and in what order.
  *
- * The page that fetched every registered source opened forty-five concurrent scrapes. Six, best-first:
+ * The page that fetched every registered source opened forty-five concurrent scrapes. Six, best-first -- and since
+ * v0.58.0 every one again (`max` Infinity), but in this order and WALL_IN_FLIGHT at a time, never all at once:
  *   1. healthy before rate-limited or blocked, because a blocked source is a guaranteed timeout for a
  *      guaranteed nothing;
  *   2. what the library actually came from;
@@ -172,6 +173,23 @@ export function aloneEmpty(src: Src, state: SrcState, now = Date.now()): { text:
 
 /** Which listing the wall is showing. The source's own ranking, never one we compute. */
 export type ListMode = 'newest' | 'popular';
+
+/**
+ * How many sources the wall has asking at once (named in v0.58.0; the page's literal 4 before). Each answer releases
+ * the next, so asking every source -- as the wall does since v0.58.0 -- never widens the burst: it only makes the wall
+ * fill for longer.
+ */
+export const WALL_IN_FLIGHT = 4;
+
+/**
+ * How many of the wall's sources have answered page `page` (v0.58.0): `keys` are the page's `${listMode}:${id}`, and
+ * `upTo` the furthest page each key has answered. The gate is WALL_IN_FLIGHT more than this, and the next page waits
+ * until it is every one of them. By page, because a count of the sources that ever answered -- what the gate counted
+ * before -- is all of them from page 2 on, and opened the gate to every source at once.
+ */
+export function answeredPage(keys: readonly string[], upTo: Readonly<Record<string, number>>, page: number): number {
+  return keys.filter((k) => (upTo[k] ?? 0) >= page).length;
+}
 
 /**
  * Sources worth asking for the mode currently selected.

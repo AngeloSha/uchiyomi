@@ -10,6 +10,7 @@ import { coverTriplet } from '@/lib/theme';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay, IcPlus, IcWifiOff } from './icons';
 import { SourceIcon } from './SourcePicker';
+import { ProgressRing } from './ProgressRing';
 import { iconStack, type StackSource } from '@/lib/sourceGroups';
 import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { effectsReduced } from '@/lib/effects';
@@ -75,7 +76,11 @@ function useTileTint(color?: string | null): React.CSSProperties {
  *
  *  `eager` skips lazy-loading for tiles that are on screen at first paint. A lazy <img> waits for layout
  *  before the browser will even queue the request, so on the first rail it is pure added latency. */
-export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Series; w?: string; eager?: boolean }) {
+export function SeriesCard({ series, w = 'w-32', eager = false, note }: {
+  series: Series; w?: string; eager?: boolean;
+  /** One quiet line under the title, a rail's own fact about the series: Home's most popular says AniList's score. */
+  note?: string;
+}) {
   // yomi.unread first: it is computed per user in lib/enrich.ts. booksUnreadCount is now corrected there too,
   // but a rail added later that forgets to enrich would fall back to seriesDto's placeholder -- which is the
   // total chapter count -- so the badge would claim every chapter is unread. Preferring the enriched field
@@ -123,6 +128,7 @@ export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Seri
       <p className="mt-2 line-clamp-2 px-0.5 text-[13px] font-medium leading-tight text-fog-200 transition group-hover:text-fog-50">
         {series.metadata?.title || series.name}
       </p>
+      {note && <p data-card-note className="mt-0.5 truncate px-0.5 text-[11px] leading-tight text-fog-500 tabular-nums">{note}</p>}
     </Link>
     {menu.element}
     </>
@@ -167,10 +173,15 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
 }
 
 /** Grid tile (library / search). */
-export function SeriesTile({ series, eager = false, selectable, selected, onToggle }: {
+export function SeriesTile({ series, eager = false, selectable, selected, onToggle, note }: {
   series: Series; eager?: boolean;
   /** select mode: the tile stops navigating and toggles instead */
   selectable?: boolean; selected?: boolean; onToggle?: () => void;
+  /**
+   * One quiet line under the title (v0.58.0): in the Library, the value the shelf is sorted by -- "312K on AniList",
+   * "★ 4/5", "Read 3d ago" (lib/sortValue.ts). Nothing when empty.
+   */
+  note?: string;
 }) {
   // yomi.unread first: it is computed per user in lib/enrich.ts. booksUnreadCount is now corrected there too,
   // but a rail added later that forgets to enrich would fall back to seriesDto's placeholder -- which is the
@@ -222,6 +233,8 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
       <p dir="auto" className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
         {series.metadata?.title || series.name}
       </p>
+      {/* In the interface's direction, not the title's `auto`: it is the app's sentence about the series. */}
+      {note && <p data-sort-value className="mt-0.5 truncate text-[11px] leading-tight text-fog-500 tabular-nums">{note}</p>}
       {/* The work's languages (v0.52.0, #72): the Library shows one card for every language edition the viewer may
           browse, and this line says so -- `EN · ES-419`, the edition this card opens brighter. The names are its
           title, for a hover and a screen reader. */}
@@ -383,4 +396,28 @@ export function SourceCard({ item, providers, onAdd, eager }: {
   return owned && item.librarySeriesId
     ? <Link href={`/series/?id=${encodeURIComponent(item.librarySeriesId)}`} aria-label={item.title} aria-describedby={described} className={rootCls}>{body}</Link>
     : <button type="button" onClick={onAdd} disabled={owned} aria-label={owned ? item.title : tr('Add to library')} aria-describedby={described} className={rootCls}>{body}</button>;
+}
+
+/**
+ * Discover's last tile while sources are still being asked (v0.58.0): which ones, so someone scrolling to the end of
+ * Newest, Popular or a search sees that more is coming -- the wall asks every source now, and fills for longer. A
+ * SourceCard's size (its 2:3 box; no title under it), dashed and quiet, with the progress ring turning, which stands
+ * still under Reduce effects or reduced motion as it does everywhere. The first `shown` names, then "+N" for the rest,
+ * isolated left to right as the source stack's "+2" is, or an Arabic line reads it "3+".
+ */
+export function StillLoadingCard({ names, shown = 3 }: { names: string[]; shown?: number }) {
+  const head = names.slice(0, shown);
+  const more = names.length - head.length;
+  return (
+    <div data-still-loading={names.length} className="w-full">
+      <div className="flex aspect-[2/3] flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 px-2 text-center">
+        <ProgressRing progress="spin" size={18} tone="muted" />
+        <p className="text-[11px] font-medium text-fog-300">{tr('Still loading')}</p>
+        <ul className="w-full space-y-0.5 text-[11px] leading-tight text-fog-500">
+          {head.map((n, i) => <li key={`${i}:${n}`} dir="auto" className="truncate">{n}</li>)}
+          {more > 0 && <li className="tabular-nums"><bdi dir="ltr">+{more}</bdi></li>}
+        </ul>
+      </div>
+    </div>
+  );
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3547
+    "strings": 3561
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3550,5 +3550,19 @@
   "1 duplicate copy removed": "1 copia duplicada eliminada",
   "{n} duplicate copies removed": "{n} copias duplicadas eliminadas",
   "1 chapter kept twice: bookmarked in the other copy": "1 capítulo conservado dos veces: con marcador en la otra copia",
-  "{n} chapters kept twice: bookmarked in the other copy": "{n} capítulos conservados dos veces: con marcador en la otra copia"
+  "{n} chapters kept twice: bookmarked in the other copy": "{n} capítulos conservados dos veces: con marcador en la otra copia",
+  "Most popular": "Más popular",
+  "Top rated": "Mejor valorado",
+  "My rating": "Mi valoración",
+  "Most chapters": "Más capítulos",
+  "Recently read": "Leído recientemente",
+  "{count} on AniList": "{count} en AniList",
+  "{score}% on AniList": "{score} % en AniList",
+  "Read {when}": "Leído {when}",
+  "Most popular in your library": "Lo más popular de tu biblioteca",
+  "AniList {score}% · {count}": "AniList {score} % · {count}",
+  "AniList {score}%": "AniList {score} %",
+  "Average score on AniList, and how many people there have it on a list": "La puntuación media en AniList y cuántas personas la tienen allí en una lista",
+  "Still loading": "Aún cargando",
+  "Asking every source · tap one to browse it alone": "Consultando todas las fuentes · toca una para explorarla sola"
 }

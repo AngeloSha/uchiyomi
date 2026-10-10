@@ -11,13 +11,13 @@ import { reasonText } from '@/lib/said';
 import { isDesktop } from '@/lib/desktop';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
-import { SourceCard, SourceItem } from '@/components/cards';
+import { SourceCard, SourceItem, StillLoadingCard } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
-import { aloneEmpty, budgetForMode, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
+import { aloneEmpty, answeredPage, budgetForMode, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
-import { applyWorks, emptiedCount, foldByWork, followWorks, mergeGroups, unknownWorks, workKey, type WallProvider } from '@/lib/wall';
+import { applyWorks, foldByWork, followWorks, mergeGroups, unknownWorks, workKey, type WallProvider } from '@/lib/wall';
 import { useLiveWorks } from '@/lib/useLiveWorks';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
@@ -60,8 +60,14 @@ const SEARCH_FIRST_WAIT_MS = 6000;
 const SEARCH_POLL_WAIT_MS = 1500;
 /** How often to poll while the answer says some sources are still pending. */
 const SEARCH_POLL_MS = 1500;
-/** How many pending sources the progress line names before "and N more". */
+/** How many pending sources the progress line names before "and N more", and the wall's last card before "+N". */
 const SEARCH_NAMES_SHOWN = 3;
+/**
+ * How many sources the hero's add looks a title up on, best-ranked first. GET /api/sources/find asks every source it is
+ * given at once -- it has no gate like the wall's four-at-a-time -- so when the wall began asking every source
+ * (v0.58.0) this stayed the most the wall had asked before: ten.
+ */
+const HERO_FIND_SOURCES = 10;
 
 /**
  * How many titles the hero rotates through.
@@ -80,14 +86,15 @@ const HERO_SLIDES = 10;
  * separate button was the entire point of the page, and the search box that dominated it was unused.
  *
  * So: a wall of what your sources published, led by a full-bleed hero built from AniList key art that
- * `/api/discover/trending` has been returning all along and this page rendered as a 144px thumbnail. The 45
- * sources are ranked and the best few are fetched at once. Search survives as a field, with a
+ * `/api/discover/trending` has been returning all along and this page rendered as a 144px thumbnail. The
+ * sources are ranked and every one of them is asked, the best first, four at a time (v0.58.0: it was the best
+ * six to ten, and the owner's 29 sources were mostly never on the wall). Search survives as a field, with a
  * way back out that it never had.
  *
- * `/api/sources/latest` takes up to fifteen seconds, so the six sources are fetched independently and the
- * wall fills in as each lands, in arrival order. Nothing already on screen ever moves: only mangadex
- * populates `updatedAt`, so "newest across six sources" is not a sortable quantity and pretending otherwise
- * would reflow tiles under a reading thumb.
+ * `/api/sources/latest` takes up to fifteen seconds, so the sources are fetched independently and the
+ * wall fills in as each lands, in arrival order, with a card at its end naming who is still loading. Nothing
+ * already on screen ever moves: only mangadex populates `updatedAt`, so "newest across every source" is not a
+ * sortable quantity and pretending otherwise would reflow tiles under a reading thumb.
  */
 export default function DiscoverPage() {
   const qc = useQueryClient();
@@ -148,6 +155,9 @@ export default function DiscoverPage() {
   const [byId, setById] = useState<Record<string, SourceItem[]>>({});
   const [order, setOrder] = useState<string[]>([]);
   const [states, setStates] = useState<Record<string, SrcState>>({});
+  // The furthest page each source has answered, by the same `${listMode}:${id}` keys (v0.58.0): the gate and the paging
+  // go by the page being fetched, so page 2 asks four at a time as page 1 does.
+  const [upTo, setUpTo] = useState<Record<string, number>>({});
   const [seed, setSeed] = useState<AddSeed | null>(null);
   /**
    * What this visit added, by work (v0.56.0; by title before): off the wall at once, and "In library" in a search, with
@@ -160,28 +170,15 @@ export default function DiscoverPage() {
   // not in the pool at all, the same way one without `latest` has never been. Popular is universal among
   // extensions but absent from a few site engines.
   //
-  // The pool is what the chip COUNTS. It used to count the ranked list below, and that list is capped at
-  // twelve, so a 14-source install read "All sources · 12 sources" over a sheet listing nine -- three numbers
-  // for one pool. The cap is a fetch budget, not a fact about the install.
+  // The pool is what the chip COUNTS, and since v0.58.0 it is also what the wall asks (`budget` below). The chip
+  // once counted a ranked list capped at twelve, so a 14-source install read "All sources · 12 sources" over a
+  // sheet listing nine -- three numbers for one pool.
   const pool = useMemo(() => budgetForMode(sources, listMode, Infinity), [sources, listMode]);
-  // Ranked once; how many of them are actually asked grows as answers come back.
-  const ranked = useMemo(() => pool.slice(0, 12), [pool]);
 
   // Nothing resets the wall any more. That reset -- and specifically resetting it WITHOUT remounting the
   // children, which kept their React keys and their cached queries -- is what left the page counting sources
   // it had just forgotten, with skeletons that never resolved. See the warning on SourceLatest.
 
-  /**
-   * Six sources, plus one more for every one that came back with nothing.
-   *
-   * Ranking by what the library actually came from is right, and on a real install it turned out that four
-   * of that reader's own six top sources answer "newest" with an empty page: their Cloudflare challenge
-   * fails and the adapter returns [] rather than throwing, so nothing marks them unhealthy and nothing
-   * moves them down. A fixed six then spends most of the wall on sources that cannot fill it.
-   *
-   * Each replacement is only requested after an earlier source has settled, so this widens the wall without
-   * widening the burst. Bounded twice over: by the ranked list and by the cap.
-   */
   // Everything the wall accumulates is keyed `${listMode}:${sourceId}`, never bare. That is what lets the
   // Newest/Popular toggle work WITHOUT clearing anything: switching simply reads a different set of keys,
   // and switching back shows what was already loaded, instantly. Clearing is the one thing that has ever
@@ -200,34 +197,45 @@ export default function DiscoverPage() {
   const rows = useMemo(() => Object.fromEntries(mine(byId).map(([k, list]) => [k, applyWorks(list, wallWorks)])), [byId, mine, wallWorks]);
   const wallAdded = useMemo(() => followWorks(added, wallWorks), [added, wallWorks]);
 
-  // Counted by what the wall SHOWS (v0.56.0): a source whose whole page the library already holds puts nothing on it,
-  // and earns its replacement like one that answered with nothing.
-  const emptied = emptiedCount(mine(states), rows, wallAdded);
-  const budget = useMemo(
-    () => ranked.slice(0, Math.min(ranked.length, 10, 6 + emptied)),
-    [ranked, emptied],
-  );
+  /**
+   * Which sources the wall asks: every one in the pool, best-ranked first (v0.58.0).
+   *
+   * It was six, plus one more for every one that came back with nothing, ten at most: on a real install four of a
+   * reader's own top six answered "newest" with an empty page (their Cloudflare challenge failed and the adapter
+   * returned [] rather than throwing), so a fixed six spent the wall on sources that could not fill it. The owner then
+   * asked for all 29 of his on the wall. The burst is the same either way: the gate below lets four ask at a time and
+   * each answer releases the next, so more sources only means the wall keeps filling for longer -- and its last card
+   * says who it is still waiting on.
+   */
+  const budget = pool;
 
+  // Where the hero's add looks a title up: the best-ranked HERO_FIND_SOURCES (v0.58.0 kept it there when the wall
+  // began asking every source -- /api/sources/find asks all it is given at once, with no gate like the wall's).
   // AddSeriesDialog's effect depends on this list. Built inline it was a fresh array every render, so with
   // the hero's add dialog open every settling source refired /api/sources/find -- a fan-out with a
   // 25-second per-source timeout, repeatedly, while the wall filled in behind it.
-  const budgetIds = useMemo(() => budget.map((s) => s.id), [budget]);
+  const budgetIds = useMemo(() => budget.slice(0, HERO_FIND_SOURCES).map((s) => s.id), [budget]);
 
-  const onSettled = useCallback((id: string, items: SourceItem[], ok: boolean) => {
+  const onSettled = useCallback((id: string, items: SourceItem[], ok: boolean, at = 1) => {
     setById((prev) => (prev[id]?.length && !items.length ? prev : { ...prev, [id]: [...(prev[id] ?? []), ...items] }));
     setOrder((prev) => (prev.includes(id) ? prev : [...prev, id]));
     setStates((prev) => ({ ...prev, [id]: !ok ? 'blocked' : items.length ? 'ok' : 'empty' }));
+    setUpTo((prev) => ((prev[id] ?? 0) >= at ? prev : { ...prev, [id]: at }));
   }, []);
 
-  // The concurrency gate. Four at a time; each settle releases the next. Counted within the current
-  // listing only, or switching modes would look already-finished and never fetch.
+  // How many sources have answered at all: the heading's "{done} of {total} sources", the picker's hairline and the
+  // skeletons. Counted within the current listing only, or switching modes would look already-finished.
   const settled = order.filter((k) => k.startsWith(`${listMode}:`)).length;
-  const gate = 4 + settled;
+  // The concurrency gate. Four at a time; each settle releases the next -- on every page. Counted by the page being
+  // fetched (v0.58.0): `settled` counts a source once, so from page 2 on it opened the gate to every source at once,
+  // and with every source asked that would have been a burst of all of them.
+  const answered = answeredPage(budget.map((s) => kOf(s.id)), upTo, page);
+  const gate = WALL_IN_FLIGHT + answered;
 
   const nameOf = useCallback((id: string) => sources.find((s) => s.id === id)?.name, [sources]);
   // The page's own ranking, so a folded card's "preferred" provider is the one the page would have asked
   // first, not whichever answered first. Unranked sources sort last.
-  const rankOf = useCallback((id: string) => { const i = ranked.findIndex((s) => s.id === id); return i < 0 ? ranked.length : i; }, [ranked]);
+  const rankOf = useCallback((id: string) => { const i = pool.findIndex((s) => s.id === id); return i < 0 ? pool.length : i; }, [pool]);
 
   // ---------------------------------------------------------------- search
   /**
@@ -329,6 +337,16 @@ export default function DiscoverPage() {
     const names = more > 1 ? `${shown} ${tr('and {n} more', { n: more })}` : more === 1 ? `${shown} ${tr('and 1 more')}` : shown;
     return tr('{n} of {m} sources answered · still asking {names}', { n, m, names });
   }, [mode, searchQ.data]);
+  /**
+   * Who the page is still waiting on, by name: the wall's last card, "Still loading" (v0.58.0). Asking every source
+   * fills the wall for longer, and someone scrolling down reached its end with nothing to say more was coming. In
+   * browsing, the sources asked for the page being fetched that have not answered it (only the one browsed alone,
+   * when one is); in a search, the ones its latest answer says are still being asked. Empty once all have answered.
+   */
+  const waitingOn = useMemo(() => {
+    if (mode === 'search') return (searchQ.data?.sources ?? []).filter((s) => s.state === 'pending').map((s) => s.name);
+    return budget.filter((s) => (!selected || s.id === selected) && (upTo[kOf(s.id)] ?? 0) < page).map((s) => s.name);
+  }, [mode, searchQ.data, budget, selected, upTo, kOf, page]);
 
   const wall = useMemo(() => {
     // Search arrives already folded: the server grouped it, and searchGroups merges what it has placed since.
@@ -363,9 +381,10 @@ export default function DiscoverPage() {
     (wall.groups[workKey(it)] ?? [{ source: it.source, name: nameOf(it.source) ?? it.source }])
       .map((p) => ({ source: p.source, name: p.name, extension: extOf.get(p.source) ?? null }));
 
-  // Skeleton tiles: in search mode only until the FIRST answer (or a failure) -- after that the wall shows
-  // what has landed and the progress line says what has not, so a skeleton would sit beside real tiles and
-  // read as a stuck load.
+  // Skeleton tiles: only until the FIRST cards land -- in search mode until the first answer (or a failure).
+  // After that the wall shows what has landed and its last card (and in a search the progress line) says what has
+  // not, so a skeleton would sit beside real tiles and read as a stuck load. Since v0.58.0 browsing too: with every
+  // source asked, eighteen skeletons sat under the covers for as long as the slowest source took.
   const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (!searchQ.data && !searchQ.isError ? 3 : 0);
 
   // The empty card for ONE source browsed alone says that source's own reason and wait, the way its sheet
@@ -415,7 +434,10 @@ export default function DiscoverPage() {
 
   // ---------------------------------------------------------------- more
   const sentinel = useRef<HTMLDivElement>(null);
-  const canPage = mode === 'newest' && settled >= budget.length && budget.length > 0 && page < 5;
+  // The next page once every source has answered this one (v0.58.0: once each had answered at all, so a page could
+  // start while the last one was still being asked -- and with the gate counting by page, the sources it had not
+  // reached yet would have been skipped).
+  const canPage = mode === 'newest' && answered >= budget.length && budget.length > 0 && page < 5;
   useEffect(() => {
     const el = sentinel.current;
     if (!el || !canPage) return;
@@ -544,16 +566,17 @@ export default function DiscoverPage() {
       */}
       <SourcePicker
         sources={budget} states={states} settled={settled} total={budget.length}
-        // The chip's number is the whole pool, not the budget and not the ranked list: the budget widens
-        // as sources answer empty, and a count that ticks upward on its own reads as a bug; the ranked
-        // list is capped at twelve, and "12 sources" on a 14-source install is simply false.
+        // The chip's number is the whole pool: every source that can answer this listing. Since v0.58.0 that is
+        // also every source asked; it was a budget of six widening to ten, and a ranked list capped at twelve,
+        // and "12 sources" on a 14-source install was simply false.
         count={pool.length}
         selected={selected} onSelect={setSelected}
         mode={listMode}
         onMode={(m) => { setListMode(m); setSelected(null); setPage(1); if (mode === 'search') backToNewest(); }}
       />
 
-      {/* One mounted child per budgeted source. Renders nothing; owns one request.
+      {/* One mounted child per source asked -- every one in the pool -- and `enabled` only while the gate lets it
+          (four at a time). Renders nothing; owns one request.
           The key carries the listing mode, so switching Newest/Popular REMOUNTS these and they fetch the
           other listing. That pairing is not optional: a child that keeps its key keeps its cached query,
           never re-reports, and the wall waits forever on a source it thinks it has not heard from. */}
@@ -648,9 +671,12 @@ export default function DiscoverPage() {
             providers={stackOf(it)}
             onAdd={() => open(it)} eager={i < 12} />
         ))}
-        {Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
+        {!wall.items.length && Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
           <div key={`sk${i}`} className="skeleton aspect-[2/3] rounded-2xl" />
         ))}
+        {/* The last tile while any source asked has not answered (v0.58.0): who, so the end of the wall says more is
+            coming. Gone once every one has. */}
+        {waitingOn.length > 0 && <StillLoadingCard names={waitingOn} shown={SEARCH_NAMES_SHOWN} />}
       </div>
 
       {/* No "no results" while sources are still being asked: the first answer often has nothing yet and the

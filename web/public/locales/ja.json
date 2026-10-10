@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3547
+    "strings": 3561
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -572,7 +572,7 @@
   "{n} days of reading, {t} chapters in total": "{n}日間の読書、合計{t}話",
   "Off by default. Your age limit, if you have one, still applies whatever this says.": "既定ではオフです。年齢制限が設定されている場合、この設定にかかわらず適用されます。",
   "Sort by": "並び替え",
-  "Sorted by {name}": "{name}順",
+  "Sorted by {name}": "並び順：{name}",
   "filtered": "絞り込み中",
   "Find a genre": "ジャンルを検索",
   "(all of them)": "（すべて一致）",
@@ -3550,5 +3550,19 @@
   "1 duplicate copy removed": "重複コピーを 1 件削除",
   "{n} duplicate copies removed": "重複コピーを {n} 件削除",
   "1 chapter kept twice: bookmarked in the other copy": "1 話を重複のまま残しました：もう一方のコピーにブックマークあり",
-  "{n} chapters kept twice: bookmarked in the other copy": "{n} 話を重複のまま残しました：もう一方のコピーにブックマークあり"
+  "{n} chapters kept twice: bookmarked in the other copy": "{n} 話を重複のまま残しました：もう一方のコピーにブックマークあり",
+  "Most popular": "人気順",
+  "Top rated": "高評価順",
+  "My rating": "自分の評価順",
+  "Most chapters": "話数が多い順",
+  "Recently read": "最近読んだ順",
+  "{count} on AniList": "AniList で {count}人",
+  "{score}% on AniList": "AniList で {score}%",
+  "Read {when}": "{when}に読んだ",
+  "Most popular in your library": "ライブラリで人気の作品",
+  "AniList {score}% · {count}": "AniList {score}% · {count}人",
+  "AniList {score}%": "AniList {score}%",
+  "Average score on AniList, and how many people there have it on a list": "AniList での平均スコアと、そこでリストに入れている人の数",
+  "Still loading": "まだ読み込み中",
+  "Asking every source · tap one to browse it alone": "すべてのソースに問い合わせ中 · ソースをタップすると、そのソースだけを見られます"
 }
