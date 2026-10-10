@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.58.0 — 2026-10-10
+## v0.58.0 — 2026-10-11
 
 **Ratings from AniList beside your own, sort the Library by popularity, chapters and more, and Discover asks every source.**
 
