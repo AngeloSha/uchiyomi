@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Dependency-free HTTP source used only by the browser walks (v0.40 onwards).
 //
-//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49,v54] [--cloudflare yes]
+//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49,v54,v57] [--cloudflare yes]
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
 // (shorthand for walk-tale-N), a SERIES id (for `omit:`), "search" with page 0, or "site" with page 0 (for
@@ -139,6 +139,12 @@ const DISCOVER = EXTRA.has('v56')
     { sourceId: 'disc-held', title: 'Disc Held Tale', first: 1, last: 12 },
   ]
   : [];
+// ⚠️ v0.57.0 (`--extra v57`, on BOTH fakes): v570Walk.mjs's merge. One series on each fake under a name of its own, their
+// chapters overlapping in 3-6: fake-a's Merge Walk holds 1-6, fake-b's Merge Walk Again 3-8. The walk links both to one
+// AniList entry, so Health's Duplicate series pairs them.
+const MERGES = EXTRA.has('v57')
+  ? [NAME === 'fake-a' ? { sourceId: 'merge-walk', title: 'Merge Walk', first: 1, last: 6 } : { sourceId: 'merge-again', title: 'Merge Walk Again', first: 3, last: 8 }]
+  : [];
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
@@ -150,6 +156,7 @@ const SERIES = [
   ...FIXES,
   ...OWNER,
   ...DISCOVER,
+  ...MERGES,
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 
