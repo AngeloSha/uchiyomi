@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.57.0
+  version: 0.58.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -199,10 +199,11 @@ components:
       properties:
         librarySort:
           type: string
-          enum: [updated, new, az, unread]
+          enum: [updated, new, az, unread, popular, score, rating, chapters, read]
           description: >-
-            The Library's saved default sort. A valid `sort` in the Library URL wins for that visit; opening a
-            shared URL does not change this setting.
+            The Library's saved default sort (since v0.58.0 also Most popular, Top rated, My rating, Most chapters
+            and Recently read). A valid `sort` in the Library URL wins for that visit; opening a shared URL does not
+            change this setting.
         homeCollections:
           type: array
           maxItems: 3
@@ -1647,6 +1648,11 @@ paths:
       tags:
         - library
       summary: "Everything the home screen is built from: on-deck books with progress, rails, updates."
+      description: >-
+        `onDeck`, `updated`, `new`, `favorites`, `updatesCount` and, since v0.58.0, `popular`: up to 20 series of the
+        caller's library that have an outside popularity (AniList, through the series' checked AniList link), the
+        most listed first -- Home's "Most popular in your library". Every series carries `yomi.anilist {score,
+        popularity}` (or null) beside the caller's own `yomi.rating`, and `yomi.lastReadAt`.
       operationId: getApiHome
       parameters:
         - name: adult
@@ -1699,8 +1705,12 @@ paths:
                   description: >-
                     `field,dir`. Fields: `updated` (last chapter added), `added` (series created), `title`,
                     `author`, `unread` (your unread count), `favorites` (your starred series first, then by
-                    unread -- what "popular" means for a personal library), `random`. The per-user ones need
-                    a signed-in caller and fall back to title order without one.
+                    unread -- what "popular" means for a personal library), `random`; since v0.58.0
+                    `popularity` and `score` (how many AniList users list the series and its AniList score, through
+                    its checked AniList link; a series with none comes after every series with one, either
+                    direction), `rating` (your own stars, unrated after rated), `chapters` (the chapters the series
+                    shows) and `lastRead` (when you last read in it). The per-user ones (`unread`, `favorites`,
+                    `rating`, `lastRead`) need a signed-in caller and fall back to title order without one.
                   type: string
                 condition:
                   type: object

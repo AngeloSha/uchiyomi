@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.58.0 — 2026-10-10
+
+**Ratings from AniList beside your own, sort the Library by popularity, chapters and more, and Discover asks every source.**
+
+### Ratings from AniList, and your own
+
+- Every series linked to its AniList entry now shows AniList's **score** and how many people have it in a list (its
+  **popularity**), next to your own star rating, which stays exactly as it was.
+- The server fetches them in the background: a few minutes after it starts, then every six hours, and only what is
+  missing or three days old. A library whose AniList lookups are off is never asked about.
+
+### More ways to sort the Library
+
+- New sorts: **Most popular**, **Top rated**, **My rating**, **Most chapters** and **Recently read**, beside Updated,
+  Newest, A–Z and Most unread.
+- With one of the new sorts, each card shows the number it is sorted by.
+- Series with no AniList score yet come after the ones that have one, whichever way you sort.
+
+### Home
+
+- A new **Most popular in your library** rail, with each card's AniList score. **See all** opens the Library sorted by
+  popularity.
+
+### Upgrading
+
+- **Database:** additive only. A new table `anilist_scores`.
+- **For scripts** ([api.md](docs/api.md)):
+  - Series carry `yomi.anilist {score, popularity}` and `yomi.lastReadAt`.
+  - `POST /api/series/search` sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead`.
+  - `GET /api/home` carries `popular`.
+  - `librarySort` accepts `popular`, `score`, `rating`, `chapters` and `read`.
+
 ## v0.57.0 — 2026-10-10
 
 **Merging duplicate series keeps each chapter once, and the merge shows which copy to keep.**

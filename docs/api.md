@@ -1385,8 +1385,18 @@ POST   /api/push/unsubscribe
 takes top-level keys directly and merges them into that object (an object value is replaced whole). Unknown keys stay
 accepted and retained for compatibility. v0.55.8 validates three public keys:
 
-- `librarySort: 'updated' | 'new' | 'az' | 'unread'`, the Library's saved default. A valid URL sort wins for that
+- `librarySort: 'updated' | 'new' | 'az' | 'unread'` (since v0.58.0 also `'popular' | 'score' | 'rating' | 'chapters'
+  | 'read'`), the Library's saved default. A valid URL sort wins for that
   visit; the web writes this key only from a direct sort-control click, so opening a shared URL does not change it.
+
+**Outside ratings and the new sorts** (since v0.58.0). Every series the library routes enrich (the Library search,
+Home's rails, the series page) carries `yomi.anilist: {score, popularity} | null` — AniList's score out of 100 and how
+many AniList users list the entry, read through the series' checked AniList link — beside the caller's own
+`yomi.rating`, and `yomi.lastReadAt` (when the caller last read in it). The server refreshes them in the background
+(`anilist_scores`, keyed by AniList id): a few minutes after boot and every six hours, only entries with no row or one
+older than three days, fifty per request; never for a library whose AniList lookups are off. `POST /api/series/search`
+sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the OpenAPI), and `GET /api/home` carries
+`popular`, Home's "Most popular in your library".
 - `homeCollections: string[]`, ordered, de-duplicated, at most three collection ids owned by the caller. Missing means
   the legacy first three nonempty Lists; `[]` explicitly means no Home List rails. A selected empty List keeps its
   slot. Home ignores an already-stored stale/unowned id and the web app omits it on the next edit; the API refuses a

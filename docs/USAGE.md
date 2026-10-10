@@ -95,7 +95,12 @@ there are unread chapters. Click a cover to open the series. The ✦ **Surprise 
 filters currently show.
 
 Since v0.55.8 ([discussion #150](https://github.com/AngeloSha/uchiyomi/discussions/150)), the sort you click —
-**Updated**, **Newest**, **A–Z** or **Most unread** — becomes this account's Library default on every device. A valid
+**Updated**, **Newest**, **A–Z**, **Most unread** and, since v0.58.0, **Most popular**, **Top rated**, **My rating**,
+**Most chapters** and **Recently read** — becomes this account's Library default on every device. Most popular and Top
+rated come from AniList (how many people list a series there, and its score), for every series linked to its AniList
+entry; the rest sort after them until they are linked. With one of the new sorts, each card says the number it is
+sorted by. Your own stars stay as they are — **My rating** sorts by them — and the series page shows AniList's score
+beside them. Home has a **Most popular in your library** rail (its **See all** opens the Library sorted that way). A valid
 `sort` in a shared Library URL wins for that visit without changing the saved default; only clicking the sort control
 saves one. The grid stays in the order you picked if saving fails, while the former default is kept for the next visit.
 
