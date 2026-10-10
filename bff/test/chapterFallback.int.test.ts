@@ -268,17 +268,30 @@ test('the source-slot preflight sees an unfollow, disable, and cooldown that lan
     const held = new Promise<void>((r) => { release = r; });
     const occupy = () => underGate(PRI, async () => { if (++entered === 2) ready(); await held; });
     const holders = [occupy(), occupy()];
-    await both;
-    const result = run(chapter(PRI, `queued-${n}-one`, n), [chapter(FOL, `queued-alt-${n}-one`, n)], extra).result;
-    // beginDownload happens before the source gate. Seeing it queued proves the outer filters have run and
-    // the operation is waiting precisely at the boundary under test.
-    for (let i = 0; i < 100 && !listActivity().active.some((x) => x.folder === 'Fallback Tale' && x.number === n); i++) {
-      await new Promise<void>((r) => setImmediate(r));
+    let result: Promise<any> | null = null;
+    try {
+      await both;
+      result = run(chapter(PRI, `queued-${n}-one`, n), [chapter(FOL, `queued-alt-${n}-one`, n)], extra).result;
+      // beginDownload happens before the source gate. Seeing it queued proves the outer filters have run and
+      // the operation is waiting precisely at the boundary under test. Waited for by the clock, not by a count of
+      // event-loop turns: the download reads the database on its way there, and on a loaded runner a hundred turns
+      // came and went first.
+      const queued = () => listActivity().active.some((x) => x.folder === 'Fallback Tale' && x.number === n);
+      for (const t0 = Date.now(); !queued() && Date.now() - t0 < 10_000;) await new Promise<void>((r) => setTimeout(r, 5));
+      assert.ok(queued(), 'download reached the held source gate');
+      await mutate();
+      release();
+      return await result;
+    } finally {
+      // ⚠️ Whatever failed above, the two slots are given back and the queued download has ended before the next
+      // test. The assertion used to throw with both still held, and every later download from fb-pri waited for a
+      // slot forever: "the best incomplete hold ..." hung until the CI Tests job was cancelled (PR #185, twice), with
+      // nothing printed. Reintroduce by releasing only on the way out of the happy path: a failed queuedRace hangs
+      // the file again.
+      release();
+      await Promise.all(holders);
+      await result?.catch(() => {});
     }
-    assert.ok(listActivity().active.some((x) => x.folder === 'Fallback Tale' && x.number === n), 'download reached the held source gate');
-    await mutate();
-    release();
-    try { return await result; } finally { await Promise.all(holders); }
   };
 
   await t.test('unfollow', async () => {

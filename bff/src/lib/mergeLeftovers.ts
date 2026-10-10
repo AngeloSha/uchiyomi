@@ -16,6 +16,7 @@ import { claimWriterFolders } from './bulkNewest';
 import { folderBusy } from './numbering';
 import { runsInside } from './updater';
 import { leftoverPairs, removeExtraCopies } from './extraCopies';
+import { visibleToAll } from './visibility';
 
 type Log = { info: (m: string) => void; warn: (m: string) => void };
 
@@ -48,7 +49,7 @@ export async function cleanMergeLeftovers(log?: Log): Promise<LeftoversOutcome> 
   try {
     const survivors = await q<{ id: string; folder: string }>(
       `SELECT s.id, s.folder FROM lib_series s
-        WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
+        WHERE ${visibleToAll('s')}
           AND EXISTS (SELECT 1 FROM lib_series m WHERE m.merged_into = s.id)
         ORDER BY s.id`);
     for (const s of survivors) {

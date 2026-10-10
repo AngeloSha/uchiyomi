@@ -29,6 +29,7 @@ import { DL_ROOT } from './library';
 import { allWritable, containedPath, realContainedPath } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { logAudit } from './audit';
+import { visibleToAll } from './visibility';
 
 /** One live chapter row, as this module weighs it. `number` is the effective one (an admin's override first). */
 export interface Copy {
@@ -235,9 +236,9 @@ export async function removeExtraCopies(
  */
 async function numbersSettled(seriesId: string): Promise<boolean> {
   const s = await one<{ ok: boolean }>(
-    `SELECT (deleted_at IS NULL AND merged_into IS NULL AND numbering IS DISTINCT FROM 'posting_order'
-             AND numbering_pending IS NULL AND renumber_plan IS NULL) AS ok
-       FROM lib_series WHERE id = $1`, [seriesId]).catch(() => null);
+    `SELECT (${visibleToAll('s')} AND s.numbering IS DISTINCT FROM 'posting_order'
+             AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL) AS ok
+       FROM lib_series s WHERE s.id = $1`, [seriesId]).catch(() => null);
   return !!s?.ok;
 }
 
