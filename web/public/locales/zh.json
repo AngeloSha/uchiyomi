@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3541
+    "strings": 3547
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3544,5 +3544,11 @@
   "Updates stopped": "已停止更新",
   "Home {n}": "首页 {n}",
   "Match Discover titles online": "在线匹配“发现”中的标题",
-  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "默认开启。“发现”中显示的标题会在后台到 AniList、MangaDex 和 MangaUpdates 各查找一次，这样被多个来源以不同名称称呼的系列会合为一张卡片，你已经拥有的系列则保持隐藏。关闭后只比较名称本身，不会向任何地方发送任何内容。"
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "默认开启。“发现”中显示的标题会在后台到 AniList、MangaDex 和 MangaUpdates 各查找一次，这样被多个来源以不同名称称呼的系列会合为一张卡片，你已经拥有的系列则保持隐藏。关闭后只比较名称本身，不会向任何地方发送任何内容。",
+  "Cooling down": "冷却中",
+  "A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.": "两者都有的章节只保留一份：另一份会被移除，其文件会被删除；如果 Uchiyomi 无权删除，则改为移到一旁。阅读进度会转移到保留的那一份，有人加了书签的副本也会保留。",
+  "1 duplicate copy removed": "已移除 1 份重复副本",
+  "{n} duplicate copies removed": "已移除 {n} 份重复副本",
+  "1 chapter kept twice: bookmarked in the other copy": "有 1 章保留了两份：另一份里有书签",
+  "{n} chapters kept twice: bookmarked in the other copy": "有 {n} 章保留了两份：另一份里有书签"
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3541
+    "strings": 3547
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3544,5 +3544,11 @@
   "Updates stopped": "توقفت التحديثات",
   "Home {n}": "الرئيسية ⁦{n}⁩",
   "Match Discover titles online": "مطابقة عناوين «اكتشف» عبر الإنترنت",
-  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "مفعّل افتراضيًا. يُبحث عن العناوين المعروضة في «اكتشف» في AniList وMangaDex وMangaUpdates، مرة واحدة لكلٍّ منها وفي الخلفية، لتظهر في بطاقة واحدة السلسلةُ التي تسمّيها عدة مصادر بأسماء مختلفة، وتبقى مخفيةً السلسلةُ الموجودة لديك. عند إيقافه تُقارَن الأسماء نفسها فقط، ولا يُرسَل أي شيء إلى أي مكان."
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "مفعّل افتراضيًا. يُبحث عن العناوين المعروضة في «اكتشف» في AniList وMangaDex وMangaUpdates، مرة واحدة لكلٍّ منها وفي الخلفية، لتظهر في بطاقة واحدة السلسلةُ التي تسمّيها عدة مصادر بأسماء مختلفة، وتبقى مخفيةً السلسلةُ الموجودة لديك. عند إيقافه تُقارَن الأسماء نفسها فقط، ولا يُرسَل أي شيء إلى أي مكان.",
+  "Cooling down": "في فترة تهدئة",
+  "A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.": "الفصل الموجود في الاثنتين يُحتفَظ به مرة واحدة: تُزال النسخة الأخرى ويُحذف ملفها، أو يُنقل جانبًا إن لم يكن بوسع Uchiyomi حذفه. ينتقل تقدّم القراءة إلى النسخة الباقية، ويُحتفَظ بأي نسخة عليها إشارة مرجعية لقارئ.",
+  "1 duplicate copy removed": "أُزيلت نسخة مكرّرة واحدة",
+  "{n} duplicate copies removed": "النسخ المكرّرة المُزالة: {n}",
+  "1 chapter kept twice: bookmarked in the other copy": "بقي فصل واحد بنسختين: عليه إشارة مرجعية في النسخة الأخرى",
+  "{n} chapters kept twice: bookmarked in the other copy": "الفصول الباقية بنسختين: {n} — عليها إشارة مرجعية في النسخة الأخرى"
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3541
+    "strings": 3547
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3544,5 +3544,11 @@
   "Updates stopped": "Atualizações interrompidas",
   "Home {n}": "Início {n}",
   "Match Discover titles online": "Identificar online os títulos em Descobrir",
-  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "Ativado por padrão. Os títulos mostrados em Descobrir são consultados no AniList, no MangaDex e no MangaUpdates, uma vez em cada um e em segundo plano, para que uma série que várias fontes chamam por nomes diferentes apareça como um só cartão e uma que você já tem continue oculta. Desativado, só os próprios nomes são comparados e nada é enviado a lugar nenhum."
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "Ativado por padrão. Os títulos mostrados em Descobrir são consultados no AniList, no MangaDex e no MangaUpdates, uma vez em cada um e em segundo plano, para que uma série que várias fontes chamam por nomes diferentes apareça como um só cartão e uma que você já tem continue oculta. Desativado, só os próprios nomes são comparados e nada é enviado a lugar nenhum.",
+  "Cooling down": "Em repouso",
+  "A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.": "Um capítulo que as duas têm fica só uma vez: a outra cópia é removida e o arquivo dela excluído, ou posto de lado se o Uchiyomi não puder excluí-lo. O progresso de leitura passa para a cópia que fica, e uma cópia em que alguém tenha um marcador é mantida.",
+  "1 duplicate copy removed": "1 cópia duplicada removida",
+  "{n} duplicate copies removed": "{n} cópias duplicadas removidas",
+  "1 chapter kept twice: bookmarked in the other copy": "1 capítulo mantido duas vezes: com marcador na outra cópia",
+  "{n} chapters kept twice: bookmarked in the other copy": "{n} capítulos mantidos duas vezes: com marcador na outra cópia"
 }

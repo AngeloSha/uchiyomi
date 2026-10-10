@@ -9,11 +9,20 @@
 // Read from source, like wall.test.ts and addSeriesDialog.test.ts: these are wiring facts -- which route a
 // key posts to, which body it sends, which sentence a refusal gets -- and each guard names the edit that
 // fails it. What the routes then DO is bff/test/repair.int.test.ts and repairRoutes.int.test.ts; the pure
-// rules are web/test/repairRun.test.ts and healthCopy.test.ts.
+// rules are web/test/repairRun.test.ts and healthCopy.test.ts. v0.57.0's facts about each copy of a duplicate pair are
+// also rendered as static markup (CopyFacts), as sourceHealth.test.ts renders its card.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import * as React from 'react';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CopyFacts, mergeExtras } from '../components/HealthActions';
+import type { DuplicateCopy, HealthItem } from '../lib/types';
+
+// Under tsx the components compile to the classic `React.createElement`, which they look up as a global when they render.
+(globalThis as any).React = React;
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -371,8 +380,9 @@ test('Merge all lists every pair, marks the copy that survives, and says the mer
   assert.match(block, /const keep = ids\[keptIndex\(p\)\];/, 'Merge all ignores the survivor the server suggested');
   // `keep` is a server suggestion, not a promise: an id that is not in the pair must not merge the wrong way.
   assert.match(src, /const i = it\.keep \? \(it\.seriesIds \|\| \[\]\)\.indexOf\(it\.keep\) : -1;\n  return i < 0 \? 0 : i;/, 'an unknown or missing keep id is not defaulted to the first copy');
-  // Sequential: two merges landing at once on pairs sharing a series race for the survivor.
-  assert.match(block, /for \(const p of pairs\) \{[\s\S]*await api<\{ moved: number \}>/, 'the merges are not run one at a time');
+  // Sequential: two merges landing at once on pairs sharing a series race for the survivor. (v0.57.0: the answer is
+  // MergeAnswer, which adds the copies a merge removed to `moved`.)
+  assert.match(block, /for \(const p of pairs\) \{[\s\S]*await api<MergeAnswer>/, 'the merges are not run one at a time');
   assert.doesNotMatch(block, /Promise\.all\(/, 'the merges are fired in parallel');
   assert.match(block, /if \(failed\) toast\(failed === 1 \? tr\('One pair could not be merged'\)/, 'pairs that failed to merge are folded into the success line');
 });
@@ -407,6 +417,97 @@ test('the survivor of a merge is named in one sentence, not a verb glued to a ti
   const dialog = src.slice(src.indexOf("asking === 'merge'"), src.indexOf('const SCAN_CHECKS'));
   assert.ok(dialog.length > 0, 'the per-pair merge dialog is gone -- update this slice');
   assert.match(dialog, /\{keepBefore\}<strong className="text-fog-100">\{t\}<\/strong>\{keepAfter\}/, 'the title is not wrapped by both halves of the sentence');
+});
+
+test('v0.57.0: each copy of a pair says its chapters and main source under its title, and what a merge does to the chapters both have', () => {
+  // The owner: the dialog should "still let you choose but show you which has more chapters and a healthy or better
+  // source". Reintroduce the bare title (drop <CopyFacts> from the radio): "the copies' facts are not under their titles"
+  // fails; start the radio on the copy with more chapters rather than the server's `keep`: "the radio does not start on
+  // the server's choice" fails; put the old "no files are touched" back: "a merge still promises it touches no file".
+  const src = code(read(KEYS));
+  const dialog = src.slice(src.indexOf("asking === 'merge'"), src.indexOf('const SCAN_CHECKS'));
+  const label = dialog.slice(dialog.indexOf('<label '), dialog.indexOf('</label>'));
+  assert.match(label, /\{keepBefore\}<strong className="text-fog-100">\{t\}<\/strong>\{keepAfter\}<\/span>\s*<CopyFacts item=\{item\} index=\{i\} \/>/,
+    'the copies\' facts are not under their titles, inside the label that picks them');
+  // Still the admin's choice: the radio starts on the server's suggestion and can be moved.
+  assert.match(src, /const \[keepFirst, setKeepFirst\] = useState\(\(\) => keptIndex\(item\) === 0\);/, 'the radio does not start on the server\'s choice');
+  assert.match(label, /checked=\{keepFirst === \(i === 0\)\} onChange=\{\(\) => setKeepFirst\(i === 0\)\}/, 'the choice can no longer be changed');
+  // The facts follow the series id, never the position, and there are none without `copies` (an older server).
+  const facts = src.slice(src.indexOf('export function CopyFacts'), src.indexOf('const estOf'));
+  assert.match(facts, /const copy = id \? item\.copies\?\.find\(\(c\) => c\.id === id\) : undefined;\s*if \(!copy\) return null;/,
+    'the facts are read by position, or drawn without copies');
+  assert.match(facts, /!compact && item\.keep === copy\.id && \(/, 'Recommended is not the server\'s choice');
+  // Merge all: the same facts, compact, on each title's line.
+  const pairs = src.slice(src.indexOf('{pairs.map((p, i) => ('), src.indexOf('{askingPurge && ('));
+  assert.match(pairs, /<CopyFacts item=\{p\} index=\{j\} compact \/>/, 'Merge all does not say what each copy holds');
+  // What a merge now does to the chapters both copies have, said in both confirmations before anything happens.
+  const dedup = /tr\('A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it\. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept\.'\)/;
+  assert.match(dialog, dedup, 'the merge dialog does not say what becomes of the chapters both copies have');
+  assert.match(src.slice(src.indexOf('{asking && (')), dedup, 'Merge all does not say what becomes of the chapters both copies have');
+  assert.doesNotMatch(src, /no files are touched/, 'a merge still promises it touches no file');
+});
+
+test('v0.57.0: a copy\'s facts render as its chapters, its source and its standing, Recommended on the server\'s choice, and nothing without copies', () => {
+  // The copies arrive in the other order from `seriesIds` on purpose: the facts follow the id. Reintroduce
+  // `item.copies?.[index]`: the failing source lands under the healthy copy's title and "the facts follow the position"
+  // fails; map `cooling` to the failing word: "a cooling source does not read "Cooling down"" fails.
+  const pair = (copies?: DuplicateCopy[]): HealthItem => ({
+    title: 'Solo Leveling', detail: '', seriesIds: ['s-old', 's-new'], titles: ['Solo Leveling', 'Solo Leveling (2)'], keep: 's-new',
+    actions: ['merge', 'ignore'], ...(copies ? { copies } : {}),
+  });
+  const html = (it: HealthItem, index: number, compact?: boolean) => renderToStaticMarkup(createElement(CopyFacts, { item: it, index, compact }));
+  const item = pair([
+    { id: 's-new', chapters: 201, source: { id: 'mangadex', name: 'MangaDex', standing: 'usable' } },
+    { id: 's-old', chapters: 1, source: { id: 'aqua', name: 'Aqua', standing: 'failing' } },
+  ]);
+  const old = html(item, 0);
+  assert.match(old, /data-merge-copy="s-old"/, 'the facts follow the position');
+  assert.match(old, />1 chapter</);
+  assert.match(old, />Aqua</);
+  assert.match(old, /data-status="warn"[\s\S]*>Failing</, 'a failing main source does not say so, in amber');
+  assert.doesNotMatch(old, /Recommended/, 'the copy the server did not choose is recommended');
+  const kept = html(item, 1);
+  assert.match(kept, />201 chapters</);
+  assert.match(kept, />MangaDex</);
+  assert.match(kept, /data-status="ok"[\s\S]*>Healthy</, 'a working main source does not say so');
+  assert.match(kept, /data-merge-recommended[^>]*>Recommended</, 'the server\'s choice is not Recommended');
+  // Merge all's line: the chapters and the word, no name, no tag (its own `kept` tag marks the survivor).
+  const short = html(item, 1, true);
+  assert.match(short, />201 chapters<[\s\S]*>Healthy</);
+  assert.doesNotMatch(short, /MangaDex|Recommended/, 'Merge all\'s line is not compact');
+  // Every standing reads as itself; a series with no main source says so; a standing a newer server adds shows the name alone.
+  const one = (source: DuplicateCopy['source']) => html(pair([{ id: 's-new', chapters: 3, source }]), 1);
+  for (const [standing, tone, word] of [['cooling', 'warn', 'Cooling down'], ['off', 'off', 'Turned off'], ['not_loaded', 'off', 'Not loaded']] as const) {
+    assert.match(one({ id: 'x', name: 'X', standing }), new RegExp(`data-status="${tone}"[\\s\\S]*>${word}<`), `a ${standing} source does not read "${word}"`);
+  }
+  assert.match(one(null), />No source</, 'a series with files only does not say it has no source');
+  const unknown = one({ id: 'x', name: 'Elsewhere', standing: 'resting' as any });
+  assert.match(unknown, />Elsewhere</);
+  assert.doesNotMatch(unknown, /data-status=/, 'a standing this page does not know is drawn as one it does');
+  // An older server sends no `copies`; a copy for another series is none of this one's: nothing, the title alone as before.
+  assert.equal(html(pair(), 0), '', 'a server without `copies` gets facts drawn from nothing');
+  assert.equal(html(pair([{ id: 'elsewhere', chapters: 9, source: null }]), 0), '');
+});
+
+test('v0.57.0: a merge\'s line names the extra copies it removed and the chapters a bookmark kept twice, summed by Merge all', () => {
+  // Reintroduce the old line (drop mergeExtras): "a merge's line does not say what it removed" fails; read a missing
+  // count as anything but none: "an older server's line changed" fails.
+  assert.equal(mergeExtras(undefined, undefined), '', 'an older server\'s line changed');
+  assert.equal(mergeExtras(0, 0), '');
+  assert.equal(mergeExtras(1, 0), ' · 1 duplicate copy removed');
+  assert.equal(mergeExtras(12, 0), ' · 12 duplicate copies removed');
+  assert.equal(mergeExtras(0, 1), ' · 1 chapter kept twice: bookmarked in the other copy');
+  assert.equal(mergeExtras(3, 2), ' · 3 duplicate copies removed · 2 chapters kept twice: bookmarked in the other copy');
+  const src = code(read(KEYS));
+  assert.match(src, /type MergeAnswer = \{ moved: number; duplicates\?: number; keptBoth\?: number \};/, 'the merge\'s answer is not read for what it removed');
+  const one = src.slice(src.indexOf('const doMerge'), src.indexOf('const doLink'));
+  assert.match(one, /const r = await api<MergeAnswer>\(/);
+  assert.match(one, /const text = \(r\.moved === 1 \? tr\('Merged — one chapter moved'\) : tr\('Merged — \{n\} chapters moved', \{ n: r\.moved \}\)\)\s*\+ mergeExtras\(r\.duplicates, r\.keptBoth\);/,
+    'a merge\'s line does not say what it removed');
+  const all = src.slice(src.indexOf('const mergeAll'), src.indexOf('return (', src.indexOf('const mergeAll')));
+  assert.match(all, /duplicates \+= r\.duplicates \|\| 0;\s*keptBoth \+= r\.keptBoth \|\| 0;/, 'Merge all does not add up what each merge removed');
+  assert.match(all, /tr\('\{n\} pairs merged, \{m\} chapters moved', \{ n: merged, m: moved \}\)\)\s*\+ mergeExtras\(duplicates, keptBoth\);/,
+    'Merge all\'s line does not say what it removed');
 });
 
 test('Fix everything\'s Let me choose runs ONE repair with every step that has findings; the live strip and history stay', () => {
