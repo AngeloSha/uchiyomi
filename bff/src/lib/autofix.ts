@@ -77,7 +77,7 @@ import {
 import { gapsOf, splitAtFloor } from './fill';
 import { loadIgnores, noIgnores } from './healthIgnore';
 import { storeHealthSummary, scheduleHealthSummaryRefresh } from './healthSummary';
-import { mergeRefusal, mergeSeries, MergeConflictError, deleteChapterFiles, getSeriesRow } from './libraryAdmin';
+import { mergeRefusal, mergeSeries, MergeConflictError, deleteChapterFiles, getSeriesRow, keepOrder, type KeepFacts } from './libraryAdmin';
 import { claimWriterFolders } from './bulkNewest';
 import { linkPair } from './editions';
 import { haveNumbers } from './libraryNumbers';
@@ -846,12 +846,16 @@ const SAME_CHAPTERS = 0.7;
 
 type Copy = { id: string; title: string; lang: string; sourceId: string | null; workId: string | null; books: number; readers: number; created: number; usable: boolean };
 
+/** A copy as keepOrder weighs it. */
+const factsOf = (c: Copy): KeepFacts => ({ inWork: !!c.workId, works: c.usable, chapters: c.books, readers: c.readers, created: c.created });
+
 /**
  * Link two-language pairs as editions, and merge same-language copies -- only when their AniList entry (the duplicate
  * check's own grouping), their language, and their titles (autoFollow.ts titleMatch, their other names included) or
  * their chapter lists (SAME_CHAPTERS of the shorter) agree. The copy kept is the one in a work, else the one whose main
  * source can still update it, then the one with more live chapters, more readers, the older; three or more copies merge
- * into it one pair at a time, each pair checked again. A merge carries the absorbed copy's working main source over as
+ * into it one pair at a time, each pair checked again (lib/libraryAdmin.ts keepOrder, which Health's suggestion sorts by
+ * too). Since v0.57.0 a merge keeps each chapter both copies had once (lib/extraCopies.ts). A merge carries the absorbed copy's working main source over as
  * a follower (libraryAdmin.ts mergeSeries). Ignored findings are left as they are.
  */
 async function duplicates(a: Run): Promise<void> {
@@ -909,8 +913,7 @@ async function mergeCopies(a: Run, ids: readonly string[]): Promise<void> {
   if (copies.length < 2) return;
   // The copy kept: one in a work (merging it away would take it out of its work), then one that still updates, then
   // the one with the most to lose (the duplicate check's own suggestion).
-  copies.sort((x, y) => Number(!!y.workId) - Number(!!x.workId) || Number(y.usable) - Number(x.usable)
-    || y.books - x.books || y.readers - x.readers || x.created - y.created);
+  copies.sort((x, y) => keepOrder(factsOf(x), factsOf(y)));
   const keep = copies[0];
   for (const other of copies.slice(1)) {
     if (halted(a)) return;
@@ -932,7 +935,8 @@ async function mergeCopies(a: Run, ids: readonly string[]): Promise<void> {
       : null;
     if (!claim) continue;
     try {
-      const r = await mergeSeries(other.id, keep.id);
+      // Each chapter both had, kept once (v0.57.0, lib/extraCopies.ts): the run holds both folders, as the route does.
+      const r = await mergeSeries(other.id, keep.id, { keepOnce: { userId: a.by, via: 'autofix', runId: a.id } });
       await logAudit('series.merge', {
         userId: a.by, detail: { from: other.id, fromTitle: other.title, into: keep.id, intoTitle: keep.title, ...r, via: 'autofix', runId: a.id },
       });

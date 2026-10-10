@@ -18,6 +18,7 @@ import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPingShared, solverUrl, type SolverAt, type SolverPing } from './sources/flaresolverr';
 import { getSource } from './sources';
+import { keepOrder, type KeepFacts } from './libraryAdmin';
 import { effectiveLang } from './seriesLang';
 import { sameLanguage } from './lang';
 import { suwayomiConfigured } from './sources/suwayomi/client';
@@ -120,8 +121,17 @@ export interface HealthItem {
    * for -- every series whose main source it is (lib/findScope.ts), the run's own `total`.
    */
   findSeries?: number;
-  /** Of `seriesIds`, the one the merge should keep: more live chapters, then more readers, then older. */
+  /**
+   * Of `seriesIds`, the one the merge should keep (lib/libraryAdmin.ts keepOrder, v0.57.0): one in a work, then the one
+   * whose main source still works, then more live chapters, more readers, the older.
+   */
   keep?: string;
+  /**
+   * v0.57.0, beside `seriesIds` on a duplicates row, in the same order: what the merge dialog shows of each copy so the
+   * admin can see why one is suggested -- its live chapters and its main source with how that source stands (null for a
+   * series with no main source: files only).
+   */
+  copies?: Array<{ id: string; chapters: number; source: { id: string; name: string; standing: Standing } | null }>;
   /** v0.52.0, beside `seriesIds` on a duplicates row: the language each is in, for Link as editions' confirmation. */
   langs?: string[];
   /** What an admin can do about this item, in the order the chips are shown. */
@@ -1407,29 +1417,47 @@ export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<Hea
     }
     return { external_id: f.external_id, ids: pick.map((m) => m.id), titles: pick.map((m) => m.title).join(' + '), langs: pick.map((m) => m.lang), languages };
   });
-  // Which copy should survive a merge. A merge is ONE-WAY and it moves everything (progress, bookmarks,
-  // trackers, chapters) into the survivor, so the suggestion has to be the copy that would lose the most by
-  // being the one absorbed: most live chapters first, then the one people have actually read, and an older
-  // row as the tie-break because it is the one whose id is in everybody's links and history.
+  // Which copy should survive a merge. A merge is ONE-WAY and it moves everything (progress, bookmarks, trackers,
+  // chapters) into the survivor. Since v0.57.0 the suggestion is the owner's own rule ("keep the series with the
+  // healthier source and more chapters", lib/libraryAdmin.ts keepOrder): one in a work, then the copy whose main source
+  // can still update it -- the absorbed copy's chapters come across anyway, and the survivor's source is the one that
+  // keeps the series going -- then most live chapters, the one people have read, and the older row as the tie-break.
+  // Each copy's facts go with the row, so the dialog can say why.
   // ⚠️ A suggestion only. The merge itself is never automatic -- an admin confirms it, naming both titles.
+  // Reintroduce chapters-first: "Health suggests keeping the copy whose source works" in extraCopies.int.test.ts finds
+  // the bigger copy on a failing source suggested.
   const ids = [...new Set(rows.flatMap((r) => r.ids))];
-  const rank = new Map<string, { books: number; readers: number; created: number }>();
+  const rank = new Map<string, KeepFacts & { sourceId: string | null }>();
+  const standing = new Map<string, Standing>();
   if (ids.length) {
-    const stats = await q<{ id: string; books: number; readers: number; created_at: string }>(
-      `SELECT ls.id, ls.created_at,
+    const stats = await q<{ id: string; books: number; readers: number; created_at: string; source_id: string | null; work_id: string | null }>(
+      `SELECT ls.id, ls.created_at, ls.source_id, ls.work_id::text AS work_id,
               (SELECT count(*) FROM lib_books b WHERE b.series_id = ls.id AND b.pruned_at IS NULL)::int AS books,
               (SELECT count(*) FROM read_progress rp WHERE rp.series_id = ls.id)::int AS readers
          FROM lib_series ls WHERE ls.id = ANY($1::text[])`,
       [ids],
     ).catch(() => []);
-    for (const s of stats) rank.set(s.id, { books: s.books, readers: s.readers, created: new Date(s.created_at).getTime() });
+    const sources = [...new Set(stats.map((s) => s.source_id).filter((x): x is string => !!x))];
+    const standingRowsOf = await standingRows(sources).catch(() => new Map<string, StandingRow>());
+    for (const id of sources) standing.set(id, standingOf(id, standingRowsOf.get(id)));
+    for (const s of stats) {
+      const st = s.source_id ? standing.get(s.source_id) : undefined;
+      rank.set(s.id, {
+        inWork: !!s.work_id, works: !!st && carries(st), chapters: Number(s.books), readers: Number(s.readers),
+        created: new Date(s.created_at).getTime(), sourceId: s.source_id,
+      });
+    }
   }
-  const keepOf = (group: string[]): string =>
-    [...group].sort((a, b) => {
-      const x = rank.get(a) ?? { books: 0, readers: 0, created: 0 };
-      const y = rank.get(b) ?? { books: 0, readers: 0, created: 0 };
-      return y.books - x.books || y.readers - x.readers || x.created - y.created;
-    })[0];
+  const none: KeepFacts = { inWork: false, works: false, chapters: 0, readers: 0, created: 0 };
+  const keepOf = (group: string[]): string => [...group].sort((a, b) => keepOrder(rank.get(a) ?? none, rank.get(b) ?? none))[0];
+  const copyOf = (id: string) => {
+    const r = rank.get(id);
+    const sid = r?.sourceId ?? null;
+    return {
+      id, chapters: r?.chapters ?? 0,
+      source: sid ? { id: sid, name: getSource(sid)?.name ?? sid, standing: standing.get(sid) ?? 'not_loaded' as Standing } : null,
+    };
+  };
   const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
       const keep = keepOf(r.ids);
       return {
@@ -1438,6 +1466,7 @@ export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<Hea
         titles: r.titles.split(' + '),
         title: r.titles,
         keep,
+        copies: r.ids.map(copyOf),
         langs: r.langs,
         // Ignored while the copies are the same ones: a third copy of the entry is a new finding.
         key: `anilist:${r.external_id}`,

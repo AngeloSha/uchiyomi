@@ -1651,6 +1651,24 @@ CREATE TABLE IF NOT EXISTS title_works (
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS discover_lookups boolean NOT NULL DEFAULT true;
 CREATE INDEX IF NOT EXISTS lib_series_source_pair_idx ON lib_series (source_id, source_series_id);
 CREATE INDEX IF NOT EXISTS series_sources_source_pair_idx ON series_sources (source_id, source_series_id);
+
+-- v0.57.0: a merge keeps one copy of a chapter both series had (lib/extraCopies.ts). The other copy's row goes; its file
+-- is deleted when it is in the download folder, and anywhere else -- a library folder the server may not write to --
+-- stays on disk, named here so the scan does not index it again (lib/setAside.ts). mtime and size are the file's when
+-- it was set aside: a different file at that path is indexed as usual. kept_book_id is the copy that stayed. Additive:
+-- v0.56.0 boots on this schema and ignores it (its scan would list those files again).
+CREATE TABLE IF NOT EXISTS set_aside_files (
+  root         text NOT NULL,
+  file         text NOT NULL,
+  series_id    text,
+  number       real,
+  kept_book_id text,
+  reason       text NOT NULL,
+  mtime        bigint,
+  size         bigint,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (root, file)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

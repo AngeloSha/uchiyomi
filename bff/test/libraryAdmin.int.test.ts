@@ -2,9 +2,10 @@
 //
 // The interesting cases are collisions. Favourites, ratings, series_seen and collection membership are all
 // keyed on (something, series_id), so a user who had BOTH copies of a series would violate a primary key on
-// a naive UPDATE. And the reason merge does not de-duplicate chapters is that deleting a chapter row forces
+// a naive UPDATE. And mergeSeries on its own does not de-duplicate chapters: deleting a chapter row forces
 // two read_progress rows to be folded into one, which is how you silently mark something unread and then
-// push that to someone's AniList account.
+// push that to someone's AniList account. Since v0.57.0 the merge route and Fix everything ask it to
+// (`keepOnce`), under the rules extraCopies.int.test.ts pins; these call it as Rescan everything does.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
@@ -202,8 +203,9 @@ test('merge: collection membership de-duplicates instead of failing', { skip }, 
 });
 
 test('merge: duplicate chapter numbers are kept, not silently dropped', { skip }, async () => {
-  // Both series have a chapter the other also has. Merge keeps both rows: de-duplicating would mean
-  // deleting one and folding two progress rows together, which is where irreversible loss lives.
+  // Both series have a chapter the other also has. A merge that does not ask (`keepOnce`, v0.57.0) keeps both
+  // rows: de-duplicating means deleting one and folding two progress rows together, which is where irreversible
+  // loss lives, so only the callers that ask do it, under extraCopies.ts's rules (extraCopies.int.test.ts).
   await q(
     `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root)
      VALUES ('b_la_dup',$1,'T!la','T!la/dup/ch1.cbz',1,'dup',5,'/library')`,

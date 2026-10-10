@@ -17,6 +17,7 @@ import { DL_ROOT, SKIP_DIR, SCAN_MAX_DEPTH, listDir, nodeFs, lastScanReport, typ
 import { chapterFileRel } from './downloader';
 import { visibleToAll } from './visibility';
 import { english, joined, say, saidOf, type Part, type Said } from './said';
+import { setAsideByRoot } from './setAside';
 
 /** What the downloader writes and the scanner reads as a chapter file (EPUBs need opening, and are not ours). */
 const CHAPTER_FILE = /\.(cbz|cbr|zip|rar|pdf)$/i;
@@ -217,6 +218,11 @@ async function takeCensus(root: string, fsx: WalkFs): Promise<Census> {
     `SELECT folder FROM lib_series GROUP BY folder HAVING bool_and(deleted_at IS NOT NULL)`,
   ).catch(() => [] as Array<{ folder: string }>)).map((r) => r.folder);
 
+  // v0.57.0: a file a merge set aside (lib/setAside.ts) is off the list on purpose -- the scan passes over it -- so it is
+  // not "on disk but not in the library" either. Reintroduce by counting it: "a set-aside copy stays off the list through
+  // a scan" in extraCopies.int.test.ts finds its folder among the missing.
+  const aside = (await setAsideByRoot()).get(root);
+
   const report = lastScanReport();
   const scannedFrom = report ? Date.parse(report.startedAt) - SKEW_MS : null;
   const folderOf = (rel: string) => (rel.includes('/') ? posix.dirname(rel) : '');
@@ -225,6 +231,7 @@ async function takeCensus(root: string, fsx: WalkFs): Promise<Census> {
   for (const rel of found) {
     const r = row.get(rel);
     if (r?.removed) { removed++; continue; }
+    if (!r && aside?.has(rel)) continue;
     if (r && !r.pruned) continue;
     const folder = folderOf(rel);
     if (removedFolders.some((f) => within(folder, f))) { removed++; continue; }

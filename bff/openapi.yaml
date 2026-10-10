@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.56.0
+  version: 0.57.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -8214,9 +8214,8 @@ paths:
       operationId: postApiAdminSeriesIdMerge
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Merges
-        {id} INTO the series named by `into`: every chapter and progress row moves to the survivor, nothing is
-        de-duplicated and no chapter row is deleted, so no reading progress can be lost; the absorbed row
-        stays, pointed at the survivor, and a merge is one-way (400 `merged` for a source or target that is
+        {id} INTO the series named by `into`: every chapter and progress row moves to the survivor; the absorbed
+        row stays, pointed at the survivor, and a merge is one-way (400 `merged` for a source or target that is
         itself merged, 400 `deleted` for a hidden one, 400 `same_series` for itself). Since v0.37.0 merging is
         transitive: anything the absorbed series had itself absorbed earlier is re-pointed at the new
         survivor in the same transaction, so a title folded in two merges ago still files its folder's
@@ -8226,7 +8225,17 @@ paths:
         a work left with one edition dissolves. Since v0.55.0 the absorbed series' main source becomes a source the
         survivor follows when it still works (usable, or only cooling down), is in the survivor's language, is not
         the survivor's own main source, and fits under the follower cap (two), unless the survivor is numbered by
-        posting order; the answer's `carried` names it, or is null.
+        posting order; the answer's `carried` names it, or is null. Since v0.57.0 a chapter both series had is
+        kept ONCE: for every number the survivor held exactly one live copy of and {id} exactly one (a number
+        either held twice -- an extra, a chapter's parts -- is left alone, as is a series numbered by posting
+        order or being renumbered), the survivor's copy stays (the other's when the survivor's has placeholder
+        pages and the other is whole, or its file is gone), what was read of the other copy moves onto it
+        (completed stays completed; the page is carried over in proportion to the two copies' page counts),
+        its reading history and notes follow, and the other copy leaves the list -- its row is deleted, not
+        tombstoned, and its file is deleted when it is in the download folder, else left on disk and set aside so
+        the scan does not list it again. A copy someone bookmarked stays, as does a pair whose folder is not
+        reachable. `duplicates` counts the copies removed and `keptBoth` the numbers still held twice; audited
+        `series.extra_copies`.
       parameters:
         - name: id
           in: path
@@ -8249,6 +8258,20 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, moved, favorites, ratings, collections, carried, duplicates, keptBoth]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  moved: { type: integer, description: Chapter rows moved to the survivor. }
+                  favorites: { type: integer }
+                  ratings: { type: integer }
+                  collections: { type: integer }
+                  carried: { type: [string, "null"], description: The absorbed series' main source, now followed by the survivor (v0.55.0). }
+                  duplicates: { type: integer, description: "v0.57.0: copies of a chapter both had that were taken off the list." }
+                  keptBoth: { type: integer, description: "v0.57.0: numbers still held twice (a bookmark in the other copy, a folder not reachable)." }
         "400":
           description: Malformed body or parameter
         "401":

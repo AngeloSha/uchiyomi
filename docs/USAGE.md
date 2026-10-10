@@ -1845,7 +1845,13 @@ leave the gaps with nothing.
 
 **What asks you.** The two things that cannot be undone are never automatic. **Duplicate series** offer
 **Merge** per pair, and **Merge all** for the whole check, behind a confirmation that lists every pair and
-marks the copy that is kept (most chapters, then most readers, then the older row); merging is one way.
+marks the copy that is kept; merging is one way. Since v0.57.0 the confirmation shows each copy's chapters and its
+main source with how that source is doing, and **Recommended** on the copy to keep: the one whose source still works,
+then the one with more chapters (you can still pick the other). A chapter both copies have is kept **once** — the
+kept series' copy, unless it is missing pages and the other is whole — and what anyone read of the other copy moves
+onto it; the other copy's file is deleted from the download folder, or left where it is (and no longer listed) in a
+library folder the server does not delete from. A copy someone bookmarked stays. Duplicates left by merges made
+before v0.57.0 are cleaned up the same way once, by themselves, a few minutes after the update.
 **Impossible chapter numbers** offer **Delete chapters**, also behind a confirmation, and a chapter anyone
 has bookmarked is skipped. There is deliberately no *Fix all* for either — only Fix everything's *Fix it for me*
 merges and deletes by itself, because pressing it is choosing that.

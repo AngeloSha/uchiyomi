@@ -23,6 +23,7 @@ import { solverHealth } from './lib/health';
 import { refreshHealthSummary } from './lib/healthSummary';
 import { scheduleMatchCheck } from './lib/matchCheck';
 import { startTitleWorks } from './lib/discoverIdentity';
+import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -350,6 +351,13 @@ async function main() {
    * MangaUpdates, once per name, paced -- runs whenever Discover shows a name nobody has asked about yet.
    */
   startTitleWorks(app.log);
+
+  /**
+   * The chapters merges before v0.57.0 left twice (lib/mergeLeftovers.ts): a few minutes after boot, each kept once --
+   * the extra copy's file deleted from the download folder, or set aside where the server may not delete -- by the
+   * merge's own rules, once. It stamps itself done; every later boot only reads the stamp.
+   */
+  scheduleMergeLeftovers(app.log);
 
   /**
    * The opt-in install count.

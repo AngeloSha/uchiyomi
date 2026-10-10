@@ -2020,8 +2020,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     ),
   }));
 
-  // Merge :id INTO the series named in the body. Chapters and everything a user owns move across; nothing
-  // is de-duplicated and no chapter row is deleted, so no reading progress can be lost.
+  // Merge :id INTO the series named in the body. Chapters and everything a user owns move across, and since v0.57.0 a
+  // chapter both had is kept once -- the kept series' copy, what was read of the other moving onto it, the other's file
+  // deleted from the download folder or set aside elsewhere (lib/extraCopies.ts). The answer says how many
+  // (`duplicates`), and how many numbers stayed twice (`keptBoth`: a bookmark in the other copy, a file not reachable).
   app.post('/api/admin/series/:id/merge', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({ into: z.string().min(1).max(64) }).safeParse(req.body);
@@ -2051,7 +2053,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const claim = claimSeriesWriter([id, into.id], [from.folder, into.folder]);
     if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing one of those series.' });
     try {
-      const r = await mergeSeries(id, into.id);
+      const r = await mergeSeries(id, into.id, { keepOnce: { userId: userIdOf(req), req } });
       await logAudit('series.merge', {
         userId: userIdOf(req),
         detail: { from: id, fromTitle: from.title, into: into.id, intoTitle: into.title, ...r },

@@ -653,8 +653,11 @@ Since v0.41.0 an item also carries what can be **done** about it, so the same fi
 script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, `fill`, `retry`, `test`,
 `unblock`, `disable`, `merge`, `solver_reset` and, since v0.49.0, `engine_solver`, `renumber` and `keep_numbers`
 (below); `bookId`, `bookIds`, `seriesId`, `seriesIds`, `sourceId` and
-`keep` (the copy a duplicate pair should keep: most live chapters, then most readers, then the older row)
-are the ids those actions need; `number`/`numbers` are the chapters it is about (a gap item carries at most
+`keep` (the copy a duplicate pair should keep: since v0.57.0 one in a work, then the one whose main source still
+works — usable or cooling down — then most live chapters, most readers, the older row) are the ids those actions
+need, and since v0.57.0 a duplicates row carries `copies`, in `seriesIds` order, `{id, chapters, source: {id, name,
+standing} | null}`, `standing` one of `usable`, `cooling`, `failing`, `off`, `not_loaded`: what the merge dialog shows
+of each copy; `number`/`numbers` are the chapters it is about (a gap item carries at most
 100 numbers, an impossible-number item at most 20 ids); and `fixed` `{at, what}` says what has already been
 decided or found — `confirmed short at the source`, or what the repair's gap search concluded — which is
 what greys the row. Since v0.49.0 an item may also carry `outcome` — what the last attempt found, from
@@ -1022,7 +1025,13 @@ merge or a forget — dissolves. The Komga-compatible API and OPDS keep every ed
 title it with its code, "Blue Lock (ES-419)", while a sibling is in the caller's sight; a tracker push never
 goes below what another series on the same tracker entry has sent. Since v0.55.0 `POST /api/admin/series/:id/merge`
 carries the absorbed series' main source to the survivor as a source it follows, when that source still works, is in
-the survivor's language and fits under the follower cap (`carried` names it, or is null).
+the survivor's language and fits under the follower cap (`carried` names it, or is null). Since v0.57.0 it keeps a
+chapter both series had once — a number each held exactly once; the survivor's copy stays unless it has placeholder
+pages and the other is whole — moving what was read of the other copy onto it and taking that copy off the list: its
+file is deleted from the download folder, or left on disk and set aside where the server does not delete. A
+bookmarked copy stays. The answer's `duplicates` counts the copies removed and `keptBoth` the numbers still held twice
+(audit `series.extra_copies`). The merges made before v0.57.0 are cleaned the same way once, a few minutes after the
+first boot of v0.57.0 (audited `series.extra_copies` with `via: 'merge_leftovers'`).
 
 **Mark caught up** (since v0.52.0, from discussion #72). `PATCH /api/admin/series/:id {chapterFloor:
 'caught_up'}` floors a series just above the newest chapter its sources list or the library holds, as a

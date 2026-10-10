@@ -16,6 +16,7 @@ import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { reconcileListingProgress } from './listingProgress';
 import { holdsRaw, isRange } from './chapterRanges';
 import { cleanGenres } from './genres';
+import { setAsideByRoot, stillSetAside, type SetAsideFile } from './setAside';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -798,6 +799,23 @@ const tracked = (run: Promise<ScanResult>): Promise<ScanResult> => run
     throw e;
   })
   .finally(() => { progress = null; });
+
+/**
+ * A folder's chapter files without those set aside (lib/setAside.ts): a file that is still the one set aside is passed
+ * over; a different file at its path -- a chapter downloaded there since, a file copied over it -- is indexed, and its
+ * set-aside row goes.
+ */
+async function notSetAside(root: string, folderRel: string, folderAbs: string, files: readonly string[], aside: Map<string, SetAsideFile>): Promise<string[]> {
+  const out: string[] = [];
+  for (const f of files) {
+    const rel = `${folderRel}/${f}`;
+    const was = aside.get(rel);
+    if (was && await stillSetAside(root, rel, was, await stat(join(folderAbs, f)).catch(() => null))) continue;
+    out.push(f);
+  }
+  return out;
+}
+
 /**
  * Scan every root into lib_series/lib_books. One scan at a time.
  *
@@ -910,10 +928,18 @@ async function scanOnce(): Promise<ScanResult> {
   // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
   const libs = await libraryRows();
   progress = { ...progress!, phase: 'indexing', total: walks.reduce((n, w) => n + w.found.length, 0) };
+  // v0.57.0: the files a merge took off the list and left on disk, because the server may not delete them there
+  // (lib/setAside.ts, lib/extraCopies.ts). Indexed, each would be its chapter's second copy again, so they are passed
+  // over -- each only while it is the file that was set aside. Reintroduce by indexing every file: "a set-aside copy
+  // stays off the list through a scan" in extraCopies.int.test.ts finds it listed again.
+  const setAside = await setAsideByRoot();
   for (const { root, found: foundInRoot } of walks) {
+    const aside = setAside.get(root);
     for (const found of foundInRoot) {
-      const { folderRel, folderAbs, source: srcName, chapters: files } = found;
+      const { folderRel, folderAbs, source: srcName } = found;
       progress!.done++;
+      const files = aside?.size ? await notSetAside(root, folderRel, folderAbs, found.chapters, aside) : found.chapters;
+      if (!files.length) continue;
       // ⚠️ ONE FOLDER, NOT THE SCAN (#109). A folder the scanner cannot index -- a ComicInfo field Postgres
       // refuses, a constraint, anything -- used to throw out of the whole pass, and every caller swallowed it
       // (`persistScan().catch(() => {})`). The scan simply stopped there, on every run, and everything after

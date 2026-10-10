@@ -6,11 +6,13 @@
 // leaving a dead series in Trending. persistScan() knows to skip a hidden folder, or the next scan would
 // simply bring it back under a new id.
 //
-// Merging does NOT de-duplicate chapters, deliberately. Every chapter row and every progress row survives
-// exactly as it is. The moment you delete a chapter because it looks like a duplicate, you have to fold two
-// read_progress rows into one, and getting that wrong silently marks chapters unread -- which then syncs
-// outward to the user's AniList account and cannot be undone. Duplicate chapter numbers are a tidiness
-// problem the health page can surface; lost reading progress is not recoverable.
+// Merging moves every chapter row and every progress row across. Until v0.57.0 that was all it did, so a chapter both
+// series had was listed twice, by design: removing a copy means folding two read_progress rows into one, and getting
+// that wrong silently marks chapters unread -- which then syncs outward to the user's AniList account and cannot be
+// undone. The owner asked for one copy ("not needed, I don't want that"), so since v0.57.0 the merge route and Fix
+// everything ask mergeSeries to keep each chapter both had ONCE (lib/extraCopies.ts): only a number each side held
+// exactly once, the kept series' copy staying, and the fold done under the rules that guard against exactly that loss
+// -- completed stays completed, nothing is ever marked unread. Rescan everything's merges do not ask.
 import type { FastifyRequest } from 'fastify';
 import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import { q, one, tx } from './db';
@@ -29,6 +31,7 @@ import { logAudit } from './audit';
 import { carries, standingsOf } from './sourceStanding';
 import { followGuard } from './seriesLang';
 import { MAX_FOLLOWERS } from './autoFollow';
+import { removeMergeDuplicates } from './extraCopies';
 
 export interface SeriesRow {
   id: string;
@@ -98,6 +101,33 @@ export async function mergeRefusal(fromId: string, intoId: string): Promise<Merg
   return null;
 }
 
+/** One copy of a series as the merge's suggestion weighs it (keepOrder). */
+export interface KeepFacts {
+  /** It is a language edition in a work (v0.52.0): merging it away would take it out of its work. */
+  inWork: boolean;
+  /** Its main source can still update it: usable, or only cooling down (lib/sourceStanding.ts `carries`). */
+  works: boolean;
+  /** Its live chapters. */
+  chapters: number;
+  /** How many reading-progress rows it has. */
+  readers: number;
+  /** When its row was made (ms). */
+  created: number;
+}
+
+/**
+ * Which copy a merge keeps first (v0.57.0; the owner: "keep the series with the healthier source and more chapters").
+ * One in a work, then one whose main source still works, then more live chapters, more readers, the older row (the
+ * one in everybody's links and history). Health's suggestion (lib/health.ts duplicateSeries) and Fix everything's merges
+ * (lib/autofix.ts mergeCopies) both sort by it; the dialog shows the same facts and the admin still chooses.
+ * Reintroduce chapters-first: "Health suggests keeping the copy whose source works" in extraCopies.int.test.ts suggests
+ * the bigger copy on the failing source.
+ */
+export function keepOrder(x: KeepFacts, y: KeepFacts): number {
+  return Number(y.inWork) - Number(x.inWork) || Number(y.works) - Number(x.works)
+    || y.chapters - x.chapters || y.readers - x.readers || x.created - y.created;
+}
+
 export interface MergeResult {
   ok: true;
   moved: number;
@@ -106,6 +136,13 @@ export interface MergeResult {
   collections: number;
   /** v0.55.0: the absorbed copy's main source, now a source the survivor follows; null when it was not carried. */
   carried: string | null;
+  /**
+   * v0.57.0, when the caller asked (`keepOnce`): copies of a chapter both series had that were taken off the list
+   * (lib/extraCopies.ts), and the numbers still held twice -- a bookmark in the other copy, or a file not reachable.
+   * Both 0 otherwise.
+   */
+  duplicates: number;
+  keptBoth: number;
 }
 
 /**
@@ -139,14 +176,19 @@ async function carryable(fromId: string, intoId: string): Promise<{ sourceId: st
 }
 
 /**
- * Fold `fromId` into `intoId`. Everything the absorbed series held moves; nothing is deleted.
+ * Fold `fromId` into `intoId`. Everything the absorbed series held moves; nothing is deleted -- unless the caller asks
+ * for each chapter both had to be kept once (`keepOnce`, v0.57.0: the merge route and Fix everything, which hold both
+ * series' folders), which happens after the transaction commits (lib/extraCopies.ts removeMergeDuplicates).
  *
  * The tables keyed `(user_id, series_id)` are the awkward ones: a user who had BOTH series favourited would
  * violate the primary key on a plain UPDATE, so those are insert-if-absent then drop. series_seen's counter
  * is recomputed rather than carried over -- summing two "how many chapters had you seen" values would give
  * everyone a phantom NEW badge, or hide one.
  */
-export async function mergeSeries(fromId: string, intoId: string): Promise<MergeResult> {
+export async function mergeSeries(
+  fromId: string, intoId: string,
+  o: { keepOnce?: { userId: string | null; via?: string; runId?: string; req?: FastifyRequest } } = {},
+): Promise<MergeResult> {
   // The standing/language checks use several ordinary pool reads. Do them before opening the transaction so a burst
   // of unrelated merges cannot occupy every pool client and then deadlock waiting for another one. Core source facts
   // are compared again under the row locks below before this candidate may be carried.
@@ -326,11 +368,17 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
       ratings: rates.length,
       collections: cols.length,
       carried,
+      movedIds: moved.map((m) => m.id),
     };
-  }).then(async (r) => {
+  }).then(async ({ movedIds, ...r }) => {
     // outside the transaction: filesystem work must not hold it open
     await dropArt(fromId);
-    return r;
+    // Each chapter both had, kept once (v0.57.0). After the commit: the books it compares are the survivor's now.
+    // Reintroduce by dropping it: "a merge keeps the kept series' copy of a chapter both had" in
+    // extraCopies.int.test.ts finds chapter 2 listed twice.
+    const once = o.keepOnce ? await removeMergeDuplicates(intoId, movedIds, o.keepOnce) : null;
+    const keptBoth = once ? Object.values(once.left).reduce((n, x) => n + (x ?? 0), 0) : 0;
+    return { ...r, duplicates: once?.removed ?? 0, keptBoth };
   });
 }
 
