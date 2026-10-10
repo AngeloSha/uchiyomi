@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.57.0 — 2026-10-10
+
+**Merging duplicate series keeps each chapter once, and the merge shows which copy to keep.**
+
+### One copy of each chapter
+
+- **Before:** merging two copies of a series moved every chapter of one into the other, so a chapter both had was
+  listed twice, on the series page and in Mihon.
+- **Now:** a chapter both copies have is kept **once**.
+  - The kept series' copy stays, unless it is missing pages and the other copy is whole.
+  - What anyone read of the other copy moves onto the one that stays: a finished chapter stays finished, and a
+    chapter half read stays half read. Reading history and notes follow it too.
+  - The other copy leaves the list. Its file is deleted from the download folder. In a library folder the server
+    does not delete from, the file is left where it is and is no longer listed.
+  - A copy someone bookmarked stays, and the merge says so.
+- **Only real duplicates.** It only touches a chapter number each copy had exactly once. An extra filed under its
+  chapter's number (17 beside 17e), a chapter's parts (1053a–d), and a series numbered by posting order are left
+  as they are.
+
+### Duplicates from earlier merges, cleaned once
+
+- A few minutes after the update, the chapters that earlier merges left twice are kept once by themselves, by the
+  same rules. This happens once.
+- On a library with read-only folders, the copies there are set aside (no longer listed, never touched) rather than
+  deleted.
+
+### Which copy to keep
+
+- **Health → Duplicate series → Merge** and **Merge all** now show, for each copy:
+  - its number of chapters;
+  - its main source, and how that source is doing (healthy, failing, turned off…).
+- **Recommended** marks the copy to keep: the one whose source still works, then the one with more chapters. You can
+  still pick the other one.
+- Fix everything's merges pick by the same rule.
+
+### Upgrading
+
+- **Database:** additive only. A new table `set_aside_files` lists the files taken off the list but left on disk.
+- **Going back to v0.56.0:** its scan would list the set-aside files again. The deleted copies stay deleted.
+- **For scripts** ([api.md](docs/api.md)):
+  - `POST /api/admin/series/:id/merge` answers `duplicates` and `keptBoth`.
+  - A Health duplicates row carries `copies`.
+  - Audit: `series.extra_copies`.
+
 ## v0.56.0 — 2026-10-10
 
 **Discover shows each series once, with every source that has it, and leaves out what you already have.**
