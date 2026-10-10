@@ -39,13 +39,13 @@ import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
-import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, withTimeout } from '../lib/sources';
+import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
 import {
   listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, altRepoUrl,
   parseRepoInput, repoKey, contributedBy, engineReason, REPO_MESSAGES, type ExtensionInfo,
 } from '../lib/sources/suwayomi/extensions';
 import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview, turnOnExtensionSources } from '../lib/sources/suwayomi/langs';
-import { lastSuwayomiLoad, rememberMissing } from '../lib/sources/suwayomi/register';
+import { lastSuwayomiLoad, limitLeftSomethingOut, rememberMissing } from '../lib/sources/suwayomi/register';
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
@@ -4402,6 +4402,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     else if (action === 'enable') await setDisabled(id, false);
     else if (action === 'unblock') await clearBlock(id);
     else return reply.code(400).send({ error: 'bad_action' });
+    // An extension's source switched off here registers after every working one (v0.59.0, suwayomi/register.ts), so
+    // while the source limit leaves something out, switching one off or on changes which sources fit: registered again
+    // now, not at the next restart -- one switched back on would otherwise stay out of everything until then.
+    // Reintroduce by only setting the flag: "switched back on, it takes its slot at once" in sourceLimitSwitch.int.test.ts
+    // finds it unregistered.
+    if ((action === 'disable' || action === 'enable') && isSwAdapterId(id) && limitLeftSomethingOut()) {
+      await reloadAll().catch(() => null);
+    }
     await logAudit(`source.${action}`, { userId: userIdOf(req), detail: { source: id }, req });
     return reply.send({ ok: true });
   });

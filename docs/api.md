@@ -112,7 +112,7 @@ Two steps: find it, then add the result. Adding takes a source and that source's
 URL.
 
 ```bash
-# 1. find it — searches your enabled sources in order and returns {source, sourceId, title, ...}
+# 1. find it — searches your enabled sources in order (six at a time since v0.59.0) and returns {source, sourceId, title, ...}
 curl -H "Authorization: Bearer $TOK" "https://your-server/api/sources/find?q=solo+leveling"
 
 # 2. add it
@@ -170,7 +170,8 @@ show them as one provider. A chapter's `lang` on a MangaDex copy is the app code
 `status` is `ok`, `disabled`, or, while a cooldown is running, one of `rate_limited` / `blocked` / `down`.
 It is also `quiet`, which means the source answers without error and returns nothing: a listing that has
 stopped parsing never throws, so it never earns a cooldown, and before this existed such a source kept
-reporting `ok` and kept being fetched first.
+reporting `ok` and kept being fetched first. Since v0.59.0 a source that is only slow stays `ok` (its `note` still
+says it has been slow): `quiet` sends a source to the back of Discover's order, and a slow one still answers.
 
 `note` is one sentence saying what is wrong, or `null` when nothing is. It is written for readers, so it
 never contains a hostname, a component name or any part of the recorded error. The operator-facing half of
@@ -456,9 +457,12 @@ log a console error in every visitor's browser. Either answer is cached, so a so
 one lookup rather than one per page load.
 
 `GET /api/sources/latest?source=<id>&page=<n>` is bounded at `SOURCE_LATEST_TIMEOUT_MS` (default 8000) per
-source and cached server-side for ten minutes per source and page, with concurrent requests for the same page
-collapsed into one outbound fetch. A source that times out is recorded against its health and earns a
-cooldown, so it stops being picked first.
+source — `SOURCE_LATEST_SOLVER_TIMEOUT_MS` (default 45000) since v0.59.0 for a source behind the Cloudflare solver —
+and cached server-side for ten minutes per source and page, with concurrent requests for the same page
+collapsed into one outbound fetch. A source that times out on page 1 is recorded as slow (later pages are not
+evidence, since v0.59.0), and a run of slow answers earns a short fixed breather. During a breather earned by
+slowness alone, a page with nothing cached is still asked for (since v0.59.0); during a failure's cooldown the
+cached page, or nothing, is served. `GET /api/sources/popular` follows the same rules.
 
 Since v0.56.0 every item of `latest`, `popular` and `search` (and every card of `search-all`) carries:
 

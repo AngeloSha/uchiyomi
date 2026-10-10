@@ -172,3 +172,52 @@ test('the cover route asks the solver only about hosts the source vouched for', 
   await assert.rejects(sourceCoverInput!(u, CF.id));
   assert.deepEqual(asked, [], 'the solver was asked to open a host the source never vouched for');
 });
+
+// ---- v0.59.0: plain first ----------------------------------------------------------------------------------------
+// A public address for the CDN (an IP literal: no resolver involved), whose answers the test scripts through fetch;
+// the solvers' own requests pass through to the fakes above.
+const CDN = 'https://93.184.215.14';
+const withCdn = async (answer: (n: number) => Response, fn: () => Promise<void>) => {
+  const real = globalThis.fetch;
+  let n = 0;
+  globalThis.fetch = (async (u: any, init?: any) => {
+    if (String(u).startsWith(CDN)) return answer(++n);
+    return real(u, init);
+  }) as typeof fetch;
+  try { await fn(); } finally { globalThis.fetch = real; }
+};
+const PNG = () => new Response(Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(64, 1)]), { status: 200, headers: { 'content-type': 'image/png' } });
+
+test('a cover the CDN serves never asks the solver', async () => {
+  // The owner's install: ~89 solves for one cover CDN, every one failed, each holding a solver slot, while the plain
+  // fetch served every cover with a 200 -- and Discover's listings timed out behind them. A library cover (not a
+  // caller's) of a source behind Cloudflare is the case that always solved first. Reintroduce the solve-first order:
+  // the solver is asked to open the CDN.
+  await withCdn(() => PNG(), async () => {
+    const img = await fetchCoverImage(`${CDN}/covers/served.png`, CF.id);
+    assert.ok(img.length > 8, 'the cover arrived');
+  });
+  assert.deepEqual(asked, [], 'no solver was asked for a cover the CDN served');
+});
+
+test("a refused caller's cover asks for its CDN's clearance once -- its origin, never the image URL", async () => {
+  // Cloudflare refused the plain fetch: now, and only now, the solver is asked -- for the origin's root. A caller's
+  // cover never has the image URL itself solved (cfSession solveUrl: false): an image is no page. The fake solvers
+  // refuse, so there are no cookies and no second fetch, and the refusal stands (502). Reintroduce solveUrl for every
+  // cover: the record holds the image URL too.
+  const { noteImageHost } = await import('../src/lib/sources/imageHosts');
+  noteImageHost(CF.id, `${CDN}/covers/served.png`);
+  assert.equal(solverMayVisit!(CF as any, '93.184.215.14'), true, 'PREMISE: the source has served covers from this CDN');
+  let fetched = 0;
+  let caught: unknown = null;
+  await withCdn((n) => {
+    fetched = n;
+    return new Response('denied', { status: 403, headers: { 'cf-mitigated': 'challenge' } });
+  }, async () => {
+    caught = await fetchCoverImage(`${CDN}/covers/refused.png`, CF.id, { callerSupplied: true }).then(() => null, (e) => e);
+  });
+  assert.equal((caught as any)?.statusCode, 502, 'the refusal stands');
+  assert.equal(fetched, 1, 'no cookies, no second fetch');
+  assert.ok(asked.length > 0, 'PREMISE: the refusal asked for clearance');
+  assert.ok(asked.every((u) => u.replace(/^backup: /, '') === `${CDN}/`), `only the origin was solved: ${asked.join(', ')}`);
+});

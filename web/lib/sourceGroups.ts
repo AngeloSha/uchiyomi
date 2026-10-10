@@ -102,9 +102,13 @@ export type SrcState = 'ok' | 'empty' | 'idle' | 'blocked';
  * extension sources with no series behind any of them, while Aqua Manga -- 189 of that library's 214 series,
  * answering in 2.5s -- was never among the six. Ranking by what someone demonstrably reads from fixed it.
  */
-export function budgetFor(sources: Src[], max = 6): Src[] {
+export function budgetFor(sources: Src[], max = 6, can: 'latest' | 'popular' = 'latest'): Src[] {
   return sources
-    .filter((s) => s.latest && s.status !== 'disabled')
+    // The listing being asked for, not always `latest` (v0.59.0): Popular filtered on popular and then again on latest,
+    // so MangaYi, Alpha Manga and AHottie -- extensions with a popular listing and no latest -- were on neither wall.
+    // Reintroduce `s.latest` alone: "a source with only a popular listing is on the Popular wall" in
+    // sourcePicker.test.ts finds it missing.
+    .filter((s) => s[can] && s.status !== 'disabled')
     .sort((a, b) =>
       Number(a.status !== 'ok') - Number(b.status !== 'ok') ||
       (b.used ?? 0) - (a.used ?? 0))
@@ -198,7 +202,7 @@ export function answeredPage(keys: readonly string[], upTo: Readonly<Record<stri
  * already does -- showing a chip that can never fill would be worse than showing one fewer chip.
  */
 export function budgetForMode(sources: Src[], mode: ListMode, max = 6): Src[] {
-  return budgetFor(mode === 'popular' ? sources.filter((s) => s.popular) : sources, max);
+  return budgetFor(sources, max, mode === 'popular' ? 'popular' : 'latest');
 }
 
 /** Where the browser can find a source's icon. The route answers 404 when there is none; the tile covers it. */

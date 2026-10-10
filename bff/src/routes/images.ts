@@ -11,7 +11,7 @@ import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPoli
 import { noticeBook, noticeShown } from '../lib/noticeChapters';
 import { linkSeriesWith } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
-import { cfSession } from '../lib/sources/flaresolverr';
+import { cfSession, withSolverDeadline } from '../lib/sources/flaresolverr';
 import { solverMayVisit } from '../lib/sources/imageHosts';
 import { getSource, isSwAdapterId } from '../lib/sources';
 import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
@@ -213,52 +213,65 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   // A caller-supplied URL reaches the solver only on a host this source vouched for -- its own site, or one it
   // has served covers from (imageHosts.ts). The solver follows redirects and runs page scripts, so a public page
   // the caller controls could otherwise walk it into the network. Library covers come from series_art, not
-  // from a caller, and keep the solver unconditionally: Aqua's CDN answers 403 without clearance.
-  if (src?.requiresCloudflare && (!opts.callerSupplied || solverMayVisit(src, parsed.hostname))) {
-    // Best-effort: many sources host covers on a separate CDN that ISN'T Cloudflare-protected, where
-    // FlareSolverr fails to "solve a challenge". Don't let that abort the cover — the Referer alone is
-    // usually enough. Attach cf cookies when we can; otherwise fall through to a plain fetch.
+  // from a caller: Aqua's CDN answers 403 without clearance.
+  const mayClear = !!src?.requiresCloudflare && (!opts.callerSupplied || solverMayVisit(src, parsed.hostname));
+  const fetchFollowing = async (): Promise<Response> => {
+    // Redirects are followed BY HAND so every hop is checked. `redirect: 'follow'` would let a public URL
+    // bounce to 169.254.169.254 or yomi-db with no second look, which makes any check on the original URL
+    // alone decorative.
+    let target = parsed;
+    let r: Response;
+    for (let hop = 0; ; hop++) {
+      try {
+        await assertPublicHost(target.hostname);
+      } catch (e) {
+        // Not fetchable, ever -- the same class as a bare source id, so it takes the same placeholder path.
+        // Deliberately indistinguishable from any other unfetchable value: a distinct status here would be
+        // the internal-service oracle this guard exists to remove.
+        if (e instanceof BlockedAddress) throw new UnfetchableCoverUrl(u);
+        throw e;
+      }
+      r = await fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+      if (r.status < 300 || r.status > 399) break;
+      const loc = r.headers.get('location');
+      if (!loc || hop >= 4) throw new UnfetchableCoverUrl(u);
+      let next: URL;
+      try { next = new URL(loc, target); } catch { throw new UnfetchableCoverUrl(u); }
+      if (next.protocol !== 'http:' && next.protocol !== 'https:') throw new UnfetchableCoverUrl(u);
+      target = next;
+    }
+    return r;
+  };
+
+  // PLAIN FIRST (v0.59.0). Every cover of a source behind Cloudflare used to ask the solver for clearance BEFORE the
+  // fetch -- and a cover CDN is no page: on the owner's install about 89 such solves for one CDN all failed, each
+  // holding one of the solver's four slots for up to a minute, while the plain fetch served every one of those covers
+  // with a 200. The solves starved Discover's own listings into timeouts. Now the referer-only fetch goes first, and only
+  // a Cloudflare refusal (403, 503 or `cf-mitigated`) asks for clearance -- the CDN's origin alone for a caller's
+  // cover, never the image URL itself -- capped hard, then one retry with the cookies. Reintroduce the solve-first
+  // order: "a cover the CDN serves never asks the solver" in coverSolverGuard.test.ts sees the solver asked.
+  let r = await fetchFollowing();
+  if (mayClear && refusedByCloudflare(r)) {
     try {
       // Capped hard. cfSession is built for solving a real challenge on a page load and will sit there for
-      // up to 95 seconds; behind an <img> that is a tile that never resolves. The cookies are an optimisation
-      // here -- the plain referer-only fetch below usually works -- so waiting more than a moment for them is
-      // strictly worse than going without.
+      // up to 95 seconds; behind an <img> that is a tile that never resolves. The deadline also drops the solve from
+      // the solver's queue if no slot frees in time (withSolverDeadline).
       let timer: NodeJS.Timeout | undefined;
       const s = await Promise.race([
-        cfSession(u),
+        withSolverDeadline(CF_IMAGE_TIMEOUT_MS, () => cfSession(u, { solveUrl: !opts.callerSupplied })),
         new Promise<never>((_, rej) => {
           timer = setTimeout(() => rej(new Error('cf timeout')), CF_IMAGE_TIMEOUT_MS);
         }),
       ]).finally(() => clearTimeout(timer)); // or the loser holds the event loop open for 5s
-      headers.cookie = s.cookie;
-      headers['user-agent'] = s.userAgent;
+      if (s.cookie) {
+        await r.body?.cancel().catch(() => {});
+        headers.cookie = s.cookie;
+        headers['user-agent'] = s.userAgent;
+        r = await fetchFollowing();
+      }
     } catch {
-      /* image host isn't behind Cloudflare, or took too long — proceed with the referer-only headers */
+      /* no clearance in time: the refusal stands */
     }
-  }
-  // Redirects are followed BY HAND so every hop is checked. `redirect: 'follow'` would let a public URL
-  // bounce to 169.254.169.254 or yomi-db with no second look, which makes any check on the original URL
-  // alone decorative.
-  let target = parsed;
-  let r: Response;
-  for (let hop = 0; ; hop++) {
-    try {
-      await assertPublicHost(target.hostname);
-    } catch (e) {
-      // Not fetchable, ever -- the same class as a bare source id, so it takes the same placeholder path.
-      // Deliberately indistinguishable from any other unfetchable value: a distinct status here would be
-      // the internal-service oracle this guard exists to remove.
-      if (e instanceof BlockedAddress) throw new UnfetchableCoverUrl(u);
-      throw e;
-    }
-    r = await fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(20000) });
-    if (r.status < 300 || r.status > 399) break;
-    const loc = r.headers.get('location');
-    if (!loc || hop >= 4) throw new UnfetchableCoverUrl(u);
-    let next: URL;
-    try { next = new URL(loc, target); } catch { throw new UnfetchableCoverUrl(u); }
-    if (next.protocol !== 'http:' && next.protocol !== 'https:') throw new UnfetchableCoverUrl(u);
-    target = next;
   }
   // A flat 502, never the upstream status. Reflecting it turned this route into a port and path scanner:
   // 404 meant an open HTTP service, a hang meant a filtered port. `Img` only needs SOME error to fall back
@@ -266,6 +279,10 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
   return Buffer.from(await r.arrayBuffer());
 }
+
+/** A Cloudflare refusal: what clearance cookies could get past (v0.59.0). */
+const refusedByCloudflare = (r: Response): boolean =>
+  r.status === 403 || r.status === 503 || r.headers.get('cf-mitigated') === 'challenge';
 
 /**
  * The cover route's fetch. `u` is whatever the caller put in the query string, so the Cloudflare solver is held

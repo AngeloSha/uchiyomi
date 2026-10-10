@@ -164,6 +164,15 @@ test('a source that cannot rank its own titles is not asked to', () => {
   assert.deepEqual(budgetForMode(pool, 'popular', 9).map((s) => s.id), ['both'], 'popular takes only the one that can');
 });
 
+test('a source with only a popular listing is on the Popular wall', () => {
+  // v0.59.0, from the audit of the owner's sources: MangaYi, Alpha Manga and AHottie answer Popular and have no
+  // Newest, and were on neither wall -- Popular filtered on `popular` and then budgetFor again on `latest`.
+  // Reintroduce `s.latest` alone in budgetFor: 'pop-only' is missing from Popular.
+  const pool = [src({ id: 'pop-only', latest: false, popular: true, used: 1 }), src({ id: 'both', popular: true })];
+  assert.deepEqual(budgetForMode(pool, 'popular', 9).map((s) => s.id), ['pop-only', 'both']);
+  assert.deepEqual(budgetForMode(pool, 'newest', 9).map((s) => s.id), ['both'], 'and still off Newest, which it cannot answer');
+});
+
 test('THE NAMESPACING: switching listing must remount the children', () => {
   // The wall keys everything by `${listMode}:${sourceId}` so the toggle never has to CLEAR anything -- and
   // clearing is the only thing that has ever broken this page. But the two halves are a pair: if the key

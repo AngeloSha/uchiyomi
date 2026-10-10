@@ -11,6 +11,7 @@ import type { FastifyRequest } from 'fastify';
 import { one } from './db';
 import { logAudit } from './audit';
 import { env } from '../env';
+import { listBudgetFor } from './sources/budget';
 import type { SourceAdapter } from './sources/types';
 import { smokeTest, probeBase, buildProbe, type SmokeResult } from './sourceProbe';
 import { diagnose, currentError, type Diagnosis, type DiagnosisCode, type Probe } from './sourceDiagnosis';
@@ -68,8 +69,9 @@ export async function checkSourceLive(src: SourceAdapter, opts: { by: 'test' | '
       blockedUntil: h?.blocked_until ?? null,
       // While somebody is still running into it: a streak nobody has added to in a day is history (v0.55.10).
       slowStreak: slowStreakNow(h),
-      // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number.
-      budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
+      // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number -- the solver's
+      // for a source behind it (v0.59.0).
+      budgetMs: listBudgetFor(src),
       disabled: !!h?.disabled,
     },
     probe,

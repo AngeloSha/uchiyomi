@@ -16,6 +16,7 @@ import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { effectsReduced } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 import { useSeriesMenu } from './SeriesMenu';
+import { publicCoverFallback } from '@/lib/coverFallback';
 
 /** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
  *  disabled under prefers-reduced-motion; on touch the handlers never fire so nothing changes. */
@@ -334,7 +335,7 @@ export function SourceCard({ item, providers, onAdd, eager }: {
       <div className={`grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300
                        ${owned ? 'opacity-55' : 'group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]'}`}>
         <Img src={sourceCover(item.source, item.coverUrl)} alt={item.title} eager={eager}
-          fallbackSrc={item.coverUrl || undefined}
+          fallbackSrc={publicCoverFallback(item.coverUrl)}
           className="h-full w-full" imgClassName="transition-transform duration-500 group-hover:scale-[1.07]" />
 
         {/* The icons overlap the way the source chip's do (SourcePicker), each ringed in the box's own ground so the

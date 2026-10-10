@@ -141,6 +141,8 @@ const schema = z.object({
   // FlareSolverr-backed site -- so a single slow source stalled the whole wall for over a minute. Settable
   // because an operator on a slow link may want more, and because a test cannot afford to wait 8 seconds.
   SOURCE_LATEST_TIMEOUT_MS: z.coerce.number().int().min(100).max(120000).default(8000),
+  /** A listing page's budget for a source behind the Cloudflare solver (v0.59.0, lib/sources/budget.ts listBudgetFor). */
+  SOURCE_LATEST_SOLVER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(180000).default(45000),
   // How long the admin "test this source" probe gets, end to end. It exercises search -> series -> chapters
   // -> pages, and each of those can reach FlareSolverr's own 95s abort, so the original 30s Promise.race on
   // the add-a-site path was guarding a 380s worst case (four search terms, serially). This is a wall-clock

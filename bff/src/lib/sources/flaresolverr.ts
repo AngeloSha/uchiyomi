@@ -10,6 +10,8 @@
 //
 // Both addresses are read when asked rather than once at load: production sets them before the server starts, and a
 // test can point them at fakes of its own.
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const mainUrl = (): string => (process.env.FLARESOLVERR_URL || 'http://yomi-flaresolverr:8191').replace(/\/$/, '');
 
 /** The backup solver's address, or '' when there is none. The main's own address again is no backup. */
@@ -74,17 +76,55 @@ function askingOrder(site: string | null): string[] {
  */
 export const SOLVER_CONCURRENCY = Math.max(1, Number(process.env.SOLVER_CONCURRENCY || 4));
 let inFlight = 0;
-const waiting: Array<() => void> = [];
+/** A request waiting for a slot: `go` hands it one; `drop` takes it out unserved (its caller stopped waiting). */
+interface Waiter { go: () => void; drop?: NodeJS.Timeout }
+const waiting: Waiter[] = [];
+
+/**
+ * When the caller stops waiting (v0.59.0), carried with the request rather than through every adapter's signature:
+ * a Discover listing runs its adapter under withSolverDeadline, and any solve the adapter queues meanwhile is dropped
+ * from the queue once that moment has passed instead of being solved for nobody. The owner's install had requests
+ * whose page had long given up still queued minutes later behind the slots they were blocking. A solve that has
+ * started runs to its end (the solver cannot be told to stop); one that has not started never will. Reintroduce by
+ * queueing without the deadline: "a queued solve whose caller gave up is never started" in solverQueue.test.ts finds
+ * it solved.
+ */
+const deadline = new AsyncLocalStorage<number>();
+export function withSolverDeadline<T>(ms: number, fn: () => Promise<T>): Promise<T> {
+  return deadline.run(Date.now() + ms, fn);
+}
+// `selfTimeout` as withTimeout tags its own (lib/sources/index.ts): the drop fires at the listing's own deadline, a moment
+// before withTimeout would, so a listing must read it as its own budget running out -- slowness, never the site failing
+// (latestPage's reportFail would hand a working site an escalating cooldown). Reintroduce without it: "a listing whose
+// solve waited past its budget is slow, not failing" in discoverSources.int.test.ts finds a cooldown.
+const late = () =>
+  Object.assign(new Error('flaresolverr: the caller stopped waiting before a solver was free'), { busy: true, selfTimeout: true });
 
 async function acquire(): Promise<void> {
+  const until = deadline.getStore();
+  if (until !== undefined && Date.now() >= until) throw late();
   if (inFlight < SOLVER_CONCURRENCY) { inFlight++; return; }
-  await new Promise<void>((resolve) => waiting.push(resolve));
+  await new Promise<void>((resolve, reject) => {
+    const w: Waiter = { go: () => { if (w.drop) clearTimeout(w.drop); resolve(); } };
+    if (until !== undefined) {
+      w.drop = setTimeout(() => {
+        const i = waiting.indexOf(w);
+        if (i >= 0) waiting.splice(i, 1);
+        reject(late());
+      }, Math.max(0, until - Date.now()));
+      w.drop.unref?.();
+    }
+    waiting.push(w);
+  });
   inFlight++;
 }
 function release(): void {
   inFlight--;
-  waiting.shift()?.();
+  waiting.shift()?.go();
 }
+
+/** Tests only: how many solves are running and waiting. */
+export const _solverQueue = () => ({ inFlight, waiting: waiting.length });
 
 async function solve(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
   await acquire();
@@ -225,22 +265,49 @@ export async function cfPost(url: string, postData: string): Promise<string> {
 const unsolvable = new Map<string, number>();
 const RESOLVE_AFTER_MS = 5 * 60_000;
 
-export async function cfSession(url: string): Promise<{ cookie: string; userAgent: string }> {
+/** The solve running for an origin, which every other caller for that origin waits on (v0.59.0). */
+const solving = new Map<string, Promise<void>>();
+
+/**
+ * @param o.solveUrl when the origin root cannot be solved, solve `url` itself (default true: a chapter's page images,
+ *   below). The cover route passes false for a caller's cover (v0.59.0): an image URL is not a page, and on the owner's
+ *   install every one of ~89 such solves for one cover CDN failed while holding the solver's slots.
+ */
+export async function cfSession(url: string, o: { solveUrl?: boolean } = {}): Promise<{ cookie: string; userAgent: string }> {
   const origin = new URL(url).origin;
   // Only the side effect matters here: `solve` stores the cookie jar before it returns, so an empty body
   // (which now throws) has still given us what we came for. Before `cfGet` could throw this was a bare
   // await, and letting it throw now would fail image downloads that used to succeed.
   if (!sessionOf(origin) && Date.now() - (unsolvable.get(origin) || 0) > RESOLVE_AFTER_MS) {
-    // The origin ROOT is the cheap way in and works for a normal site. An image CDN is not a normal site:
-    // `imgs-2.2xstorage.com/` and `storage.waitst.com/` both answer 403 with an access-denied page, which
-    // FlareSolverr reports as a block, so `solve` threw BEFORE caching anything. The session was therefore
-    // never stored, the root was re-solved for every single chapter, and every image was then fetched with
-    // no clearance cookie at all -- on the sites where the 429s were coming from.
-    //
-    // So fall back to the URL we are actually about to fetch. That one exists, so it can be solved.
-    await cfGet(`${origin}/`).catch(() => cfGet(url)).catch(() => {});
-    if (sessionOf(origin)) unsolvable.delete(origin);
-    else unsolvable.set(origin, Date.now());
+    // ONE solve per origin at a time (v0.59.0). A wall of covers from one CDN asked for its session all at once, and
+    // with no session yet each caller started its own root solve (and then its own URL solve): twenty covers, forty
+    // solves, all four slots for minutes. Now the first caller solves and the rest wait for its answer. Reintroduce
+    // by solving per caller: "one origin is solved once however many ask at once" in solverQueue.test.ts counts more.
+    let running = solving.get(origin);
+    if (!running) {
+      running = (async () => {
+        // The origin ROOT is the cheap way in and works for a normal site. An image CDN is not a normal site:
+        // `imgs-2.2xstorage.com/` and `storage.waitst.com/` both answer 403 with an access-denied page, which
+        // FlareSolverr reports as a block, so `solve` threw BEFORE caching anything. The session was therefore
+        // never stored, the root was re-solved for every single chapter, and every image was then fetched with
+        // no clearance cookie at all -- on the sites where the 429s were coming from.
+        //
+        // So fall back to the URL we are actually about to fetch. That one exists, so it can be solved -- unless the
+        // caller said not to (o.solveUrl, above).
+        //
+        // A solve dropped from the queue because its caller stopped waiting (withSolverDeadline) never reached the site:
+        // it says nothing about the origin, so it marks nothing unsolvable -- that would keep every caller, a chapter
+        // download's included, from asking for five minutes. Reintroduce by marking it: "a dropped solve does not mark
+        // its origin unsolvable" in solverQueue.test.ts finds the next caller turned away.
+        let dropped = false;
+        const ask = (u: string) => cfGet(u).catch((e) => { if ((e as { busy?: boolean })?.busy) dropped = true; throw e; });
+        await ask(`${origin}/`).catch(() => (o.solveUrl === false || dropped ? undefined : ask(url))).catch(() => {});
+        if (sessionOf(origin)) unsolvable.delete(origin);
+        else if (!dropped) unsolvable.set(origin, Date.now());
+      })().finally(() => solving.delete(origin));
+      solving.set(origin, running);
+    }
+    await running;
   }
   // One solver's pair, whole: the one that solved this origin last (`solvedBy`).
   return sessionOf(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
@@ -264,6 +331,7 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
  */
 export function resetSolverSessions(): { sessions: number; unsolvable: number } {
   const out = { sessions: sessions.size, unsolvable: unsolvable.size };
+  solving.clear();
   sessions.clear();
   solvedBy.clear();
   lastWon.clear();
