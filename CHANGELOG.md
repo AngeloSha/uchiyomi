@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.59.0 — 2026-10-11
+
+**Discover loads its sources more reliably, and a source you switched off no longer takes a working one's place.**
+
+These come from going through every extension and source on a real install with Discover asking all of them.
+
+### Sites behind Cloudflare
+
+- **More time for their first page.** A site this server opens through the Cloudflare solver now gets up to 45
+  seconds for its first Discover page, not 15. A fresh solve took 15 to 25 seconds, so the first visit of the day
+  lost exactly these sites, and then counted them as slow. The setting is `SOURCE_LATEST_SOLVER_TIMEOUT_MS`.
+- **Covers no longer tie up the solver.** A cover is fetched straight from the site first, and the solver is asked
+  only when the site actually refuses. Before, every cover from such a site asked the solver first: on one install
+  about 89 of those requests, all of which failed, kept the solver busy while Discover's own pages waited behind them.
+- **One solve per site at a time**, however many covers ask at once. A request whose page has stopped waiting is
+  dropped from the solver's queue instead of being solved for nobody.
+
+### Fairer to slow sources
+
+- Only a source's **first page** counts towards *slow*. Later pages, asked while you scroll, no longer do.
+- **Slow is not quiet.** A slow source keeps its place in Discover's order. Only a source whose page keeps coming back
+  empty is asked last.
+- A source **resting after being slow** still shows its Popular and Newest pages when nothing is saved for them, instead
+  of showing nothing. A source that refused the server still rests, as before.
+
+### Every source on its wall
+
+- A source with a Popular page and no Newest page now shows on Discover's **Popular** wall. It used to be on neither.
+
+### Extensions and the source limit
+
+- A source you **switched off in Health** no longer holds one of the extension source slots (`SUWAYOMI_MAX_SOURCES`)
+  that a working source needs. It registers after every working one. On one install, 16 of the 40 slots went to
+  switched-off sources while a working one was left out.
+- Switching a source off or on in Health takes effect **at once** while the limit is full. Before, a source switched
+  back on stayed out of everything until the next restart.
+- Fix everything's check for room counts the same way.
+
+### Smaller fixes
+
+- The add dialog's search asks **six sources at a time**, not every source at once.
+- A Discover cover that will not load no longer falls back to the extension engine's internal address in your
+  browser.
+- The *slow* note on a site behind Cloudflare names its real time limit.
+
+### Upgrading
+
+- **Database:** no changes.
+- **New setting:** `SOURCE_LATEST_SOLVER_TIMEOUT_MS` (default `45000`, see
+  [CONFIGURATION.md](docs/CONFIGURATION.md)).
+- **For scripts** ([api.md](docs/api.md)): in `GET /api/sources`, a source that is only slow now reads `ok`, with its
+  `note`, not `quiet`.
+
 ## v0.58.0 — 2026-10-11
 
 **Ratings from AniList beside your own, sort the Library by popularity, chapters and more, and Discover asks every source.**

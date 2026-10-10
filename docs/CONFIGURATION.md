@@ -196,6 +196,10 @@ also bounds every call inside the test, and a test that runs out of it is report
 rather than as a failure: raise it for extension sources behind a slow Cloudflare check that keep reading so. The
 Test key counts against it, plus a few seconds of margin (*Testing… 0:12 of up to 0:53* at the default).
 `SOURCE_LATEST_TIMEOUT_MS` (default `8000`) is how long a source's newest page may take before it counts as slow.
+`SOURCE_LATEST_SOLVER_TIMEOUT_MS` (default `45000`, since v0.59.0) is the same for a site this server opens through the
+Cloudflare solver (below): the first page of the day waits for a fresh solve, measured at 15–25 s, so the bare budget
+lost exactly these sites. It is never less than `SOURCE_LATEST_TIMEOUT_MS`. Only a source's first page counts
+toward *slow*; later pages, asked while you scroll, never do.
 
 ## The Cloudflare solver
 

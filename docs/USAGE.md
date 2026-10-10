@@ -1278,9 +1278,12 @@ again.
   when a source is rate-limited or blocked — which opens a **Sources** sheet: one row per source with its
   favicon, a health dot, the server's note (or *Could not be reached right now.* when it gave none), and
   *back in ~12 min* while a cooldown lasts. The chip's number is every source that can answer the listing
-  you are on and is switched on — *Popular* counts only the sources that have a popular listing — while the wall asks
-  only the best few of them at a time, widening as sources come back empty; the sheet's footer says which,
-  *Asking {n} of {m} · tap a source to browse it alone*. Tap a row to browse that source alone; the chip
+  you are on and is switched on — *Popular* counts only the sources that have a popular listing (since v0.59.0 also
+  one with no newest listing) — and since v0.58.0 the wall asks every one of them, the ones your library reads from
+  first, a few at a time; the sheet's footer says *Asking every source · tap one to browse it alone*. While some
+  have not answered, a **Still loading** card at the end of the wall names them. A source that is only slow keeps
+  its place in that order (since v0.59.0); one whose listing keeps coming back empty is asked last. Tap a row to
+  browse that source alone; the chip
   then shows its favicon and name, and its × goes back to all of them. Browsing a source that is in a
   cooldown shows its reason and *back in ~12 min* in place of an empty wall, not *Nothing new from these
   sources right now*. The (i) in the sheet's header is the same five-line explainer as on the series page.
@@ -1927,7 +1930,9 @@ works, it is only not loaded — which opens that source in **Admin → Sources*
 series uses makes room for it. Since v0.55.1 the row names the source as the rest of Health does (the extension's own
 name, not `sw:2522…`), and the source's sheet says why it is not loaded — *The engine’s limit of 25 sources is full.
 Turn off a source you don’t use, or raise SUWAYOMI_MAX_SOURCES.* — with no *Replace*. A source switched on that the
-engine no longer offers at all reads *no longer installed*, with *Replace*, rather than over the limit.
+engine no longer offers at all reads *no longer installed*, with *Replace*, rather than over the limit. Since v0.59.0
+a source you switched off in Health registers after every working one, so it never holds a slot a working source
+needs, and switching one off or back on there while the limit is full takes effect at once.
 
 **Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
 Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote
