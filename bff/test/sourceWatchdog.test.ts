@@ -184,7 +184,9 @@ test('the Test button can see a slow streak', () => {
       assert.ok(/\bslow_streak\b/.test(cols),
         `${file} reads source_health without slow_streak, so diagnose() never sees a slow streak and too_slow is unreachable from it`);
     }
-    assert.ok(/budgetMs: env\.SOURCE_LATEST_TIMEOUT_MS/.test(src),
-      `${file} hands diagnose() no budget, so a too_slow fix cannot say how many seconds the source keeps running out of`);
+    // v0.59.0: the budget Discover's listing runs out of for THIS source (lib/sources/budget.ts listBudgetFor) -- the
+    // solver's, 45 s, for a source behind Cloudflare -- not the bare one for every source.
+    assert.ok(/budgetMs: listBudgetFor\(src\)/.test(src),
+      `${file} hands diagnose() no budget, or not this source's, so a too_slow fix cannot say how many seconds the source keeps running out of`);
   }
 });

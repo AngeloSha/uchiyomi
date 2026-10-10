@@ -93,6 +93,23 @@ let offered: Set<string> | null = null;
  */
 let leftOut = new Set<string>();
 
+/** Whether the last load left any source out because the source limit was full. */
+export const limitLeftSomethingOut = (): boolean => leftOut.size > 0;
+
+/**
+ * The engine's ids among `ids` whose source is switched off in Health (source_health.disabled, v0.59.0). Nothing asks
+ * such a source -- the sweep, Discover and the searches all skip it -- so it registers after every working one, and a
+ * slot it would take goes to a working source. A read that fails switches nothing off, as before. The query
+ * lib/sourceStanding.ts switchedOff runs, inlined: that module reads the registry this one fills.
+ */
+async function switchedOffInHealth(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await q<{ source_id: string }>(
+    'SELECT source_id FROM source_health WHERE disabled AND source_id = ANY($1::text[])', [ids.map((id) => `${SW_PREFIX}${id}`)],
+  ).catch(() => [] as Array<{ source_id: string }>);
+  return new Set(rows.map((r) => r.source_id.slice(SW_PREFIX.length)));
+}
+
 /** Whether the last load left this source (`sw:<id>`) out because the source limit was full. */
 export function leftOutByLimit(adapterId: string | null | undefined): boolean {
   return !!adapterId?.startsWith(SW_PREFIX) && leftOut.has(adapterId.slice(SW_PREFIX.length));
@@ -107,7 +124,11 @@ export function leftOutByLimit(adapterId: string | null | undefined): boolean {
  */
 export async function wouldFit(ids: readonly string[]): Promise<boolean> {
   const on = await enabledSourceIds();
-  const counted = new Set([...on].filter((id) => !offered || offered.has(id)));
+  // A source switched off in Health takes a slot only once every working one has its own (v0.59.0), so it is not
+  // counted against a new one. Reintroduce by counting it: "a switched-off source never takes a working one's slot"
+  // reads no room for a source that would fit.
+  const off = await switchedOffInHealth([...on]);
+  const counted = new Set([...on].filter((id) => (!offered || offered.has(id)) && !off.has(id)));
   for (const id of ids) counted.add(String(id));
   return counted.size <= env.SUWAYOMI_MAX_SOURCES;
 }
@@ -188,7 +209,16 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean): Promis
   // suwayomiRegister.int.test.ts finds the used source skipped.
   const used = await usedSourceIds().catch(() => new Set<string>());
   const on = remote.filter((s) => enabled.has(String(s.id)));
-  const wanted = [...on.filter((s) => used.has(String(s.id))), ...on.filter((s) => !used.has(String(s.id)))];
+  // And a source switched off in Health LAST (v0.59.0), used or not: see switchedOffInHealth. On the owner's install 16
+  // of the 40 slots went to switched-off sources while Atsumaru, which works, was over the limit. Reintroduce the
+  // two-part order: "a switched-off source never takes a working one's slot" in suwayomiRegister.int.test.ts finds the
+  // working source skipped.
+  const off = await switchedOffInHealth(on.map((s) => String(s.id)));
+  const isOff = (s: RemoteSource) => off.has(String(s.id));
+  const live = on.filter((s) => !isOff(s));
+  const wanted = [
+    ...live.filter((s) => used.has(String(s.id))), ...live.filter((s) => !used.has(String(s.id))), ...on.filter(isOff),
+  ];
 
   let registered = 0;
   let skipped = 0;

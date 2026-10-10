@@ -15,8 +15,8 @@ import { scanOrder } from '../lib/scanOrder';
 import { followGuard, seriesLanguage } from '../lib/seriesLang';
 import { searchAll, groupByTitle, bySource, ratingOf, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
 import type { SourceSeries as DiscoverItem } from '../lib/sources/types';
-import { budgetFor } from '../lib/sources/budget';
-import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
+import { budgetFor, listBudgetFor } from '../lib/sources/budget';
+import { SOLVER_CONCURRENCY, withSolverDeadline } from '../lib/sources/flaresolverr';
 
 /**
  * How many searches a fill scan runs at once, and when it stops starting new ones.
@@ -927,6 +927,14 @@ function ownedGroup<G extends { providers: Array<{ source: string }> }>(g: G, he
  * for a single source, against a median of 355ms. Eight seconds is well past the p90 of 2.5s.
  */
 const LATEST_TIMEOUT = env.SOURCE_LATEST_TIMEOUT_MS;
+/** The add dialog's "find this title" asks this many sources at a time (v0.59.0, /api/sources/find). */
+const FIND_AT_ONCE = 6;
+/**
+ * A listing's budget (v0.59.0, lib/sources/budget.ts): 45 s behind the Cloudflare solver, where a cold solve takes 15-25 s.
+ * The search gives those sources the whole solver budget (90 s); a wall caps it lower so a dead site does not hold its
+ * Still loading card for a minute and a half.
+ */
+const listBudget = (src: SourceAdapter) => listBudgetFor(src);
 const LATEST_TTL = 10 * 60_000;
 /** What the two lookups an add must do inline are allowed to take. Matches the /find handler's budget. */
 const ADD_LOOKUP_TIMEOUT = 20_000;
@@ -1111,6 +1119,17 @@ const latestInflight = new Map<string, Promise<SourceSeries[]>>();
  */
 export type ListMode = 'latest' | 'popular';
 
+/**
+ * A rest a source earned only by being slow (reportSlow's five-minute breather): its status is still 'ok' -- a failure
+ * sets one of its own (reportFail). With nothing cached for the page, the listing asks anyway (v0.59.0): Popular's
+ * cache is rarely filled, and on the owner's install five working sites answered Popular with nothing for the length of
+ * a breather. A failure's cooldown is unchanged: a site that refused us is not asked again early. Reintroduce by always
+ * serving the cache: "a slow source's breather does not blank a listing it has never cached" in
+ * discoverSources.int.test.ts reads nothing.
+ */
+const restingForSlowness = (h: { status?: string | null; slow_streak?: number | null }) =>
+  (h.status ?? 'ok') === 'ok' && (h.slow_streak ?? 0) > 0;
+
 async function latestPage(src: SourceAdapter, page: number, mode: ListMode = 'latest'): Promise<SourceSeries[]> {
   // The mode belongs in the key. Without it the two listings share a cache entry and an in-flight promise,
   // so whichever is asked for first answers both -- Popular would serve Newest's results for ten minutes,
@@ -1124,7 +1143,10 @@ async function latestPage(src: SourceAdapter, page: number, mode: ListMode = 'la
   const run = async (): Promise<SourceSeries[]> => {
     try {
       const fetchList = mode === 'popular' ? src.popular! : src.latest!;
-      const raw = await withTimeout(fetchList(page), LATEST_TIMEOUT);
+      // The solves the adapter queues carry the same deadline (lib/sources/flaresolverr.ts withSolverDeadline): one
+      // still waiting for a slot when the listing gives up is dropped, not solved for nobody.
+      const budget = listBudget(src);
+      const raw = await withTimeout(withSolverDeadline(budget, () => fetchList(page)), budget);
       const seen = new Set<string>();
       // dedupe by sourceId (duplicate ids collide on the React key -> wrong cover/title on a card)
       const items = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
@@ -1158,7 +1180,11 @@ async function latestPage(src: SourceAdapter, page: number, mode: ListMode = 'la
       // removed the very requests that would have shown it working, which is how a healthy source went
       // missing for a day while every diagnostic said it was fine.
       if ((e as { selfTimeout?: boolean })?.selfTimeout) {
-        void reportSlow(src.id, (e as { ms?: number }).ms ?? LATEST_TIMEOUT);
+        if (page === 1) void reportSlow(src.id, (e as { ms?: number }).ms ?? listBudget(src));
+        // Page 1 only, as reportLatest counts (v0.59.0): a later page is asked while the reader scrolls, often behind
+        // the solver's queue, and its timeouts made five working sites "slow" for a day on the owner's install --
+        // which the wall then asked last. Reintroduce by reporting every page: "only page 1 makes a source slow" in
+        // discoverSources.int.test.ts counts page 3.
       } else {
         // Nothing reported health from here, so a source that failed on every single visit kept its `ok`
         // status forever and the client's ranking kept putting it first. Reporting earns it a cooldown.
@@ -2276,13 +2302,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
       content: show.map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
-        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT || slowStreakNow(h, now) >= EMPTY_SUSPECT;
+        // v0.59.0: slow is not quiet. Both still get the diagnosis (the sheet's note says which), but only an empty
+        // streak makes a source `quiet`, which the wall asks last: a site that answers slowly behind the solver --
+        // Natomanga, with 114 of the owner's series -- was being asked 24th of 29. Reintroduce by folding them
+        // together: "a slow source is not quiet" in discoverSources.int.test.ts reads quiet.
+        const emptySuspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT;
+        const suspect = emptySuspect || slowStreakNow(h, now) >= EMPTY_SUSPECT;
         const d = (blocked || suspect) && h
           ? diagnose({
               status: h.status, lastError: h.last_error, consecutive: h.consecutive,
               lastOkAt: h.last_ok_at, emptyStreak: h.empty_streak ?? 0,
               blockedUntil: h.blocked_until, disabled: !!h.disabled,
-              slowStreak: slowStreakNow(h, now), budgetMs: LATEST_TIMEOUT,
+              slowStreak: slowStreakNow(h, now), budgetMs: listBudget(s),
             })
           : null;
         return {
@@ -2308,7 +2339,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // has drifted answers 200 with an empty page and throws nothing, so it never earned a cooldown and
           // `status` stayed 'ok' forever while the wall kept fetching it first. `budgetFor` sorts on
           // `status !== 'ok'`, so naming it is all it takes to stop ranking it above sources that work.
-          status: h?.disabled ? 'disabled' : blocked ? h!.status : suspect ? 'quiet' : 'ok',
+          status: h?.disabled ? 'disabled' : blocked ? h!.status : emptySuspect ? 'quiet' : 'ok',
           blockedUntil: blocked ? h!.blocked_until : null,
           // The PUBLIC sentence only, and only when something is actually wrong. Never `fix`, which names
           // containers and config files, and never `last_error`, which carries internal hostnames and ports.
@@ -3195,9 +3226,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // cannot answer still cost the full timeout on every single visit: on this install two of them burned
     // 8s each, every time, for nothing. Whatever was last cached is still served, because an old page is
     // better than a blank one. blocked_until expires on its own, so the source heals without intervention.
-    if (await blockedNow(source!).catch(() => null)) {
+    const resting = await blockedNow(source!).catch(() => null);
+    if (resting) {
       const stale = cachedLatest(src.id, p);
-      return { content: await decorate(stale, src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(stale, src.id) };
     }
     const results = await latestPage(src, p);
     return { content: await decorate(results, src.id) };
@@ -3220,9 +3252,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!surfaceable(req).some((s) => s.id === src.id)) return { content: [] };
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
-    if (await blockedNow(source!).catch(() => null)) {
+    const resting = await blockedNow(source!).catch(() => null);
+    if (resting) {
       const stale = cachedLatest(src.id, p, 'popular');
-      return { content: await decorate(stale, src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(stale, src.id) };
     }
     const results = await latestPage(src, p, 'popular');
     return { content: await decorate(results, src.id) };
@@ -3448,19 +3481,27 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // source the "Show 18+" chip is hiding must be neither asked nor listed here (#64). A client naming it
     // in `sources` does not override the hide -- `wanted` only narrows the set, it never widens it.
     const allowed = new Set(surfaceable(req).map((x) => x.id));
-    const found = await Promise.all(
-      findOrder().filter((id) => allowed.has(id) && (!wanted || wanted.has(id))).map(async (id) => {
-        const src = getSource(id);
-        if (!src) return null;
-        // search-all and latest both skip disabled sources and this did not, so it offered a provider an
-        // admin had switched off and the add then failed with "disabled by the admin".
-        if (await isDisabled(id).catch(() => false)) return null;
-        try {
-          const best = pickBest(await withTimeout(src.search(term), budgetFor(src, 25000)), term);
-          return best ? { source: id, name: src.name, sourceId: best.sourceId, title: best.title, coverUrl: best.coverUrl } : null;
-        } catch { return null; }
-      }),
-    );
+    const ids = findOrder().filter((id) => allowed.has(id) && (!wanted || wanted.has(id)));
+    const one = async (id: string) => {
+      const src = getSource(id);
+      if (!src) return null;
+      // search-all and latest both skip disabled sources and this did not, so it offered a provider an
+      // admin had switched off and the add then failed with "disabled by the admin".
+      if (await isDisabled(id).catch(() => false)) return null;
+      try {
+        const best = pickBest(await withTimeout(src.search(term), budgetFor(src, 25000)), term);
+        return best ? { source: id, name: src.name, sourceId: best.sourceId, title: best.title, coverUrl: best.coverUrl } : null;
+      } catch { return null; }
+    };
+    // At most FIND_AT_ONCE searches in flight, in the ask order (v0.59.0). This asked every source it was given at
+    // the same moment; with Discover asking every source since v0.58.0, a client naming all of them would put
+    // twenty-nine searches -- the solver's among them -- on the wire at once. Reintroduce Promise.all over every id:
+    // "the add dialog's search asks a few sources at a time" in discoverSources.int.test.ts counts them all at once.
+    const found: Array<Awaited<ReturnType<typeof one>>> = new Array(ids.length).fill(null);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(FIND_AT_ONCE, ids.length) }, async () => {
+      for (let i = next++; i < ids.length; i = next++) found[i] = await one(ids[i]);
+    }));
     // Each provider says its language and whether the library holds its title in it (v0.52.0), as a Discover card
     // does: the add dialog marks the held ones and offers the others as a new edition.
     const hits = found.filter((f): f is NonNullable<typeof f> => !!f);

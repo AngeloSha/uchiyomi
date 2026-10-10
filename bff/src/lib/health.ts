@@ -33,6 +33,7 @@ import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
 import { slowStreakNow } from './sourceHealth';
+import { listBudgetFor } from './sources/budget';
 import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
 import { longStrip, type PageDim } from './longStrip';
 import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
@@ -1242,7 +1243,7 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
       {
         status: r.status as any, lastError: currentError(r), consecutive: r.consecutive,
         lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0, blockedUntil: r.blocked_until, disabled: r.disabled,
-        slowStreak: slowStreakNow(r, now), budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
+        slowStreak: slowStreakNow(r, now), budgetMs: listBudgetFor(src),
       },
       // The confirmed failure is live evidence of the most specific kind: its stage and its own error.
       lead && !r.disabled ? { adapterOk: false, failure: { stage: lead.stage, kind: lead.kind, error: lead.error } } : undefined,

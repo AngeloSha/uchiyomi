@@ -330,10 +330,11 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
 
       // ...but it must not keep being asked first forever. That was the real point of the old assertion
       // here, and it still holds -- just after a few chances rather than instantly, and via a short fixed
-      // breather rather than a half-hour block.
+      // breather rather than a half-hour block. Page 1 each time: since v0.59.0 only page 1 is evidence of
+      // slowness (discoverSources.int.test.ts), as only page 1 is evidence of an empty listing.
       for (let i = 0; i < 3; i++) {
         await Promise.race([
-          app.inject({ method: 'GET', url: `/api/sources/latest?source=${SLOW}&page=${i + 2}`, headers: tok(ids.plain) }),
+          app.inject({ method: 'GET', url: `/api/sources/latest?source=${SLOW}&page=1`, headers: tok(ids.plain) }),
           new Promise<null>((res) => setTimeout(() => res(null), 3000)),
         ]);
       }
