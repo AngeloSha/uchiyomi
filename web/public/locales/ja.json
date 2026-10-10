@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3541
+    "strings": 3547
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3544,5 +3544,11 @@
   "Updates stopped": "更新を停止しました",
   "Home {n}": "ホーム {n}",
   "Match Discover titles online": "「さがす」のタイトルをオンラインで照合する",
-  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "既定ではオン。「さがす」に表示されるタイトルを AniList・MangaDex・MangaUpdates で、それぞれ一度だけバックグラウンドで調べます。これにより、複数のソースが別々の名前で呼ぶシリーズは 1 枚のカードにまとまり、すでに持っているシリーズは表示されません。オフにすると名前そのものだけを比べ、どこにも何も送信しません。"
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "既定ではオン。「さがす」に表示されるタイトルを AniList・MangaDex・MangaUpdates で、それぞれ一度だけバックグラウンドで調べます。これにより、複数のソースが別々の名前で呼ぶシリーズは 1 枚のカードにまとまり、すでに持っているシリーズは表示されません。オフにすると名前そのものだけを比べ、どこにも何も送信しません。",
+  "Cooling down": "クールダウン中",
+  "A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.": "両方にある話は 1 つだけ残ります。もう一方のコピーは取り除かれ、そのファイルは削除されます（Uchiyomi に削除が許されていない場合は退避されます）。読書の進捗は残るほうのコピーに移り、誰かがブックマークしているコピーは残されます。",
+  "1 duplicate copy removed": "重複コピーを 1 件削除",
+  "{n} duplicate copies removed": "重複コピーを {n} 件削除",
+  "1 chapter kept twice: bookmarked in the other copy": "1 話を重複のまま残しました：もう一方のコピーにブックマークあり",
+  "{n} chapters kept twice: bookmarked in the other copy": "{n} 話を重複のまま残しました：もう一方のコピーにブックマークあり"
 }

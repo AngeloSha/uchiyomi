@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3541
+    "strings": 3547
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3544,5 +3544,11 @@
   "Updates stopped": "Обновления остановлены",
   "Home {n}": "Главная {n}",
   "Match Discover titles online": "Сверять названия из «Обзора источников» в интернете",
-  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "По умолчанию включено. Названия, показанные в «Обзоре источников», ищутся в AniList, MangaDex и MangaUpdates — по одному разу и в фоне, чтобы серия, которую разные источники называют по-разному, показывалась одной карточкой, а та, что у вас уже есть, оставалась скрытой. Если выключить, сравниваются только сами названия и никуда ничего не отправляется."
+  "On by default. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden. Off, only the names themselves are compared and nothing is sent anywhere.": "По умолчанию включено. Названия, показанные в «Обзоре источников», ищутся в AniList, MangaDex и MangaUpdates — по одному разу и в фоне, чтобы серия, которую разные источники называют по-разному, показывалась одной карточкой, а та, что у вас уже есть, оставалась скрытой. Если выключить, сравниваются только сами названия и никуда ничего не отправляется.",
+  "Cooling down": "На паузе",
+  "A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.": "Глава, которая есть в обеих, остаётся в одном экземпляре: другая копия убирается, а её файл удаляется или, если Uchiyomi не вправе его удалять, откладывается в сторону. Прогресс чтения переходит к оставшейся копии, а копия, в которой у кого-то есть закладка, сохраняется.",
+  "1 duplicate copy removed": "Удалена 1 дублирующая копия",
+  "{n} duplicate copies removed": "Удалено дублирующих копий: {n}",
+  "1 chapter kept twice: bookmarked in the other copy": "1 глава осталась в двух копиях: в другой копии есть закладка",
+  "{n} chapters kept twice: bookmarked in the other copy": "Глав осталось в двух копиях: {n} — в другой копии есть закладка"
 }

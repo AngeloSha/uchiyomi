@@ -36,7 +36,8 @@ import { ReplaceDialog } from '@/components/ReplaceDialog';
 import { t as tr } from '@/lib/i18n';
 import { deletedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
 import { isDesktop } from '@/lib/desktop';
-import { languageName } from '@/lib/format';
+import { bookCountText, languageName } from '@/lib/format';
+import { standingMark } from '@/lib/status';
 import { IDLE, actionButton, isBusy, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer, type ScanProgress } from '@/lib/refresh';
 import {
@@ -75,6 +76,60 @@ const keptIndex = (it: HealthItem): number => {
   const i = it.keep ? (it.seriesIds || []).indexOf(it.keep) : -1;
   return i < 0 ? 0 : i;
 };
+
+/**
+ * What a merge answers (POST /api/admin/series/:id/merge). Since v0.57.0 a chapter both series had is kept once:
+ * `duplicates` is how many extra copies it removed, `keptBoth` how many chapters it kept twice because a reader bookmarked
+ * the other copy. An older server sends neither.
+ */
+type MergeAnswer = { moved: number; duplicates?: number; keptBoth?: number };
+
+/**
+ * What a merge did beyond moving chapters (v0.57.0), after the count on its line: the extra copies it removed, the
+ * chapters a bookmark kept twice. None of either -- or an older server -- adds nothing, and the line reads as before.
+ */
+export const mergeExtras = (duplicates?: number | null, keptBoth?: number | null): string => {
+  const d = duplicates || 0;
+  const k = keptBoth || 0;
+  return [
+    d > 0 ? (d === 1 ? tr('1 duplicate copy removed') : tr('{n} duplicate copies removed', { n: d })) : '',
+    k > 0 ? (k === 1 ? tr('1 chapter kept twice: bookmarked in the other copy') : tr('{n} chapters kept twice: bookmarked in the other copy', { n: k })) : '',
+  ].filter(Boolean).map((s) => ` · ${s}`).join('');
+};
+
+/**
+ * One copy of a duplicate pair in a merge confirmation (v0.57.0), on one quiet line under its title: its chapters, its
+ * main source and whether updates can use it, and Recommended on the copy the server suggests keeping -- a working
+ * source first, then more chapters. The owner wanted the dialog to "still let you choose but show you which has more
+ * chapters and a healthy or better source". Found by series id, never by position, so a title never wears the other
+ * copy's facts; nothing at all from an older server, which sends no `copies`: the titles alone, as before. `compact` is
+ * Merge all's: the chapters and the source's word, no name and no tag -- at the end of the title's line, or under the
+ * title on a phone, where beside it they left the title a few letters.
+ */
+export function CopyFacts({ item, index, compact }: { item: HealthItem; index: number; compact?: boolean }) {
+  const id = item.seriesIds?.[index];
+  const copy = id ? item.copies?.find((c) => c.id === id) : undefined;
+  if (!copy) return null;
+  const mark = copy.source ? standingMark(copy.source.standing) : null;
+  return (
+    <span data-merge-copy={copy.id}
+      className={`flex items-center text-[11px] leading-snug text-fog-400 ${compact ? 'shrink-0 basis-full gap-1.5 sm:ms-auto sm:basis-auto' : 'mt-1 min-w-0 flex-wrap gap-x-2 gap-y-1'}`}>
+      <span className="whitespace-nowrap tabular-nums">{bookCountText(copy.chapters)}</span>
+      <span aria-hidden className="text-fog-600">·</span>
+      {copy.source ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          {(!compact || !mark) && <span dir="auto" className="min-w-0 truncate">{copy.source.name}</span>}
+          {mark && <StatusMark tone={mark.tone} label={mark.label} size="xs" />}
+        </span>
+      ) : (
+        <span className="whitespace-nowrap text-fog-500">{tr('No source')}</span>
+      )}
+      {!compact && item.keep === copy.id && (
+        <span data-merge-recommended className="shrink-0 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-300">{tr('Recommended')}</span>
+      )}
+    </span>
+  );
+}
 
 /** The estimate for a run kind, from the status route, for "usually … · at most …". */
 const estOf = (status: RepairStatus | undefined, kind: string): RepairEstimate | null => status?.estimates?.[kind] ?? null;
@@ -284,8 +339,9 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
     if (ids.length !== 2) return null;
     const keep = keepFirst ? ids[0] : ids[1];
     const gone = keepFirst ? ids[1] : ids[0];
-    const r = await api<{ moved: number }>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
-    const text = r.moved === 1 ? tr('Merged — one chapter moved') : tr('Merged — {n} chapters moved', { n: r.moved });
+    const r = await api<MergeAnswer>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
+    const text = (r.moved === 1 ? tr('Merged — one chapter moved') : tr('Merged — {n} chapters moved', { n: r.moved }))
+      + mergeExtras(r.duplicates, r.keptBoth);
     // The pair leaves the page when Health answers, so this is said in a notice as well as on the row.
     toast(text, 'success');
     return { text };
@@ -534,12 +590,17 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
             body={
               <>
                 <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
-                <p className="mt-2">{tr('No chapter is dropped even if both copies have it, and no files are touched.')}</p>
+                <p className="mt-2">{tr('A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.')}</p>
+                {/* v0.57.0: each copy's chapters and main source under its title, Recommended on the server's choice. The
+                    choice stays the admin's: the radio starts on it and can be moved. */}
                 <div className="mt-3 space-y-2">
                   {(item.titles || []).map((t, i) => (
-                    <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
-                      <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
-                      <span className="truncate">{keepBefore}<strong className="text-fog-100">{t}</strong>{keepAfter}</span>
+                    <label key={i} className="flex cursor-pointer items-start gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <input type="radio" className="mt-1 shrink-0" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{keepBefore}<strong className="text-fog-100">{t}</strong>{keepAfter}</span>
+                        <CopyFacts item={item} index={i} />
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -796,6 +857,8 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
     setMerge({ kind: 'working', startedAt: at, step: tr('Merging…') });
     let merged = 0;
     let moved = 0;
+    let duplicates = 0;
+    let keptBoth = 0;
     let failed = 0;
     // Sequential, not Promise.all: each merge rewrites rows on both series, and two of them landing at once
     // on a pair that shares a series (an AniList id matching three rows) would race for the survivor.
@@ -804,12 +867,15 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
       const keep = ids[keptIndex(p)];
       const gone = ids.find((x) => x !== keep)!;
       try {
-        const r = await api<{ moved: number }>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
+        const r = await api<MergeAnswer>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
         merged++;
         moved += r.moved || 0;
+        duplicates += r.duplicates || 0;
+        keptBoth += r.keptBoth || 0;
       } catch { failed++; }
     }
-    const line = merged === 1 ? tr('One pair merged, {m} chapters moved', { m: moved }) : tr('{n} pairs merged, {m} chapters moved', { n: merged, m: moved });
+    const line = (merged === 1 ? tr('One pair merged, {m} chapters moved', { m: moved }) : tr('{n} pairs merged, {m} chapters moved', { n: merged, m: moved }))
+      + mergeExtras(duplicates, keptBoth);
     // ⚠️ The pairs that did NOT merge are the ones still on the page: said in red, on its own, not folded in.
     if (failed) toast(failed === 1 ? tr('One pair could not be merged') : tr('{n} pairs could not be merged', { n: failed }), 'error');
     setMerge({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
@@ -828,15 +894,20 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
             body={
               <>
                 <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
+                {/* v0.57.0: a merge now removes the copies of chapters both series have, files included. */}
+                <p className="mt-2">{tr('A chapter both have is kept once: the other copy is removed and its file deleted, or set aside if Uchiyomi may not delete it. Reading progress moves to the copy that stays, and a copy somebody bookmarked is kept.')}</p>
                 <ul className="mt-3 space-y-2">
                   {pairs.map((p, i) => (
                     <li key={i} className="rounded-lg border border-ink-700 px-3 py-2">
                       {(p.titles || []).map((t, j) => (
-                        <p key={j} className="flex min-w-0 items-center gap-2 text-sm">
-                          <span className={`truncate ${j === keptIndex(p) ? 'text-fog-100' : 'text-fog-500'}`}>{t}</span>
-                          {j === keptIndex(p) && (
-                            <span className="shrink-0 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-300">{tr('kept')}</span>
-                          )}
+                        <p key={j} className="flex min-w-0 flex-wrap items-center gap-x-2 text-sm sm:flex-nowrap">
+                          <span className="flex min-w-0 max-w-full items-center gap-2">
+                            <span dir="auto" className={`truncate ${j === keptIndex(p) ? 'text-fog-100' : 'text-fog-500'}`}>{t}</span>
+                            {j === keptIndex(p) && (
+                              <span className="shrink-0 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-300">{tr('kept')}</span>
+                            )}
+                          </span>
+                          <CopyFacts item={p} index={j} compact />
                         </p>
                       ))}
                     </li>

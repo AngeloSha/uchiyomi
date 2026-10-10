@@ -527,8 +527,17 @@ export interface HealthItem {
   number?: number;
   numbers?: number[];
   sourceId?: string;
-  /** The duplicate pair's suggested survivor: the id inside `seriesIds` a merge should keep. */
+  /**
+   * The duplicate pair's suggested survivor: the id inside `seriesIds` a merge should keep. Since v0.57.0 the copy whose
+   * main source still works (`usable` or `cooling`), then the one with more chapters.
+   */
   keep?: string;
+  /**
+   * v0.57.0, on a duplicates row: what each of `seriesIds` holds, in the same order -- its chapters, and its main source
+   * with whether updates can use it (`null`: no main source, files only). The merge confirmations say it under each
+   * title. Absent from an older server: the titles alone.
+   */
+  copies?: DuplicateCopy[];
   /** v0.52.0, on a duplicates row: the language of each of `seriesIds`, for Link as editions' confirmation. */
   langs?: string[];
   /** Which chips this item offers. Absent or empty means the item is a statement, not a task. */
@@ -581,6 +590,15 @@ export interface HealthItem {
    * server it shares with another source, answered 429. On a row of any state; the whole of a `slowed` row.
    */
   slowed?: boolean;
+}
+
+/** v0.57.0: one copy of a duplicate pair (HealthItem.copies), as the merge confirmations show it. */
+export interface DuplicateCopy {
+  /** The series, one of the row's `seriesIds`. */
+  id: string;
+  chapters: number;
+  /** Its main source and that source's standing (bff lib/sourceStanding.ts); `null` for a series with none. */
+  source: { id: string; name: string; standing: NonNullable<SeriesSource['standing']> } | null;
 }
 
 /** v0.53.0: the Source health card's groups, in the server's order. */

@@ -13,7 +13,7 @@
  * can find written out.
  */
 import { keys, t as tr } from './i18n';
-import type { HealthCheck } from './types';
+import type { HealthCheck, SeriesSource } from './types';
 import type { ProviderStatus } from './providerGroups';
 import type { RingTone } from './ring';
 
@@ -141,4 +141,21 @@ export const SOURCE_STATUSES = Object.keys(SOURCE_MARK) as ProviderStatus[];
 export function sourceMark(st: ProviderStatus | undefined | null): Mark {
   const m = (st && SOURCE_MARK[st]) || SOURCE_MARK.ok;
   return { tone: m.tone, label: tr(m.label) };
+}
+
+/**
+ * v0.57.0: a source's standing -- whether updates can use it (bff lib/sourceStanding.ts) -- as a mark, for what the
+ * merge confirmations say about each copy of a duplicate pair. The source cards' words where they mean the same thing.
+ * Cooling down is a pause the source asked for and ends by itself, so it still counts as working. A standing this page
+ * does not know (a newer server) has no mark: the source's name is shown alone.
+ */
+export function standingMark(s: NonNullable<SeriesSource['standing']> | undefined | null): Mark | null {
+  switch (s) {
+    case 'usable': return sourceMark('ok');
+    case 'cooling': return { tone: 'warn', label: tr('Cooling down') };
+    case 'failing': return sourceMark('failing');
+    case 'off': return sourceMark('disabled');
+    case 'not_loaded': return { tone: 'off', label: tr('Not loaded') };
+    default: return null;
+  }
 }
