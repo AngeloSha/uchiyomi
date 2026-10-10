@@ -71,7 +71,8 @@ try {
   phase = 'setup';
   for (const [source, sourceId] of [['fake-a', 'merge-walk'], ['fake-b', 'merge-again']]) {
     const add = await api('/api/sources/add', { json: { source, sourceId } });
-    check(add.status === 200, `${sourceId} added`, `adding ${sourceId} answered ${add.status}: ${JSON.stringify(add.body).slice(0, 200)}`);
+    // 409: added by an earlier run on this stack (KEEP=1), which is the same starting point.
+    check(add.status === 200 || add.status === 409, `${sourceId} added`, `adding ${sourceId} answered ${add.status}: ${JSON.stringify(add.body).slice(0, 200)}`);
   }
   const idOf = (title) => sql(`SELECT id FROM lib_series WHERE title = ${lit(title)} AND deleted_at IS NULL LIMIT 1`);
   const A = await waitFor(() => idOf('Merge Walk'), 30_000, 500);
@@ -118,11 +119,21 @@ try {
   // ---- 1. the dialog ----
   phase = 'health';
   await page.goto(`${BASE}/admin/?tab=Health`, { waitUntil: 'networkidle2', timeout: 60_000 });
-  /** The Merge key on the duplicates row that names Merge Walk. */
-  const mergeKey = () => page.evaluateHandle(() => [...document.querySelectorAll('[data-health-action="merge"]')].find((b) => {
-    for (let el = b, i = 0; el && i < 8; el = el.parentElement, i++) if ((el.textContent || '').includes('Merge Walk')) return true;
-    return false;
-  }) || null);
+  // The Duplicate series card opens by its disclosure, the first button in the card (app/admin/page.tsx).
+  const opened = await waitFor(() => page.evaluate(() => {
+    const card = document.querySelector('[data-health-check="duplicates"]');
+    const disclosure = card?.querySelector('button');
+    if (!disclosure) return false;
+    if (disclosure.getAttribute('aria-expanded') === 'false') disclosure.click();
+    return disclosure.getAttribute('aria-expanded') === 'true';
+  }), 60_000, 1000);
+  check(!!opened, 'the Duplicate series card opens');
+  /** The Merge key on the duplicates row that names Merge Walk (a key's row is its closest [data-health-item]). */
+  const mergeKey = () => page.evaluateHandle(() => {
+    const card = document.querySelector('[data-health-check="duplicates"]');
+    return [...(card?.querySelectorAll('button[data-health-action="merge"]') || [])]
+      .find((b) => /Merge Walk/.test(b.closest('[data-health-item]')?.textContent || '')) || null;
+  });
   const key = await waitFor(async () => (await mergeKey()).asElement(), 60_000, 1000);
   check(!!key, 'Health pairs the two copies, with a Merge key');
   if (!key) throw new Error('no Merge key for Merge Walk');

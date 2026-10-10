@@ -103,9 +103,10 @@ export function pairUp(copies: readonly Copy[], isKept: (c: Copy) => boolean, is
 }
 
 /** Where a copy's file stands: there, gone (its folder is there), or not reachable (its folder is not: a missing mount). */
-type FileState = { kind: 'present'; mtime: number; size: number } | { kind: 'gone' } | { kind: 'unreachable' };
+export type FileState = { kind: 'present'; mtime: number; size: number } | { kind: 'gone' } | { kind: 'unreachable' };
 
-async function fileState(c: Copy): Promise<FileState> {
+/** Exported for a read-only dry run over a real library (what removeExtraCopies would do, without doing it). */
+export async function fileState(c: Copy): Promise<FileState> {
   const abs = c.root ? containedPath(c.root, c.file) : null;
   if (!abs) return { kind: 'unreachable' };
   const st = await stat(abs).catch(() => null);

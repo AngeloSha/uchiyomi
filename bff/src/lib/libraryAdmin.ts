@@ -578,6 +578,9 @@ const SERIES_KEYED_TABLES = [
   // v0.55.8: the durable bulk-delete intent journal deliberately has no series FK. Hard Forget removes its
   // per-series items explicitly while the terminal parent run remains as operation-level history.
   'admin_bulk_delete_items',
+  // v0.57.0: the files a merge set aside rather than list twice (lib/setAside.ts). No FK: a row names a file on disk.
+  // Forget runs only once the series' files are gone, so its set-aside rows name nothing any more.
+  'set_aside_files',
 ] as const;
 
 export interface ForgetRefusal {
