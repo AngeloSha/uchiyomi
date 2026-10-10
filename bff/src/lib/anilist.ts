@@ -107,6 +107,27 @@ export async function fetchAniListCountries(ids: number[]): Promise<Map<number, 
   return out;
 }
 
+const SCORES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANGA){id averageScore meanScore popularity}}}`;
+
+/** An entry's outside rating (v0.58.0, lib/anilistScores.ts): its score out of 100 and how many people list it. */
+export interface AniListScore { score: number | null; popularity: number | null }
+
+/**
+ * The score and popularity of many linked entries at once (series_trackers' AniList ids), fifty per request: what the
+ * Library's Most popular / Top rated sorts and Home's Most popular rail read. `score` is AniList's weighted average,
+ * else its plain mean (an entry with few ratings has only that), out of 100; `popularity` how many AniList users have
+ * the entry in a list. An id AniList does not answer is absent from the map. Public data: no token. Paced and
+ * 429-handled by mediaById; anything else throws.
+ */
+export async function fetchAniListScores(ids: number[]): Promise<Map<number, AniListScore>> {
+  const out = new Map<number, AniListScore>();
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+  await mediaById(SCORES, ids, (m) => {
+    if (Number.isInteger(m?.id)) out.set(m.id, { score: num(m.averageScore) ?? num(m.meanScore), popularity: num(m.popularity) });
+  });
+  return out;
+}
+
 /**
  * One `query($ids)` over many entries, fifty ids per request, `each` called with every media AniList answers. Paced
  * like the art jobs between pages; a 429 is waited out as fetchAniListArt waits it out, anything else throws.

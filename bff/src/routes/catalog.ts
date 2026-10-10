@@ -386,10 +386,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
       })();
     }
 
-    const [onDeck, updated, fresh] = await Promise.all([
+    const [onDeck, updated, fresh, popular] = await Promise.all([
       onDeckP,
       komga.seriesUpdated(vc(req), 0, 20).catch(() => ({ content: [] })),
       komga.seriesNew(vc(req), 0, 20).catch(() => ({ content: [] })),
+      // v0.58.0: Most popular in your library (lib/anilistScores.ts).
+      komga.seriesPopular(vc(req), 0, 20).catch(() => ({ content: [] })),
     ]);
 
     // Which device each in-progress book was last read on. Reading progress is already shared across devices;
@@ -442,6 +444,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
       updated: await enrichSeries(req, (updated as any).content ?? []),
       new: await enrichSeries(req, (fresh as any).content ?? []),
       favorites: await enrichSeries(req, favorites),
+      popular: await enrichSeries(req, (popular as any).content ?? []),
       updatesCount,
     };
   });

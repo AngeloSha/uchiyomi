@@ -1669,6 +1669,18 @@ CREATE TABLE IF NOT EXISTS set_aside_files (
   created_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (root, file)
 );
+
+-- v0.58.0: a series' outside rating (lib/anilistScores.ts): AniList's score out of 100 and how many people list the
+-- entry, keyed by the AniList id a series is linked to (series_trackers), so a series relinked to another entry reads
+-- that entry's row and nothing has to be invalidated. Both NULL for an entry AniList no longer answers for (asked
+-- again on the next refresh round). The Library's Most popular / Top rated sorts and Home's Most popular rail read it.
+-- Additive: v0.57.0 boots on this schema and ignores it.
+CREATE TABLE IF NOT EXISTS anilist_scores (
+  anilist_id  text PRIMARY KEY,
+  score       smallint,
+  popularity  integer,
+  fetched_at  timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

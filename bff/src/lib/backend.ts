@@ -35,6 +35,8 @@ export interface ContentBackend {
   series(ctx: ViewCtx, id: string): Promise<any>;
   seriesNew(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   seriesUpdated(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
+  /** v0.58.0, Home's Most popular in your library: series with an outside popularity, most listed first. */
+  seriesPopular(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   booksOnDeck(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   searchSeries(ctx: ViewCtx, body: any, page?: number, size?: number, sort?: string): Promise<any>;
   seriesBooks(ctx: ViewCtx, id: string, page?: number, size?: number, sort?: string): Promise<any>;
@@ -61,6 +63,8 @@ const komgaAdapter = (k: any): ContentBackend => ({
   series: (_c, id) => k.series(id),
   seriesNew: (_c, p, s) => k.seriesNew(p, s),
   seriesUpdated: (_c, p, s) => k.seriesUpdated(p, s),
+  // Komga's series carry no AniList link of ours (series_trackers is keyed by owned series ids): no rail.
+  seriesPopular: async () => ({ content: [] }),
   booksOnDeck: (_c, p, s) => k.booksOnDeck(p, s),
   searchSeries: (_c, body, p, s, sort) => k.searchSeries(body, p, s, sort),
   seriesBooks: (_c, id, p, s, sort) => k.seriesBooks(id, p, s, sort),

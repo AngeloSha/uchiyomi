@@ -7,6 +7,7 @@ import { cleanDescription } from './htmlText';
 import { effectiveLang } from './seriesLang';
 import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
 import { rangeEnd, numberText } from './chapterRanges';
+import { anilistScoreOf } from './anilistScores';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -349,6 +350,18 @@ function sortSql(sort?: string, perUser = false): string {
   if (/favou?rites?/i.test(field)) {
     return perUser ? `(f.series_id IS NOT NULL) ${dir}, (books_count - COALESCE(m.done, 0)) ${dir}, title ASC` : 'title ASC';
   }
+  // v0.58.0, the owner's sorts. The outside rating (lib/anilistScores.ts): how many AniList users list it, and its
+  // score out of 100 -- read through the series' checked AniList link; a series with none goes after every series that
+  // has one, whichever the direction. Then the viewer's own stars (per-user, $1), the chapters the series shows, and when
+  // the viewer last read in it (the `mine` CTE's last_at). Every one ties on the title. Reintroduce the fall-through
+  // (drop a branch): "each new sort orders the Library by its own value" in anilistScores.int.test.ts reads A-Z.
+  if (/popularity/i.test(field)) return `${anilistScoreOf('sv', 'popularity')} ${dir} NULLS LAST, title ASC`;
+  if (/score/i.test(field)) return `${anilistScoreOf('sv', 'score')} ${dir} NULLS LAST, title ASC`;
+  if (/rating/i.test(field)) {
+    return perUser ? `(SELECT r.stars FROM ratings r WHERE r.user_id = $1 AND r.series_id = sv.id) ${dir} NULLS LAST, title ASC` : `title ${dir}`;
+  }
+  if (/chapters/i.test(field)) return `books_count ${dir}, title ASC`;
+  if (/lastread/i.test(field)) return perUser ? `m.last_at ${dir} NULLS LAST, title ASC` : `title ${dir}`;
   return `title ${dir}`;
 }
 
@@ -610,6 +623,23 @@ export const owned = {
     return page(rows.map(seriesDto), await total(ctx), pg, size);
   },
 
+  /**
+   * v0.58.0, Home's "Most popular in your library": the series this viewer may browse that have an outside popularity
+   * (lib/anilistScores.ts, through the series' checked AniList link), the most listed on AniList first. A series with
+   * none is not on the rail. Reintroduce the plain order: "Home's Most popular rail" in anilistScores.int.test.ts finds
+   * an unscored series on it.
+   */
+  seriesPopular: async (ctx: ViewCtx, pg = 0, size = 20) => {
+    const p = new Params();
+    const src = browseSrc(ctx, p);
+    const pop = anilistScoreOf('sv', 'popularity');
+    const rows = await q(
+      `SELECT ${SERIES_COLS} FROM ${src} WHERE ${pop} IS NOT NULL ORDER BY ${pop} DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
+    );
+    return page(rows.map(seriesDto), rows.length, pg, size);
+  },
+
   booksOnDeck: async (_ctx: ViewCtx, _p = 0, size = 20) => page([] as any[], 0, 0, size), // owned: continue-reading is served from read_progress in catalog
 
   /**
@@ -623,7 +653,7 @@ export const owned = {
   searchSeries: async (ctx: ViewCtx, body: any, pg = 0, size = 40, sort?: string) => {
     const collapse = body?.collapseEditions === true;
     const wantsUser = !!ctx.userId
-      && (collapse || JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite/i.test(sort || ''));
+      && (collapse || JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite|rating|lastread/i.test(sort || ''));
     const p = new Params();
     const cte = wantsUser ? mineCte() : '';
     if (wantsUser) p.add(ctx.userId); // mineCte reads $1

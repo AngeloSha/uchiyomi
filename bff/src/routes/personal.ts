@@ -869,7 +869,8 @@ export default async function personalRoutes(app: FastifyInstance) {
     // Without this boundary an arbitrary sort leaks into the catalogue query, and a forged collection id can
     // make Home disclose whether another account owns it.
     if ('librarySort' in data) {
-      const sort = z.enum(['updated', 'new', 'az', 'unread']).safeParse(data.librarySort);
+      // v0.58.0: Most popular, Top rated, My rating, Most chapters and Recently read (web/components/LibraryFilters.tsx).
+      const sort = z.enum(['updated', 'new', 'az', 'unread', 'popular', 'score', 'rating', 'chapters', 'read']).safeParse(data.librarySort);
       if (!sort.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose a valid Library sort.' });
       data.librarySort = sort.data;
     }

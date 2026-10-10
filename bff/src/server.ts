@@ -24,6 +24,7 @@ import { refreshHealthSummary } from './lib/healthSummary';
 import { scheduleMatchCheck } from './lib/matchCheck';
 import { startTitleWorks } from './lib/discoverIdentity';
 import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
+import { scheduleAniListScores } from './lib/anilistScores';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -358,6 +359,12 @@ async function main() {
    * merge's own rules, once. It stamps itself done; every later boot only reads the stamp.
    */
   scheduleMergeLeftovers(app.log);
+
+  /**
+   * The outside rating (v0.58.0, lib/anilistScores.ts): AniList's score and popularity for every series linked to its
+   * entry, a few minutes after boot and then every six hours -- each round only what is missing or three days old.
+   */
+  scheduleAniListScores(app.log);
 
   /**
    * The opt-in install count.
