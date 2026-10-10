@@ -138,6 +138,15 @@ export function cached<T extends Formatter>(key: string, make: () => T): T {
  */
 export const numberText = (n: number): string => cached('num', () => new Intl.NumberFormat(intlTag())).format(n);
 
+/**
+ * A big count, short, the way the reader's language shortens it (v0.58.0): "312K", "1.2M", "950" -- "312 k" in French,
+ * "31万" in Japanese, "312 тыс." in Russian; German shortens only from a million ("312.071", "1,2 Mio."). For AniList's
+ * popularity, which runs to hundreds of thousands and is read at a glance. Intl's own rounding (whole numbers from two
+ * digits up: "312K", not "312.1K"), and Western digits, as numberText's.
+ */
+export const compactText = (n: number): string =>
+  cached('compact', () => new Intl.NumberFormat(intlTag(), { notation: 'compact' })).format(n);
+
 type Unit = 'second' | 'minute' | 'hour' | 'day';
 const unitText = (unit: Unit, n: number): string =>
   cached(`u:${unit}`, () => new Intl.NumberFormat(intlTag(), { style: 'unit', unit, unitDisplay: 'short' })).format(n);

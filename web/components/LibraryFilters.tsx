@@ -24,13 +24,21 @@ import { keys, t as tr } from '@/lib/i18n';
  * tap is a navigation, exactly as it was before, so the back button still walks your filters backwards.
  */
 
-const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread');
+const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read');
 export const SORTS = [
   { key: 'updated', label: SORT_LABELS[0], sort: 'lastModified,desc' },
   { key: 'new', label: SORT_LABELS[1], sort: 'createdDate,desc' },
   { key: 'az', label: SORT_LABELS[2], sort: 'metadata.titleSort,asc' },
   // per-user unread is now expressible server-side, so the label can say what it does
   { key: 'unread', label: SORT_LABELS[3], sort: 'unread,desc' },
+  // v0.58.0: AniList's popularity (how many people there have it on a list) and average score, the reader's own stars,
+  // the chapter count and their last read -- each card then says the value it is sorted by (lib/sortValue.ts), and a
+  // series without one sorts after the rest. A server older than v0.58.0 sorts an order it does not know by title.
+  { key: 'popular', label: SORT_LABELS[4], sort: 'popularity,desc' },
+  { key: 'score', label: SORT_LABELS[5], sort: 'score,desc' },
+  { key: 'rating', label: SORT_LABELS[6], sort: 'rating,desc' },
+  { key: 'chapters', label: SORT_LABELS[7], sort: 'chapters,desc' },
+  { key: 'read', label: SORT_LABELS[8], sort: 'lastRead,desc' },
 ];
 // ⚠️ NO "RANDOM" SORT, EVEN THOUGH THE SERVER HAS ONE. `sortSql()` maps it to `ORDER BY random()`
 // (ownedCatalog.ts), and the grid pages through `LIMIT/OFFSET` with `useInfiniteQuery` APPENDING each page.

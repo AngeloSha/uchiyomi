@@ -4,9 +4,24 @@ import type { Said } from './said';
 
 export interface UchiyomiFlags {
   favorite: boolean;
+  /** The viewer's own stars, 1–5, or null when they have not rated it. */
   rating: number | null;
   unread?: number;
   newCount?: number;
+  /**
+   * v0.58.0: what AniList says of the series, beside the viewer's own stars -- `score` its average score, 0–100 (shown
+   * "84%"), and `popularity` how many AniList users have it on a list (shown compact, "312K"); each null when AniList has
+   * none. Null when the series has no checked AniList link or nothing was fetched yet, absent from an older server.
+   */
+  anilist?: AniListNumbers | null;
+  /** v0.58.0: when this viewer last read a chapter of it (ISO); null for never, absent from an older server. */
+  lastReadAt?: string | null;
+}
+
+/** AniList's average score (0–100) and popularity for a series (v0.58.0, `yomi.anilist`). */
+export interface AniListNumbers {
+  score: number | null;
+  popularity: number | null;
 }
 
 export interface SeriesMetadata {
@@ -650,6 +665,11 @@ export interface HomePayload {
   new: Series[];
   favorites: Series[];
   updatesCount?: number;
+  /**
+   * v0.58.0: up to 20 of the viewer's series that have an AniList popularity, most popular first -- Home's "Most popular
+   * in your library". Absent from an older server, and then the rail is not drawn.
+   */
+  popular?: Series[];
 }
 
 export interface DownloadManifest {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3547
+    "strings": 3561
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3550,5 +3550,19 @@
   "1 duplicate copy removed": "已移除 1 份重复副本",
   "{n} duplicate copies removed": "已移除 {n} 份重复副本",
   "1 chapter kept twice: bookmarked in the other copy": "有 1 章保留了两份：另一份里有书签",
-  "{n} chapters kept twice: bookmarked in the other copy": "有 {n} 章保留了两份：另一份里有书签"
+  "{n} chapters kept twice: bookmarked in the other copy": "有 {n} 章保留了两份：另一份里有书签",
+  "Most popular": "最热门",
+  "Top rated": "评分最高",
+  "My rating": "我的评分",
+  "Most chapters": "章节最多",
+  "Recently read": "最近阅读",
+  "{count} on AniList": "AniList 上 {count}人收藏",
+  "{score}% on AniList": "AniList 评分 {score}%",
+  "Read {when}": "{when}读过",
+  "Most popular in your library": "你的书库中最热门",
+  "AniList {score}% · {count}": "AniList {score}% · {count}人",
+  "AniList {score}%": "AniList {score}%",
+  "Average score on AniList, and how many people there have it on a list": "AniList 上的平均评分，以及在那里把它加入列表的人数",
+  "Still loading": "仍在加载",
+  "Asking every source · tap one to browse it alone": "正在查询所有来源 · 点按一个来源即可只浏览它"
 }

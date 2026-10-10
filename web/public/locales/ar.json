@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3547
+    "strings": 3561
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3550,5 +3550,19 @@
   "1 duplicate copy removed": "أُزيلت نسخة مكرّرة واحدة",
   "{n} duplicate copies removed": "النسخ المكرّرة المُزالة: {n}",
   "1 chapter kept twice: bookmarked in the other copy": "بقي فصل واحد بنسختين: عليه إشارة مرجعية في النسخة الأخرى",
-  "{n} chapters kept twice: bookmarked in the other copy": "الفصول الباقية بنسختين: {n} — عليها إشارة مرجعية في النسخة الأخرى"
+  "{n} chapters kept twice: bookmarked in the other copy": "الفصول الباقية بنسختين: {n} — عليها إشارة مرجعية في النسخة الأخرى",
+  "Most popular": "الأكثر شعبية",
+  "Top rated": "الأعلى تقييمًا",
+  "My rating": "تقييمي",
+  "Most chapters": "الأكثر فصولًا",
+  "Recently read": "المقروءة مؤخرًا",
+  "{count} on AniList": "{count} على AniList",
+  "{score}% on AniList": "{score}٪ على AniList",
+  "Read {when}": "قرأتها {when}",
+  "Most popular in your library": "الأكثر شعبية في مكتبتك",
+  "AniList {score}% · {count}": "AniList: {score}٪ · {count}",
+  "AniList {score}%": "AniList: {score}٪",
+  "Average score on AniList, and how many people there have it on a list": "متوسط التقييم على AniList، وعدد من أضافوها إلى قوائمهم هناك",
+  "Still loading": "ما زال التحميل جاريًا",
+  "Asking every source · tap one to browse it alone": "يُسأل كل مصدر · انقر على مصدر لتصفّحه وحده"
 }

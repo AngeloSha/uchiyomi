@@ -8,6 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { api, ApiError } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
+import { sortValue } from '@/lib/sortValue';
 import { IcSearch, IcSparkle, IcPlus, IcImport } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
@@ -654,7 +655,9 @@ function LibraryInner() {
         {isLoading
           ? Array.from({ length: 14 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)
           : items.map((s, i) => (
-              <SeriesTile key={s.id} series={s} eager={i < 12}
+              // v0.58.0: under the title, the value the shelf is sorted by ("312K on AniList", "★ 4/5"), for the five
+              // orders whose answer is not on the card already; nothing for the four older ones.
+              <SeriesTile key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)}
                 selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
             ))}
       </div>

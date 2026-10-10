@@ -1,6 +1,6 @@
 // One card per work on the Discover wall, the way search-all already groups server-side.
 //
-// The wall is six sources' newest lists flattened in arrival order, and popular titles are on most of
+// The wall is its sources' newest lists flattened in arrival order, and popular titles are on most of
 // them, so the same series sat on the wall three or four times under slightly different spellings (issue
 // #36). Search never had this problem: `/api/sources/search-all` folds its hits into one card carrying every
 // provider. The wall gets the same fold here, in the client, because its rows arrive one source at a time and
@@ -16,7 +16,6 @@
 //
 // Split out of the page so it can be tested without a browser, like sourceGroups.ts.
 import { normTitle } from './normTitle';
-import type { SrcState } from './sourceGroups';
 import type { SourceItem } from '../components/cards';
 import type { Provider } from '../components/AddSeriesDialog';
 
@@ -103,18 +102,6 @@ export function foldByWork(
     };
   }
   return { items: out, groups };
-}
-
-/**
- * How many of a listing's settled sources the wall counts as empty: the page asks one more source for each.
- *
- * By what the wall SHOWS (v0.56.0): a source that answered with nothing or failed, and one whose whole answer the wall
- * hides -- every row a work the library holds, or one added on this visit. Folding into another source's card is
- * showing: that row's source is on the card. `states` are the listing's `[key, state]` pairs, `rows` its rows by the
- * same keys, read through the server's later answers.
- */
-export function emptiedCount(states: Array<[string, SrcState]>, rows: Readonly<Record<string, WallItem[]>>, added: ReadonlySet<string>): number {
-  return states.filter(([k, v]) => v === 'empty' || v === 'blocked' || !(rows[k] ?? []).some((it) => shownOnWall(it, added))).length;
 }
 
 /** What GET /api/discover/works says a key is now (v0.56.0): its current work, and whether the library holds it. */

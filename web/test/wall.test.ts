@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  applyWorks, emptiedCount, foldByWork, followWorks, mergeGroups, shownOnWall, unknownWorks, workKey, type WallItem, type WorkNow,
+  applyWorks, foldByWork, followWorks, mergeGroups, shownOnWall, unknownWorks, workKey, type WallItem, type WorkNow,
 } from '../lib/wall';
 import { normTitle } from '../lib/normTitle';
 
@@ -224,23 +224,6 @@ test('the page asks about each unplaced name once, and nothing else', () => {
   assert.deepEqual(keys, ['n:a', 'n:b'], 'a placed work is asked about, or one is asked twice');
 });
 
-test("a source whose whole page the library holds counts as empty, and earns the wall another source", () => {
-  // The rule "six sources, plus one more for every one that came back with nothing" counts what the wall SHOWS
-  // since owned works are hidden: a source whose page is all owned puts nothing on it. A source whose rows fold
-  // into another's card is showing -- its icon is on that card. Reintroduce by counting states alone (`v ===
-  // 'empty' || v === 'blocked'`): "an all-owned source does not count as empty" fails.
-  const rows: Record<string, WallItem[]> = {
-    'newest:a': [row({ source: 'a', sourceId: '1', title: 'Blue Lock', work: 'lib:1', owned: true })],
-    'newest:b': [row({ source: 'b', sourceId: '2', title: 'Lookism', work: 'al:3' })],
-    'newest:c': [row({ source: 'c', sourceId: '3', title: 'Lookism', work: 'al:3' })],
-    'newest:d': [row({ source: 'd', sourceId: '4', title: 'Eleceed', work: 'al:4' })],
-  };
-  const states: Array<[string, 'ok' | 'empty' | 'blocked']> = [['newest:a', 'ok'], ['newest:b', 'ok'], ['newest:c', 'ok'], ['newest:e', 'empty'], ['newest:f', 'blocked']];
-  assert.equal(emptiedCount(states, rows, none), 3, 'an all-owned source does not count as empty');
-  // What this visit added is hidden too, so it counts the same way.
-  assert.equal(emptiedCount([...states, ['newest:d', 'ok']], rows, new Set(['al:4'])), 4, 'an all-added source does not count as empty');
-});
-
 test('search keeps what you have, and merges two groups the server places as one work (mergeGroups)', () => {
   // Search shows owned works, with the "In library" ribbon (the owner's call), so nothing is dropped. And when a
   // re-keyed name makes two groups one work, they merge as the wall's fold merges: first keeps its place, title
@@ -301,9 +284,9 @@ test('the Discover page folds its wall and opens a card from the fold', () => {
 
 test('the page reads both views through the live answers, hides owned works on the wall only, and keys its adds by work', () => {
   // v0.56.0's wiring, read from source like the test above; the arithmetic is the functions tested above.
-  // - The wall's rows are read through the answers before the flatten, and the budget counts the same rows.
-  //   Reintroduce by flattening `byId[key]` again: "the wall does not read its rows through the answers" fails;
-  //   by counting `states` alone: "the budget does not count what the wall shows" fails.
+  // - The wall's rows are read through the answers before the flatten. Reintroduce by flattening `byId[key]` again:
+  //   "the wall does not read its rows through the answers" fails. (The budget counted the same rows to ask one more
+  //   source per emptied one until v0.58.0, which asks every source: v580Discover.test.ts.)
   // - Search merges its groups through its own answers, and never runs the wall's fold, which drops what you have.
   //   Reintroduce by folding the hits with foldByWork: "search drops what you have" fails.
   // - An add hides the card it came from, by work. Reintroduce `setAdded((prev) => new Set(prev).add(normTitle(r.title)))`:
@@ -315,7 +298,6 @@ test('the page reads both views through the live answers, hides owned works on t
   assert.match(code, /const rows = useMemo\(\(\) => Object\.fromEntries\(mine\(byId\)\.map\(\(\[k, list\]\) => \[k, applyWorks\(list, wallWorks\)\]\)\), \[byId, mine, wallWorks\]\);/,
     'the wall does not read its rows through the answers');
   assert.match(code, /for \(const it of rows\[key\] \?\? \[\]\) \{/, 'the wall does not read its rows through the answers');
-  assert.match(code, /const emptied = emptiedCount\(mine\(states\), rows, wallAdded\);/, 'the budget does not count what the wall shows');
   assert.match(code, /const searchWorks = useLiveWorks\(searchKeys, mayAdd && mode === 'search'\);/, 'search is not asked about while it is on screen');
   assert.match(code, /const searchGroups = useMemo\(\(\) => mergeGroups\(applyWorks\(searchQ\.data\?\.content \?\? \[\], searchWorks\)\), \[searchQ\.data, searchWorks\]\);/);
   assert.equal((code.match(/foldByWork\(/g) ?? []).length, 1, 'search drops what you have: the wall\'s fold runs twice');

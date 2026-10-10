@@ -222,16 +222,17 @@ test('SourcePicker renders one chip and a sheet, not a chip wall', () => {
   // The sheet lives in its own file and opens from the same page, so it must clear the bottom nav too.
   const sheet = readFileSync(join(__dirname, '..', 'components', 'SourceListSheet.tsx'), 'utf8');
   assert.match(sheet, /<Sheet[\s\S]{0,300}?overBottomNav/, 'the source sheet sits under the phone bottom nav');
-  assert.match(sheet, /tr\('Tap a source to browse it alone\.'\)/, 'the sheet lost its one-line footer');
+  assert.match(sheet, /tr\('Asking every source · tap one to browse it alone'\)/, 'the sheet lost its one-line footer');
 });
 
 test('the chip counts the whole pool, and the sheet says how many of it are being asked', () => {
   // Three numbers for one pool, measured on a mocked 14-source install: 14 installed, "12 sources" on the
-  // chip (the ranked list, which is capped at twelve as a FETCH budget) and nine rows in the sheet (the
-  // budget, six widening to ten). The cap is not a fact about the install, and "12 sources" under a chip
-  // labelled "All sources" on the owner's 14-source server is simply false. The chip now counts every
-  // source that can answer this listing and is not disabled -- the uncapped `budgetForMode` -- and the
-  // sheet's footer names both numbers ("Asking 9 of 14") so the two surfaces agree.
+  // chip (the ranked list, which was capped at twelve as a FETCH budget) and nine rows in the sheet (the
+  // budget, six widening to ten). The cap was not a fact about the install, and "12 sources" under a chip
+  // labelled "All sources" on the owner's 14-source server was simply false. The chip counts every
+  // source that can answer this listing and is not disabled -- the uncapped `budgetForMode` -- and since
+  // v0.58.0 the wall asks every one of them (v580Discover.test.ts); the sheet's footer still names both numbers
+  // ("Asking 9 of 14") should its rows ever be fewer than the pool, and says every source is asked when they are not.
   //
   // Reintroduce by passing `count={ranked.length}` (or `budget.length`) from the page, by giving the pool a
   // finite cap, or by dropping `total` / the "Asking {n} of {m}" footer from SourceListSheet.
@@ -270,7 +271,7 @@ test('every amber dot has a sentence, and the chip counts the dots', () => {
   assert.equal(noteFor(mute, 'empty').note, null);
 
   const picker = readFileSync(join(__dirname, '..', 'components', 'SourcePicker.tsx'), 'utf8');
-  assert.match(picker, /const troubled = shown\.filter\(\(s\) => noteFor\(s, stateOf\(s\.id\)\)\.dot === 'warn'\)\.length/,
+  assert.match(picker, /const troubled = sources\.filter\(\(s\) => noteFor\(s, stateOf\(s\.id\)\)\.dot === 'warn'\)\.length/,
     'the chip counts something other than the amber dots the sheet lights');
 });
 
