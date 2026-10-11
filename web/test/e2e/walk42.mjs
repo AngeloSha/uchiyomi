@@ -28,6 +28,8 @@
 //     series stops being "read to the end" and the COMPLETED assertion goes quietly vacuous.
 import puppeteer from 'puppeteer';
 import { mkdirSync } from 'node:fs';
+// The series page's More (v0.60.0): Remove from library is its item now.
+import { pressSeriesMoreItem } from './seriesMore.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
@@ -522,7 +524,9 @@ try {
   phase = 'confirm';
   await page.goto(`${BASE}/series/?id=${curlyId}`, { waitUntil: 'networkidle2', timeout: 60_000 });
   await waitFor(async () => (await bodyText()).includes(CURLY), 20_000);
-  await clickText(/^Remove from library$/);
+  // An item of More since v0.60.0 (a menu at 1280, a sheet at 390), pressed by its hook: clickText scrolls its target
+  // into view first, and a menu closes on any scroll.
+  if (!(await pressSeriesMoreItem(page, 'remove-series'))) throw new Error('the series page\'s More has no Remove from library');
   await waitFor(async () => /to confirm/.test(await bodyText()), 8_000);
   check(!!(await dialogButton('Copy title')), 'the dialog offers Copy title',
     'the dialog had no Copy title button (the clipboard probe found nothing, or the control is gone)');
