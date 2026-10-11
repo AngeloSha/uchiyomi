@@ -20,32 +20,12 @@ import { keys, t as tr } from '@/lib/i18n';
  * So the page renders this in a sticky sidebar from `lg:` up, and inside the real `Sheet` below it. Adding a
  * filter means adding a section here and it appears correctly in both.
  *
+ * Filters only, since v0.60.0: the order moved to the toolbar's Sort menu (components/LibraryToolbar.tsx,
+ * lib/librarySort.ts), where nine sort chips at the top of this panel were the loudest thing on the shelf.
+ *
  * State stays in the URL, written through the page's single `setParam`. There is no draft and no Apply: a
  * tap is a navigation, exactly as it was before, so the back button still walks your filters backwards.
  */
-
-const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read');
-export const SORTS = [
-  { key: 'updated', label: SORT_LABELS[0], sort: 'lastModified,desc' },
-  { key: 'new', label: SORT_LABELS[1], sort: 'createdDate,desc' },
-  { key: 'az', label: SORT_LABELS[2], sort: 'metadata.titleSort,asc' },
-  // per-user unread is now expressible server-side, so the label can say what it does
-  { key: 'unread', label: SORT_LABELS[3], sort: 'unread,desc' },
-  // v0.58.0: AniList's popularity (how many people there have it on a list) and average score, the reader's own stars,
-  // the chapter count and their last read -- each card then says the value it is sorted by (lib/sortValue.ts), and a
-  // series without one sorts after the rest. A server older than v0.58.0 sorts an order it does not know by title.
-  { key: 'popular', label: SORT_LABELS[4], sort: 'popularity,desc' },
-  { key: 'score', label: SORT_LABELS[5], sort: 'score,desc' },
-  { key: 'rating', label: SORT_LABELS[6], sort: 'rating,desc' },
-  { key: 'chapters', label: SORT_LABELS[7], sort: 'chapters,desc' },
-  { key: 'read', label: SORT_LABELS[8], sort: 'lastRead,desc' },
-];
-// ⚠️ NO "RANDOM" SORT, EVEN THOUGH THE SERVER HAS ONE. `sortSql()` maps it to `ORDER BY random()`
-// (ownedCatalog.ts), and the grid pages through `LIMIT/OFFSET` with `useInfiniteQuery` APPENDING each page.
-// A fresh shuffle per page means page 2 re-draws series already scrolled past and silently omits others,
-// and it looks like it works -- you would have to count to notice. Randomness that belongs to a whole shelf
-// cannot be served one window at a time. "Surprise me" in the header is the honest version: one series,
-// one request, no pagination. See library.test.ts, which fails if this comes back.
 
 const READ_LABELS = keys('Not started', 'Reading', 'Finished');
 export const READ_STATES = [
@@ -193,8 +173,7 @@ function GenreRow({ facet, on, onToggle }: { facet: GenreFacet; on: boolean; onT
   );
 }
 
-export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc, anySrc, onSet }: {
-  sort: string;
+export function LibraryFilters({ read, status, genres, lib, libs, mainSrc, anySrc, onSet }: {
   read: string;
   status: string;
   genres: string[];
@@ -256,16 +235,6 @@ export function LibraryFilters({ sort, read, status, genres, lib, libs, mainSrc,
 
   return (
     <div className="space-y-5">
-      <section>
-        <Eyebrow>{tr('Sort by')}</Eyebrow>
-        <Chips>
-          {SORTS.map((s) => (
-            <button key={s.key} type="button" onClick={() => onSet('sort', s.key)} aria-pressed={sort === s.key}
-              className={`chip text-xs ${sort === s.key ? 'chip-active' : ''}`}>{tr(s.label)}</button>
-          ))}
-        </Chips>
-      </section>
-
       {/* Only when there is a choice to make. This lists what the viewer may actually open -- the endpoint
           filters by their grants -- so it doubles as an honest answer to "what do I have access to". */}
       {libs.length > 1 && (

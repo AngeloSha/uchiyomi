@@ -4,12 +4,12 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
-import { SeriesTile } from '@/components/cards';
+import { SeriesRow, SeriesTile } from '@/components/cards';
 import { sortValue } from '@/lib/sortValue';
-import { IcSearch, IcSparkle, IcPlus, IcImport } from '@/components/icons';
+import { IcSearch, IcPlus, IcImport } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
@@ -18,7 +18,10 @@ import { LibraryFolders } from '@/components/LibraryFolders';
 import { foldersOf } from '@/lib/libraryFolders';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
-import { LibraryFilters, NO_SOURCE, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
+import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
+import { LibrarySortSheet, LibraryToolbar } from '@/components/LibraryToolbar';
+import { SORTS, dirLabel, naturalDir, sortDirOf, sortString, validDir, type SortDir } from '@/lib/librarySort';
+import { gridClass, libraryLayoutOn, setLibraryLayout, type LibraryLayout } from '@/lib/libraryLayout';
 import { Sheet } from '@/components/ui';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { t as tr } from '@/lib/i18n';
@@ -72,6 +75,12 @@ function LibraryInner() {
   // default wins; clicking a sort below is the only thing that changes that default.
   const sortKey = validSort(urlSort) ? urlSort : validSort(user?.settings?.librarySort) ? user!.settings.librarySort : 'updated';
   const active = useMemo(() => SORTS.find((s) => s.key === sortKey) || SORTS[0], [sortKey]);
+  // Which way it runs (v0.60.0), by the same precedence: the URL's `dir`, else the direction the account saved WITH its
+  // order -- only while the order is the account's: a shared `?sort=popular` means Most popular as it reads -- else the
+  // order's natural one (lib/librarySort.ts sortDirOf). The server reads `field,asc|desc` for every order.
+  const dir: SortDir = sortDirOf(active, params.get('dir'), validSort(urlSort) ? null : user?.settings?.librarySortDir);
+  const sortBy = sortString(active, dir);
+  const reversed = dir !== naturalDir(active);
 
   // Filters live in the URL so they survive the back button and can be shared, and they are part of the
   // query key so changing one refetches from page 0 rather than appending to a stale list.
@@ -83,6 +92,8 @@ function LibraryInner() {
   const lib = params.get('lib') || '';
   const src = params.get('src') || '';
   const anysrc = params.get('anysrc') || '';
+  // "Search your library" (v0.60.0): the toolbar's field, a title filter the server applies with everything else.
+  const q = (params.get('q') || '').trim();
   const { data: libSources } = useLibrarySources();
   const sourceName = (id: string) => (id === NO_SOURCE ? tr('No source') : libSources?.sources.find((x) => x.id === id)?.name || id);
   const { data: allLibs } = useLibraries();
@@ -96,6 +107,16 @@ function LibraryInner() {
     [allLibs, adultOn],
   );
   const [sheet, setSheet] = useState(false);
+  // The phone's Sort sheet (v0.60.0), the page's like the Filters sheet: from lg up the Sort key opens a menu instead.
+  const [sortSheet, setSortSheet] = useState(false);
+  // Whether motion is welcome: the veil fades and the line runs only then. Both hooks, every render (ProgressRing.tsx).
+  const plain = useReduceEffects();
+  const still = useReducedMotion();
+  const calm = plain || !!still;
+  // Comfortable, Compact or List (v0.60.0): per device, read after mount -- the static export renders without storage,
+  // and the first client render has to match it (lib/libraryLayout.ts).
+  const [layout, setLayout] = useState<LibraryLayout>('comfortable');
+  useEffect(() => { setLayout(libraryLayoutOn()); }, []);
   // Select mode. Cleared whenever the filters change, so a selection can never outlive the list it was
   // made from and act on series the user can no longer see.
   const [selecting, setSelecting] = useState(false);
@@ -129,53 +150,80 @@ function LibraryInner() {
   // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
   const mayDownload = authStatus === 'authed' && canDownload(user);
   const view: LibraryView = readView(params.get('view'), mayDownload);
-  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib, src, anysrc, view]);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, view]);
   const togglePick = (id: string) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // ⚠️ `lib` counts. It used to be left out because it lived in its own tab rail rather than in the sheet,
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
   const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0) + (src ? 1 : 0) + (anysrc ? 1 : 0);
+  // The shelf is narrowed: a filter, or a search. The search is not a filter the panel holds, so it is not in the
+  // Filters badge; but an empty grid under one is "nothing matches", never "your library is empty".
+  const narrowed = activeCount > 0 || !!q;
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params.toString());
     if (v) next.set(k, v); else next.delete(k);
+    // A new order starts in its own natural direction: a `dir` belonged to the order it replaces.
+    if (k === 'sort') next.delete('dir');
     // `folder` points one arrival at a tile in Downloads ("Open in library" on an add still downloading its
     // first chapter). Any change made on the page has moved on from it.
     next.delete('folder');
     router.replace(`/library?${next.toString()}`);
-    if (k === 'sort' && validSort(v)) {
-      const previous = user?.settings?.librarySort;
-      setSettings({ librarySort: v });
-      void api('/api/settings', { method: 'PUT', json: { librarySort: v } }).catch(() => {
-        setSettings({ librarySort: previous });
-        toast(tr('Could not save'), 'error');
-      });
-    }
+    if (k === 'sort' && validSort(v)) saveOrder(v, naturalDir(SORTS.find((s) => s.key === v)!));
+    else if (k === 'dir' && validDir(v)) saveOrder(sortKey, v);
   };
 
-  // Everything `activeCount` counts, cleared. Sort survives because it is not a filter -- clearing it would
-  // reorder the shelf as a side effect of a button that says it removes restrictions.
-  const clearAll = () => {
+  /**
+   * The order just picked becomes the account's default, with its direction -- the two always as a pair, so the saved
+   * direction is never applied to an order it was not chosen for. Only a direct pick of an order or a direction lands
+   * here, never a URL followed. Applied at once; a refused save puts the old default back and says so, and the URL --
+   * which already says what was picked -- stays, so the shelf does not jump back under the reader.
+   */
+  const saveOrder = (sort: string, sortDir: SortDir) => {
+    const previous = { librarySort: user?.settings?.librarySort, librarySortDir: user?.settings?.librarySortDir };
+    setSettings({ librarySort: sort, librarySortDir: sortDir });
+    void api('/api/settings', { method: 'PUT', json: { librarySort: sort, librarySortDir: sortDir } }).catch(() => {
+      setSettings(previous);
+      toast(tr('Could not save'), 'error');
+    });
+  };
+
+  // Everything `activeCount` counts, cleared, and the search with it unless `alsoSearch` is false (the filter panel's
+  // own Clear all clears the panel). The order survives because it is not a filter -- clearing it would reorder the
+  // shelf as a side effect of a button that says it removes restrictions -- and so does its direction.
+  const clearAll = (alsoSearch: boolean) => {
     const n = new URLSearchParams();
     if (sortKey) n.set('sort', sortKey);
+    if (reversed) n.set('dir', dir);
+    if (!alsoSearch && q) n.set('q', q);
     router.replace(`/library?${n.toString()}`);
   };
 
   const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    queryKey: ['library', active.key, read, status, genres.join(','), lib, src, anysrc],
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, isLoading, isError, isFetching, isPlaceholderData, refetch } = useInfiniteQuery({
+    queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, q],
     // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
     enabled: view === 'series',
     initialPageParam: 0,
     // One card per work (v0.52.0, #72): the language editions of a title are one card -- the edition this reader read
     // last, else the original -- whose caption names the work's languages (SeriesTile). Reintroduce by dropping the
     // flag: "the Library asks for one card per work" in library.test.ts fails, and Blue Lock sits on the shelf twice.
+    // `query` (v0.60.0) is the title search, which the server ANDs with the filters and the order.
     queryFn: ({ pageParam }) =>
-      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition, collapseEditions: true } }),
+      api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: sortBy, condition, query: q || undefined, collapseEditions: true } }),
     getNextPageParam: (last) => (last.last ? undefined : last.number + 1),
+    // A new order, filter or search keeps the shelf it replaces on screen -- dimmed, a line running along its top --
+    // until the first page of the new one lands, rather than blanking to skeletons and losing the scroll (v0.60.0). Only
+    // the very first load has nothing to keep, and shows the skeletons. Reintroduce by dropping this: every chip tap
+    // and every pause in the typing flashes the grid empty.
+    placeholderData: keepPreviousData,
   });
+  // The grid on screen is the answer to the previous question while this one loads.
+  const refreshing = isPlaceholderData;
+  // An answer to THIS question, that did not fail: the only one an empty grid may be read from.
+  const settled = !isLoading && !isPlaceholderData && !isError;
 
   const qc = useQueryClient();
   const toast = useToast();
@@ -239,7 +287,8 @@ function LibraryInner() {
    *
    * Inherited from the browse page, which is the only place it lived outside the command palette. Note it
    * asks the server for ONE series rather than sorting the grid randomly: `sortSql` does support a random
-   * order, but the grid pages through it and re-shuffles per page. See the note in LibraryFilters.
+   * order, but the grid pages through it and re-shuffles per page. See the note in lib/librarySort.ts. The toolbar's
+   * sparkle (v0.60.0), where it was a round key in the header.
    */
   const surprise = async () => {
     try {
@@ -479,14 +528,16 @@ function LibraryInner() {
     if (!el) return;
     const io = new IntersectionObserver(
       (e) => {
-        if (e[0].isIntersecting && hasNextPage && !isFetchingNextPage) fetchNextPage();
+        // Not after a page failed: the observer would ask again the moment it is rebuilt, for as long as the server
+        // fails. Its Try again does it once.
+        if (e[0].isIntersecting && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) fetchNextPage();
       },
       { rootMargin: '600px' },
     );
     io.observe(el);
     return () => io.disconnect();
     // `view`: the sentinel is only in the DOM in the series view, so coming back to it must observe it again.
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, view]);
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage, view]);
 
   const items = data?.pages.flatMap((p) => p.content) ?? [];
   const total = data?.pages[0]?.totalElements;
@@ -501,15 +552,17 @@ function LibraryInner() {
           Downloads view has no filters to show, so it takes the whole width. */}
       <div className="lg:flex lg:gap-8 xl:gap-10">
         {series && <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64" aria-label={tr('Filters')}>
-          {/* Its own scroller: this holds five sections and up to a hundred genres, which is taller than the
-              window. `data-lenis-prevent` because Lenis drives the page and would otherwise eat the wheel. */}
-          <div className="sticky top-6 max-h-[calc(100dvh-3rem)] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
+          {/* Its own scroller: this holds six sections and up to a hundred genres, which is taller than the
+              window. `data-lenis-prevent` because Lenis drives the page and would otherwise eat the wheel.
+              ⚠️ `top-[65px]`, the top bar's height (components/TopNav.tsx, sticky itself): at `top-6` the panel's first
+              sections slid under the bar once the page scrolled. */}
+          <div className="sticky top-[65px] max-h-[calc(100dvh-65px)] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
             <LibraryFilters
-              sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
+              read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
               onSet={setParam}
             />
             {activeCount > 0 && (
-              <button onClick={clearAll} className="mt-5 w-full rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-fog-400 hover:text-fog-200">
+              <button onClick={() => clearAll(false)} className="mt-5 w-full rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-fog-400 hover:text-fog-200">
                 {tr('Clear all')}
               </button>
             )}
@@ -517,10 +570,12 @@ function LibraryInner() {
         </aside>}
 
         <div className="min-w-0 flex-1">
-      <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
+      {/* Sticky on a phone, title and toolbar together. From lg up it is `contents`: its rows sit in the column as they
+          are, and the toolbar alone sticks under the top bar -- a sticky child of a box that ends with it could not. */}
+      <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-4 pb-3 backdrop-blur-xl lg:contents">
         {/* The title gives way before the keys do: with the admin's import a fourth round key, "Bibliothèque" and
             "Библиотека" pushed the row 25-29 px past a 320 px screen. */}
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 lg:pt-6">
           <h1 className="min-w-0 truncate font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
           <div className="flex shrink-0 items-center gap-2">
             {/* v0.55.4 (#158): the import, for an admin, where "+" and the top bar's Discover add series -- it was four
@@ -530,12 +585,8 @@ function LibraryInner() {
                 <IcImport width={15} height={15} aria-hidden />{tr('Import a list')}
               </Link>
             )}
-            {/* The one thing the browse page had that has nowhere else to live. */}
-            <button onClick={surprise} title={tr('Surprise me')} aria-label={tr('Surprise me')}
-              className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 hover:text-fog-100">
-              <IcSparkle width={19} height={19} />
-            </button>
-            {/* Search and Add live in the top bar on a wide screen, so they are phone-only here. */}
+            {/* Search and Add live in the top bar on a wide screen, so they are phone-only here. This search is the whole
+                app's (series, sources, places); the toolbar's field below searches the shelf. */}
             <Link href="/search" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
               <IcSearch width={20} height={20} />
             </Link>
@@ -554,38 +605,39 @@ function LibraryInner() {
         </div>
         {mayDownload && <ViewSwitch view={view} onView={(v) => setParam('view', v === 'series' ? '' : v)} />}
         {series && <>
-        <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500`}>
-          {total != null && <>{total === 1 ? tr('1 series') : tr('{n} series', { n: total })}<span className="text-fog-600"> · </span></>}
-          {/* Sorting moved into the panel, so the header has to keep saying what it is -- otherwise the
-              order of two thousand covers is decided by something with no representation on screen. */}
-          {tr('Sorted by {name}', { name: tr(active.label).toLowerCase() })}
-          {activeCount > 0 && <span className="text-accent"> · {tr('filtered')}</span>}
+        {/* How many there are, or match: the order is the toolbar's Sort key now, which says it on its face. Dimmed while
+            the count is the shelf being replaced. */}
+        <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500 ${refreshing ? 'opacity-60' : ''}`} data-library-count>
+          {total != null && (q
+            ? (total === 1 ? tr('1 series matches') : tr('{n} series match', { n: total }))
+            : (total === 1 ? tr('1 series') : tr('{n} series', { n: total })))}
+          {activeCount > 0 && <span className="text-accent">{total != null ? ' · ' : ''}{tr('filtered')}</span>}
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {/* On a wide screen the panel is already open beside the grid, so this button would open a sheet
-              duplicating what is visible two inches to the left. */}
-          <button onClick={() => setSheet(true)} className={`chip lg:hidden ${activeCount ? 'chip-active' : ''}`} aria-haspopup="dialog">
-            {tr('Filters')}{activeCount > 0 ? ` · ${activeCount}` : ''}
-          </button>
-          {/* A session reveal, not a filter: it is not in the panel because `Clear all` cannot clear it. */}
-          <AdultToggle alsoWhen={adultFilter} />
-          {/* A mode, not a filter, for the same reason. */}
-          <button onClick={() => { setSelecting((v) => !v); setPicked(new Set()); }}
-            className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
-            {selecting ? tr('Done') : tr('Select')}
-          </button>
-          {/* Selects what is LOADED, not the whole filtered library: the grid is an infinite scroll over a
-              paged search, and silently sweeping two thousand series into a pick would surprise more than
-              the loaded-pages boundary the count beside it makes visible. Scroll further, tap again. */}
-          {selecting && (
-            <button onClick={() => setPicked(new Set(items.map((s) => s.id)))} className="chip whitespace-nowrap">
-              {tr('Select all')}
-            </button>
-          )}
-        </div>
-        {/* Active filters are always visible, so a short library is never mysterious. */}
-        {activeCount > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+        <LibraryToolbar
+          q={q} onSearch={(v) => setParam('q', v)}
+          active={active} dir={dir} onSort={(k) => setParam('sort', k)} onDir={(d) => setParam('dir', d)} onSortSheet={() => setSortSheet(true)}
+          layout={layout} onLayout={(v) => { setLayout(v); setLibraryLayout(v); }}
+          filterCount={activeCount} onFilters={() => setSheet(true)}
+          selecting={selecting} onSelecting={() => { setSelecting((v) => !v); setPicked(new Set()); }}
+          onSelectAll={() => setPicked(new Set(items.map((s) => s.id)))}
+          onSurprise={surprise}
+          adult={<AdultToggle alsoWhen={adultFilter} />}
+          className="mt-3 lg:sticky lg:top-[65px] lg:z-20 lg:mt-4 lg:border-b lg:border-ink-800/60 lg:bg-ink-950/80 lg:py-3 lg:backdrop-blur-xl"
+        />
+        {/* What narrows the shelf is always visible, so a short library is never mysterious -- the search and an order
+            running the other way included, each with its own ×. */}
+        {(narrowed || reversed) && (
+          <div className="mt-2 flex flex-wrap gap-1.5 lg:mt-3">
+            {q && (
+              <button onClick={() => setParam('q', '')} title={tr('Clear search')} className="chip max-w-full text-xs" data-chip-search>
+                <IcSearch width={12} height={12} aria-hidden className="shrink-0" /><bdi className="min-w-0 truncate">{q}</bdi> ×
+              </button>
+            )}
+            {reversed && (
+              <button onClick={() => setParam('dir', naturalDir(active))} className="chip text-xs" data-chip-dir>
+                {tr(dirLabel(active, dir))} ×
+              </button>
+            )}
             {lib && (
               <button onClick={() => setParam('lib', '')} className="chip text-xs">
                 {libs.find((l) => l.id === lib)?.name || lib} ×
@@ -616,7 +668,7 @@ function LibraryInner() {
                 {g} ×
               </button>
             ))}
-            <button onClick={clearAll} className="chip text-xs text-fog-500">{tr('Clear all')}</button>
+            {narrowed && <button onClick={() => clearAll(true)} className="chip text-xs text-fog-500">{tr('Clear all')}</button>}
           </div>
         )}
         </>}
@@ -649,27 +701,53 @@ function LibraryInner() {
 
       {/* `data-library-grid` is a test hook, not a style. layout.mjs measures fill as the span between the
           leftmost and rightmost painted things, so a sidebar cannot lower it -- and a grid squeezed to a
-          third of the window would still score 95%. This attribute is what lets that be measured. */}
+          third of the window would still score 95%. This attribute is what lets that be measured. It is on the
+          grid in every layout (lib/libraryLayout.ts gridClass); Comfortable's columns are the ones measured.
+          `isolate`: the tiles' badges and the veil below stay under the sticky toolbar, whatever their z-index. */}
       {series && <>
-      <div data-library-grid className="grid grid-cols-3 gap-x-3 gap-y-5 px-4 pt-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-5 lg:gap-x-4 lg:px-0 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10">
+      <div data-library-grid data-layout={layout} aria-busy={refreshing || undefined} className={`relative isolate ${gridClass(layout)}`}>
+        {/* While a new order, filter or search loads, the shelf it replaces stays, under a veil, with a line running
+            along its top -- standing still under reduced motion or Reduce effects. */}
+        <div aria-hidden className={`pointer-events-none absolute inset-0 z-30 bg-ink-950/45 ${refreshing ? 'opacity-100' : 'opacity-0'} ${calm ? '' : 'transition-opacity duration-300'}`} />
+        {refreshing && (
+          <div aria-hidden data-library-refreshing className="pointer-events-none absolute inset-x-4 top-1 z-30 h-0.5 overflow-hidden rounded-full bg-accent/15 rtl:-scale-x-100 lg:inset-x-0">
+            {calm
+              ? <div className="h-full w-full bg-accent/60" />
+              : <div className="absolute inset-y-0 left-0 w-1/3 animate-indeterminate rounded-full bg-accent" />}
+          </div>
+        )}
         {isLoading
-          ? Array.from({ length: 14 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)
-          : items.map((s, i) => (
-              // v0.58.0: under the title, the value the shelf is sorted by ("312K on AniList", "★ 4/5"), for the five
-              // orders whose answer is not on the card already; nothing for the four older ones.
-              <SeriesTile key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)}
+          ? Array.from({ length: 14 }).map((_, i) => (
+              <div key={i} className={layout === 'list' ? 'skeleton h-[5.5rem] rounded-2xl' : `skeleton aspect-[2/3] ${layout === 'compact' ? 'rounded-xl' : 'rounded-2xl'}`} />
+            ))
+          : items.map((s, i) => (layout === 'list'
+            ? <SeriesRow key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)}
+                selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
+            // v0.58.0: under the title, the value the shelf is sorted by ("★ 84", "312K readers", "★ 4/5"), for the five
+            // orders whose answer is not on the card already; nothing for the four older ones.
+            : <SeriesTile key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)} compact={layout === 'compact'}
                 selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
             ))}
       </div>
 
-      {!isLoading && !items.length && activeCount > 0 && (
-        <p className="px-5 pb-10 pt-6 text-center text-sm text-fog-500">{tr('Nothing matches those filters.')}</p>
+      {/* The request failed, and there is no shelf to show instead: say so, with the way to ask again -- never "your
+          library is empty", and never a grid of skeletons that never fills. */}
+      {isError && !items.length && (
+        <div data-library-error className="px-4 pb-10 pt-8 text-center lg:px-0">
+          <p className="text-sm font-medium text-fog-200">{tr('Couldn’t load your library')}</p>
+          <button type="button" onClick={() => { void refetch(); }} disabled={isFetching} className="btn-key mt-3">{tr('Try again')}</button>
+        </div>
+      )}
+      {settled && !items.length && narrowed && (
+        <p className="px-4 pb-10 pt-6 text-center text-sm text-fog-500">
+          {q ? tr('No series match “{query}”.', { query: q }) : tr('Nothing matches those filters.')}
+        </p>
       )}
       {/* v0.55.4 (#158): an empty library says how to fill it -- import one (admins) or find series in Discover (whoever
           may add them) -- where it said "Your library is empty." and nothing else. Empty for THIS viewer, with nothing
-          filtered: their 18+ reveal, their library access and a folder not scanned yet all count, and an answer that
-          has not come (or failed) is not "empty". */}
-      {!isLoading && total === 0 && !activeCount && (
+          filtered or searched: their 18+ reveal, their library access and a folder not scanned yet all count, and an
+          answer that has not come, failed, or is still the previous question's is not "empty". */}
+      {settled && total === 0 && !narrowed && (
         <EmptyState art={ART.emptyLibrary} title={tr('Your library is empty.')}>
           <LibraryStart />
         </EmptyState>
@@ -677,6 +755,13 @@ function LibraryInner() {
 
       <div ref={sentinel} className="h-16" />
       {isFetchingNextPage && <p className="pb-6 text-center text-xs text-fog-500">{tr('Loading more…')}</p>}
+      {/* A later page failed: the shelf so far stays, and this asks for the rest once. */}
+      {isFetchNextPageError && !isFetchingNextPage && (
+        <div className="flex items-center justify-center gap-3 pb-6 text-xs text-fog-500" data-library-more-error>
+          {tr('Couldn’t load more')}
+          <button type="button" onClick={() => { void fetchNextPage(); }} className="btn-key">{tr('Try again')}</button>
+        </div>
+      )}
       </>}
         </div>
       </div>
@@ -689,7 +774,7 @@ function LibraryInner() {
           the nav. */}
       {series && selecting && picked.size > 0 && (
         <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
+          {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven keys plus the
               count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet). (The bar's
               bottom padding was `pb-8` until v0.49.0, clearance for the floating downloads pill, which is gone.)
               "Archive slowly" (#117) is a key from lg up and a row of More on a phone -- which is why More is
@@ -698,24 +783,26 @@ function LibraryInner() {
               behind More at EVERY width, so More stays for admins from lg up. Measured with the app's CSS and
               fonts (240 selected): Find other sources as a ninth key needed 1081 px, two rows in English at 1024
               AND 1280 px (the row is capped at 1024), where eight took 940 of 992; with the three behind More it
-              is one row, 735 px in English and 822 in German, where German took two rows before. */}
+              is one row, 735 px in English and 822 in German, where German took two rows before.
+              v0.60.0: keys, not chips -- these are actions, and the owner's "no more pills" keeps the capsule for the
+              filter chips; the same 12 px words and 12 px padding, so the rows measured above hold. */}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-5xl">
             <span className="me-auto text-sm font-medium text-fog-100">
               {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : selectedText(picked.size)}
             </span>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
-            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="btn-key">{tr('Mark read')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="btn-key">{tr('Mark unread')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="btn-key">{tr('Favourite')}</button>
             {/* Server-side fetch, so it follows the same permission as the Add button and the series
                 page's Fetch: a member who may not download does not see it. */}
-            {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="chip text-xs disabled:opacity-50">{tr('Fetch newest')}</button>}
+            {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="btn-key">{tr('Fetch newest')}</button>}
             {canDownload(user) && <button disabled={acting} onClick={archiveSelected} className="btn-key hidden lg:inline-flex">{tr('Archive slowly')}</button>}
-            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className={`chip text-xs disabled:opacity-50 ${isAdmin ? '' : 'lg:hidden'}`} aria-haspopup="dialog">{tr('More')}</button>}
-            {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
+            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className={`btn-key ${isAdmin ? '' : 'lg:hidden'}`} aria-haspopup="dialog">{tr('More')}</button>}
+            {/* Live during a Fetch newest run, unlike the other keys: a 500-series run is minutes of pacing plus
                 downloads, and a bar frozen for all of it left navigating away as the only way out. Cancel stops
                 the polling and leaves select mode; the run completes server-side. Reintroduce with a plain
                 `disabled={acting}`: "Cancel stays live while a Fetch newest run is followed" in library.test.ts. */}
-            <button disabled={acting && !fetching} onClick={() => { stopFollowing.current?.(); setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500 disabled:opacity-50">{tr('Cancel')}</button>
+            <button disabled={acting && !fetching} onClick={() => { stopFollowing.current?.(); setSelecting(false); setPicked(new Set()); }} className="btn-key text-fog-400">{tr('Cancel')}</button>
           </div>
         </div>
       )}
@@ -829,20 +916,25 @@ function LibraryInner() {
           file without `role="dialog"`, without Escape-to-close, and without `data-lenis-prevent`, so a
           flick inside it scrolled the grid behind it. `overBottomNav` clears the nav bar, or the last
           genre in the list sits underneath it and cannot be tapped. */}
+      {sortSheet && (
+        <LibrarySortSheet active={active} dir={dir} onSort={(k) => setParam('sort', k)} onDir={(d) => setParam('dir', d)} onClose={() => setSortSheet(false)} />
+      )}
       {sheet && (
-        <Sheet title={tr('Filters')} onClose={() => setSheet(false)} overBottomNav>
+        <Sheet title={tr('Filters')} onClose={() => setSheet(false)} overBottomNav
+          footer={
+            // Pinned under the list (v0.60.0): after a hundred genre rows, Done was a scroll away from every filter. `pb-2`:
+            // the sheet's nav clearance is 4 px short of the nav's measured height (the More sheet's note).
+            <div className="flex gap-2 pb-2">
+              {activeCount > 0 && (
+                <button onClick={() => clearAll(false)} className="btn-key h-10 px-4">{tr('Clear all')}</button>
+              )}
+              <button onClick={() => setSheet(false)} className="btn-key btn-key-primary h-10 flex-1">{tr('Done')}</button>
+            </div>
+          }>
           <LibraryFilters
-            sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
+            read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
             onSet={setParam}
           />
-          <div className="mt-5 flex gap-2">
-            {activeCount > 0 && (
-              <button onClick={clearAll} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-fog-400">
-                {tr('Clear all')}
-              </button>
-            )}
-            <button onClick={() => setSheet(false)} className="btn-accent flex-1 py-2 text-sm">{tr('Done')}</button>
-          </div>
         </Sheet>
       )}
     </div>

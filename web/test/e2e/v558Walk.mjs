@@ -2,7 +2,9 @@
 //
 //   librarysort -- a plain stack. At 1280, 390 and 390 in Arabic, an account default controls a Library URL with no
 //     sort; a valid sort in a shared URL wins without changing that default; clicking a sort changes the URL at once,
-//     saves the new account default, and a URL with no sort uses it after a reload.
+//     saves the new account default, and a URL with no sort uses it after a reload. v0.60.0: the orders are the
+//     toolbar's Sort menu (lg up) or sheet (phone), opened first; and the direction is saved with its order -- flipping
+//     it writes `dir`, saves `librarySortDir`, and survives a reload; a shared order with no `dir` reads as it is named.
 //
 //   homelists -- a plain stack with E2E_NET. Five lists around the two seeded series prove the legacy first-three-
 //     nonempty fallback, an explicit zero, an empty selected slot, the three-list ceiling, accessible earlier/later
@@ -69,60 +71,95 @@ export async function librarySortWalk(ctx) {
   const { page, check, waitFor, sleep } = ctx;
   const { call, say, setLang, visit, noSideScroll, lang } = kit(ctx);
   const settings = () => call('/api/settings');
-  const openSorts = async (width) => {
-    if (width >= 1024) return true;
-    if (await page.$('[role="dialog"]')) return true;
-    const opened = await tapText(page, say('Filters'));
-    await waitFor(() => page.$('[role="dialog"]'), 5000, 100);
-    return opened;
+  // ⚠️ `/library/`, with its slash, as the app's own links say it. A hard load of `/library` is a different pathname from
+  // the `/library/` the page's first URL write lands on, and PageTransition remounts the page for it -- a menu opened in
+  // that moment closes with the page it belonged to.
+  // v0.60.0: the orders are behind the toolbar's Sort key -- a menu from lg up, a sheet on a phone.
+  const SORT_UI = '[role="menu"], [role="dialog"] [data-library-sort-sheet]';
+  const openSorts = async () => {
+    if (await page.$(SORT_UI)) return true;
+    await page.evaluate(() => document.querySelector('[data-library-sort]')?.click());
+    return !!(await waitFor(() => page.$(SORT_UI), 5000, 100));
   };
+  const closeSorts = async () => {
+    if (await page.$('[role="menu"], [role="dialog"]')) { await page.keyboard.press('Escape'); await sleep(300); }
+  };
+  /** Whether `label` is the order the open menu ticks (aria-checked) or the open sheet presses (aria-pressed). */
   const sortPressed = (label) => page.evaluate((wanted) => {
-    const button = [...document.querySelectorAll('button[aria-pressed]')]
+    const scope = document.querySelector('[role="menu"]') ?? document.querySelector('[role="dialog"] [data-library-sort-sheet]');
+    const item = [...(scope?.querySelectorAll('[role="menuitemradio"], button[aria-pressed]') ?? [])]
       .find((b) => b.getClientRects().length && b.textContent?.trim() === wanted);
-    return button?.getAttribute('aria-pressed') === 'true';
+    return item?.getAttribute('aria-checked') === 'true' || item?.getAttribute('aria-pressed') === 'true';
   }, label);
+  /** The toolbar's key: the order and direction the shelf is in. */
+  const sortKey = () => page.evaluate(() => {
+    const k = document.querySelector('[data-library-sort]');
+    return k ? `${k.getAttribute('data-library-sort')},${k.getAttribute('data-sort-dir')}` : null;
+  });
 
   for (const [width, language] of PASSES) {
     const t = tag(width, language);
     console.log(`\n  librarysort @${width}${language === 'ar' ? ' ar' : ''}`);
     if (language !== lang()) await setLang(language);
-    await call('/api/settings', { method: 'PUT', json: { librarySort: 'az' } });
+    await call('/api/settings', { method: 'PUT', json: { librarySort: 'az', librarySortDir: 'asc' } });
     await page.setViewport({ width, height: width < 1024 ? 844 : 900 });
 
-    await visit('/library', 3000);
+    await visit('/library/', 3000);
     check(`librarysort @${t}: the saved A–Z default controls a URL with no sort`,
-      !new URL(page.url()).searchParams.has('sort') && await openSorts(width) && await sortPressed(say('A–Z')), page.url());
+      !new URL(page.url()).searchParams.has('sort') && await sortKey() === 'az,asc' && await openSorts() && await sortPressed(say('A–Z')), page.url());
     check(`librarysort @${t}: the default view has no sideways scroll`, await noSideScroll());
     await ctx.shot(`v558-librarysort-${t}-1-default`);
-    if (width < 1024) await page.keyboard.press('Escape');
+    await closeSorts();
 
-    await visit('/library?sort=unread', 3000);
-    await openSorts(width);
-    check(`librarysort @${t}: a valid shared URL wins for this visit`, await sortPressed(say('Most unread')), page.url());
+    await visit('/library/?sort=unread', 3000);
+    await openSorts();
+    check(`librarysort @${t}: a valid shared URL wins for this visit`, await sortPressed(say('Most unread')) && await sortKey() === 'unread,desc', page.url());
     check(`librarysort @${t}: following that URL did not rewrite the account default`,
       (await settings()).librarySort === 'az', JSON.stringify(await settings()));
     await ctx.shot(`v558-librarysort-${t}-2-shared-url`);
 
-    const clicked = await tapText(page, say('Newest'), width < 1024 ? '[role="dialog"]' : null);
+    const clicked = await tapText(page, say('Newest'), SORT_UI);
     const saved = await waitFor(async () => {
       const now = await settings();
-      return now.librarySort === 'new' && new URL(page.url()).searchParams.get('sort') === 'new' ? now : null;
+      return now.librarySort === 'new' && now.librarySortDir === 'desc' && new URL(page.url()).searchParams.get('sort') === 'new' ? now : null;
     }, 10_000, 200);
-    check(`librarysort @${t}: a direct sort click updates the URL and saves the default`, clicked && !!saved,
+    check(`librarysort @${t}: a direct sort click updates the URL and saves the default, in its own direction`, clicked && !!saved,
       `${page.url()} ${JSON.stringify(await settings())}`);
-    check(`librarysort @${t}: the clicked sort remains the visible view`, await sortPressed(say('Newest')));
+    check(`librarysort @${t}: the clicked sort remains the visible view`, await openSorts() && await sortPressed(say('Newest')));
     await ctx.shot(`v558-librarysort-${t}-3-clicked`);
 
-    if (width < 1024) await page.keyboard.press('Escape');
-    await visit('/library', 3000);
-    await openSorts(width);
-    check(`librarysort @${t}: after a reload, a URL with no sort uses the newly saved default`,
-      !new URL(page.url()).searchParams.has('sort') && await sortPressed(say('Newest')), page.url());
+    // The direction (v0.60.0): the menu's Order items, the sheet's pinned Order switch -- both say "Oldest first" for
+    // Newest. Saved with its order; the URL says it; a reload keeps it; the active row shows it with a ×.
+    const flipped = await page.evaluate((label) => {
+      const el = [...document.querySelectorAll('[role="menu"] [role="menuitemradio"], [role="dialog"] [data-library-sort-order] [role="radio"]')]
+        .find((b) => b.textContent?.trim() === label);
+      el?.click();
+      return !!el;
+    }, say('Oldest first'));
+    const dirSaved = await waitFor(async () => {
+      const now = await settings();
+      return now.librarySort === 'new' && now.librarySortDir === 'asc' && new URL(page.url()).searchParams.get('dir') === 'asc' ? now : null;
+    }, 10_000, 200);
+    check(`librarysort @${t}: flipping the direction writes dir and saves it with its order`, flipped && !!dirSaved,
+      `${page.url()} ${JSON.stringify(await settings())}`);
+    await closeSorts();
+    check(`librarysort @${t}: a reversed order says so beside the filters`, !!(await page.$('[data-chip-dir]')));
+    await ctx.shot(`v558-librarysort-${t}-3b-reversed`);
+
+    await visit('/library/', 3000);
+    await openSorts();
+    check(`librarysort @${t}: after a reload, a URL with no sort uses the newly saved default and its direction`,
+      !new URL(page.url()).searchParams.has('sort') && await sortPressed(say('Newest')) && await sortKey() === 'new,asc', page.url());
     check(`librarysort @${t}: the reloaded layout has no sideways scroll`, await noSideScroll());
     await ctx.shot(`v558-librarysort-${t}-4-reloaded`);
-    if (width < 1024) await page.keyboard.press('Escape');
+    await closeSorts();
+    // A shared order with no `dir` reads as it is named, whatever direction the account saved for its own.
+    await visit('/library/?sort=new', 3000);
+    check(`librarysort @${t}: a shared URL's order runs in its own direction, not the account's`, await sortKey() === 'new,desc', String(await sortKey()));
     await sleep(150);
   }
+  // Leave the default as a later walk expects it: Newest, newest first.
+  await call('/api/settings', { method: 'PUT', json: { librarySort: 'new', librarySortDir: 'desc' } });
   if (lang() !== 'en') await setLang('en');
 }
 

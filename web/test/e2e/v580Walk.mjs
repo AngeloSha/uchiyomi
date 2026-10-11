@@ -120,19 +120,26 @@ try {
   await page.goto(`${BASE}/library/?sort=popular`, { waitUntil: 'networkidle2', timeout: 60_000 });
   const pop = await waitFor(async () => { const r = ours(await valued()); return r.length === 3 ? r : null; }, 20_000, 500);
   check(JSON.stringify(pop?.map(([t]) => t)) === JSON.stringify(TITLES.pop), 'Most popular: the most listed first', `order: ${JSON.stringify(pop)}`);
-  check(pop?.[0]?.[1] === '500K on AniList', 'each card says its number', `values: ${JSON.stringify(pop)}`);
+  // v0.60.0: the card draws the people icon before the count, and says "readers" where it said "on AniList" -- which is
+  // the line's hover now.
+  check(pop?.[0]?.[1] === '500K readers', 'each card says its number', `values: ${JSON.stringify(pop)}`);
+  const hint = await page.evaluate(() => (document.querySelector('[data-sort-value="popularity"]')?.getAttribute('title') || '').replace(/[\u2066-\u2069]/g, ''));
+  check(/ on AniList$/.test(hint), 'and the long form is its hover', `title: ${hint}`);
   await shot('library-popular');
   await page.goto(`${BASE}/library/?sort=score`, { waitUntil: 'networkidle2', timeout: 60_000 });
   const top = await waitFor(async () => { const r = ours(await valued()); return r.length === 3 ? r : null; }, 20_000, 500);
   check(JSON.stringify(top?.map(([t]) => t)) === JSON.stringify(TITLES.top), 'Top rated: the best scored first', `order: ${JSON.stringify(top)}`);
-  check(top?.[0]?.[1] === '90% on AniList', 'and says the score', `values: ${JSON.stringify(top)}`);
+  // v0.60.0: "★ 90" -- the star is an icon that names the score to a screen reader; the text is the number.
+  check(top?.[0]?.[1] === '90', 'and says the score', `values: ${JSON.stringify(top)}`);
+  const star = await page.evaluate(() => document.querySelector('[data-sort-value="score"] svg[role="img"]')?.getAttribute('aria-label') ?? null);
+  check(star === 'AniList score', 'behind a star that names it', `star: ${star}`);
 
   // ---- 2. Home ----
   phase = 'home';
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60_000 });
   const rail = await waitFor(async () => { const r = ours(await valued('Most popular in your library')); return r.length === 3 ? r : null; }, 20_000, 500);
   check(JSON.stringify(rail?.map(([t]) => t)) === JSON.stringify(TITLES.pop), "Home's Most popular rail, most listed first", `rail: ${JSON.stringify(rail)}`);
-  check(rail?.[0]?.[1] === '70% on AniList', "with AniList's score on each card", `rail: ${JSON.stringify(rail)}`);
+  check(rail?.[0]?.[1] === '70', "with AniList's score on each card (a star and the number, v0.60.0)", `rail: ${JSON.stringify(rail)}`);
   const seeAll = await page.evaluate(() => [...document.querySelectorAll('section')].find((s) => (s.textContent || '').includes('Most popular in your library'))
     ?.querySelector('a[href*="sort=popular"]')?.getAttribute('href') || null);
   check(!!seeAll, 'See all opens the Library sorted by popularity', `href: ${seeAll}`);

@@ -85,6 +85,11 @@ const SURFACES = [
   // the menu's items -- which took the place of the stack of capsules under the cover.
   'components/SeriesKeys.tsx',
   'lib/seriesActions.ts',
+  // v0.60.0, the Library's toolbar: its search, its Sort key and menu sheet, the layouts, Select, Select all and the
+  // sparkle -- keys all; the filter chips stay chips, in the panel and the active row.
+  'components/LibraryToolbar.tsx',
+  'lib/librarySort.ts',
+  'lib/libraryLayout.ts',
 ];
 
 /**
@@ -111,6 +116,10 @@ const SLICES: [string, string, string, string][] = [
   // Step 14 (#117): where the slow archive is turned on -- keys, never chips, beside chips that stay.
   ['components/AddSeriesDialog.tsx', 'Add dialog: Archive the rest slowly', '{archiveRest > 0 && (', '</>)}'],
   ['app/library/page.tsx', 'Library: the Archive slowly key', 'onClick={archiveSelected}', "{(isAdmin || canDownload(user))"],
+  // v0.60.0: the whole select bar -- Mark read, Mark unread, Favourite, Fetch newest, More and Cancel became keys -- and
+  // the filter sheet's pinned Clear all and Done.
+  ['app/library/page.tsx', 'Library: the select bar', '<div ref={toolbarRef}', '{more && ('],
+  ['app/library/page.tsx', 'Library: the filter sheet\'s footer', "<Sheet title={tr('Filters')}", '<LibraryFilters'],
   // ...and on a phone, its row in the selection's More sheet.
   ['app/library/page.tsx', 'Library: Archive slowly in More', 'void archiveSelected(); }}', "{tr('Move to library')}"],
   // v0.60.0: Archive slowly and the admin's keys are More's (components/SeriesKeys.tsx, a whole surface above); under the

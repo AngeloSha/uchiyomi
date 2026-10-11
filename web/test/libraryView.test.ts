@@ -46,8 +46,9 @@ test('the Downloads view fetches no grid and shows none of the series controls',
   assert.match(src, /\{series && <>\s*<div data-library-grid/, 'the grid renders in the Downloads view');
   assert.match(src, /\{!series && <ServerDownloadsView focusFolder=\{params\.get\('folder'\)\} \/>\}/, 'the Downloads view is not the view');
   assert.match(src, /onRefresh=\{series \? onRefresh : \(\) => kickDownloads\(qc\)\}/, 'pull to refresh in Downloads rescans the library instead of asking for the jobs');
-  // The selection belongs to the grid it was made in.
-  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, lib, src, anysrc, view\]\);/, 'a selection outlives a switch to Downloads');
+  // The selection belongs to the grid it was made in -- its order, direction and search too (v0.60.0): a new one loads
+  // other pages, and a pick made in the old one would act on series no longer on screen.
+  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, dir, lib, src, anysrc, q, view\]\);/, 'a selection outlives a switch to Downloads');
 });
 
 test('the underline slides only when motion is welcome', () => {

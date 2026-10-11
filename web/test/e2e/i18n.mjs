@@ -51,16 +51,19 @@ await signIn();
 async function readyLibrary() {
   if (await p.$('input[type=password]')) {
     await signIn();
-    await p.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await p.goto(LIBRARY_URL, { waitUntil: 'networkidle2', timeout: 60000 });
   }
   // The filter sidebar is the last thing on this page to exist, so it is the honest "rendered" signal.
   await p.waitForSelector('aside', { timeout: 20000 }).catch(() => {});
   await new Promise((r) => setTimeout(r, 1200));
 }
 
+// `?sort=updated`: since v0.60.0 the order is one key in the toolbar saying the order in force, and this check reads its
+// label -- so the order is named in the URL rather than inherited from whatever an earlier walk saved as the default.
+const LIBRARY_URL = `${BASE}/library/?sort=updated`;
 for (const code of LOCALES) {
   await p.evaluate((c) => localStorage.setItem('uchiyomi.lang', c), code);
-  await p.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 });
+  await p.goto(LIBRARY_URL, { waitUntil: 'networkidle2', timeout: 60000 });
   await new Promise((r) => setTimeout(r, 2200));
   await readyLibrary();
 
@@ -68,8 +71,9 @@ for (const code of LOCALES) {
     lang: document.documentElement.lang,
     dir: document.documentElement.dir,
     // 400 was enough when this only had to see the nav. The library now renders its filter panel
-    // beside the grid on a 1280px viewport, and the words this check depends on run past that.
-    text: (document.body.innerText || '').slice(0, 1500),
+    // beside the grid on a 1280px viewport, and the words this check depends on run past that -- and since v0.60.0 the
+    // toolbar's Sort key comes after the whole panel, its sources and genres included.
+    text: (document.body.innerText || '').slice(0, 4000),
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     len: (document.body.innerText || '').trim().length,
   }));
@@ -87,7 +91,10 @@ for (const code of LOCALES) {
   // UNFALSIFIABLE -- always false, therefore always passing, therefore no longer detecting an untranslated
   // nav in any of the eight languages. Nothing would have failed. So the check is now counted, and it
   // audits its own premise in English below.
-  const LIBRARY_EN = ['Home', 'Library', 'Lists', 'Discover', 'Sort by', 'Updated', 'Newest', 'Read state'];
+  // v0.60.0: "Sort by", "Updated" and "Newest" were three of the nine sort chips in the panel; the orders are a menu now,
+  // and what stays on screen is the toolbar's Sort key, saying the order in force ("Updated", from the URL above), and
+  // its Select key.
+  const LIBRARY_EN = ['Home', 'Library', 'Lists', 'Discover', 'Updated', 'Select', 'Read state', 'Status'];
   // ⚠️ Case-INSENSITIVE. The filter panel's section labels are `uppercase` in CSS, and Chrome's
   // `innerText` reports text as rendered -- so "Sort by" reads back as "SORT BY". A case-sensitive
   // match found 6 of these 8 words and the clause below said so, which is exactly what it is for.

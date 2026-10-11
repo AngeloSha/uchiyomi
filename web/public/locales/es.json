@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3575
+    "strings": 3594
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3578,5 +3578,24 @@
   "{n} readers": "{n} lectores",
   "List": "Lista",
   "Notes and saved pages": "Notas y páginas guardadas",
-  "Share": "Compartir"
+  "Share": "Compartir",
+  "Ratings": "Valoraciones",
+  "Size": "Tamaño",
+  "Order": "Orden",
+  "Newest first": "Más recientes primero",
+  "Oldest first": "Más antiguos primero",
+  "High to low": "De mayor a menor",
+  "Low to high": "De menor a mayor",
+  "Most first": "De más a menos",
+  "Fewest first": "De menos a más",
+  "Layout": "Vista",
+  "Comfortable": "Cómoda",
+  "Compact": "Compacta",
+  "Clear search": "Borrar búsqueda",
+  "1 series matches": "1 serie coincide",
+  "{n} series match": "{n} series coinciden",
+  "Couldn’t load your library": "No se pudo cargar tu biblioteca",
+  "Couldn’t load more": "No se pudieron cargar más",
+  "AniList score": "Puntuación en AniList",
+  "Actions for {title}": "Acciones de {title}"
 }
