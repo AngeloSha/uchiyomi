@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3561
+    "strings": 3583
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3564,5 +3564,27 @@
   "AniList {score}%": "AniList {score}%",
   "Average score on AniList, and how many people there have it on a list": "AniList 上的平均评分，以及在那里把它加入列表的人数",
   "Still loading": "仍在加载",
-  "Asking every source · tap one to browse it alone": "正在查询所有来源 · 点按一个来源即可只浏览它"
+  "Asking every source · tap one to browse it alone": "正在查询所有来源 · 点按一个来源即可只浏览它",
+  "Ratings": "评分",
+  "Size": "篇幅",
+  "Order": "顺序",
+  "Newest first": "最新在前",
+  "Oldest first": "最早在前",
+  "High to low": "从高到低",
+  "Low to high": "从低到高",
+  "Most first": "从多到少",
+  "Fewest first": "从少到多",
+  "Layout": "布局",
+  "Comfortable": "舒适",
+  "Compact": "紧凑",
+  "List": "列表",
+  "Clear search": "清除搜索",
+  "1 series matches": "1 个系列匹配",
+  "{n} series match": "{n} 个系列匹配",
+  "Couldn’t load your library": "无法加载你的书库",
+  "Couldn’t load more": "无法加载更多",
+  "AniList score": "AniList 评分",
+  "1 reader": "1 位读者",
+  "{n} readers": "{n} 位读者",
+  "Actions for {title}": "{title} 的操作"
 }

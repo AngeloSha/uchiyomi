@@ -90,6 +90,12 @@
      is not drawn at all and the clock runs the same. */
   --animate-notice-countdown: notice-countdown 1s linear forwards;
 
+  /* The Library's "the shelf is changing" line (v0.60.0): a third of the grid's width sliding along its top edge while a
+     new order, filter or search loads over the covers it replaces. Applied only when motion is welcome -- under reduced
+     motion or Reduce effects the line stands still (app/library/page.tsx), because the reduced-motion rule below shortens
+     an infinite animation to a jitter rather than stopping it, as it would the ring's. */
+  --animate-indeterminate: indeterminate 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+
   @keyframes fade-up {
     0% { opacity: 0; transform: translateY(12px); }
     100% { opacity: 1; transform: translateY(0); }
@@ -108,6 +114,10 @@
   @keyframes notice-countdown {
     from { transform: scaleX(1); }
     to { transform: scaleX(0); }
+  }
+  @keyframes indeterminate {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(300%); }
   }
 }
 

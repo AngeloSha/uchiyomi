@@ -38,11 +38,16 @@ test('the import for admins, Discover for whoever may add series, in that order,
 test('the empty Library says how to fill it, and only when it is empty for this viewer with nothing filtered', () => {
   // Reintroduce the plain "Your library is empty." paragraph: "the empty library offers no way to fill it" fails; test
   // `!items.length` where `total === 0` is: an answer that failed would claim the library is empty.
+  // v0.60.0: `settled` -- an answer to THIS question that did not fail. The grid keeps the previous answer on screen while
+  // a new order, filter or search loads (keepPreviousData), and an error has a state of its own; neither is "empty".
+  // `narrowed` -- a filter, or a search: an empty search is "No series match", never "your library is empty".
   const lib = code(read('app/library/page.tsx'));
-  assert.match(lib, /\{!isLoading && total === 0 && !activeCount && \(\s*<EmptyState art=\{ART\.emptyLibrary\} title=\{tr\('Your library is empty\.'\)\}>\s*<LibraryStart \/>\s*<\/EmptyState>/,
+  assert.match(lib, /const settled = !isLoading && !isPlaceholderData && !isError;/, 'an empty grid is read from a placeholder or a failure');
+  assert.match(lib, /const narrowed = activeCount > 0 \|\| !!q;/, 'a search is not a narrowing');
+  assert.match(lib, /\{settled && total === 0 && !narrowed && \(\s*<EmptyState art=\{ART\.emptyLibrary\} title=\{tr\('Your library is empty\.'\)\}>\s*<LibraryStart \/>\s*<\/EmptyState>/,
     'the empty library offers no way to fill it');
   assert.equal((lib.match(/tr\('Your library is empty\.'\)/g) ?? []).length, 1, 'a second, bare "Your library is empty." is back');
-  assert.match(lib, /\{!isLoading && !items\.length && activeCount > 0 && \(\s*<p [^>]*>\{tr\('Nothing matches those filters\.'\)\}<\/p>/, 'a filtered empty grid no longer says so');
+  assert.match(lib, /\{settled && !items\.length && narrowed && \(\s*<p [^>]*>\s*\{q \? tr\('No series match “\{query\}”\.', \{ query: q \}\) : tr\('Nothing matches those filters\.'\)\}\s*<\/p>/, 'a filtered empty grid no longer says so');
   // The keys themselves: who may, from the auth context, through the pure rule above.
   const start = code(read('components/LibraryStart.tsx'));
   assert.match(start, /const keys = startKeys\(\{ isAdmin, mayDownload: status === 'authed' && canDownload\(user\) \}\);/, 'the keys are not decided by who is looking');

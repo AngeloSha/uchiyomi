@@ -109,12 +109,17 @@ test('no sort the grid cannot page through', () => {
   // random()`, the grid pages with LIMIT/OFFSET, and useInfiniteQuery APPENDS -- so page 2 re-rolls the
   // shuffle, redrawing series already scrolled past and silently omitting others. You would have to count
   // to notice. "Surprise me" is the honest version: one series, one request, no pagination.
-  // Reintroduce by adding { key: 'random', label: 'Shuffle', sort: 'random,desc' } to SORTS.
-  const sorts = [...read('components/LibraryFilters.tsx').matchAll(/sort: '([^']+)'/g)].map((m) => m[1]);
-  assert.ok(sorts.length >= 4, `the SORTS scan found ${sorts.length} entries — it is not reading the array`);
+  // Reintroduce by adding { key: 'random', label: 'Shuffle', sort: 'random,desc', … } to SORTS.
+  // v0.60.0: the orders live in lib/librarySort.ts, the toolbar's Sort menu reads them there, and every one can run the
+  // other way -- which keeps the field, so a random field stays the only way to get a random order.
+  const sorts = [...read('lib/librarySort.ts').matchAll(/sort: '([^']+)'/g)].map((m) => m[1]);
+  assert.ok(sorts.length >= 9, `the SORTS scan found ${sorts.length} entries — it is not reading the array`);
   for (const s of sorts) {
     assert.doesNotMatch(s, /random/i, `"${s}": a random order cannot be paginated, and the grid paginates`);
   }
+  // Nothing else on the page names an order of its own.
+  assert.doesNotMatch(code(read('components/LibraryFilters.tsx')), /sort: '/, 'the filter panel has orders of its own again');
+  assert.doesNotMatch(code(read('components/LibraryToolbar.tsx')), /random/i, 'the toolbar offers a random order');
 });
 
 test('the genre list comes from the counted endpoint, not the flat one', () => {
@@ -169,8 +174,13 @@ test('every label the panel renders reaches the translation extractor', () => {
   // English, in all eight languages, forever, with nothing in the suite noticing.
   // Reintroduce by going back to that expression, or by dropping a key from the locale files.
   const src = read('components/LibraryFilters.tsx');
-  for (const arr of ['SORT_LABELS', 'READ_LABELS', 'STATUS_LABELS']) {
+  for (const arr of ['READ_LABELS', 'STATUS_LABELS']) {
     assert.match(src, new RegExp(`const ${arr} = keys\\(`), `${arr} is not registered with keys()`);
+  }
+  // The orders, their groups and their directions moved to the toolbar's menu (v0.60.0), from one file.
+  const sorts = read('lib/librarySort.ts');
+  for (const arr of ['SORT_LABELS', 'GROUP_LABELS', 'DIR_LABELS']) {
+    assert.match(sorts, new RegExp(`const ${arr} = keys\\(`), `${arr} is not registered with keys()`);
   }
   assert.doesNotMatch(code(src), /charAt\(0\) \+ /, 'a label is being title-cased in JS instead of translated');
 
@@ -234,9 +244,11 @@ test('the library filter state is still the URL, with one writer', () => {
   // key -- changing one refetches from page 0 rather than appending to a stale list. The panel is a pure
   // component over props for the same reason: two writers would race.
   // Reintroduce by giving LibraryFilters its own useSearchParams/useRouter: the sidebar and the sheet then
-  // disagree about what is selected the moment one of them navigates.
+  // disagree about what is selected the moment one of them navigates. v0.60.0: the toolbar too -- its search, order and
+  // direction go through the page's setParam, never a router of its own.
   const panel = read('components/LibraryFilters.tsx');
   assert.doesNotMatch(panel, /useSearchParams|useRouter/, 'the filter panel writes the URL itself');
+  assert.doesNotMatch(read('components/LibraryToolbar.tsx'), /useSearchParams|useRouter|next\/navigation/, 'the toolbar writes the URL itself');
   const page = read('app/library/page.tsx');
   assert.equal((page.match(/router\.replace\(/g) ?? []).length, 2,
     'expected exactly two URL writers in the library: setParam and clearAll');
@@ -395,15 +407,19 @@ test('the select bar fits two rows on a phone and one at 1024 px: the admin acti
   // took 940 of 992. So the three are rows of More at every width, and More stays for admins from lg up (735 px in
   // English, 822 in German, which took two rows before). Reintroduce any of them as a key in the bar: "an admin action
   // is a key in the bar" fails; drop the admin's More from lg up: "the admin actions cannot be reached from lg up".
+  // v0.60.0: keys, not chips -- the bar's buttons are actions, and the owner's "no more pills" keeps the capsule for the
+  // filter chips. Same 12 px words, same 12 px padding: the rows above hold. Reintroduce a chip: "a chip in the select
+  // bar" fails, and noPills.test.ts scans the bar for any capsule.
   const src = read('app/library/page.tsx');
   const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\][\s\S]*?<\/div>\s*<\/div>\s*\)\}/.exec(src)?.[0] ?? '';
   assert.ok(bar.length > 200, 'could not find the select bar');
-  const chips = [...bar.matchAll(/className=\{?[`"]chip[^`"]*[`"]\}?/g)].map((m) => m[0]);
-  const phoneOnly = chips.filter((c) => /\blg:hidden\b/.test(c));
-  assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More chip');
-  assert.ok(chips.length <= 6, `${chips.length} chips reach the phone bar; more than six wraps to a third row at 390 px`);
+  assert.doesNotMatch(code(bar), /className=\{?[`"]chip\b/, 'a chip in the select bar');
+  const phone = [...bar.matchAll(/className=\{?[`"](btn-key\b[^`"]*)[`"]\}?/g)].map((m) => m[1]).filter((c) => !/\bhidden lg:inline-flex\b/.test(c));
+  const phoneOnly = phone.filter((c) => /\blg:hidden\b/.test(c));
+  assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More key');
+  assert.ok(phone.length <= 6, `${phone.length} keys reach the phone bar; more than six wraps to a third row at 390 px`);
   assert.doesNotMatch(code(bar), /setMoving\(true\)|setRemoving\(true\)|findSelected/, 'an admin action is a key in the bar');
-  assert.match(bar, /onClick=\{\(\) => setMore\(true\)\} className=\{`chip text-xs disabled:opacity-50 \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
+  assert.match(bar, /onClick=\{\(\) => setMore\(true\)\} className=\{`btn-key \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
     'the admin actions cannot be reached from lg up');
   // From lg up, every chip and key an admin sees there: at most the seven that measured one row at 1024 px.
   const keys = [...bar.matchAll(/className=\{?[`"]((?:chip|btn-key)\b[^`"]*)[`"]\}?/g)].map((m) => m[1]);
@@ -440,7 +456,7 @@ test('Archive slowly: a key from lg up, a row of More on a phone, for anyone who
   assert.match(src, /\{canDownload\(user\) && <button disabled=\{acting\} onClick=\{archiveSelected\} className="btn-key hidden lg:inline-flex">\{tr\('Archive slowly'\)\}<\/button>\}/,
     'the archive key reaches the phone bar');
   // More is a member's on a phone only (from lg up Archive slowly is a key), and an admin's at every width (v0.49.1).
-  assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className=\{`chip text-xs disabled:opacity-50 \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
+  assert.match(src, /\{\(isAdmin \|\| canDownload\(user\)\) && <button disabled=\{acting\} onClick=\{\(\) => setMore\(true\)\} className=\{`btn-key \$\{isAdmin \? '' : 'lg:hidden'\}`\}/,
     'a member who may download has no way to archive on a phone');
   const sheet = src.slice(src.indexOf('<Sheet title={selectedText(picked.size)}'), src.indexOf('</Sheet>', src.indexOf('<Sheet title={selectedText(picked.size)}')));
   assert.match(sheet, /\{canDownload\(user\) && \(\s*<button onClick=\{\(\) => \{ setMore\(false\); void archiveSelected\(\); \}\}/, 'More has no Archive slowly, or keeps the sheet open under the notice');
@@ -515,7 +531,7 @@ test('src is the main source and anysrc any source, from the URL to the search, 
   assert.match(page, /const src = params\.get\('src'\) \|\| '';\s*const anysrc = params\.get\('anysrc'\) \|\| '';/, 'the URL params are read into the wrong names');
   assert.match(page, /useMemo\(\(\) => conditionFrom\(read, status, genres, lib, src, anysrc\), \[read, status, genres\.join\(','\), lib, src, anysrc\]\)/,
     'the condition memo does not carry both source filters, in order');
-  assert.match(page, /queryKey: \['library', active\.key, read, status, genres\.join\(','\), lib, src, anysrc\],/, "the grid's key does not carry the source filters");
+  assert.match(page, /queryKey: \['library', active\.key, dir, read, status, genres\.join\(','\), lib, src, anysrc, q\],/, "the grid's key does not carry the source filters");
   assert.match(page, /const activeCount = [^;]*\+ \(src \? 1 : 0\) \+ \(anysrc \? 1 : 0\);/, 'the badge does not count the source filters');
   // The writing side: Main source's chips set `src` and count `main`, Any source's set `anysrc` and count `any`, and
   // both placements of the panel are handed both values; each active chip clears its own param.
@@ -608,7 +624,7 @@ test('the Library asks for one card per work, and the card names the work\'s lan
   // `collapseEditions: true` from the grid's search: "the Library asks for one card per work" fails, and Blue Lock
   // sits on the shelf twice.
   const page = code(read('app/library/page.tsx'));
-  assert.match(page, /api<Page<Series>>\('\/api\/series\/search', \{ json: \{ page: pageParam, size: 40, sort: active\.sort, condition, collapseEditions: true \} \}\)/,
+  assert.match(page, /api<Page<Series>>\('\/api\/series\/search', \{ json: \{ page: pageParam, size: 40, sort: sortBy, condition, query: q \|\| undefined, collapseEditions: true \} \}\)/,
     'the Library asks for one card per work');
   const cards = code(read('components/cards.tsx'));
   assert.match(cards, /\{!!series\.edition\?\.langs && series\.edition\.langs\.length > 1 && \(/, 'the card does not name its languages');
