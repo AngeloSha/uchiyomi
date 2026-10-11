@@ -747,7 +747,8 @@ try {
   // chips wide, mixing sorts with filters with a select mode -- and a hand-rolled copy of the Sheet
   // component that had no `role="dialog"` and no Escape handler. Both presentations of the one panel are
   // driven here, because the source scan in test/library.test.ts can only see that the right component is
-  // imported, not that it opens.
+  // imported, not that it opens. v0.60.0: the panel holds the filters only; the order is the toolbar's Sort key, a
+  // sheet on a phone and a menu from lg up, driven here too.
   await page.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
   await sleep(2000);
   {
@@ -766,10 +767,13 @@ try {
       if (!opened) bad('phone library: the Filters button opened no dialog');
       else {
         opened.modal === 'true' ? ok('phone library: the filter sheet is a real dialog') : bad('phone library: the filter sheet is not aria-modal');
-        // The sections are the whole point of the redesign: one labelled group each, not a chip pile.
-        const missing = ['Sort by', 'Read state', 'Status', 'Genres'].filter((h) => !opened.text.includes(h));
+        // The sections are the whole point of the redesign: one labelled group each, not a chip pile. The orders are
+        // the toolbar's since v0.60.0, so the filter sheet has none.
+        const missing = ['Read state', 'Status', 'Genres'].filter((h) => !opened.text.includes(h));
         missing.length ? bad(`phone library: the filter sheet is missing ${missing.join(', ')}`)
                        : ok('phone library: the filter sheet is grouped into labelled sections');
+        opened.text.includes('Sort by') ? bad('phone library: the filter sheet still holds the orders')
+                                        : ok('phone library: the filter sheet holds filters only');
         await shot('phone-library-filters');
         // ⚠️ The copy this replaced could not do this. Reintroduce the hand-rolled overlay and it fails.
         await page.keyboard.press('Escape');
@@ -778,6 +782,32 @@ try {
         still ? bad('phone library: Escape did not close the filter sheet') : ok('phone library: Escape closes the filter sheet');
       }
     }
+    // The order on a phone: the toolbar's Sort key opens a sheet with the nine orders and the two directions.
+    const sorted = await page.evaluate(() => {
+      const key = document.querySelector('[data-library-sort]');
+      if (!key || !key.getBoundingClientRect().width) return null;
+      key.click();
+      return key.getAttribute('data-library-sort');
+    });
+    if (!sorted) bad('phone library: no Sort key in the toolbar');
+    else {
+      await sleep(700);
+      const sheet = await page.evaluate(() => {
+        const d = document.querySelector('[role=dialog] [data-library-sort-sheet]');
+        // The two directions are the sheet's pinned footer, a radio group.
+        const order = document.querySelector('[role=dialog] [data-library-sort-order]');
+        return d ? { orders: d.querySelectorAll('[data-sort-option^="sort-"]').length, dirs: order ? order.querySelectorAll('[role=radio]').length : 0,
+          on: [...d.querySelectorAll('[aria-pressed="true"]')].map((b) => b.getAttribute('data-sort-option')) } : null;
+      });
+      !sheet ? bad('phone library: the Sort key opened no sheet')
+        : sheet.orders === 9 && sheet.dirs === 2 && sheet.on.includes(`sort-${sorted}`)
+          ? ok(`phone library: the Sort sheet lists 9 orders and 2 directions, ${sorted} ticked`)
+          : bad(`phone library: the Sort sheet is wrong: ${JSON.stringify(sheet)}`);
+      await page.keyboard.press('Escape');
+      await sleep(500);
+    }
+    const sideways = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    sideways > 1 ? bad(`phone library: the toolbar pushes the page ${sideways}px sideways`) : ok('phone library: no sideways scroll with the toolbar');
   }
 
   await setViewportSettled(page, { width: 1440, height: 900 });
@@ -807,9 +837,34 @@ try {
       // Two copies of the same panel on one screen would be the obvious way to get this wrong.
       side.filtersChipVisible ? bad('library @1440: the Filters button is still shown beside an open sidebar')
                               : ok('library @1440: no redundant Filters button');
-      const missing = ['Sort by', 'Read state'].filter((h) => !side.text.includes(h));
+      const missing = ['Read state', 'Status'].filter((h) => !side.text.includes(h));
       missing.length ? bad(`library @1440: the sidebar is missing ${missing.join(', ')}`)
                      : ok('library @1440: the sidebar carries its labelled sections');
+      // v0.60.0: filters only -- the orders are the toolbar's Sort menu.
+      /sort by/i.test(side.text) ? bad('library @1440: the sidebar still holds the orders') : ok('library @1440: the sidebar holds filters only');
+    }
+
+    // The order from lg up: the toolbar's Sort key opens a menu -- four groups, each order a ticked choice, then the two
+    // directions. Looked at, not picked from: a pick saves the account's default, which later walks start from
+    // (v558Walk.mjs drives the picks, and puts the default back).
+    const menu = await page.evaluate(() => {
+      const key = document.querySelector('[data-library-sort]');
+      if (!key) return null;
+      key.click();
+      return true;
+    });
+    if (!menu) bad('library @1440: no Sort key in the toolbar');
+    else {
+      await sleep(500);
+      const items = await page.evaluate(() => {
+        const m = document.querySelector('[role=menu]');
+        return m ? { radios: m.querySelectorAll('[role=menuitemradio]').length, checked: m.querySelectorAll('[aria-checked="true"]').length } : null;
+      });
+      items && items.radios === 11 && items.checked === 2
+        ? ok('library @1440: the Sort menu has 9 orders and 2 directions, one of each ticked')
+        : bad(`library @1440: the Sort menu is wrong: ${JSON.stringify(items)}`);
+      await page.keyboard.press('Escape');
+      await sleep(300);
     }
 
     // Picking a genre must actually filter, and say so in the url -- the panel is a pure component over the
