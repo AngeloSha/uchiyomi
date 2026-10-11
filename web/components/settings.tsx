@@ -333,11 +333,14 @@ export function SwitchRow({ label, help, on, disabled, onChange }: {
  *
  * The checked mark slides only when motion is welcome: still under Reduce effects as under the system's reduced
  * motion, as the Library's tabs are.
+ *
+ * An option with an `icon` (v0.60.0, the Library's layouts) shows the icon alone -- pass it `aria-hidden` -- and its label
+ * is the radio's name, for a screen reader, and its hover.
  */
 export function Segmented<T extends string>({ label, value, options, disabled, square, onChange }: {
   label: string;
   value: T | null;
-  options: ReadonlyArray<{ value: T; label: string }>;
+  options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode }>;
   disabled?: boolean;
   square?: boolean;
   onChange: (v: T) => void;
@@ -385,13 +388,16 @@ export function Segmented<T extends string>({ label, value, options, disabled, s
             ref={(el) => { refs.current[i] = el; }}
             onClick={() => pick(i)}
             onKeyDown={(e) => onKey(e, i)}
-            className={`relative px-3 py-1.5 text-xs disabled:cursor-not-allowed ${square ? 'rounded-lg' : 'rounded-full'}`}
+            title={o.icon ? o.label : undefined}
+            className={`relative ${o.icon ? 'px-2' : 'px-3'} py-1.5 text-xs disabled:cursor-not-allowed ${square ? 'rounded-lg' : 'rounded-full'}`}
           >
             {selected && (
               <motion.span aria-hidden layoutId={id} className={`absolute inset-0 bg-accent-soft ${square ? 'rounded-lg' : 'rounded-full'}`}
                 transition={still || plain ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }} />
             )}
-            <span className={`relative ${selected ? 'text-accent' : 'text-fog-300'}`}>{o.label}</span>
+            {o.icon
+              ? <span className={`relative grid h-4 place-items-center ${selected ? 'text-accent' : 'text-fog-400'}`}>{o.icon}<span className="sr-only">{o.label}</span></span>
+              : <span className={`relative ${selected ? 'text-accent' : 'text-fog-300'}`}>{o.label}</span>}
           </button>
         );
       })}

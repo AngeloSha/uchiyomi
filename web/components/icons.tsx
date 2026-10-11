@@ -19,6 +19,18 @@ export const IcHome = (p: P) => (
 export const IcGrid = (p: P) => (
   <svg {...base(p)}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>
 );
+// The Library's layouts (v0.60.0): Comfortable is IcGrid's four covers, Compact nine smaller ones, List covers in rows.
+export const IcGridDense = (p: P) => (
+  <svg {...base(p)}><rect x="3" y="3" width="5" height="5" rx="1" /><rect x="9.5" y="3" width="5" height="5" rx="1" /><rect x="16" y="3" width="5" height="5" rx="1" /><rect x="3" y="9.5" width="5" height="5" rx="1" /><rect x="9.5" y="9.5" width="5" height="5" rx="1" /><rect x="16" y="9.5" width="5" height="5" rx="1" /><rect x="3" y="16" width="5" height="5" rx="1" /><rect x="9.5" y="16" width="5" height="5" rx="1" /><rect x="16" y="16" width="5" height="5" rx="1" /></svg>
+);
+export const IcRows = (p: P) => (
+  <svg {...base(p)}><rect x="3" y="4" width="4.5" height="6" rx="1" /><rect x="3" y="14" width="4.5" height="6" rx="1" /><path d="M11 6h10M11 9h6M11 16h10M11 19h6" /></svg>
+);
+// Sort (v0.60.0, the Library's Sort key): bars getting shorter, the shelf from most to least. Flipped upside down, the
+// other way round.
+export const IcSort = (p: P) => (
+  <svg {...base(p)}><path d="M4 6h11M4 12h7.5M4 18h4" /><path d="M18.5 5v14" /><path d="m15.5 16 3 3 3-3" /></svg>
+);
 export const IcSearch = (p: P) => (
   <svg {...base(p)}><circle cx="11" cy="11" r="7" /><path d="m21 21-3.5-3.5" /></svg>
 );
