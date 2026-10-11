@@ -204,6 +204,13 @@ components:
             The Library's saved default sort (since v0.58.0 also Most popular, Top rated, My rating, Most chapters
             and Recently read). A valid `sort` in the Library URL wins for that visit; opening a shared URL does not
             change this setting.
+        librarySortDir:
+          type: string
+          nullable: true
+          enum: [asc, desc]
+          description: >-
+            Since v0.60.0: the Library's saved sort order, High to low (`desc`) or Low to high (`asc`); null goes back
+            to the sort's own direction. A valid `dir` in the Library URL wins for that visit.
         homeCollections:
           type: array
           maxItems: 3
@@ -1651,8 +1658,9 @@ paths:
       description: >-
         `onDeck`, `updated`, `new`, `favorites`, `updatesCount` and, since v0.58.0, `popular`: up to 20 series of the
         caller's library that have an outside popularity (AniList, through the series' checked AniList link), the
-        most listed first -- Home's "Most popular in your library". Every series carries `yomi.anilist {score,
-        popularity}` (or null) beside the caller's own `yomi.rating`, and `yomi.lastReadAt`.
+        most listed first -- Home's "Most popular in your library". Every series carries `yomi.anilist {id, score,
+        popularity}` (or null; `id`, the AniList entry's id, since v0.60.0) beside the caller's own `yomi.rating`, and
+        `yomi.lastReadAt`.
       operationId: getApiHome
       parameters:
         - name: adult
@@ -5424,7 +5432,7 @@ paths:
         `reader` (the reader's defaults; since v0.55.7 with `coverEdges`, default true, the cover's colour at the
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
-        `homeCollections` and `showAllChapters`. Unknown keys remain accepted and retained for compatibility.
+        `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`). Unknown keys remain accepted and retained for compatibility.
       operationId: putApiSettings
       requestBody:
         required: false

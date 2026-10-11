@@ -1392,9 +1392,12 @@ accepted and retained for compatibility. v0.55.8 validates three public keys:
 - `librarySort: 'updated' | 'new' | 'az' | 'unread'` (since v0.58.0 also `'popular' | 'score' | 'rating' | 'chapters'
   | 'read'`), the Library's saved default. A valid URL sort wins for that
   visit; the web writes this key only from a direct sort-control click, so opening a shared URL does not change it.
+- `librarySortDir: 'asc' | 'desc' | null` (since v0.60.0), the Library's saved sort order (High to low is `desc`); null
+  goes back to the sort's own direction. A valid `dir` in the Library URL wins for that visit.
 
 **Outside ratings and the new sorts** (since v0.58.0). Every series the library routes enrich (the Library search,
-Home's rails, the series page) carries `yomi.anilist: {score, popularity} | null` — AniList's score out of 100 and how
+Home's rails, the series page) carries `yomi.anilist: {id, score, popularity} | null` (`id`, the AniList entry's id,
+since v0.60.0: `https://anilist.co/manga/<id>`) — AniList's score out of 100 and how
 many AniList users list the entry, read through the series' checked AniList link — beside the caller's own
 `yomi.rating`, and `yomi.lastReadAt` (when the caller last read in it). The server refreshes them in the background
 (`anilist_scores`, keyed by AniList id): a few minutes after boot and every six hours, only entries with no row or one
