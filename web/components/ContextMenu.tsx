@@ -1,8 +1,8 @@
 'use client';
 import { createPortal } from 'react-dom';
 import {
-  useCallback, useEffect, useLayoutEffect, useRef, useState,
-  type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent,
+  Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState,
+  type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode,
 } from 'react';
 import { contextMenusOn, placeMenu, wantsOwnMenu, LONG_PRESS_MS, LONG_PRESS_SLOP } from '@/lib/contextMenus';
 
@@ -24,6 +24,15 @@ export interface MenuItem {
   disabled?: boolean;
   /** `data-menu-item` on the item, for a browser walk to find it by what it does rather than by its words. */
   hook?: string;
+  /**
+   * A group's name, shown above this item (v0.60.0): the series page's More and the Library's Sort menu group their
+   * items. Not focusable -- the arrow keys move between items only. Implies the divider.
+   */
+  heading?: string;
+  /** Drawn before the label (v0.60.0). */
+  icon?: ReactNode;
+  /** One choice of several, ticked when on (v0.60.0, the Sort menu): the item becomes a `menuitemradio`. */
+  checked?: boolean;
 }
 
 type At = { x: number; y: number };
@@ -40,7 +49,9 @@ function Menu({ items, at, label, onClose }: { items: MenuItem[]; at: At; label:
     if (r) setPos(placeMenu(at, { w: r.width, h: r.height }, { w: window.innerWidth, h: window.innerHeight }));
   }, [at]);
 
-  const enabled = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? [])];
+  const enabled = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>(
+    '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
+  ) ?? [])];
   useEffect(() => { if (pos) enabled()[0]?.focus(); }, [pos]);
 
   // Anything that moves the page under a menu makes its position a lie.
@@ -78,12 +89,26 @@ function Menu({ items, at, label, onClose }: { items: MenuItem[]; at: At; label:
         style={{ left: pos?.left ?? at.x, top: pos?.top ?? at.y, visibility: pos ? 'visible' : 'hidden' }}
         className="fixed z-[91] w-52 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
         {items.map((it, k) => (
-          <button key={k} type="button" role="menuitem" tabIndex={-1} disabled={it.disabled} data-menu-item={it.hook}
-            onClick={() => { onClose(true); void it.onSelect(); }}
-            className={`block w-full px-3.5 py-2.5 text-start text-xs hover:bg-ink-800 focus:bg-ink-800 focus:outline-none disabled:opacity-40 ${
-              it.divider && k > 0 ? 'border-t border-ink-800' : ''} ${it.danger ? 'text-red-300' : 'text-fog-200'}`}>
-            {it.label}
-          </button>
+          <Fragment key={k}>
+            {it.heading && (
+              <div role="presentation" className={`px-3.5 pb-1 pt-2.5 text-[11px] font-medium text-fog-500 ${k > 0 ? 'border-t border-ink-800' : ''}`}>
+                {it.heading}
+              </div>
+            )}
+            <button type="button" role={it.checked === undefined ? 'menuitem' : 'menuitemradio'}
+              aria-checked={it.checked === undefined ? undefined : it.checked}
+              tabIndex={-1} disabled={it.disabled} data-menu-item={it.hook}
+              onClick={() => { onClose(true); void it.onSelect(); }}
+              className={`flex w-full items-center gap-2.5 px-3.5 py-2.5 text-start text-xs hover:bg-ink-800 focus:bg-ink-800 focus:outline-none disabled:opacity-40 ${
+                it.divider && !it.heading && k > 0 ? 'border-t border-ink-800' : ''} ${it.danger ? 'text-red-300' : it.checked ? 'text-accent' : 'text-fog-200'}`}>
+              {it.icon && <span aria-hidden className="grid w-4 shrink-0 place-items-center">{it.icon}</span>}
+              <span className="min-w-0 flex-1">{it.label}</span>
+              {it.checked && (
+                <svg aria-hidden viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2.2}
+                  strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+              )}
+            </button>
+          </Fragment>
         ))}
       </div>
     </>,
