@@ -35,9 +35,9 @@ test('the series page has no Who-scanlates card and no version strip', () => {
 test('every sheet the series page opens clears the phone bottom nav', () => {
   // ⚠️ `Sheet` pads for the reader by default, which has no nav; opened from this page the last rows of a
   // sheet sit under the bar (the library's filters sheet hit this first). Reintroduce by dropping
-  // `overBottomNav` from any of the four: the patience footer, the last group chip or the last copy's
-  // Fetch is under the nav at 390 px.
-  for (const f of ['components/SourcesSheet.tsx', 'components/ChapterFilterSheet.tsx', 'components/ChapterVersionsSheet.tsx', 'components/SourcesExplainer.tsx']) {
+  // `overBottomNav` from any of the five: the patience footer, the last group chip, the last copy's Fetch or
+  // More's Remove from library (v0.60.0, components/SeriesKeys.tsx) is under the nav at 390 px.
+  for (const f of ['components/SourcesSheet.tsx', 'components/ChapterFilterSheet.tsx', 'components/ChapterVersionsSheet.tsx', 'components/SourcesExplainer.tsx', 'components/SeriesKeys.tsx']) {
     const src = code(read(f));
     assert.match(src, /<Sheet\b[^>]*\boverBottomNav\b/s, `${f} opens a Sheet without overBottomNav`);
   }
@@ -298,12 +298,15 @@ test('the header counts chapters or volumes in the reader\'s words, one key to a
   assert.doesNotMatch(page, /mostlyVolumes \? 'volumes' : 'chapters'/, 'the header count is bare English again');
 });
 
-test('an unrated series says "Rate this" in the reader\'s words', () => {
+test('an unrated series says "Rate this" in the reader\'s words, and a rated one how to take it back', () => {
   // It was a bare string literal beside the stars, English in every language (the v0.49.1 translation review, pt-BR).
-  // Reintroduce the literal: "Rate this is bare English again".
-  const page = code(read('app/series/page.tsx'));
-  assert.match(page, /\{rating \? `\$\{rating\}\/5` : tr\('Rate this'\)\}/, 'Rate this is bare English again');
-  assert.doesNotMatch(page, /: 'Rate this'\}/, 'Rate this is bare English again');
+  // Since v0.60.0 it is the ratings panel's caption (components/RatingsPanel.tsx), and a rated series says instead that
+  // tapping its star again clears it. Reintroduce the literal: "Rate this is bare English again".
+  const panel = code(read('components/RatingsPanel.tsx'));
+  assert.match(panel, /const caption = value \? tr\('Tap again to clear'\) : tr\('Rate this'\);/, 'Rate this is bare English again');
+  assert.doesNotMatch(panel, /: 'Rate this'/, 'Rate this is bare English again');
+  // Said once: the page does not say it again beside the panel.
+  assert.doesNotMatch(code(read('app/series/page.tsx')), /Rate this/, 'the page says Rate this again, beside the panel');
 });
 
 test('the chapter select bar says it removes chapters, and where the series\' own Remove is (v0.52.0)', () => {
@@ -355,10 +358,14 @@ test('an admin copies a chapter\'s file path and the series\' folder with one ta
 });
 
 test('the favourite button and the save notices are in the reader\'s words (v0.52.0)', () => {
-  // The button's two states have their own keys: the toast key "Saved" reads as a past action in ja and ar, where
-  // the button needs a state. Reintroduce `{fav ? 'Saved' : 'Favorite'}`: the button is English in every language.
+  // The toast key "Saved" read as a past action in ja and ar, where the button needs a state. Since v0.60.0 it is a key
+  // (components/SeriesKeys.tsx FavouriteKey) and a toggle: its word stays "Favourite", and `aria-pressed` with the filled
+  // heart says whether it is on -- a state said twice ("In favourites", pressed) reads as two. Reintroduce
+  // `label={fav ? 'Saved' : 'Favorite'}`: the key is English in every language, and this fails.
   const page = code(read('app/series/page.tsx'));
-  assert.match(page, /\{fav \? tr\('In favourites'\) : tr\('Favourite'\)\}/, 'the favourite button is not translated');
+  const keys = code(read('components/SeriesKeys.tsx'));
+  assert.match(keys, /<SeriesKey icon=\{heart\} label=\{tr\('Favourite'\)\}[^>]*attrs=\{\{ 'aria-pressed': on,/, 'the favourite key is not translated, or not a toggle');
+  assert.match(page, /<FavouriteKey on=\{fav\} pops=\{favPops\} onToggle=\{toggleFav\} \/>/, 'the page has no favourite key');
   assert.match(page, /tr\('Saved\. \{n\} readers had finished this chapter\.', \{ n: r\.affectedUsers \}\)/, 'the chapter save notice is not a counted pair');
   assert.doesNotMatch(page, /reader\(s\)/, 'a "(s)" plural is back');
   // Edit details' check key was the last bare English on the page (v0.52.0); it is components/SeriesEditor.tsx's

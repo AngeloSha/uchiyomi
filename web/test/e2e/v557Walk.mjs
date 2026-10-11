@@ -39,6 +39,8 @@ import { mkdirSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync }
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { kit, writeShelf } from './filenamesWalk.mjs';
+// The series page's More (v0.60.0): Edit details is its item now.
+import { openSeriesMore } from './seriesMore.mjs';
 
 const PASSES = [[1280, 'en'], [390, 'en'], [390, 'ar']];
 const tag = (w, l) => `${w}${l === 'ar' ? 'ar' : ''}`;
@@ -75,6 +77,7 @@ export async function matchesWalk(ctx) {
   const link = (id) => sql(`SELECT external_id || '|' || (linked_by IS NULL) || '|' || (checked_at IS NOT NULL) FROM series_trackers WHERE series_id = ${lit(id)} AND provider = 'anilist'`);
   const override = (id) => sql(`SELECT coalesce(cover, '-') FROM series_overrides WHERE series_id = ${lit(id)}`);
   const openEditor = async () => {
+    await openSeriesMore(page);
     await page.evaluate((label) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(label))?.click(), say('Edit details'));
     const opened = await waitFor(() => page.$('[data-series-editor]'), 10_000, 200);
     // The cover's keys are on the Art tab where the editor has one (a phone), beside the details where it has not.

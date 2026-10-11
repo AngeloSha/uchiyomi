@@ -9,12 +9,12 @@ import { Book, EditionRow, Ghost, Listing, Page, Series, VersionCopy, Versions }
 import { bookCountText, chapterLabel, chapterName, isVolumeName, languageName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
+import { Img, Backdrop, Rail, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass, IcRefresh } from '@/components/icons';
+import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
@@ -31,7 +31,7 @@ import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { fetchingToast } from '@/lib/jobs';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
-import { SourcesSheet, useSeriesGroups } from '@/components/SourcesSheet';
+import { SourcesSheet, useCheckNow, useSeriesGroups } from '@/components/SourcesSheet';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
@@ -50,7 +50,12 @@ import { NumberingSheet } from '@/components/NumberingSheet';
 import type { PlanMode } from '@/lib/numbering';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
 import { editionChipLabels } from '@/lib/editions';
-import { anilistLine } from '@/lib/sortValue';
+import { continueChoice, continueText, readCountText } from '@/lib/continueLabel';
+import { offlineKeyShown, seriesActionGroups, type SeriesActionId } from '@/lib/seriesActions';
+import { RatingsPanel, useSeriesRating } from '@/components/RatingsPanel';
+import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/components/ContinueBar';
+import { FavouriteKey, IcListAdd, MoreKey, SeriesKey, SeriesMoreSheet, moreMenuItems } from '@/components/SeriesKeys';
+import { ProgressRing } from '@/components/ProgressRing';
 import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
@@ -113,18 +118,6 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
           <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StarRating({ value, onSet }: { value: number | null; onSet: (n: number) => void }) {
-  return (
-    <div className="flex items-center gap-1">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button key={n} onClick={() => onSet(n)} className={n <= (value || 0) ? 'text-accent' : 'text-ink-600'}>
-          <IcStar width={22} height={22} fill={n <= (value || 0) ? 'currentColor' : 'none'} />
-        </button>
-      ))}
     </div>
   );
 }
@@ -700,7 +693,7 @@ function SeriesInner() {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, status: authStatus } = useAuth();
   const [editChapter, setEditChapter] = useState<Book | null>(null);
   // Edit details, open on a tab: Details from its key, Reading from the Sources sheet's language Change.
   const [editing, setEditing] = useState<EditTab | null>(null);
@@ -830,28 +823,35 @@ function SeriesInner() {
   // nav, the profile verb and the palette all go to the bare `/moments`. Counting bookmarks alone left a
   // series with notes and no saved pages with no door at all, and a series with neither unable to write
   // its first note: the same trap the composer's own comment says it avoids one level down.
+  // v0.60.0: the door is More's (lib/seriesActions.ts notesLabel), and the two counts are asked for once More has been
+  // opened on this series -- two requests on every visit bought a line most visits never looked at. A count already
+  // cached from an earlier look is shown at once.
+  const [askedNotes, setAskedNotes] = useState(false);
+  useEffect(() => { setAskedNotes(false); }, [id]);
   const { data: moments } = useQuery({
     queryKey: ['bookmarks', id],
     queryFn: () => api<{ content: unknown[] }>(`/api/bookmarks?seriesId=${encodeURIComponent(id)}`),
-    enabled: !!id,
+    enabled: !!id && askedNotes,
   });
   const { data: seriesNotes } = useQuery({
     queryKey: ['notes', id],
     queryFn: () => api<{ content: unknown[] }>(`/api/notes?seriesId=${encodeURIComponent(id)}`),
-    enabled: !!id,
+    enabled: !!id && askedNotes,
   });
-  const momentCount = moments?.content?.length ?? 0;
-  const noteCount = seriesNotes?.content?.length ?? 0;
+  const notesCounts = moments && seriesNotes ? { moments: moments.content?.length ?? 0, notes: seriesNotes.content?.length ?? 0 } : null;
 
   const [fav, setFav] = useState(false);
-  const [rating, setRating] = useState<number | null>(null);
+  // How many times Favourite was turned on in this visit: each one pops the heart once (components/SeriesKeys.tsx).
+  const [favPops, setFavPops] = useState(0);
   useEffect(() => {
-    if (series?.yomi) { setFav(series.yomi.favorite); setRating(series.yomi.rating); }
+    if (series?.yomi) setFav(series.yomi.favorite);
   }, [series]);
-  // v0.58.0: AniList's word on the series, "AniList 84% · 312K", shown beside the reader's own stars wherever those are
-  // (the stars, the meta line, the desktop banner's chips) -- never instead of them. '' without a checked AniList link.
-  const anilist = anilistLine(series?.yomi?.anilist);
-  const anilistHint = tr('Average score on AniList, and how many people there have it on a list');
+  useEffect(() => { setFavPops(0); }, [id]);
+  // The reader's own stars are read from the series' cached payload, which a rating changes optimistically
+  // (components/RatingsPanel.tsx useSeriesRating): one copy, so the panel and a refetch never disagree. AniList's word
+  // beside them is the panel's as well -- said once (v0.60.0), where v0.58.0 said both up to three times on the page.
+  const rating = series?.yomi?.rating ?? null;
+  const rate = useSeriesRating(id);
 
   useEffect(() => {
     listDownloads().then((d) => setDownloaded(new Set(d.filter((c) => c.seriesId === id).map((c) => c.bookId))));
@@ -950,14 +950,16 @@ function SeriesInner() {
   const supplyPhone = useMemo(() => supplyLine(supplyInput, false), [supplyInput]);
   const supplyWide = useMemo(() => supplyLine(supplyInput, true), [supplyInput]);
 
-  const resumeBook = useMemo(() => {
-    const c = books?.content ?? [];
-    // A chapter the server deleted has no pages to resume into -- unless this device saved a copy, in which
-    // case that copy is the last one and resuming into it is right. Without this, "Continue" on a series
-    // whose next unread chapter was pruned opened straight onto "Chapter deleted".
+  // The reading button's one choice (lib/continueLabel.ts, v0.60.0): the chapter part-read, the next one after the
+  // highest finished, the first -- or nothing to read. It opened the lowest unfinished chapter under "Start reading"
+  // even after chapters 1 to 10 were read. A chapter the server deleted has no pages to open -- unless this device
+  // saved a copy, in which case that copy is the last one and opening it is right. Without this, "Continue" on a
+  // series whose next unread chapter was pruned opened straight onto "Chapter deleted".
+  const reading = useMemo(() => {
     const openable = (b: Book) => !b.pruned || downloaded.has(b.id);
-    return c.find((b) => !b.readProgress?.completed && openable(b)) || c.find(openable) || c[0];
+    return continueChoice(books?.content ?? [], openable);
   }, [books, downloaded]);
+  const resumeBook = reading.book;
 
   // The list a page at a time (lib/chapterPages.ts). It opens on the page holding `resumeBook`, so a reader
   // on chapter 956 lands among the 900s, and then STAYS there: the page is decided once per series, sort and
@@ -1025,23 +1027,22 @@ function SeriesInner() {
     if (scroll) chaptersTop.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
 
-  const inProgress = books?.content.some((b) => b.readProgress && !b.readProgress.completed);
-
   const back = () => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push('/'));
 
   const toggleFav = async () => {
     const next = !fav;
     setFav(next);
+    if (next) setFavPops((n) => n + 1);
     try {
       if (next) await api('/api/favorites', { json: { seriesId: id } });
       else await api(`/api/favorites/${id}`, { method: 'DELETE' });
       qc.invalidateQueries({ queryKey: ['home'] });
-    } catch { setFav(!next); }
-  };
-
-  const setStars = async (n: number) => {
-    setRating(n);
-    try { await api(`/api/ratings/${id}`, { method: 'PUT', json: { stars: n } }); } catch {}
+      qc.invalidateQueries({ queryKey: ['library'] });
+    } catch {
+      // Put back, and say so: the heart that stayed lit over a refusal was the one feedback, and it lied.
+      setFav(!next);
+      toast(tr('Could not do that'), 'error');
+    }
   };
 
   const toggleDownload = async (bookId: string) => {
@@ -1135,6 +1136,16 @@ function SeriesInner() {
     toast(markingText(todo.length), 'info', { busy: true, key: 'mark-read' });
     await setRead(todo, true);
     toast(todo.length === 1 ? tr('Marked 1 chapter read') : tr('Marked {n} chapters read', { n: todo.length }), 'success', { key: 'mark-read' });
+  };
+  // "Mark all unread" (More, v0.60.0): the request a series card's menu makes (components/SeriesMenu.tsx), so the two say
+  // the same. The route deletes this reader's progress on every chapter of the series, and the marks on its grey rows
+  // with it -- unread means those too -- and tells no tracker: a tracker left ahead is the safe direction.
+  const markAllUnread = async () => {
+    try {
+      await api('/api/library/bulk/read', { json: { seriesIds: [id], completed: false } });
+      toast(tr('Marked unread'), 'success');
+    } catch { toast(tr('Could not do that'), 'error'); }
+    for (const k of [['series-books', id], ['series-listing', id], ['series', id], ['home'], ['library'], ['collection']]) qc.invalidateQueries({ queryKey: k });
   };
 
   // The one download loop, for Save all offline and for Save offline in select mode: stops at the first
@@ -1510,89 +1521,96 @@ function SeriesInner() {
     await archiveEnqueue([id], title);
     setActing(false);
   };
+  // ---- the reading button, the four keys and More (v0.60.0) ----------------------------------------------------
+  // Under the cover there were up to twelve stacked buttons, and on a 768-px-tall screen an admin's last ones ran past
+  // the bottom of the sticky column. Now: one button that says what it opens, how far the reader is, and four keys --
+  // Favourite, Offline, List, More. More holds the rest, grouped (lib/seriesActions.ts decides who sees what): a menu
+  // from lg up, a sheet below, where a thumb is.
+  const wide = useWideViewport();
+  const seriesHref = `/series/?id=${encodeURIComponent(id)}`;
+  const notesHref = `/moments/?series=${encodeURIComponent(id)}`;
+  const openReader = () => { if (resumeBook) router.push(`/reader/?book=${resumeBook.id}`); };
+  // While the chapters load the button waits with no words rather than guessing them; a series with none says so at once.
+  const ctaText = books || nothingYet ? continueText(reading) : { label: '', caption: '' };
+  // How far through the series: the chapters on the list once they are here (the list the button chose from), the
+  // series' own counts until then. Nothing on a series with no chapters.
+  const readCount = useMemo(() => (books
+    ? { read: books.content.filter((b) => b.readProgress?.completed).length, total: books.content.length }
+    : { read: series?.booksReadCount ?? 0, total: series?.booksCount ?? 0 }), [books, series]);
+  const readLine = readCountText(readCount.read, readCount.total);
+  // Check for new chapters, the Sources sheet's and Edit details' own: the same notices, the same polling.
+  const { checking, checkNow } = useCheckNow(id, () => {
+    for (const k of [['series', id], ['series-books', id], ['series-listing', id], ['series-versions', id], ['home']]) qc.invalidateQueries({ queryKey: k });
+  });
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(new URL(seriesHref, window.location.href).toString());
+      toast(tr('Link copied'), 'success');
+    } catch { toast(tr('Could not copy the link'), 'error'); }
+  };
+  const moreGroups = seriesActionGroups({
+    isAdmin, mayDownload: canDownload(user), booksCount: series?.booksCount ?? 0, mayArchive,
+    autoHero: !!series?.autoHero, hasFolder: !!series?.folder, offline: authStatus === 'offline', notes: notesCounts,
+    busy: { checkNew: checking, archive: acting, newBanner: busyAdmin },
+  });
+  const runAction = (a: SeriesActionId) => {
+    switch (a) {
+      case 'notes': router.push(notesHref); break;
+      case 'markAllRead': void markAllRead(); break;
+      case 'markAllUnread': void markAllUnread(); break;
+      case 'findMissing': setFindingMissing(true); break;
+      case 'archive': void archiveSlowly(); break;
+      case 'checkNew': void checkNow(); break;
+      case 'copyLink': void copyLink(); break;
+      case 'openTab': window.open(seriesHref, '_blank', 'noopener'); break;
+      case 'edit': setEditing('details'); break;
+      case 'newBanner': void newBanner(); break;
+      case 'rename': setRenaming(true); break;
+      case 'remove': setDeleting(true); break;
+    }
+  };
+  // ⚠️ The sheet closes BEFORE its row's action runs (SeriesMoreSheet's onPick): Edit details, Rename folder, Remove's
+  // typed-title confirmation and Find missing chapters are dialogs, and a dialog opened under a Sheet cannot be tapped.
+  const [moreSheet, setMoreSheet] = useState(false);
+  useEffect(() => { setMoreSheet(false); }, [id]);
+  const more = useContextMenu(() => moreMenuItems(moreGroups, runAction), { label: title });
+  const openMore = (el: HTMLElement) => {
+    setAskedNotes(true);
+    if (wide) more.openFrom(el);
+    else setMoreSheet(true);
+  };
+  const moreOpen = wide ? more.open : moreSheet;
+  // The phone's bar (components/ContinueBar.tsx): once the button is out of view -- under the top bar, or below the
+  // band the bottom nav and the bar itself take -- a compact copy of it, the heart and More. Never in Select mode, whose
+  // bar takes the same place, and never from lg up.
+  const ctaRef = useRef<HTMLDivElement>(null);
+  const ctaOut = useOutOfView(ctaRef, '-64px 0px -160px 0px');
+  const barShown = !wide && ctaOut && !selecting && !!series;
+
   const Actions = (
-    <div className="mt-4 flex flex-col gap-2">
-      <button onClick={() => resumeBook && router.push(`/reader/?book=${resumeBook.id}`)} disabled={nothingYet || !resumeBook} className="btn-accent w-full disabled:opacity-50">
-        <IcPlay width={18} height={18} /> {nothingYet ? tr('Nothing to read yet') : inProgress ? tr('Continue') : tr('Start reading')}
-      </button>
-      {/*
-        Which chapter that button opens. "Continue" on its own is a promise with no subject: on a long
-        series there is no way to tell whether it resumes the chapter you were part-way through, moves on
-        to the next unread one, or drops you at the top -- and those differ precisely when it matters.
-      */}
-      {!nothingYet && resumeBook && (
-        <p className="-mt-1 truncate text-center text-xs text-fog-500">
-          {/* The page only once there is one: "Mark unread" writes page 0, which read "page 0 of 23". */}
-          {resumeBook.readProgress && !resumeBook.readProgress.completed && resumeBook.media?.pagesCount
-            && (resumeBook.readProgress.page ?? 0) >= 1
-            ? tr('{chapter} · page {page} of {pages}', {
-                chapter: [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · '),
-                page: resumeBook.readProgress.page,
-                pages: resumeBook.media.pagesCount,
-              })
-            : [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · ')}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button onClick={toggleFav} className={`flex flex-1 items-center justify-center gap-2 rounded-full border py-3 text-sm ${fav ? 'border-accent/50 bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
-          <IcHeart width={18} height={18} fill={fav ? 'currentColor' : 'none'} stroke={fav ? 'none' : 'currentColor'} /> {fav ? tr('In favourites') : tr('Favourite')}
-        </button>
-        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁).
-            Never on Uchiyomi Desktop, where this device IS the server (lib/desktop.ts). */}
-        {!nothingYet && !isDesktop() && (
-          <button onClick={downloadAll} disabled={downloadingAll} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-ink-700 py-3 text-sm text-fog-300 disabled:opacity-50">
-            <IcDownload width={18} height={18} /> {downloadingAll ? tr('Saving…') : tr('Save all offline')}
-          </button>
+    <div className="mt-4 flex flex-col gap-2.5">
+      {/* The one reading button. It names the chapter it opens -- "Continue · Ch. 12", "Next · Ch. 11" -- and the line
+          under it says what the label does not: the chapter's own name and how far into it the reader is, or which
+          chapter "Start reading" and "Read again" open. */}
+      <div ref={ctaRef}>
+        <ContinueButton label={ctaText.label} disabled={!resumeBook} onOpen={openReader} />
+      </div>
+      {ctaText.caption && <p data-continue-caption className="-mt-1 truncate text-center text-xs text-fog-500">{ctaText.caption}</p>}
+      {readLine && <ReadProgress read={readCount.read} total={readCount.total} text={readLine} />}
+      {/* Four keys, or three where there is nothing to save offline. Equal widths, whatever their number. */}
+      <div data-series-keys className="mt-0.5 grid auto-cols-fr grid-flow-col gap-1.5">
+        <FavouriteKey on={fav} pops={favPops} onToggle={toggleFav} />
+        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁). Never on
+            Uchiyomi Desktop, where this device IS the server (lib/desktop.ts). The key's word is "Offline", its name the
+            whole action. */}
+        {offlineKeyShown({ nothingYet, desktop: isDesktop() }) && (
+          <SeriesKey icon={downloadingAll ? <ProgressRing progress="spin" size={20} /> : <IcDownload width={20} height={20} aria-hidden />}
+            label={tr('Offline')} name={downloadingAll ? tr('Saving…') : tr('Save all offline')} onClick={downloadAll} disabled={downloadingAll} />
         )}
+        <SeriesKey icon={<IcListAdd />} label={tr('List')} title={tr('Add to collection')} onClick={() => setCollecting(true)}
+          attrs={{ 'aria-haspopup': 'dialog' }} />
+        <MoreKey onOpen={openMore} open={moreOpen} menu={wide} />
       </div>
-      <button onClick={() => setCollecting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h10" /><path d="M19 15v6M16 18h6" /></svg>{tr('Add to collection')}</button>
-      {/* Always rendered. It is not a link to an empty page: with nothing saved yet it is the way IN to
-          writing this series' first note, which is the only thing on the other side that can be created. */}
-      <Link href={`/moments/?series=${encodeURIComponent(id)}`}
-        className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-        <IcMoments width={16} height={16} />
-        {momentCount > 0
-          ? (momentCount === 1 ? tr('1 saved page') : tr('{n} saved pages', { n: momentCount }))
-          : noteCount > 0
-            ? (noteCount === 1 ? tr('1 note') : tr('{n} notes', { n: noteCount }))
-            : tr('Add a note')}
-      </Link>
-      <div className="mt-1 flex items-center justify-between">
-        <StarRating value={rating} onSet={setStars} />
-        <span className="text-xs text-fog-500">{rating ? `${rating}/5` : tr('Rate this')}</span>
-      </div>
-      {/* Under the reader's "4/5", at its end: theirs, then AniList's. */}
-      {anilist && (
-        <p data-anilist-rating title={anilistHint} className="-mt-1 text-end text-[11px] tabular-nums text-fog-500">{anilist}</p>
-      )}
-      {canDownload(user) && (series?.booksCount ?? 0) >= 3 && (
-        <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></svg>{tr('Find missing chapters')}</button>
-      )}
-      {mayArchive && (
-        <button type="button" onClick={archiveSlowly} disabled={acting} data-archive-slowly
-          className="btn-key mt-1 h-auto w-full py-2.5 text-sm font-normal text-fog-300">
-          <IcHourglass width={16} height={16} />{tr('Archive slowly')}</button>
-      )}
-      {isAdmin && (
-        <>
-          <button onClick={() => setEditing('details')} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>{tr('Edit details')}</button>
-          {/* Only while the hero is an automatic one: a real banner is changed in Edit details. */}
-          {series?.autoHero && (
-            <button type="button" onClick={newBanner} disabled={busyAdmin} data-new-banner
-              className="btn-key h-auto w-full py-2.5 text-sm font-normal text-fog-300 disabled:opacity-50">
-              <IcRefresh width={16} height={16} />{tr('New banner')}</button>
-          )}
-          {series?.folder && (
-            <button onClick={() => setRenaming(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></svg>{tr('Rename folder')}</button>
-          )}
-          <button onClick={() => setDeleting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-500 hover:border-rose-500/40 hover:text-rose-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>{tr('Remove from library')}</button>
-        </>
-      )}
     </div>
   );
 
@@ -1604,8 +1622,8 @@ function SeriesInner() {
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
     // yet"), with the source and the groups beside it, and one line saying it is enough.
     updatedAt ? <>{tr('Updated {ago}', { ago: relativeTime(updatedAt) })}</> : null,
-    rating ? <span className="text-accent">★ {rating}/5</span> : null,
-    anilist ? <span data-anilist-meta title={anilistHint} className="whitespace-nowrap">{anilist}</span> : null,
+    // The reader's stars and AniList's score were here as well, and over the banner, and under the stars (v0.58.0):
+    // the ratings panel says them once now (components/RatingsPanel.tsx, v0.60.0).
   ].filter(Boolean);
   const Meta = (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-400 lg:text-sm">
@@ -1821,11 +1839,9 @@ function SeriesInner() {
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
-          {(meta?.status || rating || anilist) && (
+          {meta?.status && (
             <div className="mb-2 flex items-center gap-2">
-              {meta?.status && <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>}
-              {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
-              {anilist ? <span data-anilist-chip className="chip text-[11px] tabular-nums">{anilist}</span> : null}
+              <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>
             </div>
           )}
           <h1 dir="auto" className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
@@ -1850,6 +1866,9 @@ function SeriesInner() {
               {Meta}
             </div>
           </div>
+          {/* The ratings, phone form: under the cover and the title, before anything to press. The desktop form is the
+              first row of the right column. */}
+          {series && <div className="mt-4 lg:hidden"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} /></div>}
           {/* Under the cover and the title, full width: beside the cover a 390-px screen leaves the chips ~210 px. */}
           {editions && <EditionChips editions={editions} onAdd={addLanguage} className="mt-3 lg:hidden" />}
           {/* The supply line, phone form: under the title block, full width, before the actions. The desktop
@@ -1861,6 +1880,9 @@ function SeriesInner() {
 
         {/* info + chapters */}
         <div className="mt-7 flex flex-col gap-4 lg:mt-4">
+          {/* The ratings, desktop form: the top of this column, where the sticky one beside it has no room left -- and
+              no wider than its two tiles need. */}
+          {series && <div className="hidden lg:block"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} className="max-w-[440px]" /></div>}
           <div className="hidden lg:block"><SupplyLine parts={supplyWide} loaded={supplyLoaded} wide onOpen={() => setSourcesOpen(true)} /></div>
           {Genres}
           {Summary}
@@ -1980,6 +2002,17 @@ function SeriesInner() {
           onAddEdition={addEdition ? (o) => { setFindingMissing(false); addEdition(o); } : undefined} />
       )}
       {Toolbar}
+      {/* After the select bar, which takes the same place and hides this one. */}
+      <ContinueBar shown={barShown}>
+        <ContinueButton compact label={ctaText.label} disabled={!resumeBook} onOpen={openReader} />
+        <FavouriteKey compact on={fav} pops={favPops} onToggle={toggleFav} />
+        <MoreKey compact onOpen={openMore} open={moreSheet} menu={false} />
+      </ContinueBar>
+      {more.element}
+      {moreSheet && (
+        <SeriesMoreSheet title={title} groups={moreGroups} notesHref={notesHref}
+          onPick={(a) => { setMoreSheet(false); runAction(a); }} onClose={() => setMoreSheet(false)} />
+      )}
       {confirming === 'delete' && (
         <ConfirmDialog
           title={deletable.length === 1 ? tr('Delete 1 chapter from the server?') : tr('Delete {n} chapters from the server?', { n: deletable.length })}
@@ -2032,6 +2065,9 @@ function SeriesInner() {
           <Rail>{similar!.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
         </section>
       )}
+      {/* Room under the last rows for the phone's bar (ContinueBar), which can be up whenever the button has scrolled
+          away; the select bar's own room takes over while Select is on. */}
+      {!Toolbar && <div aria-hidden className="h-16 lg:hidden" />}
       {Toolbar && <SelectBarRoom />}
     </div>
   );

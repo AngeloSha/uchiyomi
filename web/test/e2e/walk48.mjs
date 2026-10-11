@@ -33,6 +33,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The series page's More (v0.60.0): Edit details is its item now.
+import { openSeriesMore } from './seriesMore.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18148';
 const USER = process.env.E2E_USER || 'e2e';
@@ -223,6 +225,7 @@ try {
   await setPrefs({ mode: 'paged' });
   await page.goto(`${BASE}/series/?id=${MANGA}`, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(2500);
+  await openSeriesMore(page);
   await page.evaluate(() => { [...document.querySelectorAll('button')].find((x) => x.textContent?.includes('Edit details'))?.click(); });
   await page.waitForSelector('[data-series-editor]', { timeout: 10000 }).catch(() => {});
   await page.click('[data-edit-tab="reading"]').catch(() => {});

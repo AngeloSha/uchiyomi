@@ -192,6 +192,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 // The fake extension engine's own seed, so the numbering phase expects what the engine serves rather than a copy
 // of it (the same file up.sh starts the engine from).
 import { SOURCE_IDS, SEQUENTIAL_KEY, defaultSeed, istreveliaPosts, webtoonsNumbers } from '../../../bff/test/fixtures/fakeSuwayomiEngine.mjs';
+// The series page's More (v0.60.0): Edit details and Archive slowly are its items now.
+import { openSeriesMore, pressSeriesMoreItem, seriesMoreOffers } from './seriesMore.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18149';
 const USER = process.env.E2E_USER || 'e2e';
@@ -518,6 +520,8 @@ async function notices(width) {
   // 4. Edit details (a dialog of its own; Check now is on its New chapters tab) and Sources & translations (a Sheet), each
   // with Check now
   await go(`/series/?id=${tale.id}`);
+  // Edit details is an item of More since v0.60.0 (a menu from lg up, a sheet on a phone).
+  await openSeriesMore(page);
   await press('Edit details');
   await sleep(700);
   await press('New chapters', '[role="dialog"]');
@@ -599,6 +603,7 @@ async function notices(width) {
   if (wide) return;
   // 6. motion: a busy notice turns and drains; under reduced motion it does neither
   await go(`/series/?id=${tale.id}`);
+  await openSeriesMore(page);
   await press('Edit details');
   await sleep(700);
   await press('New chapters', '[role="dialog"]');
@@ -611,6 +616,7 @@ async function notices(width) {
   await sleep(6000);
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await go(`/series/?id=${tale.id}`);
+  await openSeriesMore(page);
   await press('Edit details');
   await sleep(700);
   await press('New chapters', '[role="dialog"]');
@@ -786,12 +792,13 @@ async function archive(width) {
   if (wide) {
     // 1'. The series page's "Archive slowly", then its band -- the one place on the page to watch it.
     await go(`/series/?id=${gap.id}`, 3000);
-    const key = await page.$('button[data-archive-slowly]');
-    check(`${tag}: the series page offers Archive slowly`, !!key);
-    await key?.click();
+    // An item of More since v0.60.0 -- a menu at this width -- found by its hook (lib/seriesActions.ts).
+    check(`${tag}: the series page offers Archive slowly, in More`, await pressSeriesMoreItem(page, 'archive-slowly'));
     const band = await waitFor(() => page.$('[data-band-state="archive"]'), 15_000);
     check(`${tag}: the band above the chapters shows the archive`, !!band);
-    check(`${tag}: once queued, the page no longer offers to start it`, !(await page.$('[data-archive-slowly]')));
+    // Neither More nor the older-chapters row offers it again.
+    check(`${tag}: once queued, the page no longer offers to start it`,
+      !(await page.$('[data-archive-slowly]')) && !(await seriesMoreOffers(page, 'archive-slowly')));
     const run = await page.$('[data-run="archive"]');
     check(`${tag}: the older chapters read as a run the archive is fetching, with no Fetch all`, !!run
       && !/Fetch all/.test(await run.evaluate((el) => el.textContent ?? '')));
@@ -968,7 +975,7 @@ async function memberSeesNoKeys(tag, gap) {
     const inBand = band ? await keysIn('[data-band-state="archive"]') : ['(no band)'];
     check(`${tag}: the member's series band shows the archive with no key to press`, inBand.length === 0, JSON.stringify(inBand));
     check(`${tag}: ...its Details still there`, !!band && (await band.evaluate((el) => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Details'))));
-    check(`${tag}: ...and no Archive slowly while it runs`, !(await m.$('[data-archive-slowly]')));
+    check(`${tag}: ...and no Archive slowly while it runs`, !(await m.$('[data-archive-slowly]')) && !(await seriesMoreOffers(m, 'archive-slowly')));
     await band?.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await sleep(300);
     await shot(`${tag}-12-member-band`, m);

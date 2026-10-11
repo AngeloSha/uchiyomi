@@ -81,6 +81,10 @@ const SURFACES = [
   // v0.55.0, Health's Fix everything: its key, its dialog (the question, the run, the end) and the words they say.
   'components/FixEverythingDialog.tsx',
   'lib/autofix.ts',
+  // v0.60.0, the series page's four keys (Favourite, Offline, List, More) and what More opens -- its sheet's rows and
+  // the menu's items -- which took the place of the stack of capsules under the cover.
+  'components/SeriesKeys.tsx',
+  'lib/seriesActions.ts',
 ];
 
 /**
@@ -109,7 +113,9 @@ const SLICES: [string, string, string, string][] = [
   ['app/library/page.tsx', 'Library: the Archive slowly key', 'onClick={archiveSelected}', "{(isAdmin || canDownload(user))"],
   // ...and on a phone, its row in the selection's More sheet.
   ['app/library/page.tsx', 'Library: Archive slowly in More', 'void archiveSelected(); }}', "{tr('Move to library')}"],
-  ['app/series/page.tsx', 'Series: Archive slowly in the actions', '{mayArchive && (', '{isAdmin && ('],
+  // v0.60.0: Archive slowly and the admin's keys are More's (components/SeriesKeys.tsx, a whole surface above); under the
+  // reading button, the row of four keys -- never the capsules they replaced.
+  ['app/series/page.tsx', 'Series: the four keys', '<div data-series-keys', 'const metaBits'],
   ['app/series/page.tsx', 'Series: Archive slowly on the older-chapters row', '{!archiving && mayArchive', '</span>'],
   // Step 17 (#116): the add dialog's numbering notice and its switch -- a text block with a start-edge rule, beside
   // the dialog's own chips that stay. The last function in the file: an empty `to` reads to its end.

@@ -211,25 +211,25 @@ test('Home: "Most popular in your library" after Recently added, saying AniList\
   assert.match(read('lib/types.ts'), /popular\?: Series\[\];/, 'HomePayload has no optional `popular`');
 });
 
-test('the series page shows AniList\'s line beside the reader\'s own stars, and keeps theirs as it was', () => {
-  // Beside each place the reader's rating shows: under the stars' "4/5", in the meta line after "★ 4/5", and as a chip
-  // after the desktop banner's "★ 4/5". Reintroduce the line in place of the reader's own (`anilist || rating`): the
-  // unchanged-own-rating assertions fail.
+test('the series page says AniList\'s word and the reader\'s own once, in one panel: linked, and clearable', () => {
+  // v0.58.0 said both up to three times -- a chip over the desktop banner, the meta line, a line under the stars. v0.60.0
+  // made it one panel (components/RatingsPanel.tsx; test/ratingsPanel.test.ts renders it): AniList's tile opening the
+  // entry, and the reader's stars, the current one tapped again clearing it. Reintroduce any of the three old places
+  // (`data-anilist-chip`, `data-anilist-meta`, `data-anilist-rating`, or "★ {rating}/5" in the page): this fails.
   const page = code(read('app/series/page.tsx'));
-  assert.match(page, /const anilist = anilistLine\(series\?\.yomi\?\.anilist\);/);
-  assert.match(page, /<StarRating value=\{rating\} onSet=\{setStars\} \/>\s*<span className="text-xs text-fog-500">\{rating \? `\$\{rating\}\/5` : tr\('Rate this'\)\}<\/span>\s*<\/div>\s*\{anilist && \(\s*<p data-anilist-rating title=\{anilistHint\}[^>]*>\{anilist\}<\/p>\s*\)\}/,
-    'the AniList line is not under the reader\'s stars');
-  assert.match(page, /rating \? <span className="text-accent">★ \{rating\}\/5<\/span> : null,\s*anilist \? <span data-anilist-meta title=\{anilistHint\}[^>]*>\{anilist\}<\/span> : null,/,
-    'the meta line does not say AniList\'s beside the reader\'s');
-  assert.match(page, /\{\(meta\?\.status \|\| rating \|\| anilist\) && \(/, 'the banner\'s chip row is not drawn for AniList alone');
-  assert.match(page, /\{rating \? <span className="chip text-\[11px\] text-accent">★ \{rating\}\/5<\/span> : null\}\s*\{anilist \? <span data-anilist-chip className="chip text-\[11px\] tabular-nums">\{anilist\}<\/span> : null\}/,
-    'the desktop banner has no AniList chip beside the reader\'s');
-  assert.match(page, /const anilistHint = tr\('Average score on AniList, and how many people there have it on a list'\);/);
-  // The reader's own, exactly as before.
-  assert.match(page, /const setStars = async \(n: number\) => \{\s*setRating\(n\);\s*try \{ await api\(`\/api\/ratings\/\$\{id\}`, \{ method: 'PUT', json: \{ stars: n \} \}\); \} catch \{\}\s*\};/);
-  assert.match(page, /if \(series\?\.yomi\) \{ setFav\(series\.yomi\.favorite\); setRating\(series\.yomi\.rating\); \}/);
-  // The two fields arrive inside `yomi`, optional, as an older server sends neither.
+  for (const old of ['data-anilist-chip', 'data-anilist-meta', 'data-anilist-rating', 'anilistLine(', '<StarRating']) {
+    assert.ok(!page.includes(old), `the series page says it again: ${old}`);
+  }
+  assert.doesNotMatch(page, /★ \{rating\}\/5/, 'the reader\'s stars are said beside the panel again');
+  // Once per layout: under the cover on a phone, atop the right column from lg.
+  assert.equal((page.match(/<RatingsPanel anilist=\{series\.yomi\?\.anilist\} rating=\{rating\} onRate=\{rate\}/g) ?? []).length, 2);
+  const panel = code(read('components/RatingsPanel.tsx'));
+  assert.match(panel, /<a href=\{tile\.url\} target="_blank" rel="noopener noreferrer"/, 'the AniList tile does not open the entry');
+  assert.match(panel, /const next = nextRating\(before, tapped\);/, 'a tap on the current star does not clear it');
+  assert.match(panel, /const hint = tr\('Average score on AniList, and how many people there have it on a list'\);/);
+  // The two fields arrive inside `yomi`, optional, as an older server sends neither; the entry's id since v0.60.0.
   const flags = slice(read('lib/types.ts'), 'export interface UchiyomiFlags', '\n}');
   assert.match(flags, /anilist\?: AniListNumbers \| null;/);
   assert.match(flags, /lastReadAt\?: string \| null;/);
+  assert.match(slice(read('lib/types.ts'), 'export interface AniListNumbers', '\n}'), /id\?: string \| null;/);
 });

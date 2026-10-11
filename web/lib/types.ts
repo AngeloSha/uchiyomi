@@ -20,6 +20,11 @@ export interface UchiyomiFlags {
 
 /** AniList's average score (0–100) and popularity for a series (v0.58.0, `yomi.anilist`). */
 export interface AniListNumbers {
+  /**
+   * v0.60.0: the AniList entry's id -- the series page's AniList tile links to `https://anilist.co/manga/<id>`. Absent
+   * from an older server, and the tile is then not a link.
+   */
+  id?: string | null;
   score: number | null;
   popularity: number | null;
 }

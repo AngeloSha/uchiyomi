@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3561
+    "strings": 3575
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3564,5 +3564,19 @@
   "AniList {score}%": "AniList {score} %",
   "Average score on AniList, and how many people there have it on a list": "Durchschnittliche Bewertung auf AniList und wie viele Leute sie dort auf einer Liste haben",
   "Still loading": "Lädt noch",
-  "Asking every source · tap one to browse it alone": "Alle Quellen werden abgefragt · tippe auf eine, um nur sie zu durchstöbern"
+  "Asking every source · tap one to browse it alone": "Alle Quellen werden abgefragt · tippe auf eine, um nur sie zu durchstöbern",
+  "Continue · {chapter}": "Weiterlesen · {chapter}",
+  "Next · {chapter}": "Als Nächstes · {chapter}",
+  "Read again": "Noch einmal lesen",
+  "page {page} of {pages}": "Seite {page} von {pages}",
+  "{read} of {total} read": "{read} von {total} gelesen",
+  "Your rating": "Deine Bewertung",
+  "Rate {n} of 5": "Mit {n} von 5 bewerten",
+  "Tap again to clear": "Nochmal tippen zum Entfernen",
+  "Could not save your rating": "Deine Bewertung konnte nicht gespeichert werden",
+  "1 reader": "1 Leser",
+  "{n} readers": "{n} Leser",
+  "List": "Liste",
+  "Notes and saved pages": "Notizen und gespeicherte Seiten",
+  "Share": "Teilen"
 }

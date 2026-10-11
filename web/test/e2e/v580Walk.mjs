@@ -6,7 +6,9 @@
 //   1. Library sorted by Most popular: Mixed Formats, Walk Tale, Repeated Pages, each card saying its number; by Top
 //      rated: Repeated Pages, Walk Tale, Mixed Formats;
 //   2. Home's "Most popular in your library" rail, in the same order, each card with AniList's score;
-//   3. the series page shows "AniList 70% · 500K" beside the reader's own stars, which stay;
+//   3. the series page says both once, in its ratings panel (v0.60.0): AniList's tile -- 70 / 100, "500K readers", a
+//      link to the entry -- beside the reader's own four stars, the fourth pressed; tapped again, it clears the rating
+//      on the server, and once more puts it back;
 //   4. Discover's wall fills from every source and its Still loading tile is gone once they have all answered;
 //   5. no console errors along the way.
 //
@@ -137,12 +139,42 @@ try {
   await shot('home');
 
   // ---- 3. the series page ----
+  // One ratings panel since v0.60.0 (components/RatingsPanel.tsx), drawn once per layout: the visible one is read.
   phase = 'series';
-  await page.goto(`${BASE}/series/?id=${encodeURIComponent(ids['Mixed Formats'])}`, { waitUntil: 'networkidle2', timeout: 60_000 });
-  const line = await waitFor(async () => { const t = await pageText(); return /AniList 70% · 500K/.test(t) ? t : null; }, 20_000, 500);
-  check(!!line, 'the series page shows AniList 70% · 500K');
-  check(/4\/5/.test(line || ''), 'beside the reader\'s own stars, which stay');
+  const mixedId = ids['Mixed Formats'];
+  await page.goto(`${BASE}/series/?id=${encodeURIComponent(mixedId)}`, { waitUntil: 'networkidle2', timeout: 60_000 });
+  const tile = await waitFor(() => page.evaluate(() => {
+    const t = [...document.querySelectorAll('[data-anilist-tile]')].find((e) => e.getClientRects().length);
+    const plain = (s) => (s || '').replace(/[\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
+    return t ? {
+      score: plain(t.querySelector('[dir="ltr"]')?.textContent), name: plain(t.getAttribute('aria-label')),
+      href: t.getAttribute('href'), target: t.getAttribute('target'), rel: t.getAttribute('rel'),
+    } : null;
+  }), 20_000, 500);
+  check(tile?.score === '70/ 100' && /500K readers/.test(tile?.name ?? ''), "the series page shows AniList's 70 / 100 and 500K readers", JSON.stringify(tile));
+  check(tile?.href === 'https://anilist.co/manga/990001' && tile?.target === '_blank' && /noopener/.test(tile?.rel ?? ''),
+    'its tile opens the entry on AniList, in a new tab', JSON.stringify(tile));
+  /** The visible star row: each star's aria-pressed, and the tile's data-your-rating. */
+  const stars = () => page.evaluate(() => {
+    const row = [...document.querySelectorAll('[data-your-rating]')].find((e) => e.getClientRects().length);
+    return row ? { rating: row.getAttribute('data-your-rating'), pressed: [...row.querySelectorAll('button[aria-pressed]')].map((b) => b.getAttribute('aria-pressed')) } : null;
+  });
+  const mine = await stars();
+  check(JSON.stringify(mine?.pressed) === JSON.stringify(['false', 'false', 'false', 'true', 'false']), "beside the reader's own four stars, which stay", JSON.stringify(mine));
+  // Said once: the old "AniList 70% · 500K" line, chip and meta entry are gone.
+  const said = await pageText();
+  check(!/AniList 70% · 500K/.test(said) && (said.match(/500K readers/g) ?? []).length <= 1, 'said once on the page', said.slice(0, 300));
   await shot('series');
+  // The fourth star again takes the rating back (DELETE /api/ratings/:id); once more puts it back.
+  const tap = (n) => page.evaluate((n) => [...document.querySelectorAll('[data-your-rating]')].find((e) => e.getClientRects().length)
+    ?.querySelector(`button[aria-label="Rate ${n} of 5"]`)?.click(), n);
+  const serverRating = async () => (await api(`/api/series/${encodeURIComponent(mixedId)}`)).body?.yomi?.rating ?? null;
+  await tap(4);
+  const cleared = await waitFor(async () => (await serverRating()) === null && (await stars())?.rating === '0', 10_000, 300);
+  check(!!cleared, 'tapping the fourth star again clears the rating, on the server too', JSON.stringify({ server: await serverRating(), page: await stars() }));
+  await tap(4);
+  const back = await waitFor(async () => (await serverRating()) === 4 && (await stars())?.rating === '4', 10_000, 300);
+  check(!!back, 'and tapped once more, it is back', JSON.stringify({ server: await serverRating(), page: await stars() }));
 
   // ---- 4. Discover ----
   phase = 'discover';
