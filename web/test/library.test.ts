@@ -574,11 +574,12 @@ test('Main source offers "No source" (#149): its own condition, a sentinel no so
   assert.match(panel, /<SourceSection title=\{tr\('Main source'\)\}[\s\S]{0,120}?rows=\{sources\} none=\{none\} count=\{\(s\) => s\.main\} value=\{mainSrc\} onPick=\{\(id\) => onSet\('src', id\)\} \/>/,
     'Main source is not handed the No source count');
   assert.match(panel, /<SourceSection title=\{tr\('Any source'\)\}[\s\S]{0,140}?rows=\{sources\} count=\{\(s\) => s\.any\}/, 'Any source has a No source of its own');
-  // The chip: single choice in `src`, a tap on the chosen one clears it, its count beside it as a source's is.
-  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function Eyebrow('));
+  // The row (a chip until v0.60.0): single choice in `src`, a tap on the chosen one clears it, its count beside it as a
+  // source's is.
+  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function GenreRow('));
   assert.match(section, /const noneShown = none !== undefined && \(none > 0 \|\| value === NO_SOURCE\);/, 'No source is offered with nothing in it, or not while chosen');
-  assert.match(section, /<button type="button" onClick=\{\(\) => onPick\(value === NO_SOURCE \? '' : NO_SOURCE\)\} aria-pressed=\{value === NO_SOURCE\}[\s\S]*?\{tr\('No source'\)\}<span className="ms-1 tabular-nums text-fog-600">\{none\}<\/span>/,
-    'the No source chip does not write the sentinel into src, or has no count');
+  assert.match(section, /<FilterOption on=\{value === NO_SOURCE\} onPick=\{\(\) => onPick\(value === NO_SOURCE \? '' : NO_SOURCE\)\}[\s\S]*?label=\{tr\('No source'\)\} count=\{none\}/,
+    'the No source row does not write the sentinel into src, or has no count');
   // The active chip says it in words, never the sentinel; the count comes from the same query as the sources.
   assert.match(page, /const sourceName = \(id: string\) => \(id === NO_SOURCE \? tr\('No source'\) : libSources\?\.sources\.find/, 'the active chip reads the sentinel');
   assert.match(panel, /\.then\(\(r\) => \(\{ sources: r\.content \?\? \[\], none: r\.none \?\? 0 \}\)\)/, 'the count is not read, or an older server\'s missing one is not 0');
@@ -599,23 +600,48 @@ test('in Japanese and Chinese the source filters use those files\' full-width br
   assert.ok(ja['Any source'].startsWith(ja['Any: {name}'].split('：')[0]), 'ja: Any source and its active chip say any in two different words');
 });
 
-test('a chosen source chip is drawn chosen, even for a source that is not loaded', () => {
+test('a chosen source row is drawn chosen, even for a source that is not loaded', () => {
   // `.chip-active` is in @layer components and `text-fog-500` is a utility, so where a chip carried both the
   // utility won: the chosen chip of a source that is not loaded (its extension gone, the engine down) kept the
-  // grey of an unchosen one and lost its accent. The class list is evaluated here for all four cases. Reintroduce
-  // `${value === s.id ? 'chip-active' : ''} ${s.installed ? '' : 'text-fog-500'}`: "a chosen chip for a source
-  // that is not loaded is drawn unchosen" fails.
+  // grey of an unchosen one and lost its accent. Since v0.60.0 the choices are rows (FilterOption), and the row's
+  // class list is evaluated here for all four cases. Reintroduce `${on ? 'text-accent' : ''} ${muted ? 'text-fog-500' : ''}`:
+  // "a chosen row for a source that is not loaded is drawn unchosen" fails.
   const panel = code(read('components/LibraryFilters.tsx'));
-  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function Eyebrow('));
-  const tpl = /<button key=\{s\.id\}[\s\S]*?className=\{`([^`]*)`\}/.exec(section)?.[1];
-  assert.ok(tpl, 'could not find the source chip');
-  const classes = (value: string, installed: boolean): string[] =>
-    (new Function('value', 's', `return \`${tpl}\`;`)(value, { id: 'x', installed }) as string).split(/\s+/).filter(Boolean);
-  assert.ok(classes('x', false).includes('chip-active') && !classes('x', false).includes('text-fog-500'),
-    'a chosen chip for a source that is not loaded is drawn unchosen');
-  assert.ok(classes('', false).includes('text-fog-500'), 'a source that is not loaded no longer looks it');
-  assert.ok(classes('x', true).includes('chip-active'));
-  assert.deepEqual(classes('', true), ['chip', 'text-xs']);
+  const option = panel.slice(panel.indexOf('function FilterOption('), panel.indexOf('function Glyph('));
+  const tpl = /<button type="button" onClick=\{onPick\}[\s\S]*?className=\{`([^`]*)`\}/.exec(option)?.[1];
+  assert.ok(tpl, 'could not find the filter row');
+  const classes = (on: boolean, muted: boolean): string[] =>
+    (new Function('on', 'muted', `return \`${tpl}\`;`)(on, muted) as string).split(/\s+/).filter(Boolean);
+  assert.ok(classes(true, true).includes('text-accent') && !classes(true, true).includes('text-fog-500'),
+    'a chosen row for a source that is not loaded is drawn unchosen');
+  assert.ok(classes(false, true).includes('text-fog-500'), 'a source that is not loaded no longer looks it');
+  assert.ok(classes(true, false).includes('text-accent'));
+  assert.ok(!classes(false, false).includes('text-accent') && !classes(false, false).includes('text-fog-500'));
+  // And Main source hands its rows the source's own state.
+  const section = panel.slice(panel.indexOf('function SourceSection('), panel.indexOf('function GenreRow('));
+  assert.match(section, /<FilterOption key=\{s\.id\} on=\{value === s\.id\}[\s\S]{0,120}?muted=\{!s\.installed\}/, 'the source rows are not muted for a source that is not loaded');
+});
+
+test('the filters are rows that fold, and a folded section still says what it filters by (v0.60.0)', () => {
+  // The owner: "it's so full of pills". Every choice is a FilterOption row in a FilterSection; nothing in the panel is a
+  // chip any more. A folded section names its pick beside its title, so a filter is never on out of sight. Reintroduce a
+  // chip: "the panel draws chips again" fails; drop `picked` from the folded header: "a folded section hides its filter".
+  const panel = code(read('components/LibraryFilters.tsx'));
+  assert.doesNotMatch(panel, /className=\{`?['"]?chip\b|\bchip-active\b/, 'the panel draws chips again');
+  for (const id of ['read', 'status', 'format', 'genres']) assert.match(panel, new RegExp(`<FilterSection id="${id}"`), `${id} is not a folding section`);
+  assert.match(panel, /<SourceSection title=\{tr\('Main source'\)\}[^>]*id="src"/, 'Main source does not fold');
+  assert.match(panel, /<SourceSection title=\{tr\('Any source'\)\}[^>]*id="anysrc"/, 'Any source does not fold');
+  const section = panel.slice(panel.indexOf('function FilterSection('), panel.indexOf('function FilterOption('));
+  assert.match(section, /\{!open && picked && <span[^>]*>\{picked\}<\/span>\}/, 'a folded section hides its filter');
+  assert.match(section, /aria-expanded=\{open\}/, 'the fold key does not say whether it is open');
+  // Per device, read after mount (the static export renders without storage), Any source folded until told otherwise.
+  assert.match(panel, /const FOLD_KEY = 'uchiyomi\.libraryFilterFold';/);
+  assert.match(panel, /const FOLD_DEFAULT = \['anysrc'\];/);
+  assert.match(panel, /useEffect\(\(\) => \{\s*try \{\s*const saved = JSON\.parse\(localStorage\.getItem\(FOLD_KEY\)/, 'the fold is read during render, not after mount');
+  // The walks' handles survive: every choice is still an aria-pressed button, and No source keeps its hook.
+  const option = panel.slice(panel.indexOf('function FilterOption('), panel.indexOf('function Glyph('));
+  assert.match(option, /<button type="button" onClick=\{onPick\} aria-pressed=\{on\}/);
+  assert.match(panel, /attrs=\{\{ 'data-source-none': '' \}\}/, 'No source lost its hook');
 });
 
 test('the Library asks for one card per work, and the card names the work\'s languages (v0.52.0)', () => {

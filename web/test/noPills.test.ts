@@ -88,6 +88,8 @@ const SURFACES = [
   // v0.60.0, the Library's toolbar: its search, its Sort key and menu sheet, the layouts, Select, Select all and the
   // sparkle -- keys all; the filter chips stay chips, in the panel and the active row.
   'components/LibraryToolbar.tsx',
+  // v0.60.0, the owner: the filter panel was "so full of pills". Every choice is a row now; nothing in it is a chip.
+  'components/LibraryFilters.tsx',
   'lib/librarySort.ts',
   'lib/libraryLayout.ts',
 ];

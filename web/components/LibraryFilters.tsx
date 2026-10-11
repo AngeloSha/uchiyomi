@@ -1,10 +1,12 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { FORMAT_KEYS, GenreFacet, sameGenre } from '@/lib/genres';
 import { LibraryRow } from '@/components/AdultToggle';
 import { Img } from '@/components/ui';
+import { IcCheck, IcChevronRight } from '@/components/icons';
+import { SourceIcon } from '@/components/SourcePicker';
 import { keys, t as tr } from '@/lib/i18n';
 
 /**
@@ -25,6 +27,11 @@ import { keys, t as tr } from '@/lib/i18n';
  *
  * State stays in the URL, written through the page's single `setParam`. There is no draft and no Apply: a
  * tap is a navigation, exactly as it was before, so the back button still walks your filters backwards.
+ *
+ * Rows, not chips, since v0.60.0 (the owner: "it's so full of pills"). Every choice is one row -- a glyph, a source's
+ * icon or a cover mosaic, its name, its count where the server counts it, and a tick when it is on -- in a section that
+ * folds; a folded section still names what it is filtering by, so a filter is never on out of sight. The genre rows
+ * were already this; every other section now matches them.
  */
 
 const READ_LABELS = keys('Not started', 'Reading', 'Finished');
@@ -77,8 +84,108 @@ export function useLibrarySources() {
   });
 }
 
-/** How many sources a source section lists before the rest go behind "Show all". */
-const SOURCE_HEAD = 10;
+/** How many sources a source section lists before the rest go behind "Show all". Rows are taller than chips were. */
+const SOURCE_HEAD = 6;
+
+/**
+ * Which sections are folded, on this device (v0.60.0): `uchiyomi.libraryFilterFold`, a list of section ids. Any source
+ * starts folded -- the rarer question of the two source sections. Read after mount, as every device preference here
+ * is: the static export renders without storage, and the first client render must match it.
+ */
+const FOLD_KEY = 'uchiyomi.libraryFilterFold';
+const FOLD_DEFAULT = ['anysrc'];
+export interface Fold { folded: (id: string) => boolean; toggle: (id: string) => void }
+export function useFilterFold(): Fold {
+  const [ids, setIds] = useState<string[]>(FOLD_DEFAULT);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FOLD_KEY) ?? 'null');
+      if (Array.isArray(saved) && saved.every((x) => typeof x === 'string')) setIds(saved);
+    } catch { /* no storage, or not ours: the default */ }
+  }, []);
+  return {
+    folded: (id) => ids.includes(id),
+    toggle: (id) => setIds((now) => {
+      const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+      try { localStorage.setItem(FOLD_KEY, JSON.stringify(next)); } catch { /* the choice lasts this visit */ }
+      return next;
+    }),
+  };
+}
+
+/**
+ * One section: its name as the key that folds it, and while folded, what it is filtering by beside the name (`picked`),
+ * so a filter that is on never hides. `data-filter-section` is the walks' handle.
+ */
+function FilterSection({ id, title, help, picked, fold, children }: {
+  id: string; title: ReactNode; help?: string; picked?: string; fold: Fold; children: ReactNode;
+}) {
+  const open = !fold.folded(id);
+  return (
+    <section data-filter-section={id}>
+      <button type="button" onClick={() => fold.toggle(id)} aria-expanded={open}
+        className="group flex w-full items-center gap-2 rounded-md py-1 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+        <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-fog-500 transition group-hover:text-fog-300">{title}</span>
+        {!open && picked && <span className="min-w-0 truncate text-xs font-medium text-accent">{picked}</span>}
+        <IcChevronRight width={14} height={14} aria-hidden
+          className={`ms-auto shrink-0 text-fog-600 transition-transform duration-200 ${open ? 'rotate-90' : 'rtl:rotate-180'}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5">
+          {help && <p className="mb-1.5 text-[11px] leading-snug text-fog-600">{help}</p>}
+          <div className="space-y-0.5">{children}</div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One choice, as a row: `lead` (a glyph, a source's icon or a cover mosaic), the name, the count where there is one, and
+ * a tick when it is on. A chosen row is drawn chosen whatever else is true of it -- a source that is not loaded is
+ * `muted` only while it is not the one chosen (library.test.ts evaluates this template). Still a `button` with
+ * `aria-pressed`: what the walks click, and what a screen reader says.
+ */
+function FilterOption({ on, onPick, lead, label, count, muted = false, title, attrs }: {
+  on: boolean; onPick: () => void; lead: ReactNode; label: ReactNode; count?: number | null; muted?: boolean; title?: string;
+  attrs?: Record<string, string>;
+}) {
+  return (
+    <button type="button" onClick={onPick} aria-pressed={on} title={title} {...attrs}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-1.5 py-2 text-start text-sm transition lg:py-1.5 ${on ? 'bg-accent-soft font-medium text-accent' : muted ? 'text-fog-500 hover:bg-ink-800/60' : 'text-fog-300 hover:bg-ink-800/60 hover:text-fog-100'}`}>
+      <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center">{lead}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {count != null && <span className={`shrink-0 text-xs tabular-nums ${on ? 'text-accent' : 'text-fog-600'}`}>{count}</span>}
+      {on && <IcCheck width={14} height={14} aria-hidden className="shrink-0" />}
+    </button>
+  );
+}
+
+/**
+ * The read states and the publication statuses, each drawn as a mark on one small ring (16 px, the text's colour): a ring
+ * filling up for how far YOU are (empty, half, full), and a sign inside it for where the SERIES is (playing on, done,
+ * paused, stopped). One family, so the two sections read as a pair rather than as two walls of words.
+ */
+function Glyph({ k }: { k: string }) {
+  const ring = <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />;
+  const inner: Record<string, ReactNode> = {
+    UNREAD: null,
+    IN_PROGRESS: <path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor" />,
+    READ: <circle cx="8" cy="8" r="6" fill="currentColor" />,
+    ONGOING: <path d="M6.6 5.4v5.2L10.8 8Z" fill="currentColor" />,
+    COMPLETED: <path d="m5.4 8.2 1.8 1.8 3.5-3.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />,
+    HIATUS: <path d="M6.6 5.6v4.8M9.4 5.6v4.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />,
+    CANCELLED: <path d="m6 6 4 4M10 6l-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />,
+    NONE: null,
+    LIBRARY: <path d="M5.2 5.5h5.6M5.2 8h5.6M5.2 10.5h3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />,
+  };
+  return (
+    <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden className="shrink-0">
+      {k === 'NONE' ? <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.4 2.2" /> : ring}
+      {inner[k]}
+    </svg>
+  );
+}
 
 /**
  * One source filter: every source with its count, single choice, a tap on the chosen one clears it. The
@@ -86,7 +193,9 @@ const SOURCE_HEAD = 10;
  * Main source ends on "No source" (#149) while series have none, or while it is chosen: after the sources and never
  * behind "Show all", the one choice that is not a source.
  */
-function SourceSection({ title, help, rows, none, count, value, onPick }: {
+function SourceSection({ id, fold, title, help, rows, none, count, value, onPick }: {
+  /** The section's id for folding (`src`, `anysrc`). */
+  id: string; fold: Fold;
   title: string; help: string; rows: LibrarySource[];
   /** How many series have no main source: Main source's alone. */
   none?: number;
@@ -99,29 +208,22 @@ function SourceSection({ title, help, rows, none, count, value, onPick }: {
   const hidden = listed.length - shown.length;
   const noneShown = none !== undefined && (none > 0 || value === NO_SOURCE);
   if (!listed.length && !noneShown) return null;
+  const picked = value === NO_SOURCE ? tr('No source') : rows.find((s) => s.id === value)?.name;
   return (
-    <section>
-      <Eyebrow>{title}</Eyebrow>
-      <p className="-mt-1 mb-1.5 text-[11px] leading-snug text-fog-600">{help}</p>
-      <Chips>
-        {shown.map((s) => (
-          <button key={s.id} type="button" onClick={() => onPick(value === s.id ? '' : s.id)} aria-pressed={value === s.id}
-            title={s.installed ? undefined : tr('not installed')}
-            className={`chip text-xs ${value === s.id ? 'chip-active' : s.installed ? '' : 'text-fog-500'}`}>
-            {s.name}<span className="ms-1 tabular-nums text-fog-600">{count(s)}</span>
-          </button>
-        ))}
-        {noneShown && (
-          <button type="button" onClick={() => onPick(value === NO_SOURCE ? '' : NO_SOURCE)} aria-pressed={value === NO_SOURCE}
-            className={`chip text-xs ${value === NO_SOURCE ? 'chip-active' : ''}`} data-source-none>
-            {tr('No source')}<span className="ms-1 tabular-nums text-fog-600">{none}</span>
-          </button>
-        )}
-      </Chips>
-      {hidden > 0 && (
-        <button type="button" onClick={() => setAll(true)} className="mt-2 text-xs text-accent">{tr('Show all')} ({hidden})</button>
+    <FilterSection id={id} fold={fold} title={title} help={help} picked={picked}>
+      {shown.map((s) => (
+        <FilterOption key={s.id} on={value === s.id} onPick={() => onPick(value === s.id ? '' : s.id)} muted={!s.installed}
+          title={s.installed ? undefined : tr('not installed')}
+          lead={<SourceIcon id={s.id} name={s.name} size={20} registered={s.installed} />} label={s.name} count={count(s)} />
+      ))}
+      {noneShown && (
+        <FilterOption on={value === NO_SOURCE} onPick={() => onPick(value === NO_SOURCE ? '' : NO_SOURCE)}
+          lead={<Glyph k="NONE" />} label={tr('No source')} count={none} attrs={{ 'data-source-none': '' }} />
       )}
-    </section>
+      {hidden > 0 && (
+        <button type="button" onClick={() => setAll(true)} className="mt-1 px-1.5 text-xs text-accent">{tr('Show all')} ({hidden})</button>
+      )}
+    </FilterSection>
   );
 }
 
@@ -130,13 +232,6 @@ const GENRE_HEAD = 20;
 /** Below this many, the search box is noise. */
 const GENRE_SEARCHABLE = 16;
 
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{children}</p>;
-}
-
-function Chips({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap gap-1.5">{children}</div>;
-}
 
 /**
  * A genre, as a row rather than a tile.
@@ -148,29 +243,18 @@ function Chips({ children }: { children: React.ReactNode }) {
  */
 function GenreRow({ facet, on, onToggle }: { facet: GenreFacet; on: boolean; onToggle: () => void }) {
   const ids = facet.covers.slice(0, 4);
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={on}
-      className={`flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-start text-sm transition ${
-        on ? 'bg-accent-soft font-medium text-accent' : 'text-fog-300 hover:bg-ink-800/60 hover:text-fog-100'
-      }`}
-    >
-      <span aria-hidden className={`grid h-7 w-7 shrink-0 overflow-hidden rounded-md border border-ink-700/70
-                                    ${ids.length > 1 ? 'grid-cols-2 grid-rows-2' : ''}`}>
-        {/* ⚠️ The same URL `SeriesTile` asks for, with no `w=` of its own. A different width is a different
-            cache entry, so asking for a smaller one here would DOUBLE the requests rather than save any:
-            these are covers of series that are, by definition, in the grid beside this list. */}
-        {ids.map((id) => (
-          <Img key={id} src={img.seriesThumb(id)} alt="" className="h-full w-full" imgClassName="object-top" />
-        ))}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{facet.label}</span>
-      {/* Omitted rather than faked when the backend cannot count -- Komga exposes no per-genre aggregate. */}
-      {facet.series != null && <span className="shrink-0 text-xs tabular-nums text-fog-600">{facet.series}</span>}
-    </button>
+  const mosaic = (
+    <span className={`grid h-7 w-7 overflow-hidden rounded-md border border-ink-700/70 ${ids.length > 1 ? 'grid-cols-2 grid-rows-2' : ''}`}>
+      {/* ⚠️ The same URL `SeriesTile` asks for, with no `w=` of its own. A different width is a different
+          cache entry, so asking for a smaller one here would DOUBLE the requests rather than save any:
+          these are covers of series that are, by definition, in the grid beside this list. */}
+      {ids.map((id) => (
+        <Img key={id} src={img.seriesThumb(id)} alt="" className="h-full w-full" imgClassName="object-top" />
+      ))}
+    </span>
   );
+  // The count is omitted rather than faked when the backend cannot count -- Komga exposes no per-genre aggregate.
+  return <FilterOption on={on} onPick={onToggle} lead={mosaic} label={facet.label} count={facet.series ?? null} />;
 }
 
 export function LibraryFilters({ read, status, genres, lib, libs, mainSrc, anySrc, onSet }: {
@@ -190,6 +274,7 @@ export function LibraryFilters({ read, status, genres, lib, libs, mainSrc, anySr
   const none = counted?.none ?? 0;
   const [q, setQ] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const fold = useFilterFold();
 
   // The counted list the browse page used, not the bare `/api/genres` the old sheet called. It is the same
   // one request either way, and it is what carries the counts and the cover ids.
@@ -233,86 +318,70 @@ export function LibraryFilters({ read, status, genres, lib, libs, mainSrc, anySr
     return { formats, listed: [...head, ...picked], hidden: matched.length - head.length - picked.length };
   }, [data, q, showAll, genres]);
 
+  const pickedRead = READ_STATES.find((r) => r.key === read);
+  const pickedStatus = STATUSES.find((x) => x.key === status);
+  const pickedFormats = formats.filter((g) => isOn(g.label)).map((g) => g.label);
+  const pickedGenres = genres.filter((g) => !formats.some((f) => sameGenre(f.label, g)));
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Only when there is a choice to make. This lists what the viewer may actually open -- the endpoint
           filters by their grants -- so it doubles as an honest answer to "what do I have access to". */}
       {libs.length > 1 && (
-        <section>
-          <Eyebrow>{tr('Library')}</Eyebrow>
-          <Chips>
-            <button type="button" onClick={() => onSet('lib', '')} aria-pressed={!lib}
-              className={`chip text-xs ${lib ? '' : 'chip-active'}`}>{tr('All')}</button>
-            {libs.map((l) => (
-              <button key={l.id} type="button" onClick={() => onSet('lib', lib === l.id ? '' : l.id)} aria-pressed={lib === l.id}
-                className={`chip text-xs ${lib === l.id ? 'chip-active' : ''}`}>{l.name}</button>
-            ))}
-          </Chips>
-        </section>
+        <FilterSection id="lib" fold={fold} title={tr('Library')} picked={libs.find((l) => l.id === lib)?.name}>
+          <FilterOption on={!lib} onPick={() => onSet('lib', '')} lead={<Glyph k="LIBRARY" />} label={tr('All')} />
+          {libs.map((l) => (
+            <FilterOption key={l.id} on={lib === l.id} onPick={() => onSet('lib', lib === l.id ? '' : l.id)} lead={<Glyph k="LIBRARY" />} label={l.name} />
+          ))}
+        </FilterSection>
       )}
 
-      <section>
-        <Eyebrow>{tr('Read state')}</Eyebrow>
-        <Chips>
-          {READ_STATES.map((r) => (
-            <button key={r.key} type="button" onClick={() => onSet('read', read === r.key ? '' : r.key)} aria-pressed={read === r.key}
-              className={`chip text-xs ${read === r.key ? 'chip-active' : ''}`}>{tr(r.label)}</button>
-          ))}
-        </Chips>
-      </section>
+      <FilterSection id="read" fold={fold} title={tr('Read state')} picked={pickedRead ? tr(pickedRead.label) : undefined}>
+        {READ_STATES.map((r) => (
+          <FilterOption key={r.key} on={read === r.key} onPick={() => onSet('read', read === r.key ? '' : r.key)}
+            lead={<Glyph k={r.key} />} label={tr(r.label)} />
+        ))}
+      </FilterSection>
 
-      <section>
-        <Eyebrow>{tr('Status')}</Eyebrow>
-        <Chips>
-          {STATUSES.map((s) => (
-            <button key={s.key} type="button" onClick={() => onSet('status', status === s.key ? '' : s.key)} aria-pressed={status === s.key}
-              className={`chip text-xs ${status === s.key ? 'chip-active' : ''}`}>{tr(s.label)}</button>
-          ))}
-        </Chips>
-      </section>
+      <FilterSection id="status" fold={fold} title={tr('Status')} picked={pickedStatus ? tr(pickedStatus.label) : undefined}>
+        {STATUSES.map((x) => (
+          <FilterOption key={x.key} on={status === x.key} onPick={() => onSet('status', status === x.key ? '' : x.key)}
+            lead={<Glyph k={x.key} />} label={tr(x.label)} />
+        ))}
+      </FilterSection>
 
       {/* Only with a choice to make: two sources, or for Main source one source and series with none (#149), whose
           "No source" makes two -- a library with no source at all has nothing to narrow. Empty on a Komga backend (no
           sources there, and `none` is 0), so neither section renders and no condition a Komga server would refuse is
           ever sent. */}
       {(sources.length > 1 || (sources.length > 0 && (none > 0 || mainSrc === NO_SOURCE))) && (
-        <SourceSection title={tr('Main source')} help={tr('Series added from this source.')}
+        <SourceSection title={tr('Main source')} help={tr('Series added from this source.')} id="src" fold={fold}
           rows={sources} none={none} count={(s) => s.main} value={mainSrc} onPick={(id) => onSet('src', id)} />
       )}
       {sources.length > 1 && (
-        <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a followed one.')}
+        <SourceSection title={tr('Any source')} help={tr('Series that read from this source, as their main source or a followed one.')} id="anysrc" fold={fold}
           rows={sources} count={(s) => s.any} value={anySrc} onPick={(id) => onSet('anysrc', id)} />
       )}
 
       {formats.length > 0 && (
-        <section>
-          <Eyebrow>{tr('Format')}</Eyebrow>
-          <Chips>
-            {formats.map((g) => (
-              <button key={g.key} type="button" onClick={() => toggleGenre(g.label)} aria-pressed={isOn(g.label)}
-                className={`chip text-xs ${isOn(g.label) ? 'chip-active' : ''}`}>
-                {g.label}{g.series != null && <span className="ms-1 tabular-nums text-fog-600">{g.series}</span>}
-              </button>
-            ))}
-          </Chips>
-        </section>
+        <FilterSection id="format" fold={fold} title={tr('Format')} picked={pickedFormats.join(', ') || undefined}>
+          {formats.map((g) => (
+            <GenreRow key={g.key} facet={g} on={isOn(g.label)} onToggle={() => toggleGenre(g.label)} />
+          ))}
+        </FilterSection>
       )}
 
-      <section>
-        <Eyebrow>
-          {tr('Genres')}
-          {genres.length > 1 && <span className="ms-1 normal-case tracking-normal">{tr('(all of them)')}</span>}
-        </Eyebrow>
+      <FilterSection id="genres" fold={fold}
+        title={<>{tr('Genres')}{genres.length > 1 && <span className="ms-1 normal-case tracking-normal">{tr('(all of them)')}</span>}</>}
+        picked={pickedGenres.join(', ') || undefined}>
         {(data ?? []).length > GENRE_SEARCHABLE && (
           <input value={q} onChange={(e) => setQ(e.target.value)} type="search"
             placeholder={tr('Find a genre')} aria-label={tr('Find a genre')}
             className="field mb-2 w-full py-1.5 text-xs" />
         )}
-        <div className="space-y-0.5">
-          {listed.map((g) => (
-            <GenreRow key={g.key} facet={g} on={isOn(g.label)} onToggle={() => toggleGenre(g.label)} />
-          ))}
-        </div>
+        {listed.map((g) => (
+          <GenreRow key={g.key} facet={g} on={isOn(g.label)} onToggle={() => toggleGenre(g.label)} />
+        ))}
         {!data && <p className="text-xs text-fog-500">{tr('Loading…')}</p>}
         {/* Two different nothings. "No match" is an answer to a search; a library whose series carry no
             genres at all has not been searched, and telling it that nothing matched is a small lie. */}
@@ -322,11 +391,11 @@ export function LibraryFilters({ read, status, genres, lib, libs, mainSrc, anySr
           </p>
         )}
         {hidden > 0 && (
-          <button type="button" onClick={() => setShowAll(true)} className="mt-2 text-xs text-accent">
+          <button type="button" onClick={() => setShowAll(true)} className="mt-1 px-1.5 text-xs text-accent">
             {tr('Show all')} ({hidden})
           </button>
         )}
-      </section>
+      </FilterSection>
     </div>
   );
 }
