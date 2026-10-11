@@ -35,6 +35,10 @@ export const IcCloudDownload = (p: P) => (
 export const IcUser = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
 );
+/** People: how many readers have a series on a list (v0.60.0, the AniList tile and the Library's popularity value). */
+export const IcUsers = (p: P) => (
+  <svg {...base(p)}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c0-3.6 3-5.5 6.5-5.5s6.5 1.9 6.5 5.5" /><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8" /><path d="M17.5 14.8c2.4.5 4 2.3 4 5.2" /></svg>
+);
 export const IcHeart = (p: P) => (
   <svg {...base(p)}><path d="M12 20s-7-4.6-9.2-9C1.3 8 2.6 4.8 6 4.8c2 0 3.2 1.2 4 2.4.8-1.2 2-2.4 4-2.4 3.4 0 4.7 3.2 3.2 6.2C19 15.4 12 20 12 20Z" /></svg>
 );
