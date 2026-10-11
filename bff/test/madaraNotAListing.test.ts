@@ -26,7 +26,7 @@ before(async () => {
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
       const { url } = JSON.parse(body || '{}');
-      const html = String(url).startsWith('https://gone.example') ? HOME : SEARCH;
+      const html = new URL(String(url)).hostname === 'gone.example' ? HOME : SEARCH;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', message: '', solution: { url, status: 200, response: html, cookies: [], userAgent: 'UA' } }));
     });
