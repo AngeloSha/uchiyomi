@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.60.0 — 2026-10-11
+
+**A calmer, cooler series page and Library, and ratings said once.**
+
+### The series page
+
+- **One button to read:** *Continue · Ch. 42* when a chapter is half read, *Next · Ch. 11* after chapters 1–10, *Start
+  reading* the first time, and *Read again* once everything is read. A line under it says how far you are.
+- **Four keys** under it: Favourite, Offline, List and **More**. Everything else (notes, mark all read, find missing
+  chapters, archive slowly, copy link, and the admin tools) is in More, in groups. Before, up to twelve buttons were
+  stacked under the cover, and on a short screen an admin's bottom ones could not be reached.
+- On a phone, a small bar with Continue, the heart and More stays at hand while you scroll the chapters.
+
+### The Library
+
+- A **toolbar**: search your library, one **Sort** menu where every order runs both ways (*Newest first* or *Oldest
+  first*, *A–Z* or *Z–A*, …), and **Grid, Compact or List**, remembered on each device. The sidebar keeps the filters.
+- **Covers show how far you are**: a thin progress bar along the bottom edge, and squared unread tags.
+- Changing a sort, filter or search keeps the grid on screen until the new one arrives, instead of blanking it, and a
+  library that fails to load says so, with Try again.
+- **The filters are rows, not pills.** Each choice has its own mark (a ring that fills for read state, a sign for status,
+  the source's icon, a cover mosaic for formats and genres), its count, and a tick when it is on. Sections fold, and a
+  folded one still says what it is filtering by.
+
+### Ratings, said once
+
+- The series page shows AniList's score and how many readers list it, beside **your own stars**, in one panel. Before,
+  both appeared up to three times on the same page.
+- The AniList tile opens the series' AniList page.
+- Tap your current star again to **clear your rating**. A rating that could not be saved now says so.
+- Library and Home cards show a score as ★ 84 and popularity as a count of readers.
+
+### Sources
+
+- A site added by address that has stopped answering a real search (its search now lands on its homepage) fails its
+  search, Newest and Popular instead of showing that homepage's titles as results.
+
+### Upgrading
+
+- **Database:** no changes.
+- **For scripts** ([api.md](docs/api.md)): `yomi.anilist` carries the AniList entry's `id`; `PUT /api/settings` accepts
+  `librarySortDir: 'asc' | 'desc' | null`.
+
 ## v0.59.0 — 2026-10-11
 
 **Discover loads its sources more reliably, and a source you switched off no longer takes a working one's place.**

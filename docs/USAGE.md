@@ -79,9 +79,14 @@ two-factor auth, you'll be asked for your 6-digit code (or a recovery code) afte
 
 ![Library](shots/library.webp)
 
-The **Library** tab is your whole collection, and every way to narrow it lives in one filter panel:
-sorting, which library, read state, publication status, format and genre. On a laptop the panel sits down
-the left of the grid; on a phone it opens from **Filters** at the top. Genres are listed biggest-first with
+The **Library** tab is your whole collection. Since v0.60.0 a **toolbar** sits above the grid: **Search your library**
+(narrows the shelf by title, filters and sort kept), the **Sort** key, the **Grid / Compact / List** switch (remembered on
+each device), **Select** and ✦ **Surprise me**. Every way to narrow it lives in one filter panel: which library, read
+state, publication status, format and genre. On a laptop the panel sits down the left of the grid; on a phone it opens
+from **Filters** in the toolbar. Since v0.60.0 its choices are rows rather than chips: each with its own mark (a ring
+that fills for read state, a sign for status, the source's icon, a cover mosaic for formats and genres), its count, and
+a tick when it is on. Tap a section's name to fold it; a folded section still names what it filters by, and the folds
+are remembered on each device (**Any source** starts folded). Genres are listed biggest-first with
 how many series each holds, and formats (Manhwa, Manhua, Webtoon…) are kept separate from moods like Horror
 and Romance. Picking two genres shows series that are in **both**. With more than one source in the
 library, two more sections appear: **Main source** shows the series added from a source, and **Any source**
@@ -91,12 +96,16 @@ folders you added by hand, and anything never matched to a site — and then app
 source that went away, or for the series with none, an admin can filter by it under **Main source**, then **Select** →
 **Select all** → **More** → **Find other sources** (section 4); *Select all* takes what the grid has loaded, so scroll
 to the end first. Each cover shows a **NEW** ribbon when
-there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
+there are unread chapters, and since v0.60.0 a thin bar along its bottom edge for how much of it you have read (the
+accent colour once you have read it all). Changing a sort, a filter or the search keeps the grid on screen until the new
+one has arrived, and a library that fails to load says so, with **Try again**. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
 filters currently show.
 
-Since v0.55.8 ([discussion #150](https://github.com/AngeloSha/uchiyomi/discussions/150)), the sort you click —
+Since v0.55.8 ([discussion #150](https://github.com/AngeloSha/uchiyomi/discussions/150)), the sort you pick —
 **Updated**, **Newest**, **A–Z**, **Most unread** and, since v0.58.0, **Most popular**, **Top rated**, **My rating**,
-**Most chapters** and **Recently read** — becomes this account's Library default on every device. Most popular and Top
+**Most chapters** and **Recently read**, grouped in the toolbar's **Sort** menu since v0.60.0 — becomes this account's
+Library default on every device, and so does its order: since v0.60.0 every sort runs both ways (*Newest first* or
+*Oldest first*, *Most first* or *Fewest first*, *A–Z* or *Z–A*). Most popular and Top
 rated come from AniList (how many people list a series there, and its score), for every series linked to its AniList
 entry; the rest sort after them until they are linked. With one of the new sorts, each card says the number it is
 sorted by. Your own stars stay as they are — **My rating** sorts by them — and the series page shows AniList's score
@@ -218,17 +227,25 @@ order leaves it alone; Edit a chapter gives it one number instead.
 The series page shows the cover, an ambient backdrop, one muted line about where the chapters come from,
 genres, description, and the **chapter list**.
 
-- **Start reading** jumps to where you left off (or chapter 1). A series with no chapter on disk yet shows
-  *Nothing to read yet* instead (see *Chapters the sources have that you don't*).
-  The line under the button names the chapter it opens — *Ch. 12 · The Sound of Thunder · page 7 of 23*
-  when you are part-way through one — so *Continue* is never a guess.
+- **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
+  one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the
+  first time, and *Read again* once everything is read. A series with no chapter on disk yet shows *Nothing to read yet*
+  instead (see *Chapters the sources have that you don't*). The line under it names the page you stopped on, and a bar
+  says how many chapters you have read (*9 of 24 read*). On a phone, once you scroll past it, a small bar with the same
+  button, the heart and **More** stays above the bottom navigation.
+- **Ratings** sit in one panel: **AniList**'s score out of 100 and how many readers list the series there (tap it to
+  open the series on AniList), beside **Your rating**. Tap a star to rate; tap your current star again to clear it.
 - **Chapter names.** A row reads *Ch. 12 · The Sound of Thunder* when the source names its chapters. The
   name is taken when a chapter is downloaded, and chapters downloaded before this was kept pick theirs up
   on the series' next source check (nightly, or **Check now**). Many sources only ever say *Chapter 12*;
   those rows show the number alone, since repeating it adds nothing — unless you switch on **borrowing**
   (below), which takes the names from another source.
-- **Favorite** (heart) adds it to your favorites + smart offline sync.
-- **Save all offline** copies every chapter to this device for reading with no connection.
+- Four keys sit under the cover (since v0.60.0): **Favourite** (heart; adds it to your favourites and smart offline
+  sync), **Offline** (*Save all offline*: copies every chapter to this device for reading with no connection), **List**
+  (*Add to collection*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
+  or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters), *Share* (copy
+  the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
+  library*. On a computer it opens as a menu, on a phone as a sheet.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
   **Oldest/Newest** to flip the order.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
@@ -260,11 +277,10 @@ source, an extension and a translation group are, in five lines.
 
 Progress, favorites, and history are **per-user**, so each account has its own.
 
-**Filtering the library.** The Library page has a **Filters** button: read state (not started / reading /
-finished), publication status, genres, and the source a series comes from
+**Filtering the library.** The Library's filter panel (a sidebar on a computer, **Filters** on a phone): read state
+(not started / reading / finished), publication status, genres, and the source a series comes from
 (**Main source** / **Any source**). Picking several genres means all of them. Active filters show as
-chips under the header with a count, and they live in the URL, so the back button works and you can share a
-filtered view.
+removable tags above the grid, and they live in the URL, so you can share a filtered view.
 
 **Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
 bar at the bottom shows what can be done with them. **Select all**, beside *Done*, takes every series loaded
