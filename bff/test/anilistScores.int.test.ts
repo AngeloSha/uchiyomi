@@ -152,8 +152,9 @@ test('every series says its outside rating and when it was last read, beside the
   await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1, 'b_s_sc_big_1', 's_sc_big', 0, true)`, [user]);
   const r = await app.inject({ method: 'POST', url: '/api/series/search', headers: H, payload: { sort: 'score,desc', size: 100 } });
   const byId = new Map((r.json().content as any[]).map((s) => [s.id, s]));
-  // Reintroduce by dropping the field in enrichSeries: undefined.
-  assert.deepEqual(byId.get('s_sc_big').yomi.anilist, { score: 84, popularity: 312000 });
+  // Reintroduce by dropping the field in enrichSeries: undefined. v0.60.0: with the entry's id, which the series page's
+  // AniList tile links to -- reintroduce without it and the id is missing.
+  assert.deepEqual(byId.get('s_sc_big').yomi.anilist, { id: '101', score: 84, popularity: 312000 });
   assert.equal(byId.get('s_sc_big').yomi.rating, 4, 'the own rating is kept');
   assert.match(String(byId.get('s_sc_big').yomi.lastReadAt), /^\d{4}-\d\d-\d\dT/);
   assert.equal(byId.get('s_sc_unchecked').yomi.anilist, null, 'an unchecked link shows no outside rating');

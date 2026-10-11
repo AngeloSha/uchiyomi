@@ -123,17 +123,24 @@ async function seriesProgress(userId: string, seriesIds: string[]): Promise<Map<
 /**
  * v0.58.0: each series' outside rating, from the AniList entry it is linked to (lib/anilistScores.ts) -- the checked
  * link only, as the sorts read it. Absent: no checked link, or no score fetched yet, or AniList answered nothing.
+ * v0.60.0: and the entry's id, so the series page's AniList tile opens that entry on anilist.co. Reintroduce without
+ * it: "every series says its outside rating" in anilistScores.int.test.ts reads no id.
  */
-async function anilistScores(seriesIds: string[]): Promise<Map<string, { score: number | null; popularity: number | null }>> {
+export interface OutsideRating { id: string; score: number | null; popularity: number | null }
+async function anilistScores(seriesIds: string[]): Promise<Map<string, OutsideRating>> {
   if (!seriesIds.length) return new Map();
-  const rows = await q<{ series_id: string; score: number | null; popularity: number | null }>(
-    `SELECT t.series_id, a.score, a.popularity
+  const rows = await q<{ series_id: string; anilist_id: string; score: number | null; popularity: number | null }>(
+    `SELECT t.series_id, t.external_id AS anilist_id, a.score, a.popularity
        FROM series_trackers t JOIN anilist_scores a ON a.anilist_id = t.external_id
       WHERE t.series_id = ANY($1) AND t.provider = 'anilist' AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
         AND (a.score IS NOT NULL OR a.popularity IS NOT NULL)`,
     [seriesIds],
-  ).catch(() => [] as Array<{ series_id: string; score: number | null; popularity: number | null }>);
-  return new Map(rows.map((r) => [r.series_id, { score: r.score == null ? null : Number(r.score), popularity: r.popularity == null ? null : Number(r.popularity) }]));
+  ).catch(() => [] as Array<{ series_id: string; anilist_id: string; score: number | null; popularity: number | null }>);
+  return new Map(rows.map((r) => [r.series_id, {
+    id: String(r.anilist_id),
+    score: r.score == null ? null : Number(r.score),
+    popularity: r.popularity == null ? null : Number(r.popularity),
+  }]));
 }
 
 /**

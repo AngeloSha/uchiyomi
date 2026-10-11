@@ -874,6 +874,14 @@ export default async function personalRoutes(app: FastifyInstance) {
       if (!sort.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose a valid Library sort.' });
       data.librarySort = sort.data;
     }
+    // v0.60.0: the Library's sort order, High to low or Low to high (web/components/LibraryToolbar.tsx); null goes back to
+    // the sort's own direction. It reaches the catalogue query as `field,asc|desc`, so only these. Reintroduce by
+    // accepting anything: "a sort order other than asc or desc" in settingsV558.int.test.ts saves it.
+    if ('librarySortDir' in data && data.librarySortDir !== null) {
+      const dir = z.enum(['asc', 'desc']).safeParse(data.librarySortDir);
+      if (!dir.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose High to low or Low to high.' });
+      data.librarySortDir = dir.data;
+    }
     if ('showAllChapters' in data && typeof data.showAllChapters !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Show all chapters must be on or off.' });
     }

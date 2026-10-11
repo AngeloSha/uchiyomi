@@ -45,16 +45,21 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
   try {
     const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/settings', headers: auth, payload });
 
-    const ok = await put({ librarySort: 'unread', showAllChapters: true, homeCollections: [owned[1], owned[0], owned[1]], futureSetting: { kept: true } });
+    const ok = await put({ librarySort: 'unread', librarySortDir: 'asc', showAllChapters: true, homeCollections: [owned[1], owned[0], owned[1]], futureSetting: { kept: true } });
     assert.equal(ok.statusCode, 200, ok.body);
     const saved = (await app.inject({ method: 'GET', url: '/api/settings', headers: auth })).json();
     assert.equal(saved.librarySort, 'unread');
+    assert.equal(saved.librarySortDir, 'asc', 'v0.60.0: the Library sort order');
+    const back = await put({ librarySortDir: null });
+    assert.equal(back.statusCode, 200, 'null goes back to the sort\'s own direction');
     assert.equal(saved.showAllChapters, true);
     assert.deepEqual(saved.homeCollections, [owned[1], owned[0]], 'deduplicated without changing order');
     assert.deepEqual(saved.futureSetting, { kept: true }, 'unknown settings remain forwards-compatible');
 
     for (const payload of [
       { librarySort: 'oldest' },
+      // v0.60.0: a sort order other than asc or desc. Reintroduce by accepting anything: saved, 200.
+      { librarySortDir: 'sideways' },
       { showAllChapters: 'yes' },
       { homeCollections: owned },
       { homeCollections: [foreign] },

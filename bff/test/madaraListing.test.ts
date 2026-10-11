@@ -7,7 +7,7 @@
 // stock Madara's `tab-thumb`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseResults } from '../src/lib/sources/engines/madara';
+import { parseResults, isListingPage } from '../src/lib/sources/engines/madara';
 
 // Verbatim shape from manhuaplus.org.
 const ITEM_THUMB = `
@@ -189,4 +189,23 @@ test('the alt-titled fallback still works when there is genuinely no heading', (
   // site was stored under. Making it faithful to the markup would orphan all of them for a cosmetic gain.
   // The bug was never the shape -- it was the two shapes being compared to each other.
   assert.equal(out[0].url, 'https://example.org/manga/only-a-thumb');
+});
+
+// ---- v0.60.0: a page that is not a listing --------------------------------------------------------------------------
+// The body tags as the sites send them (2026-10-11): MangaRead's and ManhuaUS's search, Newest and Popular pages, and
+// what ManhuaPlus now answers a search with -- its /home, no longer Madara.
+const SEARCH_BODY = '<body class="archive search search-results post-type-archive post-type-archive-wp-manga wp-embed-responsive wp-manga-page page header-style-1 is-sidebar text-ui-dark">';
+const MANHUAPLUS_HOME = `<html><head><title>Manhuaplus - Read Manga Fastest and highest quality updates</title></head><body id='modeSwitch'>${ITEM_THUMB}${ITEM_THUMB}</body></html>`;
+
+test('a listing page is a search or the manga archive, by what WordPress marks its body', () => {
+  assert.equal(isListingPage(`<html>${SEARCH_BODY}<div class="c-tabs-item__content"></div></body></html>`), true, 'a Madara search page');
+  assert.equal(isListingPage('<body class="archive post-type-archive post-type-archive-wp-manga">'), true,
+    'the manga archive an empty search can redirect to');
+  assert.equal(isListingPage('<body class="search search-no-results">'), true, 'a search that found nothing is still a listing');
+  assert.equal(isListingPage(MANHUAPLUS_HOME), false, "ManhuaPlus's /home: no class at all");
+  assert.equal(isListingPage('<body class="home page-template-default page">'), false, "a WordPress site's front page");
+  assert.equal(isListingPage('<body class="researchers">'), false, 'a class that only contains the word');
+  assert.equal(isListingPage(ITEM_THUMB), true, 'no <body> to judge by: left to the parser, as before');
+  // PREMISE: the homepage's widgets do parse as results -- which is exactly what reached the wall and the search.
+  assert.ok(parseResults(MANHUAPLUS_HOME, 'manhuaplus').length > 0, 'PREMISE: the widgets parse');
 });
