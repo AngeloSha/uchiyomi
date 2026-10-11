@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { join } from 'path';
 import { DESKTOP_HIDDEN } from '../lib/desktop';
+import { offlineKeyShown } from '../lib/seriesActions';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -202,10 +203,15 @@ test('Admin → Settings hides registration, the install count and the Mihon row
 });
 
 test('"Save offline" and the Offline tab are hidden on desktop, and smart offline never runs there', () => {
-  // The chapters ARE on this disk; copying them into the window's storage stores every one twice. Reintroduce
-  // by dropping `!isDesktop() &&` from "Save all offline": "Save all offline shows on desktop" fails.
+  // The chapters ARE on this disk; copying them into the window's storage stores every one twice. Since v0.60.0
+  // "Save all offline" is the series page's Offline key, drawn when lib/seriesActions.ts offlineKeyShown says so.
+  // Reintroduce it on desktop -- drop `!x.desktop` there, or draw the key without asking it -- and "Save all offline
+  // shows on desktop" fails.
   const series = code(read('app/series/page.tsx'));
-  assert.match(series, /\{!nothingYet && !isDesktop\(\) && \(/, 'Save all offline shows on desktop');
+  assert.match(series, /\{offlineKeyShown\(\{ nothingYet, desktop: isDesktop\(\) \}\) && \(\s*<SeriesKey [\s\S]{0,300}?name=\{downloadingAll \? tr\('Saving…'\) : tr\('Save all offline'\)\}/,
+    'Save all offline shows on desktop');
+  assert.equal(offlineKeyShown({ nothingYet: false, desktop: true }), false, 'Save all offline shows on desktop');
+  assert.equal(offlineKeyShown({ nothingYet: false, desktop: false }), true, 'Save all offline is gone from the server build too');
   assert.match(series, /\{!isDesktop\(\) && <button\s+onClick=\{async \(\) => \{\s*if \(busy\) return;\s*setBusy\(true\);\s*try \{ await onToggleDownload\(\); \}/, 'a chapter row offers Save offline on desktop');
   assert.match(series, /\{!isDesktop\(\) && <button disabled=\{acting \|\| !saveable\.length\} onClick=\{bulkSave\}/, 'select mode offers Save offline on desktop');
   // The nav and the palette keep the entries (the server build shows them) and filter them on desktop.

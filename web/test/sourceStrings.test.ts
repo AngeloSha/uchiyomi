@@ -215,7 +215,8 @@ test("Admin → Extensions → Languages and the Offline page say nothing in bar
   assert.doesNotMatch(code(offline), /label: '[A-Z]/, 'a bare English button label on the Offline page');
   // The counts beside them, one pair each (localeCoverage.test.ts holds every pair in the app to its other half).
   assert.match(read('app/library/page.tsx'), /total === 1 \? tr\('1 series'\) : tr\('\{n\} series', \{ n: total \}\)/, 'the library counts its series in English');
-  assert.match(read('app/series/page.tsx'), /momentCount === 1 \? tr\('1 saved page'\)/, '"1 saved pages" on the series page');
+  // The series page's notes door is More's since v0.60.0 (lib/seriesActions.ts notesLabel).
+  assert.match(read('lib/seriesActions.ts'), /counts\.moments === 1 \? tr\('1 saved page'\)/, '"1 saved pages" on the series page');
   assert.match(read('components/SourcePicker.tsx'), /count === 1 \? tr\('1 source'\)/, '"All sources · 1 sources" on Discover');
 });
 

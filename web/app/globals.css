@@ -264,6 +264,18 @@
     @apply border-accent/35 bg-accent-soft text-accent hover:border-accent/70 hover:text-accent
            disabled:hover:border-accent/35 disabled:hover:text-accent;
   }
+  /* The series page's reading button (v0.60.0): the accent key, lit by the series' own cover colour -- `--cover`, which
+     lib/theme.ts applyCover sets while a series is open, else the accent. After `.btn-accent` in this layer, so its
+     plain accent shadow gives way to this one; Reduce effects puts the plain one back (below, unlayered). A still
+     shadow: nothing here animates but the hover, which the reduced-motion rule already cuts short. */
+  .cta-glow {
+    box-shadow: 0 10px 34px -12px rgb(var(--cover, var(--accent)) / 0.85), 0 0 26px -8px rgb(var(--cover, var(--accent)) / 0.5),
+      0 0 0 1px rgb(var(--cover, var(--accent)) / 0.3);
+  }
+  .cta-glow:hover {
+    box-shadow: 0 12px 40px -10px rgb(var(--cover, var(--accent)) / 0.95), 0 0 34px -6px rgb(var(--cover, var(--accent)) / 0.6),
+      0 0 0 1px rgb(var(--cover, var(--accent)) / 0.45);
+  }
   .card {
     @apply rounded-3xl border border-ink-700/70 bg-ink-850/70 backdrop-blur;
   }
@@ -381,6 +393,9 @@ html.reduce-effects .skeleton::after { animation: none; display: none; }
    scrolled at 32 fps in headless Firefox, and at 59.5 with only these rings gone. Every element wearing one
    keeps its own plain border underneath, so nothing loses its edge -- only the accent glint on it. */
 html.reduce-effects .grad-border::before { display: none; }
+/* The reading button's cover-coloured glow (v0.60.0) goes back to the plain accent shadow every `.btn-accent` wears. */
+html.reduce-effects .cta-glow,
+html.reduce-effects .cta-glow:hover { box-shadow: 0 8px 30px -10px rgb(var(--accent) / 0.7); }
 
 /* Lenis momentum scroll */
 html.lenis, html.lenis body { height: auto; }

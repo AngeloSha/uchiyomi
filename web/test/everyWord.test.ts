@@ -303,6 +303,7 @@ const NOT_TEXT: { file: string; text: string; why: string }[] = [
   { file: 'components/CommandPalette.tsx', text: 'esc', why: 'the key cap of the Escape key, as keyboards print it' },
   { file: 'components/Brand.tsx', text: 'uchiyomi', why: 'the wordmark' },
   { file: 'app/admin/page.tsx', text: 'Uchiyomi', why: 'the product name before its version at the foot of the admin menu' },
+  { file: 'components/RatingsPanel.tsx', text: 'AniList', why: 'the service\'s name over its own score on the series page (v0.60.0), as every language writes it' },
 ];
 
 /** Literals a `{…}` child shows that are not words to translate, with where and why. */

@@ -305,6 +305,34 @@ test('every consumer honours the switch', () => {
   assert.match(toast, /exit=\{reduced \? \{ opacity: 0, transition: \{ duration: 0 \} \}/, 'Toast.tsx still slides out under Reduce effects');
 });
 
+test("the series page's new motion and glow (v0.60.0) are the default look, and step aside for the switch and for reduced motion", () => {
+  // The phone's Continue bar slides up, the favourite heart pops, AniList's meter grows in, and the reading button
+  // glows in the series' cover colour. Each reads BOTH settings on every render, as Toast.tsx does, and draws still
+  // under either. Reintroduce `initial={{ opacity: 0, y: 16 }}` on the bar, or drop the heart's `reduced ||`: the
+  // matching assertion fails.
+  const both = /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/;
+  const bar = code(read('components/ContinueBar.tsx'));
+  assert.match(bar, both, 'ContinueBar.tsx reads the motion settings conditionally, or only one of them');
+  assert.match(bar, /initial=\{reduced \? false : \{ opacity: 0, y: \d+ \}\}/, 'the Continue bar still slides in under Reduce effects');
+  assert.match(bar, /exit=\{reduced \? undefined : \{ opacity: 0, y: \d+ \}\}/, 'the Continue bar still slides out under Reduce effects');
+  assert.match(bar, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.2\d/, 'the Continue bar still animates under Reduce effects');
+  const keys = code(read('components/SeriesKeys.tsx'));
+  assert.match(keys, both, 'SeriesKeys.tsx reads the motion settings conditionally, or only one of them');
+  assert.match(keys, /initial=\{reduced \|\| pops === 0 \? false : \{ scale: [\d.]+ \}\}/, 'the heart still pops under Reduce effects, or pops on arrival');
+  assert.match(keys, /transition=\{reduced \? \{ duration: 0 \} : \{ type: 'spring'/);
+  const panel = code(read('components/RatingsPanel.tsx'));
+  assert.match(panel, both, 'RatingsPanel.tsx reads the motion settings conditionally, or only one of them');
+  assert.match(panel, /initial=\{reduced \? false : \{ scaleX: 0 \}\}/, 'the AniList meter still grows in under Reduce effects');
+  // The glow: the default in the components layer, after `.btn-accent` whose plain shadow it replaces; the switch puts
+  // the plain one back, unlayered as every Reduce effects rule is.
+  const rules = CSS();
+  const glow = rules.find((r) => r.sel === '.cta-glow' && r.ctx.join('|') === '@layer components');
+  assert.ok(glow && /rgb\(var\(--cover, var\(--accent\)\) \/ 0\.\d+\)/.test(flat(glow.body)), 'the reading button is not lit in the cover colour by default');
+  const plainGlow = rules.find((r) => r.ctx.length === 0 && r.sel.split(',').map((x) => x.trim()).includes('html.reduce-effects .cta-glow'));
+  assert.ok(plainGlow && /box-shadow: 0 8px 30px -10px rgb\(var\(--accent\) \/ 0\.7\)/.test(flat(plainGlow.body)), 'Reduce effects leaves the cover glow on');
+  assert.match(code(read('components/ContinueBar.tsx')), /\$\{disabled \? '' : 'cta-glow'\}/, 'the reading button does not wear the glow');
+});
+
 /* ================================================================ the setting itself */
 
 test('the Appearance section has the Reduce effects switch, and it saves to the account', () => {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3561
+    "strings": 3575
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3564,5 +3564,19 @@
   "AniList {score}%": "AniList {score}%",
   "Average score on AniList, and how many people there have it on a list": "AniList 上的平均评分，以及在那里把它加入列表的人数",
   "Still loading": "仍在加载",
-  "Asking every source · tap one to browse it alone": "正在查询所有来源 · 点按一个来源即可只浏览它"
+  "Asking every source · tap one to browse it alone": "正在查询所有来源 · 点按一个来源即可只浏览它",
+  "Continue · {chapter}": "继续阅读 · {chapter}",
+  "Next · {chapter}": "接着读 · {chapter}",
+  "Read again": "重新阅读",
+  "page {page} of {pages}": "第 {page} 页，共 {pages} 页",
+  "{read} of {total} read": "已读 {read} / {total}",
+  "Your rating": "我的评分",
+  "Rate {n} of 5": "评为 {n} 分（满分 5 分）",
+  "Tap again to clear": "再点一次即可清除",
+  "Could not save your rating": "无法保存你的评分",
+  "1 reader": "1 位读者",
+  "{n} readers": "{n} 位读者",
+  "List": "列表",
+  "Notes and saved pages": "笔记和已保存的页面",
+  "Share": "分享"
 }

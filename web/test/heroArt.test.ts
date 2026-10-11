@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { autoHeroUrl, backdropSources, backdropUrl } from '../lib/art';
+import { seriesActionGroups, type SeriesActionsInput } from '../lib/seriesActions';
 
 const GENRE = '/art/bg/action.webp';
 
@@ -59,14 +60,21 @@ test('a portrait hero asks for the two-by-two frame; a wide one and the series p
 });
 
 test('the series page offers New banner to an admin, and only while the hero is an automatic one', () => {
-  // A real banner is changed in Edit details; Shuffle answers 409 for it. Reintroduce by dropping the
-  // `series?.autoHero &&` around the button: the assertion below fails.
+  // A real banner is changed in Edit details; Shuffle answers 409 for it. Since v0.60.0 New banner is an item of the
+  // page's More (its Admin group), and lib/seriesActions.ts decides who sees it. Reintroduce by offering it without the
+  // automatic hero (drop `x.autoHero ?` there), or to someone who is not an admin: the assertions below fail.
+  const ids = (x: SeriesActionsInput) => seriesActionGroups(x).flatMap((g) => g.items.map((i) => i.id));
+  const admin: SeriesActionsInput = { isAdmin: true, mayDownload: true, booksCount: 12, mayArchive: false, autoHero: true, hasFolder: false };
+  assert.ok(ids(admin).includes('newBanner'), 'the New banner item is gone');
+  assert.ok(!ids({ ...admin, autoHero: false }).includes('newBanner'), 'New banner must be offered only while the hero is an automatic one');
+  assert.ok(!ids({ ...admin, isAdmin: false }).includes('newBanner'), 'New banner is offered outside the admin actions');
+  assert.equal(seriesActionGroups(admin).find((g) => g.items.some((i) => i.id === 'newBanner'))?.id, 'admin', 'New banner sits outside the admin group');
+  // Its row keeps the hook the key had (`data-new-banner`, components/SeriesKeys.tsx draws `data-${hook}`), and the
+  // page hands it the payload's flag and runs the shuffle for it.
+  assert.equal(seriesActionGroups(admin).flatMap((g) => g.items).find((i) => i.id === 'newBanner')?.hook, 'new-banner');
   const src = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
-  const at = src.indexOf('data-new-banner');
-  assert.ok(at > 0, 'the New banner button is gone');
-  const admin = src.lastIndexOf('{isAdmin && (', at);
-  assert.ok(admin > 0, 'New banner sits outside the admin actions');
-  assert.match(src.slice(admin, at), /\{series\?\.autoHero && \(\s*<button[^>]*$/, 'New banner must be offered only while the hero is an automatic one');
+  assert.match(src, /autoHero: !!series\?\.autoHero,/, 'the page does not say whether the hero is the automatic one');
+  assert.match(src, /case 'newBanner': void newBanner\(\); break;/, 'the item does not make a new banner');
   assert.match(src, /\/api\/admin\/series\/\$\{encodeURIComponent\(id\)\}\/hero\/shuffle/);
   // v0.52.0: the pages give no other banner (`same`), and the page says so rather than "Banner changed" over the same
   // picture. Reintroduce by dropping the `same` branch: the toast below is gone.
