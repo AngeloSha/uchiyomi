@@ -6053,6 +6053,9 @@ paths:
       tags:
         - opds
       summary: Root navigation feed.
+      description: >-
+        Per reader since v0.61.0: Keep reading, the three series feeds, Favourites, then one entry per List the reader
+        may read -- their own, and those shared with the household that show them a series ("List · Owner").
       operationId: getOpds
       security:
         - opdsBasic: []
@@ -6162,6 +6165,69 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /opds/continue:
+    get:
+      tags:
+        - opds
+      summary: "Keep reading: the chapter Home offers for each series this reader is reading, newest read first."
+      description: Since v0.61.0. Chapters, each with its CBZ link and an OPDS-PSE stream link carrying `pse:lastRead`.
+      operationId: getOpdsContinue
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/favorites:
+    get:
+      tags:
+        - opds
+      summary: This reader's favourites, newest first, paged sixty at a time.
+      description: Since v0.61.0. Series entries; 18+ titles only when the token's 18+ switch allows them.
+      operationId: getOpdsFavorites
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/lists/{id}:
+    get:
+      tags:
+        - opds
+      summary: One List's series as this reader may see them, paged sixty at a time.
+      description: >-
+        Since v0.61.0. The reader's own List or one shared with the household (a smart list answered for this reader);
+        anything else, a malformed id included, is 404.
+      operationId: getOpdsListsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /opds/series/{id}:
     get:
       tags:

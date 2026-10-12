@@ -2553,6 +2553,14 @@ them:
 `<updated>` is honest: a series carries its newest chapter's time, a chapter its own, and a feed the newest
 of its entries. It used to be "now" on every fetch, which defeated readers' change detection.
 
+**Personal shelves** (since v0.61.0). The root is the reader's own: *Keep reading* (`/opds/continue`: the chapter
+Home's Keep reading offers for each series they are reading, newest read first, each a CBZ and a page stream with
+`pse:lastRead`), the three series feeds, *Favourites* (`/opds/favorites`, newest favourite first, sixty to a page),
+then one entry per List they may read -- their own, and those other members share with the household that show them
+at least one series, titled "List · Owner" -- each `/opds/lists/:id`, sixty to a page with a `next` link (a smart list
+answered for this reader, in its saved order). Another member's private List, or a malformed id, is **404**. Every
+shelf goes through the token's viewer, so its 18+ switch and the account's libraries and age cap apply.
+
 **The cover proxy.** `GET /img/sources/cover?u=<url>&source=<id>&w=400|800|1600` fetches a remote cover
 same-origin, resized to WebP, so a Discover tile never loads a third-party image in the browser. `u` is
 caller-supplied and is fetched through the SSRF guard: a value that is not an `http(s)` URL, or that
@@ -2618,6 +2626,8 @@ GET    /opds                      GET    /opds/series
 GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
 GET    /opds/book/:id/page/:n
+GET    /opds/continue             GET    /opds/favorites
+GET    /opds/lists/:id
 ```
 
 ### Komga-compatible API (Mihon's Komga extension and tracker)

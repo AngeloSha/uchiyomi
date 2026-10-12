@@ -18,6 +18,8 @@ import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { serveImage } from '../lib/imageCache';
 import { editionLabels } from '../lib/editions';
 import { noticeShown, visibleBookCount } from '../lib/noticeChapters';
+import { onDeckPicks } from '../lib/onDeck';
+import { listFor, listsFor, listItems, ownerOf } from '../lib/lists';
 const AdmZip = require('adm-zip');
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -214,16 +216,25 @@ export default async function opdsRoutes(app: FastifyInstance) {
     (req as any).viewCtx = await viewCtxFor(who.userId, undefined, { hideAdult: !who.showAdult });
   });
 
-  // root navigation feed
-  app.get('/opds', async (_req, reply) =>
-    sendXml(reply, 'nav', feed({
+  // The root navigation feed, per reader since v0.61.0: their Keep reading and Favourites shelves around the library's
+  // three feeds, then one entry per List they may read -- their own, and the household's shared ones that show them
+  // something (lib/lists.ts listsFor), someone else's named "List · Owner". Counted, like everything here, through this
+  // token's ViewCtx: its 18+ switch applies.
+  app.get('/opds', async (req, reply) => {
+    const lists = await listsFor(uidOf(req), vc(req), 'all');
+    const count = (n: number) => (n === 1 ? '1 series' : `${n} series`);
+    return sendXml(reply, 'nav', feed({
       id: 'yomi:opds:root', title: 'Uchiyomi', self: '/opds', kind: 'nav',
       entries: [
+        navEntry('Keep reading', '/opds/continue', 'The next chapter of what you are reading'),
         navEntry('Recently updated', '/opds/series?sort=updated', 'Series with the newest chapters'),
         navEntry('All series (A–Z)', '/opds/series?sort=title', 'Your whole library'),
         navEntry('Recently added', '/opds/series?sort=added', 'Newest series first'),
+        navEntry('Favourites', '/opds/favorites', 'Newest favourite first'),
+        ...lists.map((l) => navEntry(l.owner ? `${l.name} · ${l.owner.name}` : l.name, `/opds/lists/${l.id}`, count(l.item_count))),
       ],
-    })));
+    }));
+  });
 
   app.get('/opds/opensearch.xml', async (_req, reply) =>
     reply.header('Content-Type', 'application/opensearchdescription+xml').send(
@@ -350,6 +361,88 @@ export default async function opdsRoutes(app: FastifyInstance) {
     return sendXml(reply, 'acq', feed({
       id: `yomi:series:${id}`, title: s.title + label, self: `/opds/series/${esc(id)}`, kind: 'acq', up: '/opds/series', entries,
       updated: newest(books.map((b) => iso(b.updated_at))),
+    }));
+  });
+
+  /**
+   * Keep reading (v0.61.0): the chapter Home's Keep reading offers for each series this reader has been reading
+   * (lib/onDeck.ts, one rule for both), as chapters -- a CBZ to download and the page stream with where they stopped --
+   * newest read first. Only this reader's own: the picks and `pse:lastRead` are both per user.
+   */
+  app.get('/opds/continue', async (req, reply) => {
+    const picks = await onDeckPicks(uidOf(req), vc(req), { window: 'recent', limit: PAGE_SIZE });
+    const bp = new Params();
+    const uid = bp.add(uidOf(req));
+    const rows = picks.length ? await q<ChapterRow & { series_title: string }>(
+      `SELECT b.id, b.title, b.number, b.pages, b.updated_at, b.root, b.file, rp.page AS last_page, rp.updated_at AS last_at,
+              COALESCE(o.title, s.title) AS series_title
+         FROM lib_books b
+         JOIN lib_series s ON s.id = b.series_id AND ${visible('s', vc(req), bp)}
+         LEFT JOIN series_overrides o ON o.series_id = s.id
+         LEFT JOIN book_overrides ov ON ov.book_id = b.id
+         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ${uid}
+        WHERE b.id = ANY(${bp.add(picks.map((r) => r.bookId))}) AND b.pruned_at IS NULL AND ${noticeShown('s', 'b', 'ov')}`,
+      bp.values as any[]) : [];
+    const byId = new Map(rows.map((b) => [b.id, b]));
+    const books = picks.map((r) => byId.get(r.bookId)).filter((b): b is ChapterRow & { series_title: string } => !!b);
+    await countUnknownPages(books);
+    return sendXml(reply, 'acq', feed({
+      id: 'yomi:opds:continue', title: 'Keep reading', self: '/opds/continue', kind: 'acq', up: '/opds',
+      entries: books.map((b) => chapterEntryXml(b, b.series_title)),
+      updated: newest(picks.map((r) => r.lastRead)),
+    }));
+  });
+
+  /** Favourites (v0.61.0): this reader's, newest favourite first, as series -- 18+ as the token says. */
+  app.get('/opds/favorites', async (req, reply) => {
+    const page = Math.max(0, parseInt((req.query as { page?: string }).page || '0', 10) || 0);
+    const pp = new Params();
+    const src = seriesSrc(vc(req), pp);
+    const rows = await q<SeriesRow>(
+      `SELECT sv.id, sv.title, sv.summary, sv.author, sv.books_count, sv.latest_mtime, sv.created_at
+         FROM favorites f JOIN ${src} ON sv.id = f.series_id
+        WHERE f.user_id = ${pp.add(uidOf(req))}
+        ORDER BY f.created_at DESC, sv.title ASC LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
+      pp.values as any[],
+    );
+    const labels = await editionLabels(rows.map((r) => r.id), vc(req));
+    return sendXml(reply, 'acq', feed({
+      id: 'yomi:opds:favorites', title: 'Favourites', self: page ? `/opds/favorites?page=${page}` : '/opds/favorites', kind: 'acq', up: '/opds',
+      next: rows.length === PAGE_SIZE ? `/opds/favorites?page=${page + 1}` : undefined,
+      entries: rows.map((s) => seriesEntryXml(s, labels.get(s.id) ?? '')),
+      updated: newest(rows.map(seriesStamp)),
+    }));
+  });
+
+  /**
+   * One List (v0.61.0): the reader's own or one shared with the household (lib/lists.ts listFor; anything else, a
+   * malformed id included, is 404), its series as THIS reader may see them -- a smart list answered for them, in its
+   * own order -- sixty to a page.
+   */
+  app.get('/opds/lists/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const list = await listFor(uidOf(req), id);
+    if (!list) return reply.code(404).send('not found');
+    const page = Math.max(0, parseInt((req.query as { page?: string }).page || '0', 10) || 0);
+    const { items, total } = await listItems(list, vc(req), page, PAGE_SIZE);
+    // Someone else's shared list is there for this reader only while it shows them something (lib/lists.ts listsFor).
+    if (list.user_id !== uidOf(req) && total === 0) return reply.code(404).send('not found');
+    const ids = items.map((s: any) => String(s.id));
+    const pp = new Params();
+    const rows = ids.length ? await q<SeriesRow>(
+      `SELECT id, title, summary, author, books_count, latest_mtime, created_at FROM ${seriesSrc(vc(req), pp)} WHERE id = ANY(${pp.add(ids)})`,
+      pp.values as any[]) : [];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const shown = ids.map((sid) => byId.get(sid)).filter((r): r is SeriesRow => !!r);
+    const labels = await editionLabels(shown.map((r) => r.id), vc(req));
+    const owner = list.user_id === uidOf(req) ? '' : (await ownerOf(list)).name;
+    const self = `/opds/lists/${list.id}`;
+    return sendXml(reply, 'acq', feed({
+      id: `yomi:list:${list.id}`, title: owner ? `${list.name} · ${owner}` : list.name,
+      self: page ? `${self}?page=${page}` : self, kind: 'acq', up: '/opds',
+      next: (page + 1) * PAGE_SIZE < total ? `${self}?page=${page + 1}` : undefined,
+      entries: shown.map((s) => seriesEntryXml(s, labels.get(s.id) ?? '')),
+      updated: newest(shown.map(seriesStamp)),
     }));
   });
 
