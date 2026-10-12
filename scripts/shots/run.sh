@@ -17,9 +17,10 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB=${DB_CONTAINER:-yomi-db}
 NET=${SHOT_NET:-yomi_yomi_app}
-# The app serves its own web UI, so there is no separate nginx to point at. These defaults follow the
-# single-container layout; override them if you are shooting against the development stack, where the
-# equivalents are `http://yomi-web` and `yomi-bff:prod`.
+# The defaults are the maintainer's server: its database container, its network, and the app container on it. On
+# another install set DB_CONTAINER, SHOT_NET and SHOT_BASE; the single-container install keeps its database inside the
+# app container, so there point DB_CONTAINER at that (`uchiyomi`). Against the development stack the app is
+# `http://yomi-web` and the image `yomi-bff:prod`.
 BASE=${SHOT_BASE:-http://uchiyomi:3000}
 # Only used as a throwaway node+sharp environment for hashing a password and encoding WebP -- any image
 # with the app's dependencies will do, which is why it is the app image rather than a separate tool.
@@ -28,6 +29,8 @@ SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
 OUT_WEBP="$REPO/docs/shots"
 ONLY=""; YES=0; SITE=""; RECORD=0; LOGIN=""
+# A reading life for the capture account (fixtures.mjs seedReading): only for the throwaway one this script creates.
+SEED=0
 SITE_DIR=${SITE_DIR:-}     # only for --site: where to ALSO publish shots (a marketing site checkout)
 
 while [ $# -gt 0 ]; do
@@ -59,14 +62,17 @@ else
 cat <<EOF
 This will, against the LIVE database in container '$DB':
   • create a temporary admin account '$SHOT_USER' (random password)
+  • give it some reading progress, one rating and one favourite, so the screens show what a reader sees
   • capture screenshots from $BASE
-  • DELETE that account again, even if it fails partway
-It does not touch any existing user, series or file.
+  • DELETE that account again, even if it fails partway -- and everything it read, rated and favourited with it
+It does not touch any existing user, series or file. The audit log keeps its sign-ins, as for any account.
 EOF
 if [ "$YES" != "1" ]; then
   read -r -p "Continue? [y/N] " a; [ "$a" = "y" ] || [ "$a" = "Y" ] || exit 1
 fi
 
+# Said plainly: without this a missing container read as "a previous run did not clean up" below.
+docker inspect "$DB" >/dev/null 2>&1 || { echo "error: no database container '$DB' -- set DB_CONTAINER" >&2; exit 1; }
 if [ "$(psql "SELECT count(*) FROM users WHERE username='$SHOT_USER'")" != "0" ]; then
   echo "error: a '$SHOT_USER' account already exists — a previous run did not clean up." >&2
   echo "       remove it with: docker exec $DB psql -U yomi -d yomi -c \"DELETE FROM users WHERE username='$SHOT_USER'\"" >&2
@@ -90,12 +96,23 @@ psql "INSERT INTO users (username, display_name, password_hash, role, auth_kind)
       VALUES ('$SHOT_USER','Admin','$HASH','admin','password')" >/dev/null
 echo "· temporary admin created"
 
-# Pick real content so the shots show a real library rather than an empty state.
-SERIES_ID=${SHOT_SERIES_ID:-$(psql "SELECT s.id FROM lib_series s JOIN series_art a ON a.series_id=s.id
-  WHERE a.banner IS NOT NULL AND a.cover IS NOT NULL ORDER BY s.books_count DESC LIMIT 1" | tr -d ' ')}
+# Pick real content so the shots show a real library rather than an empty state: the most popular series with its
+# own banner and cover art and a checked AniList score (the ratings panel's tile, v0.60.0), of a size a progress bar
+# reads well at; else the biggest one with art. Never a removed or merged series, nor a deleted chapter, which has no
+# pages to photograph (lib/chapterCleanup.ts deletes chapters once read, and chapter 1 is the first to go).
+SERIES_ID=${SHOT_SERIES_ID:-$(psql "SELECT s.id FROM lib_series s
+  JOIN series_art sa ON sa.series_id = s.id AND sa.banner IS NOT NULL AND sa.cover IS NOT NULL
+  JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist' AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
+  JOIN anilist_scores a ON a.anilist_id = t.external_id AND a.score IS NOT NULL
+  WHERE s.deleted_at IS NULL AND s.merged_into IS NULL AND s.books_count BETWEEN 30 AND 400
+  ORDER BY a.popularity DESC NULLS LAST LIMIT 1" | tr -d ' ')}
+[ -n "$SERIES_ID" ] || SERIES_ID=$(psql "SELECT s.id FROM lib_series s JOIN series_art a ON a.series_id=s.id
+  WHERE a.banner IS NOT NULL AND a.cover IS NOT NULL AND s.deleted_at IS NULL AND s.merged_into IS NULL
+  ORDER BY s.books_count DESC LIMIT 1" | tr -d ' ')
 BOOK_ID=${SHOT_BOOK_ID:-$(psql "SELECT b.id FROM lib_books b WHERE b.series_id='$SERIES_ID' AND b.pages > 3
-  ORDER BY b.number LIMIT 1" | tr -d ' ')}
-[ -n "$BOOK_ID" ] || BOOK_ID=$(psql "SELECT id FROM lib_books WHERE pages > 3 ORDER BY random() LIMIT 1" | tr -d ' ')
+  AND b.pruned_at IS NULL ORDER BY b.number LIMIT 1" | tr -d ' ')}
+[ -n "$BOOK_ID" ] || BOOK_ID=$(psql "SELECT id FROM lib_books WHERE pages > 3 AND pruned_at IS NULL ORDER BY random() LIMIT 1" | tr -d ' ')
+SEED=1
 echo "· series $SERIES_ID · book $BOOK_ID"
 fi
 
@@ -106,7 +123,7 @@ if [ "$RECORD" = "1" ]; then
   # vp9 and animated-webp — no extra image needed.
   docker run --rm --network "$NET" -w /home/pptruser \
     -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
-    -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" \
+    -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$SEED" \
     -e SHOT_PALETTE_QUERY -e SHOT_DISCOVER_QUERY \
     -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
     ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/record.mjs
@@ -132,7 +149,7 @@ fi
 docker run --rm --network "$NET" \
   -w /home/pptruser \
   -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
-  -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" \
+  -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$SEED" \
   -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
   ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/capture.mjs
 

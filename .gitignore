@@ -35,3 +35,9 @@ __pycache__/
 # desktop/scripts/release/pin-engine.mjs keeps the packs it hashes). This is the one that lands OUTSIDE
 # desktop/: the web + bff build that .github/workflows/desktop.yml hands to `scripts/stage.mjs --prebuilt`.
 prebuilt/
+
+# scripts/shots/run.sh --record writes the tour's video into docs/shots/ unless DEMO_DIR says where the site wants it;
+# only the animated tour.webp (the README's) is committed.
+docs/shots/tour.mp4
+docs/shots/tour.webm
+docs/shots/tour-poster.webp

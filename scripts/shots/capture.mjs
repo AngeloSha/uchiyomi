@@ -23,6 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // how each kind of shot is kept neutral.
 import {
   FIXTURE_REPO, FIXTURE_REPO_STORED, extensionFixture, sourcesFixture, fixturePage, neutralNames, meetNames,
+  apiLogin, peopleFixture, librariesFixture, seedReading,
 } from './fixtures.mjs';
 
 // Viewports. `desk` matches the existing good assets and the app's own lg: breakpoint; phone is iPhone-14
@@ -150,13 +151,18 @@ async function main() {
   }
 
   // ---- everything else, one login reused for every shot ----
+  // The account's id first (sample names for everyone else, fixtures.mjs peopleFixture), and its reading life when
+  // run.sh asks for one (seedReading), before the first screen is drawn.
+  const me = await apiLogin(BASE, USER, PASS);
+  if (process.env.SHOT_SEED === '1') await seedReading(BASE, me.accessToken, SERIES_ID);
+  const people = peopleFixture(me.user.id);
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
   await page.setViewport(PROFILES.desk);
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   // A real library: its sources' and groups' names are shown as made-up ones (fixtures.mjs neutralNames) --
-  // series.webp's supply line named a real site and its groups until v0.45.0.
-  await neutralNames(page);
+  // series.webp's supply line named a real site and its groups until v0.45.0 -- and its people as sample ones.
+  await neutralNames(page, { fixtures: [people, librariesFixture()] });
   await login(page);
   console.log('  · signed in');
   await meetNames(page, BASE);
@@ -165,6 +171,28 @@ async function main() {
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(page, extra);
   };
+  /**
+   * A crop for the marketing site's "What's new" cards, which show a 3:1 band (its styles.css .road-shot): the element
+   * (from `selector`, or its `closest` container, down to `to`) whole, and the page around it filling the band out to
+   * 3:1, downwards, rather than a sliver the band would blow up. Document coordinates, for page.screenshot's clip.
+   */
+  const bandAround = (selector, { to = null, closest = null, ratio = 3, pad = 16 } = {}) => page.evaluate((selector, to, closest, ratio, pad) => {
+    const pick = (sel) => [...document.querySelectorAll(sel)].find((e) => e.getBoundingClientRect().height > 0) || null;
+    let a = pick(selector);
+    if (a && closest) a = a.closest(closest) || a;
+    const b = to ? pick(to) : a;
+    if (!a || !b) return null;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const left = Math.min(ra.left, rb.left) - pad, right = Math.max(ra.right, rb.right) + pad;
+    const top = Math.min(ra.top, rb.top) - pad;
+    const bottom = Math.max(Math.max(ra.bottom, rb.bottom) + pad, top + (right - left) / ratio);
+    return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+  }, selector, to, closest, ratio, pad);
+  const bandShot = async (name, box) => {
+    if (!box) { console.log(`  · skipped ${name} (nothing to crop)`); return; }
+    await page.screenshot({ path: `${OUT}/${name}.png`, clip: box });
+    console.log(`  ✓ ${name}`);
+  };
   const adminTab = async (name) => {
     await go('/admin/', 300);
     await clickText(page, 'button', name);
@@ -172,8 +200,37 @@ async function main() {
   };
 
   if (want('home')) { await go('/', 900); await shot(page, 'home'); }
-  if (want('library')) { await go('/library/', 600); await shot(page, 'library'); }
-  if (want('series') && SERIES_ID) { await go(`/series/?id=${SERIES_ID}`, 1200); await shot(page, 'series'); }
+  if (want('library') || want('crop-library')) {
+    await go('/library/', 600);
+    if (want('library')) await shot(page, 'library');
+    // The toolbar and the first row of covers, with their progress bars (v0.60.0).
+    if (want('crop-library')) await bandShot('crop-library', await bandAround('[data-library-toolbar]', { to: '[data-library-grid] > :first-child' }));
+  }
+  // The series page since v0.60.0: Continue, the four keys and the ratings sit under the cover, and at 860 px tall the
+  // keys fell just below the frame. The window is scrolled just far enough to show them, so the shot keeps the 16:10
+  // the marketing site frames it in. Then More, opened: USAGE.md sends readers to "More → …" for a dozen things.
+  if ((want('series') || want('series-more') || want('crop-ratings')) && SERIES_ID) {
+    await go(`/series/?id=${SERIES_ID}`, 1200);
+    const more = await page.evaluateHandle(() =>
+      [...document.querySelectorAll('button[data-series-more]')].find((b) => b.getBoundingClientRect().height > 0) || null);
+    const key = more.asElement();
+    if (!key) throw new Error('series: no visible More key (button[data-series-more])');
+    await page.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > window.innerHeight - 24) window.scrollBy({ top: r.bottom - window.innerHeight + 48, behavior: 'instant' });
+    }, key);
+    await settle(page, 400);
+    if (want('series')) await shot(page, 'series');
+    // The ratings panel (v0.60.0): AniList's score and readers beside the account's own stars.
+    if (want('crop-ratings')) await bandShot('crop-ratings', await bandAround('[data-ratings-panel]'));
+    if (want('series-more')) {
+      await key.click();
+      await page.waitForSelector('[role="menu"]', { timeout: 5000 });
+      await sleep(700);
+      await shot(page, 'series-more');
+      await page.keyboard.press('Escape');
+    }
+  }
   if (want('wrapped')) { await go('/wrapped/', 1500); await shot(page, 'wrapped'); }
 
   // A desktop capture of the reader as well as the phone one: the marketing tour shows screens in a browser
@@ -191,8 +248,8 @@ async function main() {
   }
 
   if (want('discover')) {
-    // The WALL, not a search. Discover was rebuilt around what your sources just published -- the hero, the
-    // language chips and the grid are the page now, and search is a field in the corner. This used to type
+    // The WALL, not a search. Discover was rebuilt around what your sources just published -- the hero and the grid
+    // (one card per work since v0.56.0) are the page now, and search is a field in the corner. This used to type
     // "solo leveling" and photograph the results, so every screenshot in the docs and on the marketing site
     // illustrated the one thing the page had stopped leading with.
     await go('/discover/', 600);
@@ -228,6 +285,12 @@ async function main() {
     await page.evaluate(() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'instant' }));
     await settle(page, 1400);
     await shot(page, 'admin-health');
+  }
+  // Health's header row, with Fix everything (v0.55.0), and the first cards under it.
+  if (want('crop-fix-everything')) {
+    await adminTab('Health');
+    await settle(page, 1000);
+    await bandShot('crop-fix-everything', await bandAround('[data-fix-everything]', { closest: '.full' }));
   }
   // admin-extensions, admin-providers and the extension crops are taken on a fixture page: see "fixture shots".
   // Libraries sit at the top of the Library tab, above the removed-series list. v0.8.0 added the section
@@ -425,7 +488,8 @@ async function main() {
   // A later visit: one repository, three extensions installed and one out of date -- the engine's strip, Needs
   // attention with the update, and Your sources (v0.54.0; Installed in v0.53.0). The crop is Your sources alone,
   // from its row of views to its last row.
-  if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
+  const strips = want('ext-strip-1') || want('ext-strip-2') || want('ext-strip-3');
+  if (want('admin-extensions') || want('crop-extensions') || strips) {
     const xp = await sourcesPage(PROFILES.desk, { repos: [FIXTURE_REPO_STORED] });
     await tabOn(xp, 'Sources');
     await xp.waitForFunction(() => document.body.innerText.includes('Example Manga (EN)'), { timeout: 15000 });
@@ -442,7 +506,7 @@ async function main() {
     //
     // Deliberately NOT screenshots of the list, and since v0.45.0 not the real icons either: a site's icon is
     // its logo, and a third of the old strips spelled the site's name. They are the fixture's generated tiles.
-    if (want('ext-strip-1')) {
+    if (strips) {
       // Browse, every page of it (v0.53.0: the list is the page's, a page at a time, with Show more under it).
       await xp.goto(`${BASE}/admin/?tab=Sources&view=add`, { waitUntil: 'networkidle2', timeout: 60000 });
       await xp.waitForSelector('[data-ext-list] img', { timeout: 15000 });
@@ -542,7 +606,7 @@ async function main() {
 
   // ---- phone ----
   const ph = await ctx.newPage();
-  await neutralNames(ph);
+  await neutralNames(ph, { fixtures: [people] });
   await ph.setViewport(PROFILES.phone);
   await ph.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await meetNames(ph, BASE);
