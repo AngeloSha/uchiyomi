@@ -5112,18 +5112,122 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/stats/time:
+    get:
+      tags:
+        - personal
+      summary: Reading time from the caller's own page turns -- the week, the month, the year and the Studio's window.
+      operationId: getApiStatsTime
+      description: >-
+        Since v0.61.0. Worked out from the caller's reading_events, every device merged into one timeline: the gap
+        between one page turn and the next counts in full when it is within the page's allowance (five minutes, more for
+        a tall strip by its height-to-width ratio, at most thirty), a longer gap is a break and counts nothing, and each
+        sitting adds one typical page (the window's median counted gap, 5-90 s) for the page it opened on, which the
+        reader never reports. `week` and `month` are the rolling 7 and 30 days; `year` is the UTC calendar year
+        /api/wrapped counts; `window` is the last `days` days with `perChapterMs` (the median time of the chapters
+        finished in it, null under three), `byHour` (24 numbers, ms, in `tz`) and `byDevice` ({name, ms}, most first,
+        named by the caller's own sessions; null for an unnamed device). `chapters` counts finished chapters as
+        /api/stats does. Times are ms. No user parameter: a member reads only their own time.
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: The window, clamped to 7-400. Defaults to 90.
+          schema:
+            type: integer
+            minimum: 7
+            maximum: 400
+        - name: tz
+          in: query
+          required: false
+          description: An IANA timezone for the hours of the day (Asia/Kolkata); anything else is UTC, and `tz` says so.
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{tz, days, week: {ms, chapters}, month: {ms, chapters}, year: {year, ms, chapters}, window: {ms, chapters, perChapterMs, byHour, byDevice}}`"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tz: { type: string }
+                  days: { type: integer }
+                  week: { type: object, properties: { ms: { type: integer }, chapters: { type: integer } } }
+                  month: { type: object, properties: { ms: { type: integer }, chapters: { type: integer } } }
+                  year: { type: object, properties: { year: { type: integer }, ms: { type: integer }, chapters: { type: integer } } }
+                  window:
+                    type: object
+                    properties:
+                      ms: { type: integer }
+                      chapters: { type: integer }
+                      perChapterMs: { type: [integer, "null"] }
+                      byHour: { type: array, items: { type: integer }, minItems: 24, maxItems: 24 }
+                      byDevice:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: [string, "null"] }
+                            ms: { type: integer }
+        "401":
+          description: Not authenticated
+  /api/series/{id}/reading-pace:
+    get:
+      tags:
+        - personal
+      summary: The caller's pace through a series, for "Catch up in ~2 h".
+      operationId: getApiSeriesIdReadingPace
+      description: >-
+        Since v0.61.0. `{perChapterMs, from}`: the median time of the chapters of this series the caller finished in the
+        last 365 days when there are three or more (`from: series`), else their median over every series in the last 90
+        days (`all`), else `{perChapterMs: null, from: null}`. Reading time as GET /api/stats/time works it out. 404 for
+        a series the caller may not open.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  perChapterMs: { type: [integer, "null"] }
+                  from: { type: [string, "null"], enum: [series, all, null] }
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /api/wrapped:
     get:
       tags:
         - personal
       summary: The year in reading.
       operationId: getApiWrapped
+      description: >-
+        Since v0.61.0 also `tz` (as asked, UTC when it is not a timezone), `ms` (the year's reading time, as GET
+        /api/stats/time's `year` works it out -- the same figure), `perChapterMs` and `byHour` (24 numbers, ms, in `tz`).
+        Chapters are still counted in UTC.
       parameters:
         - name: year
           in: query
           required: false
           schema:
             type: integer
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
         - name: adult
           in: query
           required: false

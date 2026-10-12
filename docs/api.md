@@ -1362,6 +1362,7 @@ between series; the rest read `skipped` *The server is shutting down.*
 GET    /api/favorites             POST   /api/favorites
 DELETE /api/favorites/:seriesId   GET    /api/history
 GET    /api/stats                 GET    /api/wrapped
+GET    /api/stats/time            GET    /api/series/:id/reading-pace
 GET    /api/settings              PUT    /api/settings
 GET    /api/collections           POST   /api/collections
 GET    /api/collections/:id       PATCH  /api/collections/:id
@@ -1412,6 +1413,22 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
 
 The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
+
+**Reading time** (since v0.61.0). `GET /api/stats/time?days=90&tz=Asia/Kolkata` answers the signed-in reader's own
+reading time, worked out from their page turns (`reading_events`; nothing new is recorded): `{tz, days, week: {ms,
+chapters}, month: {ms, chapters}, year: {year, ms, chapters}, window: {ms, chapters, perChapterMs, byHour, byDevice}}`.
+Every device goes into one timeline, so two devices at once never count twice and a replayed turn adds nothing; the gap
+to the next turn counts in full within the page's allowance (five minutes, stretched for a tall strip by its
+height-to-width ratio over four, at most thirty), a longer gap is a break that counts nothing, and each sitting adds one
+typical page (the window's median counted gap, 5–90 s, 20 s when there is none) for the page it opened on, which the
+reader never reports. `week` and `month` are rolling 7 and 30 days, `year` the UTC calendar year `/api/wrapped` counts,
+`window` the last `days` (7–400) with `perChapterMs` (the median time of the chapters finished in it; null under three),
+`byHour` (24 values in `tz`, an IANA name; UTC when it is not one) and `byDevice` (`{name, ms}`, named by the reader's
+own sessions). `GET /api/series/:id/reading-pace` answers `{perChapterMs, from: 'series' | 'all' | null}` for the series
+page's "Catch up in": the series' own median over a year when three or more of its chapters were finished, else the
+reader's 90-day median; 404 for a series they may not open. `GET /api/wrapped` takes `tz` too and adds `tz`, `ms` (the
+same figure as the Studio's year), `perChapterMs` and `byHour`. The leaderboard and the admin's member stats stay
+counts of chapters.
 
 **Release radar** (since v0.61.0). Every enriched series also carries `yomi.radar: {nextAt, dueUntil, quietAfter,
 lastAt, every, kind, steady, ended, basis} | null` — the server's estimate of when its next chapter comes (`series_radar`,
