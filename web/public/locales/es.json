@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3601
+    "strings": 3607
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3604,5 +3604,11 @@
   "Rotate": "Girar",
   "On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.": "Con la pantalla en vertical, una doble página puede dividirse en sus dos páginas o girarse de lado para llenar la pantalla.",
   "Crop page borders": "Recortar los márgenes",
-  "Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.": "Recorta los márgenes en blanco de las páginas escaneadas. En el modo Webtoon solo se recortan los lados, lo mismo en todo el capítulo."
+  "Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.": "Recorta los márgenes en blanco de las páginas escaneadas. En el modo Webtoon solo se recortan los lados, lo mismo en todo el capítulo.",
+  "Colour filter": "Filtro de color",
+  "None": "Ninguno",
+  "Invert": "Invertir",
+  "Grayscale": "Escala de grises",
+  "E-ink": "Tinta electrónica",
+  "Over the pages only. E-ink also turns pages without sliding.": "Solo sobre las páginas. Tinta electrónica además pasa las páginas sin deslizarlas."
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3601
+    "strings": 3607
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3604,5 +3604,11 @@
   "Rotate": "旋转",
   "On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.": "竖屏时，跨页可以拆分成两页，或横过来旋转以铺满屏幕。",
   "Crop page borders": "裁掉页面白边",
-  "Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.": "裁掉扫描页面四周的空白边。在条漫模式下只裁两侧，且整章裁掉的宽度相同。"
+  "Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.": "裁掉扫描页面四周的空白边。在条漫模式下只裁两侧，且整章裁掉的宽度相同。",
+  "Colour filter": "颜色滤镜",
+  "None": "无",
+  "Invert": "反色",
+  "Grayscale": "灰度",
+  "E-ink": "墨水屏",
+  "Over the pages only. E-ink also turns pages without sliding.": "只作用于页面。墨水屏模式翻页时也不再滑动。"
 }

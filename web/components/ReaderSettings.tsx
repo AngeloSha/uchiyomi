@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion';
 import { useRef } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
+import type { ColorFilter, DevicePrefs } from '@/lib/readerDevice';
 import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
@@ -21,6 +22,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export function ReaderSettings({
   prefs,
   set,
+  device,
+  setDevice,
   onClose,
   sourceName,
   sourceDefault,
@@ -28,6 +31,9 @@ export function ReaderSettings({
 }: {
   prefs: ReaderPrefs;
   set: (p: Partial<ReaderPrefs>) => void;
+  /** This device's own settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
+  device: DevicePrefs;
+  setDevice: (p: Partial<DevicePrefs>) => void;
   onClose: () => void;
   /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
   sourceName?: string;
@@ -85,6 +91,18 @@ export function ReaderSettings({
               </button>
             ))}
           </div>
+        </Row>
+
+        {/* v0.61.0: a filter over the page images only -- the theme above still tints the reader as it did. This device
+            only: an e-ink tablet wants E-ink, the phone beside it does not. */}
+        <Row label={`${tr('Colour filter')} · ${tr('This device')}`}>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {([['none', tr('None')], ['invert', tr('Invert')], ['grayscale', tr('Grayscale')], ['eink', tr('E-ink')]] as [ColorFilter, string][]).map(([v, label]) => (
+              <button key={v} type="button" aria-pressed={device.colorFilter === v} onClick={() => setDevice({ colorFilter: v })}
+                className={`rounded-2xl border px-1 py-3 text-sm ${device.colorFilter === v ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{label}</button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('Over the pages only. E-ink also turns pages without sliding.')}</p>
         </Row>
 
         {/* #170: the cover's colour across the top and bottom of the screen. A switch on one line, the only boolean here:

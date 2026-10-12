@@ -42,7 +42,7 @@ export interface RowItem {
  * measured -- only while Crop page borders is on.
  */
 export const ReaderPageRow = memo(function ReaderPageRow({
-  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop, onLoaded, onExpand, onCollapse,
+  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop, imgFilter, onLoaded, onExpand, onCollapse,
 }: {
   item: RowItem;
   height: number;
@@ -55,6 +55,8 @@ export const ReaderPageRow = memo(function ReaderPageRow({
   wide: WidePages;
   rightFirst: boolean;
   crop: { l: number; r: number } | null;
+  /** The colour filter over the page's image (lib/readerDevice.ts COLOR_FILTER): on the image, never the row. */
+  imgFilter?: string;
   onLoaded?: (key: string, img: HTMLImageElement) => void;
   onExpand: (key: string) => void;
   onCollapse: (key: string) => void;
@@ -95,7 +97,8 @@ export const ReaderPageRow = memo(function ReaderPageRow({
             className="group block h-full w-full overflow-hidden text-start"
           >
             {stripSrc && (
-              <img src={stripSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover object-top opacity-50" />
+              <img src={stripSrc} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover object-top opacity-50"
+                style={imgFilter ? { filter: imgFilter } : undefined} />
             )}
             <span className="absolute inset-0 flex items-center justify-center gap-2.5 bg-ink-950/45 text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-400 group-hover:text-fog-200">
               <span className="h-px w-6 bg-ink-600" />
@@ -109,7 +112,7 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           <div data-wide="split" className="flex h-full w-full flex-col">
             {(rightFirst ? [RIGHT_HALF, LEFT_HALF] : [LEFT_HALF, RIGHT_HALF]).map((region) => (
               <div key={region.l} data-half={region.l ? 'right' : 'left'} className="relative w-full flex-1 overflow-hidden">
-                <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} />
+                <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} filter={imgFilter} />
               </div>
             ))}
           </div>
@@ -117,18 +120,18 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           /* v0.61.0: a wide page turned on its side to the column's width. The box keeps the page's own shape -- as
              wide as the row is tall -- and turns about its centre. */
           <div data-wide="rotate" className="absolute inset-0 m-auto" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
-            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" />
+            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" filter={imgFilter} />
           </div>
         ) : src && crop && (crop.l || crop.r) ? (
           /* v0.61.0, Crop page borders: the chapter's one trim of both sides. The image is drawn wider than the column by
              exactly what is trimmed and shifted left by the left trim; the reader reserved the taller row that makes. */
           <div className="relative h-full w-full overflow-hidden">
             <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none"
-              style={cropStyle({ l: crop.l, t: 0, r: crop.r, b: 0 }).img} onLoaded={onLoaded ? loaded : undefined} />
+              style={cropStyle({ l: crop.l, t: 0, r: crop.r, b: 0 }).img} filter={imgFilter} onLoaded={onLoaded ? loaded : undefined} />
           </div>
         ) : src ? (
           <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover"
-            onLoaded={onLoaded && wide === 'whole' ? loaded : undefined} />
+            filter={imgFilter} onLoaded={onLoaded && wide === 'whole' ? loaded : undefined} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-ink-600">{item.number}</div>
         )}
@@ -165,17 +168,20 @@ export const ReaderPageRow = memo(function ReaderPageRow({
  * `pending`: Crop page borders is on and this page's margins are not known yet. The page is not shown until they are,
  * or until 300 ms after it loaded -- then it is shown whole rather than not at all. Opacity, at once: no new motion.
  */
-export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, onLoaded }: {
+export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, filter, trimmed, onLoaded }: {
   src: string; alt: string; width: number; height: number; region: Region; area: { w: number; h: number }; zoom: number;
-  pending?: boolean; half?: Exclude<Half, null>; onLoaded?: (img: HTMLImageElement) => void;
+  pending?: boolean; half?: Exclude<Half, null>; filter?: string;
+  /** The page's own left trim, while Crop page borders is on: `data-crop`, which the browser walk reads. */
+  trimmed?: number;
+  onLoaded?: (img: HTMLImageElement) => void;
 }) {
   const late = useLate(src, !!pending);
   const st = cropStyle(region);
   const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h);
   return (
-    <div data-half={half} data-crop={pending ? undefined : region.l.toFixed(3)} className="relative shrink-0 overflow-hidden"
+    <div data-half={half} data-crop={trimmed == null || pending ? undefined : trimmed.toFixed(3)} className="relative shrink-0 overflow-hidden"
       style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: pending && !late.on ? 0 : undefined }}>
-      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} onLoaded={late.wrap(onLoaded)} />
+      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} filter={filter} onLoaded={late.wrap(onLoaded)} />
     </div>
   );
 }
@@ -184,12 +190,12 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
  * A page of the paged track whose size is not known yet, while Crop page borders is on: drawn as it always was, hidden
  * until its margins are measured (or 300 ms after it loaded, as SlideRegion), so it is not seen whole and then cropped.
  */
-export function SlidePending({ src, alt, className, zoom, onLoaded }: {
-  src: string; alt: string; className: string; zoom: number; onLoaded?: (img: HTMLImageElement) => void;
+export function SlidePending({ src, alt, className, zoom, filter, onLoaded }: {
+  src: string; alt: string; className: string; zoom: number; filter?: string; onLoaded?: (img: HTMLImageElement) => void;
 }) {
   const late = useLate(src, true);
   return (
-    <ReaderImg src={src} alt={alt} className={className} onLoaded={late.wrap(onLoaded)}
+    <ReaderImg src={src} alt={alt} className={className} filter={filter} onLoaded={late.wrap(onLoaded)}
       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: late.on ? undefined : 0 }} />
   );
 }
@@ -237,15 +243,15 @@ export function measurePage(img: HTMLImageElement): { all: Region; sides: Region
  * are the same: a box of the page's own shape, sized so that once turned a quarter it fits the slide, centred, turned,
  * and zoomed like any page.
  */
-export function SlideTurned({ src, alt, width, height, area, zoom }: {
-  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number;
+export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
+  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; filter?: string;
 }) {
   // Turned, the page stands `height` wide and `width` tall: fit THAT, then draw the box the other way round.
   const fit = fitBox(height, width, area.w, area.h);
   return (
     <div data-rotated className="absolute inset-0 m-auto"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
-      <ReaderImg src={src} alt={alt} className="block h-full w-full max-w-none" />
+      <ReaderImg src={src} alt={alt} className="block h-full w-full max-w-none" filter={filter} />
     </div>
   );
 }
@@ -257,8 +263,10 @@ export function SlideTurned({ src, alt, width, height, area, zoom }: {
  * layouts size a page completely differently: one fills a box whose height was reserved from `page_dims`,
  * the other is bounded by the viewport. Only the failure behaviour is shared.
  */
-export function ReaderImg({ src, alt, className, style, onLoaded }: {
+export function ReaderImg({ src, alt, className, style, filter, onLoaded }: {
   src: string; alt: string; className?: string; style?: React.CSSProperties;
+  /** A colour filter over the page (v0.61.0, lib/readerDevice.ts): on the image, so nothing around it changes. */
+  filter?: string;
   /** Handed the image once it has loaded (v0.61.0, to measure its margins) -- also when it had loaded already. */
   onLoaded?: (img: HTMLImageElement) => void;
 }) {
@@ -282,7 +290,7 @@ export function ReaderImg({ src, alt, className, style, onLoaded }: {
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img ref={ref} src={shown} alt={alt} className={className} style={style} decoding="async" onError={onError}
+  return <img ref={ref} src={shown} alt={alt} className={className} style={filter ? { ...style, filter } : style} decoding="async" onError={onError}
     onLoad={onLoaded ? (e) => onLoaded(e.currentTarget) : undefined} />;
 }
 

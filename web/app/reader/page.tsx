@@ -22,6 +22,7 @@ import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
+import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
@@ -154,6 +155,12 @@ function ReaderInner() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
   /** Whether the open title's look is in `prefs` yet: a pull of the account's settings then leaves the look alone (mergePulled). */
   const titleOpen = useRef(false);
+  /** This device's own reader settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
+  const [device, setDeviceState] = useState<DevicePrefs>(loadDevicePrefs);
+  const setDevice = (p: Partial<DevicePrefs>) => setDeviceState((cur) => { const n = { ...cur, ...p }; saveDevicePrefs(n); return n; });
+  /** The colour filter over every page IMAGE (never the column, the track or a card), and how a move moves under it. */
+  const imgFilter = COLOR_FILTER[device.colorFilter];
+  const behavior = glide(device.colorFilter);
   const [zoom, setZoom] = useState(1);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
   // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
@@ -1132,7 +1139,7 @@ function ReaderInner() {
         // from its second half the next press went back to the half already on screen, and stayed there.
         const to = Math.max(0, Math.min(last, slideNow() + d));
         lastMoved.current = Date.now(); // before the first scroll event arrives
-        el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior: 'smooth' });
+        el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
       };
       // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
       // (turning the page instead swallowed the click), a text field everything.
@@ -1152,13 +1159,13 @@ function ReaderInner() {
       else if (el && paged && !owned && e.key === 'ArrowLeft') { e.preventDefault(); step(-trackSign as 1 | -1); }
       else if (el && paged && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown' || e.key === 'PageDown')) { e.preventDefault(); step(1); }
       else if (el && paged && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp' || e.key === 'PageUp')) { e.preventDefault(); step(-1); }
-      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown')) { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.88, behavior: 'smooth' }); }
-      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp')) { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.88, behavior: 'smooth' }); }
+      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown')) { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.88, behavior }); }
+      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp')) { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.88, behavior }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prevId, nextId, prefs.mode, seriesId, current, slideOf, trackSign, showSettings, showPages, showChapters]);
+  }, [prevId, nextId, prefs.mode, seriesId, current, slideOf, trackSign, showSettings, showPages, showChapters, behavior]);
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1247,7 +1254,7 @@ function ReaderInner() {
       const to = Math.max(0, Math.min(last, from + (zone === 'back' ? -1 : 1) * trackSign));
       acted.current = { kind: 'turn', slide: from, at: Date.now() };
       lastMoved.current = Date.now();
-      el.scrollTo({ left: trackSign * to * w, behavior: 'smooth' });
+      el.scrollTo({ left: trackSign * to * w, behavior });
       return;
     }
     acted.current = { kind: 'chrome', at: Date.now() };
@@ -1428,7 +1435,7 @@ function ReaderInner() {
                 recollapsible={collapsing && !!p.junk && !p.missing && expanded.has(p.key)}
                 missingSource={p.missing ? sourceNameOf(chapters[p.ci]?.sourceId) : null}
                 wide={!p.missing && isWide(p) ? wideMode : 'whole'} rightFirst={rightFirst}
-                crop={rowCrop(p, !p.missing && isWide(p) ? wideMode : 'whole')}
+                crop={rowCrop(p, !p.missing && isWide(p) ? wideMode : 'whole')} imgFilter={imgFilter}
                 onLoaded={prefs.cropBorders ? onPageLoad : undefined}
                 onExpand={expandPage} onCollapse={collapsePage} />
             ))}
@@ -1461,7 +1468,7 @@ function ReaderInner() {
                     return (
                       <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                         style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-                        <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" />
+                        <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" filter={imgFilter} />
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
@@ -1477,17 +1484,18 @@ function ReaderInner() {
                   if (halfOf && p.width && p.height) {
                     return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
                       region={cropOn ? halfCrop(halfOf, box?.all ?? WHOLE) : halfOf === 'left' ? LEFT_HALF : RIGHT_HALF}
-                      half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded} />;
+                      half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded}
+                      filter={imgFilter} trimmed={cropOn ? (box?.all ?? WHOLE).l : undefined} />;
                   }
                   if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
                     return <SlideTurned key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
-                      area={area} zoom={zoom} />;
+                      area={area} zoom={zoom} filter={imgFilter} />;
                   }
                   if (cropOn) {
                     const w = p.width || box?.w;
                     const h = p.height || box?.h;
                     if (!(w && h)) {
-                      return <SlidePending key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded}
+                      return <SlidePending key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
                         className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
@@ -1499,12 +1507,12 @@ function ReaderInner() {
                     }
                     return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
                       region={region} area={shown.length === 2 ? { w: area.w / 2 - 2, h: area.h } : area} zoom={zoom}
-                      pending={pending} onLoaded={loaded} />;
+                      pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
                     <ReaderImg key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
                       className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
-                      style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} />
+                      style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
                   );
                 })}
               </div>
@@ -1671,6 +1679,8 @@ function ReaderInner() {
           <ReaderSettings
             prefs={prefs}
             set={setPref}
+            device={device}
+            setDevice={setDevice}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).
