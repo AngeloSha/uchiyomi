@@ -181,11 +181,12 @@ test('Continue reading never offers a deleted chapter', { skip }, async () => {
   await tombstoneBooks([B.two]);
   assert.deepEqual(await onDeck(), [B.three], 'the "next unread" pick must step over the tombstone');
 
-  // Part-way through chapter 2 when it was deleted: the progress row survives (by design), so the pick
-  // itself is the tombstone. The resolved list is where it is caught.
-  // Reintroduce by dropping `!b.pruned` from the filter on the resolved books.
+  // Part-way through chapter 2 when it was deleted: the progress row survives (by design), but the part-way pick
+  // steps over the tombstone, so the series stays on the rail at the next chapter (v0.60.1, found in Squeaks72's
+  // fork). It used to win the pick, get dropped by the resolved-book filter, and take the whole series off the rail.
+  // Reintroduce by deleting the `pruned_at IS NOT NULL` guard from the part-way subquery in routes/catalog.ts: [].
   await progress(B.two, false);
-  assert.deepEqual(await onDeck(), [], 'a part-read tombstone must not be offered as the place to continue');
+  assert.deepEqual(await onDeck(), [B.three], 'a part-read tombstone gives way to the next chapter, and the series stays');
 });
 
 test('the OPDS chapter feed omits a deleted chapter', { skip }, async () => {

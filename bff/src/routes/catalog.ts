@@ -356,6 +356,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
                          WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
                            -- not a notice chapter the admin hides (lib/noticeChapters.ts): it is no chapter to resume
                            AND NOT ${noticeBook('p.book_id')}
+                           -- nor one whose pages were deleted (v0.60.1, found in Squeaks72's fork): it used to win here
+                           -- and then be dropped by the resolved-book filter below, taking the whole series off the rail
+                           -- instead of falling through to the next chapter. NOT EXISTS of a KNOWN tombstone, not EXISTS
+                           -- of a live row: a Komga-backed install has no lib_books row for the book at all.
+                           AND NOT EXISTS (SELECT 1 FROM lib_books pb WHERE pb.id = p.book_id AND pb.pruned_at IS NOT NULL)
                          ORDER BY p.updated_at DESC LIMIT 1),
                       -- otherwise the lowest-numbered chapter you have not finished
                       (SELECT b.id FROM lib_books b
