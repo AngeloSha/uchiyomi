@@ -91,8 +91,11 @@ export function workForKey(k: string): string | null {
 // ---- what the library holds ----------------------------------------------------------------------------------------
 
 const INDEX_TTL_MS = 60_000;
-/** An other name (not the series' own title) counts as the series' only when its key is at least this long. */
-const MIN_OTHER_NAME_KEY = 8;
+/**
+ * An other name (not the series' own title) counts as the series' only when its key is at least this long. Also the
+ * rule for an AniList synonym naming a held series (lib/anilistRelated.ts heldEntry, v0.61.0).
+ */
+export const MIN_OTHER_NAME_KEY = 8;
 let indexVersion = 0;
 let indexCache: { at: number; version: number; built: Promise<LibraryIndex> } | null = null;
 
