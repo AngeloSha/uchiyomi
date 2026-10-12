@@ -18,6 +18,9 @@ export const SMART_SORTS = {
   updated: 'lastModified,desc',
   read: 'lastRead,desc',
   new: 'createdDate,desc',
+  // v0.61.0: the release radar's Releasing soon (lane RT), which lane LS's table was written before. A list saved from the
+  // Library in that order was refused as a query the Library could not have written.
+  soon: 'releasing,asc',
   popular: 'popularity,desc',
   score: 'score,desc',
   rating: 'rating,desc',

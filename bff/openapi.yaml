@@ -281,7 +281,7 @@ components:
         lib: { type: string, minLength: 1, maxLength: 120, description: Library id. }
         src: { type: string, minLength: 1, maxLength: 120, description: "Main source id; '-' is No source." }
         anysrc: { type: string, minLength: 1, maxLength: 120, description: Any source id. }
-        sort: { type: string, enum: [updated, read, new, popular, score, rating, chapters, unread, az] }
+        sort: { type: string, enum: [updated, read, new, soon, popular, score, rating, chapters, unread, az] }
         dir: { type: string, enum: [asc, desc] }
     AdminBulkDeleteResult:
       type: object
@@ -4774,7 +4774,7 @@ paths:
       description: >-
         Since v0.61.0 `query` makes a smart list -- a saved Library search, the Library's own URL words
         `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, sort, dir?:
-        asc|desc}`, `sort` one of updated, read, new, popular, score, rating, chapters, unread, az -- answered afresh for
+        asc|desc}`, `sort` one of updated, read, new, soon, popular, score, rating, chapters, unread, az -- answered afresh for
         whoever opens it; a list's kind is fixed when it is made. `shared: true` lets the rest of the household read it
         (never change it). An unknown or oversized query key is 400.
       operationId: postApiCollections
