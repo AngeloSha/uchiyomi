@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
@@ -14,8 +15,8 @@ import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiT
 import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
-import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
-import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
+import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor, testConnection } from '../lib/trackers';
+import { ADAPTERS, isProvider, verdictOf, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
 
@@ -65,6 +66,9 @@ async function listDates(userId: string, ids: string[]): Promise<{ read: Map<str
 }
 
 export default async function personalRoutes(app: FastifyInstance) {
+  // server.ts registers the limiter at the root; a test or a tool that mounts this plugin bare gets it here instead,
+  // so Test connection is never unlimited by accident (v0.61.0, the notify.ts and komgaCompat.ts precedent).
+  if (!app.hasDecorator('createRateLimit')) await app.register(rateLimit, { global: false });
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', async (req) => {
     (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
@@ -781,10 +785,19 @@ export default async function personalRoutes(app: FastifyInstance) {
 
   // Connect by pasting a token, for any provider. This is the honest, dependency-free path: a full OAuth
   // dance would make every self-hoster register an application with each service and keep its secret in
-  // their compose file, which is a worse trade for a household app than copying a token once.
+  // their compose file, which is a worse trade for a household app than copying a token once. Since v0.61.0
+  // AniList's token comes from the project's own public client, whose page shows it to copy -- still a paste,
+  // with no secret anywhere (trackerProviders.ts ANILIST_CLIENT_ID).
   //
   // The token is verified against the service before it is stored, so a typo fails here with the service's
   // own answer rather than silently at 3am when the first chapter tries to sync.
+  //
+  // Only the service's verdict on the token is a 400 `rejected` (v0.61.0, #190). Every failure used to be, so a DNS
+  // failure, Cloudflare's 403 in front of AniList or an outage all read "AniList did not accept that token" and sent
+  // the person back for a new one. No answer at all is a 502 `tracker_unreachable`; an answer that refused the request
+  // for another reason is a 502 `tracker_refused` with the service's `status` (lib/trackerProviders.ts verdictOf).
+  // Reintroduce by answering 400 `rejected` in the catch again: "connect: a network throw is 502 tracker_unreachable"
+  // in trackerVerdicts.int.test.ts fails.
   const connectTracker = async (provider: Provider, req: any, reply: any) => {
     const b = z.object({ token: z.string().min(10).max(4000) }).safeParse(req.body);
     const adapter = ADAPTERS[provider];
@@ -792,7 +805,18 @@ export default async function personalRoutes(app: FastifyInstance) {
     let who;
     try {
       who = await whoAmI(b.data.token.trim(), provider);
-    } catch {
+    } catch (e) {
+      const v = verdictOf(e);
+      if (v.verdict !== 'rejected') req.log.warn({ provider, verdict: v.verdict, status: v.status, err: (e as Error)?.message }, 'tracker connect: the token could not be checked');
+      if (v.verdict === 'unreachable') {
+        return reply.code(502).send({ error: 'tracker_unreachable', message: `Could not reach ${adapter.label}. Try again in a moment.` });
+      }
+      if (v.verdict === 'refused') {
+        return reply.code(502).send({
+          error: 'tracker_refused', ...(v.status ? { status: v.status } : {}),
+          message: `${adapter.label} refused the request${v.status ? ` (HTTP ${v.status})` : ''}. That is not about the token; try again later.`,
+        });
+      }
       return reply.code(400).send({ error: 'rejected', message: `${adapter.label} did not accept that token.` });
     }
     if (!who) return reply.code(400).send({ error: 'rejected', message: `${adapter.label} did not accept that token.` });
@@ -810,6 +834,27 @@ export default async function personalRoutes(app: FastifyInstance) {
     const { provider } = req.params as { provider: string };
     if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
     return connectTracker(provider, req, reply);
+  });
+
+  // Test connection (v0.61.0, #190): does the saved token still work? One call to the service (lib/trackers.ts
+  // testConnection), always a 200 that says which -- `connected` with the account, or `rejected`, `unreachable`,
+  // `refused` (+ `status`), `expired`, `not_connected` -- and nothing is written. Six a minute per account: each one is
+  // a request to someone else's service. `hook: 'preHandler'` puts the limiter after authenticate, so the key is the
+  // account (the notify-target Test's pattern). Reintroduce by dropping the rateLimit config: "the seventh test in a
+  // minute is a 429" in trackerVerdicts.int.test.ts sees a 200.
+  app.post('/api/trackers/:provider/test', {
+    config: {
+      rateLimit: {
+        max: 6,
+        timeWindow: '1 minute',
+        hook: 'preHandler',
+        keyGenerator: (req) => `tracker-test:${userIdOf(req)}`,
+      },
+    },
+  }, async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
+    return testConnection(userIdOf(req), provider);
   });
 
   app.delete('/api/trackers/:provider', async (req) => {

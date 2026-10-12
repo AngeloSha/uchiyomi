@@ -923,7 +923,9 @@ the next check downloads what it no longer hides.
 
 ## Rate limiting
 
-The API isn't rate-limited for authenticated users; the limits are on getting in. `POST /auth/login` takes
+The API isn't rate-limited for authenticated users, but for the two Test routes that ask someone else's service
+(`POST /api/trackers/:provider/test` six per account per minute, since v0.61.0; a notification target's Test five);
+the limits are on getting in. `POST /auth/login` takes
 ten attempts per address per five minutes, `POST /api/setup` and `POST /auth/register` five per ten minutes,
 and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
 minutes, then **429** `too_many_requests` `{message}` with `Retry-After` for every further request from that
@@ -963,6 +965,15 @@ POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 ```
+
+**Signing up** (the form since v0.61.0). `POST /auth/register` `{username, password, displayName?, deviceId?,
+deviceName?}` works only while **Admin → Settings → Open registration** is on — `GET /auth/config` says so as
+`allowRegistration`, which the sign-in screen reads to offer *Create an account*, and which is always false on
+Uchiyomi Desktop — and is otherwise **403** `registration_disabled`. It makes a member (role `user`) and signs them in
+exactly as `/auth/login` does: the same body, cookies and session, named by `deviceId`/`deviceName` like a sign-in's.
+A name that differs from an existing one only in case is taken (**409** `username_taken`, as is the name itself),
+and two sign-ups racing for one name end in one account and a 409, never a 500. **400** is `bad_request` (a name
+outside letters, numbers, `.`, `_`, `-`, 2–64 long) or `weak_password`.
 
 **Two-factor enrolment is one way.** `POST /auth/totp/setup` writes a *pending* secret and answers
 `{secret, otpauth, qr}`; nothing is enforced until `POST /auth/totp/enable` `{code}` confirms a code from
@@ -1378,6 +1389,7 @@ GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/:provider/connect
+POST   /api/trackers/:provider/test
 POST   /api/trackers/anilist/backfill
 POST   /api/trackers/:provider/resync/:seriesId
 DELETE /api/trackers/:provider
@@ -1430,7 +1442,18 @@ series per selected rail; an empty selected List reserves its position and appea
 
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
-drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below
+drops it. Since v0.61.0 ([#190](https://github.com/AngeloSha/uchiyomi/issues/190)) AniList's entry carries
+`authorizeUrl` — `https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token`, the project's
+public AniList client: open it, approve, and AniList's own pin page shows the token to paste (an implicit grant;
+nothing comes back to this server and no secret is involved). MyAnimeList and Kitsu have no such page;
+[USAGE.md](USAGE.md#getting-a-myanimelist-token) has the commands that get theirs. Connect checks the token with
+the service first, and only the service's verdict on it is a **400** `rejected`: no answer at all (a timeout, DNS, a
+refused connection) is a **502** `tracker_unreachable`, and an answer that turned the request down for another
+reason (Cloudflare's 403 in front of AniList, a 429, a 5xx) is a **502** `tracker_refused` `{status}` — neither
+means the token is bad. `POST /api/trackers/:provider/test` asks the service whether the saved token still works
+and answers **200** `{ok, verdict, account?, status?}` with `verdict` one of `connected`, `rejected`,
+`unreachable`, `refused`, `expired` or `not_connected`; it writes nothing (not even `last_error`), sends no token
+past its `expires_at`, and allows six tests a minute per account (**429** after). A push goes out for the caller alone when they finish a chapter of a linked series, never below
 the floor `tracker_progress` holds for them (see the reviewable import under Admin, `/run`). Only a **401**
 from the service — or AniList's "Invalid token" **400** — is a verdict on the token, and disables the
 connection with `last_error` = `the tracker rejected the saved token -- reconnect to resume syncing`; a

@@ -142,6 +142,9 @@ const SLICES: [string, string, string, string][] = [
   // v0.55.1 (#148): a library's dialog, its list of folders and the folder browser that ticks them -- keys where "Use"
   // was a chip -- beside the Libraries cards' chips and the suggested folders, which stay.
   ['app/admin/page.tsx', 'Libraries: the folder browser and the library dialog', 'function FolderPicker(', 'function LibrariesSection('],
+  // v0.61.0 (#190): Profile → Connections' tracker rows -- Connect, Cancel, Test connection, Disconnect, and AniList's token
+  // page -- are keys, beside the OPDS and API token sections below them, whose chips this release does not redesign.
+  ['components/ProfileConnections.tsx', 'Connections: the tracker rows', 'function TrackerRow(', 'function OpdsSection('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3613
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3597,5 +3597,24 @@
   "Couldn’t load your library": "ライブラリを読み込めませんでした",
   "Couldn’t load more": "続きを読み込めませんでした",
   "AniList score": "AniList のスコア",
-  "Actions for {title}": "{title} の操作"
+  "Actions for {title}": "{title} の操作",
+  "That is a client ID, not the token.": "それはクライアント ID で、トークンではありません。",
+  "That looks like an app’s client ID or secret, not the token.": "それはアプリのクライアント ID かシークレットのようです。トークンではありません。",
+  "Could not reach {name} from this server. Check its internet connection and try again.": "このサーバーから {name} に接続できませんでした。サーバーのインターネット接続を確認して、もう一度お試しください。",
+  "{name} refused the request (HTTP {status}). That is not about your token: try again later.": "{name} がリクエストを拒否しました（HTTP {status}）。トークンの問題ではありません。しばらくしてからもう一度お試しください。",
+  "{name} refused the request. That is not about your token: try again later.": "{name} がリクエストを拒否しました。トークンの問題ではありません。しばらくしてからもう一度お試しください。",
+  "It works: {name} answers as {account}.": "接続できています: {name} では {account} として認識されています。",
+  "{name} no longer accepts this token. Disconnect, then connect again with a new one.": "{name} はこのトークンを受け付けなくなりました。接続を解除してから、新しいトークンで接続し直してください。",
+  "This token has expired. Disconnect, then connect again with a new one.": "このトークンは期限切れです。接続を解除してから、新しいトークンで接続し直してください。",
+  "Six tests a minute at most — try again shortly": "テストは 1 分に 6 回までです — 少し待ってからもう一度お試しください",
+  "Test connection": "接続をテスト",
+  "Get a token from {name}": "{name} でトークンを取得",
+  "Approve Uchiyomi there, copy the token {name} shows, and paste it here.": "そのページで Uchiyomi を承認し、{name} に表示されるトークンをコピーして、ここに貼り付けてください。",
+  "{name} shows no token on any page, so getting one takes a few steps outside Uchiyomi.": "{name} はどのページにもトークンを表示しないため、取得するには Uchiyomi の外でいくつかの手順が必要です。",
+  "How to get a {name} token": "{name} のトークンを取得する方法",
+  "Sign-up is turned off on this server. Ask whoever runs it for an account.": "このサーバーでは新規登録が無効になっています。サーバーの管理者にアカウントを依頼してください。",
+  "That username is taken.": "そのユーザー名はすでに使われています。",
+  "Too many attempts. Wait a few minutes and try again.": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
+  "Already have an account? Sign in": "アカウントをお持ちですか？ログイン",
+  "Create an account": "アカウントを新規作成"
 }

@@ -73,6 +73,12 @@ Setup is in [docs/api.md](api.md#single-sign-on-oidc).
 Log in with the username/password you set in `setup.sh` (the first account is `admin`). If you've turned on
 two-factor auth, you'll be asked for your 6-digit code (or a recovery code) after the password.
 
+**Creating your own account** (since v0.61.0). When the admin has turned on **Admin → Settings → Open registration**,
+the sign-in form offers **Create an account** under it: a username (letters, numbers, `.`, `_` and `-`), a password
+of at least 8 characters, typed twice, and you are signed in as a member. A name someone already has is taken,
+whatever its capital letters: with `admin` here, `Admin` is taken too. With the switch off there is no such link,
+and accounts come from the admin (**Admin → Members**). The desktop app never offers it.
+
 ---
 
 ## 3. Your library
@@ -2526,7 +2532,7 @@ stuck.
 ![Settings](shots/admin-settings.webp)
 
 **Settings** (`/admin/?tab=Settings`) is five sections. **Server**: the server name, an **Open registration**
-switch (let anyone sign up), **Check for updates** and the anonymous **install count**, each of the last two
+switch (let anyone sign up: the sign-in screen then offers *Create an account*, section 2), **Check for updates** and the anonymous **install count**, each of the last two
 with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
 chapters), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer is re-armed at
@@ -2714,7 +2720,20 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the
 AniList row and the token field opens under it) and finishing a chapter here updates your AniList list on its own.
 
-Paste an access token from AniList's developer settings. Progress is the highest chapter you have **finished**,
+**Getting the token** (since v0.61.0, [#190](https://github.com/AngeloSha/uchiyomi/issues/190)): tap **Get a token
+from AniList**, approve Uchiyomi on AniList's page, and AniList shows you a token: copy all of it and paste it into
+the field. That page belongs to Uchiyomi's own public AniList client, so there is nothing to register and no secret
+anywhere. The token lasts a year, and the row warns you a month before it runs out. Pasting the whole address of
+AniList's page works too: the token is taken out of it. (AniList's developer settings show a client ID and a secret,
+never a token; paste either and the row says that is what it is.) MyAnimeList and Kitsu show no token on any page:
+their rows link to the steps below.
+
+If Connect fails, the row says why: the service turned the token down, the server could not reach the service, or
+the service refused the request for another reason (a block, a rate limit, an outage). The last two are not about
+your token, so try again later rather than getting a new one. **Test connection** on a connected row asks the
+service whether the saved token still works and says what it answered; it changes nothing.
+
+Progress is the highest chapter you have **finished**,
 so re-reading an old chapter never rewinds your list, and AniList being slow or down can never delay or block
 your reading. If the service rejects your token, Uchiyomi disables the connection and says so on the row
 rather than failing silently; a token that has lapsed is noted on the row too, but the connection is left
@@ -2747,6 +2766,52 @@ from the start: chapters read to 12 plus a mark on chapter 1000 still send 12, b
 tracker cannot be taken back there. Section 4, *Marking chapters you don't have as read*, has the whole rule.
 
 ![AniList sync](shots/crop-anilist.webp)
+
+### Getting a MyAnimeList token
+
+MyAnimeList hands out tokens only through its API, to an app of your own (OAuth 2 with PKCE). Once a month or so:
+
+1. Sign in at [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig) and **Create ID**. Choose **App Type:
+   other**, which gets no client secret (none is needed), and any **App Redirect URL**: `http://localhost/oauth`
+   is fine, nothing has to answer there. Fill in the rest and submit; the app's page shows its **Client ID**.
+2. Make a verifier, a random string of 43 to 128 letters and digits, and print the approval link with it.
+   MyAnimeList supports only PKCE's `plain` method, so the verifier is the challenge too:
+
+   ```bash
+   CLIENT_ID=your-client-id
+   VERIFIER=$(openssl rand -hex 32)
+   echo "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$CLIENT_ID&code_challenge=$VERIFIER&code_challenge_method=plain&state=uchiyomi"
+   ```
+
+3. Open that link, sign in and **Allow**. The browser lands on your redirect URL (a page that does not load is
+   fine) with `?code=…&state=uchiyomi` in the address bar. Copy the code: everything after `code=` up to `&state`.
+4. Swap it for a token right away, in the same terminal:
+
+   ```bash
+   curl -s https://myanimelist.net/v1/oauth2/token \
+     -d client_id="$CLIENT_ID" -d grant_type=authorization_code \
+     -d code=PASTE_THE_CODE -d code_verifier="$VERIFIER"
+   ```
+
+   The answer is JSON: paste its `access_token` into the MyAnimeList row (pasting the whole answer works too). It
+   lasts as long as `expires_in` says, in seconds: 31 days (2678400) at the time of writing. The row warns you
+   before it runs out; then repeat steps 2 to 4.
+
+### Getting a Kitsu token
+
+Kitsu gives a token to its OAuth endpoint for your email (or profile name) and password, its documented *password
+grant*. In a terminal (the password is read without being shown, so it stays out of your shell history):
+
+```bash
+printf 'Kitsu password: '; read -rs KITSU_PASSWORD; echo
+curl -s https://kitsu.io/api/oauth/token \
+  --data-urlencode grant_type=password \
+  --data-urlencode username=you@example.com \
+  --data-urlencode "password=$KITSU_PASSWORD"
+```
+
+Paste the answer's `access_token` into the Kitsu row (or the whole answer). It lasts 30 days (`expires_in`, in
+seconds); run the command again for a new one. Your password goes to Kitsu only, never to Uchiyomi.
 
 ## 11. Install as an app & offline
 

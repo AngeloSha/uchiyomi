@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
 import { api, ApiError } from '@/lib/api';
@@ -28,9 +28,10 @@ const ssoError = (reason: string): string => {
 };
 
 export function LoginScreen() {
-  const { login, firstRunSetup } = useAuth();
-  // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below.
-  const [mode, setMode] = useState<'checking' | 'login' | 'setup' | 'desktop'>('checking');
+  const { login, firstRunSetup, register } = useAuth();
+  // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below. `register` (v0.61.0):
+  // signing up, reached only from `login` by "Create an account" while Open registration is on.
+  const [mode, setMode] = useState<'checking' | 'login' | 'setup' | 'desktop' | 'register'>('checking');
   const [username, setUsername] = useState('');
   const [pw, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -39,6 +40,10 @@ export function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
   const [sso, setSso] = useState<{ enabled: boolean; name: string }>({ enabled: false, name: '' });
+  // Admin → Settings → Open registration, as /auth/config says (v0.61.0). The switch existed and POST /auth/register
+  // answered behind it, but this screen had no form, so turning it on did nothing anyone could see. Always false on
+  // Uchiyomi Desktop, whose server says so whatever its settings hold.
+  const [canRegister, setCanRegister] = useState(false);
   const err = !!errMsg;
   // globals.css kills CSS animation under prefers-reduced-motion, but it cannot reach framer-motion, so
   // this screen's backdrop ignored the setting until now.
@@ -59,8 +64,9 @@ export function LoginScreen() {
         else setMode('login');
       }
       try {
-        const c = await api<{ oidc?: { enabled: boolean; name: string }; desktop?: boolean }>('/auth/config');
+        const c = await api<{ oidc?: { enabled: boolean; name: string }; desktop?: boolean; allowRegistration?: boolean }>('/auth/config');
         if (c.oidc?.enabled) setSso(c.oidc);
+        setCanRegister(c.allowRegistration === true);
         // A browser tab pointed at the desktop app's port: that library signs in only inside the app, and
         // this form could never succeed there (the server has no password sign-in to answer it).
         if (c.desktop === true) { noteServerDesktop(true); setMode('desktop'); }
@@ -88,16 +94,42 @@ export function LoginScreen() {
     setBusy(false);
   };
 
-  const submitSetup = async (e: React.FormEvent) => {
+  /** What is wrong with the account form before anything is sent: setup's checks, which sign-up shares (v0.61.0). */
+  const accountProblem = (): string => {
+    if (username.trim().length < 2) return tr('Pick a username (at least 2 characters).');
+    if (pw.length < 8) return tr('Password must be at least 8 characters.');
+    if (pw !== confirm) return tr('Passwords do not match.');
+    return '';
+  };
+
+  const submitSetup = async (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    if (username.trim().length < 2) { setErrMsg(tr('Pick a username (at least 2 characters).')); return; }
-    if (pw.length < 8) { setErrMsg(tr('Password must be at least 8 characters.')); return; }
-    if (pw !== confirm) { setErrMsg(tr('Passwords do not match.')); return; }
+    const problem = accountProblem();
+    if (problem) { setErrMsg(problem); return; }
     setBusy(true);
     setErrMsg('');
     const r = await firstRunSetup(username.trim(), pw);
     if (!r.ok) setErrMsg(r.error || tr('Setup failed — please try again.'));
+    setBusy(false);
+  };
+
+  // Between signing in and signing up: the password fields start empty and an old refusal goes, the name stays.
+  const toMode = (next: 'login' | 'register') => { setMode(next); setErrMsg(''); setPw(''); setConfirm(''); };
+
+  const submitRegister = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const problem = accountProblem();
+    if (problem) { setErrMsg(problem); return; }
+    setBusy(true);
+    setErrMsg('');
+    const r = await register(username.trim(), pw);
+    if (!r.ok) {
+      // Switched off since this screen asked: back to signing in, without the link, saying why.
+      if (r.closed) { setCanRegister(false); toMode('login'); }
+      setErrMsg(r.error || tr('Could not create account'));
+    }
     setBusy(false);
   };
 
@@ -165,31 +197,21 @@ export function LoginScreen() {
 
         {/* First-run: create the admin account */}
         {mode === 'setup' && (
-          <form onSubmit={submitSetup} className="glass grad-border rounded-3xl p-5 shadow-lift">
-            <label className={labelCls}>{tr('Admin username')}</label>
-            <input
-              type="text" autoCapitalize="none" autoCorrect="off" autoFocus
-              value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('admin')}
-              className={`mb-4 ${inputCls}`}
-            />
-            <label className={labelCls}>{tr('Password')}</label>
-            <input
-              type="password"
-              value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr('At least 8 characters')}
-              className={`mb-4 ${inputCls}`}
-            />
-            <label className={labelCls}>{tr('Confirm password')}</label>
-            <input
-              type="password"
-              value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••"
-              className={inputCls}
-            />
-            {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
-            <button type="submit" disabled={busy} className="btn-accent mt-4 w-full disabled:opacity-50">
-              {busy ? tr('Creating…') : tr('Create admin account & open Uchiyomi')}
-            </button>
-            <p className="mt-3 text-center text-xs text-fog-500">{tr('This first account becomes the server admin.')}</p>
-          </form>
+          <AccountForm onSubmit={submitSetup} nameLabel={tr('Admin username')} namePlaceholder={tr('admin')}
+            submitLabel={tr('Create admin account & open Uchiyomi')}
+            footer={<p className="mt-3 text-center text-xs text-fog-500">{tr('This first account becomes the server admin.')}</p>}
+            {...{ username, setUsername, pw, setPw, confirm, setConfirm, busy, errMsg, inputCls, labelCls }} />
+        )}
+
+        {/* Signing up (v0.61.0): the same form, as a member. Setup always wins -- `register` is reached only from `login`. */}
+        {mode === 'register' && (
+          <AccountForm onSubmit={submitRegister} nameLabel={tr('Username')} submitLabel={tr('Create account')}
+            footer={(
+              <button type="button" onClick={() => toMode('login')} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300">
+                {tr('Already have an account? Sign in')}
+              </button>
+            )}
+            {...{ username, setUsername, pw, setPw, confirm, setConfirm, busy, errMsg, inputCls, labelCls }} />
         )}
 
         {/* Normal sign-in */}
@@ -240,11 +262,74 @@ export function LoginScreen() {
                 </a>
               </>
             )}
+            {/* v0.61.0: only while Open registration is on, and never mid-way through a second step. Reintroduce the
+                form-less screen by dropping this: "the sign-in form offers Create an account only while registration
+                is open" in web/test/signUp.test.ts fails. */}
+            {canRegister && !needTotp && (
+              <button type="button" onClick={() => toMode('register')} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300" data-create-account>
+                {tr('Create an account')}
+              </button>
+            )}
           </form>
         )}
 
         <p className="mt-6 text-center text-xs text-fog-500">{mode === 'setup' ? tr('First-run setup') : tr('Private library · single sign-in')}</p>
       </motion.div>
     </div>
+  );
+}
+
+/**
+ * The form that makes an account (v0.61.0): first-run setup's admin, and a member signing up while Open registration is
+ * on. One form so the two cannot drift -- setup passes exactly the words and classes its form always had. Each label
+ * names its field, and autoComplete tells a password manager this is a new account: it offers to make the password
+ * and saves it under the name typed. "signing up is first-run setup's form …" in web/test/signUp.test.ts holds setup's
+ * words and classes to it; a second copy of the form fails it.
+ */
+function AccountForm({ onSubmit, nameLabel, namePlaceholder, submitLabel, footer, username, setUsername, pw, setPw, confirm, setConfirm,
+  busy, errMsg, inputCls, labelCls }: {
+  onSubmit: (e: FormEvent) => void;
+  nameLabel: string;
+  namePlaceholder?: string;
+  submitLabel: string;
+  footer: ReactNode;
+  username: string;
+  setUsername: (v: string) => void;
+  pw: string;
+  setPw: (v: string) => void;
+  confirm: string;
+  setConfirm: (v: string) => void;
+  busy: boolean;
+  errMsg: string;
+  inputCls: string;
+  labelCls: string;
+}) {
+  const id = useId();
+  return (
+    <form onSubmit={onSubmit} className="glass grad-border rounded-3xl p-5 shadow-lift">
+      <label htmlFor={`${id}-name`} className={labelCls}>{nameLabel}</label>
+      <input
+        id={`${id}-name`} type="text" autoCapitalize="none" autoCorrect="off" autoComplete="username" autoFocus
+        value={username} onChange={(e) => setUsername(e.target.value)} placeholder={namePlaceholder}
+        className={`mb-4 ${inputCls}`}
+      />
+      <label htmlFor={`${id}-pw`} className={labelCls}>{tr('Password')}</label>
+      <input
+        id={`${id}-pw`} type="password" autoComplete="new-password"
+        value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr('At least 8 characters')}
+        className={`mb-4 ${inputCls}`}
+      />
+      <label htmlFor={`${id}-confirm`} className={labelCls}>{tr('Confirm password')}</label>
+      <input
+        id={`${id}-confirm`} type="password" autoComplete="new-password"
+        value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••"
+        className={inputCls}
+      />
+      {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
+      <button type="submit" disabled={busy} className="btn-accent mt-4 w-full disabled:opacity-50">
+        {busy ? tr('Creating…') : submitLabel}
+      </button>
+      {footer}
+    </form>
   );
 }

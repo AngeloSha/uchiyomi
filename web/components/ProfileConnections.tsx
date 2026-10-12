@@ -12,6 +12,7 @@ import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { IcCloudDownload, IcPlus, IcRefresh } from '@/components/icons';
 import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
 import { isDesktop } from '@/lib/desktop';
+import { connectProblem, testProblem, testSaid, tokenFromPaste, tokenSource, type TestResult } from '@/lib/trackerHelp';
 
 /**
  * Profile → Connections: everything that lets something OTHER than this app read or write on the account --
@@ -72,6 +73,7 @@ function useFocusAfter() {
 interface TrackerStatus {
   /** Sent by the server so the UI never hardcodes the provider list. */
   label?: string;
+  /** The server's English help: shown only for a provider lib/trackerHelp.ts does not know (v0.61.0). */
   tokenHelp?: string;
   provider: string; connected: boolean; accountName: string | null;
   expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
@@ -117,20 +119,34 @@ function TrackerSection({ focus }: { focus: boolean }) {
   );
 }
 
+/**
+ * One provider's row. Since v0.61.0 (#190) its actions are squared keys, like every action the redesigned surfaces have
+ * (web/test/noPills.test.ts slices this function); a failed Connect says why under the field rather than in a toast that
+ * leaves with the reason, by the server's code (lib/trackerHelp.ts connectProblem); and a connected row has Test
+ * connection, which asks the service whether the saved token still works and changes nothing.
+ */
 function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   const toast = useToast();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  // Why the last Connect failed, said under the field (role="status"); cleared as the paste changes.
+  const [problem, setProblem] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<{ ok: boolean; text: string } | null>(null);
   const formId = useId();
   // A service's own name is a proper noun: it is passed as a placeholder rather than translated.
   const label = t.label || t.provider;
 
   const connect = async () => {
-    if (!token.trim()) return;
+    // The address of AniList's pin page, or a token endpoint's whole JSON answer, carries the token: it is taken out.
+    // Anything else is sent as pasted -- a shape only ever chooses the message below, never refuses the paste.
+    const sent = tokenFromPaste(token);
+    if (!sent) return;
     setBusy(true);
+    setProblem('');
     try {
-      const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: token.trim() } });
+      const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: sent } });
       toast(tr('Connected to {name} as {account}', { name: label, account: r.account }), 'success');
       setToken('');
       setOpen(false);
@@ -140,12 +156,23 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
         const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
         if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
       }
-    } catch (e: any) { toast(msgOf(e, tr('{name} did not accept that token', { name: label })), 'error'); }
+    } catch (e) { setProblem(connectProblem(e, t.provider, label, sent)); }
     setBusy(false);
   };
 
+  const test = async () => {
+    setTesting(true);
+    try {
+      const r = await api<TestResult>(`/api/trackers/${t.provider}/test`, { method: 'POST' });
+      setTested({ ok: r.ok, text: testSaid(r, label) });
+      // A push met a rejected token since this list was read, and disabled the connection: show the row as it is now.
+      if (r.verdict === 'not_connected') refetch();
+    } catch (e) { setTested({ ok: false, text: testProblem(e) }); }
+    setTesting(false);
+  };
+
   const disconnect = async () => {
-    try { await api(`/api/trackers/${t.provider}`, { method: 'DELETE' }); toast(tr('Disconnected'), 'success'); refetch(); }
+    try { await api(`/api/trackers/${t.provider}`, { method: 'DELETE' }); toast(tr('Disconnected'), 'success'); setTested(null); refetch(); }
     catch { toast(tr('Could not disconnect'), 'error'); }
   };
 
@@ -171,10 +198,16 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
             {t.lastError && (
               <span className="mt-2 block rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{t.lastError}</span>
             )}
+            {/* Always in the tree, so a screen reader hears the answer arrive; hidden while it is empty. */}
+            <span role="status" aria-live="polite" data-tracker-test
+              className={`mt-2 block text-xs empty:hidden ${tested?.ok ? 'text-emerald-300' : 'text-amber-300'}`}>{tested?.text ?? ''}</span>
           </>
         }
       >
-        <button type="button" onClick={disconnect} className="chip text-xs">{tr('Disconnect')}</button>
+        <button type="button" onClick={test} disabled={testing} className="btn-key">
+          {testing ? tr('Testing…') : tr('Test connection')}
+        </button>
+        <button type="button" onClick={disconnect} className="btn-key btn-key-danger">{tr('Disconnect')}</button>
       </Row>
     );
   }
@@ -191,30 +224,63 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
           ? <>{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}{t.lastError && <span className="mt-1 block text-red-300">{t.lastError}</span>}</>
           : t.lastError ? <span className="text-red-300">{t.lastError}</span> : undefined}
       >
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={formId} className="chip text-xs">
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={formId} className="btn-key">
           {open ? tr('Cancel') : tr('Connect')}
         </button>
       </Row>
       {open && (
         <div id={formId} className="pb-3 last:pb-0">
-          {t.tokenHelp && <p className="max-w-prose text-xs text-fog-500">{t.tokenHelp}</p>}
+          <TokenHelp provider={t.provider} name={label} fallback={t.tokenHelp} />
           {/* fog-500, not fog-600: this is the one security fact on the form, and fog-600 measures 2.6:1 on
               the card -- below AA for any size of text. fog-500 (4.1:1) is the floor for helper text. */}
-          <p className="mt-1 max-w-prose text-[11px] text-fog-500">
+          <p className="mt-2 max-w-prose text-[11px] text-fog-500">
             {tr('The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.', { name: label })}
           </p>
           <div className="mt-3 flex gap-2">
-            <input value={token} onChange={(e) => setToken(e.target.value)} type="password"
+            <input value={token} onChange={(e) => { setToken(e.target.value); setProblem(''); }} type="password"
               onKeyDown={(e) => { if (e.key === 'Enter' && !busy) connect(); }}
               placeholder={tr('{name} access token', { name: label })} aria-label={tr('{name} access token', { name: label })}
-              autoCapitalize="none" autoCorrect="off" className="field min-w-0 flex-1" />
-            <button type="button" onClick={connect} disabled={busy || !token.trim()} className="btn-accent shrink-0 px-4 py-2 text-sm disabled:opacity-50">
+              autoCapitalize="none" autoCorrect="off" autoComplete="off" className="field min-w-0 flex-1" />
+            <button type="button" onClick={connect} disabled={busy || !token.trim()} className="btn-key btn-key-primary shrink-0">
               {busy ? tr('Working…') : tr('Connect')}
             </button>
           </div>
+          <p role="status" aria-live="polite" data-tracker-problem className="mt-2 max-w-prose text-xs leading-snug text-red-300 empty:hidden">{problem}</p>
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Where this provider's token comes from (v0.61.0, #190), in the reader's words: for AniList a key to the page that
+ * shows one (the project's public client, lib/trackerHelp.ts) and the three steps; for MyAnimeList and Kitsu the honest
+ * sentence that no page shows a token, and the guide's steps. A provider the web does not know keeps the server's
+ * English help. Reintroduce `{t.tokenHelp && <p …>{t.tokenHelp}</p>}` for every provider: "the Connections row: the
+ * web's help, …" in web/test/trackerHelp.test.ts fails.
+ */
+function TokenHelp({ provider, name, fallback }: { provider: string; name: string; fallback?: string }) {
+  const src = tokenSource(provider);
+  if (!src) return fallback ? <p className="max-w-prose text-xs text-fog-500">{fallback}</p> : null;
+  if (src.shows) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <a href={src.url} target="_blank" rel="noopener noreferrer" className="btn-key btn-key-accent" data-token-page>
+          {tr('Get a token from {name}', { name })}
+        </a>
+        <p className="min-w-0 flex-1 basis-56 text-xs text-fog-500">
+          {tr('Approve Uchiyomi there, copy the token {name} shows, and paste it here.', { name })}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <p className="max-w-prose text-xs text-fog-500">
+      {tr('{name} shows no token on any page, so getting one takes a few steps outside Uchiyomi.', { name })}{' '}
+      <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-accent underline-offset-2 hover:underline" data-token-guide>
+        {tr('How to get a {name} token', { name })}
+      </a>
+    </p>
   );
 }
 

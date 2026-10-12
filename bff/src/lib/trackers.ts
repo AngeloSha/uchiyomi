@@ -13,7 +13,7 @@
 import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
-import { ADAPTERS, PROVIDERS, type Provider } from './trackerProviders';
+import { ADAPTERS, PROVIDERS, verdictOf, type Provider } from './trackerProviders';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
@@ -27,6 +27,8 @@ export interface TrackerStatus {
   /** Display name and where to get a token, so the UI does not hardcode the provider list. */
   label: string;
   tokenHelp: string;
+  /** A page that shows a token to copy (v0.61.0): AniList's, for the project's public client. Absent for the others. */
+  authorizeUrl?: string;
   connected: boolean;
   accountName: string | null;
   expiresAt: string | null;
@@ -76,16 +78,19 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
   return PROVIDERS.map((p) => {
     const r = byProvider.get(p);
+    // Additive (v0.61.0): only a provider with such a page carries the key at all.
+    const authorizeUrl = ADAPTERS[p].authorizeUrl ? { authorizeUrl: ADAPTERS[p].authorizeUrl } : {};
     if (!r) {
       return {
         provider: p, connected: false, accountName: null, expiresAt: null,
         expiringSoon: false, lastSyncAt: null, lastError: null,
-        label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp,
+        label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp, ...authorizeUrl,
       };
     }
     return {
     label: ADAPTERS[p].label,
     tokenHelp: ADAPTERS[p].tokenHelp,
+    ...authorizeUrl,
     provider: r.provider,
     connected: r.enabled,
     accountName: r.account_name,
@@ -176,6 +181,40 @@ export async function whoAmI(token: string, provider: Provider = 'anilist'): Pro
   const adapter = ADAPTERS[provider];
   if (!adapter) return null;
   return adapter.whoAmI(token);
+}
+
+/** What Test connection found (v0.61.0): the token works, the service says no, or something between the two. */
+export type TestVerdict = 'connected' | 'rejected' | 'unreachable' | 'refused' | 'expired' | 'not_connected';
+export interface TestResult { ok: boolean; verdict: TestVerdict; account?: string; status?: number }
+
+/**
+ * Ask the service whether the saved token still works (v0.61.0, #190): unseal it and make the one call Connect proves a
+ * token with (the adapter's whoAmI). It changes NOTHING -- not `enabled`, not `last_error`, not the account name: a
+ * person checking a connection must not be able to disable it, and a service having a bad minute is not a verdict the
+ * card should keep (verdictOf, trackerProviders.ts, says which answers are). Outside the push gate on purpose: behind a
+ * backfill's queue a test would wait minutes; the route is rate-limited instead.
+ *
+ * `not_connected` is no row, a disabled one (GET /api/trackers says `connected: false` for it), or a token this server
+ * can no longer unseal -- each needs a new token pasted, which is what reconnecting is. `expired` is said without
+ * sending the token, as a push would not send it either (pushOne). Reintroduce a write (markError on a failure, say):
+ * "test: each verdict, and nothing about the connection is written" in trackerVerdicts.int.test.ts fails.
+ */
+export async function testConnection(userId: string, provider: Provider): Promise<TestResult> {
+  const row = await one<{ access_token: string; expires_at: string | null; enabled: boolean }>(
+    'SELECT access_token, expires_at, enabled FROM user_trackers WHERE user_id = $1 AND provider = $2',
+    [userId, provider],
+  );
+  if (!row || !row.enabled) return { ok: false, verdict: 'not_connected' };
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return { ok: false, verdict: 'expired' };
+  const token = unseal(row.access_token);
+  if (!token) return { ok: false, verdict: 'not_connected' };
+  try {
+    const who = await ADAPTERS[provider].whoAmI(token);
+    return who ? { ok: true, verdict: 'connected', account: who.name } : { ok: false, verdict: 'rejected' };
+  } catch (e) {
+    const v = verdictOf(e);
+    return { ok: false, verdict: v.verdict, ...(v.status ? { status: v.status } : {}) };
+  }
 }
 
 // ---- progress push ---------------------------------------------------------
