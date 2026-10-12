@@ -799,9 +799,10 @@ try {
         return d ? { orders: d.querySelectorAll('[data-sort-option^="sort-"]').length, dirs: order ? order.querySelectorAll('[role=radio]').length : 0,
           on: [...d.querySelectorAll('[aria-pressed="true"]')].map((b) => b.getAttribute('data-sort-option')) } : null;
       });
+      // v0.61.0: ten orders -- Releasing soon (the release radar) joined the nine (lib/librarySort.ts SORTS).
       !sheet ? bad('phone library: the Sort key opened no sheet')
-        : sheet.orders === 9 && sheet.dirs === 2 && sheet.on.includes(`sort-${sorted}`)
-          ? ok(`phone library: the Sort sheet lists 9 orders and 2 directions, ${sorted} ticked`)
+        : sheet.orders === 10 && sheet.dirs === 2 && sheet.on.includes(`sort-${sorted}`)
+          ? ok(`phone library: the Sort sheet lists 10 orders and 2 directions, ${sorted} ticked`)
           : bad(`phone library: the Sort sheet is wrong: ${JSON.stringify(sheet)}`);
       await page.keyboard.press('Escape');
       await sleep(500);
@@ -860,8 +861,9 @@ try {
         const m = document.querySelector('[role=menu]');
         return m ? { radios: m.querySelectorAll('[role=menuitemradio]').length, checked: m.querySelectorAll('[aria-checked="true"]').length } : null;
       });
-      items && items.radios === 11 && items.checked === 2
-        ? ok('library @1440: the Sort menu has 9 orders and 2 directions, one of each ticked')
+      // v0.61.0: ten orders and two directions (Releasing soon joined the nine).
+      items && items.radios === 12 && items.checked === 2
+        ? ok('library @1440: the Sort menu has 10 orders and 2 directions, one of each ticked')
         : bad(`library @1440: the Sort menu is wrong: ${JSON.stringify(items)}`);
       await page.keyboard.press('Escape');
       await sleep(300);
