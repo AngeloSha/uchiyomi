@@ -240,13 +240,21 @@ components:
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 64 }
           description: >-
-            Ordered ids of up to three Lists owned by this account. Missing preserves the legacy first-three-
-            nonempty Home rails; an explicit empty array means no List rails. Empty selected Lists retain their
-            slot. Already-stored stale or unowned ids are ignored by Home and omitted on the next edit;
-            a request that tries to add one is refused.
+            Ordered ids of up to three Lists owned by this account -- or, since v0.61.0, shared with the household by
+            another member. Missing preserves the legacy first-three-nonempty Home rails; an explicit empty array means
+            no List rails. Empty selected Lists retain their slot. Already-stored stale or unreadable ids are ignored by
+            Home and omitted on the next edit; a request that tries to add one (another member's private List, a
+            malformed id) is refused.
         showAllChapters:
           type: boolean
           description: Show one unpaged chapter list, including all grey rows and unfolded older runs.
+        incognito:
+          type: boolean
+          description: >-
+            Since v0.61.0, Incognito reading, for the whole account and enforced by the server: progress is still
+            written (Keep reading and resuming work), but no reading event is recorded (history, streaks, Wrapped, the
+            leaderboard, the household's Top 10, member activity) and nothing is pushed to a tracker automatically --
+            whatever client wrote the progress. The next push once it is off sends the series' real highest chapter.
         reader:
           type: object
           additionalProperties: true
@@ -257,6 +265,24 @@ components:
             type: string
             enum: [az, za, read, unread, latest]
           description: Per-List display sorts; absence for a List means its own order.
+    SmartListQuery:
+      type: object
+      additionalProperties: false
+      required: [v, sort]
+      description: >-
+        Since v0.61.0, a smart list's saved Library search, in the Library URL's own words. Answered with the Library's
+        own search for whoever opens the list.
+      properties:
+        v: { type: integer, enum: [1] }
+        q: { type: string, minLength: 1, maxLength: 200, description: Title search. }
+        read: { type: string, enum: [UNREAD, IN_PROGRESS, READ] }
+        status: { type: string, minLength: 1, maxLength: 40 }
+        genres: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 60 } }
+        lib: { type: string, minLength: 1, maxLength: 120, description: Library id. }
+        src: { type: string, minLength: 1, maxLength: 120, description: "Main source id; '-' is No source." }
+        anysrc: { type: string, minLength: 1, maxLength: 120, description: Any source id. }
+        sort: { type: string, enum: [updated, read, new, popular, score, rating, chapters, unread, az] }
+        dir: { type: string, enum: [asc, desc] }
     AdminBulkDeleteResult:
       type: object
       required: [id, outcome, chapters, bytes, kept, paused, chapterSkips]
@@ -1705,7 +1731,11 @@ paths:
         caller's library that have an outside popularity (AniList, through the series' checked AniList link), the
         most listed first -- Home's "Most popular in your library". Every series carries `yomi.anilist {id, score,
         popularity}` (or null; `id`, the AniList entry's id, since v0.60.0) beside the caller's own `yomi.rating`, and
-        `yomi.lastReadAt`.
+        `yomi.lastReadAt`. Since v0.61.0 also `pickUp`, up to 20 books shaped like `onDeck`, each with `stoppedAt`
+        (when the caller last read in the series): the chapter to pick a series back up at, for series last read 90
+        days to two years ago in which the caller finished at least one chapter (never a series `onDeck` holds); and
+        `gems`, up to 20 series with an AniList score of at least 75 that nobody on the server has read in any
+        language edition, one per work, best score first (empty on a Komga backend).
       operationId: getApiHome
       parameters:
         - name: adult
@@ -2666,6 +2696,15 @@ paths:
                   type: boolean
                 silent:
                   type: boolean
+                at:
+                  type: integer
+                  description: When the page was read, in client ms (the offline outbox's replay time); absent means now.
+                incognito:
+                  type: boolean
+                  description: >-
+                    Since v0.61.0: read under Incognito reading. The account's own `incognito` setting is read by the
+                    server anyway; this covers a chapter read while it was on and sent after it went off. Either way
+                    the progress is written, and no reading event or tracker push follows.
       security:
         - bearer: []
       responses:
@@ -4699,7 +4738,15 @@ paths:
     get:
       tags:
         - personal
-      summary: The caller's collections.
+      summary: The caller's collections (Lists); with scope=all, smart and shared ones too.
+      description: >-
+        Without `scope`: the caller's own hand-picked lists, `{id, name, accent, sort_order, item_count}` with the
+        stored count, as before v0.61.0 (the series page's "Add to collection" sheet offers these). `scope=all`
+        (v0.61.0): the caller's own lists of both kinds, then those other members share with the household, each
+        `{id, name, accent, sort_order, item_count, kind: manual|smart, shared, mine, owner?: {id, name, avatar},
+        query?}` -- `item_count` is how many series it shows THIS caller (their libraries, age cap and 18+ switch),
+        `owner` names whoever made someone else's list, and `query`, a smart list's saved search, goes to its owner
+        alone. A shared list that shows the caller nothing is left out.
       operationId: getApiCollections
       parameters:
         - name: adult
@@ -4707,6 +4754,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all]
       security:
         - bearer: []
       responses:
@@ -4717,7 +4770,13 @@ paths:
     post:
       tags:
         - personal
-      summary: Create a collection.
+      summary: Create a collection (a List), hand-picked or smart, private or shared.
+      description: >-
+        Since v0.61.0 `query` makes a smart list -- a saved Library search, the Library's own URL words
+        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, sort, dir?:
+        asc|desc}`, `sort` one of updated, read, new, popular, score, rating, chapters, unread, az -- answered afresh for
+        whoever opens it; a list's kind is fixed when it is made. `shared: true` lets the rest of the household read it
+        (never change it). An unknown or oversized query key is 400.
       operationId: postApiCollections
       requestBody:
         required: false
@@ -4728,6 +4787,12 @@ paths:
               properties:
                 name:
                   type: string
+                accent:
+                  type: string
+                query:
+                  $ref: '#/components/schemas/SmartListQuery'
+                shared:
+                  type: boolean
       security:
         - bearer: []
       responses:
@@ -4741,7 +4806,10 @@ paths:
     patch:
       tags:
         - personal
-      summary: Rename a collection.
+      summary: Rename a collection, change a smart list's search, or share it.
+      description: >-
+        The owner's only: someone else's list, shared or not, is 404. Since v0.61.0 `query` replaces a smart list's
+        search (400 `not_smart` on a hand-picked list) and `shared` shares the list with the household or stops it.
       operationId: patchApiCollectionsId
       parameters:
         - name: id
@@ -4758,13 +4826,21 @@ paths:
               properties:
                 name:
                   type: string
+                accent:
+                  type: string
+                sortOrder:
+                  type: integer
+                query:
+                  $ref: '#/components/schemas/SmartListQuery'
+                shared:
+                  type: boolean
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: Malformed body or parameter, or `not_smart`
         "401":
           description: Not authenticated
         "404":
@@ -4797,7 +4873,11 @@ paths:
         `{id, name, accent, sort_order, items}`: the series in the list's own order, enriched like every listing
         (`yomi.unread` is the unread badge), a series hidden by the 18+ switch or an age cap left out. Since v0.55.7 (#164)
         each item also carries `lastReadAt` (when the caller last read in it, their own progress only; null if never)
-        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts.
+        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts. Since v0.61.0
+        also a list shared with the household by another member (404 for anyone else's private list, and for a
+        malformed id), with `kind`, `shared`, `mine`, `owner` (someone else's list), `query` (the owner's own smart
+        list) and `total`, how many series it shows this caller in all: a smart list is answered for the caller, in
+        its saved order, and capped at `limit` items (200 without one).
       operationId: getApiCollectionsId
       parameters:
         - name: id
@@ -4810,6 +4890,13 @@ paths:
           required: false
           schema:
             type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
       security:
         - bearer: []
       responses:
@@ -4824,7 +4911,10 @@ paths:
       tags:
         - personal
       summary: Add a series to a collection.
-      description: At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them.
+      description: >-
+        At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them. The
+        owner's hand-picked lists only: since v0.61.0 someone else's list is 404 (it answered `{ok: false}`), and a
+        smart list is 409 `smart_list` -- it holds what its search finds. The same for the other item routes.
       operationId: postApiCollectionsIdItems
       parameters:
         - name: id
@@ -4852,6 +4942,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
     put:
       tags:
         - personal
@@ -4885,6 +4977,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/collections/{id}/items/{seriesId}:
     delete:
       tags:
@@ -4911,6 +5005,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/ratings/{seriesId}:
     put:
       tags:
@@ -5420,6 +5516,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/library/bulk/newest:
     post:
       tags:
@@ -5796,7 +5894,8 @@ paths:
         `reader` (the reader's defaults; since v0.55.7 with `coverEdges`, default true, the cover's colour at the
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
-        `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`). Unknown keys remain accepted and retained for compatibility.
+        `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
+        boolean). Unknown keys remain accepted and retained for compatibility.
       operationId: putApiSettings
       requestBody:
         required: false
@@ -6318,6 +6417,9 @@ paths:
       tags:
         - opds
       summary: Root navigation feed.
+      description: >-
+        Per reader since v0.61.0: Keep reading, the three series feeds, Favourites, then one entry per List the reader
+        may read -- their own, and those shared with the household that show them a series ("List · Owner").
       operationId: getOpds
       security:
         - opdsBasic: []
@@ -6427,6 +6529,69 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /opds/continue:
+    get:
+      tags:
+        - opds
+      summary: "Keep reading: the chapter Home offers for each series this reader is reading, newest read first."
+      description: Since v0.61.0. Chapters, each with its CBZ link and an OPDS-PSE stream link carrying `pse:lastRead`.
+      operationId: getOpdsContinue
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/favorites:
+    get:
+      tags:
+        - opds
+      summary: This reader's favourites, newest first, paged sixty at a time.
+      description: Since v0.61.0. Series entries; 18+ titles only when the token's 18+ switch allows them.
+      operationId: getOpdsFavorites
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+  /opds/lists/{id}:
+    get:
+      tags:
+        - opds
+      summary: One List's series as this reader may see them, paged sixty at a time.
+      description: >-
+        Since v0.61.0. The reader's own List or one shared with the household (a smart list answered for this reader);
+        anything else, a malformed id included, is 404.
+      operationId: getOpdsListsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      security:
+        - opdsBasic: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /opds/series/{id}:
     get:
       tags:

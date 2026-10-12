@@ -37,6 +37,11 @@ export interface ContentBackend {
   seriesUpdated(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   /** v0.58.0, Home's Most popular in your library: series with an outside popularity, most listed first. */
   seriesPopular(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
+  /**
+   * v0.61.0, Home's Hidden gems: well-rated series (lib/ownedCatalog.ts GEM_MIN_SCORE) nobody in the household has
+   * opened, in any language edition, one card per work, best first.
+   */
+  seriesGems(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   booksOnDeck(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   searchSeries(ctx: ViewCtx, body: any, page?: number, size?: number, sort?: string): Promise<any>;
   seriesBooks(ctx: ViewCtx, id: string, page?: number, size?: number, sort?: string): Promise<any>;
@@ -65,6 +70,8 @@ const komgaAdapter = (k: any): ContentBackend => ({
   seriesUpdated: (_c, p, s) => k.seriesUpdated(p, s),
   // Komga's series carry no AniList link of ours (series_trackers is keyed by owned series ids): no rail.
   seriesPopular: async () => ({ content: [] }),
+  // Nor scores or the household's reading of them for Hidden gems (v0.61.0): no rail.
+  seriesGems: async () => ({ content: [] }),
   booksOnDeck: (_c, p, s) => k.booksOnDeck(p, s),
   searchSeries: (_c, body, p, s, sort) => k.searchSeries(body, p, s, sort),
   seriesBooks: (_c, id, p, s, sort) => k.seriesBooks(id, p, s, sort),

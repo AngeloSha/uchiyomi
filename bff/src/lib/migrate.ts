@@ -1720,6 +1720,15 @@ CREATE TABLE IF NOT EXISTS series_radar (
   computed_at   timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS update_smart boolean NOT NULL DEFAULT false;
+
+-- v0.61.0: smart and shared Lists (lib/lists.ts, lib/smartLists.ts). query is a smart list's Library filters and order, in
+-- the Library's own URL words ({v:1, q, read, status, genres, lib, src, anysrc, sort, dir}); NULL is a list picked by
+-- hand, and a list's kind is fixed when it is made. shared lets the household read a list (never change it); it is only
+-- listed to a member it shows at least one series to. Additive: v0.60.1 boots on this schema and shows a smart list as
+-- an empty list, and a shared one to its owner only.
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS query jsonb;
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS shared boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS collections_shared_idx ON collections (shared) WHERE shared;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

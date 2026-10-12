@@ -13,4 +13,8 @@ test('the live progress payload sends at: Date.now()', () => {
   const line = src.split('\n').find((l) => l.includes('const payload = {') && l.includes('deviceId: deviceId()'));
   assert.ok(line, 'the payload line exists');
   assert.match(line!, /at: Date\.now\(\)/, 'and it carries the clock the server guard needs');
+  // v0.61.0, updated deliberately: the same line now also says a page was read under Incognito reading, read from the
+  // shell's switch at the moment of the write (lib/incognito.ts incognitoRef), so the live write -- and the outbox entry
+  // a failed one becomes -- carries it. Reintroduce the payload without it: this fails.
+  assert.match(line!, /\.\.\.\(incognitoRef\.current \? \{ incognito: true \} : \{\}\)/, 'and whether it was read incognito');
 });

@@ -215,7 +215,11 @@ export function SeriesCard({ series, w = 'w-32', eager = false, note }: {
 }
 
 /** Wide "continue reading" card for an on-deck book. */
-export function ContinueCard({ book, eager = false }: { book: Book; eager?: boolean }) {
+/**
+ * A chapter to go on with: Keep reading's card, and Pick back up's (v0.61.0), whose `note` says when the reading stopped
+ * ("Read 3 months ago") where Keep reading names the other device it was on.
+ */
+export function ContinueCard({ book, eager = false, note }: { book: Book; eager?: boolean; note?: string }) {
   const pct = progressOf(book);
   // Progress already syncs across devices; this just says where you left off, and only when that was
   // somewhere else — "you were reading this on the device you're holding" is noise.
@@ -234,7 +238,8 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
         <p className="line-clamp-1 font-display text-base font-semibold text-white">{book.seriesTitle}</p>
         <p className="mb-2 text-xs text-fog-300">
           {chapterLabel(book)}
-          {elsewhere && (
+          {note && <span className="text-fog-500" data-continue-note> · {note}</span>}
+          {!note && elsewhere && (
             // One sentence per language: relativeTime is the reader's language now, and "on iPhone vor 3 Tagen"
             // was English words around a German phrase.
             <span className="text-fog-500"> · {elsewhere.at

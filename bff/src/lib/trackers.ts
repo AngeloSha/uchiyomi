@@ -19,6 +19,7 @@ import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
 import { lastNumber } from './chapterRanges';
 import type { ScopedQuery } from './anilistPolicy';
+import { incognitoOn } from './incognito';
 export type { Provider } from './trackerProviders';
 
 
@@ -407,9 +408,21 @@ async function markError(userId: string, provider: Provider, msg: string): Promi
   await q('UPDATE user_trackers SET last_error = $3 WHERE user_id = $1 AND provider = $2', [userId, provider, msg]).catch(() => {});
 }
 
-/** Fire-and-forget wrapper used from the reading path — must never delay or fail a page turn. */
+/**
+ * Fire-and-forget wrapper used from the reading path — must never delay or fail a page turn.
+ *
+ * Every AUTOMATIC push goes through here -- the reader's progress write, Mihon's read-progress PUT, a listing's read
+ * marks, a bulk Mark read -- so this is where Incognito reading (v0.61.0, lib/incognito.ts) stops them, whichever
+ * client wrote the progress. The deliberate ones on Profile → Connections (Push everything finished, Resync) call
+ * pushSeriesProgress directly and still go: the person asked for them. Once Incognito is off, the next push for a series
+ * sends its real highest chapter, so the tracker catches up then. Reintroduce by pushing without the check: "a Mihon
+ * read-progress PUT pushes nothing under Incognito" in incognito.int.test.ts sees a push.
+ */
 export function pushSeriesProgressAsync(userId: string, seriesId: string): void {
-  void pushSeriesProgress(userId, seriesId).catch(() => {});
+  void (async () => {
+    if (await incognitoOn(userId)) return;
+    await pushSeriesProgress(userId, seriesId);
+  })().catch(() => {});
 }
 
 /**

@@ -10,6 +10,9 @@ import { rangeEnd, numberText } from './chapterRanges';
 import { anilistScoreOf } from './anilistScores';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
+
+/** v0.61.0: the AniList score (out of 100) a series needs to be one of Home's Hidden gems. */
+export const GEM_MIN_SCORE = 75;
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
   const totalPages = Math.max(1, Math.ceil(total / size));
   return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
@@ -642,6 +645,35 @@ export const owned = {
     const pop = anilistScoreOf('sv', 'popularity');
     const rows = await q(
       `SELECT ${SERIES_COLS} FROM ${src} WHERE ${pop} IS NOT NULL ORDER BY ${pop} DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
+    );
+    return page(rows.map(seriesDto), rows.length, pg, size);
+  },
+
+  /**
+   * v0.61.0, Home's "Hidden gems": what the household is sleeping on. Series this viewer may browse whose AniList score
+   * (lib/anilistScores.ts, through the checked link) is at least GEM_MIN_SCORE, and that NOBODY has a read_progress row
+   * for -- not in this series, and not in any other language edition of its work (another member reading the English
+   * edition is not a gem in Spanish). One card per work, the best-scored edition; best score first, then the more
+   * popular. A series with no score is never a gem: there is nothing to say it is good. Reintroduce by checking the
+   * series alone, or by dropping DISTINCT ON: "Hidden gems: well rated, read by nobody in any edition, one card per work"
+   * in homeRails.int.test.ts finds the Spanish edition, or a second edition of one work.
+   */
+  seriesGems: async (ctx: ViewCtx, pg = 0, size = 20) => {
+    const p = new Params();
+    const src = browseSrc(ctx, p);
+    const score = anilistScoreOf('sv', 'score');
+    const pop = anilistScoreOf('sv', 'popularity');
+    const rows = await q(
+      `SELECT ${SERIES_COLS} FROM (
+         SELECT DISTINCT ON (COALESCE(sv.work_id::text, sv.id)) sv.*, ${score} AS gem_score, ${pop} AS gem_pop
+           FROM ${src}
+          WHERE ${score} >= ${GEM_MIN_SCORE}
+            AND NOT EXISTS (SELECT 1 FROM read_progress rp WHERE rp.series_id = sv.id)
+            AND NOT EXISTS (SELECT 1 FROM read_progress rp JOIN lib_series ed ON ed.id = rp.series_id WHERE ed.work_id = sv.work_id)
+          ORDER BY COALESCE(sv.work_id::text, sv.id), gem_score DESC, gem_pop DESC NULLS LAST, sv.title ASC
+       ) g
+       ORDER BY gem_score DESC, gem_pop DESC NULLS LAST, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
       p.values as any[],
     );
     return page(rows.map(seriesDto), rows.length, pg, size);

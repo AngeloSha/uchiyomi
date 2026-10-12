@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3655
+    "strings": 3674
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3658,5 +3658,24 @@
   "Devices": "Устройства",
   "Reading time by hour of the day": "Время чтения по часам суток",
   "Catch up in ~{time}": "Догнать ≈ за {time}",
-  "{time} of reading": "{time} чтения"
+  "{time} of reading": "{time} чтения",
+  "Save as list": "Сохранить как список",
+  "Update “{name}”": "Обновить «{name}»",
+  "Share with the household": "Поделиться с домашними",
+  "Everyone here can open it and sees only what they may open; only you can change it.": "Все здесь могут открыть его и видят только то, что им доступно; изменить его можете только вы.",
+  "Live list": "Живой список",
+  "Shared": "Общий",
+  "by {name}": "автор: {name}",
+  "Your lists": "Ваши списки",
+  "Shared with you": "Доступные вам",
+  "Edit filters": "Изменить фильтры",
+  "Stop sharing": "Перестать делиться",
+  "Showing the first {n} of {total}.": "Показаны первые {n} из {total}.",
+  "Nothing in your library matches this list right now.": "Сейчас в вашей библиотеке нет ничего, что подходит под этот список.",
+  "Incognito reading": "Режим инкогнито",
+  "Your place is kept, but what you read stays out of your history, stats and the household’s rails, and nothing is sent to your trackers. For every device on this account.": "Место чтения сохраняется, но прочитанное не попадает в историю, статистику и общие подборки, и ничего не отправляется в трекеры. Для всех устройств этой учётной записи.",
+  "Incognito": "Инкогнито",
+  "Incognito reading is on: what you read is not recorded.": "Режим инкогнито включён: прочитанное не записывается.",
+  "Pick back up": "Вернуться к чтению",
+  "Hidden gems": "Скрытые жемчужины"
 }

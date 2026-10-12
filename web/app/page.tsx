@@ -20,21 +20,25 @@ import { Lockup } from '@/components/Brand';
 import { LibraryStart } from '@/components/LibraryStart';
 import { t as tr } from '@/lib/i18n';
 import { sortValue } from '@/lib/sortValue';
+import { relativeTime } from '@/lib/format';
+import { homeIdsOf, type ListRow } from '@/lib/lists';
+import { useListsAll } from '@/components/SaveListDialog';
 
-interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
+type CollectionRow = ListRow;
 
-/** One home rail per (non-empty) collection, capped at 3 — links through to the collection page. */
+/**
+ * One home rail per chosen list, capped at 3 — links through to the list's page. v0.61.0: any list this reader may read
+ * (lib/lists.ts), a smart one or one someone shares included, from ['lists-all'].
+ */
 function CollectionRails() {
   const { user } = useAuth();
-  const { data } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections'), staleTime: 300000 });
+  const { data } = useListsAll(true, 300_000);
   const all = data?.content ?? [];
   const saved = user?.settings?.homeCollections;
   // No setting means the pre-v0.55.8 behaviour.  Once a reader makes an explicit choice, including choosing
   // none, that exact order wins.  Empty selected lists remain in the setting but their rail stays quiet until
-  // something is added; stale or foreign ids cannot occur in this account-scoped response and are ignored.
-  const cols = Array.isArray(saved)
-    ? saved.slice(0, 3).map((id) => all.find((c) => c.id === id)).filter((c): c is CollectionRow => !!c)
-    : all.filter((c) => Number(c.item_count) > 0).slice(0, 3);
+  // something is added; a stale or unreadable id is not in this reader's answer and is ignored (lib/lists.ts homeIdsOf).
+  const cols = homeIdsOf(saved, all).map((id) => all.find((c) => c.id === id)).filter((c): c is CollectionRow => !!c);
   if (!cols.length) return null;
   return (
     <>
@@ -44,9 +48,11 @@ function CollectionRails() {
 }
 
 function CollectionRail({ col }: { col: CollectionRow }) {
+  // Twelve, not the whole list (v0.61.0: a smart list may match the library), under a key of its own so the list's page
+  // never takes this short answer for the list.
   const { data } = useQuery({
-    queryKey: ['collection', col.id],
-    queryFn: () => api<{ items: Series[] }>(`/api/collections/${col.id}`),
+    queryKey: ['collection', col.id, 'rail'],
+    queryFn: () => api<{ items: Series[] }>(`/api/collections/${col.id}?limit=12`),
     staleTime: 300000,
   });
   const items = data?.items ?? [];
@@ -219,6 +225,19 @@ export default function HomePage() {
       {/* Your collections */}
       <CollectionRails />
 
+      {/* Pick back up (v0.61.0): series put down three months to two years ago, each at its next chapter and saying when.
+          Only with something in it, like every rail an older server does not send. */}
+      {(data?.pickUp?.length ?? 0) > 0 && (
+        <section className="pt-8" data-home-pickup>
+          <SectionTitle>{tr('Pick back up')}</SectionTitle>
+          <Rail>
+            {data!.pickUp!.map((b) => (
+              <ContinueCard key={b.id} book={b} note={b.stoppedAt ? tr('Read {when}', { when: relativeTime(b.stoppedAt) }) : undefined} />
+            ))}
+          </Rail>
+        </section>
+      )}
+
       {/* Recently added */}
       <section className="pt-8">
         <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Recently added')}</SectionTitle>
@@ -237,6 +256,17 @@ export default function HomePage() {
           <SectionTitle action={<Link href="/library?sort=popular" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Most popular in your library')}</SectionTitle>
           <Rail>
             {data!.popular!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
+          </Rail>
+        </section>
+      )}
+
+      {/* Hidden gems (v0.61.0): well-rated series nobody here has opened, each saying AniList's score. Only with something
+          in it. See all is the Library's own answer to the same question, best first and not started. */}
+      {(data?.gems?.length ?? 0) > 0 && (
+        <section className="pt-8" data-home-gems>
+          <SectionTitle action={<Link href="/library?sort=score&read=UNREAD" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Hidden gems')}</SectionTitle>
+          <Rail>
+            {data!.gems!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
           </Rail>
         </section>
       )}

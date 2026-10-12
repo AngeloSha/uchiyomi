@@ -21,6 +21,9 @@ import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } fr
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
 import { LibrarySortSheet, LibraryToolbar } from '@/components/LibraryToolbar';
 import { SORTS, dirLabel, naturalDir, sortDirOf, sortString, validDir, type SortDir } from '@/lib/librarySort';
+// v0.61.0: the condition tree moved to lib/libraryQuery.ts, where Save as list and the server's port of it read it too.
+import { conditionFrom, queryOfParams, suggestListName } from '@/lib/libraryQuery';
+import { SaveListKeys } from '@/components/SaveListDialog';
 import { gridClass, libraryLayoutOn, setLibraryLayout, type LibraryLayout } from '@/lib/libraryLayout';
 import { Sheet } from '@/components/ui';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
@@ -48,22 +51,6 @@ import {
   startedBulkChapterDeleteRun,
   type BulkChapterDeleteRun,
 } from '@/lib/bulkChapterDelete';
-
-/** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
-function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
-  const all: any[] = [];
-  if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
-  // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
-  // it reads from -- added from it, or following it as a fallback. Main source's "No source" (#149) is a condition of its
-  // own, never `mainSource` with the sentinel: an older server would answer that with an empty grid, not a 400.
-  if (src === NO_SOURCE) all.push({ hasMainSource: { operator: 'isFalse' } });
-  else if (src) all.push({ mainSource: { operator: 'is', value: src } });
-  if (anysrc) all.push({ anySource: { operator: 'is', value: anysrc } });
-  if (read) all.push({ readStatus: { operator: 'is', value: read } });
-  if (status) all.push({ status: { operator: 'is', value: status } });
-  for (const g of genres) all.push({ genre: { operator: 'is', value: g } });
-  return all.length ? { allOf: all } : undefined;
-}
 
 function LibraryInner() {
   const params = useSearchParams();
@@ -197,10 +184,15 @@ function LibraryInner() {
     if (sortKey) n.set('sort', sortKey);
     if (reversed) n.set('dir', dir);
     if (!alsoSearch && q) n.set('q', q);
+    // v0.61.0: the smart list this shelf was opened from (its Edit filters) stays, so filters cleared and chosen again
+    // can still Update it.
+    if (params.get('list')) n.set('list', params.get('list')!);
     router.replace(`/library?${n.toString()}`);
   };
 
   const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
+  // v0.61.0: the shelf on screen as a smart list's query -- the order in force included, the account's default too.
+  const shownQuery = useMemo(() => queryOfParams(params, { sort: active.key, dir }), [params, active.key, dir]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, isLoading, isError, isFetching, isPlaceholderData, refetch } = useInfiniteQuery({
     queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, q],
@@ -625,9 +617,10 @@ function LibraryInner() {
           className="mt-3 lg:sticky lg:top-[65px] lg:z-20 lg:mt-4 lg:border-b lg:border-ink-800/60 lg:bg-ink-950/80 lg:py-3 lg:backdrop-blur-xl"
         />
         {/* What narrows the shelf is always visible, so a short library is never mysterious -- the search and an order
-            running the other way included, each with its own ×. */}
-        {(narrowed || reversed) && (
-          <div className="mt-2 flex flex-wrap gap-1.5 lg:mt-3">
+            running the other way included, each with its own ×. v0.61.0: and an order the address chose, for the row's
+            last key, Save as list -- the shelf as a smart list (components/SaveListDialog.tsx). */}
+        {(narrowed || reversed || validSort(urlSort)) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 lg:mt-3">
             {q && (
               <button onClick={() => setParam('q', '')} title={tr('Clear search')} className="chip max-w-full text-xs" data-chip-search>
                 <IcSearch width={12} height={12} aria-hidden className="shrink-0" /><bdi className="min-w-0 truncate">{q}</bdi> ×
@@ -669,6 +662,8 @@ function LibraryInner() {
               </button>
             ))}
             {narrowed && <button onClick={() => clearAll(true)} className="chip text-xs text-fog-500">{tr('Clear all')}</button>}
+            <SaveListKeys query={shownQuery} listId={params.get('list') || undefined}
+              suggested={suggestListName(shownQuery, { lib: (id) => libs.find((l) => l.id === id)?.name || id, source: sourceName })} />
           </div>
         )}
         </>}

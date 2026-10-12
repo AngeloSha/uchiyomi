@@ -32,6 +32,7 @@ import { NextInStory } from '@/components/RelatedRail';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
+import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
 
 interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
@@ -636,7 +637,7 @@ function ReaderInner() {
     // `at` is what lets the server refuse a stale write. The offline outbox always sent it; the live path
     // never did, so every live ping took the "no timestamp" leg of the guard and applied unconditionally --
     // a desktop tab left open on chapter 3 could still rewind the phone that had read to chapter 9.
-    const payload = { page, completed, seriesId: sId, deviceId: deviceId(), at: Date.now() };
+    const payload = { page, completed, seriesId: sId, deviceId: deviceId(), at: Date.now(), ...(incognitoRef.current ? { incognito: true } : {}) };
     // Alongside the write, not instead of it: this is what a downloaded chapter resumes from with no network.
     void noteOfflineProgress(chId, page, completed);
     api(`/api/books/${chId}/progress`, { method: 'PUT', json: payload }).catch(() => queueProgress({ bookId: chId, ...payload }));
@@ -1347,6 +1348,7 @@ function ReaderInner() {
               ) : (
                 <div className="min-w-0 flex-1">{titleBlock}</div>
               )}
+              <IncognitoTag />
               {/* Chapter jump, at every width. This was `hidden lg:block`, so on a phone the only way
                   through a series was prev/next, one chapter at a time. */}
               {chapterRefs.length > 0 && (

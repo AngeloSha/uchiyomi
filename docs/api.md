@@ -1440,11 +1440,19 @@ many AniList users list the entry, read through the series' checked AniList link
 older than three days, fifty per request; never for a library whose AniList lookups are off. `POST /api/series/search`
 sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the OpenAPI), and `GET /api/home` carries
 `popular`, Home's "Most popular in your library".
-- `homeCollections: string[]`, ordered, de-duplicated, at most three collection ids owned by the caller. Missing means
-  the legacy first three nonempty Lists; `[]` explicitly means no Home List rails. A selected empty List keeps its
-  slot. Home ignores an already-stored stale/unowned id and the web app omits it on the next edit; the API refuses a
-  request that tries to add one.
+- `homeCollections: string[]`, ordered, de-duplicated, at most three collection ids owned by the caller -- or, since
+  v0.61.0, shared with the household by another member. Missing means the legacy first three nonempty Lists; `[]`
+  explicitly means no Home List rails. A selected empty List keeps its slot. Home ignores an already-stored stale or
+  unreadable id and the web app omits it on the next edit; the API refuses a request that tries to add one (another
+  member's private List, a malformed id).
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
+- `incognito: boolean` (since v0.61.0), **Incognito reading**, for the whole account and enforced by the server: progress
+  is still written, so Keep reading and every resume work, but no reading event is recorded -- history, streaks,
+  Wrapped, the leaderboard, the household's Top 10 and member activity never see it -- and nothing is pushed to a
+  tracker automatically, whichever client wrote the progress (the app, Mihon's read-progress PUT, a listing's marks, a
+  bulk Mark read). The deliberate *Push everything finished* and resync still push. `PUT /api/books/:id/progress`
+  also takes `incognito: true` for a chapter read while it was on and sent after it went off (the offline outbox).
+  When a series is next pushed with it off, the tracker is told the series' real highest chapter and catches up.
 
 The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
 
@@ -1498,6 +1506,29 @@ is not stored. The reader's defaults are the settings' `reader` object, and sinc
 `coverEdges` (default `true`): `false` takes the cover's colour off the reader's top and bottom edges.
 `homeCollections` controls which zero to three Lists also appear on Home and in what order. Home shows up to twelve
 series per selected rail; an empty selected List reserves its position and appears once it has a series.
+
+**Smart and shared Lists** (since v0.61.0). `POST /api/collections {name, accent?, query?, shared?}`: a `query` makes a
+*smart* list, a saved Library search in the Library URL's own words -- `{v: 1, q?, read?: 'UNREAD' | 'IN_PROGRESS' |
+'READ', status?, genres?, lib?, src?, anysrc?, sort, dir?: 'asc' | 'desc'}`, `src: '-'` being *No source* and `sort`
+one of `updated`, `read`, `new`, `popular`, `score`, `rating`, `chapters`, `unread`, `az` -- answered with the
+Library's own search, one card per work, for whoever opens it; an unknown key or an oversized value is **400**. A
+list's kind is fixed when it is made: `PATCH /api/collections/:id {query}` replaces a smart list's search and is
+**400** `not_smart` on a hand-picked one; the item routes on a smart list are **409** `smart_list`. `shared: true`
+(on create or PATCH) lets the rest of the household read the list -- never change it: PATCH, DELETE and the item
+routes are the owner's, and someone else's list answers **404** (the item routes answered `{ok: false}` before).
+`GET /api/collections/:id` answers the owner's lists and shared ones, with `kind`, `shared`, `mine`, `owner`
+(`{id, name, avatar}`, someone else's list), `query` (to the owner alone) and `total`, the series it shows this caller
+in all; `?limit=1..200` caps the items (a Home rail asks for twelve), and a smart list is capped at 200 without it.
+What a list shows is always the caller's view of it: their libraries, age cap and 18+ switch, and their own reading
+for `read`. `GET /api/collections` with no `scope` is unchanged -- the caller's hand-picked lists with the stored count
+-- and `?scope=all` adds their smart lists and the household's shared ones, counted for the caller, a shared list that
+shows them nothing left out.
+
+**Pick back up and Hidden gems** (since v0.61.0). `GET /api/home` carries `pickUp`, up to twenty books shaped like
+`onDeck` with `stoppedAt`: the chapter to resume each series last read 90 days to two years ago in which the caller
+finished at least one chapter -- never one `onDeck` holds -- most recent first; and `gems`, up to twenty series with an
+AniList score of at least 75 that nobody on the server has read in any language edition, one per work, best score
+first (empty on a Komga backend).
 
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
@@ -2609,6 +2640,14 @@ them:
 `<updated>` is honest: a series carries its newest chapter's time, a chapter its own, and a feed the newest
 of its entries. It used to be "now" on every fetch, which defeated readers' change detection.
 
+**Personal shelves** (since v0.61.0). The root is the reader's own: *Keep reading* (`/opds/continue`: the chapter
+Home's Keep reading offers for each series they are reading, newest read first, each a CBZ and a page stream with
+`pse:lastRead`), the three series feeds, *Favourites* (`/opds/favorites`, newest favourite first, sixty to a page),
+then one entry per List they may read -- their own, and those other members share with the household that show them
+at least one series, titled "List · Owner" -- each `/opds/lists/:id`, sixty to a page with a `next` link (a smart list
+answered for this reader, in its saved order). Another member's private List, or a malformed id, is **404**. Every
+shelf goes through the token's viewer, so its 18+ switch and the account's libraries and age cap apply.
+
 **The cover proxy.** `GET /img/sources/cover?u=<url>&source=<id>&w=400|800|1600` fetches a remote cover
 same-origin, resized to WebP, so a Discover tile never loads a third-party image in the browser. `u` is
 caller-supplied and is fetched through the SSRF guard: a value that is not an `http(s)` URL, or that
@@ -2674,6 +2713,8 @@ GET    /opds                      GET    /opds/series
 GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
 GET    /opds/book/:id/page/:n
+GET    /opds/continue             GET    /opds/favorites
+GET    /opds/lists/:id
 ```
 
 ### Komga-compatible API (Mihon's Komga extension and tracker)

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3655
+    "strings": 3674
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3658,5 +3658,24 @@
   "Devices": "الأجهزة",
   "Reading time by hour of the day": "وقت القراءة حسب ساعات اليوم",
   "Catch up in ~{time}": "تلحق بالجديد خلال نحو {time}",
-  "{time} of reading": "{time} من القراءة"
+  "{time} of reading": "{time} من القراءة",
+  "Save as list": "حفظ كقائمة",
+  "Update “{name}”": "تحديث «{name}»",
+  "Share with the household": "مشاركة مع أهل البيت",
+  "Everyone here can open it and sees only what they may open; only you can change it.": "يمكن للجميع هنا فتحها، ولا يرى كلٌّ منهم إلا ما يحق له فتحه؛ ولا يغيّرها أحد سواك.",
+  "Live list": "قائمة حيّة",
+  "Shared": "مُشارَكة",
+  "by {name}": "من {name}",
+  "Your lists": "قوائمك",
+  "Shared with you": "مُشارَكة معك",
+  "Edit filters": "تعديل عوامل التصفية",
+  "Stop sharing": "إيقاف المشاركة",
+  "Showing the first {n} of {total}.": "يُعرض أول {n} من {total}.",
+  "Nothing in your library matches this list right now.": "لا شيء في مكتبتك يطابق هذه القائمة الآن.",
+  "Incognito reading": "القراءة الخفية",
+  "Your place is kept, but what you read stays out of your history, stats and the household’s rails, and nothing is sent to your trackers. For every device on this account.": "يُحفظ موضعك، لكن ما تقرؤه لا يظهر في سجلك ولا في إحصاءاتك ولا في رفوف أهل البيت، ولا يُرسَل شيء إلى متتبّعاتك. على كل الأجهزة في هذا الحساب.",
+  "Incognito": "خفي",
+  "Incognito reading is on: what you read is not recorded.": "القراءة الخفية مفعّلة: ما تقرؤه لا يُسجَّل.",
+  "Pick back up": "عُد إليها",
+  "Hidden gems": "جواهر خفية"
 }

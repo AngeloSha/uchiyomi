@@ -287,6 +287,8 @@ export interface Book {
   id: string;
   /** where this book was last read, when that was another device (see /api/home) */
   lastDevice?: { id: string; name: string | null; at: string } | null;
+  /** v0.61.0, Home's Pick back up: when the reader last read in the series (see /api/home `pickUp`). */
+  stoppedAt?: string | null;
   seriesId: string;
   seriesTitle: string;
   name: string;
@@ -697,6 +699,12 @@ export interface HomePayload {
    * in your library". Absent from an older server, and then the rail is not drawn.
    */
   popular?: Series[];
+  /**
+   * v0.61.0: Pick back up -- the chapter to resume each series put down 90 days to two years ago, with `stoppedAt` --
+   * and Hidden gems -- well-rated series nobody on the server has read. Absent from an older server: no rail.
+   */
+  pickUp?: Book[];
+  gems?: Series[];
 }
 
 export interface DownloadManifest {

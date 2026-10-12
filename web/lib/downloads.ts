@@ -355,6 +355,11 @@ export interface ProgressEvent {
   page: number;
   completed: boolean;
   deviceId?: string;
+  /**
+   * v0.61.0: read under Incognito reading (lib/incognito.ts). Kept with the event and sent with it, so a page read while
+   * it was on stays out of history even when the queue flushes after it was turned off.
+   */
+  incognito?: boolean;
 }
 
 export async function queueProgress(ev: ProgressEvent): Promise<void> {
@@ -416,7 +421,7 @@ export async function flushOutbox(): Promise<number> {
     try {
       await api(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
-        json: { page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts },
+        json: { page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts, ...(ev.incognito ? { incognito: true } : {}) },
       });
       await d.delete('outbox', ev.id);
       sent++;

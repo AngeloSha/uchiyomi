@@ -141,6 +141,10 @@ export const IcImport = (p: P) => (
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );
+/** v0.61.0: Incognito reading -- an eye, struck through. */
+export const IcEyeOff = (p: P) => (
+  <svg {...base(p)}><path d="M3 3l18 18" /><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c5.5 0 9 5.5 9.6 7a13.6 13.6 0 0 1-3 3.9M6.4 6.4C4.2 7.9 2.8 10 2.4 12c.6 1.5 4.1 7 9.6 7 1.7 0 3.2-.5 4.5-1.3" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg>
+);
 export const IcWifiOff = (p: P) => (
   <svg {...base(p)}><path d="M2 4l20 20M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.6M2 9a15 15 0 0 1 4-2.5M19 12.5q.8.6 1.5 1.3M22 9a15 15 0 0 0-7-4" /><circle cx="12" cy="20" r="0.6" fill="currentColor" /></svg>
 );

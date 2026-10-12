@@ -12,6 +12,7 @@
 import { q } from './db';
 import { pushSeriesProgressAsync } from './trackers';
 import { eventTime } from './progressRules';
+import { incognitoOn } from './incognito';
 
 export interface ProgressWrite {
   userId: string;
@@ -24,6 +25,11 @@ export interface ProgressWrite {
   deviceId?: string | null;
   /** When the event happened, in client ms. Absent means now, which is every live ping. */
   at?: number;
+  /**
+   * v0.61.0: read under Incognito reading, by the request's own word -- a chapter read offline while the switch was on
+   * and sent after it went off. The account's switch is read here as well, so a client that does not send it is covered.
+   */
+  incognito?: boolean;
 }
 
 export { reachedEnd } from './progressRules';
@@ -52,7 +58,12 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
        updated_at = GREATEST(read_progress.updated_at, COALESCE($7::timestamptz, now()))`,
     [w.userId, w.bookId, w.seriesId, w.page, w.completed, !!w.silent, at],
   );
-  if (!w.silent) {
+  // Incognito reading (v0.61.0, lib/incognito.ts): the place above is kept, and nothing else -- no event, so history,
+  // streaks, Wrapped, the boards and Top 10 never see it, and no tracker push. The request's flag OR the account's
+  // switch now. Reintroduce by writing the event regardless: "an incognito chapter keeps its place and leaves no trace"
+  // in incognito.int.test.ts finds the event.
+  const incognito = w.incognito === true || (await incognitoOn(w.userId));
+  if (!w.silent && !incognito) {
     await q(
       `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))`,
@@ -61,5 +72,5 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   }
   // Finishing a chapter is the only thing worth telling an external tracker about. Fire-and-forget on
   // purpose: a tracker being slow or down must never delay a page turn or fail the write above.
-  if (w.completed && w.seriesId && w.seriesId !== 'unknown') pushSeriesProgressAsync(w.userId, w.seriesId);
+  if (w.completed && w.seriesId && w.seriesId !== 'unknown' && !incognito) pushSeriesProgressAsync(w.userId, w.seriesId);
 }

@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, adultFilterConfigured } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -17,6 +17,7 @@ import { sourceLabel } from '../lib/health';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
+import { onDeckPicks, type DeckPick } from '../lib/onDeck';
 import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
@@ -101,6 +102,9 @@ const progressBody = z.object({
   // the fact, and without this the server cannot tell a queued page-12 from a live one and lets it overwrite
   // a position the reader has since moved well past. Absent means "now", which is every live ping.
   at: z.coerce.number().int().positive().optional(),
+  // v0.61.0: read under Incognito reading. The account's switch is the server's own to read (lib/progress.ts); this is
+  // for a chapter read while it was on and sent after it went off -- the offline outbox, a retried page turn.
+  incognito: z.boolean().optional(),
 });
 
 const forYouCache = new Map<string, { ts: number; pool: any[] }>();
@@ -135,6 +139,8 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
 
 // How many series the Continue Reading rail carries. 20 hid 33 of the heaviest user's 53 in progress.
 const ON_DECK_LIMIT = 60;
+/** v0.61.0: how many series Pick back up offers; a rail of things you put down should not be a backlog. */
+const PICK_UP_LIMIT = 20;
 
 /**
  * How long POST /api/refresh waits for the library scan before it answers that the scan is still running (v0.55.6):
@@ -321,83 +327,40 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/home', async (req) => {
     const uid = userIdOf(req);
     const admin = NATIVE_PROGRESS && roleOf(req) === 'admin';
+    // The part-way-through pick is a read_progress row, which survives a prune by design, so the resolved book is checked
+    // as well: Continue Reading must never hand someone a chapter with no pages.
+    const resolvePicks = async (picks: DeckPick[]): Promise<any[]> => {
+      const books = (await Promise.all(picks.map((r) => komga.book(vc(req), r.bookId).catch(() => null))))
+        .filter((b) => b && !b.pruned) as any[];
+      return overlay(books, await userProgress(uid, books.map((b) => b.id)));
+    };
 
     let onDeckP: Promise<any[]>;
     if (admin) {
       onDeckP = komga.booksOnDeck(vc(req), 0, 20).then((r: any) => r.content).catch(() => []);
     } else {
-      onDeckP = (async () => {
-        // One row per series you have been reading lately: the chapter you are part-way through, or -- if you
-        // finished it -- the next one you have not read.
-        //
-        // It used to be only `completed = false`, so finishing a chapter dropped the series out of Continue
-        // Reading entirely and nothing put the next one in front of you. You had to remember what you were
-        // reading and go find it, which is precisely the job this rail exists to do.
-        //
-        // Scoped to series touched in the last 90 days so the list stays short, ordered by when you last read.
-        // The 18+ filter is applied HERE rather than after the fact, for the same reason the LIMIT is: this
-        // resolves each pick through komga.book(), which is a by-id read and deliberately does not filter,
-        // so a series hidden from browsing would otherwise stay in Continue Reading. Params is used rather
-        // than hand-written $1/$2 because `browsable()` pushes its own for a restricted viewer.
-        const p = new Params();
-        const uidP = p.add(uid);
-        const rows = await q<{ book_id: string }>(
-          `WITH recent AS (
-             SELECT series_id, max(updated_at) AS last_read
-               FROM read_progress rp
-              WHERE rp.user_id = ${uidP} AND rp.updated_at > now() - interval '90 days'
-                AND EXISTS (SELECT 1 FROM lib_series s WHERE s.id = rp.series_id AND ${browsable('s', vc(req), p)})
-              GROUP BY series_id
-           ),
-           pick AS (
-             SELECT r.series_id, r.last_read,
-                    COALESCE(
-                      -- the chapter you are part-way through wins
-                      (SELECT p.book_id FROM read_progress p
-                         WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
-                           -- not a notice chapter the admin hides (lib/noticeChapters.ts): it is no chapter to resume
-                           AND NOT ${noticeBook('p.book_id')}
-                           -- nor one whose pages were deleted (v0.60.1, found in Squeaks72's fork): it used to win here
-                           -- and then be dropped by the resolved-book filter below, taking the whole series off the rail
-                           -- instead of falling through to the next chapter. NOT EXISTS of a KNOWN tombstone, not EXISTS
-                           -- of a live row: a Komga-backed install has no lib_books row for the book at all.
-                           AND NOT EXISTS (SELECT 1 FROM lib_books pb WHERE pb.id = p.book_id AND pb.pruned_at IS NOT NULL)
-                         ORDER BY p.updated_at DESC LIMIT 1),
-                      -- otherwise the lowest-numbered chapter you have not finished
-                      (SELECT b.id FROM lib_books b
-                         LEFT JOIN book_overrides bo ON bo.book_id = b.id
-                         WHERE b.series_id = r.series_id
-                           -- never offer a chapter whose pages were deleted (a tombstone, lib/chapterCleanup.ts)
-                           AND b.pruned_at IS NULL
-                           AND NOT ${noticeBook('b.id')}
-                           AND NOT EXISTS (
-                             SELECT 1 FROM read_progress p2
-                              WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
-                           )
-                         ORDER BY COALESCE(bo.number, b.number) ASC, b.file ASC LIMIT 1)
-                    ) AS book_id
-               FROM recent r
-           )
-           SELECT book_id FROM pick
-            WHERE book_id IS NOT NULL      -- a series you have finished entirely drops out, correctly
-            ORDER BY last_read DESC
-            LIMIT ${p.add(ON_DECK_LIMIT)}`,
-          p.values as any[],
-        );
-        // The part-way-through pick above is a read_progress row, which survives a prune by design, so the
-        // resolved book is checked as well: Continue Reading must never hand someone a chapter with no pages.
-        const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null))))
-          .filter((b) => b && !b.pruned) as any[];
-        return overlay(books, await userProgress(uid, books.map((b) => b.id)));
-      })();
+      // The pick itself is lib/onDeck.ts (v0.61.0: shared with Pick back up and the OPDS Keep reading shelf).
+      onDeckP = onDeckPicks(uid, vc(req), { window: 'recent', limit: ON_DECK_LIMIT }).then(resolvePicks);
     }
 
-    const [onDeck, updated, fresh, popular] = await Promise.all([
+    // v0.61.0, Pick back up: the same pick over series put down three months to two years ago, each saying when
+    // (`stoppedAt`). Kept apart from Keep reading by construction (lib/onDeck.ts): no series is on both.
+    const pickUpP = onDeckPicks(uid, vc(req), { window: 'stale', limit: PICK_UP_LIMIT })
+      .then(async (picks) => {
+        const at = new Map(picks.map((r) => [r.bookId, r.lastRead]));
+        return (await resolvePicks(picks)).map((b) => ({ ...b, stoppedAt: at.get(b.id) ?? null }));
+      })
+      .catch(() => []);
+
+    const [onDeck, updated, fresh, popular, pickUp, gems] = await Promise.all([
       onDeckP,
       komga.seriesUpdated(vc(req), 0, 20).catch(() => ({ content: [] })),
       komga.seriesNew(vc(req), 0, 20).catch(() => ({ content: [] })),
       // v0.58.0: Most popular in your library (lib/anilistScores.ts).
       komga.seriesPopular(vc(req), 0, 20).catch(() => ({ content: [] })),
+      pickUpP,
+      // v0.61.0, Hidden gems (lib/ownedCatalog.ts seriesGems).
+      komga.seriesGems(vc(req), 0, 20).catch(() => ({ content: [] })),
     ]);
 
     // Which device each in-progress book was last read on. Reading progress is already shared across devices;
@@ -451,6 +414,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
       new: await enrichSeries(req, (fresh as any).content ?? []),
       favorites: await enrichSeries(req, favorites),
       popular: await enrichSeries(req, (popular as any).content ?? []),
+      // v0.61.0: Home draws each only when it has something in it.
+      pickUp,
+      gems: await enrichSeries(req, (gems as any).content ?? []),
       updatesCount,
     };
   });
@@ -1026,7 +992,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.put('/api/books/:id/progress', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
-    const { page, completed, seriesId, deviceId, silent, at } = progressBody.parse(req.body ?? {});
+    const { page, completed, seriesId, deviceId, silent, at, incognito } = progressBody.parse(req.body ?? {});
 
     let sid: string | undefined;
     let done = completed;
@@ -1059,7 +1025,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // -- and a 500 is a retry forever, where a 404 lets it drop the entry.
     if (!sid) return reply.code(404).send({ error: 'not_found' });
 
-    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at });
+    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at, incognito });
 
     if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });

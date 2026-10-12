@@ -16,6 +16,7 @@ import { IcWifiOff } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { desktopShell, isDesktop } from '@/lib/desktop';
 import { useServerDownloads } from '@/lib/useServerDownloads';
+import { IncognitoBanner, useIncognito } from './IncognitoBanner';
 
 function Splash() {
   return (
@@ -84,6 +85,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useServerDownloads({ poll: true, enabled: !path.startsWith('/reader') });
   // Ctrl/Cmd+K, "/", or just typing, anywhere in the app (reader keeps its own keys; palette skipped there)
   usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'), setPaletteSeed);
+  // Incognito reading (v0.61.0): kept here, above every early return, so the reader's progress payload knows it on the
+  // reader's own route too, where this shell renders nothing of its own (components/IncognitoBanner.tsx).
+  useIncognito();
 
   // smart offline: keep favorites' latest unread chapters downloaded. Never on desktop, where "Save offline"
   // is hidden: it would copy chapters already on this disk into the window's storage (lib/desktop.ts).
@@ -119,6 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <CinematicFX />
       {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
+      {status === 'authed' && <IncognitoBanner />}
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
       {status === 'authed' && <HealthBanner />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">

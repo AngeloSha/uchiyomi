@@ -20,6 +20,8 @@ import { t as tr, LOCALES, keys } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 import { SETTINGS_GRID, Section, Row, SwitchRow, Segmented, NumberRow, RangeRow, LinkRow, useAutosave } from '@/components/settings';
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
+import { useIncognito } from '@/components/IncognitoBanner';
+import { INCOGNITO_TEXT } from '@/lib/incognito';
 
 /**
  * The profile's Settings tab: Appearance · Reading · Downloads · This device.
@@ -270,6 +272,7 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
     return () => { live = false; };
   }, []);
   const set = (p: Partial<ReaderPrefs>) => { const n = { ...prefs, ...p }; setPrefs(n); savePrefs(n); };
+  const incognito = useIncognito();
 
   return (
     <Section id="reading" title={tr('Reading')} icon={<IcMoments width={18} height={18} />}
@@ -289,6 +292,8 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
       <SwitchRow label={tr('Cover colour at the edges')}
         help={tr('A soft wash of the cover’s colour across the top and bottom of the reader.')}
         on={prefs.coverEdges} onChange={(coverEdges) => set({ coverEdges })} />
+      {/* v0.61.0: the account's, not this device's (lib/incognito.ts); the reader's sheet has the same switch. */}
+      <SwitchRow label={tr(INCOGNITO_TEXT[0])} help={tr(INCOGNITO_TEXT[1])} on={incognito.on} onChange={incognito.set} />
       {prefs.mode === 'paged' && (
         <Choice label={tr('Pages per view')} value={prefs.spread ? 'double' : 'single'}
           options={[{ value: 'single', label: tr('Single') }, { value: 'double', label: tr('Double spread') }]}

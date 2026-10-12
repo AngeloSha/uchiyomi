@@ -1,0 +1,50 @@
+[
+  {
+    "name": "nothing narrows: the order alone",
+    "params": "sort=az",
+    "query": { "v": 1, "sort": "az" },
+    "condition": null
+  },
+  {
+    "name": "a title search is not a condition",
+    "params": "q=solo&sort=updated",
+    "query": { "v": 1, "q": "solo", "sort": "updated" },
+    "condition": null
+  },
+  {
+    "name": "every filter, in the Library's own order, and an order run the other way",
+    "params": "read=UNREAD&status=ONGOING&genres=Romance%2CAction&lib=lib_a&src=aqua&anysrc=mdx&sort=popular&dir=asc",
+    "query": {
+      "v": 1, "read": "UNREAD", "status": "ONGOING", "genres": ["Romance", "Action"], "lib": "lib_a", "src": "aqua",
+      "anysrc": "mdx", "sort": "popular", "dir": "asc"
+    },
+    "condition": {
+      "allOf": [
+        { "libraryId": { "operator": "is", "value": "lib_a" } },
+        { "mainSource": { "operator": "is", "value": "aqua" } },
+        { "anySource": { "operator": "is", "value": "mdx" } },
+        { "readStatus": { "operator": "is", "value": "UNREAD" } },
+        { "status": { "operator": "is", "value": "ONGOING" } },
+        { "genre": { "operator": "is", "value": "Romance" } },
+        { "genre": { "operator": "is", "value": "Action" } }
+      ]
+    }
+  },
+  {
+    "name": "No source is a condition of its own, never mainSource with the sentinel",
+    "params": "src=-&sort=new",
+    "query": { "v": 1, "src": "-", "sort": "new" },
+    "condition": { "allOf": [{ "hasMainSource": { "operator": "isFalse" } }] }
+  },
+  {
+    "name": "reading state and one genre, read most recently",
+    "params": "read=IN_PROGRESS&genres=Isekai&sort=read",
+    "query": { "v": 1, "read": "IN_PROGRESS", "genres": ["Isekai"], "sort": "read" },
+    "condition": {
+      "allOf": [
+        { "readStatus": { "operator": "is", "value": "IN_PROGRESS" } },
+        { "genre": { "operator": "is", "value": "Isekai" } }
+      ]
+    }
+  }
+]

@@ -519,8 +519,11 @@ test('src is the main source and anysrc any source, from the URL to the search, 
   // queryKey: "the grid's key does not carry the source filters" fails, and a change of source filter would append
   // its pages to the list the old filter fetched.
   const page = code(read('app/library/page.tsx'));
-  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(page);
+  // v0.61.0: conditionFrom moved to lib/libraryQuery.ts, where Save as list and the server's port of it (bff
+  // lib/smartLists.ts) read it too; the page imports it. Read from there deliberately, the same pins kept.
+  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(code(read('lib/libraryQuery.ts')));
   assert.ok(fn, 'could not find conditionFrom');
+  assert.match(page, /import \{ conditionFrom[^}]*\} from '@\/lib\/libraryQuery';/, 'the page builds its condition somewhere else');
   const params = fn![1].split(',').map((p) => p.trim().split(/[\s:=]/)[0]);
   assert.deepEqual(params.slice(4), ['src', 'anysrc'], 'conditionFrom takes the source filters in another order');
   // Which parameter guards each condition, and which one it carries.
@@ -557,7 +560,8 @@ test('Main source offers "No source" (#149): its own condition, a sentinel no so
   assert.ok(sentinel, 'could not find the No source sentinel');
   // Not a site added by address (letters and digits), an extension's source (sw:…), MangaDex (mangadex…), nor nothing.
   for (const id of [/^[a-z0-9]+$/, /^sw:/, /^mangadex/, /^$/]) assert.doesNotMatch(sentinel!, id, `No source's sentinel could be a source id: ${sentinel}`);
-  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(page)![2];
+  // v0.61.0: conditionFrom lives in lib/libraryQuery.ts (see the test above).
+  const fn = /function conditionFrom\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(code(read('lib/libraryQuery.ts')))![2];
   assert.match(fn, /if \(src === NO_SOURCE\) all\.push\(\{ hasMainSource: \{ operator: 'isFalse' \} \}\);\s*else if \(src\) all\.push\(\{ mainSource: \{ operator: 'is', value: src \} \}\);/,
     'No source is sent as a source id');
   // The section: Main source with one source and series that have none; Any source still with two. Evaluated.

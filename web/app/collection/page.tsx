@@ -11,8 +11,12 @@ import { Sheet, useRtl } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { IcChevronLeft, IcChevronRight, IcTrash } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { isMine, type ListRow } from '@/lib/lists';
+import { ListKeys, ListOwnerLine, ListTags } from '@/components/ListBits';
+import { invalidateLists } from '@/components/SaveListDialog';
 
-interface CollectionDetail { id: string; name: string; accent: string | null; items: Series[] }
+/** v0.61.0: with its kind, sharing and owner, and `total` -- how many it shows this reader, a smart list being capped. */
+type CollectionDetail = Pick<ListRow, 'id' | 'name' | 'accent' | 'kind' | 'shared' | 'mine' | 'owner' | 'query'> & { items: Series[]; total?: number };
 
 /**
  * A list's orders (#164) as the Library's sort chips: one definition, in a row on a wide screen and in a sheet on a
@@ -40,6 +44,7 @@ function CollectionInner() {
   // a touchscreen could not see and which now sat on the unread badge.
   const [editing, setEditing] = useState(false);
   const [sorting, setSorting] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['collection', id],
     queryFn: () => api<CollectionDetail>(`/api/collections/${id}`),
@@ -47,15 +52,25 @@ function CollectionInner() {
   });
   // The list's own order, as the server keeps it.
   const items = useMemo(() => data?.items ?? [], [data]);
+  // v0.61.0: whose it is and what kind. Someone else's shared list is read-only; a smart list holds what its search
+  // finds, so it has no Edit -- its owner changes the search instead.
+  const mine = !!data && isMine(data);
+  const smart = data?.kind === 'smart';
   const chosen = listSortOf(user?.settings, id);
   // While editing, the list's own order whatever the chosen sort: it is the order the arrows move.
   const sort: ListSort = editing ? 'manual' : chosen;
   const shown = useMemo(() => sortList(items, sort), [items, sort]);
   const active = LIST_SORTS.find((s) => s.key === chosen) ?? LIST_SORTS[0];
 
-  const inval = () => {
-    qc.invalidateQueries({ queryKey: ['collection', id] });
-    qc.invalidateQueries({ queryKey: ['collections'] });
+  const inval = () => invalidateLists(qc, id);
+
+  // Share with the household, or stop: read-only for everyone else either way (the owner's ruling).
+  const toggleShare = async () => {
+    if (!data || sharing) return;
+    setSharing(true);
+    try { await api(`/api/collections/${id}`, { method: 'PATCH', json: { shared: !data.shared } }); inval(); }
+    catch { toast(tr('Could not save'), 'error'); }
+    setSharing(false);
   };
 
   // Kept on the account (lib/listSort.ts says why), applied at once and put back if the server refuses it.
@@ -94,11 +109,13 @@ function CollectionInner() {
           <div className="flex min-w-0 items-center gap-2.5">
             <span aria-hidden className="h-6 w-1.5 shrink-0 rounded-full" style={{ background: data?.accent || 'rgb(var(--accent))' }} />
             <h1 className="truncate font-display text-2xl font-bold lg:text-3xl">{data?.name || '…'}</h1>
+            {data && <ListTags list={data} />}
           </div>
         </div>
-        {(items.length > 0 || editing) && (
+        {data?.owner && !mine && <ListOwnerLine owner={data.owner} className="mt-2 ps-12" />}
+        {(items.length > 0 || editing || mine) && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {!editing && (
+            {!editing && items.length > 0 && (
               <>
                 {/* On a phone the chip names the order and opens the sheet; from lg up the chips are simply there. */}
                 <button type="button" onClick={() => setSorting(true)} aria-haspopup="dialog" data-list-sort-open
@@ -111,11 +128,16 @@ function CollectionInner() {
                 </div>
               </>
             )}
-            <button type="button" onClick={() => setEditing((v) => !v)} aria-pressed={editing} data-list-edit
-              className={`chip ms-auto text-xs ${editing ? 'chip-active' : ''}`}>
-              {editing ? tr('Done') : tr('Edit')}
-            </button>
+            {/* v0.61.0: the owner's keys (components/ListBits.tsx) -- Edit was a chip, an action dressed as a filter. */}
+            {data && (
+              <ListKeys list={data} editing={editing} hasItems={items.length > 0} onEdit={() => setEditing((v) => !v)}
+                onShare={toggleShare} busy={sharing} />
+            )}
           </div>
+        )}
+        {/* A smart list is capped at 200 (bff lib/lists.ts): say so rather than let the rest read as missing. */}
+        {smart && data?.total != null && data.total > items.length && (
+          <p className="mt-2 text-xs text-fog-500" data-list-capped>{tr('Showing the first {n} of {total}.', { n: items.length, total: data.total })}</p>
         )}
       </header>
 
@@ -124,7 +146,9 @@ function CollectionInner() {
           {Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
         </div>
       ) : items.length === 0 ? (
-        <p className="px-4 pt-10 text-center text-sm text-fog-500 lg:px-0">{tr('Empty so far — open any series and use “Add to collection”.')}</p>
+        <p className="px-4 pt-10 text-center text-sm text-fog-500 lg:px-0">
+          {smart ? tr('Nothing in your library matches this list right now.') : tr('Empty so far — open any series and use “Add to collection”.')}
+        </p>
       ) : (
         // The Library's own tile (#164): the same unread count, NEW mark, favourite and offline marks, from the same
         // per-reader numbers, and the same right-click menu.

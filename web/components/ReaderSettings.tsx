@@ -6,6 +6,9 @@ import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
+import { INCOGNITO_TEXT } from '@/lib/incognito';
+import { useIncognito } from './IncognitoBanner';
+import { useToast } from './Toast';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -41,6 +44,9 @@ export function ReaderSettings({
   // it rather than covering its last rows.
   const panelRef = useRef<HTMLDivElement>(null);
   useLayer('dialog', true, { ref: panelRef });
+  // v0.61.0: Incognito reading, the account's switch (lib/incognito.ts) -- here because the reader is where it is wanted.
+  const incognito = useIncognito();
+  const toast = useToast();
   return (
     <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
@@ -92,6 +98,14 @@ export function ReaderSettings({
         <div className="flex items-center justify-between gap-3 py-3">
           <span className="text-sm font-medium text-fog-200">{tr('Cover colour at the edges')}</span>
           <Switch on={prefs.coverEdges} onChange={(coverEdges) => set({ coverEdges })} label={tr('Cover colour at the edges')} />
+        </div>
+        <div className="py-3" data-reader-incognito>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-fog-200">{tr(INCOGNITO_TEXT[0])}</span>
+            <Switch on={incognito.on} label={tr(INCOGNITO_TEXT[0])}
+              onChange={(on) => { incognito.set(on).catch(() => toast(tr('Could not save'), 'error')); }} />
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr(INCOGNITO_TEXT[1])}</p>
         </div>
 
         <Row label={`${tr('Brightness')} · ${Math.round(prefs.brightness * 100)}%`}>

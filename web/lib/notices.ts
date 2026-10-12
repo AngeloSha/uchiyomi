@@ -33,6 +33,11 @@ export interface NoticeOpts {
   busy?: boolean;
   /** How long it stays, in ms. Left out, it follows the length of the message (noticeDuration). */
   duration?: number;
+  /**
+   * v0.61.0: somewhere to go from here, as a squared key after the words -- "Saved" with Open, after Save as list made
+   * a list. Following it dismisses the notice.
+   */
+  link?: { href: string; label: string };
 }
 
 export interface Notice {
@@ -44,6 +49,8 @@ export interface Notice {
   busy: boolean;
   duration: number;
   key?: string;
+  /** Where its key goes (NoticeOpts.link). */
+  link?: { href: string; label: string };
   /** Moved by a merge or a replacement: restarts the card's clock and its hairline. */
   bump: number;
 }

@@ -22,6 +22,7 @@
 // and the draining hairline is not drawn; the busy ring is still (ProgressRing handles both). Under reduced
 // motion a card cannot be dragged either -- ✕ dismisses it.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useReduceEffects } from '@/lib/effects';
 import { useLayers } from '@/lib/layers';
@@ -51,6 +52,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = ++seq.current;
     setItems((s) => pushNotice(s, {
       id, msg, type, busy: !!opts.busy, duration: opts.duration ?? noticeDuration(msg, type), key: opts.key,
+      ...(opts.link ? { link: opts.link } : {}),
     }));
     // An error interrupts; the rest wait for a pause in what the screen reader is saying.
     setSaid((s) => (type === 'error' ? { ...s, assertive: announceText(s.assertive, msg) } : { ...s, polite: announceText(s.polite, msg) }));
@@ -185,11 +187,17 @@ function NoticeCard({ n, place, reduced, still, onDismiss }: {
               and since the ring takes its glyph's tone that would be a grey ring. */}
           <StatusGlyph tone={n.busy ? 'accent' : tone} size={16} working={n.busy} />
         </span>
-        <p className={`break-words text-[13px] leading-snug text-fog-100 ${tight ? 'line-clamp-2 lg:line-clamp-none' : ''}`}
-          title={tight ? n.msg : undefined}>
-          {n.msg}
-          {n.count > 1 && <span className="ms-1.5 tabular-nums text-fog-500">×{n.count}</span>}
-        </p>
+        <div className="min-w-0">
+          <p className={`break-words text-[13px] leading-snug text-fog-100 ${tight ? 'line-clamp-2 lg:line-clamp-none' : ''}`}
+            title={tight ? n.msg : undefined}>
+            {n.msg}
+            {n.count > 1 && <span className="ms-1.5 tabular-nums text-fog-500">×{n.count}</span>}
+          </p>
+          {/* v0.61.0: where to go from here (NoticeOpts.link), a key like every action; following it is done with the notice. */}
+          {n.link && (
+            <Link href={n.link.href} onClick={() => onDismiss(n.id)} className="btn-key mt-2" data-notice-link>{n.link.label}</Link>
+          )}
+        </div>
         <button type="button" onClick={() => onDismiss(n.id)} aria-label={tr('Dismiss')}
           className="-my-1.5 grid h-8 w-8 place-items-center rounded-md text-fog-500 transition hover:bg-ink-800 hover:text-fog-100">
           <IcX width={14} height={14} />
