@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, adultFilterConfigured } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -17,6 +17,7 @@ import { sourceLabel } from '../lib/health';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
+import { onDeckPicks, type DeckPick } from '../lib/onDeck';
 import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
@@ -320,75 +321,20 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/home', async (req) => {
     const uid = userIdOf(req);
     const admin = NATIVE_PROGRESS && roleOf(req) === 'admin';
+    // The part-way-through pick is a read_progress row, which survives a prune by design, so the resolved book is checked
+    // as well: Continue Reading must never hand someone a chapter with no pages.
+    const resolvePicks = async (picks: DeckPick[]): Promise<any[]> => {
+      const books = (await Promise.all(picks.map((r) => komga.book(vc(req), r.bookId).catch(() => null))))
+        .filter((b) => b && !b.pruned) as any[];
+      return overlay(books, await userProgress(uid, books.map((b) => b.id)));
+    };
 
     let onDeckP: Promise<any[]>;
     if (admin) {
       onDeckP = komga.booksOnDeck(vc(req), 0, 20).then((r: any) => r.content).catch(() => []);
     } else {
-      onDeckP = (async () => {
-        // One row per series you have been reading lately: the chapter you are part-way through, or -- if you
-        // finished it -- the next one you have not read.
-        //
-        // It used to be only `completed = false`, so finishing a chapter dropped the series out of Continue
-        // Reading entirely and nothing put the next one in front of you. You had to remember what you were
-        // reading and go find it, which is precisely the job this rail exists to do.
-        //
-        // Scoped to series touched in the last 90 days so the list stays short, ordered by when you last read.
-        // The 18+ filter is applied HERE rather than after the fact, for the same reason the LIMIT is: this
-        // resolves each pick through komga.book(), which is a by-id read and deliberately does not filter,
-        // so a series hidden from browsing would otherwise stay in Continue Reading. Params is used rather
-        // than hand-written $1/$2 because `browsable()` pushes its own for a restricted viewer.
-        const p = new Params();
-        const uidP = p.add(uid);
-        const rows = await q<{ book_id: string }>(
-          `WITH recent AS (
-             SELECT series_id, max(updated_at) AS last_read
-               FROM read_progress rp
-              WHERE rp.user_id = ${uidP} AND rp.updated_at > now() - interval '90 days'
-                AND EXISTS (SELECT 1 FROM lib_series s WHERE s.id = rp.series_id AND ${browsable('s', vc(req), p)})
-              GROUP BY series_id
-           ),
-           pick AS (
-             SELECT r.series_id, r.last_read,
-                    COALESCE(
-                      -- the chapter you are part-way through wins
-                      (SELECT p.book_id FROM read_progress p
-                         WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
-                           -- not a notice chapter the admin hides (lib/noticeChapters.ts): it is no chapter to resume
-                           AND NOT ${noticeBook('p.book_id')}
-                           -- nor one whose pages were deleted (v0.60.1, found in Squeaks72's fork): it used to win here
-                           -- and then be dropped by the resolved-book filter below, taking the whole series off the rail
-                           -- instead of falling through to the next chapter. NOT EXISTS of a KNOWN tombstone, not EXISTS
-                           -- of a live row: a Komga-backed install has no lib_books row for the book at all.
-                           AND NOT EXISTS (SELECT 1 FROM lib_books pb WHERE pb.id = p.book_id AND pb.pruned_at IS NOT NULL)
-                         ORDER BY p.updated_at DESC LIMIT 1),
-                      -- otherwise the lowest-numbered chapter you have not finished
-                      (SELECT b.id FROM lib_books b
-                         LEFT JOIN book_overrides bo ON bo.book_id = b.id
-                         WHERE b.series_id = r.series_id
-                           -- never offer a chapter whose pages were deleted (a tombstone, lib/chapterCleanup.ts)
-                           AND b.pruned_at IS NULL
-                           AND NOT ${noticeBook('b.id')}
-                           AND NOT EXISTS (
-                             SELECT 1 FROM read_progress p2
-                              WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
-                           )
-                         ORDER BY COALESCE(bo.number, b.number) ASC, b.file ASC LIMIT 1)
-                    ) AS book_id
-               FROM recent r
-           )
-           SELECT book_id FROM pick
-            WHERE book_id IS NOT NULL      -- a series you have finished entirely drops out, correctly
-            ORDER BY last_read DESC
-            LIMIT ${p.add(ON_DECK_LIMIT)}`,
-          p.values as any[],
-        );
-        // The part-way-through pick above is a read_progress row, which survives a prune by design, so the
-        // resolved book is checked as well: Continue Reading must never hand someone a chapter with no pages.
-        const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null))))
-          .filter((b) => b && !b.pruned) as any[];
-        return overlay(books, await userProgress(uid, books.map((b) => b.id)));
-      })();
+      // The pick itself is lib/onDeck.ts (v0.61.0: shared with Pick back up and the OPDS Keep reading shelf).
+      onDeckP = onDeckPicks(uid, vc(req), { window: 'recent', limit: ON_DECK_LIMIT }).then(resolvePicks);
     }
 
     const [onDeck, updated, fresh, popular] = await Promise.all([

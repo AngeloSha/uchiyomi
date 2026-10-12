@@ -18,6 +18,7 @@ import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, push
 import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
+import { listFor, listsFor, listItems } from '../lib/lists';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -193,17 +194,7 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   // ---- collections ----
-  app.get('/api/collections', async (req) => {
-    const uid = userIdOf(req);
-    return {
-      content: await q(
-        `SELECT c.id, c.name, c.accent, c.sort_order,
-                (SELECT count(*) FROM collection_items ci WHERE ci.collection_id = c.id) AS item_count
-         FROM collections c WHERE c.user_id = $1 ORDER BY c.sort_order, c.created_at`,
-        [uid],
-      ),
-    };
-  });
+  app.get('/api/collections', async (req) => ({ content: await listsFor(userIdOf(req)) }));
 
   app.post('/api/collections', async (req) => {
     const uid = userIdOf(req);
@@ -235,16 +226,11 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.get('/api/collections/:id', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
-    const col = await one('SELECT id, name, accent, sort_order FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
-    if (!col) return reply.code(404).send({ error: 'not_found' });
-    const ids = (
-      await q<{ series_id: string }>('SELECT series_id FROM collection_items WHERE collection_id = $1 ORDER BY position', [id])
-    ).map((r) => r.series_id);
-    // A collection is a listing like any other, so a title in an 18+ library stays out of it while hidden.
-    // Nothing is removed from the collection itself -- reordering and membership are untouched.
-    const shown = await browsableIds(ids, vc(req));
-    const series = (await Promise.all(ids.filter((sid) => shown.has(sid)).map((sid) => komga.series(vc(req), sid).catch(() => null)))).filter(Boolean);
-    const items = await enrichSeries(req, series);
+    const list = await listFor(uid, id);
+    if (!list) return reply.code(404).send({ error: 'not_found' });
+    const col = { id: list.id, name: list.name, accent: list.accent, sort_order: list.sort_order };
+    // The series this viewer may see, in the list's own order (lib/lists.ts).
+    const items = await enrichSeries(req, (await listItems(list, vc(req))).items);
     // The list's sorts (#164) order by two dates no series payload carries; they ride on these items alone. The items
     // stay in the list's own order: the web sorts them, a list being one request and never paged.
     const dates = await listDates(uid, items.map((s: any) => s.id));
