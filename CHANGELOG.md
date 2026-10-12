@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.60.1 — 2026-10-12
+
+**Eight fixes found by reading a contributor's fork: Keep reading, extension installs, long strips in the nightly repair,
+and a few small ones.** Every one was found by **@Squeaks72**, who built them in their own fork and offered them back
+([#176](https://github.com/AngeloSha/uchiyomi/discussions/176)). Thank you.
+
+### Fixes found in a contributor's fork
+
+- **Keep reading lost a series** when the chapter you were part-way through was deleted: by an admin, by Verify, or by
+  the cleanup of read chapters. The row now offers the series' next chapter instead.
+- **Installing, updating or removing an extension** unregistered every extension source while the engine answered. For
+  those seconds:
+  - Health called every extension series "no longer installed".
+  - The check for new chapters skipped them.
+  - A download in progress could fail.
+  - Discover lost them.
+
+  Sources now stay registered until the new list is ready, and are swapped in one step.
+- **The nightly repair no longer replaces long-strip chapters.** Since v0.55.10, Health has known that a webtoon chapter
+  stitched into one or two very tall images is not a failed download. The repair didn't: it could follow new sources for
+  the series and swap the chapter for another site's sliced copy. It now leaves them alone, and long strips can no longer
+  use up its 20 chapters a night.
+- **With Fix everything as the nightly,** three steps never ran: the opt-in group upgrades and borrowed chapter names,
+  and learning which way series read. They now run after it, as they do in the plain nightly.
+- **Very tall strips** failed to load in the page grid, as chapter thumbnails, and as a series cover made from such a
+  page. These are images over 16,383 pixels tall at the size asked for. Such a page now comes as JPEG, and its thumbnail
+  shows the top of the strip. Every other image is unchanged.
+- **On a phone, a long series title** could slide under the banner and lose its first lines.
+- **The heart leaned left:** its two halves met two pixels to one side of its tip. It is symmetric now.
+- **After an admin adds, renames or removes a library,** the Library page's library filter and the 18+ switch update
+  straight away, instead of up to five minutes later.
+
+### Upgrading
+
+- **Database:** no changes.
+- Nothing else to do.
+
 ## v0.60.0 — 2026-10-11
 
 **A calmer, cooler series page and Library, and ratings said once.**
@@ -16,7 +53,7 @@
 ### The Library
 
 - A **toolbar**: search your library, one **Sort** menu where every order runs both ways (*Newest first* or *Oldest
-  first*, *A–Z* or *Z–A*, …), and **Grid, Compact or List**, remembered on each device. The sidebar keeps the filters.
+  first*, *A–Z* or *Z–A*, …), and **Comfortable, Compact or List**, remembered on each device. The sidebar keeps the filters.
 - **Covers show how far you are**: a thin progress bar along the bottom edge, and squared unread tags.
 - Changing a sort, filter or search keeps the grid on screen until the new one arrives, instead of blanking it, and a
   library that fails to load says so, with Try again.
