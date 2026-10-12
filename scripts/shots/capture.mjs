@@ -183,7 +183,7 @@ async function main() {
    * (from `selector`, or its `closest` container, down to `to`) whole, and the page around it filling the band out to
    * 3:1, downwards, rather than a sliver the band would blow up. Document coordinates, for page.screenshot's clip.
    */
-  const bandAround = (selector, { to = null, closest = null, ratio = 3, pad = 16 } = {}) => page.evaluate((selector, to, closest, ratio, pad) => {
+  const bandAround = (selector, { to = null, closest = null, ratio = 3, pad = 16, padBottom = pad, grow = 'down' } = {}) => page.evaluate((selector, to, closest, ratio, pad, padBottom, grow) => {
     const pick = (sel) => [...document.querySelectorAll(sel)].find((e) => e.getBoundingClientRect().height > 0) || null;
     let a = pick(selector);
     if (a && closest) a = a.closest(closest) || a;
@@ -191,10 +191,13 @@ async function main() {
     if (!a || !b) return null;
     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
     const left = Math.min(ra.left, rb.left) - pad, right = Math.max(ra.right, rb.right) + pad;
-    const top = Math.min(ra.top, rb.top) - pad;
-    const bottom = Math.max(Math.max(ra.bottom, rb.bottom) + pad, top + (right - left) / ratio);
+    const minH = (right - left) / ratio;
+    let top = Math.min(ra.top, rb.top) - pad;
+    let bottom = Math.max(ra.bottom, rb.bottom) + padBottom;
+    // Out to the band's shape: downwards, or upwards when what lies below would be cut through.
+    if (grow === 'up') top = Math.min(top, bottom - minH); else bottom = Math.max(bottom, top + minH);
     return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
-  }, selector, to, closest, ratio, pad);
+  }, selector, to, closest, ratio, pad, padBottom, grow);
   const bandShot = async (name, box) => {
     if (!box) { console.log(`  · skipped ${name} (nothing to crop)`); return; }
     await page.screenshot({ path: `${OUT}/${name}.png`, clip: box });
@@ -210,8 +213,24 @@ async function main() {
   if (want('library') || want('crop-library')) {
     await go('/library/', 600);
     if (want('library')) await shot(page, 'library');
-    // The toolbar and the first row of covers, with their progress bars (v0.60.0).
-    if (want('crop-library')) await bandShot('crop-library', await bandAround('[data-library-toolbar]', { to: '[data-library-grid] > :first-child' }));
+    // The toolbar and the first row of covers, with their progress bars (v0.60.0). The row is measured from the tiles
+    // themselves: the grid's first child is a wrapper around all of them, and a first run cropped the whole shelf.
+    if (want('crop-library')) {
+      await bandShot('crop-library', await page.evaluate(() => {
+        const bar = [...document.querySelectorAll('[data-library-toolbar]')].find((e) => e.getBoundingClientRect().height > 0);
+        const tiles = [...document.querySelectorAll('[data-library-grid] a[href*="/series/"]')]
+          .map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0);
+        if (!bar || !tiles.length) return null;
+        const top0 = Math.min(...tiles.map((r) => r.top));
+        const row = tiles.filter((r) => r.top < top0 + 8);
+        const a = bar.getBoundingClientRect();
+        const left = Math.min(a.left, ...row.map((r) => r.left)) - 16;
+        const right = Math.max(a.right, ...row.map((r) => r.right)) + 16;
+        const top = a.top - 16;
+        const bottom = Math.max(...row.map((r) => r.bottom)) + 16;
+        return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+      }));
+    }
   }
   // The series page since v0.60.0: Continue, the four keys and the ratings sit under the cover, and at 860 px tall the
   // keys fell just below the frame. The window is scrolled just far enough to show them, so the shot keeps the 16:10
@@ -229,7 +248,8 @@ async function main() {
     await settle(page, 400);
     if (want('series')) await shot(page, 'series');
     // The ratings panel (v0.60.0): AniList's score and readers beside the account's own stars.
-    if (want('crop-ratings')) await bandShot('crop-ratings', await bandAround('[data-ratings-panel]'));
+    // Grown upwards: the supply line sits 12 px under the panel, and a band grown downwards cut it in half.
+    if (want('crop-ratings')) await bandShot('crop-ratings', await bandAround('[data-ratings-panel]', { grow: 'up', padBottom: 6 }));
     if (want('series-more')) {
       await key.click();
       await page.waitForSelector('[role="menu"]', { timeout: 5000 });
