@@ -59,6 +59,11 @@ export interface ReaderPrefs {
    * setting for every title, synced with the account like `coverEdges`; not a title's look (LOOK_KEYS).
    */
   widePages: WidePages;
+  /**
+   * Trim the blank margins of scanned pages (v0.61.0), measured from each page's pixels in the browser
+   * (lib/readerCrop.ts). Off by default; one setting for every title, synced like `coverEdges`, not a look.
+   */
+  cropBorders: boolean;
 }
 
 const WIDE_PAGES: readonly WidePages[] = ['whole', 'split', 'rotate'];
@@ -76,6 +81,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   pagedDirection: 'series',
   coverEdges: true,
   widePages: 'whole',
+  cropBorders: false,
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -121,6 +127,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   if (typeof p.coverEdges !== 'boolean') p.coverEdges = DEFAULT_PREFS.coverEdges;
   // v0.61.0: anything but a known value (an older build's row has none) is the default, which is today's reader.
   if (!WIDE_PAGES.includes(p.widePages)) p.widePages = DEFAULT_PREFS.widePages;
+  // Only a real `true` crops: an older row, or junk, reads as the default -- off.
+  if (p.cropBorders !== true) p.cropBorders = false;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

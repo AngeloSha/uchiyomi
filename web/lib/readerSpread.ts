@@ -29,7 +29,7 @@ export interface SpreadItem {
 }
 
 /** A page wider than it is tall. Unknown or nonsensical dimensions are portrait -- see rule 5. */
-export function isWide(it: SpreadItem | undefined): boolean {
+export function isWide(it: Partial<SpreadItem> | undefined): boolean {
   if (!it) return false;
   const { width: w, height: h } = it;
   return typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0 && w > h;
@@ -96,7 +96,7 @@ export type WidePages = 'whole' | 'split' | 'rotate';
  * Anything else -- a page that is not wide, or whose size is not known -- is itself, colW x h / w, or the reader's
  * portrait guess of 1.4 when its size is not known.
  */
-export function pageHeight(item: SpreadItem, colW: number, wide: WidePages = 'whole'): number {
+export function pageHeight(item: Partial<SpreadItem>, colW: number, wide: WidePages = 'whole'): number {
   const { width: w, height: h } = item;
   if (!(typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0)) return colW * 1.4;
   if (wide !== 'whole' && isWide(item)) return wide === 'split' ? 4 * colW * (h / w) : colW * (w / h);

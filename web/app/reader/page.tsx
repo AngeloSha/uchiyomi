@@ -29,7 +29,8 @@ import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
-import { ReaderImg, MissingCaption, ReaderPageRow, SlideHalf, SlideTurned, DIVIDER_H } from '@/components/ReaderPage';
+import { ReaderImg, MissingCaption, ReaderPageRow, SlidePending, SlideRegion, SlideTurned, DIVIDER_H, measurePage } from '@/components/ReaderPage';
+import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop, pairCrop, type Region } from '@/lib/readerCrop';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 
@@ -480,6 +481,45 @@ function ReaderInner() {
     return () => window.removeEventListener('resize', m);
   }, [prefs.mode, ready]);
 
+  // ---- Crop page borders (v0.61.0, lib/readerCrop.ts) ----
+  // Each page's margins, measured from its pixels once it has loaded (null: it could not be read back), and each
+  // chapter's one trim of both sides for the webtoon column, decided from its first measured story pages and then
+  // kept for the session, so the column never changes scale twice. Refs, with a version each to draw again: a page's
+  // margins redraw the paged track, a chapter's trim the column's height model.
+  const pageBoxes = useRef<Map<string, ReturnType<typeof measurePage>>>(new Map());
+  const sideCrops = useRef<Map<string, { l: number; r: number }>>(new Map());
+  const measuring = useRef<Set<string>>(new Set());
+  const [boxVersion, setBoxVersion] = useState(0);
+  const [sideVersion, setSideVersion] = useState(0);
+  const chaptersRef = useRef(chapters);
+  chaptersRef.current = chapters;
+  const onPageLoad = useCallback((key: string, imgEl: HTMLImageElement) => {
+    if (pageBoxes.current.has(key) || measuring.current.has(key)) return;
+    measuring.current.add(key);
+    const run = () => {
+      measuring.current.delete(key);
+      pageBoxes.current.set(key, measurePage(imgEl));
+      setBoxVersion((v) => v + 1);
+      // The chapter's trim, once enough of its story pages are measured: not a repeated page, not a placeholder, not a
+      // spread (whose margins are not a page's).
+      const chId = key.slice(0, key.lastIndexOf(':'));
+      if (sideCrops.current.has(chId)) return;
+      const ch = chaptersRef.current.find((c) => c.id === chId);
+      if (!ch) return;
+      const story = ch.pages.filter((pg) => !pg.junk && !pg.missing && !isWide(pg));
+      const boxes = story.map((pg) => pageBoxes.current.get(`${chId}:${pg.number}`)?.sides).filter((b): b is Region => !!b);
+      const decided = chapterSideCrop(boxes, Math.min(CHAPTER_SAMPLE, story.length));
+      if (decided) { sideCrops.current.set(chId, decided); setSideVersion((v) => v + 1); }
+    };
+    // At idle: the read-back is a few milliseconds, and never in the way of a scroll. Safari has no idle callback.
+    const idle = (window as unknown as { requestIdleCallback?: (f: () => void, o: { timeout: number }) => number }).requestIdleCallback;
+    if (idle) idle(run, { timeout: 150 }); else setTimeout(run, 0);
+  }, []);
+  /** The chapter's trim of a row of the webtoon column: on whole pages only -- a split or turned page, a band, a
+   *  placeholder are drawn as they are -- and once decided. */
+  const rowCrop = (p: FlatItem, wide: WidePages): { l: number; r: number } | null =>
+    (prefs.cropBorders && wide === 'whole' && !p.collapsed && !p.missing ? sideCrops.current.get(chapters[p.ci]?.id ?? '') ?? null : null);
+
   // ⚠️ #180: Safari (WebKit, on iOS and macOS alike) keeps a snapped track's place as the index of its snap point
   // counted from the LEFT edge, and a right-to-left track grows leftwards. So every slide added at its end -- the next
   // chapter, the Up Next card -- moved the reader that many pages on, to the same distance from the new end: four
@@ -537,9 +577,15 @@ function ReaderInner() {
     // a placeholder must keep its full page box so its explanation is never squeezed into a strip.
     // v0.61.0: a wide page split or turned on its side is as tall as lib/readerSpread.ts pageHeight says; a missing
     // placeholder is always drawn whole, with its caption.
+    // Crop page borders: a trimmed row is drawn wider than the column by what is trimmed, so it stands taller by as much.
+    const rowHeight = (p: FlatItem) => {
+      const wide = p.missing ? 'whole' : wideMode;
+      const crop = rowCrop(p, isWide(p) ? wide : 'whole');
+      return pageHeight(p, crop ? colW / (1 - crop.l - crop.r) : colW, wide);
+    };
     const hs = flat.map((p) => p.collapsed
       ? STRIP_H
-      : pageHeight(p, colW, p.missing ? 'whole' : wideMode));
+      : rowHeight(p));
     const ts: number[] = [];
     let acc = 0;
     flat.forEach((p, i) => {
@@ -548,7 +594,8 @@ function ReaderInner() {
       acc += hs[i] + prefs.gap;
     });
     return { heights: hs, tops: ts };
-  }, [flat, colW, prefs.gap, collapsing, expanded, wideMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flat, colW, prefs.gap, collapsing, expanded, wideMode, prefs.cropBorders, sideVersion]);
 
   /** Each page's place in the flow, by key (v0.61.0): the anchor, the downloaded pages' images and the page grid look
    *  a page up here. They used to scan the flow for it, once per page -- per blob, per grid tile, per page turn. */
@@ -1381,6 +1428,8 @@ function ReaderInner() {
                 recollapsible={collapsing && !!p.junk && !p.missing && expanded.has(p.key)}
                 missingSource={p.missing ? sourceNameOf(chapters[p.ci]?.sourceId) : null}
                 wide={!p.missing && isWide(p) ? wideMode : 'whole'} rightFirst={rightFirst}
+                crop={rowCrop(p, !p.missing && isWide(p) ? wideMode : 'whole')}
+                onLoaded={prefs.cropBorders ? onPageLoad : undefined}
                 onExpand={expandPage} onCollapse={collapsePage} />
             ))}
             {ended && upNextCard}
@@ -1417,15 +1466,40 @@ function ReaderInner() {
                       </div>
                     );
                   }
+                  // v0.61.0, Crop page borders: this page's measured margins -- undefined until measured, null when the
+                  // page could not be read back (then it is drawn whole). A spread's two pages share a top and a bottom
+                  // and keep their gutter (pairCrop), so neither is trimmed until both are measured.
+                  const cropOn = prefs.cropBorders;
+                  const box = cropOn ? pageBoxes.current.get(p.key) : undefined;
+                  const loaded = cropOn ? (el: HTMLImageElement) => onPageLoad(p.key, el) : undefined;
                   // v0.61.0, Wide pages: one half of the page, or the page turned on its side, fitted to the slide. A page
                   // whose size is not known is never wide (lib/readerSpread.ts rule 5), so it never gets here.
                   if (halfOf && p.width && p.height) {
-                    return <SlideHalf key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
-                      half={halfOf} area={area} zoom={zoom} />;
+                    return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
+                      region={cropOn ? halfCrop(halfOf, box?.all ?? WHOLE) : halfOf === 'left' ? LEFT_HALF : RIGHT_HALF}
+                      half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded} />;
                   }
                   if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
                     return <SlideTurned key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
                       area={area} zoom={zoom} />;
+                  }
+                  if (cropOn) {
+                    const w = p.width || box?.w;
+                    const h = p.height || box?.h;
+                    if (!(w && h)) {
+                      return <SlidePending key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded}
+                        className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                    }
+                    let region: Region = box?.all ?? WHOLE;
+                    let pending = box === undefined;
+                    if (shown.length === 2) {
+                      const pair = shown.map((j) => pageBoxes.current.get(flat[j].key));
+                      pending = pair.some((b) => b === undefined);
+                      region = pairCrop(pair[0]?.all ?? WHOLE, pair[1]?.all ?? WHOLE)[shown.indexOf(i)];
+                    }
+                    return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2 - 2, h: area.h } : area} zoom={zoom}
+                      pending={pending} onLoaded={loaded} />;
                   }
                   return (
                     <ReaderImg key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}

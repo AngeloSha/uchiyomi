@@ -136,6 +136,17 @@ export function ReaderSettings({
           </p>
         </Row>
 
+        {/* v0.61.0. Off by default; every title, synced. The margins are measured from each page's own pixels. */}
+        <div className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-fog-200">{tr('Crop page borders')}</span>
+            <Switch on={prefs.cropBorders} onChange={(cropBorders) => set({ cropBorders })} label={tr('Crop page borders')} />
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-fog-500">
+            {tr('Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.')}
+          </p>
+        </div>
+
         {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
             every slide is exactly one viewport wide -- so under Collapse a repeated page is shown there like
             any other, where it costs one swipe rather than a scroll. (Not removed: that would give the two modes

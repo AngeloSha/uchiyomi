@@ -1,9 +1,9 @@
 'use client';
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useImgRetry } from '@/components/ui';
 import { IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
-import { LEFT_HALF, RIGHT_HALF, cropStyle, fitBox } from '@/lib/readerCrop';
+import { LEFT_HALF, RIGHT_HALF, contentBox, cropStyle, fitBox, type Region } from '@/lib/readerCrop';
 import type { Half, WidePages } from '@/lib/readerSpread';
 
 /**
@@ -37,10 +37,12 @@ export interface RowItem {
  * thumbnail a collapsed page is drawn from. `divider` is the next chapter's title, for the first page of a chapter
  * after the first. `missingSource` names the source on a placeholder's caption. `wide` is what a wide page becomes
  * (Reader → Wide pages, v0.61.0) -- the reader passes `whole` for every page that is not wide -- and `rightFirst` puts
- * a split page's right half on top.
+ * a split page's right half on top. `crop` is the chapter's trim of both sides (Reader → Crop page borders, v0.61.0),
+ * null when nothing is trimmed, and `onLoaded` is handed the page's image once it has loaded, so its margins can be
+ * measured -- only while Crop page borders is on.
  */
 export const ReaderPageRow = memo(function ReaderPageRow({
-  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, onExpand, onCollapse,
+  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop, onLoaded, onExpand, onCollapse,
 }: {
   item: RowItem;
   height: number;
@@ -52,11 +54,14 @@ export const ReaderPageRow = memo(function ReaderPageRow({
   missingSource: string | null;
   wide: WidePages;
   rightFirst: boolean;
+  crop: { l: number; r: number } | null;
+  onLoaded?: (key: string, img: HTMLImageElement) => void;
   onExpand: (key: string) => void;
   onCollapse: (key: string) => void;
 }) {
   // Do not duplicate buildFlow's rule here: it deliberately keeps missing+junk placeholders open.
   const collapsed = !!item.collapsed;
+  const loaded = useCallback((img: HTMLImageElement) => onLoaded?.(item.key, img), [onLoaded, item.key]);
   return (
     <div>
       {divider != null && (
@@ -67,7 +72,8 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           <span className="h-px w-8 bg-ink-700" />
         </div>
       )}
-      <div style={{ height: height || undefined, marginBottom: gap }} className="relative w-full bg-ink-900">
+      <div style={{ height: height || undefined, marginBottom: gap }} className="relative w-full bg-ink-900"
+        data-crop={crop ? crop.l.toFixed(3) : undefined}>
         {collapsed ? (
           /* A band of the real page, not a placeholder standing in for it. Seeing that it IS the
              credit page is the whole difference between "the reader set this aside" and "a page is
@@ -113,8 +119,16 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           <div data-wide="rotate" className="absolute inset-0 m-auto" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
             <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" />
           </div>
+        ) : src && crop && (crop.l || crop.r) ? (
+          /* v0.61.0, Crop page borders: the chapter's one trim of both sides. The image is drawn wider than the column by
+             exactly what is trimmed and shifted left by the left trim; the reader reserved the taller row that makes. */
+          <div className="relative h-full w-full overflow-hidden">
+            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none"
+              style={cropStyle({ l: crop.l, t: 0, r: crop.r, b: 0 }).img} onLoaded={onLoaded ? loaded : undefined} />
+          </div>
         ) : src ? (
-          <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover" />
+          <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover"
+            onLoaded={onLoaded && wide === 'whole' ? loaded : undefined} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-ink-600">{item.number}</div>
         )}
@@ -144,20 +158,78 @@ export const ReaderPageRow = memo(function ReaderPageRow({
 });
 
 /**
- * One half of a wide page as a slide of the paged track (v0.61.0, Wide pages → Split): a box of the half's shape,
- * fitted to the slide, that clips the page drawn at twice its width. Zoomed like any page.
+ * A page of the paged track drawn as a region of itself (v0.61.0): one half of a wide page (Wide pages → Split), the
+ * page with its margins trimmed (Crop page borders), or both. A box of the region's shape, fitted to `area`, clips the
+ * page drawn larger behind it. Zoomed like any page.
+ *
+ * `pending`: Crop page borders is on and this page's margins are not known yet. The page is not shown until they are,
+ * or until 300 ms after it loaded -- then it is shown whole rather than not at all. Opacity, at once: no new motion.
  */
-export function SlideHalf({ src, alt, width, height, half, area, zoom }: {
-  src: string; alt: string; width: number; height: number; half: Exclude<Half, null>; area: { w: number; h: number }; zoom: number;
+export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, onLoaded }: {
+  src: string; alt: string; width: number; height: number; region: Region; area: { w: number; h: number }; zoom: number;
+  pending?: boolean; half?: Exclude<Half, null>; onLoaded?: (img: HTMLImageElement) => void;
 }) {
-  const st = cropStyle(half === 'left' ? LEFT_HALF : RIGHT_HALF);
+  const late = useLate(src, !!pending);
+  const st = cropStyle(region);
   const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h);
   return (
-    <div data-half={half} className="relative shrink-0 overflow-hidden"
-      style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} />
+    <div data-half={half} data-crop={pending ? undefined : region.l.toFixed(3)} className="relative shrink-0 overflow-hidden"
+      style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: pending && !late.on ? 0 : undefined }}>
+      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} onLoaded={late.wrap(onLoaded)} />
     </div>
   );
+}
+
+/**
+ * A page of the paged track whose size is not known yet, while Crop page borders is on: drawn as it always was, hidden
+ * until its margins are measured (or 300 ms after it loaded, as SlideRegion), so it is not seen whole and then cropped.
+ */
+export function SlidePending({ src, alt, className, zoom, onLoaded }: {
+  src: string; alt: string; className: string; zoom: number; onLoaded?: (img: HTMLImageElement) => void;
+}) {
+  const late = useLate(src, true);
+  return (
+    <ReaderImg src={src} alt={alt} className={className} onLoaded={late.wrap(onLoaded)}
+      style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: late.on ? undefined : 0 }} />
+  );
+}
+
+/** Whether a page that is waiting for its margins has waited long enough: 300 ms after its image loaded. */
+function useLate(src: string, pending: boolean) {
+  const [on, setOn] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setOn(false);
+    return () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
+  }, [src]);
+  const wrap = (next?: (img: HTMLImageElement) => void) => (img: HTMLImageElement) => {
+    next?.(img);
+    if (pending && !timer.current) timer.current = setTimeout(() => setOn(true), 300);
+  };
+  return { on, wrap };
+}
+
+/** The margins of a loaded page (lib/readerCrop.ts contentBox): read from a copy at most 128 px wide and 2,048 rows tall,
+ *  both ways -- all four sides for a page of the paged track, the sides only for the webtoon column. null when the
+ *  page cannot be read back: a canvas tainted by another origin's image throws, and that page is simply not cropped. */
+export function measurePage(img: HTMLImageElement): { all: Region; sides: Region; w: number; h: number } | null {
+  const w0 = img.naturalWidth;
+  const h0 = img.naturalHeight;
+  if (!w0 || !h0) return null;
+  const w = Math.min(128, w0);
+  const h = Math.max(1, Math.min(2048, Math.round(h0 * (w / w0))));
+  try {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, w, h);
+    const px = ctx.getImageData(0, 0, w, h).data;
+    return { all: contentBox(px, w, h), sides: contentBox(px, w, h, { sidesOnly: true }), w: w0, h: h0 };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -185,10 +257,19 @@ export function SlideTurned({ src, alt, width, height, area, zoom }: {
  * layouts size a page completely differently: one fills a box whose height was reserved from `page_dims`,
  * the other is bounded by the viewport. Only the failure behaviour is shared.
  */
-export function ReaderImg({ src, alt, className, style }: {
+export function ReaderImg({ src, alt, className, style, onLoaded }: {
   src: string; alt: string; className?: string; style?: React.CSSProperties;
+  /** Handed the image once it has loaded (v0.61.0, to measure its margins) -- also when it had loaded already. */
+  onLoaded?: (img: HTMLImageElement) => void;
 }) {
   const { src: shown, failed, onError, retry } = useImgRetry(src);
+  const ref = useRef<HTMLImageElement>(null);
+  // An image that loaded before anybody asked (Crop page borders switched on over pages already on screen) raises no
+  // load event again, so it is handed over as soon as it is asked for.
+  useEffect(() => {
+    const el = ref.current;
+    if (onLoaded && el?.complete && el.naturalWidth) onLoaded(el);
+  }, [onLoaded, shown]);
   if (failed) {
     // A broken glyph tells the reader nothing and offers nothing. This says which page failed and gives them
     // the one action that fixes it, without reloading the chapter and losing their place.
@@ -201,7 +282,8 @@ export function ReaderImg({ src, alt, className, style }: {
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={shown} alt={alt} className={className} style={style} decoding="async" onError={onError} />;
+  return <img ref={ref} src={shown} alt={alt} className={className} style={style} decoding="async" onError={onError}
+    onLoad={onLoaded ? (e) => onLoaded(e.currentTarget) : undefined} />;
 }
 
 /**
