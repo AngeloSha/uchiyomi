@@ -5272,74 +5272,167 @@ paths:
         The caller's own connections, every provider listed connected or not. Unchanged by the tracker
         import (v0.36.0): POST /api/admin/import/batches with `origin: 'tracker'` reads the requesting
         admin's list through the very connection shown here, and links what it imports so this listing's
-        linked series grow with it.
+        linked series grow with it. Since v0.61.0 a provider with a page that SHOWS a token to copy carries
+        `authorizeUrl`: AniList's, for the project's public client (client id 53603, implicit grant, redirect to
+        AniList's pin page) -- open it, approve, paste the token it shows into POST /api/trackers/{provider}/connect.
+        No secret is involved. `tokenHelp` stays the English fallback.
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: Every provider, in a `content` array.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError]
+                      properties:
+                        provider: { type: string, enum: [anilist, myanimelist, kitsu] }
+                        label: { type: string }
+                        tokenHelp: { type: string, description: "Where a token comes from, in English." }
+                        authorizeUrl:
+                          type: string
+                          description: >-
+                            Since v0.61.0, only for a provider with a page that shows a token (AniList):
+                            https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token
+                        connected: { type: boolean, description: "False for a connection a rejected token disabled." }
+                        accountName: { type: [string, "null"] }
+                        expiresAt: { type: [string, "null"], format: date-time }
+                        expiringSoon: { type: boolean }
+                        lastSyncAt: { type: [string, "null"], format: date-time }
+                        lastError: { type: [string, "null"] }
         "401":
           description: Not authenticated
   /api/trackers/anilist:
     post:
       tags:
         - personal
-      summary: Connect AniList with an OAuth code.
+      summary: Connect AniList with a pasted access token (the older path of POST /api/trackers/anilist/connect).
       operationId: postApiTrackersAnilist
+      description: >-
+        Kept for the clients and docs that already call it; answers exactly as POST /api/trackers/{provider}/connect
+        does for `anilist`, including the 502s since v0.61.0.
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [token]
               properties:
-                code:
+                token:
                   type: string
+                  minLength: 10
+                  maxLength: 4000
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "`{ok: true, account}`: verified and saved."
         "400":
-          description: Malformed body or parameter
+          description: "`bad_request` (no token) or `rejected` (AniList's verdict on the token)"
         "401":
           description: Not authenticated
+        "502":
+          description: "`tracker_unreachable`, or `tracker_refused` with the service's `status`: not about the token"
   /api/trackers/{provider}/connect:
     post:
       tags:
         - personal
-      summary: Connect a tracker (AniList, MyAnimeList, Kitsu) with the provider's credential.
+      summary: Connect a tracker (AniList, MyAnimeList, Kitsu) with a pasted access token.
       operationId: postApiTrackersProviderConnect
+      description: >-
+        The token is checked against the service (who it belongs to) before it is stored, encrypted. Since v0.61.0
+        only the service's verdict on the token is a 400 `rejected`: no answer at all (a timeout, DNS, a refused
+        connection) is a 502 `tracker_unreachable`, and an answer that refused the request for another reason
+        (Cloudflare's 403 in front of AniList, a 429, a 5xx, an AniList 400 that is not "Invalid token") is a 502
+        `tracker_refused` carrying the service's `status` when there was one. Neither 502 means the token is bad.
       parameters:
         - name: provider
           in: path
           required: true
           schema:
             type: string
+            enum: [anilist, myanimelist, kitsu]
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [token]
               properties:
-                code:
+                token:
                   type: string
-                username:
-                  type: string
-                password:
-                  type: string
+                  minLength: 10
+                  maxLength: 4000
+                  description: >-
+                    The access token itself (AniList's pin page shows it; MyAnimeList and Kitsu hand it out as
+                    `access_token` from their token endpoints).
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "`{ok: true, account}`: verified and saved."
         "400":
-          description: Malformed body or parameter
+          description: "`bad_request` (no token, or one under 10 characters) or `rejected` (the service's verdict on the token)"
         "401":
           description: Not authenticated
         "404":
-          description: Not found, or not visible to this account
+          description: "`unknown_provider`"
+        "502":
+          description: >-
+            `tracker_unreachable` `{error, message}`, or `tracker_refused` `{error, status?, message}`: the service
+            could not be asked, or refused the request for a reason that is not the token.
+  /api/trackers/{provider}/test:
+    post:
+      tags:
+        - personal
+      summary: Test a saved tracker connection -- does the token still work? Changes nothing.
+      operationId: postApiTrackersProviderTest
+      description: >-
+        Since v0.61.0. Makes the one call a Connect proves a token with (who it belongs to) using the caller's
+        saved token, and says what came back. Always a 200 for a known provider, whatever the verdict; nothing
+        is written -- not `enabled`, not `lastError`, not the account name. `expired` and `not_connected` are said
+        without asking the service (`not_connected`: no connection, one a rejected token disabled, or a saved
+        token this server can no longer decrypt). Six per minute per account (keyed on the account, not the
+        address). Not audited: it changes nothing.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [anilist, myanimelist, kitsu]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: What the service said about the saved token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, verdict]
+                properties:
+                  ok: { type: boolean, description: "True only for `connected`." }
+                  verdict:
+                    type: string
+                    enum: [connected, rejected, unreachable, refused, expired, not_connected]
+                  account: { type: string, description: "The account the token belongs to, with `connected`." }
+                  status: { type: integer, description: "The HTTP status the service answered, with `refused` when there was one." }
+        "401":
+          description: Not authenticated
+        "404":
+          description: "`unknown_provider`"
+        "429":
+          description: More than six tests in a minute from this account
   /api/trackers/{provider}:
     delete:
       tags:

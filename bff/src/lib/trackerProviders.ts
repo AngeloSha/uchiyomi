@@ -9,7 +9,9 @@
 // All three connect by PASTING A TOKEN, which is the same honest, dependency-free path AniList already used:
 // no client registration, no redirect URLs to configure, nothing to keep secret server-side. A full OAuth
 // dance would need every self-hoster to register an application with each service and put the secret in
-// their compose file, which is a worse trade for a household app than copying a token once.
+// their compose file, which is a worse trade for a household app than copying a token once. Since v0.61.0
+// the AniList token comes from the project's own public client, whose page shows it (ANILIST_CLIENT_ID below):
+// still a paste, and still nothing secret anywhere.
 
 export type Provider = 'anilist' | 'myanimelist' | 'kitsu';
 
@@ -94,8 +96,16 @@ const apiUrl = (name: string, fallback: string): string => (process.env[name] ||
 export interface TrackerAdapter {
   readonly id: Provider;
   readonly label: string;
-  /** Where a user gets a token, shown in the UI next to the paste box. */
+  /**
+   * Where a user gets a token, in English. Since v0.61.0 the web app says this itself, translated
+   * (web/lib/trackerHelp.ts); this stays for API clients and for a provider the web does not know yet.
+   */
   readonly tokenHelp: string;
+  /**
+   * A page that shows the person a token to copy, when the service has one (v0.61.0, #190): AniList's authorize link
+   * for the project's public client. Sent as `authorizeUrl` in GET /api/trackers so API clients see it too.
+   */
+  readonly authorizeUrl?: string;
   /** How long a token lasts, or null when the service does not say. Used to warn before it lapses. */
   readonly tokenDays: number | null;
   /** Prove the token works and name the account it belongs to. Throws or returns null when rejected. */
@@ -110,9 +120,55 @@ export interface TrackerAdapter {
   listLibrary(token: string, opts: { statuses: ListStatus[]; max: number }): Promise<LibraryEntry[]>;
 }
 
-const authFail = (msg: string) => Object.assign(new Error(msg), { authFailed: true });
+/**
+ * Errors from a service carry the HTTP status it answered (v0.61.0), messages unchanged: `lastError` shows the message,
+ * and verdictOf below reads the status to tell a refusal from a verdict on the token.
+ */
+const authFail = (msg: string, status?: number) => Object.assign(new Error(msg), { authFailed: true, ...(status ? { status } : {}) });
+const httpFail = (msg: string, status: number) => Object.assign(new Error(msg), { status });
+
+/** What a failed call says about the token: nothing (`unreachable`, `refused`), or that it is bad (`rejected`). */
+export type CallVerdict = 'rejected' | 'unreachable' | 'refused';
+/** The codes Node puts on a connection that never got an answer, on the error or its `cause` (undici). */
+const NO_ANSWER = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
+]);
+
+/**
+ * Read a failed call to a tracker (v0.61.0, #190). Connect answered EVERY failure "AniList did not accept that token":
+ * a DNS failure, Cloudflare's 403 in front of AniList, the service being down -- and the person went back for a new
+ * token that was never the problem. Only an `authFailed` error is the service's verdict on the token: `rejected`. No
+ * answer at all -- a timeout (AbortSignal.timeout's TimeoutError, an AbortError), undici's `TypeError: fetch failed`, a
+ * connection refused or a name that did not resolve -- is `unreachable`. An answer that turned the request down for
+ * another reason -- a 403 from the edge, a 429, a 5xx, a 400 that is not "Invalid token" -- is `refused`, with the
+ * status when there was one (a GraphQL error inside a 200, or a body that is not JSON, has none).
+ * Reintroduce "every failure is the token's" by returning `rejected` last: "a network throw is unreachable" in
+ * trackerVerdicts.int.test.ts fails.
+ */
+export function verdictOf(e: unknown): { verdict: CallVerdict; status?: number } {
+  const err = (e ?? {}) as { authFailed?: unknown; status?: unknown; name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown } };
+  if (err.authFailed) return { verdict: 'rejected' };
+  if (typeof err.status === 'number' && err.status > 0) return { verdict: 'refused', status: err.status };
+  const name = String(err.name ?? '');
+  const code = String(err.code ?? err.cause?.code ?? '');
+  if (name === 'TimeoutError' || name === 'AbortError' || NO_ANSWER.has(code)
+    || (name === 'TypeError' && /fetch failed/i.test(String(err.message ?? '')))) return { verdict: 'unreachable' };
+  return { verdict: 'refused' };
+}
 
 // ---------------------------------------------------------------------------- AniList
+
+/**
+ * The project's public AniList API client (v0.61.0, #190), registered by the owner with AniList's own pin page
+ * (https://anilist.co/api/v2/oauth/pin) as its redirect URL. Its implicit-grant link asks the person to approve
+ * Uchiyomi and then SHOWS the access token to copy: still paste-a-token, nothing is redirected back to this server,
+ * and no client secret exists here or is needed -- the implicit grant uses none; never add one. A token lasts a year
+ * with no refresh, which is `tokenDays` below. web/lib/trackerHelp.ts builds the same link, and
+ * web/test/trackerHelp.test.ts holds the two to one address.
+ */
+export const ANILIST_CLIENT_ID = 53603;
+export const ANILIST_TOKEN_URL = `https://anilist.co/api/v2/oauth/authorize?client_id=${ANILIST_CLIENT_ID}&response_type=token`;
 
 const ANILIST_API = apiUrl('ANILIST_API_URL', 'https://graphql.anilist.co');
 /** AniList says "Invalid token" (HTTP 400) for a bad token and "Unauthorized" for a missing one. */
@@ -131,7 +187,7 @@ async function anilistCall(token: string, query: string, variables: Record<strin
   // the edge -- the person had to paste a new token for a block that was never about the token. A 403 falls
   // through to the plain-error branch below: the message is recorded, the connection kept, the next chapter
   // retries. Reintroduce by adding `|| r.status === 403` back here.
-  if (r.status === 401) throw authFail('tracker rejected the token');
+  if (r.status === 401) throw authFail('tracker rejected the token', 401);
   // A rejected token is an HTTP 400 on AniList, but so is every validation error -- a variable the schema
   // stopped accepting, a clamp that changed. Every 400 used to count as a bad token, which disables the
   // person's connection with "rejected the saved token"; the list query has far more ways to earn a 400 than
@@ -139,10 +195,10 @@ async function anilistCall(token: string, query: string, variables: Record<strin
   if (r.status === 400) {
     const j: any = await r.json().catch(() => null);
     const msg = j?.errors?.[0]?.message || 'anilist 400';
-    if (ANILIST_BAD_TOKEN.test(msg)) throw authFail('tracker rejected the token');
-    throw new Error(`anilist 400: ${msg}`);
+    if (ANILIST_BAD_TOKEN.test(msg)) throw authFail('tracker rejected the token', 400);
+    throw httpFail(`anilist 400: ${msg}`, 400);
   }
-  if (!r.ok) throw new Error(`anilist ${r.status}`);
+  if (!r.ok) throw httpFail(`anilist ${r.status}`, r.status);
   const j: any = await r.json();
   if (j?.errors?.length) {
     const msg = j.errors[0]?.message || 'anilist error';
@@ -186,7 +242,10 @@ const ANILIST_SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatu
 export const anilistAdapter: TrackerAdapter = {
   id: 'anilist',
   label: 'AniList',
-  tokenHelp: 'anilist.co → Settings → Developer → create a client, then copy the access token.',
+  // It said "anilist.co → Settings → Developer → create a client, then copy the access token" until v0.61.0 (#190):
+  // that page shows a client ID and a secret, never a token, so the one instruction led to a paste AniList refused.
+  tokenHelp: `Open ${ANILIST_TOKEN_URL}, approve Uchiyomi, and paste the token AniList shows.`,
+  authorizeUrl: ANILIST_TOKEN_URL,
   tokenDays: 365,
   async whoAmI(token) {
     const d = await anilistCall(token, 'query{Viewer{id name}}', {});
@@ -263,17 +322,18 @@ async function malCall(token: string, path: string, init?: RequestInit): Promise
   // A 401 is a bad token. A 403 on MAL is its DoS block (too many requests from one address), which a token
   // paste cannot fix; treating it as authFail disabled the connection for a rate limit. Reintroduce by
   // adding `|| r.status === 403` back.
-  if (r.status === 401) throw authFail('MyAnimeList rejected the token');
-  if (!r.ok) throw new Error(`myanimelist ${r.status}`);
+  if (r.status === 401) throw authFail('MyAnimeList rejected the token', 401);
+  if (!r.ok) throw httpFail(`myanimelist ${r.status}`, r.status);
   return r.status === 204 ? null : r.json();
 }
 
 export const malAdapter: TrackerAdapter = {
   id: 'myanimelist',
   label: 'MyAnimeList',
-  // MAL issues tokens through OAuth2 with PKCE; the practical path for a self-hoster is to obtain one once
-  // and paste it, exactly as with AniList.
-  tokenHelp: 'myanimelist.net → Account settings → API, create an app and obtain an access token.',
+  // MAL issues tokens through OAuth2 with PKCE (`plain` only) and no page shows one, so the practical path for a
+  // self-hoster is to obtain one once with an app of their own and paste it. docs/USAGE.md has the recipe (v0.61.0).
+  tokenHelp: 'MyAnimeList shows no token on any page: create an API app at https://myanimelist.net/apiconfig and '
+    + 'exchange a code for a token (docs/USAGE.md, "Getting a MyAnimeList token"), then paste its access_token.',
   tokenDays: 31,   // MAL access tokens are short-lived; surfacing that is the whole point of storing it
   async listLibrary(token, { statuses, max }) {
     if (!statuses.length || !(max > 0)) return [];
@@ -366,15 +426,18 @@ async function kitsuCall(token: string, path: string, init?: RequestInit): Promi
   // A 401 is a bad token. A 403 on Kitsu is a forbidden ACTION -- writing an entry that belongs to another
   // account, say -- and the token that earned it is still good for everything else, so it is a plain error
   // that keeps the connection. Reintroduce by adding `|| r.status === 403` back.
-  if (r.status === 401) throw authFail('Kitsu rejected the token');
-  if (!r.ok) throw new Error(`kitsu ${r.status}`);
+  if (r.status === 401) throw authFail('Kitsu rejected the token', 401);
+  if (!r.ok) throw httpFail(`kitsu ${r.status}`, r.status);
   return r.status === 204 ? null : r.json();
 }
 
 export const kitsuAdapter: TrackerAdapter = {
   id: 'kitsu',
   label: 'Kitsu',
-  tokenHelp: 'Kitsu issues a token from its OAuth endpoint with your username and password; paste it here.',
+  // Kitsu's documented way (its API docs, "Password Grant") is a POST to https://kitsu.io/api/oauth/token with your
+  // email or slug and password; no page shows a token. docs/USAGE.md has the command (v0.61.0).
+  tokenHelp: 'Kitsu shows no token on any page: ask https://kitsu.io/api/oauth/token for one with your email and '
+    + 'password (docs/USAGE.md, "Getting a Kitsu token"), then paste its access_token.',
   tokenDays: 30,
   async listLibrary(token, { statuses, max }) {
     if (!statuses.length || !(max > 0)) return []; // an empty filter[status] would page the whole library

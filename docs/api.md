@@ -925,7 +925,8 @@ the next check downloads what it no longer hides.
 
 The API isn't rate-limited for authenticated users; the limits are on getting in. `POST /auth/login` takes
 ten attempts per address per five minutes, `POST /api/setup` and `POST /auth/register` five per ten minutes,
-and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
+`POST /api/trackers/:provider/test` six per account per minute (since v0.61.0: each one asks someone else's
+service), and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
 minutes, then **429** `too_many_requests` `{message}` with `Retry-After` for every further request from that
 address that presents a credential, until the window ends; requests with no credential, cookie-only
 requests and valid keys are not counted. The *sources* the server fetches from are limited too: endpoints
@@ -1378,6 +1379,7 @@ GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/:provider/connect
+POST   /api/trackers/:provider/test
 POST   /api/trackers/anilist/backfill
 POST   /api/trackers/:provider/resync/:seriesId
 DELETE /api/trackers/:provider
@@ -1430,7 +1432,18 @@ series per selected rail; an empty selected List reserves its position and appea
 
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
-drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below
+drops it. Since v0.61.0 ([#190](https://github.com/AngeloSha/uchiyomi/issues/190)) AniList's entry carries
+`authorizeUrl` — `https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token`, the project's
+public AniList client: open it, approve, and AniList's own pin page shows the token to paste (an implicit grant;
+nothing comes back to this server and no secret is involved). MyAnimeList and Kitsu have no such page;
+[USAGE.md](USAGE.md#getting-a-myanimelist-token) has the commands that get theirs. Connect checks the token with
+the service first, and only the service's verdict on it is a **400** `rejected`: no answer at all (a timeout, DNS, a
+refused connection) is a **502** `tracker_unreachable`, and an answer that turned the request down for another
+reason (Cloudflare's 403 in front of AniList, a 429, a 5xx) is a **502** `tracker_refused` `{status}` — neither
+means the token is bad. `POST /api/trackers/:provider/test` asks the service whether the saved token still works
+and answers **200** `{ok, verdict, account?, status?}` with `verdict` one of `connected`, `rejected`,
+`unreachable`, `refused`, `expired` or `not_connected`; it writes nothing (not even `last_error`), sends no token
+past its `expires_at`, and allows six tests a minute per account (**429** after). A push goes out for the caller alone when they finish a chapter of a linked series, never below
 the floor `tracker_progress` holds for them (see the reviewable import under Admin, `/run`). Only a **401**
 from the service — or AniList's "Invalid token" **400** — is a verdict on the token, and disables the
 connection with `last_error` = `the tracker rejected the saved token -- reconnect to resume syncing`; a
