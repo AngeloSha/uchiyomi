@@ -27,10 +27,16 @@ function useEndSeries(seriesId: string | null | undefined): Series | undefined {
   return data;
 }
 
-/** The card's label: "You're all caught up" for a series the radar dates and that has not ended, else "You finished". */
-export function endLabel(series: Pick<Series, 'yomi'> | undefined): string {
+/**
+ * The card's label: "You're all caught up" for a series the radar dates and that has not ended, else "You finished".
+ * Not while the sources list chapters that are not here yet: the line under the title says "3 not here yet", and
+ * "caught up" above it would contradict it. Reintroduce by dropping the `missing` test: "the end card: caught up while
+ * more is on the way, finished otherwise" in radar.test.ts reads "caught up" over chapters not here yet.
+ */
+export function endLabel(series: Pick<Series, 'yomi' | 'source'> | undefined): string {
   const radar = series?.yomi?.radar;
-  return radar && !radar.ended ? tr('You’re all caught up') : tr('You finished');
+  const missing = series?.source?.missing ?? 0;
+  return radar && !radar.ended && missing === 0 ? tr('You’re all caught up') : tr('You finished');
 }
 
 /** The line under the title: what the sources list that is not here yet, else what the radar expects; '' for nothing. */

@@ -2223,6 +2223,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       );
     });
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
+    // The release radar keeps whether a series has ended (lib/releaseRadar.ts). A status set here otherwise reached it
+    // only at the next listing refresh -- up to three days for a quiet series under smart checks -- and a series just
+    // marked Completed went on promising "Next chapter ~Friday". Reintroduce by dropping this: "marking a series
+    // Completed ends its estimate at once" in releaseRadar.int.test.ts still finds a next chapter.
+    await refreshRadar(id).catch((e) => console.warn(`[radar] refresh after an edit failed for ${id}: ${(e as Error)?.message || e}`));
     return { ok: true };
   });
 

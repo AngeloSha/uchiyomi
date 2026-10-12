@@ -196,6 +196,19 @@ test('the radar goes with its series', { skip }, async () => {
   assert.equal(await row('s_rr_gone'), null, 'the radar outlived its series');
 });
 
+test('marking a series Completed ends its estimate at once', { skip }, async () => {
+  // Reintroduce by dropping the refresh after PUT /api/admin/series/:id/meta (routes/admin.ts): the row keeps its next
+  // chapter until the next listing refresh, and the series page goes on promising one.
+  await mk('s_rr_edit');
+  await write('s_rr_edit', weekly(8, 2 * DAY));
+  assert.ok((await row('s_rr_edit'))?.next_at, 'the fixture has no estimate to end');
+  const put = await app.inject({ method: 'PUT', url: '/api/admin/series/s_rr_edit/meta', headers: A, payload: { status: 'Completed' } });
+  assert.equal(put.statusCode, 200, put.body);
+  const after = await row('s_rr_edit');
+  assert.equal(after.ended, true);
+  assert.equal(after.next_at, null);
+});
+
 test('the series page carries its radar', { skip }, async () => {
   // Reintroduce by leaving yomi.radar out of enrichSeries: undefined.
   const r = await row('s_rr_weekly');

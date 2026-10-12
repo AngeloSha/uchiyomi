@@ -103,6 +103,8 @@ test('the end card: caught up while more is on the way, finished otherwise', () 
   assert.equal(endLabel(series(radar(4, { ended: true }))), 'You finished');
   assert.equal(endLabel(series(null)), 'You finished', 'nothing dates it: as before');
   assert.equal(endLabel(undefined), 'You finished', 'while the series loads');
+  assert.equal(endLabel(series(radar(4), 3)), 'You finished', '"caught up" over 3 chapters not here yet');
+  assert.equal(endLabel(series(radar(4), null)), 'You’re all caught up', 'a series with no source summary');
   // The line: what the sources list that is not here yet first, else the radar.
   assert.equal(endLine(series(radar(4), 3)), '3 not here yet');
   assert.equal(endLine(series(radar(4), 1)), '1 not here yet');
