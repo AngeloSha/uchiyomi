@@ -29,7 +29,7 @@ import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
-import { autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
+import { AFTER_NIGHTLY_AUTOFIX, autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
 import { startArchive } from './lib/archive';
 import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
@@ -483,7 +483,13 @@ async function main() {
           if ('busy' in r) {
             app.log.info(`repair: Fix everything could not start beside a running ${r.busy}, trying again in 10 minutes`);
             next = 10 * 60 * 1000;
-          } else await autofixSettled();
+          } else {
+            await autofixSettled();
+            // v0.60.1: then the repair steps Fix everything does not drive itself (lib/autofix.ts AFTER_NIGHTLY_AUTOFIX),
+            // as the plain nightly would have run them. A partial run: its own Tasks card, and repair_last_run left alone.
+            const rest = runRepair(app.log, { only: [...AFTER_NIGHTLY_AUTOFIX] });
+            if (rest) await rest;
+          }
         } else if (runtime.autofixing) {
           app.log.info('repair: Fix everything is running, trying again in 10 minutes');
           next = 10 * 60 * 1000;

@@ -47,7 +47,7 @@ import { logAudit } from './audit';
 import { say, saidOf, type Part, type Said } from './said';
 import { SYSTEM_CTX, visibleToAll, type ViewCtx } from './visibility';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
-import { repairState, repairForAutofix, type AutofixDrive, type RepairCurrent, type RepairResult, type RepairStep } from './repair';
+import { repairState, repairForAutofix, REPAIR_STEPS, type AutofixDrive, type RepairCurrent, type RepairResult, type RepairStep } from './repair';
 import { findRunning, findRunSettled, findState, startFind, stopFind, FIND_BUSY_WAIT_MS, type FindResult } from './findSources';
 import { persistScan, DL_ROOT } from './library';
 import { updateSeries, runsInside } from './updater';
@@ -93,6 +93,20 @@ import { clearRunDigest, pruneRuns } from './repairRuns';
 
 export const PHASES = ['preflight', 'scan', 'solver', 'sources', 'duplicates', 'numbering', 'chapters', 'extensions', 'files', 'recheck'] as const;
 export type AutofixPhase = (typeof PHASES)[number];
+
+/**
+ * The repair steps a run drives itself: `count` (the files phase), `solver` (its own phase) and the three chapters()
+ * runs. Every `repairForAutofix(..., { only })` below names steps from this list.
+ */
+export const AUTOFIX_REPAIR_STEPS: readonly RepairStep[] = ['count', 'solver', 'failures', 'short', 'gaps'];
+/**
+ * ...and the rest -- the opt-in group upgrades and borrowed names, and learning reading directions -- which a NIGHTLY
+ * Fix everything runs after it as a plain repair (server.ts). The plain nightly runs all eight; an install whose nightly
+ * was Fix everything never ran these three at all (v0.60.1, found in Squeaks72's fork). Reintroduce by dropping the
+ * follow-up from server.ts's repair tick: "a nightly Fix everything runs the repair steps it does not drive itself" in
+ * autofix.int.test.ts fails.
+ */
+export const AFTER_NIGHTLY_AUTOFIX: readonly RepairStep[] = REPAIR_STEPS.filter((s) => !AUTOFIX_REPAIR_STEPS.includes(s));
 
 export type DoneKind = 'replaced' | 'retired' | 'tested' | 'unblocked' | 'linked' | 'merged' | 'renumbered' | 'fetched' | 'refetched'
   | 'shortFixed' | 'shortConfirmed' | 'failuresCleared' | 'installed' | 'uninstalled' | 'deletedTwice' | 'deletedOdd' | 'scanned'
