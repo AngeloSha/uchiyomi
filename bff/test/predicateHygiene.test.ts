@@ -108,13 +108,18 @@ const GATED: Record<string, string> = {
   // address of their choosing. No library content is involved either way.
   '/img/sources/icon/:id': 'n/a: source icon, resolved only from a registered source; not library content',
   // opds.ts
-  '/opds': 'n/a: static navigation feed, no library data',
+  // v0.61.0: no longer static -- the reader's own root, with an entry per List they may read.
+  '/opds': "listsFor(uid, vc(req), 'all'): the reader's own Lists and shared ones that show this token a series; names and counts only",
   '/opds/search': 'seriesSrc(vc(req)) via seriesFeed, the same handler as /opds/series',
   '/opds/opensearch.xml': 'n/a: OpenSearch descriptor document, no library data',
   '/opds/series': 'seriesSrc(vc(req))',
   '/opds/series/:id': 'seriesSrc(vc(req)) for the series, booksSrc join for its chapters',
   '/opds/book/:id/file': 'visibleBookFile(vc(req))',
   '/opds/book/:id/page/:n': 'visibleBookFile(vc(req)); zero-based page for OPDS-PSE readers',
+  // v0.61.0, the reader's own shelves (opdsShelves.int.test.ts).
+  '/opds/continue': "onDeckPicks(uid, vc(req)), browsable() in its SQL; the chapter rows through a visible('s', vc(req)) join",
+  '/opds/favorites': "seriesSrc(vc(req)) joined to this reader's favorites",
+  '/opds/lists/:id': 'listFor (own or shared, uuid-checked; 404 when it shows this token nothing), listItems through vc(req), rows through seriesSrc(vc(req))',
 };
 
 test('every image and OPDS route says how it is gated', () => {
