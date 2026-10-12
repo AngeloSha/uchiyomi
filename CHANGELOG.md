@@ -1,5 +1,106 @@
 # Changelog
 
+## v0.61.0 — 2026-10-12
+
+**When the next chapter is due, how long you've read, what to read next, lists that keep themselves up to date, and a
+reader that fits more screens.** Also: connecting AniList works the first time
+([#190](https://github.com/AngeloSha/uchiyomi/issues/190)), a sign-up form, and Incognito reading.
+
+### Release radar
+
+- Uchiyomi now estimates **when a series' next chapter is likely**, from when its chapters usually come: the dates its
+  sources list, or, where they list none (most don't), when chapters arrived on this server. Only for a series that
+  keeps a rhythm (four releases or more, mostly evenly spaced, still running), and always said as an estimate:
+  *~Friday*, *usually Fridays*, *due any day*, *running late*.
+- It shows under the reading progress on the series page, on **Updates → Expected this week** (your favourites and what
+  you read in the last 90 days), as the Library's **Releasing soon** order, and on the reader's last page, which now
+  says *You're all caught up* when more is on the way.
+- **Smart update checks** (Admin → Settings → Updates & schedules, off by default): the scheduled check asks series
+  that have been quiet for a long time less often, at least every three days, and every series as usual while its next
+  chapter is due. *Check now* always asks at once. On the library it was tested on, about half as many requests a day.
+
+### Reading time
+
+- **How long you've read**, worked out from the page turns Uchiyomi already records, so it covers your reading from
+  before the update too. **Profile → Reading studio** shows the last 7 days, the last 30 days and the year, about how
+  long a chapter takes you, the hours of the day you read and on which devices. A pause of more than five minutes is a
+  break, and two devices reading at once are never counted twice.
+- **Wrapped** adds the year's hours, and a series page says *Catch up in ~2 h* beside the release estimate.
+- The household's weekly board stays a count of chapters.
+
+### Related works and recommendations
+
+- **Related** on the series page: AniList's sequels, prequels, main story, side stories, spin-offs and alternative
+  versions. One you have opens in your library; one you don't opens Discover searching your sources for it.
+- **Next in the story** on the reader's last page.
+- **More like this** now puts first what AniList's readers recommend that you already have.
+- **Discover**: *Because you read …* (for accounts that may add series), and **trending manga** and **manhua** rails
+  beside the manhwa one. A Discover address with `?q=` opens on that search.
+- All of it is kept in the background with the AniList scores, about every six hours: nothing asks AniList when a page
+  opens, a library with AniList lookups off sends nothing, and the 18+ switch and age limits apply to each person.
+
+### Lists
+
+- **Save as list** in the Library keeps the filters and order you have on as a **live list**, which follows your
+  library as it changes. *Edit filters* opens the Library with them on.
+- **Share** any list with the household: everyone else can read it and put it on their Home, never change it, and sees
+  only the series they may open.
+- Lists has *Your lists* and *Shared with you*; live and shared lists can be Home rails, and OPDS readers get each list.
+
+### Small touches
+
+- **Incognito reading** (Profile → Settings → Reading, or the reader's settings): your place is kept, but what you read
+  stays out of your history, stats and the household's boards, and nothing is sent to your trackers. It covers your
+  whole account, every device and Mihon, because the server applies it.
+- **Pick back up** on Home: series you stopped part-way through, three months to two years ago.
+- **Hidden gems** on Home: series AniList's readers score 75 or more that nobody on this server has read.
+- **OPDS readers** get your own shelves: Keep reading, Favourites and your lists.
+- **Reading done offline is dated when you read it.** It used to land on the day the phone came back online, in history,
+  streaks and Wrapped, and a chapter first opened offline resumed at the first page read offline, not the last.
+
+### The reader
+
+Every new setting is off, or the reader as before, until you change it.
+
+- **Wide pages:** on a phone held upright, a double-page spread can be split into its two pages or turned on its side.
+- **Crop page borders** trims the blank margins around scanned pages.
+- **Colour filter**, per device: invert, grayscale or e-ink (e-ink also turns pages without sliding).
+- **Tap zones, keys and a game controller**, per device: Edges, L shape, Kindle-style or Off; any key for any action;
+  and a controller, on an https address.
+- **Pick the mode for each series:** long strips and webtoons open in Webtoon mode, manga and right-to-left series in
+  Paged. A series or source you have set yourself keeps its own.
+- **Long webtoons** keep far fewer images decoded (three tall strips at most, down from nine), start loading the next
+  chapter earlier, and keep your place through a zoom.
+- Fixed: settings that synced late could change the open title's mode; a source's default mode could open a chapter on
+  its first page while the counter said 9; switching mode mid-chapter lost your place.
+
+### Connecting trackers
+
+- **Get a token from AniList** opens AniList's own page for Uchiyomi: approve it, copy the token AniList shows, paste it.
+  If what you paste is an app's client ID or secret, Uchiyomi says so. Thanks to **@Kedryn** for the report
+  ([#190](https://github.com/AngeloSha/uchiyomi/issues/190)).
+- Connecting says why it failed: a token the service turned down, a service this server could not reach, and a service
+  that refused the request are three different messages. **Test connection** checks a connection whenever you like.
+- The user guide has step-by-step guides for MyAnimeList and Kitsu tokens.
+
+### Sign-up
+
+- With Admin → Settings → **Open registration** on, the sign-in screen has **Create an account**. A name that differs
+  from an existing one only in capital letters is taken, and two people signing up for the same name at once can't both
+  get it.
+
+### Upgrading
+
+- **Database:** two new tables (`series_radar`, `anilist_related`) and new columns on `collections` and
+  `server_settings`, all added when the server starts. v0.60.1 still runs on the new database if you go back.
+- Release estimates appear a minute after the server starts; related works fill in over the next AniList round.
+- **For scripts** ([api.md](docs/api.md)): new `GET /api/updates/expected`, `GET /api/stats/time`,
+  `GET /api/series/:id/reading-pace`, `GET /api/series/:id/related`, `GET /api/discover/because`,
+  `POST /api/trackers/:provider/test`, `GET /opds/continue`, `GET /opds/favorites` and `GET /opds/lists/:id`. Every
+  series carries `yomi.radar`; `GET /api/collections?scope=all` adds live and shared lists; `GET /api/discover/trending`
+  takes `country`; `GET /api/series/:id` sends `seriesType`; `/auth/register` takes a device name and answers 409 for a
+  taken name.
+
 ## v0.60.1 — 2026-10-12
 
 **Eight fixes found by reading a contributor's fork: Keep reading, extension installs, long strips in the nightly repair,
