@@ -165,6 +165,8 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
     try {
       const r = await api<TestResult>(`/api/trackers/${t.provider}/test`, { method: 'POST' });
       setTested({ ok: r.ok, text: testSaid(r, label) });
+      // A push met a rejected token since this list was read, and disabled the connection: show the row as it is now.
+      if (r.verdict === 'not_connected') refetch();
     } catch (e) { setTested({ ok: false, text: testProblem(e) }); }
     setTesting(false);
   };
