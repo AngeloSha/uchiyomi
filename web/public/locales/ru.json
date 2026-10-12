@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3614
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3597,5 +3597,25 @@
   "Couldn’t load your library": "Не удалось загрузить библиотеку",
   "Couldn’t load more": "Не удалось загрузить ещё",
   "AniList score": "Оценка на AniList",
-  "Actions for {title}": "Действия: {title}"
+  "Actions for {title}": "Действия: {title}",
+  "~{day}": "≈ {day}",
+  "Next chapter due any day": "Следующая глава — со дня на день",
+  "Running late": "Задерживается",
+  "Due": "Вот-вот",
+  "usually Sundays": "обычно по воскресеньям",
+  "usually Mondays": "обычно по понедельникам",
+  "usually Tuesdays": "обычно по вторникам",
+  "usually Wednesdays": "обычно по средам",
+  "usually Thursdays": "обычно по четвергам",
+  "usually Fridays": "обычно по пятницам",
+  "usually Saturdays": "обычно по субботам",
+  "Expected this week": "Ожидается на этой неделе",
+  "Estimated from when chapters usually arrive, not promised.": "Оценка по тому, когда обычно приходят главы, а не обещание.",
+  "Releasing soon": "Скоро выйдет",
+  "Soonest first": "Сначала ближайшие",
+  "Latest first": "Сначала дальние",
+  "Smart update checks": "Умные проверки обновлений",
+  "Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.": "Реже опрашивать давно затихшие серии — не реже раза в 3 дня — и как обычно каждую серию, пока ожидается её следующая глава. «Проверить сейчас» всегда спрашивает сразу.",
+  "1 quiet series not due": "1 затихшая серия ещё не на очереди",
+  "{n} quiet series not due": "затихших серий не на очереди: {n}"
 }

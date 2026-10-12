@@ -238,7 +238,10 @@ export function taskResult(r: any): string {
     // A sweep an admin cancelled from the download pill (#82) is not a quiet night either. One key per count: the
     // `{count}` key read "+1 chapters", and its placeholder hid it from the pairing check.
     const added = r.added === 1 ? tr('+1 chapter') : tr('+{n} chapters', { n: r.added });
-    const base = ` \u00b7 ${added}${r.stopped === 'cancelled' ? ` \u00b7 ${tr('cancelled')}` : ''}`;
+    // v0.61.0: the series the smart update checks left for a later sweep (bff lib/releaseRadar.ts isDue) -- said, so a
+    // sweep that visited 40 of 224 series reads as resting the rest, not as missing them.
+    const rested = r.rested > 0 ? ` \u00b7 ${r.rested === 1 ? tr('1 quiet series not due') : tr('{n} quiet series not due', { n: r.rested })}` : '';
+    const base = ` \u00b7 ${added}${r.stopped === 'cancelled' ? ` \u00b7 ${tr('cancelled')}` : ''}${rested}`;
     if (r.healthy === false) {
       const bits: string[] = [];
       if (r.failed) bits.push(r.failed === 1 ? tr('1 series did not answer') : tr('{n} series did not answer', { n: r.failed }));

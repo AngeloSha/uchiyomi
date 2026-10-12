@@ -69,19 +69,21 @@ test('the Library offers the nine orders as the grouped Sort menu, each as the s
   // one both sort it by title, and nothing on screen says so -- this fails; move an order to another group, or drop one:
   // the menu fails.
   assert.deepEqual(SORT_GROUPS.map((g) => [g.label, g.sorts.map((s) => [s.key, s.label, s.sort])]), [
-    ['Activity', [['updated', 'Updated', 'lastModified,desc'], ['read', 'Recently read', 'lastRead,desc'], ['new', 'Newest', 'createdDate,desc']]],
+    // v0.61.0, deliberately: Releasing soon joins Activity -- the release radar's estimate, soonest first.
+    ['Activity', [['updated', 'Updated', 'lastModified,desc'], ['read', 'Recently read', 'lastRead,desc'], ['new', 'Newest', 'createdDate,desc'],
+      ['soon', 'Releasing soon', 'releasing,asc']]],
     ['Ratings', [['popular', 'Most popular', 'popularity,desc'], ['score', 'Top rated', 'score,desc'], ['rating', 'My rating', 'rating,desc']]],
     ['Size', [['chapters', 'Most chapters', 'chapters,desc'], ['unread', 'Most unread', 'unread,desc']]],
     ['Name', [['az', 'A–Z', 'metadata.titleSort,asc']]],
   ]);
   // Every order in exactly one group, the default first: SORTS[0] is the page's fallback for a key it does not know.
   assert.deepEqual(SORT_GROUPS.flatMap((g) => g.sorts), [...SORTS]);
-  assert.deepEqual(new Set(SORTS.map((s) => s.key)).size, 9);
+  assert.deepEqual(new Set(SORTS.map((s) => s.key)).size, 10, 'v0.61.0: the nine, and Releasing soon');
   assert.equal(SORTS[0].key, 'updated');
   // The labels reach the extractor (rendered as tr(s.label)), and the page accepts the new ids from the URL and from the
   // saved default because its validSort reads SORTS -- the line v558Preferences.test.ts pins.
   assert.match(read('lib/librarySort.ts'),
-    /const SORT_LABELS = keys\('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read'\);/);
+    /const SORT_LABELS = keys\('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read', 'Releasing soon'\);/);
   assert.match(read('lib/librarySort.ts'), /const GROUP_LABELS = keys\('Activity', 'Ratings', 'Size', 'Name'\);/);
   assert.match(code(read('app/library/page.tsx')), /const validSort = \(v: unknown\): v is string => typeof v === 'string' && SORTS\.some\(\(s\) => s\.key === v\)/);
   assert.match(read('app/library/page.tsx'), /import \{ SORTS, [^}]*\} from '@\/lib\/librarySort';/, 'the page reads another list of orders');

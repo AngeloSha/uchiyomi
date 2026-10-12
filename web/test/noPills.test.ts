@@ -92,6 +92,9 @@ const SURFACES = [
   'components/LibraryFilters.tsx',
   'lib/librarySort.ts',
   'lib/libraryLayout.ts',
+  // v0.61.0, the release radar: its words, and the reader's end-card label and line.
+  'lib/radar.ts',
+  'components/ReaderEndRadar.tsx',
 ];
 
 /**
@@ -142,6 +145,10 @@ const SLICES: [string, string, string, string][] = [
   // v0.55.1 (#148): a library's dialog, its list of folders and the folder browser that ticks them -- keys where "Use"
   // was a chip -- beside the Libraries cards' chips and the suggested folders, which stay.
   ['app/admin/page.tsx', 'Libraries: the folder browser and the library dialog', 'function FolderPicker(', 'function LibrariesSection('],
+  // v0.61.0, the release radar: Updates' Expected this week (its cards are the list's own, without the capsule count),
+  // and the series page's outlook line under the reading progress.
+  ['app/updates/page.tsx', 'Updates: Expected this week', 'function ExpectedThisWeek(', 'export default function UpdatesPage('],
+  ['app/series/page.tsx', 'Series: the outlook line', '{outlook && <p data-series-outlook', '<div data-series-keys'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

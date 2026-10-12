@@ -27,6 +27,16 @@ test('a chapter sweep distinguishes a quiet week from a broken one', () => {
   assert.notEqual(broken, ' · +0 chapters');
 });
 
+test('a smart sweep says how many quiet series it left for later', () => {
+  // v0.61.0, Smart update checks: a sweep that visited 40 of 224 series rested the rest on purpose, and the Tasks line
+  // says so rather than leaving it to look like a sweep that missed them. Reintroduce by dropping `rested`: the first
+  // line reads " · +3 chapters" alone.
+  assert.equal(taskResult({ added: 3, healthy: true, rested: 184 }), ' · +3 chapters · 184 quiet series not due');
+  assert.equal(taskResult({ added: 1, healthy: true, rested: 1 }), ' · +1 chapter · 1 quiet series not due');
+  assert.equal(taskResult({ added: 0, healthy: true, rested: 0 }), ' · +0 chapters', 'the switch off says nothing new');
+  assert.match(taskResult({ added: 0, healthy: false, failed: 2, rested: 5 }), /^ · \+0 chapters · 5 quiet series not due · 2 series did not answer$/);
+});
+
 test('the read-chapter cleanup is not mistaken for a backup', () => {
   // ⚠️ Both results carry `bytes`. The cleanup branch has to come first, or "12 chapters deleted, 4 MB
   // freed" renders as an archive size and the only number that matters -- how many files were destroyed --

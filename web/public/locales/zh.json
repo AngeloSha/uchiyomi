@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3614
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3597,5 +3597,25 @@
   "Couldn’t load your library": "无法加载你的书库",
   "Couldn’t load more": "无法加载更多",
   "AniList score": "AniList 评分",
-  "Actions for {title}": "{title} 的操作"
+  "Actions for {title}": "{title} 的操作",
+  "~{day}": "预计{day}",
+  "Next chapter due any day": "下一章随时可能更新",
+  "Running late": "已延迟",
+  "Due": "随时更新",
+  "usually Sundays": "通常在周日",
+  "usually Mondays": "通常在周一",
+  "usually Tuesdays": "通常在周二",
+  "usually Wednesdays": "通常在周三",
+  "usually Thursdays": "通常在周四",
+  "usually Fridays": "通常在周五",
+  "usually Saturdays": "通常在周六",
+  "Expected this week": "本周预计更新",
+  "Estimated from when chapters usually arrive, not promised.": "根据章节通常到达的时间估算，并非承诺。",
+  "Releasing soon": "即将更新",
+  "Soonest first": "最快更新在前",
+  "Latest first": "最晚更新在前",
+  "Smart update checks": "智能更新检查",
+  "Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.": "对长时间没有更新的系列减少检查（至少每 3 天一次），下一章临近时照常检查。“立即检查”总是立刻检查。",
+  "1 quiet series not due": "1 部停更作品暂不检查",
+  "{n} quiet series not due": "{n} 部停更作品暂不检查"
 }

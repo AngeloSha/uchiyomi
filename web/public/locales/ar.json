@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3614
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3597,5 +3597,25 @@
   "Couldn’t load your library": "تعذّر تحميل مكتبتك",
   "Couldn’t load more": "تعذّر تحميل المزيد",
   "AniList score": "تقييم AniList",
-  "Actions for {title}": "إجراءات {title}"
+  "Actions for {title}": "إجراءات {title}",
+  "~{day}": "نحو {day}",
+  "Next chapter due any day": "الفصل التالي متوقَّع في أي يوم",
+  "Running late": "متأخر عن موعده",
+  "Due": "مستحق",
+  "usually Sundays": "عادةً أيام الأحد",
+  "usually Mondays": "عادةً أيام الاثنين",
+  "usually Tuesdays": "عادةً أيام الثلاثاء",
+  "usually Wednesdays": "عادةً أيام الأربعاء",
+  "usually Thursdays": "عادةً أيام الخميس",
+  "usually Fridays": "عادةً أيام الجمعة",
+  "usually Saturdays": "عادةً أيام السبت",
+  "Expected this week": "متوقَّع هذا الأسبوع",
+  "Estimated from when chapters usually arrive, not promised.": "تقدير بحسب مواعيد وصول الفصول عادةً، وليس وعدًا.",
+  "Releasing soon": "يصدر قريبًا",
+  "Soonest first": "الأقرب أولًا",
+  "Latest first": "الأبعد أولًا",
+  "Smart update checks": "فحوصات تحديث ذكية",
+  "Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.": "تُسأل السلاسل الهادئة منذ زمن طويل بوتيرة أقل، مرة كل 3 أيام على الأقل، وتُسأل كل سلسلة كالمعتاد حين يحين موعد فصلها التالي. «تحقّق الآن» يسأل فورًا دائمًا.",
+  "1 quiet series not due": "سلسلة هادئة واحدة لم يحن دورها",
+  "{n} quiet series not due": "{n} سلسلة هادئة لم يحن دورها"
 }
