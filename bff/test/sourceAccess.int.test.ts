@@ -109,6 +109,9 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'DELETE'; url: string; payload?: 
   { method: 'GET', url: `/api/sources/detail?source=${CLEAN}&sourceId=${CLEAN}-1` },
   { method: 'GET', url: '/api/sources/jobs' },
   { method: 'GET', url: '/api/discover/trending' },
+  // v0.61.0: Discover's other AniList rails -- the trending manga and manhua, and Because you read.
+  { method: 'GET', url: '/api/discover/trending?country=CN' },
+  { method: 'GET', url: '/api/discover/because' },
   { method: 'POST', url: '/api/sources/add', payload: { source: CLEAN, sourceId: `${CLEAN}-1` } },
   // The fill pair. They belong in this table for the same reason everything else here does: the permission
   // is a preHandler on the whole plugin, so the only way to know a new route is covered is to name it.

@@ -1961,6 +1961,40 @@ paths:
         - library
       summary: Series like this one.
       operationId: getApiSeriesIdSimilar
+      description: >-
+        `{content: Series[]}`, at most 18, each once and never another edition of this work. Since v0.61.0 the library
+        series AniList's readers recommend after this one come first (read from the server's stored copy, never from
+        AniList, and only those this account may list), then the series sharing its genres. Empty for a series this
+        account may not open.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/related:
+    get:
+      tags:
+        - library
+      summary: What AniList relates this series to -- sequels, prequels, side stories and more (v0.61.0).
+      operationId: getApiSeriesIdRelated
+      description: >-
+        `{lookups, content: [{relation, series?, outside?}]}`. `relation` is AniList's: `SEQUEL`, `PREQUEL`, `PARENT`
+        (the main story), `SIDE_STORY`, `SPIN_OFF` or `ALTERNATIVE`, in that order. A related work the server holds is
+        `series`, enriched like every rail, when this account may list it, and left out -- never named -- when it may
+        not; one the server does not hold is `outside: {anilistId, title, cover, format, status, score}`, unless it is
+        18+ for this account (an age limit under 18, or Show 18+ off: AniList's adult flag and the admin's adult
+        genres). `lookups` is false, with nothing else, for a series in a library whose AniList lookups are off or with
+        no checked AniList link. Read from the copy the server refreshes in the background; a request never asks AniList.
       parameters:
         - name: id
           in: path
@@ -3514,6 +3548,42 @@ paths:
         - sources
       summary: Trending titles from AniList for the Discover page.
       operationId: getApiDiscoverTrending
+      description: >-
+        `{content: [{id, title, cover, banner, description, genres, score, chapters, status}]}`, up to 36, never one
+        the server already holds, never 18+ on AniList and never a light novel. Since v0.61.0 by `country` of origin,
+        each cached six hours; while Show 18+ is off, a title carrying a genre the admin named as adult is left out of
+        the answer.
+      parameters:
+        - name: country
+          in: query
+          required: false
+          description: "`KR` (manhwa, the default), `JP` (manga) or `CN` (manhua)."
+          schema:
+            type: string
+            enum: [KR, JP, CN]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "`country` is not one of KR, JP, CN"
+        "401":
+          description: Not authenticated
+        "403":
+          description: This account may not add series
+  /api/discover/because:
+    get:
+      tags:
+        - sources
+      summary: Discover's "Because you read" -- AniList's recommendations after a series the caller read (v0.61.0).
+      operationId: getApiDiscoverBecause
+      description: >-
+        `{seed: {id, title} | null, content}`: `content` in the trending shape, at most 20. The seed is the caller's most
+        recently read series with a finished chapter, that they may list, in a library whose AniList lookups are on and
+        with a checked AniList link -- the first of five that leaves at least four recommendations once what the server
+        holds (by AniList entry or any name) and what is 18+ for the caller are left out. `seed` null and nothing to show
+        otherwise. Read from the server's stored copy; a request never asks AniList.
       security:
         - bearer: []
       responses:
@@ -3521,6 +3591,8 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+        "403":
+          description: This account may not add series
   /api/discover/works:
     get:
       tags:

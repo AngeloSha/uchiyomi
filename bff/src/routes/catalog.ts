@@ -37,6 +37,7 @@ import { effectiveLang } from '../lib/seriesLang';
 import { DL_ROOT, LIBRARY_ROOT, lastScanFailure, lastScanReport, scanProgress, scanRunning } from '../lib/library';
 import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapters';
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
+import { heldRecs, relatedFor } from '../lib/anilistRelated';
 import { join } from 'node:path';
 
 
@@ -638,17 +639,57 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { color: null };
   });
 
-  // "More like this" — series sharing genres with this one.
+  // "More like this" — series sharing genres with this one. Since v0.61.0 led by the library series AniList's readers
+  // recommend after this one (lib/anilistRelated.ts heldRecs, read from the table, never from AniList), then the genre
+  // matches, each series once, eighteen in all. Home's "Because you read" and the reader's "Because you finished this"
+  // read it too. Reintroduce the genre matches alone: "More like this leads with the held recommendations" in
+  // anilistRelated.int.test.ts finds a genre match first.
   app.get('/api/series/:id/similar', async (req) => {
     const { id } = req.params as { id: string };
     const s = (await komga.series(vc(req), id).catch(() => null)) as any;
+    if (!s) return { content: [] };
+    // A read that fails leaves the genre matches: the rail they made before v0.61.0.
+    const recIds = OWNED ? await heldRecs(id, vc(req)).catch(() => [] as string[]) : [];
+    const recs = (await Promise.all(recIds.map((x) => komga.series(vc(req), x).catch(() => null)))).filter(Boolean) as any[];
     const genres = (s?.metadata?.genres ?? []).slice(0, 3);
-    if (!genres.length) return { content: [] };
-    const res = await komga.searchSeries(vc(req), { condition: { anyOf: genres.map((g: string) => ({ genre: { operator: 'is', value: g } })) } }, 0, 24);
+    const res = genres.length
+      ? await komga.searchSeries(vc(req), { condition: { anyOf: genres.map((g: string) => ({ genre: { operator: 'is', value: g } })) } }, 0, 24)
+      : { content: [] as any[] };
     // Another edition of this work is not "more like this" (v0.52.0): it is this, in another language, and the
     // switcher under the title already offers it.
-    const content = res.content.filter((x: any) => x.id !== id && !(s?.workId && x.workId === s.workId)).slice(0, 18);
+    const seen = new Set<string>([id]);
+    const content: any[] = [];
+    for (const x of [...recs, ...res.content]) {
+      if (content.length >= 18) break;
+      if (seen.has(x.id) || (s?.workId && x.workId === s.workId)) continue;
+      seen.add(x.id);
+      content.push(x);
+    }
     return { content: await enrichSeries(req, content) };
+  });
+
+  /**
+   * What AniList relates this series to (v0.61.0, lib/anilistRelated.ts relatedFor): its sequels, prequels, main story,
+   * side stories, spin-offs and alternative versions. A held one is the library's series, enriched like every rail, when
+   * this viewer may list it -- and left out, never named, when they may not; one the server does not hold is AniList's
+   * cover and words (`outside`), unless it is 18+ for the viewer. `lookups: false` and nothing else for a series whose
+   * library does not look things up on AniList, or with no checked link. Reads the table only: a page open never asks
+   * AniList. Resolved through the series' own visibility first, so a series this viewer may not open is a 404.
+   */
+  app.get('/api/series/:id/related', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    if (!OWNED) return { lookups: false, content: [] };
+    const r = await relatedFor(id, vc(req));
+    const heldIds = r.content.flatMap((e) => ('seriesId' in e ? [e.seriesId] : []));
+    const found = (await Promise.all(heldIds.map((x) => komga.series(vc(req), x).catch(() => null)))).filter(Boolean) as any[];
+    const byId = new Map((await enrichSeries(req, found)).map((x: any) => [x.id, x]));
+    const content: Array<{ relation: string; series?: any; outside?: unknown }> = [];
+    for (const e of r.content) {
+      if (!('seriesId' in e)) content.push({ relation: e.relation, outside: e.outside });
+      else if (byId.has(e.seriesId)) content.push({ relation: e.relation, series: byId.get(e.seriesId) });
+    }
+    return { lookups: r.lookups, content };
   });
 
   app.get('/api/series/:id/books', async (req) => {
