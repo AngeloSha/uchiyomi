@@ -80,8 +80,8 @@ two-factor auth, you'll be asked for your 6-digit code (or a recovery code) afte
 ![Library](shots/library.webp)
 
 The **Library** tab is your whole collection. Since v0.60.0 a **toolbar** sits above the grid: **Search your library**
-(narrows the shelf by title, filters and sort kept), the **Sort** key, the **Grid / Compact / List** switch (remembered on
-each device), **Select** and ✦ **Surprise me**. Every way to narrow it lives in one filter panel: which library, read
+(narrows the shelf by title, filters and sort kept), the **Sort** key, the **Comfortable / Compact / List** switch (remembered
+on each device), **Select** and ✦ **Surprise me**. Every way to narrow it lives in one filter panel: which library, read
 state, publication status, format and genre. On a laptop the panel sits down the left of the grid; on a phone it opens
 from **Filters** in the toolbar. Since v0.60.0 its choices are rows rather than chips: each with its own mark (a ring
 that fills for read state, a sign for status, the source's icon, a cover mosaic for formats and genres), its count, and
@@ -117,7 +117,7 @@ The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **L
 plus search, the updates bell, a refresh button, and your profile.
 
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
-add series to it from a series page with **Add to collection**. A list shows its series with the Library's covers
+add series to it from a series page with the **List** key under the reading button (*Add to collection*). A list shows its series with the Library's covers
 (since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
 the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
 the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**
@@ -246,6 +246,8 @@ genres, description, and the **chapter list**.
   or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters), *Share* (copy
   the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
   library*. On a computer it opens as a menu, on a phone as a sheet.
+
+  ![The series page's More menu, open: Reading, Chapters, Share and Admin groups](shots/series-more.webp)
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
   **Oldest/Newest** to flip the order.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
@@ -317,7 +319,7 @@ says how many are in hand. The chips:
   *Remove from library* asks *Remove {n} series from the library?* and says what it does not do: **no files
   are deleted**, the chapters stay exactly where they are on disk, and everyone's reading progress, history,
   favourites and ratings are kept, so any of them can be put back at any time from **Admin → Library**. It
-  is the series page's *Delete* over a selection, nothing more; a series that was merged into another, or is
+  is the series page's **More → Remove from library** over a selection, nothing more; a series that was merged into another, or is
   already hidden, is skipped and counted (*Removed 11 series · 1 skipped*). A selection that hid nothing
   says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
   separate, per-title step on **Content → Library** — see section 8.
@@ -355,15 +357,15 @@ says how many are in hand. The chips:
   a chapter's number is read* in section 3), and a chapter scanned before v0.55.2 by the first number in it, so
   its `Vol 2 Ch 5.cbz` is chapter 2. Correcting it fixes the reading order and what gets reported to a connected
   tracker; on a file holding a range of chapters it gives the file that one number.
-- **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
-  runs that check immediately instead of waiting for the next sweep (it is also in *Sources & translations*,
-  as a chip under the *Sources* list).
+- **Auto-update new chapters** (in *Edit details*, on its *New chapters* tab) says whether the updater keeps checking
+  this one for new chapters, and **More → Check for new chapters** runs that check immediately instead of waiting for
+  the next sweep (it is also in *Sources & translations*, as *Check now* under the *Sources* list).
 - **Sources & translations**, the sheet the line under the title opens, is where the groups that release
   this series are ranked or blocked, for when its source lists a chapter from more than one; *Edit details*
   only points there now. See *Sources & translations* below.
 - **Sources**, at the top of that sheet, lists where the chapters come from: the source the series was added
   from, and any other you have told it to follow. See *Following a second source* below.
-- **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
+- **Remove from library** (the last item in **More**) hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
   history stay attached, so nothing is lost and it can be put back (see section 8). A hidden series stays
   hidden when the library is rescanned instead of reappearing as a new one, and adding the same title again
   from a source puts the same series back, history and all. What each kind of delete does and does not
@@ -553,7 +555,7 @@ chapter" from it would be the wrong book. A series numbered by posting order (se
 follows no second source at all, since v0.49.0: another site's numbers do not line up with its posts, so the
 sources it already follows are kept but not asked, and a new follow is refused with that reason.
 
-- **Find missing chapters** on the series page. Every source it scans and finds to line up with the
+- **Find missing chapters**, in the series page's **More → Chapters**. Every source it scans and finds to line up with the
   chapters you already hold — at least 90% of your chapter numbers listed there, and the numbering
   agreeing — is offered with **Also follow this source**; one that is already followed says so. You are
   looking at each candidate, so the title's spelling on the other source is yours to judge. Since v0.48.3 a
@@ -804,7 +806,7 @@ source it follows is inside their age limit:
 
 - in the add dialog, the **Archive the rest slowly** switch under *Chapters to fetch now* (section 6) — off until
   you switch it on, and not there for *All*, which leaves nothing over;
-- on a series page, **Archive slowly** under the other actions, and beside *Fetch all {n}* on the line of older
+- on a series page, **More → Archive slowly**, and beside *Fetch all {n}* on the line of older
   chapters — while the sources list chapters this server does not hold and no archive is on the series yet;
 - in a cover's menu (right-click it, or press and hold);
 - over a selection on the Library page (section 3).
@@ -929,8 +931,8 @@ hold. Each grey row's caption says why it is not here:
   the cloud icon and its own sheet, folded past fifty into *Show all*; **Fetch all {n}** on the line takes
   the whole run, for anyone who may download — a run longer than 300 goes to the server in batches of 300
   sent one after another, since the server runs one fetch job per series at a time, under one toast
-  (*Fetching {n} chapters…*) and stopping at the first batch that fails; **Find missing chapters** under the
-  cover still works too. On a series with no chapter on disk the line starts open, since it is all there is,
+  (*Fetching {n} chapters…*) and stopping at the first batch that fails; **More → Find missing chapters** still
+  works too. On a series with no chapter on disk the line starts open, since it is all there is,
   and stays open when you flip *Oldest/Newest*. **Archive slowly** beside *Fetch all* hands the same chapters to
   the slow archive instead (since v0.49.0; see *Fetching a whole series slowly* above).
 - Chapters **the slow archive is about to fetch** fold the same way into a line of their own, `Ch. 121–900 · 780
@@ -1304,10 +1306,10 @@ again.
   cooldown shows its reason and *back in ~12 min* in place of an empty wall, not *Nothing new from these
   sources right now*. The (i) in the sheet's header is the same five-line explainer as on the series page.
 - **Search:** type a title once and Uchiyomi searches **all your sources at the same time**. Results are
-  de-duplicated into one card per title (a *{n} sources* chip says how many carry it), and anything you
-  already own is marked **✓ In library**, and tapping it opens that series in your library. The wall does the same: a title several of your sources publish is
-  one card with the same chip, and tapping it lets you pick the source. A card's corner shows the favicon of
-  the source it came from. The first useful results appear without waiting for the slowest source (within
+  de-duplicated into one card per title (its corner shows the icons of up to three sources that carry it, and *+N*
+  for the rest), and anything you already own is marked **✓ In library**, and tapping it opens that series in your
+  library. The wall does the same: a title several of your sources publish is one card with the same icons, and
+  tapping it lets you pick the source. The first useful results appear without waiting for the slowest source (within
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
@@ -1385,8 +1387,8 @@ again.
   act, as it is on the series page, and a member's add goes through as if the switch were off; their done
   step says *Other sources: an admin can follow them from Sources & translations.*): when the dialog
   already holds the list of sources that carry the title — a Trending pick, which it searches your sources
-  for; a search result; a wall card that several of your sources published, the one with the *{n} sources*
-  chip — a switch under *auto-update* asks the server to check the others once the series' own listing is
+  for; a search result; a wall card that several of your sources published, the one with several source icons
+  in its corner — a switch under *auto-update* asks the server to check the others once the series' own listing is
   written, and follow those that pass: a source whose own title is this title and whose chapter list lines
   up with the main source's — at least 90% of the main source's numbers listed there and, unless the title
   is exact and the main source lists at least ten, at least 90% of its numbers listed here too — up to two
@@ -2042,7 +2044,7 @@ PGID=1000    # id -g
 Set those to the user that owns your library and restart. The startup log says which way it went, so
 `docker compose logs uchiyomi` answers "why is the button missing" without you having to guess.
 
-**Rename folder** is on the series page, under the admin actions next to *Edit details*. It moves the folder
+**Rename folder** is on the series page, in **More → Admin** next to *Edit details*. It moves the folder
 on disk and rewrites the chapter paths, and it keeps chapter ids and everyone's reading progress, so nothing
 is marked unread and nothing is re-downloaded. It refuses outright unless *every* folder the series occupies
 is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
@@ -2754,7 +2756,7 @@ Uchiyomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to
 standalone, full-screen app icon; **Profile → Settings → This device → Install Uchiyomi** offers the same, with the
 steps for the browser you are in.
 
-**Offline:** favorite a series (or use **Save all offline** / a chapter's ⬇), and those chapters are stored on the
+**Offline:** favorite a series (or use the series page's **Offline** key, *Save all offline*, or a chapter's ⬇), and those chapters are stored on the
 device for reading with no connection. The **Offline** tab shows what's saved and a **Sync now** button;
 with **Keep favorites offline** on (**Profile → Settings → Offline downloads**), your favorites' next unread chapters
 auto-download while you're online. A cover with a
@@ -3042,7 +3044,9 @@ anything. Running the engine yourself? That works too, or set both on that conta
 [CONFIGURATION.md](CONFIGURATION.md#environment-variables).
 
 **A source says it answers, but takes longer than the time it is given.** The source is up but keeps taking longer
-than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button
+than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. A site Uchiyomi reaches through the
+Cloudflare solver gets `SOURCE_LATEST_SOLVER_TIMEOUT_MS` instead (45 s by default, since v0.59.0), and only a
+source's first page counts as slow: a later page of the wall that takes its time is not held against it. Since v0.37.0 the *Test* button
 and the daily source check report this too, not only Discover's health view. Raise the budget if the wait is
 acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part. Since v0.55.10 the
 streak ends with the next answer in time, a Discover search's included, and Health stops listing a source a day after

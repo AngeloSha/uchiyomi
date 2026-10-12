@@ -101,6 +101,12 @@ is off, clears none of the art, links, type or direction it already learned, and
 policy when a series moves. Explicit Admin Art, Relink, Check online matches, tracker import/sync and Discover actions
 remain available and can contact AniList because they are actions you asked for, rather than background enrichment.
 
+Since v0.58.0, every six hours (the first time a few minutes after a start), the server asks AniList for the score and
+popularity of the series it holds AniList ids for: a checked link only, never a guessed one, 50 ids to a request, and
+only those missing or more than three days old. It sends the **AniList ids** and nothing else, skips the series of any
+library with *Look up art and metadata on AniList automatically* off, and keeps the answers for the series page's
+ratings panel and the *Most popular* and *Top rated* sorts. `ANILIST_API_URL` moves it with the rest.
+
 Since v0.56.0, Discover asks which work each title it shows is, so that a series several sources name differently is
 one card and one you already have stays out of the browsing views. Each name is asked once, in the background:
 AniList first, then MangaDex (`api.mangadex.org`), then MangaUpdates (`api.mangaupdates.com`), and the answer is
