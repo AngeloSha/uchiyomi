@@ -1205,7 +1205,8 @@ you keep scrolling through a series without interruption.
   desktop `[` / `]` step to the previous/next chapter as well.
 - **Keyboard:** in paged mode **→** / **↓** / **Page Down** / **Space** turn to the next page and **←** / **↑** /
   **Page Up** to the previous one, one press per page, the same as tapping the edge of the page. In webtoon
-  scroll, **Space** / **↓** and **↑** scroll by most of a screen.
+  scroll, **Space** / **↓** and **↑** scroll by most of a screen. Since v0.61.0 every key can be rebound on a
+  device, and a game controller works too (see *Reading comfort* below).
 - **Jump to a page:** tap the page counter (`4/18`) in the bottom bar for a thumbnail grid of the chapter.
 - **Desktop:** the page is centered with comfortable margins.
 
@@ -1247,6 +1248,54 @@ the source's default < this series*: a title you have adjusted by hand still kee
 the default for *Source*** removes it again. Like the per-series memory it is saved to your account, so it
 follows you to your other devices. A downloaded chapter opened offline carries no source, so the button does
 not appear there.
+
+### Reading comfort
+
+Since v0.61.0 the reader has a few more settings. **Every one of them is off, or exactly the old reader, until you
+change it.** Three follow your account like the rest of the reader defaults (the reader's sheet and Profile →
+Settings → Reading); the rest are marked **This device** in the sheet, because they belong to a screen and a hand,
+not to you: an e-ink tablet wants E-ink, the phone beside it does not.
+
+- **Pick the mode for each series** (account). The reader picks Webtoon or Paged for each title from what it is
+  opening: pages that are long strips (a chapter stitched into a few very tall images, or pages at least twice as
+  tall as wide) open as a webtoon whatever the series is; a manhwa or a webtoon does too, unless its pages are
+  shaped like printed pages; a manga, a comic or a series that reads right to left opens page by page. When it
+  cannot tell, your default stands. The sheet says what it picked and why (*Picked for this series: Webtoon ·
+  long strips*). It never overrides a mode you chose: a series you have set, or a source default, keeps its own,
+  and changing the theme of a title whose mode was picked does not freeze the pick into it -- only tapping
+  **Mode** does. The series' type comes from the server, which now sends it to every account (an admin can correct
+  it under **Edit details**).
+- **Wide pages** (account): *Whole*, as before; *Split*, a double-page spread becomes its two halves, one after the
+  other, in reading order (right half first on a right-to-left read); *Rotate*, the spread is turned on its side to
+  fill the screen. Only on a screen held upright -- a spread fits a phone held sideways, or a computer's screen, as
+  it is -- and never in two-page spread mode. The two halves are one page: the counter, your progress, OPDS and
+  your trackers never see a half.
+- **Crop page borders** (account): trims the blank white or black margins around scanned pages, measured from each
+  page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
+  all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon
+  scroll only the sides are trimmed, by one amount for a whole chapter, so the strips still join.
+- **Colour filter** (this device): *Invert* (light pages turned dark, colours kept), *Grayscale* and *E-ink* (grey with
+  more contrast, and every page turn jumps instead of sliding, which e-ink screens draw badly). It is laid over the
+  pages only; the reader's own cards and buttons are unchanged, and the theme works as before.
+- **Tap zones** (this device): *Automatic* is the reader as it was -- the left and right thirds turn the page in
+  paged mode, and a tap in webtoon scroll only shows the controls. *Edges* turns with the thirds in both modes (in
+  webtoon scroll a step of most of a screen). *L shape* and *Kindle-style* are the layouts Mihon readers know: the
+  top and the left go back, the bottom and the right go on, the middle shows the controls; in Kindle-style the top
+  third shows the controls and a narrow left column goes back. *Off* turns nothing. Each choice shows its map.
+- **Keys and controller** (this device): every action -- next and previous page, the page to the left or right,
+  next and previous chapter, full screen, the controls, leaving the reader -- takes the keys you give it: tap
+  *Add a key* and press one; tap a key to take it off; a key already used elsewhere moves and says so. **Esc**
+  always leaves the reader, or closes what is open over it, and **Tab** is never bound; keys held with Ctrl, Alt or
+  Cmd stay the browser's. A **game controller** works as soon as you plug one in: the D-pad turns pages (← and → to the
+  page on that side, like the arrow keys), A goes on and B back, the shoulder buttons change chapter, Start shows
+  the controls, and a held D-pad keeps turning. Its buttons can be rebound the same way. Browsers offer controllers
+  to secure pages only, so on a plain `http://` address on your home network the sheet says it cannot.
+
+The webtoon scroll also got smoother: it keeps decoded only the images within a few screens of where you are
+(a chapter of very tall strips used to hold nine of them, over a gigabyte, in memory), fetches the next pages ahead
+quietly, and adds the next chapter six screens before the end. A double-tap zoom in the middle of a long strip
+keeps your place in it, opening a title whose source default is Paged no longer starts on the wrong page, and
+switching between Webtoon and Paged mid-chapter keeps the page you were on.
 
 ### Skipping the pages that are not the story
 
