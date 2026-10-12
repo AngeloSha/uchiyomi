@@ -21,13 +21,14 @@ import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, withTitleLook, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
-import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
+import { ReaderImg, MissingCaption, ReaderPageRow, DIVIDER_H } from '@/components/ReaderPage';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 
@@ -39,7 +40,6 @@ interface FlatItem { ci: number; number: number; width: number | null; height: n
 
 const WINDOW_BEHIND = 2;
 const WINDOW_AHEAD = 6;
-const DIVIDER_H = 60;
 /**
  * How tall a collapsed page is. Enough to read as a band OF SOMETHING -- you can see it is a credit page --
  * without being tall enough to interrupt a scroll. A sibling of DIVIDER_H, and reserved the same way.
@@ -128,6 +128,8 @@ function ReaderInner() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
+  /** Whether the open title's look is in `prefs` yet: a pull of the account's settings then leaves the look alone (mergePulled). */
+  const titleOpen = useRef(false);
   const [zoom, setZoom] = useState(1);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
   // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
@@ -140,6 +142,8 @@ function ReaderInner() {
   const trackSign = pagedRtl ? -1 : 1;
   // The direction the track was last laid out for, so the flip effect below acts only on a REAL flip.
   const laidOutSign = useRef<number | null>(null);
+  /** The mode the scroller was last laid out for (F3, the mode-change effect below). */
+  const laidOutMode = useRef<ReaderPrefs['mode'] | null>(null);
   /** When the track last moved -- a scroll event, or a smooth scroll this code started. See untilStill. */
   const lastMoved = useRef(0);
   // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
@@ -219,6 +223,7 @@ function ReaderInner() {
     let alive = true;
     setReady(false);
     setEnded(false);
+    titleOpen.current = false;
     didInitScroll.current = false;
     appending.current = false;
     noMore.current = false;
@@ -297,6 +302,7 @@ function ReaderInner() {
         } catch {}
       }
       // reading direction (drives double-spread pair order for RTL manga)
+      let src: { id: string; name: string } | null = null;
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
@@ -307,16 +313,29 @@ function ReaderInner() {
           setSeriesSourceNames(Object.fromEntries((s?.sources ?? []).map((x) => [x.sourceId, x.name])));
           const primary = (s?.sources ?? []).find((x) => x.primary) ?? s?.sources?.[0];
           if (primary) {
-            const src = { id: primary.sourceId, name: primary.name };
-            setSeriesSource(src);
+            src = { id: primary.sourceId, name: primary.name };
             rememberSeriesSource(first.seriesId, src);
           }
+          // Set either way (v0.61.0): a series with no source used to keep the previous series' (an edition switch),
+          // and with it that source's default and its row in the sheet.
+          setSeriesSource(src);
         }
       } catch {
         // offline: the downloaded record's direction, set above, stands, and the series' source is the one
         // this device saw the last time it opened the series online.
-        if (alive) setSeriesSource(seriesSourceOf(first.seriesId));
+        src = seriesSourceOf(first.seriesId);
+        if (alive) setSeriesSource(src);
       }
+      if (!alive) return;
+      // F1 (v0.61.0): the title's look -- the stored default < its source's < its own (lib/readerPrefs.ts titleLook) --
+      // in the SAME render as `ready`, so the initial scroll below lays out the mode the title opens in. It used to
+      // arrive a render later, from an effect declared after the initial scroll: that scroll ran on the global mode,
+      // the source's mode then swapped the scroller under it, and a resume at page 9 opened on page 1 with a counter
+      // saying 9. The zoom is the series' memory too, and comes with it.
+      const memory = loadSeriesPrefs(first.seriesId);
+      setPrefs(titleLook(loadPrefs(), src ? loadSourcePrefs(src.id) : {}, memory));
+      setZoom(memory.zoom && memory.zoom >= 1 ? memory.zoom : 1);
+      titleOpen.current = true;
       setReady(true);
     })();
     return () => {
@@ -336,6 +355,9 @@ function ReaderInner() {
    * question entirely, and this one IS cleared when the book changes, below.
    */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** A repeated page opened, or folded again, by hand. Stable, so a memoised row (ReaderPageRow) is not drawn again for them. */
+  const expandPage = useCallback((key: string) => setExpanded((prev) => new Set(prev).add(key)), []);
+  const collapsePage = useCallback((key: string) => setExpanded((prev) => { const n = new Set(prev); n.delete(key); return n; }), []);
 
   // ---- every page of every loaded chapter, including the ones the flow skips ----
   /**
@@ -553,9 +575,27 @@ function ReaderInner() {
     const at = flat[idx];
     if (at) lastSent.current = `${chapters[at.ci]?.id}:${at.number}`;
     laidOutSign.current = trackSign;
+    laidOutMode.current = prefs.mode;
     didInitScroll.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, colW, tops]);
+
+  // F3 (v0.61.0): switching mode mid-chapter swaps the scroller -- the webtoon column scrolls down, the paged track
+  // across -- and the new one starts at its origin: Webtoon -> Paged landed on page 1 of the chapter. Put the new
+  // scroller on the page that was being read, before it paints. The direction is laid out with it, so the flip effect
+  // below does not act on the same change twice.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !didInitScroll.current || laidOutMode.current === prefs.mode) return;
+    laidOutMode.current = prefs.mode;
+    if (prefs.mode === 'paged') {
+      laidOutSign.current = trackSign;
+      el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    } else {
+      el.scrollTop = tops[current] ?? 0;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.mode]);
 
   // Flipping the direction mid-chapter mirrors the track, and the old scrollLeft now points at another page
   // (or clamps to page 1). Put the reader back on the page they were looking at.
@@ -849,25 +889,16 @@ function ReaderInner() {
   useEffect(() => {
     if (pulledPrefs.current) return;
     pulledPrefs.current = true;
-    // localStorage already painted; this catches up a device that hasn't seen your settings yet
-    syncPrefsFromServer().then((p) => setPrefs((cur) => ({ ...cur, ...p }))).catch(() => {});
+    // localStorage already painted; this catches up a device that hasn't seen your settings yet. F2 (v0.61.0): with a
+    // title open, a late answer changes what is not a look -- the title's own look stays (lib/readerPrefs.ts mergePulled).
+    syncPrefsFromServer().then((p) => setPrefs((cur) => mergePulled(cur, p, titleOpen.current))).catch(() => {});
   }, []);
 
   // ---- per-source, then per-series, memory (mode/theme/spread/direction/zoom) ----
   //
-  // Applied in that order so the precedence is global default < source default < this series: a source
-  // default fixes everything from it in one go, and a title someone has adjusted by hand still wins. Keyed by
-  // the SERIES' source, known before the reader is ready, so it holds for downloaded chapters and never
-  // changes mid-series.
-  const seriesSourceId = seriesSource?.id || '';
-  useEffect(() => {
-    if (!seriesId) return;
-    const base = seriesSourceId ? loadSourcePrefs(seriesSourceId) : {};
-    const sp = { ...base, ...loadSeriesPrefs(seriesId) };
-    if (sp.mode || sp.theme || sp.spread !== undefined || sp.pagedDirection) setPrefs((cur) => withTitleLook(cur, sp));
-    setZoom(sp.zoom && sp.zoom >= 1 ? sp.zoom : 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesId, seriesSourceId]);
+  // Applied in the load effect above, with `ready` (titleLook, F1): global default < source default < this series, a
+  // source default fixing everything from it in one go and a title someone has adjusted by hand still winning. Keyed
+  // by the SERIES' source, so it holds for downloaded chapters and never changes mid-series.
 
   // ---- auto-hide chrome ----
   useEffect(() => {
@@ -1189,77 +1220,15 @@ function ReaderInner() {
           className={`h-screen-d touch-pan-y overflow-y-auto overscroll-contain ${zoom > 1 ? 'overflow-x-auto' : 'overflow-x-hidden'}`}>
           <div className="mx-auto" style={{ width: colW || '100%', filter: THEME_FILTER[prefs.theme] }}>
             <div className="h-2" />
-            {flat.map((p, i) => {
-              // Do not duplicate buildFlow's rule here: it deliberately keeps missing+junk placeholders open.
-              const collapsed = !!p.collapsed;
-              return (
-              <div key={p.key}>
-                {p.firstOfChapter && p.ci > 0 && (
-                  <div style={{ height: DIVIDER_H }} className="flex items-center justify-center gap-3 text-xs text-fog-500">
-                    <span className="h-px w-8 bg-ink-700" />
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-600">{tr('Up Next')}</span>
-                    <span className="text-fog-400">{chapters[p.ci]?.title || tr('Next chapter')}</span>
-                    <span className="h-px w-8 bg-ink-700" />
-                  </div>
-                )}
-                <div style={{ height: heights[i] || undefined, marginBottom: prefs.gap }} className="relative w-full bg-ink-900">
-                  {collapsed ? (
-                    /* A band of the real page, not a placeholder standing in for it. Seeing that it IS the
-                       credit page is the whole difference between "the reader set this aside" and "a page is
-                       missing" -- and it costs nothing extra, because the box below already crops with
-                       object-cover; only the height changed. `object-top` because the top of a credit page is
-                       the part that identifies it. The THUMBNAIL is used deliberately: a page nobody is
-                       reading must never pull a full-size scan down. */
-                    <button
-                      type="button"
-                      aria-expanded={false}
-                      onClick={() => setExpanded((prev) => new Set(prev).add(p.key))}
-                      /* ⚠️ BOTH, and neither is optional. The scroll container owns a tap gesture that
-                         toggles the chrome and a double-tap that zooms; it seeds that gesture on pointerdown
-                         and reads it on pointerup. Stop only one and a tap on a strip still expands the page
-                         AND toggles the chrome, and a double-tap expands then zooms. */
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onPointerUp={(e) => e.stopPropagation()}
-                      aria-label={tr('Show repeated page {n}', { n: p.number })}
-                      className="group block h-full w-full overflow-hidden text-start"
-                    >
-                      {stripSrc(i) && (
-                        <img src={stripSrc(i)!} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover object-top opacity-50" />
-                      )}
-                      <span className="absolute inset-0 flex items-center justify-center gap-2.5 bg-ink-950/45 text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-400 group-hover:text-fog-200">
-                        <span className="h-px w-6 bg-ink-600" />
-                        {tr('repeated page — tap to show')}
-                        <span className="h-px w-6 bg-ink-600" />
-                      </span>
-                    </button>
-                  ) : activeSet.has(i) && srcFor(i) ? (
-                    <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="block h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-ink-600">{p.number}</div>
-                  )}
-                  {/* Opened by hand, so it can be closed by hand -- otherwise expanding one to check it is a
-                      one-way door for the rest of the session. */}
-                  {collapsing && p.junk && !p.missing && expanded.has(p.key) && (
-                    <button
-                      type="button"
-                      aria-expanded
-                      onClick={() => setExpanded((prev) => { const n = new Set(prev); n.delete(p.key); return n; })}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onPointerUp={(e) => e.stopPropagation()}
-                      aria-label={tr('Collapse repeated page {n}', { n: p.number })}
-                      className="absolute end-2 top-2 rounded-full bg-ink-950/75 px-2 py-1 text-[10px] font-medium text-fog-300 backdrop-blur hover:text-white"
-                    >
-                      {tr('collapse')}
-                    </button>
-                  )}
-                  {/* The server saved this chapter short and this page is its placeholder: say so, over the
-                      flat panel, or a grey page reads as the reader failing to load it. Not on a collapsed
-                      strip (a hand-marked one): the band is too short for two lines and expanding it shows
-                      the caption. */}
-                  {p.missing && !collapsed && <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} />}
-                </div>
-              </div>
-            );})}
+            {flat.map((p, i) => (
+              <ReaderPageRow key={p.key} item={p} height={heights[i]} gap={prefs.gap}
+                divider={p.firstOfChapter && p.ci > 0 ? (chapters[p.ci]?.title || tr('Next chapter')) : null}
+                src={activeSet.has(i) ? srcFor(i) : null}
+                stripSrc={p.collapsed ? stripSrc(i) : null}
+                recollapsible={collapsing && !!p.junk && !p.missing && expanded.has(p.key)}
+                missingSource={p.missing ? sourceNameOf(chapters[p.ci]?.sourceId) : null}
+                onExpand={expandPage} onCollapse={collapsePage} />
+            ))}
             {ended && upNextCard}
             {failed && !!flat.length && failureCard}
           </div>
@@ -1518,55 +1487,5 @@ export default function ReaderPage() {
     <Suspense fallback={<div className="fixed inset-0 bg-ink-950" />}>
       <ReaderInner />
     </Suspense>
-  );
-}
-
-/**
- * One reader page, with a retry.
- *
- * Both call sites -- the continuous column and the paged slide -- keep their own classes, because the two
- * layouts size a page completely differently: one fills a box whose height was reserved from `page_dims`,
- * the other is bounded by the viewport. Only the failure behaviour is shared.
- */
-function ReaderImg({ src, alt, className, style }: {
-  src: string; alt: string; className?: string; style?: React.CSSProperties;
-}) {
-  const { src: shown, failed, onError, retry } = useImgRetry(src);
-  if (failed) {
-    // A broken glyph tells the reader nothing and offers nothing. This says which page failed and gives them
-    // the one action that fixes it, without reloading the chapter and losing their place.
-    return (
-      <div className="flex h-full w-full items-center justify-center p-4">
-        <button onClick={retry} className="chip text-xs text-fog-300">
-          <IcRefresh width={13} height={13} />{tr('Page did not load — tap to retry')}
-        </button>
-      </div>
-    );
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={shown} alt={alt} className={className} style={style} decoding="async" onError={onError} />;
-}
-
-/**
- * The caption over a page the source never served (v0.40.0).
- *
- * The server saved the chapter short -- at least 80 % of its pages arrived -- with a flat panel at this
- * index, so the page count, progress and spreads are all unchanged; the one thing a reader cannot tell from
- * the panel is WHY it is blank. This says why, names the source when the reader can be told one, and says
- * what happens next (the sweep re-asks for the holes). Both renderers draw it inside the page's own box.
- *
- * ⚠️ `pointer-events-none`, and no button: a tap on it must be the tap it always was -- chrome toggle,
- * double-tap zoom -- because the scroll container owns those gestures and reads them from the same
- * pointerdown/up pair. There is nothing to do here by hand anyway: the retry is the server's, not the
- * reader's. Reintroduce by making the caption a <button>: a tap on a missing page stops toggling the chrome.
- */
-function MissingCaption({ number, source, dir }: { number: number; source: string | null; dir?: 'ltr' | 'rtl' }) {
-  return (
-    <div role="note" dir={dir} className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
-      <span className="text-sm font-medium text-fog-200">
-        {source ? tr('Page {n} could not be fetched from {source}', { n: number, source }) : tr('Page {n} could not be fetched', { n: number })}
-      </span>
-      <span className="text-xs text-fog-500">{tr('It will be retried automatically.')}</span>
-    </div>
   );
 }

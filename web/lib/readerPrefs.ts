@@ -258,6 +258,39 @@ export function withTitleLook(cur: ReaderPrefs, sp: SeriesPrefs): ReaderPrefs {
 }
 
 /**
+ * The reader's settings for one title (v0.61.0): the global default, the source's default laid over it, then the
+ * series' own memory -- global < source < series.
+ *
+ * ⚠️ ONE pure answer, given to the reader in the same render as `ready`. It used to be two steps: the chapter became
+ * ready on the global default, the initial scroll ran on that, and an effect declared after it laid the source's and
+ * the series' look over the top a render later. With a global Webtoon default and a source default of Paged, a resume
+ * at page 9 scrolled the vertical column, the paged track then replaced it at slide 0 while the counter said 9, and
+ * the first swipe sent page 2 and rewound the progress. `base` is the STORED default, never the reader's live state:
+ * live state carries the previous title's look, and an edition switch (another series) inherited it.
+ * Reintroduce by laying the look over the live prefs instead of `loadPrefs()`: readerAuto.test.ts "a title's look is
+ * built from the stored default" fails.
+ */
+export function titleLook(base: ReaderPrefs, source: SourcePrefs, series: SeriesPrefs): ReaderPrefs {
+  return withTitleLook(withTitleLook(base, source), series);
+}
+
+/**
+ * What a pull of the account's settings (`syncPrefsFromServer`) may change in the reader's live state (v0.61.0).
+ *
+ * The pull answers the GLOBAL default. Once a title is open, the live look is that title's (its memory, its source's
+ * default) and a late answer laid over it whole put the global look back over the title -- a series set to Paged
+ * flipped to Webtoon a second after it opened. So with a title open only what is not a look is taken; the look is
+ * adopted from storage the next time a title opens, which is where the pull wrote it.
+ * Reintroduce by spreading `pulled` over `cur` unconditionally: readerAuto.test.ts "a late pull keeps the open
+ * title's look" fails.
+ */
+export function mergePulled(cur: ReaderPrefs, pulled: ReaderPrefs, titleOpen: boolean): ReaderPrefs {
+  const out = { ...cur, ...pulled };
+  if (titleOpen) for (const k of LOOK_KEYS) (out as Record<string, unknown>)[k] = cur[k];
+  return out;
+}
+
+/**
  * What a change made in the reader, with a title open, pins to that title's memory -- or null for nothing.
  *
  * Any change to the look pins the look as it now stands (mode, theme, spread): that is how a title keeps what

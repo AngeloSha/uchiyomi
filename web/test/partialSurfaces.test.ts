@@ -34,16 +34,21 @@ test('the reader captions a missing page in both renderers, and the caption is n
   // caption added to one is absent from the other and the page reads as a broken image there.
   // Reintroduce by deleting the `<MissingCaption` line from either renderer: the matching assertion fails.
   const src = code(read('app/reader/page.tsx'));
+  // v0.61.0: a row of the vertical column is components/ReaderPage.tsx's ReaderPageRow, and MissingCaption lives there
+  // too. The guard followed the code: the column hands each row its source's name, and the row draws the caption.
+  const rowFile = code(read('components/ReaderPage.tsx'));
   const vertical = between(src, "{prefs.mode === 'vertical' ? (", 'hide-scrollbar flex h-screen-d snap-x', 'the vertical renderer');
   // `<AnimatePresence>` is where the chrome starts; the CHROME comment itself is stripped with the rest.
   const paged = between(src, 'hide-scrollbar flex h-screen-d snap-x', '<AnimatePresence>', 'the paged renderer');
-  assert.match(vertical, /p\.missing && !collapsed && <MissingCaption number=\{p\.number\} source=\{sourceNameOf\(/, 'the vertical column draws no caption on a missing page');
+  const row = between(rowFile, 'export const ReaderPageRow = memo(', '\n});\n', 'ReaderPageRow');
+  assert.match(vertical, /<ReaderPageRow [\s\S]*?missingSource=\{p\.missing \? sourceNameOf\(chapters\[p\.ci\]\?\.sourceId\) : null\}/, 'the vertical column does not name the source to a missing page\'s row');
+  assert.match(row, /item\.missing && !collapsed && <MissingCaption number=\{item\.number\} source=\{missingSource\} \/>/, 'the vertical column draws no caption on a missing page');
   assert.match(paged, /if \(p\.missing\) \{[\s\S]*?<MissingCaption number=\{p\.number\} source=\{sourceNameOf\(/, 'the paged slide draws no caption on a missing page');
   // In the slide the caption needs a box of its own, with a definite height, or the image's max-h-full is
   // no limit at all and the page overflows the viewport. Reintroduce by dropping `h-full` from that box.
   assert.match(paged, /<div key=\{p\.key\} className=\{`relative flex h-full items-center justify-center/, 'the paged caption box has no definite height');
   // The caption itself: passive, both sentences, the source named only when there is a name.
-  const cap = between(src, 'function MissingCaption(', '\n}\n', 'MissingCaption');
+  const cap = between(rowFile, 'function MissingCaption(', '\n}\n', 'MissingCaption');
   assert.match(cap, /pointer-events-none/, 'the caption takes taps -- the chrome toggle and double-tap zoom stop working over a missing page');
   assert.doesNotMatch(cap, /<button|onClick/, 'the caption is a control; there is nothing to do by hand and the tap belongs to the scroll container');
   assert.match(cap, /tr\('Page \{n\} could not be fetched from \{source\}', \{ n: number, source \}\)/, 'the named sentence is gone');
@@ -57,7 +62,9 @@ test('the renderer cannot re-collapse or re-hide a missing placeholder that also
   // its missing-page exception, leaving a protected placeholder as a 48 px strip with no readable caption.
   const src = code(read('app/reader/page.tsx'));
   assert.match(src, /const hs = flat\.map\(\(p\) => p\.collapsed\s*\? STRIP_H/, 'the height model bypasses buildFlow and can collapse a missing placeholder');
-  assert.match(src, /const collapsed = !!p\.collapsed;/, 'the vertical renderer recomputes collapse from junk');
+  // v0.61.0: the row is components/ReaderPage.tsx's ReaderPageRow, and is handed the flow's own item.
+  assert.match(code(read('components/ReaderPage.tsx')), /const collapsed = !!item\.collapsed;/, 'the vertical renderer recomputes collapse from junk');
+  assert.match(src, /<ReaderPageRow key=\{p\.key\} item=\{p\}/, 'the vertical renderer hands its rows something other than the flow\'s item');
   assert.match(src, /p\.junk && !p\.missing && !expanded\.has\(`\$\{ch\.id\}:\$\{p\.number\}`\)/, 'the hidden-page notice counts a visible missing placeholder');
   assert.match(src, /junk: !!p\.junk && !p\.missing,\s*missing: !!p\.missing,/, 'the page grid presents a missing placeholder as skipped');
   assert.match(code(read('components/PageGrid.tsx')), /onToggleJunk && !p\.missing && \(/, 'the page grid lets a missing placeholder be marked for skipping');
