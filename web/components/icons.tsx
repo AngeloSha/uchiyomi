@@ -51,8 +51,10 @@ export const IcUser = (p: P) => (
 export const IcUsers = (p: P) => (
   <svg {...base(p)}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c0-3.6 3-5.5 6.5-5.5s6.5 1.9 6.5 5.5" /><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8" /><path d="M17.5 14.8c2.4.5 4 2.3 4 5.2" /></svg>
 );
+// Mirrored about x = 12, the tip's line (v0.60.1, from Squeaks72's fork): the old path's lobes met at x = 10, so the heart
+// leaned left -- visible since v0.60.0 drew it at 20 px on the Favourite key. v601Fixes.test.ts checks the mirror.
 export const IcHeart = (p: P) => (
-  <svg {...base(p)}><path d="M12 20s-7-4.6-9.2-9C1.3 8 2.6 4.8 6 4.8c2 0 3.2 1.2 4 2.4.8-1.2 2-2.4 4-2.4 3.4 0 4.7 3.2 3.2 6.2C19 15.4 12 20 12 20Z" /></svg>
+  <svg {...base(p)}><path d="M12 20s-8-4.9-9.4-9.6C1.7 7.2 3.6 4.5 6.6 4.5c2.1 0 3.9 1.1 5.4 3.1 1.5-2 3.3-3.1 5.4-3.1 3 0 4.9 2.7 4 5.9C20 15.1 12 20 12 20Z" /></svg>
 );
 export const IcStar = (p: P) => (
   <svg {...base(p)}><path d="m12 3 2.6 5.6 6 .8-4.4 4.2 1.1 6L12 16.8 6.7 19.6l1.1-6L3.4 9.4l6-.8L12 3Z" /></svg>

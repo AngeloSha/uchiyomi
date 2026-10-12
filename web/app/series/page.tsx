@@ -1860,9 +1860,11 @@ function SeriesInner() {
               className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
               {series && <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
             </motion.div>
-            {/* title beside cover on mobile */}
-            <div className="min-w-0 pb-1 lg:hidden">
-              <h1 dir="auto" className="font-display text-2xl font-bold leading-tight text-white">{title}</h1>
+            {/* title beside cover on mobile. Positioned above the banner (v0.60.1, found in Squeaks72's fork): the row rises
+                into the banner, which is `relative` and so painted over anything unpositioned -- a title long enough to wrap
+                past the cover's top lost its first lines behind it. */}
+            <div className="relative z-10 min-w-0 pb-1 lg:hidden">
+              <h1 dir="auto" className="break-words font-display text-2xl font-bold leading-tight text-white [text-shadow:0_2px_12px_rgba(0,0,0,0.7)]">{title}</h1>
               {Meta}
             </div>
           </div>

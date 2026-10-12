@@ -1396,7 +1396,10 @@ function LibrariesSection() {
   const anyMembers = (people?.content ?? []).some((u) => u.role !== 'admin');
   // Uchiyomi Desktop keeps libraries and their age rating but not who may open them (lib/desktop.ts).
   const desktopLibs = isDesktop();
-  const refresh = () => { for (const k of [['admin-libraries'], ['admin-users'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
+  // ['libraries'] too (v0.60.1, found in Squeaks72's fork): the Library page's library filter and the 18+ toggle read it
+  // (components/AdultToggle.tsx useLibraries), and with a five-minute staleTime they kept a renamed, added or removed
+  // library in this tab until then.
+  const refresh = () => { for (const k of [['admin-libraries'], ['libraries'], ['admin-users'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
 
   const openNew = (from = { name: '', paths: [] as string[] }) => { setStart(from); setAdding(true); setEditing(null); };
   const openEdit = (l: LibraryRow) => { setEditing(l); setAdding(false); };
