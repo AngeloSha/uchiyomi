@@ -49,6 +49,23 @@ async function settle(page, extra = 0) {
   await sleep(500 + extra);
 }
 
+/**
+ * Hold Home's hero still. It crossfades to its next slide every 6.5 s, over 0.9 s (web/components/HeroCarousel.tsx),
+ * and a shot that lands inside the fade shows the last slide ghosting through the next -- phone-home did, on the
+ * v0.60.1 re-shoot. The carousel pauses while the pointer is over it, so the pointer rests on an empty corner of it
+ * (top end: the arrows sit at mid-height, the title and keys lower down), and a fade already under way gets to finish.
+ */
+async function heroAtRest(page) {
+  const corner = await page.evaluate(() => {
+    const hero = document.querySelector('button[aria-label="Slide 1"]')?.parentElement?.parentElement;
+    const r = hero?.getBoundingClientRect();
+    return r && r.height > 0 ? { x: r.right - 24, y: r.top + 24 } : null;
+  });
+  if (!corner) return;
+  await page.mouse.move(corner.x, corner.y);
+  await sleep(1300);
+}
+
 /** Click a control by its visible text — the app has few stable test ids and this survives restyling. */
 async function clickText(page, selector, text, { exact = true } = {}) {
   const handle = await page.evaluateHandle(
@@ -209,7 +226,28 @@ async function main() {
     await settle(page, 700);
   };
 
-  if (want('home')) { await go('/', 900); await shot(page, 'home'); }
+  // The phone page, made on first use. phone-home is taken here, beside home and before the desktop reader below: the
+  // reader shot opens a chapter, which moves its series to the front of Keep reading, and in the v0.60.1 re-shoot the
+  // phone rail then led with the shot series' part-read chapter, whose thumbnail is the top of a strip that opens on a
+  // white title card -- a blank card on the marketing site's phone. Taken first, both Home shots show the same rail.
+  let phonePage = null;
+  const phone = async () => {
+    if (phonePage) return phonePage;
+    phonePage = await ctx.newPage();
+    await neutralNames(phonePage, { fixtures: [people, librariesFixture()] });
+    await phonePage.setViewport(PROFILES.phone);
+    await phonePage.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await meetNames(phonePage, BASE);
+    return phonePage;
+  };
+
+  if (want('home')) { await go('/', 900); await heroAtRest(page); await shot(page, 'home'); }
+  if (want('phone-home')) {
+    const ph = await phone();
+    await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home');
+    await ph.goto('about:blank');
+  }
   if (want('library') || want('crop-library')) {
     await go('/library/', 600);
     if (want('library')) await shot(page, 'library');
@@ -645,16 +683,8 @@ async function main() {
     await ph3.close();
   }
 
-  // ---- phone ----
-  const ph = await ctx.newPage();
-  await neutralNames(ph, { fixtures: [people, librariesFixture()] });
-  await ph.setViewport(PROFILES.phone);
-  await ph.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-  await meetNames(ph, BASE);
-  if (want('phone-home')) {
-    await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
-    await settle(ph, 900); await shot(ph, 'phone-home');
-  }
+  // ---- phone ---- (phone-home is taken earlier, beside home)
+  const ph = await phone();
   if (want('phone-library')) {
     await ph.goto(`${BASE}/library/`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 900); await shot(ph, 'phone-library');

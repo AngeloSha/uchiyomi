@@ -109,8 +109,10 @@ SERIES_ID=${SHOT_SERIES_ID:-$(psql "SELECT s.id FROM lib_series s
 [ -n "$SERIES_ID" ] || SERIES_ID=$(psql "SELECT s.id FROM lib_series s JOIN series_art a ON a.series_id=s.id
   WHERE a.banner IS NOT NULL AND a.cover IS NOT NULL AND s.deleted_at IS NULL AND s.merged_into IS NULL
   ORDER BY s.books_count DESC LIMIT 1" | tr -d ' ')
+# Chapter 1 before any chapter 0: a "chapter 0" is a prologue or teaser, often a few panels on black, and the v0.60.1
+# re-shoot's reader landed on a nearly empty dark page because of it.
 BOOK_ID=${SHOT_BOOK_ID:-$(psql "SELECT b.id FROM lib_books b WHERE b.series_id='$SERIES_ID' AND b.pages > 3
-  AND b.pruned_at IS NULL ORDER BY b.number LIMIT 1" | tr -d ' ')}
+  AND b.pruned_at IS NULL ORDER BY (b.number < 1), b.number LIMIT 1" | tr -d ' ')}
 [ -n "$BOOK_ID" ] || BOOK_ID=$(psql "SELECT id FROM lib_books WHERE pages > 3 AND pruned_at IS NULL ORDER BY random() LIMIT 1" | tr -d ' ')
 SEED=1
 echo "· series $SERIES_ID · book $BOOK_ID"
