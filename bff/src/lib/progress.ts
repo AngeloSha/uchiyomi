@@ -11,6 +11,7 @@
 //    kept out of reading_events so bulk-marking a backlog doesn't inflate this week's stats.
 import { q } from './db';
 import { pushSeriesProgressAsync } from './trackers';
+import { eventTime } from './progressRules';
 
 export interface ProgressWrite {
   userId: string;
@@ -35,10 +36,15 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   //
   // Note this is NOT `GREATEST(page)`: turning back a page is a real thing readers do and must still persist.
   // The rule is "the newest event wins", not "the furthest page wins".
-  const at = w.at ? new Date(w.at) : null;
+  // Clamped (progressRules.ts eventTime): never in the future, and a dead clock's 1970 is not believed.
+  const at = eventTime(w.at);
+  // A first row takes the event's time too (v0.61.0): a chapter first opened offline was inserted at SYNC time, every
+  // later replayed page was then older than that and moved nothing, and the reader resumed at the first page read
+  // offline rather than the last. Reintroduce by letting the INSERT take updated_at's default: "a chapter first read
+  // offline resumes where the reader stopped" in offlineDates.int.test.ts finds page 3, not 25.
   await q(
-    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()))
      ON CONFLICT (user_id, book_id)
      DO UPDATE SET page = CASE WHEN $7::timestamptz IS NULL OR $7 >= read_progress.updated_at
                                THEN EXCLUDED.page ELSE read_progress.page END,
@@ -48,9 +54,9 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   );
   if (!w.silent) {
     await q(
-      `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [w.userId, w.seriesId, w.bookId, w.page, w.completed, w.deviceId ?? null],
+      `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))`,
+      [w.userId, w.seriesId, w.bookId, w.page, w.completed, w.deviceId ?? null, at],
     );
   }
   // Finishing a chapter is the only thing worth telling an external tracker about. Fire-and-forget on
