@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3613
+    "strings": 3625
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3616,5 +3616,17 @@
   "That username is taken.": "Cet identifiant est déjà pris.",
   "Too many attempts. Wait a few minutes and try again.": "Trop de tentatives. Attendez quelques minutes, puis réessayez.",
   "Already have an account? Sign in": "Vous avez déjà un compte ? Se connecter",
-  "Create an account": "Créer un compte"
+  "Create an account": "Créer un compte",
+  "Related": "Œuvres liées",
+  "Sequel": "Suite",
+  "Prequel": "Préquelle",
+  "Main story": "Histoire principale",
+  "Side story": "Histoire parallèle",
+  "Spin-off": "Série dérivée",
+  "Alternative version": "Version alternative",
+  "Find it on your sources": "Le trouver dans vos sources",
+  "Not in your library": "Pas dans votre bibliothèque",
+  "Next in the story": "La suite de l'histoire",
+  "Trending manga": "Manga en vogue",
+  "Trending manhua": "Manhua en vogue"
 }

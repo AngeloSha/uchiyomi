@@ -7,6 +7,8 @@ import { t as tr } from '@/lib/i18n';
 import { dotWindow } from '@/lib/carousel';
 
 export interface Trending {
+  /** The AniList entry (sent since v0.56.0): what Discover's AniList rails key a card by (v0.61.0). */
+  id?: number | null;
   title: string;
   cover: string | null;
   /** Wide AniList key art. Returned by /api/discover/trending since it shipped, and never once rendered. */

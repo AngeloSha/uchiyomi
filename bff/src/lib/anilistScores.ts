@@ -14,6 +14,7 @@ import { q } from './db';
 import { runtime } from './runtime';
 import { visibleToAll } from './visibility';
 import { fetchAniListScores } from './anilist';
+import { refreshAniListRelated } from './anilistRelated';
 
 type Log = { info: (m: string) => void; warn: (m: string) => void };
 
@@ -68,7 +69,11 @@ export async function refreshAniListScores(o: { maxAgeMs?: number; max?: number 
   return { asked: ids.length, stored: ids.length - missing, missing };
 }
 
-/** A few minutes after boot, then every six hours: one round each time (lib/matchCheck.ts's pattern). */
+/**
+ * A few minutes after boot, then every six hours: one round each time (lib/matchCheck.ts's pattern). v0.61.0: the
+ * related works and recommendations (lib/anilistRelated.ts) ride the same tick, right after the scores, one after the
+ * other so the two never ask AniList at once -- no timer or setting of their own.
+ */
 export function scheduleAniListScores(log: Log, delayMs = 4 * 60_000, everyMs = 6 * 60 * 60_000): void {
   const tick = async () => {
     if (!runtime.stopping) {
@@ -77,6 +82,14 @@ export function scheduleAniListScores(log: Log, delayMs = 4 * 60_000, everyMs = 
         if (r.asked) log.info(`anilist scores: ${r.stored} of ${r.asked} entries scored${r.missing ? `, ${r.missing} not answered` : ''}`);
       } catch (e) {
         log.warn(`anilist scores: the refresh failed: ${(e as Error)?.message || e}`);
+      }
+    }
+    if (!runtime.stopping) {
+      try {
+        const r = await refreshAniListRelated();
+        if (r.asked) log.info(`anilist related: ${r.stored} of ${r.asked} entries read${r.missing ? `, ${r.missing} not answered` : ''}${r.skipped ? `, ${r.skipped} skipped (lookups switched off)` : ''}`);
+      } catch (e) {
+        log.warn(`anilist related: the refresh failed: ${(e as Error)?.message || e}`);
       }
     }
     setTimeout(tick, everyMs).unref?.();

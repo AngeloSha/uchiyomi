@@ -57,6 +57,7 @@ import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/compo
 import { FavouriteKey, IcListAdd, MoreKey, SeriesKey, SeriesMoreSheet, moreMenuItems } from '@/components/SeriesKeys';
 import { ProgressRing } from '@/components/ProgressRing';
 import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
+import { RelatedRail } from '@/components/RelatedRail';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -2061,6 +2062,8 @@ function SeriesInner() {
         />
       )}
 
+      {/* v0.61.0: what AniList relates this series to -- sequels, prequels, side stories -- just above More like this. */}
+      <RelatedRail seriesId={id} />
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">
           <SectionTitle>{tr('More like this')}</SectionTitle>

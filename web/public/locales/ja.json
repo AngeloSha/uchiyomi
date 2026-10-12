@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3613
+    "strings": 3625
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3616,5 +3616,17 @@
   "That username is taken.": "そのユーザー名はすでに使われています。",
   "Too many attempts. Wait a few minutes and try again.": "試行回数が多すぎます。数分待ってからもう一度お試しください。",
   "Already have an account? Sign in": "アカウントをお持ちですか？ログイン",
-  "Create an account": "アカウントを新規作成"
+  "Create an account": "アカウントを新規作成",
+  "Related": "関連作品",
+  "Sequel": "続編",
+  "Prequel": "前作",
+  "Main story": "本編",
+  "Side story": "外伝",
+  "Spin-off": "スピンオフ",
+  "Alternative version": "別バージョン",
+  "Find it on your sources": "ソースで探す",
+  "Not in your library": "ライブラリにありません",
+  "Next in the story": "物語の続き",
+  "Trending manga": "人気のマンガ",
+  "Trending manhua": "人気のマンホア"
 }

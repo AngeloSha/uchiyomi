@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3613
+    "strings": 3625
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3616,5 +3616,17 @@
   "That username is taken.": "该用户名已被占用。",
   "Too many attempts. Wait a few minutes and try again.": "尝试次数过多。请等几分钟后再试。",
   "Already have an account? Sign in": "已有账号？登录",
-  "Create an account": "注册新账号"
+  "Create an account": "注册新账号",
+  "Related": "相关作品",
+  "Sequel": "续作",
+  "Prequel": "前传",
+  "Main story": "正篇",
+  "Side story": "外传",
+  "Spin-off": "衍生作品",
+  "Alternative version": "另一版本",
+  "Find it on your sources": "在你的来源中查找",
+  "Not in your library": "不在你的库中",
+  "Next in the story": "故事的后续",
+  "Trending manga": "热门日漫",
+  "Trending manhua": "热门国漫"
 }

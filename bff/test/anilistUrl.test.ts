@@ -1,6 +1,7 @@
 // ANILIST_API_URL (v0.55.7): the test knob the tracker calls read (lib/trackerProviders.ts) moves the title and id
 // lookups too (lib/anilist.ts) -- the art lookup, the anime banner, the Art picker's candidates, Discover's Trending
-// rail, and the by-id reads of the online-match check and the direction backfill. The browser walk points it at a fake
+// rail, and the by-id reads of the online-match check and the direction backfill -- and since v0.61.0 the trending rails
+// by country and the related works (lib/anilistRelated.ts). The browser walk points it at a fake
 // AniList (web/test/e2e/fakeAniList.mjs), so no walk asks the real one. Unset, it is AniList's own endpoint.
 // Reintroduce the hard-coded address in any one lookup: "every AniList lookup goes where ANILIST_API_URL says" fails.
 import test from 'node:test';
@@ -26,7 +27,10 @@ test('every AniList lookup goes where ANILIST_API_URL says, with its trailing sl
     await al.fetchTrendingManhwa(1);
     await al.fetchAniListEntries([970002]);
     await al.fetchAniListCountries([970002]);
-    assert.equal(asked.length, 6, JSON.stringify(asked));
+    // v0.61.0: the trending rails by country, and the related works and recommendations.
+    await al.fetchTrending('JP', 1);
+    await al.fetchAniListRelated([970002]);
+    assert.equal(asked.length, 8, JSON.stringify(asked));
     assert.deepEqual([...new Set(asked)], ['http://anilist.example/graphql'], 'every AniList lookup goes where ANILIST_API_URL says');
   } finally {
     globalThis.fetch = realFetch;

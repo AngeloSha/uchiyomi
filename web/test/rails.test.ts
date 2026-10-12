@@ -33,6 +33,10 @@ test('the rail goes through ScrollRail, and leaves room for the bar', () => {
   let rails = 0;
   // SourcePicker used to carry a second rail, the language strip. That whole dimension was removed after it
   // turned out to be the trigger for a wall that stalled mid-load, so the trending rail is the only one left.
+  // v0.61.0: Discover has four AniList rails -- Because you read above the wall, trending manhwa, manga and manhua
+  // under it -- and every one renders through the page's one AniListRail, so there is still exactly one ScrollRail
+  // element, and the count below still holds. Updated deliberately: its message names what that one element is, and
+  // the rails are held to going through it.
   for (const file of ['app/discover/page.tsx']) {
     const src = read(file);
     assert.ok(src.includes('<ScrollRail'), `${file} has no ScrollRail — is a rail still hand-rolled?`);
@@ -50,7 +54,10 @@ test('the rail goes through ScrollRail, and leaves room for the bar', () => {
       );
     }
   }
-  assert.equal(rails, 1, `expected the trending rail, found ${rails}`);
+  assert.equal(rails, 1, `expected the one ScrollRail every AniList rail on Discover renders through, found ${rails}`);
+  const page = read('app/discover/page.tsx');
+  assert.match(page, /function AniListRail\([\s\S]*?<ScrollRail label=\{title\}/, 'the one ScrollRail is not the AniList rails\' own');
+  assert.equal((page.match(/<AniListRail\b/g) ?? []).length, 2, 'Because you read and the trending rails do not both go through AniListRail');
 });
 
 test('the arrows exist, are desktop-only, and mirror under RTL', () => {

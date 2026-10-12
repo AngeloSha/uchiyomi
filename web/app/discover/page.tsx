@@ -1,12 +1,13 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
-import { t as tr } from '@/lib/i18n';
+import { keys, t as tr } from '@/lib/i18n';
 import { reasonText } from '@/lib/said';
 import { isDesktop } from '@/lib/desktop';
 import { EmptyState } from '@/components/EmptyState';
@@ -78,6 +79,41 @@ const HERO_FIND_SOURCES = 10;
 const HERO_SLIDES = 10;
 
 /**
+ * The trending rails under the wall (v0.61.0), by AniList's country of origin: Korea's (manhwa -- the hero shows its
+ * first ten, as it always has, and the rail the rest), then Japan's (manga) and China's (manhua). What each is called,
+ * in the same order, declared for the translators: the rails render it through a variable.
+ */
+const TREND_RAILS = ['KR', 'JP', 'CN'] as const;
+const TREND_LABELS = keys('Trending manhwa', 'Trending manga', 'Trending manhua');
+/** An AniList rail's card, as the page remembers what this visit added from it: by its entry, else its title. */
+const railKey = (t: Trending): string => (t.id != null ? `al:${t.id}` : `t:${normTitle(t.title)}`);
+
+/**
+ * One of Discover's AniList rails (v0.61.0): Because you read above the wall, and the trending rails under it. Every
+ * one goes through this one ScrollRail -- a strip a mouse can move (rails.test.ts) -- and a card opens the add dialog,
+ * which looks the title up on the best-ranked sources.
+ */
+function AniListRail({ kind, title, items, onPick, className = 'pb-6' }: {
+  kind: string; title: string; items: Trending[]; onPick: (t: Trending) => void; className?: string;
+}) {
+  return (
+    <section className={className} data-anilist-rail={kind}>
+      <h2 className="mb-3 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{title}</h2>
+      {/* pb-3 rather than pb-1: the global scrollbar is 8px and used to be hidden, so the rail had no
+          room for it and it would have sat on the card captions. */}
+      <ScrollRail label={title}
+        className="bleed flex gap-3 px-4 pb-3 lg:px-8 [scroll-snap-type:x_mandatory]">
+        {items.map((t, i) => (
+          <Reveal key={railKey(t)} delay={Math.min(i, 12) * 28}>
+            <TrendingCard t={t} onPick={onPick} />
+          </Reveal>
+        ))}
+      </ScrollRail>
+    </section>
+  );
+}
+
+/**
  * Discover, rebuilt around what people actually do here.
  *
  * This is the only page that adds new series from the internet, and it was a bare search box on black with a
@@ -96,13 +132,19 @@ const HERO_SLIDES = 10;
  * already on screen ever moves: only mangadex populates `updatedAt`, so "newest across every source" is not a
  * sortable quantity and pretending otherwise would reflow tiles under a reading thumb.
  */
-export default function DiscoverPage() {
+function DiscoverInner() {
   const qc = useQueryClient();
   const { user, isAdmin } = useAuth();
 
   // Not fired at all for an account that may not add series: every route behind this page answers 403 for
   // them, and a query whose only possible outcome is a refusal is noise in the console and in the log.
   const mayAdd = canDownload(user);
+
+  // v0.61.0: `/discover/?q=<title>` -- where the series page's Related and the reader's Next in the story send a work the
+  // library does not hold -- opens on a search for it. Read once, here, as Library and Admin → Sources read their
+  // `?view=`; afterwards the page writes the address itself (writeQ below), so a reload stays on what is on screen.
+  const params = useSearchParams();
+  const [arrivedQ] = useState(() => (params.get('q') ?? '').trim().slice(0, 200));
 
   const { data: sourcesData } = useQuery({
     queryKey: ['sources'],
@@ -130,15 +172,34 @@ export default function DiscoverPage() {
     // Series[]. This is /api/discover/trending, which is AniList and carries genres, banner and score. They
     // shared a key, so arriving here from the home page handed this the wrong shape out of the cache and the
     // hero threw on `genres.slice`. A direct page load was fine, which is why it looked intermittent.
-    queryKey: ['discover-trending'],
-    queryFn: () => api<{ content: Trending[] }>('/api/discover/trending'),
+    // v0.61.0: one key per country of origin; this one is Korea's, the hero's and the first rail's.
+    queryKey: ['discover-trending', 'KR'],
+    queryFn: () => api<{ content: Trending[] }>('/api/discover/trending?country=KR'),
     enabled: mayAdd,
     staleTime: 0,
     refetchOnMount: 'always',
   });
 
   // ---------------------------------------------------------------- the wall
-  const [mode, setMode] = useState<'newest' | 'search'>('newest');
+  const [mode, setMode] = useState<'newest' | 'search'>(arrivedQ ? 'search' : 'newest');
+  // v0.61.0: the manga and manhua rails under the wall -- while browsing, each country its own answer and its own key.
+  const moreTrending = useQueries({
+    queries: TREND_RAILS.slice(1).map((country) => ({
+      queryKey: ['discover-trending', country],
+      queryFn: () => api<{ content: Trending[] }>(`/api/discover/trending?country=${country}`),
+      enabled: mayAdd && mode === 'newest',
+      staleTime: 0,
+      refetchOnMount: 'always' as const,
+    })),
+  });
+  // v0.61.0: "Because you read {title}" above the wall -- what AniList's readers recommend after something this account
+  // read lately, less what the server holds. The server answers from its stored copy; nothing asks AniList here.
+  const { data: because } = useQuery({
+    queryKey: ['discover-because'],
+    queryFn: () => api<{ seed: { id: string; title: string } | null; content: Trending[] }>('/api/discover/because'),
+    enabled: mayAdd && mode === 'newest',
+    staleTime: 5 * 60_000,
+  });
   /**
    * Which listing the wall shows, and which single source (if any) is shown alone.
    *
@@ -147,10 +208,11 @@ export default function DiscoverPage() {
    */
   const [listMode, setListMode] = useState<ListMode>('newest');
   const [selected, setSelected] = useState<string | null>(null);
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(arrivedQ);
   // What was SUBMITTED, as opposed to `q`, which is whatever is in the field. The search is keyed on this, so
   // typing never fires a request and a term is searched exactly once per five minutes however it is reached.
-  const [term, setTerm] = useState('');
+  // An arrival's `?q=` is submitted as it lands (v0.61.0).
+  const [term, setTerm] = useState(arrivedQ);
   const [page, setPage] = useState(1);
   const [byId, setById] = useState<Record<string, SourceItem[]>>({});
   const [order, setOrder] = useState<string[]>([]);
@@ -165,6 +227,15 @@ export default function DiscoverPage() {
    */
   const [added, setAdded] = useState<Set<string>>(new Set());
   const fromKey = useRef<string | null>(null);
+  /**
+   * The AniList rails' cards this visit added (v0.61.0): off their rail at once, as an added card leaves the wall.
+   * `fromRail` is the rail card the open dialog came from -- null from the wall or the hero -- and forgotten when the
+   * dialog closes, so a later add from the hero never takes a rail card with it.
+   */
+  const [railAdded, setRailAdded] = useState<Set<string>>(new Set());
+  const fromRail = useRef<string | null>(null);
+  useEffect(() => { if (!seed) fromRail.current = null; }, [seed]);
+  const pickRail = (t: Trending) => { fromKey.current = null; fromRail.current = railKey(t); setSeed({ kind: 'trending', title: t.title }); };
 
   // Every source that can answer this listing, best first. A source that cannot answer the chosen listing is
   // not in the pool at all, the same way one without `latest` has never been. Popular is universal among
@@ -272,7 +343,8 @@ export default function DiscoverPage() {
       const rated = ratingAsked === 'all' ? '' : `&rating=${ratingAsked}`;
       return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}`, { signal });
     },
-    enabled: mode === 'search' && !!term,
+    // `mayAdd` (v0.61.0): an arrival's `?q=` starts in search mode, and an account the server refuses is not asked.
+    enabled: mode === 'search' && !!term && mayAdd,
     // A failed search is shown as one; retrying it would be another fan-out to every source.
     retry: false,
     staleTime: 5 * 60_000,
@@ -395,11 +467,24 @@ export default function DiscoverPage() {
     ? aloneEmpty(budget.find((s) => s.id === selected) ?? { id: selected, name: selected, lang: null }, states[kOf(selected)] ?? 'idle')
     : null;
 
+  /**
+   * The address says what is on screen (v0.61.0): `?q=` while a search is, nothing while browsing -- replaced, never
+   * pushed, so Back leaves Discover instead of stepping through its searches.
+   */
+  const writeQ = (value: string) => {
+    try {
+      const u = new URL(window.location.href);
+      if (value) u.searchParams.set('q', value); else u.searchParams.delete('q');
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
+    } catch { /* the page works the same without it */ }
+  };
+
   const search = (e?: React.FormEvent) => {
     e?.preventDefault();
     const next = q.trim();
     if (!next) return;
     setMode('search');
+    writeQ(next);
     // The same term submitted again while its answer is on screen is a refetch -- a failed search has no
     // other way back, and a finished one costs the server nothing (it answers from its entry). Not while
     // one is in flight: `refetch()` cancels the running request by default, so a second tap of Search during
@@ -410,7 +495,7 @@ export default function DiscoverPage() {
   };
   // `term` is kept: the query is disabled by the mode, and keeping its observer keeps the answer cached, so
   // searching the same title again after browsing is instant.
-  const backToNewest = () => { setQ(''); setMode('newest'); };
+  const backToNewest = () => { setQ(''); setMode('newest'); writeQ(''); };
 
   const open = (it: SourceItem) => {
     const key = workKey(it);
@@ -476,6 +561,13 @@ export default function DiscoverPage() {
     const lead = new Set(heroSlides.map((s) => s.title));
     return (trending?.content ?? []).filter((t) => !lead.has(t.title));
   }, [trending, heroSlides]);
+  // Each AniList rail's cards, less what this visit added from them (v0.61.0): Korea's (what the hero did not take),
+  // Japan's, China's, in TREND_RAILS' order; and Because you read's.
+  const jpTrending = moreTrending[0]?.data;
+  const cnTrending = moreTrending[1]?.data;
+  const trendRails = useMemo(() => [rail, jpTrending?.content ?? [], cnTrending?.content ?? []]
+    .map((list) => list.filter((t) => !railAdded.has(railKey(t)))), [rail, jpTrending, cnTrending, railAdded]);
+  const becauseRail = useMemo(() => (because?.content ?? []).filter((t) => !railAdded.has(railKey(t))), [because, railAdded]);
 
   // ---------------------------------------------------------------- may they be here at all
   // The tab is hidden for this account and every route this page calls now refuses it, so a typed URL would
@@ -557,6 +649,15 @@ export default function DiscoverPage() {
           </form>
         </div>
       </header>
+
+      {/* v0.61.0: "Because you read {title}", above the wall while browsing, only with something on it -- under the
+          header, so the source picker stays beside the wall it narrows. The title is isolated: a Latin title inside an
+          Arabic sentence takes its order, as Home's rail of that name does. */}
+      {mode === 'newest' && because?.seed && becauseRail.length > 0 && (
+        <AniListRail kind="because" className="pt-6"
+          title={tr('Because you read {title}', { title: `\u2068${because.seed.title}\u2069` })}
+          items={becauseRail} onPick={pickRail} />
+      )}
 
       {/*
         In both modes, not just while browsing. The picker is the only place the chosen source is visible or
@@ -704,21 +805,10 @@ export default function DiscoverPage() {
 
       <div ref={sentinel} className="h-16" />
 
-      {mode === 'newest' && rail.length > 0 && (
-        <section className="pb-6">
-          <h2 className="mb-3 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{tr('Trending manhwa')}</h2>
-          {/* pb-3 rather than pb-1: the global scrollbar is 8px and used to be hidden, so the rail had no
-              room for it and it would have sat on the card captions. */}
-          <ScrollRail label={tr('Trending manhwa')}
-            className="bleed flex gap-3 px-4 pb-3 lg:px-8 [scroll-snap-type:x_mandatory]">
-            {rail.map((t, i) => (
-              <Reveal key={t.title} delay={Math.min(i, 12) * 28}>
-                <TrendingCard t={t} onPick={(x) => setSeed({ kind: 'trending', title: x.title })} />
-              </Reveal>
-            ))}
-          </ScrollRail>
-        </section>
-      )}
+      {/* The trending rails (v0.61.0: manga and manhua beside the manhwa), each only with something on it. */}
+      {mode === 'newest' && TREND_RAILS.map((country, i) => trendRails[i].length > 0 && (
+        <AniListRail key={country} kind={country} title={tr(TREND_LABELS[i])} items={trendRails[i]} onPick={pickRail} />
+      ))}
 
       {seed && (
         <AddSeriesDialog
@@ -734,10 +824,25 @@ export default function DiscoverPage() {
             const title = normTitle(r.title);
             const keys = fromKey.current ? [fromKey.current] : title ? wall.items.filter((c) => normTitle(c.title) === title).map(workKey) : [];
             setAdded((prev) => new Set([...prev, ...keys.filter(Boolean)]));
+            // From an AniList rail (v0.61.0): that card leaves its rail.
+            const railCard = fromRail.current;
+            if (railCard) setRailAdded((prev) => new Set(prev).add(railCard));
             qc.invalidateQueries({ queryKey: ['source-jobs'] });
           }}
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The page, inside the Suspense boundary `useSearchParams` needs in a static export (v0.61.0: `?q=`), as the Library's
+ * and a List's pages are: the build refuses a page that reads the address outside one.
+ */
+export default function DiscoverPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen-d" />}>
+      <DiscoverInner />
+    </Suspense>
   );
 }

@@ -1681,6 +1681,20 @@ CREATE TABLE IF NOT EXISTS anilist_scores (
   popularity  integer,
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- v0.61.0: what AniList relates an entry to (lib/anilistRelated.ts): its sequels, prequels, main story, side stories,
+-- spin-offs and alternative versions (relations), and the entries its readers recommend (recs), keyed like
+-- anilist_scores by the AniList id a series is linked to. Each item keeps AniList's own adult flag and genres: the 18+
+-- rules are applied per viewer when it is read, never to this shared copy. Both empty for an entry AniList did not answer
+-- for (asked again once the row is stale). The series page's Related, the reader's Next in the story, Discover's Because
+-- you read and the held recommendations of More like this read it; nothing asks AniList when a page opens. Additive:
+-- v0.60.1 boots on this schema and ignores it.
+CREATE TABLE IF NOT EXISTS anilist_related (
+  anilist_id  text PRIMARY KEY,
+  relations   jsonb NOT NULL DEFAULT '[]'::jsonb,
+  recs        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  fetched_at  timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

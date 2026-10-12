@@ -484,6 +484,15 @@ that work. `pending` is how many of the keys are still being looked up.
 Admin settings carry `discover_lookups` (`PATCH` takes `discoverLookups`). It is Admin → Settings *Match Discover
 titles online*.
 
+**Trending and Because you read** (since v0.61.0). `GET /api/discover/trending?country=KR|JP|CN` (KR, manhwa, when
+absent; anything else is **400**) answers AniList's trending titles of that country of origin -- never 18+ on AniList,
+never a light novel, never one the server holds -- each country cached six hours; with Show 18+ off, a title carrying a
+genre the admin named as adult is left out of the answer. `GET /api/discover/because` answers `{seed: {id, title} |
+null, content}`, `content` in the trending shape: what AniList's readers recommend after the caller's most recently read
+series with a finished chapter (that they may list, in a library with AniList lookups on and a checked link), less what
+the server holds and what is 18+ for them -- the first of their last five such series that leaves at least four. Both
+sit behind the `canDownload` gate below; neither asks AniList for anything about the library.
+
 Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
 and **409** `duplicate` if a series with the same title came from a *different* source — retry with
 `"force": true` to add the second copy anyway.
@@ -994,6 +1003,7 @@ GET    /api/updates               POST   /api/updates/seen
 POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
+GET    /api/series/:id/related
 POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
@@ -1004,6 +1014,18 @@ GET    /api/series/:id/groups        GET    /api/series/:id/versions
 POST   /api/series/:id/listing-progress
 DELETE /api/series/:id/listing-progress
 ```
+
+**Related works and More like this** (since v0.61.0). `GET /api/series/:id/related` answers `{lookups, content:
+[{relation, series?, outside?}]}`: what AniList relates the series to -- `relation` is `SEQUEL`, `PREQUEL`, `PARENT` (the
+main story), `SIDE_STORY`, `SPIN_OFF` or `ALTERNATIVE`, in that order. A work the server holds is `series` (enriched like
+every rail) when the caller may list it, and is left out, never named, when they may not; one it does not hold is
+`outside: {anilistId, title, cover, format, status, score}`, unless it is 18+ for the caller. `lookups` is false, with
+nothing else, for a series whose library has its AniList lookups off or that has no checked AniList link. `GET
+/api/series/:id/similar` now leads with the library series AniList's readers recommend after this one, then the genre
+matches, eighteen in all. Both read a copy the server keeps (`anilist_related`, keyed by AniList id), refreshed in the
+background in the same six-hourly round as the outside ratings: missing entries first, then the most recently read, ten
+per request, a row asked again after a week -- never for a library whose AniList lookups are off, and never when a page
+opens.
 
 **Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
 backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
@@ -1210,7 +1232,7 @@ GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
-GET    /api/discover/works
+GET    /api/discover/works        GET    /api/discover/because
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
 GET    /api/sources/archive       POST   /api/sources/archive
