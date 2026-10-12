@@ -131,24 +131,22 @@ do: the real accounts have 2FA, and working around that is worse than the screen
 
 ## Currency
 
-The whole set was re-captured against **v0.40.0** on 2026-09-22, along with the tour video, so nothing in
-`docs/shots/` currently shows a retired screen. For **v0.45.0** the extension and sources shots were retaken on
-the fixture above and the desktop pages added. Then everything that showed a third-party name was retaken
-behind `neutralNames()`: **the tour** (`tour.webp`, and the site's `tour.mp4`/`tour.webm`/posters: a real site
-and its groups in the series supply line, a scanlator's credits page with its site address and a Discord invite,
-the live extension catalogue), **`series`** (the same supply line), **`home`** (a scraped summary naming a
-site), **`library`** (a site's name as a format tag, a scanlator's logo on a cover), **`admin-libraries`** (a
-library named after a site, and folders named after sites and scanlators — the site's `phone-libraries` plate is
-a crop of it), **`phone-home`** (a credits page as the Keep reading thumbnail), **`phone-library`**, and
-**`reader`**, **`phone-reader`** and **`discover`** with them. They were taken on a throwaway instance
-(`--login`, no account created anywhere) holding a small library of MangaDex series — the rig's live-library run
-creates an account on the server, which is not done for a fix — with a readiness-only solver stand-in so Health
-reads as a healthy server, one extra library ("Family", 13+) so the Libraries shot has two, and
-`SHOT_PALETTE_QUERY` / `SHOT_DISCOVER_QUERY` set to words that library matches. `admin-health`, `admin-members`
-and the per-user shots show no third-party name and were not retaken; the next live run takes every library
-shot behind `neutralNames()` automatically.
+Every capture except the desktop app's was retaken against **v0.60.1** on 2026-10-12, with the tour video, on the live
+library behind `neutralNames()`, `peopleFixture` and `librariesFixture` (see above), with the capture account's reading
+life: the series page's Continue, four keys and ratings, *More* open (`series-more`), the Library's toolbar and progress
+bars, Discover's one card per work, Health with *Fix everything*, Admin → Sources, and three new crops for the marketing
+site's "What's new" cards (`crop-library`, `crop-ratings`, `crop-fix-everything`). The desktop shots (`desktop-*`) are
+v0.45.0's: those pages have not changed since. The reader stills and the tour open the shot series' first chapter
+numbered 1 or more (run.sh): a chapter 0 is often a prologue of a few panels on black, and this run's first pass
+photographed one.
 
-Two things that run were worth writing down, because both had been silently wrong for weeks:
+Before that, the whole set was re-captured against **v0.40.0** on 2026-09-22; for **v0.45.0** the extension and sources
+shots were retaken on the fixture above and the desktop pages added, and everything that showed a third-party name was
+retaken behind `neutralNames()` on a throwaway instance; on 2026-10-03 the extension and sources shots were retaken for
+v0.53.0 and v0.54.0's Admin → Sources. The marketing site's copies of those 10-03 shots were not refreshed until
+2026-10-12: a fixed shot reaches the site only through a run with `--site`.
+
+Two things the 2026-09-22 run turned up were worth writing down, because both had been silently wrong for weeks:
 
 - `profile-security` and `profile-stats` had been **byte-identical**. The Account capture navigates to
   `/profile/?tab=Account`, and `?tab=` addresses only arrived in v0.39.0 — before that the deep link was
