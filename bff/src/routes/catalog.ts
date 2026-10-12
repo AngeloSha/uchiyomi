@@ -101,6 +101,9 @@ const progressBody = z.object({
   // the fact, and without this the server cannot tell a queued page-12 from a live one and lets it overwrite
   // a position the reader has since moved well past. Absent means "now", which is every live ping.
   at: z.coerce.number().int().positive().optional(),
+  // v0.61.0: read under Incognito reading. The account's switch is the server's own to read (lib/progress.ts); this is
+  // for a chapter read while it was on and sent after it went off -- the offline outbox, a retried page turn.
+  incognito: z.boolean().optional(),
 });
 
 const forYouCache = new Map<string, { ts: number; pool: any[] }>();
@@ -902,7 +905,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.put('/api/books/:id/progress', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
-    const { page, completed, seriesId, deviceId, silent, at } = progressBody.parse(req.body ?? {});
+    const { page, completed, seriesId, deviceId, silent, at, incognito } = progressBody.parse(req.body ?? {});
 
     let sid: string | undefined;
     let done = completed;
@@ -935,7 +938,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // -- and a 500 is a retry forever, where a 404 lets it drop the entry.
     if (!sid) return reply.code(404).send({ error: 'not_found' });
 
-    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at });
+    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at, incognito });
 
     if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });

@@ -225,6 +225,13 @@ components:
         showAllChapters:
           type: boolean
           description: Show one unpaged chapter list, including all grey rows and unfolded older runs.
+        incognito:
+          type: boolean
+          description: >-
+            Since v0.61.0, Incognito reading, for the whole account and enforced by the server: progress is still
+            written (Keep reading and resuming work), but no reading event is recorded (history, streaks, Wrapped, the
+            leaderboard, the household's Top 10, member activity) and nothing is pushed to a tracker automatically --
+            whatever client wrote the progress. The next push once it is off sends the series' real highest chapter.
         reader:
           type: object
           additionalProperties: true
@@ -2556,6 +2563,15 @@ paths:
                   type: boolean
                 silent:
                   type: boolean
+                at:
+                  type: integer
+                  description: When the page was read, in client ms (the offline outbox's replay time); absent means now.
+                incognito:
+                  type: boolean
+                  description: >-
+                    Since v0.61.0: read under Incognito reading. The account's own `incognito` setting is read by the
+                    server anyway; this covers a chapter read while it was on and sent after it went off. Either way
+                    the progress is written, and no reading event or tracker push follows.
       security:
         - bearer: []
       responses:
@@ -5510,7 +5526,8 @@ paths:
         `reader` (the reader's defaults; since v0.55.7 with `coverEdges`, default true, the cover's colour at the
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
-        `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`). Unknown keys remain accepted and retained for compatibility.
+        `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
+        boolean). Unknown keys remain accepted and retained for compatibility.
       operationId: putApiSettings
       requestBody:
         required: false

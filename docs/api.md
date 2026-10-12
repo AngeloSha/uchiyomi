@@ -1410,6 +1410,13 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
   unreadable id and the web app omits it on the next edit; the API refuses a request that tries to add one (another
   member's private List, a malformed id).
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
+- `incognito: boolean` (since v0.61.0), **Incognito reading**, for the whole account and enforced by the server: progress
+  is still written, so Keep reading and every resume work, but no reading event is recorded -- history, streaks,
+  Wrapped, the leaderboard, the household's Top 10 and member activity never see it -- and nothing is pushed to a
+  tracker automatically, whichever client wrote the progress (the app, Mihon's read-progress PUT, a listing's marks, a
+  bulk Mark read). The deliberate *Push everything finished* and resync still push. `PUT /api/books/:id/progress`
+  also takes `incognito: true` for a chapter read while it was on and sent after it went off (the offline outbox).
+  When a series is next pushed with it off, the tracker is told the series' real highest chapter and catches up.
 
 The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
 

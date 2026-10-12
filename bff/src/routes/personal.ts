@@ -945,6 +945,12 @@ export default async function personalRoutes(app: FastifyInstance) {
     if ('showAllChapters' in data && typeof data.showAllChapters !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Show all chapters must be on or off.' });
     }
+    // v0.61.0, Incognito reading (lib/incognito.ts): the whole account's, read by the server on every progress write and
+    // tracker push, so only a real boolean. Reintroduce by accepting anything: "Incognito must be on or off" in
+    // incognito.int.test.ts saves "yes".
+    if ('incognito' in data && typeof data.incognito !== 'boolean') {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Incognito reading must be on or off.' });
+    }
     if ('homeCollections' in data) {
       const parsed = z.array(z.string().min(1).max(64)).max(30).safeParse(data.homeCollections);
       if (!parsed.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
