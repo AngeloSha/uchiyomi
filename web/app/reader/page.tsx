@@ -817,6 +817,8 @@ function ReaderInner() {
     if (prefs.mode === 'paged') {
       laidOutSign.current = trackSign;
       laidOutSplit.current = splitTrack;
+      // The column's anchor belongs to the column: on the way back it would be a place read before the pages turned.
+      anchorRef.current = null;
       el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
     } else {
       el.scrollTop = tops[current] ?? 0;
