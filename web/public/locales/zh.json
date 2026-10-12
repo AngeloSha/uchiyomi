@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3606
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3597,5 +3597,17 @@
   "Couldn’t load your library": "无法加载你的书库",
   "Couldn’t load more": "无法加载更多",
   "AniList score": "AniList 评分",
-  "Actions for {title}": "{title} 的操作"
+  "Actions for {title}": "{title} 的操作",
+  "Related": "相关作品",
+  "Sequel": "续作",
+  "Prequel": "前传",
+  "Main story": "正篇",
+  "Side story": "外传",
+  "Spin-off": "衍生作品",
+  "Alternative version": "另一版本",
+  "Find it on your sources": "在你的来源中查找",
+  "Not in your library": "不在你的库中",
+  "Next in the story": "故事的后续",
+  "Trending manga": "热门日漫",
+  "Trending manhua": "热门国漫"
 }

@@ -27,6 +27,7 @@ import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
+import { NextInStory } from '@/components/RelatedRail';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
@@ -1158,6 +1159,7 @@ function ReaderInner() {
           ? <button onClick={() => router.push('/downloads/')} className="btn-accent text-sm">{tr('Offline')}</button>
           : <button onClick={() => router.push('/')} className="btn-accent text-sm">{tr('Home')}</button>}
       </div>
+      {ended && !offlineEnd && <NextInStory seriesId={seriesId} />}
       {!offlineEnd && !!upNext?.content?.length && (
         <div className="mt-12 text-start">
           <SectionTitle>{tr('Because you finished this')}</SectionTitle>

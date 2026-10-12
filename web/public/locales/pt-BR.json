@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3606
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3597,5 +3597,17 @@
   "Couldn’t load your library": "Não foi possível carregar sua biblioteca",
   "Couldn’t load more": "Não foi possível carregar mais",
   "AniList score": "Nota no AniList",
-  "Actions for {title}": "Ações de {title}"
+  "Actions for {title}": "Ações de {title}",
+  "Related": "Relacionados",
+  "Sequel": "Sequência",
+  "Prequel": "Pré-sequência",
+  "Main story": "História principal",
+  "Side story": "História paralela",
+  "Spin-off": "Derivado",
+  "Alternative version": "Versão alternativa",
+  "Find it on your sources": "Encontre nas suas fontes",
+  "Not in your library": "Não está na sua biblioteca",
+  "Next in the story": "A seguir na história",
+  "Trending manga": "Mangá em alta",
+  "Trending manhua": "Manhua em alta"
 }

@@ -92,6 +92,10 @@ const SURFACES = [
   'components/LibraryFilters.tsx',
   'lib/librarySort.ts',
   'lib/libraryLayout.ts',
+  // v0.61.0, Related works and the reader's Next in the story: AniList's covers with a squared score tag, a squared add
+  // mark and a band that says a work is not in the library -- no capsule anywhere on them.
+  'components/RelatedRail.tsx',
+  'lib/related.ts',
 ];
 
 /**
