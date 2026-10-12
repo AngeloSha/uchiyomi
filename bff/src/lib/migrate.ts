@@ -1695,6 +1695,31 @@ CREATE TABLE IF NOT EXISTS anilist_related (
   recs        jsonb NOT NULL DEFAULT '[]'::jsonb,
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- v0.61.0: the release radar (lib/releaseRadar.ts) -- when a series' next chapter is likely, from when its chapters
+-- came: the dates its sources list, else when they arrived on this server (most chapters carry no source date).
+-- One row per series, rewritten whole after every listing refresh and after a check lands chapters; no row while
+-- nothing dates the series or it has no source. basis is 'source' or 'arrival' (NULL: one release, no rhythm); kind
+-- and interval_days are the cadence (lib/groupStats.ts cadenceOf); next_at and due_until bound the estimate, NULL when
+-- the rhythm is too uneven, too short, or the series ended or is on hiatus; quiet_after is when silence stops being
+-- "late"; steady means it keeps one weekday; ended its status says it is finished. Read by every series' yomi.radar,
+-- the Library's Releasing soon sort, Updates' Expected this week and the smart update checks. server_settings.
+-- update_smart is Admin -> Settings "Smart update checks": off by default, the sweep asks every series as before.
+-- Additive: v0.60.1 boots on this schema and ignores both.
+CREATE TABLE IF NOT EXISTS series_radar (
+  series_id     text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  basis         text,
+  kind          text NOT NULL DEFAULT 'unknown',
+  interval_days real,
+  last_at       timestamptz,
+  next_at       timestamptz,
+  due_until     timestamptz,
+  quiet_after   timestamptz,
+  steady        boolean NOT NULL DEFAULT false,
+  ended         boolean NOT NULL DEFAULT false,
+  computed_at   timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS update_smart boolean NOT NULL DEFAULT false;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

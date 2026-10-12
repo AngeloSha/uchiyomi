@@ -51,6 +51,8 @@ import type { PlanMode } from '@/lib/numbering';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
 import { editionChipLabels } from '@/lib/editions';
 import { continueChoice, continueText, readCountText } from '@/lib/continueLabel';
+import { radarText } from '@/lib/radar';
+import { catchUpText } from '@/lib/readingTime';
 import { offlineKeyShown, seriesActionGroups, type SeriesActionId } from '@/lib/seriesActions';
 import { RatingsPanel, useSeriesRating } from '@/components/RatingsPanel';
 import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/components/ContinueBar';
@@ -1539,6 +1541,21 @@ function SeriesInner() {
     ? { read: books.content.filter((b) => b.readProgress?.completed).length, total: books.content.length }
     : { read: series?.booksReadCount ?? 0, total: series?.booksCount ?? 0 }), [books, series]);
   const readLine = readCountText(readCount.read, readCount.total);
+  // v0.61.0: what comes next -- the release radar's estimate, as an estimate (lib/radar.ts): "Next chapter ~Friday ·
+  // usually Fridays", "Next chapter due any day", "Running late · last release 12d ago"; nothing for a series that is
+  // quiet, ended, on hiatus, undated or not monitored. Before it, how long the chapters left take at this reader's own
+  // pace (lib/readingTime.ts, "Catch up in ~2 hr"), asked only when it can be said: some read, some left.
+  const unreadCount = Math.max(0, readCount.total - readCount.read);
+  const { data: pace } = useQuery({
+    queryKey: ['reading-pace', id],
+    queryFn: () => api<{ perChapterMs: number | null; from: 'series' | 'all' | null }>(`/api/series/${id}/reading-pace`),
+    enabled: !!id && readCount.read > 0 && unreadCount > 0,
+    staleTime: 300_000,
+  });
+  const outlook = [
+    catchUpText({ read: readCount.read, unread: unreadCount, perChapterMs: pace?.perChapterMs }),
+    radarText(series?.yomi?.radar, { autoUpdate: series?.autoUpdate !== false }),
+  ].filter(Boolean).join(' · ');
   // Check for new chapters, the Sources sheet's and Edit details' own: the same notices, the same polling.
   const { checking, checkNow } = useCheckNow(id, () => {
     for (const k of [['series', id], ['series-books', id], ['series-listing', id], ['series-versions', id], ['home']]) qc.invalidateQueries({ queryKey: k });
@@ -1598,6 +1615,7 @@ function SeriesInner() {
       </div>
       {ctaText.caption && <p data-continue-caption className="-mt-1 truncate text-center text-xs text-fog-500">{ctaText.caption}</p>}
       {readLine && <ReadProgress read={readCount.read} total={readCount.total} text={readLine} />}
+      {outlook && <p data-series-outlook className="-mt-1 text-start text-[11px] leading-snug text-fog-500">{outlook}</p>}
       {/* Four keys, or three where there is nothing to save offline. Equal widths, whatever their number. */}
       <div data-series-keys className="mt-0.5 grid auto-cols-fr grid-flow-col gap-1.5">
         <FavouriteKey on={fav} pops={favPops} onToggle={toggleFav} />

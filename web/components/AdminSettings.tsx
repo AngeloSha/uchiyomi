@@ -449,6 +449,12 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
       <NumberRow label={tr('Library update interval (hours)')} min={1} max={168} value={data.updater_hours ?? 6}
         help={tr('How often every followed series is asked for new chapters.')}
         onSave={(n) => save({ updaterHours: n })} />
+      {/* v0.61.0, the release radar's other half (bff lib/releaseRadar.ts isDue): the scheduled sweep asks a long-quiet
+          series less often and a due one as usual. Off by default, and `=== true` reads a server that does not send the
+          key as off; the help says the limit and that Check now is never kept waiting. */}
+      <SwitchRow label={tr('Smart update checks')}
+        help={tr('Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.')}
+        on={data.update_smart === true} onChange={(next) => save({ updateSmart: next })} />
       <NumberRow label={tr('Backup time (hour, 0–23)')} min={0} max={23} value={data.backup_hour ?? 3}
         help={isDesktop() ? `${nightly} ${tr('If the PC is off then, it runs the next time Uchiyomi opens.')}` : nightly}
         onSave={(n) => save({ backupHour: n })} />

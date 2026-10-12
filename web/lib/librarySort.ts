@@ -12,18 +12,22 @@ import { keys } from './i18n';
 
 export type SortDir = 'asc' | 'desc';
 
-const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read');
+// v0.61.0: 'Releasing soon', the release radar's estimate of the next chapter (bff lib/releaseRadar.ts).
+const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread', 'Most popular', 'Top rated', 'My rating', 'Most chapters', 'Recently read', 'Releasing soon');
 const GROUP_LABELS = keys('Activity', 'Ratings', 'Size', 'Name');
 /**
  * What the Order switch says, per kind of value: a time runs newest to oldest, a score high to low, an amount most to
  * fewest, a name A to Z. Words that say which end comes first, never "ascending", which nobody outside a database says.
  */
-const DIR_LABELS = keys('Newest first', 'Oldest first', 'High to low', 'Low to high', 'Most first', 'Fewest first', 'A–Z', 'Z–A');
+const DIR_LABELS = keys('Newest first', 'Oldest first', 'High to low', 'Low to high', 'Most first', 'Fewest first', 'A–Z', 'Z–A',
+  // v0.61.0, a time still to come: the soonest estimate first, or the furthest.
+  'Soonest first', 'Latest first');
 const WORDS = {
   time: { desc: DIR_LABELS[0], asc: DIR_LABELS[1] },
   score: { desc: DIR_LABELS[2], asc: DIR_LABELS[3] },
   amount: { desc: DIR_LABELS[4], asc: DIR_LABELS[5] },
   name: { asc: DIR_LABELS[6], desc: DIR_LABELS[7] },
+  soon: { asc: DIR_LABELS[8], desc: DIR_LABELS[9] },
 } as const;
 
 export interface LibrarySort {
@@ -40,9 +44,9 @@ export interface LibrarySort {
 }
 
 /**
- * The nine orders, in the menu's order: Activity (Updated, Recently read, Newest), Ratings (Most popular, Top rated, My
- * rating), Size (Most chapters, Most unread), Name (A–Z). Updated stays first: it is the default, and `SORTS[0]` the
- * page's fallback for anything it does not know.
+ * The ten orders, in the menu's order: Activity (Updated, Recently read, Newest, Releasing soon), Ratings (Most popular,
+ * Top rated, My rating), Size (Most chapters, Most unread), Name (A–Z). Updated stays first: it is the default, and
+ * `SORTS[0]` the page's fallback for anything it does not know.
  */
 export const SORTS: ReadonlyArray<LibrarySort> = [
   { key: 'updated', label: SORT_LABELS[0], sort: 'lastModified,desc', group: 0, words: 'time' },
@@ -51,6 +55,9 @@ export const SORTS: ReadonlyArray<LibrarySort> = [
   // series without one sorts after the rest. A server older than v0.58.0 sorts an order it does not know by title.
   { key: 'read', label: SORT_LABELS[8], sort: 'lastRead,desc', group: 0, words: 'time' },
   { key: 'new', label: SORT_LABELS[1], sort: 'createdDate,desc', group: 0, words: 'time' },
+  // v0.61.0: when the next chapter is likely (the release radar's estimate, soonest first); a series with none in force
+  // -- undated, gone quiet, not monitored -- comes after the rest either way. A server older than v0.61.0 sorts it A–Z.
+  { key: 'soon', label: SORT_LABELS[9], sort: 'releasing,asc', group: 0, words: 'soon' },
   { key: 'popular', label: SORT_LABELS[4], sort: 'popularity,desc', group: 1, words: 'score' },
   { key: 'score', label: SORT_LABELS[5], sort: 'score,desc', group: 1, words: 'score' },
   { key: 'rating', label: SORT_LABELS[6], sort: 'rating,desc', group: 1, words: 'score' },

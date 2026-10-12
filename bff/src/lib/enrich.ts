@@ -20,6 +20,7 @@ import { autoHeroFor } from './autoHero';
 import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
 import { noticeBook, noticeHidden, noticesActive } from './noticeChapters';
+import { radarsFor } from './releaseRadar';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -190,6 +191,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const fresh = await newSinceSeen(seen, await seenCounts(list));
   const heroes = await autoHeroFor(list.map((s) => s.id));
   const outside = await anilistScores(list.map((s) => s.id));
+  const radars = await radarsFor(list.map((s) => s.id));
   const editions = await editionLangs(list, (req as any).viewCtx as ViewCtx | undefined);
   return list.map((s) => {
     const p = progress?.get(s.id);
@@ -218,6 +220,11 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
         // own `rating`; and when this viewer last read in it. The Library's new sorts order by these.
         anilist: outside.get(s.id) ?? null,
         lastReadAt: p?.lastAt ?? null,
+        // v0.61.0: the release radar (lib/releaseRadar.ts) -- when its next chapter is likely, as an estimate: `{nextAt,
+        // dueUntil, quietAfter, lastAt, every, kind, steady, ended, basis}`, null while nothing dates it. The same for every
+        // viewer; the series page, the reader's end card, Releasing soon and Expected this week read it. Reintroduce
+        // without it: "the series page carries its radar" in releaseRadar.int.test.ts reads undefined.
+        radar: radars.get(s.id) ?? null,
       },
     };
   });

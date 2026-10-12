@@ -19,6 +19,7 @@ import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, push
 import { ADAPTERS, isProvider, verdictOf, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
+import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -554,6 +555,63 @@ export default async function personalRoutes(app: FastifyInstance) {
     return { ...summary, days: windowDays, byDay, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
   });
 
+  /**
+   * v0.61.0, Reading time (lib/readingTime.ts): how long the signed-in reader has read, from their own page turns -- the
+   * last 7 and 30 days, this UTC year (the one /api/wrapped counts), and over the Reading Studio's window (`days`,
+   * 7-400, as /api/stats) the median time per finished chapter, the hours of the day in `tz` (an IANA name; UTC when it
+   * is not one) and the devices, by the names their own sessions gave. No user parameter: nobody reads another
+   * member's time, and the household leaderboard and the admin's member stats stay counts of chapters.
+   * Reintroduce another member's events: "the Studio's time: the reader's own, by window, hour and device" in
+   * readingTime.int.test.ts adds the other member's forty turns.
+   */
+  app.get('/api/stats/time', async (req) => {
+    const uid = userIdOf(req);
+    const qs = req.query as Record<string, string>;
+    const days = Math.max(7, Math.min(400, Math.floor(Number(qs.days) || 90)));
+    const tz = validTz(qs.tz);
+    const now = Date.now();
+    const year = new Date(now).getUTCFullYear();
+    const [ys, ye] = yearRange(year);
+    const win = lastDays(days, now);
+    const week = lastDays(7, now);
+    const month = lastDays(30, now);
+    const tl = await loadTimeline(uid, Math.min(win[0], month[0], ys), now + 1);
+    const hourOf = hourIn(tz);
+    const w = summarize(tl, win[0], win[1], hourOf);
+    const wk = summarize(tl, week[0], week[1], hourOf);
+    const mo = summarize(tl, month[0], month[1], hourOf);
+    const yr = summarize(tl, ys, ye, hourOf);
+    return {
+      tz, days,
+      week: { ms: wk.ms, chapters: wk.chapters },
+      month: { ms: mo.ms, chapters: mo.chapters },
+      year: { year, ms: yr.ms, chapters: yr.chapters },
+      window: { ms: w.ms, chapters: w.chapters, perChapterMs: w.perChapterMs, byHour: w.byHour, byDevice: await devicesOf(uid, w.byDevice) },
+    };
+  });
+
+  /**
+   * v0.61.0: this reader's pace through a series, for its page's "Catch up in ~2 hr" -- the median time of the chapters
+   * of it they finished in the last year when there are three or more (`from: 'series'`), else their median over every
+   * series in the last 90 days (`'all'`), else none. A series they may not open is not found, as its page is not.
+   * Reintroduce the lookup by id alone: "the reading pace of a series: its own, else the reader's overall, else none;
+   * 404 where it may not be seen" in readingTime.int.test.ts answers 200 for a library this account was not given.
+   */
+  app.get('/api/series/:id/reading-pace', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const seen = await komga.series(vc(req), id).catch(() => null);
+    if (!seen) return reply.code(404).send({ error: 'not_found' });
+    const now = Date.now();
+    const year = lastDays(365, now);
+    const quarter = lastDays(90, now);
+    const tl = await loadTimeline(userIdOf(req), year[0], now + 1);
+    const noHours = () => 0;
+    const own = summarize(tl, year[0], year[1], noHours, id).perChapterMs;
+    if (own != null) return { perChapterMs: own, from: 'series' as const };
+    const all = summarize(tl, quarter[0], quarter[1], noHours).perChapterMs;
+    return all != null ? { perChapterMs: all, from: 'all' as const } : { perChapterMs: null, from: null };
+  });
+
   app.get('/api/wrapped', async (req) => {
     const uid = userIdOf(req);
     const year = Math.max(1970, Math.min(9999, Math.floor(Number((req.query as Record<string, string>).year) || new Date().getUTCFullYear())));
@@ -621,8 +679,19 @@ export default async function personalRoutes(app: FastifyInstance) {
     const genreCounts: Record<string, number> = {};
     for (const s of pool) for (const g of s.genres) genreCounts[g] = (genreCounts[g] ?? 0) + (seriesCounts[s.id] ?? 0);
     const rankedGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    // v0.61.0: the year's reading time from page turns (lib/readingTime.ts), its pace per chapter and its hours of the
+    // day in the reader's `tz` -- the same timeline and the same year the Reading Studio's year tile reads, so the two
+    // never disagree. Reintroduce a different year (say the last 365 days): "the Studio's year is Wrapped's, to the
+    // millisecond" in readingTime.int.test.ts finds two figures.
+    const tz = validTz((req.query as Record<string, string>).tz);
+    const [ys, ye] = yearRange(year);
+    const time = summarize(await loadTimeline(uid, ys, ye), ys, ye, hourIn(tz));
     return {
       year,
+      tz,
+      ms: time.ms,
+      perChapterMs: time.perChapterMs,
+      byHour: time.byHour,
       chapters: rows.length,
       series: Object.keys(seriesCounts).length,
       topSeries: topSeries.map((s) => ({ id: s.id, title: s.title, count: s.count })),
@@ -915,7 +984,8 @@ export default async function personalRoutes(app: FastifyInstance) {
     // make Home disclose whether another account owns it.
     if ('librarySort' in data) {
       // v0.58.0: Most popular, Top rated, My rating, Most chapters and Recently read (web/components/LibraryFilters.tsx).
-      const sort = z.enum(['updated', 'new', 'az', 'unread', 'popular', 'score', 'rating', 'chapters', 'read']).safeParse(data.librarySort);
+      // v0.61.0: Releasing soon (`soon`, the release radar's estimate; web/lib/librarySort.ts).
+      const sort = z.enum(['updated', 'new', 'az', 'unread', 'popular', 'score', 'rating', 'chapters', 'read', 'soon']).safeParse(data.librarySort);
       if (!sort.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose a valid Library sort.' });
       data.librarySort = sort.data;
     }

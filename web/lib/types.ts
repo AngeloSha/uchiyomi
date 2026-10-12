@@ -16,6 +16,28 @@ export interface UchiyomiFlags {
   anilist?: AniListNumbers | null;
   /** v0.58.0: when this viewer last read a chapter of it (ISO); null for never, absent from an older server. */
   lastReadAt?: string | null;
+  /**
+   * v0.61.0: the release radar -- the server's estimate of when the next chapter comes (bff lib/releaseRadar.ts). Null
+   * while nothing dates the series or it has no source; absent from an older server. lib/radar.ts says it in words.
+   */
+  radar?: SeriesRadar | null;
+}
+
+/**
+ * The release radar (v0.61.0, `yomi.radar`), ISO times. `nextAt`/`dueUntil` bound the estimate, null when the rhythm is
+ * too uneven or too short or the series ended or is on hiatus; from `quietAfter` on the series is quiet. `every` is the
+ * median gap in days, `steady` whether it keeps one weekday. Always shown as an estimate ("~Friday", "usually Fridays").
+ */
+export interface SeriesRadar {
+  nextAt: string | null;
+  dueUntil: string | null;
+  quietAfter: string | null;
+  lastAt: string | null;
+  every: number | null;
+  kind: CadenceKind;
+  steady: boolean;
+  ended: boolean;
+  basis: 'source' | 'arrival' | null;
 }
 
 /** AniList's average score (0–100) and popularity for a series (v0.58.0, `yomi.anilist`). */

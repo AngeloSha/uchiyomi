@@ -19,6 +19,7 @@ import { editionChipLabels, readerTarget } from '@/lib/editions';
 import { numLabel } from '@/lib/numbering';
 import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
+import { ReaderEndLabel, ReaderEndRadar } from '@/components/ReaderEndRadar';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, withTitleLook, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
@@ -1141,9 +1142,10 @@ function ReaderInner() {
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
       className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">
-        {offlineEnd ? tr('End of your downloads') : tr('You finished')}
+        {offlineEnd ? tr('End of your downloads') : <ReaderEndLabel seriesId={activeSeriesId} />}
       </p>
       <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || tr('This series')}</h2>
+      {!offlineEnd && <ReaderEndRadar seriesId={activeSeriesId} />}
       {offlineEnd && (
         <p className="mx-auto mt-2 max-w-sm text-sm text-fog-400">
           {tr('This is the last chapter you have offline. Reconnect to keep reading.')}

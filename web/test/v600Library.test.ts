@@ -61,6 +61,9 @@ test('every order runs both ways: the natural direction first, worded for what i
     ['updated', [['desc', 'Newest first'], ['asc', 'Oldest first']]],
     ['read', [['desc', 'Newest first'], ['asc', 'Oldest first']]],
     ['new', [['desc', 'Newest first'], ['asc', 'Oldest first']]],
+    // v0.61.0, deliberately added: Releasing soon (the release radar's estimate), a time still to come, so its two ways
+    // are "Soonest first" (its own) and "Latest first".
+    ['soon', [['asc', 'Soonest first'], ['desc', 'Latest first']]],
     ['popular', [['desc', 'High to low'], ['asc', 'Low to high']]],
     ['score', [['desc', 'High to low'], ['asc', 'Low to high']]],
     ['rating', [['desc', 'High to low'], ['asc', 'Low to high']]],

@@ -16,6 +16,7 @@
 // browser.
 import { t as tr } from './i18n';
 import { bookCountText, compactText, numberText, relativeTime } from './format';
+import { radarNote } from './radar';
 import type { AniListNumbers, Series } from './types';
 
 /** A number the server sent, or null: an older server sends nothing, and a value that is not a number is nothing too. */
@@ -60,7 +61,7 @@ export const readersText = (popularity: number): string =>
  * What kind of value a card shows, which is what it draws before the text: `score` a star, `popularity` the people
  * icon; the other three are words already.
  */
-export type SortValueKind = 'popularity' | 'score' | 'rating' | 'chapters' | 'read';
+export type SortValueKind = 'popularity' | 'score' | 'rating' | 'chapters' | 'read' | 'soon';
 
 export interface SortValue {
   kind: SortValueKind;
@@ -74,7 +75,7 @@ export interface SortValue {
  * The value a Library card shows under its title while the shelf is in order `sort` (a SORTS key): null for the four
  * older orders, and for a series without the value.
  */
-export function sortValue(series: Pick<Series, 'booksCount' | 'yomi'>, sort: string): SortValue | null {
+export function sortValue(series: Pick<Series, 'booksCount' | 'yomi' | 'autoUpdate'>, sort: string): SortValue | null {
   switch (sort) {
     case 'popular': {
       const p = anilistNumbers(series.yomi?.anilist)?.popularity;
@@ -100,6 +101,12 @@ export function sortValue(series: Pick<Series, 'booksCount' | 'yomi'>, sort: str
       if (!at || !Number.isFinite(Date.parse(at))) return null;
       const text = tr('Read {when}', { when: relativeTime(at) });
       return { kind: 'read', text, hint: text };
+    }
+    // v0.61.0, Releasing soon: the release radar's word on the next chapter -- "~Fri", "Due", "Running late" (lib/radar.ts);
+    // nothing for a series without an estimate in force, which sorts after the rest.
+    case 'soon': {
+      const text = radarNote(series.yomi?.radar, { autoUpdate: series.autoUpdate !== false });
+      return text ? { kind: 'soon', text, hint: text } : null;
     }
     default:
       return null;

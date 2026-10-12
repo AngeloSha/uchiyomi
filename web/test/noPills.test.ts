@@ -96,6 +96,12 @@ const SURFACES = [
   // mark and a band that says a work is not in the library -- no capsule anywhere on them.
   'components/RelatedRail.tsx',
   'lib/related.ts',
+  // v0.61.0, the release radar: its words, and the reader's end-card label and line.
+  'lib/radar.ts',
+  'components/ReaderEndRadar.tsx',
+  // v0.61.0, reading time: its words and the hours chart.
+  'lib/readingTime.ts',
+  'components/charts/Columns.tsx',
 ];
 
 /**
@@ -149,6 +155,15 @@ const SLICES: [string, string, string, string][] = [
   // v0.61.0 (#190): Profile → Connections' tracker rows -- Connect, Cancel, Test connection, Disconnect, and AniList's token
   // page -- are keys, beside the OPDS and API token sections below them, whose chips this release does not redesign.
   ['components/ProfileConnections.tsx', 'Connections: the tracker rows', 'function TrackerRow(', 'function OpdsSection('],
+  // v0.61.0, the release radar: Updates' Expected this week (its cards are the list's own, without the capsule count),
+  // and the series page's outlook line under the reading progress.
+  ['app/updates/page.tsx', 'Updates: Expected this week', 'function ExpectedThisWeek(', 'export default function UpdatesPage('],
+  ['app/series/page.tsx', 'Series: the outlook line', '{outlook && <p data-series-outlook', '<div data-series-keys'],
+  // v0.61.0, reading time: the Reading Studio's tiles, hours and devices, and Wrapped's line and hours.
+  ['components/ProfileYou.tsx', 'Studio: reading time', '<div data-studio-time>', '{bookCountText(total)}'],
+  ['components/ProfileYou.tsx', 'Studio: by hour and devices', '<div data-studio-hours>', ''],
+  ['app/wrapped/page.tsx', 'Wrapped: the time line', '{timeLine && <p data-wrapped-time', '</div>'],
+  ['app/wrapped/page.tsx', 'Wrapped: by hour', '<div data-wrapped-hours', '(data?.topSeries?.length'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

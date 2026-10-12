@@ -618,6 +618,35 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /**
+   * v0.61.0, Expected this week (the Updates page, under the new chapters): the series this reader follows -- a
+   * favourite, or one they read in the last 90 days -- whose next chapter the release radar (lib/releaseRadar.ts) puts
+   * within the next seven days, due or running late but not yet quiet; monitored series only, soonest first, at most
+   * 30. Every series as a listing shows it to THIS viewer (browsable(): their libraries, age cap and 18+ switch), and
+   * only their own favourites and reading choose it. `{content: Series[]}`, enriched, so each carries yomi.radar.
+   * Reintroduce another member's reading (drop the user from the events test), or list without browsable(): "Expected
+   * this week: this reader's series due within seven days, in the libraries they may see" in releaseRadar.int.test.ts
+   * lists their series, or the 18+ favourite a listing leaves out while the 18+ switch is off (the by-id resolve below
+   * keeps libraries and age caps, and knows no 18+ switch).
+   */
+  app.get('/api/updates/expected', async (req) => {
+    const p = new Params();
+    const uid = p.add(userIdOf(req));
+    const rows = await q<{ id: string }>(
+      `SELECT s.id FROM lib_series s JOIN series_radar r ON r.series_id = s.id
+        WHERE (EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = ${uid} AND f.series_id = s.id)
+               OR EXISTS (SELECT 1 FROM reading_events e WHERE e.user_id = ${uid} AND e.series_id = s.id
+                             AND e.created_at > now() - interval '90 days'))
+          AND s.auto_update AND r.next_at IS NOT NULL AND r.next_at < now() + interval '7 days' AND r.quiet_after > now()
+          AND ${browsable('s', vc(req), p)}
+        ORDER BY r.next_at, s.id
+        LIMIT 30`,
+      p.values as any[],
+    );
+    const series = (await Promise.all(rows.map((r) => komga.series(vc(req), r.id).catch(() => null)))).filter(Boolean) as any[];
+    return { content: await enrichSeries(req, series) };
+  });
+
   // Ambient cover color (computed + cached on demand).
   app.get('/api/series/:id/color', async (req) => {
     const { id } = req.params as { id: string };
