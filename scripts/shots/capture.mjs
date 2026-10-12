@@ -248,32 +248,48 @@ async function main() {
     await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home');
     await ph.goto('about:blank');
   }
+  /**
+   * The Library's toolbar and its first row of covers, as a band for the site's "What's new" cards. The row is measured
+   * from the tiles themselves: the grid's first child is a wrapper around all of them, and a first run cropped the whole
+   * shelf.
+   */
+  const firstRowBand = ({ captions = false } = {}) => page.evaluate((captions) => {
+    const bar = [...document.querySelectorAll('[data-library-toolbar]')].find((e) => e.getBoundingClientRect().height > 0);
+    const tiles = [...document.querySelectorAll('[data-library-grid] a[href*="/series/"]')]
+      .map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0);
+    if (!bar || !tiles.length) return null;
+    const top0 = Math.min(...tiles.map((r) => r.top));
+    const row = tiles.filter((r) => r.top < top0 + 8);
+    const a = bar.getBoundingClientRect();
+    const left = Math.min(a.left, ...row.map((r) => r.left)) - 16;
+    let right = Math.max(a.right, ...row.map((r) => r.right)) + 16;
+    const top = a.top - 16;
+    // `captions`: the lines under the covers too -- since v0.61.0 the Releasing soon order says *~Fri*, *Due* or
+    // *Running late* there, the band's whole point. That band is cut at the first cover edge past 3:1, so the site's
+    // 3:1 card trims a sliver off its sides rather than the captions off its bottom.
+    const bottom = Math.max(...row.map((r) => r.bottom)) + (captions ? 52 : 16);
+    if (captions) {
+      const edge = row.map((r) => r.right + 16).sort((x, y) => x - y).find((x) => x - left >= (bottom - top) * 3);
+      if (edge) right = Math.min(right, edge);
+    }
+    return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+  }, captions);
   if (want('library') || want('crop-library')) {
     await go('/library/', 600);
     if (want('library')) await shot(page, 'library');
-    // The toolbar and the first row of covers, with their progress bars (v0.60.0). The row is measured from the tiles
-    // themselves: the grid's first child is a wrapper around all of them, and a first run cropped the whole shelf.
-    if (want('crop-library')) {
-      await bandShot('crop-library', await page.evaluate(() => {
-        const bar = [...document.querySelectorAll('[data-library-toolbar]')].find((e) => e.getBoundingClientRect().height > 0);
-        const tiles = [...document.querySelectorAll('[data-library-grid] a[href*="/series/"]')]
-          .map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0);
-        if (!bar || !tiles.length) return null;
-        const top0 = Math.min(...tiles.map((r) => r.top));
-        const row = tiles.filter((r) => r.top < top0 + 8);
-        const a = bar.getBoundingClientRect();
-        const left = Math.min(a.left, ...row.map((r) => r.left)) - 16;
-        const right = Math.max(a.right, ...row.map((r) => r.right)) + 16;
-        const top = a.top - 16;
-        const bottom = Math.max(...row.map((r) => r.bottom)) + 16;
-        return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
-      }));
-    }
+    // The toolbar and the first row of covers, with their progress bars (v0.60.0).
+    if (want('crop-library')) await bandShot('crop-library', await firstRowBand());
+  }
+  // v0.61.0, the release radar: the Library in its Releasing soon order, each of the first covers saying when its next
+  // chapter is likely. The URL's sort wins for this visit only; the account's saved order is left alone.
+  if (want('crop-radar')) {
+    await go('/library/?sort=soon', 900);
+    await bandShot('crop-radar', await firstRowBand({ captions: true }));
   }
   // The series page since v0.60.0: Continue, the four keys and the ratings sit under the cover, and at 860 px tall the
   // keys fell just below the frame. The window is scrolled just far enough to show them, so the shot keeps the 16:10
   // the marketing site frames it in. Then More, opened: USAGE.md sends readers to "More → …" for a dozen things.
-  if ((want('series') || want('series-more') || want('crop-ratings')) && SERIES_ID) {
+  if ((want('series') || want('series-more') || want('crop-ratings') || want('crop-related')) && SERIES_ID) {
     await go(`/series/?id=${SERIES_ID}`, 1200);
     const more = await page.evaluateHandle(() =>
       [...document.querySelectorAll('button[data-series-more]')].find((b) => b.getBoundingClientRect().height > 0) || null);
@@ -295,12 +311,31 @@ async function main() {
       await shot(page, 'series-more');
       await page.keyboard.press('Escape');
     }
+    // v0.61.0: the Related row -- AniList's sequels, side stories and spin-offs -- cut to its covers, which sit at the
+    // start of a row as wide as the page: a band over the whole row would be two thirds empty. Widened to 3:1 for the
+    // site's card when the covers alone are taller than that.
+    if (want('crop-related')) {
+      await sleep(400);
+      const box = await page.evaluate(() => {
+        const root = [...document.querySelectorAll('[data-related]')].find((e) => e.getBoundingClientRect().height > 0);
+        if (!root) return null;
+        root.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const rs = [...root.querySelectorAll('h2, h3, a, img, p')].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.width > 0);
+        if (!rs.length) return null;
+        const top = Math.min(...rs.map((r) => r.top)) - 16, bottom = Math.max(...rs.map((r) => r.bottom)) + 16;
+        const left = Math.max(0, Math.min(...rs.map((r) => r.left)) - 16);
+        const right = Math.min(document.documentElement.clientWidth, Math.max(Math.max(...rs.map((r) => r.right)) + 16, left + (bottom - top) * 3));
+        return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+      });
+      await sleep(600);
+      await bandShot('crop-related', box);
+    }
   }
   if (want('wrapped')) { await go('/wrapped/', 1500); await shot(page, 'wrapped'); }
 
   // A desktop capture of the reader as well as the phone one: the marketing tour shows screens in a browser
   // frame, and a portrait phone shot letterboxed into that frame looks like a mistake.
-  if (want('reader') && process.env.SHOT_BOOK_ID) {
+  if ((want('reader') || want('crop-reader-comfort')) && process.env.SHOT_BOOK_ID) {
     await go(`/reader/?book=${process.env.SHOT_BOOK_ID}`, 1200);
     await page.evaluate((frac) => {
       const el = document.querySelector('[data-lenis-prevent]');
@@ -309,7 +344,33 @@ async function main() {
     await sleep(1600);
     await page.mouse.click(683, 430);
     await sleep(900);
-    await shot(page, 'reader');
+    if (want('reader')) await shot(page, 'reader');
+    // v0.61.0, the reader comfort pack: its settings sheet from Wide pages down, the rows a phone reader looks for.
+    // The rows are marked here and the band is cut round them (bandAround), widened to the sheet.
+    if (want('crop-reader-comfort')) {
+      if (!(await page.$('[data-reader-settings]'))) { await page.mouse.click(683, 430); await sleep(900); }
+      await page.$eval('[data-reader-settings]', (b) => b.click()).catch(() => {});
+      await page.waitForSelector('[role="dialog"][aria-label="Reader"]', { timeout: 5000 }).catch(() => {});
+      await sleep(800);
+      const marked = await page.evaluate(() => {
+        const d = document.querySelector('[role="dialog"][aria-label="Reader"]');
+        if (!d) return false;
+        const width = d.getBoundingClientRect().width;
+        const row = (t) => {
+          let el = [...d.querySelectorAll('*')].find((x) => x.children.length === 0 && (x.textContent || '').trim() === t);
+          while (el && el.parentElement && el.getBoundingClientRect().width < width * 0.8) el = el.parentElement;
+          return el;
+        };
+        const a = row('Wide pages'), b = row('Crop page borders');
+        if (!a || !b) return false;
+        a.scrollIntoView({ block: 'start', behavior: 'instant' });
+        a.setAttribute('data-shot-from', ''); b.setAttribute('data-shot-to', '');
+        return true;
+      });
+      await sleep(500);
+      await bandShot('crop-reader-comfort', marked ? await bandAround('[data-shot-from]', { to: '[data-shot-to]' }) : null);
+      await page.keyboard.press('Escape');
+    }
   }
 
   if (want('discover')) {
