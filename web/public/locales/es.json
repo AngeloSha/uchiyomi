@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3607
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3597,5 +3597,18 @@
   "Couldn’t load your library": "No se pudo cargar tu biblioteca",
   "Couldn’t load more": "No se pudieron cargar más",
   "AniList score": "Puntuación en AniList",
-  "Actions for {title}": "Acciones de {title}"
+  "Actions for {title}": "Acciones de {title}",
+  "Save as list": "Guardar como lista",
+  "Update “{name}”": "Actualizar «{name}»",
+  "Share with the household": "Compartir con tu hogar",
+  "Everyone here can open it and sees only what they may open; only you can change it.": "Todos aquí pueden abrirla y solo ven lo que pueden abrir; solo tú puedes cambiarla.",
+  "Live list": "Lista dinámica",
+  "Shared": "Compartida",
+  "by {name}": "de {name}",
+  "Your lists": "Tus listas",
+  "Shared with you": "Compartidas contigo",
+  "Edit filters": "Editar filtros",
+  "Stop sharing": "Dejar de compartir",
+  "Showing the first {n} of {total}.": "Se muestran los primeros {n} de {total}.",
+  "Nothing in your library matches this list right now.": "Ahora mismo nada de tu biblioteca encaja con esta lista."
 }

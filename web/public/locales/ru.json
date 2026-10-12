@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3607
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3597,5 +3597,18 @@
   "Couldn’t load your library": "Не удалось загрузить библиотеку",
   "Couldn’t load more": "Не удалось загрузить ещё",
   "AniList score": "Оценка на AniList",
-  "Actions for {title}": "Действия: {title}"
+  "Actions for {title}": "Действия: {title}",
+  "Save as list": "Сохранить как список",
+  "Update “{name}”": "Обновить «{name}»",
+  "Share with the household": "Поделиться с домашними",
+  "Everyone here can open it and sees only what they may open; only you can change it.": "Все здесь могут открыть его и видят только то, что им доступно; изменить его можете только вы.",
+  "Live list": "Живой список",
+  "Shared": "Общий",
+  "by {name}": "автор: {name}",
+  "Your lists": "Ваши списки",
+  "Shared with you": "Доступные вам",
+  "Edit filters": "Изменить фильтры",
+  "Stop sharing": "Перестать делиться",
+  "Showing the first {n} of {total}.": "Показаны первые {n} из {total}.",
+  "Nothing in your library matches this list right now.": "Сейчас в вашей библиотеке нет ничего, что подходит под этот список."
 }

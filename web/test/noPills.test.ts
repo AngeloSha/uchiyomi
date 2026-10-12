@@ -92,6 +92,13 @@ const SURFACES = [
   'components/LibraryFilters.tsx',
   'lib/librarySort.ts',
   'lib/libraryLayout.ts',
+  // v0.61.0: Save as list and Update "Name" (keys at the end of the Library's chip row) and the dialog; a list's tags
+  // ("Live list", "Shared"), whose it is, and its own keys on its page -- Edit (a chip until now), Edit filters, Share
+  // and Stop sharing -- beside its sort chips, which stay in the page.
+  'components/SaveListDialog.tsx',
+  'components/ListBits.tsx',
+  'lib/lists.ts',
+  'lib/libraryQuery.ts',
 ];
 
 /**

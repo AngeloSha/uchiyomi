@@ -79,7 +79,8 @@ export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string 
 }
 
 export function ListsCard({ span = '' }: { span?: string }) {
-  const { data } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections'), staleTime: 300_000 });
+  // v0.61.0: every list this reader may read, smart and shared ones too, each counted for them (lib/lists.ts).
+  const { data } = useQuery({ queryKey: ['lists-all'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections?scope=all'), staleTime: 60_000 });
   const rows = data?.content ?? [];
   return (
     <div className={`${CARD} ${span}`}>

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
@@ -12,10 +12,12 @@ import { IcChevronLeft, IcChevronRight, IcHome, IcPlus, IcTrash } from '@/compon
 import { useRtl } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
+import { ACCENTS, homeIdsOf, isMine, type ListRow } from '@/lib/lists';
+import { ListOwnerLine, ListTags } from '@/components/ListBits';
+import { invalidateLists, useListsAll } from '@/components/SaveListDialog';
 
-export interface CollectionRow { id: string; name: string; accent: string | null; sort_order: number; item_count: number }
+export type CollectionRow = ListRow;
 
-const ACCENTS = ['#7c5cff', '#ff4dd2', '#22d3ee', '#34d399', '#fbbf24', '#f87171'];
 /** A list's name inside a sentence, isolated: in Arabic a Latin name would reorder the words around it. */
 const iso = (s: string): string => `\u2068${s}\u2069`;
 
@@ -31,15 +33,18 @@ export default function CollectionsPage() {
   // "Failed to create" over itself.
   useLayer('dialog', creating);
   const [name, setName] = useState('');
-  const [accent, setAccent] = useState(ACCENTS[0]);
-  const { data, isLoading } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections') });
+  const [accent, setAccent] = useState<string>(ACCENTS[0]);
+  // v0.61.0: every list this reader may read (lib/lists.ts) -- their own, hand-picked and smart, then the household's
+  // shared ones -- in two sections. Its own key: ['collections'] stays the plain answer the series page's sheet reads.
+  const { data, isLoading } = useListsAll();
   const items = data?.content ?? [];
+  const mine = items.filter(isMine);
+  const theirs = items.filter((c) => !isMine(c));
   const savedHome = user?.settings?.homeCollections;
   // Until the first edit, mirror Home's legacy first-three-nonempty choice.  An edit writes the complete,
-  // valid list and thereby drops deleted or foreign ids from an older setting.
-  const homeIds = (Array.isArray(savedHome)
-    ? savedHome.filter((id): id is string => typeof id === 'string' && items.some((c) => c.id === id))
-    : items.filter((c) => Number(c.item_count) > 0).slice(0, 3).map((c) => c.id)).slice(0, 3);
+  // valid list and thereby drops deleted or unreadable ids from an older setting. A shared list takes a Home slot
+  // like the reader's own (v0.61.0); it never fills one nobody chose for it.
+  const homeIds = homeIdsOf(savedHome, items);
 
   const saveHome = async (next: string[]) => {
     if (homeSaving) return;
@@ -82,7 +87,7 @@ export default function CollectionsPage() {
       toast(tr('Collection created'), 'success');
       setCreating(false);
       setName('');
-      qc.invalidateQueries({ queryKey: ['collections'] });
+      invalidateLists(qc);
       router.push(`/collection/?id=${c.id}`);
     } catch { toast(tr('Could not create the collection'), 'error'); }
   };
@@ -92,9 +97,52 @@ export default function CollectionsPage() {
     try {
       await api(`/api/collections/${c.id}`, { method: 'DELETE' });
       toast(tr('Deleted'), 'success');
-      qc.invalidateQueries({ queryKey: ['collections'] });
+      invalidateLists(qc);
     } catch { toast(tr('Failed'), 'error'); }
   };
+
+  /** One list's card: the same for the reader's own and a shared one, which has no Delete and says whose it is. */
+  const card = (c: CollectionRow) => (
+    <div key={c.id} className="card group relative overflow-hidden p-4">
+      <span aria-hidden className="absolute inset-y-0 start-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
+      <Link href={`/collection/?id=${c.id}`} className="block ps-2">
+        <p className="font-display text-lg font-semibold text-fog-50">{c.name}</p>
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-xs text-fog-500">{Number(c.item_count) === 1 ? tr('1 series') : tr('{n} series', { n: Number(c.item_count) })}</span>
+          <ListTags list={c} />
+        </span>
+        {c.owner && <ListOwnerLine owner={c.owner} className="mt-1.5" />}
+      </Link>
+      <div className="mt-3 flex items-center gap-1.5 ps-2">
+        <button type="button" onClick={() => toggleHome(c.id)} disabled={homeSaving}
+          aria-pressed={homeIds.includes(c.id)}
+          className={`chip text-xs disabled:opacity-50 ${homeIds.includes(c.id) ? 'chip-active' : ''}`}>
+          <IcHome width={13} height={13} aria-hidden />
+          {homeIds.includes(c.id) ? tr('Home {n}', { n: homeIds.indexOf(c.id) + 1 }) : tr('Show on Home')}
+        </button>
+        {homeIds.includes(c.id) && homeIds.length > 1 && (
+          <>
+            <button type="button" disabled={homeSaving || homeIds.indexOf(c.id) === 0}
+              onClick={() => moveHome(c.id, -1)} aria-label={tr('Move earlier')}
+              className="grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-300 disabled:opacity-30">
+              {rtl ? <IcChevronRight width={14} height={14} /> : <IcChevronLeft width={14} height={14} />}
+            </button>
+            <button type="button" disabled={homeSaving || homeIds.indexOf(c.id) === homeIds.length - 1}
+              onClick={() => moveHome(c.id, 1)} aria-label={tr('Move later')}
+              className="grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-300 disabled:opacity-30">
+              {rtl ? <IcChevronLeft width={14} height={14} /> : <IcChevronRight width={14} height={14} />}
+            </button>
+          </>
+        )}
+      </div>
+      {isMine(c) && (
+        <button onClick={() => remove(c)} aria-label={tr('Delete “{name}”', { name: iso(c.name) })}
+          className="absolute end-3 top-3 grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-500 opacity-0 transition group-hover:opacity-100">
+          <IcTrash width={14} height={14} />
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen-d">
@@ -120,43 +168,18 @@ export default function CollectionsPage() {
           sub={tr('Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page.')}
           cta={undefined} />
       ) : (
-        <div className="grid grid-cols-1 gap-3 px-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 lg:px-0">
-          {items.map((c) => (
-            <div key={c.id} className="card group relative overflow-hidden p-4">
-              <span aria-hidden className="absolute inset-y-0 start-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
-              <Link href={`/collection/?id=${c.id}`} className="block ps-2">
-                <p className="font-display text-lg font-semibold text-fog-50">{c.name}</p>
-                <p className="text-xs text-fog-500">{Number(c.item_count) === 1 ? tr('1 series') : tr('{n} series', { n: Number(c.item_count) })}</p>
-              </Link>
-              <div className="mt-3 flex items-center gap-1.5 ps-2">
-                <button type="button" onClick={() => toggleHome(c.id)} disabled={homeSaving}
-                  aria-pressed={homeIds.includes(c.id)}
-                  className={`chip text-xs disabled:opacity-50 ${homeIds.includes(c.id) ? 'chip-active' : ''}`}>
-                  <IcHome width={13} height={13} aria-hidden />
-                  {homeIds.includes(c.id) ? tr('Home {n}', { n: homeIds.indexOf(c.id) + 1 }) : tr('Show on Home')}
-                </button>
-                {homeIds.includes(c.id) && homeIds.length > 1 && (
-                  <>
-                    <button type="button" disabled={homeSaving || homeIds.indexOf(c.id) === 0}
-                      onClick={() => moveHome(c.id, -1)} aria-label={tr('Move earlier')}
-                      className="grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-300 disabled:opacity-30">
-                      {rtl ? <IcChevronRight width={14} height={14} /> : <IcChevronLeft width={14} height={14} />}
-                    </button>
-                    <button type="button" disabled={homeSaving || homeIds.indexOf(c.id) === homeIds.length - 1}
-                      onClick={() => moveHome(c.id, 1)} aria-label={tr('Move later')}
-                      className="grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-300 disabled:opacity-30">
-                      {rtl ? <IcChevronLeft width={14} height={14} /> : <IcChevronRight width={14} height={14} />}
-                    </button>
-                  </>
-                )}
-              </div>
-              <button onClick={() => remove(c)} aria-label={tr('Delete “{name}”', { name: iso(c.name) })}
-                className="absolute end-3 top-3 grid h-8 w-8 place-items-center rounded-full border border-ink-700 text-fog-500 opacity-0 transition group-hover:opacity-100">
-                <IcTrash width={14} height={14} />
-              </button>
-            </div>
-          ))}
-        </div>
+        <>
+          {/* v0.61.0: the reader's own lists, then those someone else shares with the household -- read-only here, and
+              never theirs to delete. A section is named only when there are two. */}
+          {theirs.length > 0 && <h2 className="px-4 pt-4 font-display text-base font-semibold text-fog-100 lg:px-0">{tr('Your lists')}</h2>}
+          {mine.length > 0 && <div className="grid grid-cols-1 gap-3 px-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 lg:px-0">{mine.map(card)}</div>}
+          {theirs.length > 0 && (
+            <>
+              <h2 className="px-4 pt-6 font-display text-base font-semibold text-fog-100 lg:px-0">{tr('Shared with you')}</h2>
+              <div className="grid grid-cols-1 gap-3 px-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 lg:px-0">{theirs.map(card)}</div>
+            </>
+          )}
+        </>
       )}
 
       {creating && (

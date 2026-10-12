@@ -84,10 +84,16 @@ test('only a direct sort click saves the default, without undoing the current UR
 test('Home keeps the legacy first three nonempty Lists only until an explicit ordered setting exists', () => {
   const src = code(read('app/page.tsx'));
   assert.match(src, /const saved = user\?\.settings\?\.homeCollections;/);
-  assert.match(src, /const cols = Array\.isArray\(saved\)\s*\? saved\.slice\(0, 3\)\.map\(\(id\) => all\.find\(\(c\) => c\.id === id\)\)\.filter/,
-    'an explicit order is not followed or is not limited to three owned rows');
-  assert.match(src, /: all\.filter\(\(c\) => Number\(c\.item_count\) > 0\)\.slice\(0, 3\)/,
-    'an account with no setting lost the legacy first-three-nonempty behaviour');
+  // v0.61.0, updated deliberately: the choice moved into lib/lists.ts homeIdsOf, shared with the Lists page (which used
+  // its own copy) and Save as list, because a list someone else shares can now hold a Home slot -- one it is CHOSEN for,
+  // never a legacy one. The same three rules are pinned there; Home only follows the ids it gives, in their order.
+  assert.match(src, /const cols = homeIdsOf\(saved, all\)\.map\(\(id\) => all\.find\(\(c\) => c\.id === id\)\)\.filter/,
+    'Home does not follow the chosen order');
+  const lists = code(read('lib/lists.ts'));
+  assert.match(lists, /Array\.isArray\(saved\)\s*\? saved\.filter\(\(id\): id is string => typeof id === 'string' && lists\.some\(\(c\) => c\.id === id\)\)/,
+    'an explicit order is not followed');
+  assert.match(lists, /: lists\.filter\(\(c\) => isMine\(c\) && Number\(c\.item_count\) > 0\)\.map\(\(c\) => c\.id\);\s*return ids\.slice\(0, 3\);/,
+    'an account with no setting lost the legacy first-three-nonempty behaviour, or more than three are shown');
   assert.match(src, /if \(!cols\.length\) return null;/,
     'an explicit empty array should mean no Home List rails');
   assert.match(src, /const items = data\?\.items \?\? \[\];\s*if \(!items\.length\) return null;/,
@@ -98,10 +104,11 @@ test('Home keeps the legacy first three nonempty Lists only until an explicit or
 
 test('Lists edits clean stale IDs, refuse a fourth choice, and expose ordered accessible controls', () => {
   const src = code(read('app/collections/page.tsx'));
-  assert.match(src, /savedHome\.filter\(\(id\): id is string => typeof id === 'string' && items\.some\(\(c\) => c\.id === id\)\)/,
-    'stale, deleted or foreign collection IDs survive the next edit');
-  assert.match(src, /items\.filter\(\(c\) => Number\(c\.item_count\) > 0\)\.slice\(0, 3\)\.map\(\(c\) => c\.id\)/,
-    'the editor does not mirror legacy Home before the account has a setting');
+  // v0.61.0, updated deliberately: the editor reads Home's choice through the same lib/lists.ts homeIdsOf Home does (its
+  // rules are pinned in the test above), over every list this reader may read, so a stale or no-longer-shared id is
+  // dropped by the next edit as a deleted one always was.
+  assert.match(src, /const homeIds = homeIdsOf\(savedHome, items\);/,
+    'stale, deleted or foreign collection IDs survive the next edit, or the editor does not mirror legacy Home');
   assert.match(src, /if \(homeIds\.length >= 3\) \{\s*toast\(tr\('Choose up to 3 lists for Home'\), 'error'\);\s*return;/,
     'choosing a fourth List is not refused with an explanation');
   assert.match(src, /api\('\/api\/settings', \{ method: 'PUT', json: \{ homeCollections: next \} \}\)/,
