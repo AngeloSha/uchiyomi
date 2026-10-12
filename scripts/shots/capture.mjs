@@ -166,6 +166,13 @@ async function main() {
   await login(page);
   console.log('  · signed in');
   await meetNames(page, BASE);
+  // The admin's Health banner ("…checks found something · Take a look · Not now") is the live server's state, not a
+  // feature of the screen being shot: answer it "Not now", as a person would. It is remembered in this browser context,
+  // so the phone page below never shows it either (components/HealthAlert.tsx, lib/healthAlert.ts writeSeen).
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
+  await settle(page, 300);
+  const notNow = await page.$('[data-health-banner] button');
+  if (notNow) { await notNow.click(); await sleep(400); console.log('  · Health banner: Not now'); }
 
   const go = async (path, extra = 0) => {
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });

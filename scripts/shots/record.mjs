@@ -56,6 +56,10 @@ async function main() {
   if (await page.$('input[type=password]')) throw new Error('login failed');
   // Every source name, and this series' groups, known before the first frame (fixtures.mjs meetNames).
   await meetNames(page, BASE);
+  // The admin's Health banner is the live server's state, not part of the tour: answer it "Not now" before filming.
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  const notNow = await page.$('[data-health-banner] button');
+  if (notNow) { await notNow.click(); await sleep(400); }
   if (SERIES_ID) await page.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
 
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
