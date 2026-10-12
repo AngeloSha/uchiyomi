@@ -923,10 +923,11 @@ the next check downloads what it no longer hides.
 
 ## Rate limiting
 
-The API isn't rate-limited for authenticated users; the limits are on getting in. `POST /auth/login` takes
+The API isn't rate-limited for authenticated users, but for the two Test routes that ask someone else's service
+(`POST /api/trackers/:provider/test` six per account per minute, since v0.61.0; a notification target's Test five);
+the limits are on getting in. `POST /auth/login` takes
 ten attempts per address per five minutes, `POST /api/setup` and `POST /auth/register` five per ten minutes,
-`POST /api/trackers/:provider/test` six per account per minute (since v0.61.0: each one asks someone else's
-service), and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
+and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
 minutes, then **429** `too_many_requests` `{message}` with `Retry-After` for every further request from that
 address that presents a credential, until the window ends; requests with no credential, cookie-only
 requests and valid keys are not counted. The *sources* the server fetches from are limited too: endpoints
