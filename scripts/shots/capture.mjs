@@ -15,6 +15,8 @@ const USER = process.env.SHOT_USER;
 const PASS = process.env.SHOT_PASS;
 const ONLY = (process.env.SHOT_ONLY || '').split(',').map((s) => s.trim()).filter(Boolean);
 const SERIES_ID = process.env.SHOT_SERIES_ID || '';
+// crop-related's series (run.sh: the one with the most related works); the shot series when none was picked.
+const RELATED_ID = process.env.SHOT_RELATED_ID || SERIES_ID;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -253,7 +255,7 @@ async function main() {
    * from the tiles themselves: the grid's first child is a wrapper around all of them, and a first run cropped the whole
    * shelf.
    */
-  const firstRowBand = ({ captions = false } = {}) => page.evaluate((captions) => {
+  const firstRowBand = ({ captions = false, toolbar = true } = {}) => page.evaluate((captions, toolbar) => {
     const bar = [...document.querySelectorAll('[data-library-toolbar]')].find((e) => e.getBoundingClientRect().height > 0);
     const tiles = [...document.querySelectorAll('[data-library-grid] a[href*="/series/"]')]
       .map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0);
@@ -261,19 +263,21 @@ async function main() {
     const top0 = Math.min(...tiles.map((r) => r.top));
     const row = tiles.filter((r) => r.top < top0 + 8);
     const a = bar.getBoundingClientRect();
-    const left = Math.min(a.left, ...row.map((r) => r.left)) - 16;
-    let right = Math.max(a.right, ...row.map((r) => r.right)) + 16;
-    const top = a.top - 16;
+    const left = (toolbar ? Math.min(a.left, ...row.map((r) => r.left)) : Math.min(...row.map((r) => r.left))) - 16;
+    let right = (toolbar ? Math.max(a.right, ...row.map((r) => r.right)) : Math.max(...row.map((r) => r.right))) + 16;
+    const top = (toolbar ? a.top : Math.min(...row.map((r) => r.top))) - 16;
     // `captions`: the lines under the covers too -- since v0.61.0 the Releasing soon order says *~Fri*, *Due* or
     // *Running late* there, the band's whole point. That band is cut at the first cover edge past 3:1, so the site's
     // 3:1 card trims a sliver off its sides rather than the captions off its bottom.
-    const bottom = Math.max(...row.map((r) => r.bottom)) + (captions ? 52 : 16);
+    // ...and never into the next row: its covers start about two lines under the captions.
+    const below = tiles.filter((r) => r.top >= top0 + 8).map((r) => r.top);
+    const bottom = Math.min(Math.max(...row.map((r) => r.bottom)) + (captions ? 52 : 16), below.length ? Math.min(...below) - 8 : Infinity);
     if (captions) {
       const edge = row.map((r) => r.right + 16).sort((x, y) => x - y).find((x) => x - left >= (bottom - top) * 3);
       if (edge) right = Math.min(right, edge);
     }
     return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
-  }, captions);
+  }, captions, toolbar);
   if (want('library') || want('crop-library')) {
     await go('/library/', 600);
     if (want('library')) await shot(page, 'library');
@@ -282,14 +286,17 @@ async function main() {
   }
   // v0.61.0, the release radar: the Library in its Releasing soon order, each of the first covers saying when its next
   // chapter is likely. The URL's sort wins for this visit only; the account's saved order is left alone.
+  // Narrowed to the series the capture account is part-way through: the soonest of ALL series are the ones running late,
+  // and a first row of six *Running late* says the opposite of what the feature is for. The covers and their captions
+  // only: the toolbar and the filter row above them made the band too tall for the site's 3:1 card.
   if (want('crop-radar')) {
-    await go('/library/?sort=soon', 900);
-    await bandShot('crop-radar', await firstRowBand({ captions: true }));
+    await go('/library/?sort=soon&read=IN_PROGRESS', 900);
+    await bandShot('crop-radar', await firstRowBand({ captions: true, toolbar: false }));
   }
   // The series page since v0.60.0: Continue, the four keys and the ratings sit under the cover, and at 860 px tall the
   // keys fell just below the frame. The window is scrolled just far enough to show them, so the shot keeps the 16:10
   // the marketing site frames it in. Then More, opened: USAGE.md sends readers to "More → …" for a dozen things.
-  if ((want('series') || want('series-more') || want('crop-ratings') || want('crop-related')) && SERIES_ID) {
+  if ((want('series') || want('series-more') || want('crop-ratings')) && SERIES_ID) {
     await go(`/series/?id=${SERIES_ID}`, 1200);
     const more = await page.evaluateHandle(() =>
       [...document.querySelectorAll('button[data-series-more]')].find((b) => b.getBoundingClientRect().height > 0) || null);
@@ -311,25 +318,39 @@ async function main() {
       await shot(page, 'series-more');
       await page.keyboard.press('Escape');
     }
-    // v0.61.0: the Related row -- AniList's sequels, side stories and spin-offs -- cut to its covers, which sit at the
-    // start of a row as wide as the page: a band over the whole row would be two thirds empty. Widened to 3:1 for the
-    // site's card when the covers alone are taller than that.
-    if (want('crop-related')) {
-      await sleep(400);
-      const box = await page.evaluate(() => {
-        const root = [...document.querySelectorAll('[data-related]')].find((e) => e.getBoundingClientRect().height > 0);
-        if (!root) return null;
-        root.scrollIntoView({ block: 'center', behavior: 'instant' });
-        const rs = [...root.querySelectorAll('h2, h3, a, img, p')].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.width > 0);
-        if (!rs.length) return null;
-        const top = Math.min(...rs.map((r) => r.top)) - 16, bottom = Math.max(...rs.map((r) => r.bottom)) + 16;
-        const left = Math.max(0, Math.min(...rs.map((r) => r.left)) - 16);
-        const right = Math.min(document.documentElement.clientWidth, Math.max(Math.max(...rs.map((r) => r.right)) + 16, left + (bottom - top) * 3));
-        return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
-      });
-      await sleep(600);
-      await bandShot('crop-related', box);
-    }
+  }
+  // v0.61.0: a series page's Related row -- AniList's sequels, side stories and spin-offs -- on the series with the most
+  // of them (RELATED_ID), its covers loaded (they come through the cover proxy, after the rest of the page), cut at the
+  // first cover edge past 3:1 for the site's card.
+  if (want('crop-related') && RELATED_ID) {
+    await go(`/series/?id=${RELATED_ID}`, 1200);
+    await page.evaluate(() => [...document.querySelectorAll('[data-related]')].find((e) => e.getBoundingClientRect().height > 0)
+      ?.scrollIntoView({ block: 'center', behavior: 'instant' }));
+    await page.waitForFunction(() => {
+      const root = [...document.querySelectorAll('[data-related]')].find((e) => e.getBoundingClientRect().height > 0);
+      const imgs = root ? [...root.querySelectorAll('img')].filter((i) => i.getBoundingClientRect().left < innerWidth) : [];
+      return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+    }, { timeout: 20000 }).catch(() => {});
+    await sleep(900);
+    await bandShot('crop-related', await page.evaluate(() => {
+      const root = [...document.querySelectorAll('[data-related]')].find((e) => e.getBoundingClientRect().height > 0);
+      if (!root) return null;
+      const head = root.querySelector('h2, h3');
+      const cards = [...root.querySelectorAll('img')].map((i) => i.closest('a, article, li, div[class*="w-"]') || i)
+        .map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.right <= innerWidth);
+      if (!cards.length) return null;
+      // The titles and the relation (Sequel, Side story) sit under the covers, outside the link round each cover.
+      const words = [...root.querySelectorAll('p, span')].map((e) => e.getBoundingClientRect())
+        .filter((r) => r.height > 0 && r.right <= innerWidth && r.top >= Math.min(...cards.map((c) => c.bottom)) - 4);
+      const rs = head ? [head.getBoundingClientRect(), ...cards] : cards;
+      const top = Math.min(...rs.map((r) => r.top)) - 16;
+      const bottom = Math.max(...cards.map((r) => r.bottom), ...words.map((r) => r.bottom)) + 16;
+      const left = Math.max(0, Math.min(...rs.map((r) => r.left)) - 16);
+      let right = Math.max(...cards.map((r) => r.right)) + 16;
+      const edge = cards.map((r) => r.right + 16).sort((x, y) => x - y).find((x) => x - left >= (bottom - top) * 3);
+      if (edge) right = Math.min(right, edge);
+      return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+    }));
   }
   if (want('wrapped')) { await go('/wrapped/', 1500); await shot(page, 'wrapped'); }
 

@@ -114,6 +114,15 @@ SERIES_ID=${SHOT_SERIES_ID:-$(psql "SELECT s.id FROM lib_series s
 BOOK_ID=${SHOT_BOOK_ID:-$(psql "SELECT b.id FROM lib_books b WHERE b.series_id='$SERIES_ID' AND b.pages > 3
   AND b.pruned_at IS NULL ORDER BY (b.number < 1), b.number LIMIT 1" | tr -d ' ')}
 [ -n "$BOOK_ID" ] || BOOK_ID=$(psql "SELECT id FROM lib_books WHERE pages > 3 AND pruned_at IS NULL ORDER BY random() LIMIT 1" | tr -d ' ')
+# crop-related (v0.61.0): the series whose AniList entry has the most related works, so the Related row is a row. The
+# shot series often has one (a sequel) and the band would be one cover and a field of black. Never an 18+ one.
+RELATED_ID=${SHOT_RELATED_ID:-$(psql "SELECT s.id FROM lib_series s
+  JOIN series_art sa ON sa.series_id = s.id AND sa.cover IS NOT NULL
+  JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
+  JOIN anilist_related r ON r.anilist_id = t.external_id
+  WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r.relations) x WHERE (x->>'adult')::boolean)
+  ORDER BY jsonb_array_length(r.relations) DESC, s.books_count DESC LIMIT 1" 2>/dev/null | tr -d ' ')}
 SEED=1
 echo "· series $SERIES_ID · book $BOOK_ID"
 fi
@@ -151,7 +160,7 @@ fi
 docker run --rm --network "$NET" \
   -w /home/pptruser \
   -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
-  -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$SEED" \
+  -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$SEED" -e SHOT_RELATED_ID="${RELATED_ID:-}" \
   -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
   ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/capture.mjs
 
