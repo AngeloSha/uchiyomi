@@ -28,7 +28,8 @@ test('the series page says what is coming in one muted line, directly under the 
   const page = code(read('app/series/page.tsx'));
   assert.match(page, /\{readLine && <ReadProgress read=\{readCount\.read\} total=\{readCount\.total\} text=\{readLine\} \/>\}\s*\{outlook && <p data-series-outlook className="[^"]*text-fog-500[^"]*">\{outlook\}<\/p>\}\s*(?:\{\}\s*)*<div data-series-keys/);
   assert.equal(page.match(/data-series-outlook/g)?.length, 1);
-  assert.match(page, /const outlook = radarText\(series\?\.yomi\?\.radar, \{ autoUpdate: series\?\.autoUpdate !== false \}\);/,
+  // v0.61.0's reading time put "Catch up in ~2 hr" before it on the same line (readingTime.test.ts pins that part).
+  assert.match(page, /const outlook = \[[\s\S]*?radarText\(series\?\.yomi\?\.radar, \{ autoUpdate: series\?\.autoUpdate !== false \}\),\s*\]\.filter\(Boolean\)\.join\(' · '\);/,
     'the line does not go quiet for a series nothing updates');
 });
 

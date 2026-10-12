@@ -7,8 +7,11 @@ import { IcChevronRight } from '@/components/icons';
 import { Heatmap } from '@/components/charts/Heatmap';
 import { Pace } from '@/components/charts/Pace';
 import { Bars } from '@/components/charts/Bars';
+import { Columns } from '@/components/charts/Columns';
 import { t as tr, keys } from '@/lib/i18n';
 import { bookCountText } from '@/lib/format';
+import { hoursText, perChapterText, readerTz } from '@/lib/readingTime';
+import { shownDeviceName } from '@/lib/device';
 
 /**
  * The You tab of the profile: what you have earned, what you have read, and your lists.
@@ -35,6 +38,29 @@ export interface Stats {
   weeklyGoal: number;
 }
 interface CollectionRow { id: string; name: string; item_count: number }
+
+/** GET /api/stats/time (v0.61.0): reading time from page turns, the reader's own (bff lib/readingTime.ts). */
+export interface ReadingTime {
+  tz: string;
+  days: number;
+  week: { ms: number; chapters: number };
+  month: { ms: number; chapters: number };
+  year: { year: number; ms: number; chapters: number };
+  window: { ms: number; chapters: number; perChapterMs: number | null; byHour: number[]; byDevice: { name: string | null; ms: number }[] };
+}
+
+/**
+ * The devices' rows: each name as the session list says it, unnamed ones as "Device" -- one row per name shown, since
+ * two devices the server could not name read the same and a list of two "Device" rows says nothing.
+ */
+export function deviceRows(list: ReadingTime['window']['byDevice']): { label: string; value: number; hint: string }[] {
+  const by = new Map<string, number>();
+  for (const d of list) {
+    const label = shownDeviceName(d.name, { device: true }) || tr('Device');
+    by.set(label, (by.get(label) ?? 0) + d.ms);
+  }
+  return [...by].sort((a, b) => b[1] - a[1]).map(([label, ms]) => ({ label, value: ms, hint: hoursText(ms) }));
+}
 
 // Rendered as `tr(b.label)`, so the labels are declared. See lib/i18n.ts.
 const BADGE_LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', 'Legend');
@@ -115,6 +141,13 @@ export function StudioCard({ span = '' }: { span?: string }) {
     queryKey: ['stats', days],
     queryFn: () => api<Stats>(`/api/stats?days=${days}`),
   });
+  // v0.61.0: reading time over the same window, plus the week, the month and the year (bff lib/readingTime.ts).
+  const tz = readerTz();
+  const { data: time } = useQuery({
+    queryKey: ['stats-time', days, tz],
+    queryFn: () => api<ReadingTime>(`/api/stats/time?days=${days}&tz=${encodeURIComponent(tz)}`),
+  });
+  const devices = deviceRows(time?.window.byDevice ?? []);
 
   const series = data?.byDay ?? [];
   const counts = series.map((d) => d.chapters);
@@ -150,6 +183,28 @@ export function StudioCard({ span = '' }: { span?: string }) {
         <p className="py-6 text-center text-sm text-fog-500">{tr('Nothing read in this window yet.')}</p>
       ) : (
         <div className="space-y-5">
+          {/* v0.61.0: how long, in three squared tiles -- the last week, the last month and the year (Wrapped's) -- then
+              the pace per chapter and what the figures are built on. Static: nothing counts up. */}
+          {time && (
+            <div data-studio-time>
+              <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">{tr('Reading time')}</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: tr('Last 7 days'), ...time.week },
+                  { label: tr('Last 30 days'), ...time.month },
+                  { label: String(time.year.year), ...time.year },
+                ].map((tile) => (
+                  <div key={tile.label} className="min-w-0 rounded-xl border border-ink-700/70 bg-ink-850/50 px-2.5 py-2">
+                    <p className="truncate text-[10px] text-fog-500">{tile.label}</p>
+                    <p className="truncate font-display text-base font-semibold tabular-nums text-fog-100">{hoursText(tile.ms)}</p>
+                    <p className="truncate text-[10px] text-fog-500">{bookCountText(tile.chapters)}</p>
+                  </div>
+                ))}
+              </div>
+              {perChapterText(time.window.perChapterMs) && <p className="mt-2 text-xs text-fog-300">{perChapterText(time.window.perChapterMs)}</p>}
+              <p className="mt-0.5 text-[11px] text-fog-500">{tr('Counted from page turns; long pauses are left out.')}</p>
+            </div>
+          )}
           <div>
             <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">
               {bookCountText(total)}
@@ -164,6 +219,19 @@ export function StudioCard({ span = '' }: { span?: string }) {
             <p className="mb-2 text-[11px] uppercase tracking-widest text-fog-500">{tr('By weekday')}</p>
             <Bars items={dow.map((v, i) => ({ label: tr(DOW[i]), value: v }))} />
           </div>
+          {/* v0.61.0: when in the day, in the reader's own hours, and on which devices. */}
+          {!!time?.window.byHour.some((v) => v > 0) && (
+            <div data-studio-hours>
+              <p className="mb-2 text-[11px] uppercase tracking-widest text-fog-500">{tr('By hour')}</p>
+              <Columns values={time.window.byHour} />
+            </div>
+          )}
+          {devices.length > 0 && (
+            <div data-studio-devices>
+              <p className="mb-2 text-[11px] uppercase tracking-widest text-fog-500">{tr('Devices')}</p>
+              <Bars items={devices} wideHint />
+            </div>
+          )}
         </div>
       )}
     </div>

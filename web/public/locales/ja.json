@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3614
+    "strings": 3624
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3617,5 +3617,15 @@
   "Smart update checks": "スマート更新チェック",
   "Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.": "長く停滞しているシリーズへの問い合わせを減らし（少なくとも 3 日に 1 回）、次の話が近いシリーズはいつも通り問い合わせます。「今すぐ確認」は常にすぐ問い合わせます。",
   "1 quiet series not due": "停滞中のシリーズ 1 件は確認時期前",
-  "{n} quiet series not due": "停滞中のシリーズ {n} 件は確認時期前"
+  "{n} quiet series not due": "停滞中のシリーズ {n} 件は確認時期前",
+  "Reading time": "読書時間",
+  "Last 7 days": "過去 7 日間",
+  "Last 30 days": "過去 30 日間",
+  "~{time} per chapter": "1 話あたり約 {time}",
+  "Counted from page turns; long pauses are left out.": "ページめくりから計算しています。長い中断は含みません。",
+  "By hour": "時間帯別",
+  "Devices": "デバイス",
+  "Reading time by hour of the day": "時間帯別の読書時間",
+  "Catch up in ~{time}": "約 {time} で追いつけます",
+  "{time} of reading": "読書 {time}"
 }

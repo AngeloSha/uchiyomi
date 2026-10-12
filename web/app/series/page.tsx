@@ -52,6 +52,7 @@ import { AddSeriesDialog } from '@/components/AddSeriesDialog';
 import { editionChipLabels } from '@/lib/editions';
 import { continueChoice, continueText, readCountText } from '@/lib/continueLabel';
 import { radarText } from '@/lib/radar';
+import { catchUpText } from '@/lib/readingTime';
 import { offlineKeyShown, seriesActionGroups, type SeriesActionId } from '@/lib/seriesActions';
 import { RatingsPanel, useSeriesRating } from '@/components/RatingsPanel';
 import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/components/ContinueBar';
@@ -1541,8 +1542,19 @@ function SeriesInner() {
   const readLine = readCountText(readCount.read, readCount.total);
   // v0.61.0: what comes next -- the release radar's estimate, as an estimate (lib/radar.ts): "Next chapter ~Friday ·
   // usually Fridays", "Next chapter due any day", "Running late · last release 12d ago"; nothing for a series that is
-  // quiet, ended, on hiatus, undated or not monitored.
-  const outlook = radarText(series?.yomi?.radar, { autoUpdate: series?.autoUpdate !== false });
+  // quiet, ended, on hiatus, undated or not monitored. Before it, how long the chapters left take at this reader's own
+  // pace (lib/readingTime.ts, "Catch up in ~2 hr"), asked only when it can be said: some read, some left.
+  const unreadCount = Math.max(0, readCount.total - readCount.read);
+  const { data: pace } = useQuery({
+    queryKey: ['reading-pace', id],
+    queryFn: () => api<{ perChapterMs: number | null; from: 'series' | 'all' | null }>(`/api/series/${id}/reading-pace`),
+    enabled: !!id && readCount.read > 0 && unreadCount > 0,
+    staleTime: 300_000,
+  });
+  const outlook = [
+    catchUpText({ read: readCount.read, unread: unreadCount, perChapterMs: pace?.perChapterMs }),
+    radarText(series?.yomi?.radar, { autoUpdate: series?.autoUpdate !== false }),
+  ].filter(Boolean).join(' · ');
   // Check for new chapters, the Sources sheet's and Edit details' own: the same notices, the same polling.
   const { checking, checkNow } = useCheckNow(id, () => {
     for (const k of [['series', id], ['series-books', id], ['series-listing', id], ['series-versions', id], ['home']]) qc.invalidateQueries({ queryKey: k });

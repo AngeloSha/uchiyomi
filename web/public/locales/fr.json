@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3614
+    "strings": 3624
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3617,5 +3617,15 @@
   "Smart update checks": "Vérifications intelligentes",
   "Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.": "Interroger moins souvent les séries en pause depuis longtemps, au moins tous les 3 jours, et chaque série comme d’habitude quand son prochain chapitre est attendu. « Vérifier maintenant » interroge toujours tout de suite.",
   "1 quiet series not due": "1 série en pause pas encore à vérifier",
-  "{n} quiet series not due": "{n} séries en pause pas encore à vérifier"
+  "{n} quiet series not due": "{n} séries en pause pas encore à vérifier",
+  "Reading time": "Temps de lecture",
+  "Last 7 days": "7 derniers jours",
+  "Last 30 days": "30 derniers jours",
+  "~{time} per chapter": "env. {time} par chapitre",
+  "Counted from page turns; long pauses are left out.": "Calculé à partir des pages tournées ; les longues pauses ne comptent pas.",
+  "By hour": "Par heure",
+  "Devices": "Appareils",
+  "Reading time by hour of the day": "Temps de lecture selon l’heure de la journée",
+  "Catch up in ~{time}": "À jour en env. {time}",
+  "{time} of reading": "{time} de lecture"
 }

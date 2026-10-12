@@ -12,7 +12,7 @@ export interface Bar { label: string; value: number; hint?: string }
  * Brightness carries the value as well as length, so the ranking survives being read at a glance -- and at
  * the bottom of a long list, where every bar is short, the difference is still visible.
  */
-export function Bars({ items, max: maxIn }: { items: Bar[]; max?: number }) {
+export function Bars({ items, max: maxIn, wideHint = false }: { items: Bar[]; max?: number; wideHint?: boolean }) {
   const max = Math.max(1, maxIn ?? Math.max(0, ...items.map((i) => i.value)));
   // No RTL handling here on purpose. Rows are a flex line of ordinary elements, so the label, the track and
   // the number already swap ends with `dir`, and the bar grows from whichever edge the text starts at. The
@@ -33,7 +33,8 @@ export function Bars({ items, max: maxIn }: { items: Bar[]; max?: number }) {
                 }}
               />
             </div>
-            <span className="w-8 shrink-0 text-end text-[11px] tabular-nums text-fog-500">{b.hint ?? b.value}</span>
+            {/* v0.61.0: `wideHint` for a hint that is an amount of time ("4.5 hr", the Studio's devices), not a count. */}
+            <span className={`${wideHint ? 'w-14' : 'w-8'} shrink-0 text-end text-[11px] tabular-nums text-fog-500`}>{b.hint ?? b.value}</span>
           </div>
         );
       })}

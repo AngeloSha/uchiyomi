@@ -9,7 +9,9 @@ import { Wordmark } from '@/components/Brand';
 import { IcChevronLeft } from '@/components/icons';
 import { Heatmap } from '@/components/charts/Heatmap';
 import { Bars } from '@/components/charts/Bars';
+import { Columns } from '@/components/charts/Columns';
 import { keys, t as tr } from '@/lib/i18n';
+import { hoursText, perChapterText, readerTz } from '@/lib/readingTime';
 
 function CountUp({ to }: { to: number }) {
   const [n, setN] = useState(0);
@@ -38,6 +40,10 @@ interface Wrapped {
   byDay?: number[];
   byDow?: number[];
   busiestDow: number;
+  /** v0.61.0: reading time from page turns (bff lib/readingTime.ts), its pace per chapter and its hours in `tz`. */
+  ms?: number;
+  perChapterMs?: number | null;
+  byHour?: number[];
 }
 // Through keys(): both places that show a day say `tr(DOW[i])`, which a scan for inline tr() cannot see, so the
 // days were English in every language.
@@ -71,7 +77,9 @@ function Wrapped() {
   const asked = Math.floor(Number(sp.get('year')));
   const year = Number.isFinite(asked) && asked >= 1970 && asked <= thisYear ? asked : thisYear;
 
-  const { data } = useQuery({ queryKey: ['wrapped', year], queryFn: () => api<Wrapped>('/api/wrapped?year=' + year) });
+  // The reader's timezone rides along (v0.61.0) for the year's hours of the day; the chapters are counted in UTC as ever.
+  const tz = readerTz();
+  const { data } = useQuery({ queryKey: ['wrapped', year], queryFn: () => api<Wrapped>(`/api/wrapped?year=${year}&tz=${encodeURIComponent(tz)}`) });
   // Only for `first_read_at`, so the picker offers the years that exist rather than a made-up range. The
   // narrowest window keeps it cheap; nothing on this page uses the daily series from it.
   const { data: stats } = useQuery({
@@ -86,6 +94,8 @@ function Wrapped() {
   // One sentence split around the day, which is set brighter: `tr('Your power day was')` glued to it read
   // "Your power day wasTuesday", and a language that puts the day first could not.
   const [dayBefore, dayAfter] = tr('Your power day was {day}').split('{day}');
+  // v0.61.0: "312 hr of reading · ~4 min per chapter", said once and still -- the year's figure is not counted up.
+  const timeLine = data?.ms ? [tr('{time} of reading', { time: hoursText(data.ms) }), perChapterText(data.perChapterMs)].filter(Boolean).join(' · ') : '';
 
   return (
     <div className="min-h-screen-d">
@@ -120,6 +130,7 @@ function Wrapped() {
           <p className="mt-6 text-sm text-fog-300">{year === thisYear ? tr('This year you read') : tr('In {y} you read', { y: String(year) })}</p>
           <p className="font-brand text-7xl font-bold text-accent drop-shadow-[0_2px_24px_rgba(124,92,255,0.4)]"><CountUp to={data?.chapters ?? 0} /></p>
           <p className="text-lg text-fog-100">{acrossText(data?.chapters ?? 0, data?.series ?? 0)}</p>
+          {timeLine && <p data-wrapped-time className="mt-1 text-sm text-fog-300">{timeLine}</p>}
           {data != null && data.chapters > 0 && (
             <p className="mt-4 text-sm text-fog-300">{dayBefore}<span className="text-fog-100">{tr(DOW[data.busiestDow])}</span>{dayAfter}</p>
           )}
@@ -156,6 +167,14 @@ function Wrapped() {
         <div className="px-5 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
           <p className="mb-2 text-xs font-medium text-fog-400">{tr('By weekday')}</p>
           <Bars items={data!.byDow!.map((v, i) => ({ label: tr(DOW[i]), value: v, hint: `${v}` }))} />
+        </div>
+      )}
+
+      {/* v0.61.0: the year's reading by hour of the day, in the reader's own hours. */}
+      {!!data?.byHour?.some((v) => v > 0) && (
+        <div data-wrapped-hours className="px-5 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
+          <p className="mb-2 text-xs font-medium text-fog-400">{tr('By hour')}</p>
+          <Columns values={data!.byHour!} />
         </div>
       )}
 
