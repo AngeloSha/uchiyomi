@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3607
+    "strings": 3613
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3610,5 +3610,11 @@
   "Edit filters": "フィルターを編集",
   "Stop sharing": "共有をやめる",
   "Showing the first {n} of {total}.": "{total}件中、最初の{n}件を表示しています。",
-  "Nothing in your library matches this list right now.": "今のところ、このリストに当てはまる作品はライブラリにありません。"
+  "Nothing in your library matches this list right now.": "今のところ、このリストに当てはまる作品はライブラリにありません。",
+  "Incognito reading": "シークレット読書",
+  "Your place is kept, but what you read stays out of your history, stats and the household’s rails, and nothing is sent to your trackers. For every device on this account.": "読んでいる位置は保存されますが、読んだ内容は履歴・統計・家族のおすすめ欄に残らず、トラッカーにも送信されません。このアカウントのすべての端末に適用されます。",
+  "Incognito": "シークレット",
+  "Incognito reading is on: what you read is not recorded.": "シークレット読書がオンです：読んだ内容は記録されません。",
+  "Pick back up": "読むのを再開",
+  "Hidden gems": "隠れた名作"
 }

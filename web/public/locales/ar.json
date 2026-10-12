@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3607
+    "strings": 3613
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3610,5 +3610,11 @@
   "Edit filters": "تعديل عوامل التصفية",
   "Stop sharing": "إيقاف المشاركة",
   "Showing the first {n} of {total}.": "يُعرض أول {n} من {total}.",
-  "Nothing in your library matches this list right now.": "لا شيء في مكتبتك يطابق هذه القائمة الآن."
+  "Nothing in your library matches this list right now.": "لا شيء في مكتبتك يطابق هذه القائمة الآن.",
+  "Incognito reading": "القراءة الخفية",
+  "Your place is kept, but what you read stays out of your history, stats and the household’s rails, and nothing is sent to your trackers. For every device on this account.": "يُحفظ موضعك، لكن ما تقرؤه لا يظهر في سجلك ولا في إحصاءاتك ولا في رفوف أهل البيت، ولا يُرسَل شيء إلى متتبّعاتك. على كل الأجهزة في هذا الحساب.",
+  "Incognito": "خفي",
+  "Incognito reading is on: what you read is not recorded.": "القراءة الخفية مفعّلة: ما تقرؤه لا يُسجَّل.",
+  "Pick back up": "عُد إليها",
+  "Hidden gems": "جواهر خفية"
 }

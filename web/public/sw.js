@@ -386,7 +386,8 @@ async function flushOutboxWith(db) {
       const r = await fetch(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts }),
+        // v0.61.0: a page read under Incognito reading says so, whenever the queue flushes (lib/incognito.ts).
+        body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts, ...(ev.incognito ? { incognito: true } : {}) }),
       });
       // success or permanent rejection -> drop the entry; transient failures stay queued
       if (r.ok || (r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 429)) {

@@ -20,6 +20,7 @@ import { Lockup } from '@/components/Brand';
 import { LibraryStart } from '@/components/LibraryStart';
 import { t as tr } from '@/lib/i18n';
 import { sortValue } from '@/lib/sortValue';
+import { relativeTime } from '@/lib/format';
 import { homeIdsOf, type ListRow } from '@/lib/lists';
 import { useListsAll } from '@/components/SaveListDialog';
 
@@ -224,6 +225,19 @@ export default function HomePage() {
       {/* Your collections */}
       <CollectionRails />
 
+      {/* Pick back up (v0.61.0): series put down three months to two years ago, each at its next chapter and saying when.
+          Only with something in it, like every rail an older server does not send. */}
+      {(data?.pickUp?.length ?? 0) > 0 && (
+        <section className="pt-8" data-home-pickup>
+          <SectionTitle>{tr('Pick back up')}</SectionTitle>
+          <Rail>
+            {data!.pickUp!.map((b) => (
+              <ContinueCard key={b.id} book={b} note={b.stoppedAt ? tr('Read {when}', { when: relativeTime(b.stoppedAt) }) : undefined} />
+            ))}
+          </Rail>
+        </section>
+      )}
+
       {/* Recently added */}
       <section className="pt-8">
         <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Recently added')}</SectionTitle>
@@ -242,6 +256,17 @@ export default function HomePage() {
           <SectionTitle action={<Link href="/library?sort=popular" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Most popular in your library')}</SectionTitle>
           <Rail>
             {data!.popular!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
+          </Rail>
+        </section>
+      )}
+
+      {/* Hidden gems (v0.61.0): well-rated series nobody here has opened, each saying AniList's score. Only with something
+          in it. See all is the Library's own answer to the same question, best first and not started. */}
+      {(data?.gems?.length ?? 0) > 0 && (
+        <section className="pt-8" data-home-gems>
+          <SectionTitle action={<Link href="/library?sort=score&read=UNREAD" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Hidden gems')}</SectionTitle>
+          <Rail>
+            {data!.gems!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
           </Rail>
         </section>
       )}
