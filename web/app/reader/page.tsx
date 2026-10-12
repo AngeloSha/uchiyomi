@@ -1,6 +1,6 @@
 'use client';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { pairSlides } from '@/lib/readerSpread';
+import { isWide, pageHeight, pairSlides, type WidePages } from '@/lib/readerSpread';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -29,7 +29,7 @@ import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
-import { ReaderImg, MissingCaption, ReaderPageRow, DIVIDER_H } from '@/components/ReaderPage';
+import { ReaderImg, MissingCaption, ReaderPageRow, SlideHalf, SlideTurned, DIVIDER_H } from '@/components/ReaderPage';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 
@@ -74,6 +74,23 @@ const STILL_MS = 250;
 async function untilStill(lastMoved: { current: number }, rtl: boolean): Promise<void> {
   if (!rtl) return;
   for (let i = 0; i < 40 && Date.now() - lastMoved.current < STILL_MS; i++) await new Promise((r) => setTimeout(r, 100));
+}
+
+/**
+ * Whether the screen is held upright (v0.61.0): what Reader → Wide pages waits for. A double-page spread on a phone held
+ * upright is a strip across the middle of the screen; held sideways, or on a computer's screen, it fits as it is.
+ */
+function usePortrait(): boolean {
+  const [portrait, setPortrait] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(orientation: portrait)');
+    if (!mq) return;
+    const read = () => setPortrait(mq.matches);
+    read();
+    mq.addEventListener?.('change', read);
+    return () => mq.removeEventListener?.('change', read);
+  }, []);
+  return portrait;
 }
 
 async function loadChapter(bookId: string): Promise<Chapter | null> {
@@ -150,6 +167,8 @@ function ReaderInner() {
   const laidOutSign = useRef<number | null>(null);
   /** The mode the scroller was last laid out for (F3, the mode-change effect below). */
   const laidOutMode = useRef<ReaderPrefs['mode'] | null>(null);
+  /** Whether the paged track was last laid out with wide pages split in two (the split effect below). */
+  const laidOutSplit = useRef<boolean | null>(null);
   /** When the track last moved -- a scroll event, or a smooth scroll this code started. See untilStill. */
   const lastMoved = useRef(0);
   // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
@@ -435,10 +454,31 @@ function ReaderInner() {
   // The rules, and why each exists, live in lib/readerSpread.ts, where they can be tested without mounting
   // this component. This used to pair a landscape double-page spread with the portrait page before it,
   // which halved the spread and left every later pair in the chapter off by one.
-  const { slides, slideOf } = useMemo(
-    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread),
-    [flat, prefs.mode, prefs.spread],
+  // v0.61.0, Reader → Wide pages: what a wide page becomes here and now. Only on a screen held upright, and never in
+  // spread mode, where a wide page already has a slide to itself (lib/readerSpread.ts rule 4). Split, a wide page is
+  // two slides of the paged track, its halves in reading order -- the right half first on a right-to-left read, or for
+  // a right-to-left series read either way -- and two halves one above the other in the webtoon column.
+  const portrait = usePortrait();
+  const wideMode: WidePages = portrait && !(prefs.mode === 'paged' && prefs.spread) ? prefs.widePages : 'whole';
+  const rightFirst = rtl || pagedRtl;
+  const splitTrack = prefs.mode === 'paged' && wideMode === 'split';
+  const { slides, slideOf, half } = useMemo(
+    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst }),
+    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst],
   );
+  /** The paged track's slide, measured: what a split half or a page turned on its side is fitted into. */
+  const [area, setArea] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const m = () => {
+      const el = scrollRef.current;
+      const w = el?.clientWidth || window.innerWidth;
+      const h = el?.clientHeight || window.innerHeight;
+      setArea((a) => (a.w === w && a.h === h ? a : { w, h }));
+    };
+    m();
+    window.addEventListener('resize', m);
+    return () => window.removeEventListener('resize', m);
+  }, [prefs.mode, ready]);
 
   // ⚠️ #180: Safari (WebKit, on iOS and macOS alike) keeps a snapped track's place as the index of its snap point
   // counted from the LEFT edge, and a right-to-left track grows leftwards. So every slide added at its end -- the next
@@ -495,9 +535,11 @@ function ReaderInner() {
   const { heights, tops } = useMemo(() => {
     // `buildFlow` owns the collapse decision. In particular, `missing` outranks a stale/manual `junk` flag:
     // a placeholder must keep its full page box so its explanation is never squeezed into a strip.
+    // v0.61.0: a wide page split or turned on its side is as tall as lib/readerSpread.ts pageHeight says; a missing
+    // placeholder is always drawn whole, with its caption.
     const hs = flat.map((p) => p.collapsed
       ? STRIP_H
-      : p.width && p.height ? colW * (p.height / p.width) : colW * 1.4);
+      : pageHeight(p, colW, p.missing ? 'whole' : wideMode));
     const ts: number[] = [];
     let acc = 0;
     flat.forEach((p, i) => {
@@ -506,7 +548,7 @@ function ReaderInner() {
       acc += hs[i] + prefs.gap;
     });
     return { heights: hs, tops: ts };
-  }, [flat, colW, prefs.gap, collapsing, expanded]);
+  }, [flat, colW, prefs.gap, collapsing, expanded, wideMode]);
 
   /** Each page's place in the flow, by key (v0.61.0): the anchor, the downloaded pages' images and the page grid look
    *  a page up here. They used to scan the flow for it, once per page -- per blob, per grid tile, per page turn. */
@@ -661,6 +703,7 @@ function ReaderInner() {
     if (at) lastSent.current = `${chapters[at.ci]?.id}:${at.number}`;
     laidOutSign.current = trackSign;
     laidOutMode.current = prefs.mode;
+    laidOutSplit.current = splitTrack;
     didInitScroll.current = true;
     // The column's window and anchor from where it now stands: a resume on page 1 scrolls nowhere, so no scroll event
     // would ever bring them.
@@ -678,6 +721,7 @@ function ReaderInner() {
     laidOutMode.current = prefs.mode;
     if (prefs.mode === 'paged') {
       laidOutSign.current = trackSign;
+      laidOutSplit.current = splitTrack;
       el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
     } else {
       el.scrollTop = tops[current] ?? 0;
@@ -699,6 +743,17 @@ function ReaderInner() {
     el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackSign]);
+
+  // The same for wide pages split in two (v0.61.0): turning the phone, or the setting, adds or removes a slide for every
+  // wide page before the one being read, so the track's place now points at another page. Put it back on the page
+  // being read -- its first half -- before it paints.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !didInitScroll.current || prefs.mode !== 'paged' || laidOutSplit.current === splitTrack) return;
+    laidOutSplit.current = splitTrack;
+    el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitTrack]);
 
   // ---- track current page on scroll ----
   const onScroll = useCallback(() => {
@@ -1026,7 +1081,9 @@ function ReaderInner() {
       const step = (d: 1 | -1) => {
         if (!el) return;
         const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
-        const to = Math.max(0, Math.min(last, (slideOf[current] ?? current) + d));
+        // From the slide ON SCREEN (v0.61.0, F4), as a tap does: `slideOf[current]` is a split page's FIRST half, so
+        // from its second half the next press went back to the half already on screen, and stayed there.
+        const to = Math.max(0, Math.min(last, slideNow() + d));
         lastMoved.current = Date.now(); // before the first scroll event arrives
         el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior: 'smooth' });
       };
@@ -1323,6 +1380,7 @@ function ReaderInner() {
                 stripSrc={p.collapsed ? stripSrc(i) : null}
                 recollapsible={collapsing && !!p.junk && !p.missing && expanded.has(p.key)}
                 missingSource={p.missing ? sourceNameOf(chapters[p.ci]?.sourceId) : null}
+                wide={!p.missing && isWide(p) ? wideMode : 'whole'} rightFirst={rightFirst}
                 onExpand={expandPage} onCollapse={collapsePage} />
             ))}
             {ended && upNextCard}
@@ -1333,14 +1391,16 @@ function ReaderInner() {
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
           dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
-          {slides.map((idxs) => {
+          {slides.map((idxs, s) => {
             // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
             // left, so flipping here as well would put it back the wrong way round. A right-to-left series
             // forced to read left to right still swaps: the pages turn the other way, but a double-page spread
             // is ONE drawing, and it only reassembles with its first page on the right.
             const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+            // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
+            const halfOf = half[s];
             return (
-              <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center gap-1">
+              <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center gap-1">
                 {shown.map((i) => {
                   const p = flat[i];
                   if (!(activeSet.has(i) && srcFor(i))) return <span key={p.key} className="text-ink-600">{p.number}</span>;
@@ -1356,6 +1416,16 @@ function ReaderInner() {
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
+                  }
+                  // v0.61.0, Wide pages: one half of the page, or the page turned on its side, fitted to the slide. A page
+                  // whose size is not known is never wide (lib/readerSpread.ts rule 5), so it never gets here.
+                  if (halfOf && p.width && p.height) {
+                    return <SlideHalf key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
+                      half={halfOf} area={area} zoom={zoom} />;
+                  }
+                  if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
+                    return <SlideTurned key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
+                      area={area} zoom={zoom} />;
                   }
                   return (
                     <ReaderImg key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}

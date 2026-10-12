@@ -299,6 +299,11 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
           options={[{ value: 'series', label: tr('Series default') }, { value: 'ltr', label: tr('Left to right') }, { value: 'rtl', label: tr('Right to left') }]}
           onChange={(v) => set({ pagedDirection: v })} />
       )}
+      {/* v0.61.0: what a double-page spread becomes on a screen held upright. Through `set`, the one writer. */}
+      <Choice label={tr('Wide pages')} value={prefs.widePages}
+        help={tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}
+        options={[{ value: 'whole', label: tr('Whole') }, { value: 'split', label: tr('Split') }, { value: 'rotate', label: tr('Rotate') }]}
+        onChange={(widePages) => set({ widePages })} />
       {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
           every slide is exactly one viewport wide -- so Collapse falls back to removing there, where an
           unwanted page costs one swipe rather than a scroll and there is no flow to interrupt. */}

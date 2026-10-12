@@ -3,6 +3,8 @@ import { memo } from 'react';
 import { useImgRetry } from '@/components/ui';
 import { IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { LEFT_HALF, RIGHT_HALF, cropStyle, fitBox } from '@/lib/readerCrop';
+import type { Half, WidePages } from '@/lib/readerSpread';
 
 /**
  * One page of the reader, in its two renderers' shared parts (v0.61.0).
@@ -20,6 +22,8 @@ export const DIVIDER_H = 60;
 export interface RowItem {
   key: string;
   number: number;
+  width: number | null;
+  height: number | null;
   junk?: boolean;
   missing?: boolean;
   collapsed?: boolean;
@@ -31,10 +35,12 @@ export interface RowItem {
  * `height` is the reader's model of the box (never measured back from the DOM: overflow-anchor is off for that
  * reason). `src` is null outside the render window -- the row then shows the page's number -- and `stripSrc` is the
  * thumbnail a collapsed page is drawn from. `divider` is the next chapter's title, for the first page of a chapter
- * after the first. `missingSource` names the source on a placeholder's caption.
+ * after the first. `missingSource` names the source on a placeholder's caption. `wide` is what a wide page becomes
+ * (Reader → Wide pages, v0.61.0) -- the reader passes `whole` for every page that is not wide -- and `rightFirst` puts
+ * a split page's right half on top.
  */
 export const ReaderPageRow = memo(function ReaderPageRow({
-  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, onExpand, onCollapse,
+  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, onExpand, onCollapse,
 }: {
   item: RowItem;
   height: number;
@@ -44,6 +50,8 @@ export const ReaderPageRow = memo(function ReaderPageRow({
   stripSrc: string | null;
   recollapsible: boolean;
   missingSource: string | null;
+  wide: WidePages;
+  rightFirst: boolean;
   onExpand: (key: string) => void;
   onCollapse: (key: string) => void;
 }) {
@@ -89,6 +97,22 @@ export const ReaderPageRow = memo(function ReaderPageRow({
               <span className="h-px w-6 bg-ink-600" />
             </span>
           </button>
+        ) : src && wide === 'split' ? (
+          /* v0.61.0: a wide page as its two halves, one above the other, each the column's width -- the right half on
+             top when the series reads right to left. The reader reserved 4 x colW x h / w for the pair. */
+          <div data-wide="split" className="flex h-full w-full flex-col">
+            {(rightFirst ? [RIGHT_HALF, LEFT_HALF] : [LEFT_HALF, RIGHT_HALF]).map((region) => (
+              <div key={region.l} data-half={region.l ? 'right' : 'left'} className="relative w-full flex-1 overflow-hidden">
+                <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} />
+              </div>
+            ))}
+          </div>
+        ) : src && wide === 'rotate' && item.width && item.height ? (
+          /* v0.61.0: a wide page turned on its side to the column's width. The box keeps the page's own shape -- as
+             wide as the row is tall -- and turns about its centre. */
+          <div data-wide="rotate" className="absolute inset-0 m-auto" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
+            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" />
+          </div>
         ) : src ? (
           <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover" />
         ) : (
@@ -118,6 +142,41 @@ export const ReaderPageRow = memo(function ReaderPageRow({
     </div>
   );
 });
+
+/**
+ * One half of a wide page as a slide of the paged track (v0.61.0, Wide pages → Split): a box of the half's shape,
+ * fitted to the slide, that clips the page drawn at twice its width. Zoomed like any page.
+ */
+export function SlideHalf({ src, alt, width, height, half, area, zoom }: {
+  src: string; alt: string; width: number; height: number; half: Exclude<Half, null>; area: { w: number; h: number }; zoom: number;
+}) {
+  const st = cropStyle(half === 'left' ? LEFT_HALF : RIGHT_HALF);
+  const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h);
+  return (
+    <div data-half={half} className="relative shrink-0 overflow-hidden"
+      style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
+      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} />
+    </div>
+  );
+}
+
+/**
+ * A wide page turned on its side to fill a slide held upright (v0.61.0, Wide pages → Rotate). CSS only, so the slides
+ * are the same: a box of the page's own shape, sized so that once turned a quarter it fits the slide, centred, turned,
+ * and zoomed like any page.
+ */
+export function SlideTurned({ src, alt, width, height, area, zoom }: {
+  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number;
+}) {
+  // Turned, the page stands `height` wide and `width` tall: fit THAT, then draw the box the other way round.
+  const fit = fitBox(height, width, area.w, area.h);
+  return (
+    <div data-rotated className="absolute inset-0 m-auto"
+      style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
+      <ReaderImg src={src} alt={alt} className="block h-full w-full max-w-none" />
+    </div>
+  );
+}
 
 /**
  * One reader page, with a retry.

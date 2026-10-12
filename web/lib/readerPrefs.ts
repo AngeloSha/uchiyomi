@@ -1,3 +1,5 @@
+import type { WidePages } from './readerSpread';
+
 export type ReaderTheme = 'amoled' | 'sepia' | 'gray';
 
 /**
@@ -51,7 +53,15 @@ export interface ReaderPrefs {
    * does. Stored settings without the key pick up the default through the spread in `migratePrefs`.
    */
   coverEdges: boolean;
+  /**
+   * What a wide page -- a double-page spread scanned as one image -- becomes on a screen held upright (v0.61.0):
+   * `whole` as it always was, `split` into its two halves one after the other, `rotate` turned on its side. One
+   * setting for every title, synced with the account like `coverEdges`; not a title's look (LOOK_KEYS).
+   */
+  widePages: WidePages;
 }
+
+const WIDE_PAGES: readonly WidePages[] = ['whole', 'split', 'rotate'];
 
 export const DEFAULT_PREFS: ReaderPrefs = {
   junkPages: 'collapse',
@@ -65,6 +75,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   spread: false,
   pagedDirection: 'series',
   coverEdges: true,
+  widePages: 'whole',
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -108,6 +119,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   if (!PAGED_DIRECTIONS.includes(p.pagedDirection)) p.pagedDirection = DEFAULT_PREFS.pagedDirection;
   // Only a real `false` turns the edges off: anything else out of storage keeps the default look.
   if (typeof p.coverEdges !== 'boolean') p.coverEdges = DEFAULT_PREFS.coverEdges;
+  // v0.61.0: anything but a known value (an older build's row has none) is the default, which is today's reader.
+  if (!WIDE_PAGES.includes(p.widePages)) p.widePages = DEFAULT_PREFS.widePages;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

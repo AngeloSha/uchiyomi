@@ -122,6 +122,20 @@ export function ReaderSettings({
           </Row>
         )}
 
+        {/* v0.61.0. Both modes, every title (synced with the account, like the edges above). On a screen held upright
+            only: a spread on a phone held sideways, or on a computer, fits as it is. */}
+        <Row label={tr('Wide pages')}>
+          <div className="grid grid-cols-3 gap-2">
+            {([['whole', tr('Whole')], ['split', tr('Split')], ['rotate', tr('Rotate')]] as const).map(([v, label]) => (
+              <button key={v} type="button" aria-pressed={prefs.widePages === v} onClick={() => set({ widePages: v })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.widePages === v ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{label}</button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-fog-500">
+            {tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}
+          </p>
+        </Row>
+
         {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
             every slide is exactly one viewport wide -- so under Collapse a repeated page is shown there like
             any other, where it costs one swipe rather than a scroll. (Not removed: that would give the two modes

@@ -35,11 +35,36 @@ export function isWide(it: SpreadItem | undefined): boolean {
   return typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0 && w > h;
 }
 
-export function pairSlides(items: SpreadItem[], spread: boolean): { slides: number[][]; slideOf: number[] } {
+/** Which half of a wide page a slide shows (v0.61.0): `null` for a slide that shows its pages whole. */
+export type Half = 'left' | 'right' | null;
+
+/**
+ * The slides of paged mode, and which slide each page starts on.
+ *
+ * v0.61.0, Wide pages → Split: with `split`, and only out of spread mode (a spread already shows a wide page whole,
+ * rule 4), a wide page is TWO slides, its two halves, in reading order -- the right half first when `rightFirst` (a
+ * right-to-left track, or a right-to-left series read either way: a spread is one drawing, and it reads from the
+ * right). Both slides hold the SAME page: progress, the counter, the server, OPDS and the trackers count pages and
+ * never see a half. `slideOf` points a page at its first half. A page whose size is not known is never split (rule 5).
+ */
+export function pairSlides(
+  items: SpreadItem[],
+  spread: boolean,
+  opts: { split?: boolean; rightFirst?: boolean } = {},
+): { slides: number[][]; slideOf: number[]; half: Half[] } {
   const slides: number[][] = [];
+  const half: Half[] = [];
 
   if (!spread) {
-    for (let k = 0; k < items.length; k++) slides.push([k]);
+    for (let k = 0; k < items.length; k++) {
+      if (opts.split && isWide(items[k])) {
+        const order: Half[] = opts.rightFirst ? ['right', 'left'] : ['left', 'right'];
+        for (const h of order) { slides.push([k]); half.push(h); }
+      } else {
+        slides.push([k]);
+        half.push(null);
+      }
+    }
   } else {
     let k = 0;
     while (k < items.length) {
@@ -52,10 +77,28 @@ export function pairSlides(items: SpreadItem[], spread: boolean): { slides: numb
         isWide(nxt);                  // rule 4, the page before a wide one
       if (soloed) { slides.push([k]); k += 1; }
       else { slides.push([k, k + 1]); k += 2; }
+      half.push(null);
     }
   }
 
   const slideOf: number[] = new Array(items.length);
-  slides.forEach((idxs, s) => idxs.forEach((k) => { slideOf[k] = s; }));
-  return { slides, slideOf };
+  // The FIRST slide that holds a page, so a jump, a resume and a re-anchor land on a split page's first half.
+  for (let s = slides.length - 1; s >= 0; s--) for (const k of slides[s]) slideOf[k] = s;
+  return { slides, slideOf, half };
+}
+
+/** What a wide page becomes on screen (v0.61.0, Reader → Wide pages): itself, its two halves, or turned on its side. */
+export type WidePages = 'whole' | 'split' | 'rotate';
+
+/**
+ * How tall a page stands in the webtoon column at `colW` wide (v0.61.0). Split, a wide page is its two halves one above
+ * the other, each `colW` wide: 4 x colW x h / w in all. Turned on its side, it is `colW` wide and colW x w / h tall.
+ * Anything else -- a page that is not wide, or whose size is not known -- is itself, colW x h / w, or the reader's
+ * portrait guess of 1.4 when its size is not known.
+ */
+export function pageHeight(item: SpreadItem, colW: number, wide: WidePages = 'whole'): number {
+  const { width: w, height: h } = item;
+  if (!(typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0)) return colW * 1.4;
+  if (wide !== 'whole' && isWide(item)) return wide === 'split' ? 4 * colW * (h / w) : colW * (w / h);
+  return colW * (h / w);
 }
