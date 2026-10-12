@@ -163,3 +163,18 @@ test('the reader measures pages only while Crop page borders is on, and makes a 
   assert.match(row, /setTimeout\(\(\) => setOn\(true\), 300\)/, 'a page whose margins never arrive is never shown');
   assert.doesNotMatch(row, /transition/, 'a page waiting for its margins fades in: new motion');
 });
+
+test('a region is drawn left to right whatever the direction around it, and a turned page is centred by its parent', () => {
+  // Found in a browser (test/e2e/v610Walk-reader.mjs, "each half draws its own half of the spread", "...and that is what
+  // is drawn"): on a right-to-left track, or in the column under the Arabic interface, an image too wide for its box
+  // overflows to the LEFT, so a half or a crop showed the wrong part of the page. And a turned page, wider than its slide
+  // until turned, was "centred" with inset-0 m-auto -- auto margins never go below zero, so it sat 80 px off centre.
+  // Reintroduce by dropping a `dir="ltr"`, or by positioning a turned box with `absolute inset-0 m-auto`: this fails.
+  const src = code(readFileSync(join(ROOT, 'components/ReaderPage.tsx'), 'utf8'));
+  const region = src.slice(src.indexOf('export function SlideRegion('), src.indexOf('export function SlidePending('));
+  assert.match(region, /<div dir="ltr" data-half=\{half\}/, 'a slide\'s region box takes the track\'s direction');
+  assert.match(src, /<div data-wide="split" dir="ltr"/, 'the column\'s split halves take the interface\'s direction');
+  assert.match(src, /<div dir="ltr" className="relative h-full w-full overflow-hidden">\s*<ReaderImg[^>]*style=\{cropStyle\(\{ l: crop\.l, t: 0, r: crop\.r, b: 0 \}\)\.img\}/, 'the column\'s trimmed row takes the interface\'s direction');
+  assert.doesNotMatch(src, /data-rotated className="absolute|data-wide="rotate" className="absolute/, 'a turned page is centred with auto margins again');
+  assert.match(src, /<div data-rotated className="shrink-0"/);
+});

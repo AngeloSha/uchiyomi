@@ -75,7 +75,7 @@ export const ReaderPageRow = memo(function ReaderPageRow({
         </div>
       )}
       <div style={{ height: height || undefined, marginBottom: gap }} className="relative w-full bg-ink-900"
-        data-crop={crop ? crop.l.toFixed(3) : undefined}>
+        data-page={item.number} data-crop={crop ? crop.l.toFixed(3) : undefined}>
         {collapsed ? (
           /* A band of the real page, not a placeholder standing in for it. Seeing that it IS the
              credit page is the whole difference between "the reader set this aside" and "a page is
@@ -108,8 +108,11 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           </button>
         ) : src && wide === 'split' ? (
           /* v0.61.0: a wide page as its two halves, one above the other, each the column's width -- the right half on
-             top when the series reads right to left. The reader reserved 4 x colW x h / w for the pair. */
-          <div data-wide="split" className="flex h-full w-full flex-col">
+             top when the series reads right to left. The reader reserved 4 x colW x h / w for the pair.
+             ⚠️ `dir="ltr"`: the image is wider than its box and shifted to the half it shows -- left and right of the
+             PICTURE, not of the interface. Under the Arabic interface the column is right to left, and an image too wide
+             for its box overflows to the left there, so every half and every crop showed the wrong part of the page. */
+          <div data-wide="split" dir="ltr" className="flex h-full w-full flex-col">
             {(rightFirst ? [RIGHT_HALF, LEFT_HALF] : [LEFT_HALF, RIGHT_HALF]).map((region) => (
               <div key={region.l} data-half={region.l ? 'right' : 'left'} className="relative w-full flex-1 overflow-hidden">
                 <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} filter={imgFilter} />
@@ -118,14 +121,18 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           </div>
         ) : src && wide === 'rotate' && item.width && item.height ? (
           /* v0.61.0: a wide page turned on its side to the column's width. The box keeps the page's own shape -- as
-             wide as the row is tall -- and turns about its centre. */
-          <div data-wide="rotate" className="absolute inset-0 m-auto" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
-            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" filter={imgFilter} />
+             wide as the row is tall -- and turns about its centre. ⚠️ Centred by the flex row, not by `inset-0 m-auto`:
+             the box is wider than the row until it is turned, and auto margins never go below zero, so it sat against
+             one edge and turned off the side of the column. */
+          <div className="flex h-full w-full items-center justify-center overflow-hidden">
+            <div data-wide="rotate" className="shrink-0" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
+              <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" filter={imgFilter} />
+            </div>
           </div>
         ) : src && crop && (crop.l || crop.r) ? (
           /* v0.61.0, Crop page borders: the chapter's one trim of both sides. The image is drawn wider than the column by
              exactly what is trimmed and shifted left by the left trim; the reader reserved the taller row that makes. */
-          <div className="relative h-full w-full overflow-hidden">
+          <div dir="ltr" className="relative h-full w-full overflow-hidden">
             <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none"
               style={cropStyle({ l: crop.l, t: 0, r: crop.r, b: 0 }).img} filter={imgFilter} onLoaded={onLoaded ? loaded : undefined} />
           </div>
@@ -179,7 +186,10 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
   const st = cropStyle(region);
   const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h);
   return (
-    <div data-half={half} data-crop={trimmed == null || pending ? undefined : trimmed.toFixed(3)} className="relative shrink-0 overflow-hidden"
+    // ⚠️ `dir="ltr"`: the picture's left and right, not the track's. On a right-to-left track an image too wide for its
+    // box overflows to the LEFT, so a half or a crop showed the wrong part of the page (seen in a browser: the right
+    // margin of a cropped page, the left half for the right).
+    <div dir="ltr" data-half={half} data-crop={trimmed == null || pending ? undefined : trimmed.toFixed(3)} className="relative shrink-0 overflow-hidden"
       style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: pending && !late.on ? 0 : undefined }}>
       <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} filter={filter} onLoaded={late.wrap(onLoaded)} />
     </div>
@@ -241,7 +251,8 @@ export function measurePage(img: HTMLImageElement): { all: Region; sides: Region
 /**
  * A wide page turned on its side to fill a slide held upright (v0.61.0, Wide pages → Rotate). CSS only, so the slides
  * are the same: a box of the page's own shape, sized so that once turned a quarter it fits the slide, centred, turned,
- * and zoomed like any page.
+ * and zoomed like any page. ⚠️ Centred as a flex item of the slide, never with `inset-0 m-auto`: until it is turned the
+ * box is wider than the slide, auto margins never go below zero, and it sat against one edge (seen in a browser).
  */
 export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
   src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; filter?: string;
@@ -249,7 +260,7 @@ export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
   // Turned, the page stands `height` wide and `width` tall: fit THAT, then draw the box the other way round.
   const fit = fitBox(height, width, area.w, area.h);
   return (
-    <div data-rotated className="absolute inset-0 m-auto"
+    <div data-rotated className="shrink-0"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
       <ReaderImg src={src} alt={alt} className="block h-full w-full max-w-none" filter={filter} />
     </div>

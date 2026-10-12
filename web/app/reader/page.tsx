@@ -1471,7 +1471,9 @@ function ReaderInner() {
   );
 
   return (
-    <div className="fixed inset-0 z-40 bg-ink-950">
+    // `data-page` / `data-chapter`: what is being read, for the browser walks (test/e2e/v610Walk-reader.mjs) -- the counter
+    // that says it lives in the auto-hiding footer. Nothing reads them in the app.
+    <div className="fixed inset-0 z-40 bg-ink-950" data-page={pageInChapter || undefined} data-chapter={activeChapter?.id}>
       <div className="pointer-events-none absolute inset-0 z-30 bg-black" style={{ opacity: 1 - prefs.brightness }} />
       {/* Ambient cover wash framing the reader: the look, by default. Its switch (Cover colour at the edges, #170)
           removes the two bands outright rather than their colour, because with no colour they are still a 16 %
